@@ -8,7 +8,7 @@
  * and nothing else. There is deliberately no `I18nProvider` in this file — a UI
  * locale cannot even be expressed here, which is the strongest statement of the
  * rule the unit level can make. `AiChatPage.planCardLocale.test.tsx` then pins
- * the same four strings through a real provider, where a UI locale exists and
+ * the same strings through a real provider, where a UI locale exists and
  * could still leak in.
  *
  * Gate conformance is NOT re-asserted here: the cloud `APPROVAL_RE` mirror lives
@@ -29,6 +29,8 @@ const KEYS = [
   'planApproveMessage',
   'planApproveDefaultsMessage',
   'planAnswerMessage',
+  'planExtendExistingMessage',
+  'planBuildNewAppMessage',
   'changesConfirmMessage',
 ] as const;
 
@@ -93,6 +95,20 @@ describe('outbound agent text follows the conversation, never the UI locale (#38
 
     it('does not interpolate when no variables are supplied', () => {
       expect(resolveOutboundAgentText(false, 'planAnswerMessage')).toBe(packValue(en, 'planAnswerMessage'));
+    });
+  });
+
+  describe('planExtendExistingMessage names the app (objectstack#27480)', () => {
+    it('fills the app in a Chinese conversation', () => {
+      expect(resolveOutboundAgentText(true, 'planExtendExistingMessage', { app: '图书馆' })).toBe(
+        '在「图书馆」上继续完善，不另建应用。',
+      );
+    });
+
+    it('fills the app in an English conversation', () => {
+      expect(resolveOutboundAgentText(false, 'planExtendExistingMessage', { app: 'Library' })).toBe(
+        'Keep improving "Library" instead of building a new app.',
+      );
     });
   });
 });

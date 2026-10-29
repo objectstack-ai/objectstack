@@ -67,13 +67,17 @@ type Table = { string(n: string): { primary(): void } };
  * the same records (`metadata.get('datasource', name)`, as `plugin.ts` wires
  * it), so a datasource's Sync answer and its listed `schemaMode` are one fact.
  * `stream` is a FEDERATED datasource on a driver that cannot introspect, the
- * subject of the engine-reason pin below.
+ * subject of the engine-reason pin below. `ghost` is saved but never
+ * connected, the no-live-driver subject of the Test pin below: [#27510] it is
+ * a stored record because Test answers a name with no record `404`
+ * (`saved-datasource-test-unknown-name.test.ts`).
  */
 const RECORDS = [
   { name: 'default', driver: 'sqlite', origin: 'code', config: {} },
   { name: 'warehouse', driver: 'sqlite', origin: 'runtime', config: {} },
   { name: 'scratch', driver: 'memory', origin: 'runtime', config: {} },
   { name: 'stream', driver: 'memory', origin: 'runtime', schemaMode: 'external', external: {}, config: {} },
+  { name: 'ghost', driver: 'sqlite', origin: 'runtime', config: {} },
 ];
 
 /**
@@ -248,7 +252,8 @@ describe('a driver with no introspectSchema', () => {
           throw new Error('introspect must not be reached');
         },
         liveDriver: () => ({ checkHealth }),
-        getDatasource: async () => undefined,
+        // [#27510] A saved datasource: Test answers a name with no record 404.
+        getDatasource: async (name) => ({ name }),
         getObject: async () => undefined,
         listObjects: async () => [],
       });

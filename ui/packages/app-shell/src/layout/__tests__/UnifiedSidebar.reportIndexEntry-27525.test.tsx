@@ -1,14 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * UnifiedSidebar — every app's sidebar links its report index
- * (objectui#13020), so a report the app's navigation does not name still has
- * a UI path, with nothing for the app to author.
+ * UnifiedSidebar — the app's report index is an entry its navigation declares
+ * (objectstack#27525, superseding objectui#13020's injected row). The
+ * maintainer's model, 「加上才有」: the entry exists only where the author adds
+ * it, `{ type: 'report' }` with no `reportName`.
  *
- * Pinned: the entry links `/apps/APP/reports`, it is drawn for an app whose
- * navigation names no report at all, and drawing it reads no report list
- * (the sidebar is chrome on every route, objectui#12980). CONTROL: the app's
- * own navigation entries are drawn as before.
+ * Pinned:
+ *  (a) an app whose navigation declares no index entry gets no injected row:
+ *      no link to `/apps/APP/reports`, no "All reports" text;
+ *  (b) a declared index entry is drawn by the navigation renderer and routed to
+ *      `/apps/APP/reports`; with no `label` it is named by the console's own
+ *      wording for that page ("All reports"), with a `label` as authored;
+ *  (c) it is the active row on the index route;
+ *  (d) drawing it reads no report list (the sidebar is chrome on every route,
+ *      objectui#12980).
+ * CONTROL: a named `report` entry still routes to its own `report/NAME` page,
+ * and the app's other entries are drawn as before.
  *
  * Harness: the provider / chrome mocks of `UnifiedSidebar.objectReadGate-12109.test.tsx`;
  * `MetadataProvider`, `@object-ui/layout` and `@object-ui/components` stay real.
@@ -82,13 +90,14 @@ import { SidebarProvider } from '@object-ui/components';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 
-const NAVIGATION: NavigationItem[] = [
+const BASE_NAVIGATION: NavigationItem[] = [
   { id: 'nav_account', type: 'object', objectName: 'crm_account', label: 'Accounts' },
+  { id: 'nav_pipeline', type: 'report', reportName: 'crm_pipeline', label: 'Pipeline' },
   { id: 'nav_help', type: 'url', url: '/help', label: 'Help' },
 ];
-const CRM_APP = { name: 'crm', label: 'CRM', active: true, navigation: NAVIGATION };
 
-function renderSidebar() {
+function renderSidebar(navigation: NavigationItem[] = BASE_NAVIGATION, at = '/apps/crm') {
+  const app = { name: 'crm', label: 'CRM', active: true, navigation };
   const asked: string[] = [];
   const adapter = {
     clearCache: vi.fn(),
@@ -103,45 +112,76 @@ function renderSidebar() {
       meta: {
         getItems: (type: string) => {
           asked.push(type);
-          return Promise.resolve({ type, items: type === 'app' ? [CRM_APP] : [] });
+          return Promise.resolve({ type, items: type === 'app' ? [app] : [] });
         },
         getItem: () => Promise.resolve({ item: null }),
       },
     }),
   } as unknown as Parameters<typeof MetadataProvider>[0]['adapter'];
-  render(
+  const view = render(
     <MetadataProvider adapter={adapter}>
-      <MemoryRouter initialEntries={['/apps/crm']}>
+      <MemoryRouter initialEntries={[at]}>
         <SidebarProvider>
           <UnifiedSidebar activeAppName="crm" />
         </SidebarProvider>
       </MemoryRouter>
     </MetadataProvider>,
   );
-  return asked;
+  return { asked, container: view.container };
 }
+
+const INDEX_ENTRY: NavigationItem = { id: 'nav_reports', type: 'report' };
 
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
 });
 
-describe('UnifiedSidebar — the report index entry (objectui#13020)', () => {
-  it('links the app\'s report index, though the navigation names no report', async () => {
-    renderSidebar();
-    await waitFor(() => expect(screen.getByRole('link', { name: 'All reports' })).toHaveAttribute('href', '/apps/crm/reports'));
+describe('UnifiedSidebar — the report index is a declared entry (objectstack#27525)', () => {
+  it('(a) injects no index row on an app whose navigation declares none', async () => {
+    const { container } = renderSidebar();
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Accounts' })).toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: 'All reports' })).not.toBeInTheDocument();
+    expect(container.querySelector('a[href="/apps/crm/reports"]')).toBeNull();
+    expect(container.querySelector('[data-testid="sidebar-report-index"]')).toBeNull();
   });
 
-  it('drawing it reads no report list', async () => {
-    const asked = renderSidebar();
+  it('(b) draws a declared index entry, routed to the report index, named by the console', async () => {
+    renderSidebar([...BASE_NAVIGATION, INDEX_ENTRY]);
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'All reports' })).toHaveAttribute('href', '/apps/crm/reports'),
+    );
+  });
+
+  it('(b) a labelled index entry shows its own label, routed the same', async () => {
+    renderSidebar([...BASE_NAVIGATION, { ...INDEX_ENTRY, label: 'Reports' }]);
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Reports' })).toHaveAttribute('href', '/apps/crm/reports'),
+    );
+    expect(screen.queryByRole('link', { name: 'All reports' })).not.toBeInTheDocument();
+  });
+
+  it('(c) the declared entry is the active row on the index route', async () => {
+    renderSidebar([...BASE_NAVIGATION, INDEX_ENTRY], '/apps/crm/reports');
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'All reports' })).toHaveAttribute('data-active', 'true'),
+    );
+    expect(screen.getByRole('link', { name: 'Pipeline' })).not.toHaveAttribute('data-active', 'true');
+  });
+
+  it('(d) drawing it reads no report list', async () => {
+    const { asked } = renderSidebar([...BASE_NAVIGATION, INDEX_ENTRY]);
     await waitFor(() => expect(screen.getByRole('link', { name: 'All reports' })).toBeInTheDocument());
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(asked).not.toContain('report');
   });
 
-  it('CONTROL: the app\'s own entries are drawn as before', async () => {
+  it('CONTROL: a named report entry routes to its own page, and the other entries are drawn as before', async () => {
     renderSidebar();
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/apps/crm/crm_account'));
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Pipeline' })).toHaveAttribute('href', '/apps/crm/report/crm_pipeline'),
+    );
+    expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/apps/crm/crm_account');
     expect(screen.getByRole('link', { name: 'Help' })).toBeInTheDocument();
   });
 });

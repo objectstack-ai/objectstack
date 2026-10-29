@@ -23,19 +23,20 @@
  * `summarizeAction` ever runs:
  *
  *   1. fail-closed on `sys_*` objects (`isSystemObjectName`)
- *   2. `isHeadlessInvokableAction` — only `type: 'script'` (with `target` or
- *      `body`) or `type: 'flow'` (with `target` + an automation service) has
- *      a headless dispatch path at all
+ *   2. `isHeadlessInvokableAction` — `type: 'script'` (with `target` or
+ *      `body`), `type: 'flow'` (with `target` + an automation service), or —
+ *      since #27506 — a `type: 'api'` action with a SAME-ORIGIN `target`,
+ *      which the doors forward in-process
  *   3. `actionAiExposureError` — excluded unless the author set
  *      `ai.exposed: true`
  *
  * All 14 of #7309's identity actions lived on `sys_*` objects (13 still do), are
- * `type: 'api'` (not `script`/`flow`, so gate 2 excludes them independently
- * of gate 1), and none declares `ai.exposed`. So today's real declarations
- * are excluded on THREE independent grounds before `actionLooksDestructive`
- * ever runs on them (the #7828 triage comment names two; gate 2 is a third,
- * confirmed below against the real objects) — this fix has zero observable
- * effect on any request a caller can make today.
+ * `type: 'api'` with same-origin targets, and none declares `ai.exposed`. So
+ * today's real declarations are excluded on TWO independent grounds before
+ * `actionLooksDestructive` ever runs on them (the #7828 triage comment's two;
+ * gate 2 was a third until #27506 admitted same-origin api actions, which is
+ * pinned below so the count of grounds is a measurement, not a memory) — this
+ * fix has zero observable effect on any request a caller can make today.
  *
  * That is a fact about *today's platform objects*, not about the heuristic —
  * a future `ai.exposed`, non-`sys_*`, `script`/`flow` action carrying only
@@ -277,8 +278,10 @@ describe('the classification IS live-reachable for a shape gate 1/2/3 all pass �
 // ---------------------------------------------------------------------------
 // Documents (with real assertions, not narration) why today's 13 identity
 // actions never reach the classifier via the live MCP path — confirming the
-// #7828 triage comment's "double-gated dead" plus the third gate found while
-// verifying this card (isHeadlessInvokableAction: all 13 are `type: 'api'`).
+// #7828 triage comment's "double-gated dead". The third gate this file once
+// recorded (isHeadlessInvokableAction: all 13 are `type: 'api'`) no longer
+// holds: #27506 made a same-origin api action server-dispatched, so gate 2
+// ADMITS all 13 and gates 1 and 3 carry the exclusion alone.
 // #7309 converted 14; `sys_organization.change_slug` left the platform object.
 // ---------------------------------------------------------------------------
 
@@ -312,10 +315,11 @@ describe('today, all 13 #7309 identity actions the platform still declares are e
         expect(isSystemObjectName(objName)).toBe(true);
     });
 
-    it.each(allThirteen)('%s is excluded by isHeadlessInvokableAction (gate 2: type is not script/flow)', (_label, _objName, obj, name) => {
+    it.each(allThirteen)('%s is ADMITTED by isHeadlessInvokableAction since #27506 (gate 2: a same-origin api action is server-dispatched)', (_label, _objName, obj, name) => {
         const action = actionByName(obj, name);
         expect(action.type).toBe('api');
-        expect(isHeadlessInvokableAction(deps, action, true)).toBe(false);
+        expect(String(action.target).startsWith('/')).toBe(true);
+        expect(isHeadlessInvokableAction(deps, action, true)).toBe(true);
     });
 
     it.each(allThirteen)('%s is excluded by actionAiExposureError (gate 3: ai.exposed not set)', (_label, _objName, obj, name) => {

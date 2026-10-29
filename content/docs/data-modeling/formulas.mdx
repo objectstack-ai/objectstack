@@ -86,6 +86,10 @@ Formatters: `currency[:CODE]`, `number[:decimals]`, `percent[:decimals]`,
 `localization.currency` setting, the one currency fields and dashboards read);
 when the organization has none, the render refuses the hole by name instead of
 guessing a currency. Write `currency:EUR` where the amount's currency is fixed.
+For a `record`-mode amount, whose currency is each record's own code, a mail
+template writes `currency:@currency_code`: `@` and a path into the send's data
+whose value is the code. Only mail templates admit the `@` form; the in-app
+dialect refuses it by name.
 
 At **input** time you may write a bare string for shorthand — the spec
 transforms it into the right envelope based on the field type. The compiled
@@ -133,7 +137,9 @@ yourself — nothing back-fills it — but the agent-callable `validate_expressi
 tool reports the type it infers from the expression (`inferredType`) so an AI
 author can stamp the matching value. A `'currency'` result is an amount of money
 and carries its currency the way a currency field does: in the formula's own
-`currencyConfig` (none means dynamic, the tenant default currency). Copy it from
+`currencyConfig` (none means dynamic, the tenant default currency; over
+record-mode amounts it is `{ currencyMode: 'record', currencyField }`, naming the
+same code field). Copy it from
 the currency field the formula computes from — `inferFormulaReturn` in
 `@objectstack/formula` answers both halves for a formula it can prove is money. Consumers read the declared `returnType`
 instead of re-parsing the expression (record-title eligibility, for one: a

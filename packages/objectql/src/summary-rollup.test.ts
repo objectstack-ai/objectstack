@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
+import { ObjectSchema } from '@objectstack/spec/data';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -168,6 +169,53 @@ describe('roll-up summary fields', () => {
 
     expect(parent(a.id).line_total).toBe(7);
     expect(parent(b.id).line_total).toBe(3);
+  });
+});
+
+// [#27462] `summaryOperations.field` is optional on a `count` (it reads no
+// child field). The definitions here go through the spec's own parse first, so
+// the shape the engine indexes is the shape the metadata door now accepts.
+describe('[#27462] a count roll-up with no summaryOperations.field', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    const parentObject = ObjectSchema.parse({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+      },
+    });
+    expect(parentObject.fields.line_count.summaryOperations).toEqual({ object: 'inv_line', function: 'count' });
+    engine.registry.registerObject(parentObject as any);
+    engine.registry.registerObject(ObjectSchema.parse({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+      },
+    }) as any);
+  });
+
+  const parent = (id: string) => storeFor('inv').get(id);
+
+  it('counts the children through insert, update and delete', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1' });
+    expect(parent(p.id).line_count).toBe(0);
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 10 });
+    await engine.insert('inv_line', { inv: p.id, amount: 32 });
+    await engine.insert('inv_line', [{ inv: p.id }, { inv: p.id, amount: 1 }]);
+    expect(parent(p.id).line_count).toBe(4);
+    await engine.update('inv_line', { id: a.id, amount: 11 });
+    expect(parent(p.id).line_count).toBe(4);
+    await engine.delete('inv_line', { where: { id: a.id } });
+    expect(parent(p.id).line_count).toBe(3);
   });
 });
 

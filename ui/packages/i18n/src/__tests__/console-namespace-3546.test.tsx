@@ -376,6 +376,8 @@ describe('objectui#3546 slice four — the console namespace', () => {
       'planAnswerMessage',
       'planApproveDefaultsMessage',
       'planApproveMessage',
+      'planBuildNewAppMessage',
+      'planExtendExistingMessage',
     ]);
     // #3896's headline defect in one line: an outbound message read through
     // `t()` is read from the UI pack, which is how a zh console sent Chinese

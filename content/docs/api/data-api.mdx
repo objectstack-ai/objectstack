@@ -154,6 +154,7 @@ corrupts something the earlier axes do not:
 |:---|:---|
 | `?search=alpha&searchFields=title` | scans only `title` |
 | `?search=alpha&searchFields=no_such_field` | `400 INVALID_FIELD` |
+| `?search=alpha&searchFields=` (or `=,`, or `[]` in a body) | `400 VALIDATION_ERROR` — names no field, the answer `$select=` gets; leave the parameter out to scan the default set |
 | `?search=alpha&searchFields=amount` | `400 INVALID_FIELD` — real field, but not searchable |
 | `?search=alpha&searchFields=project_id.name` | `400 INVALID_FIELD` — search scans this object's own columns; mirror the related title instead (see below) |
 | `?search=alpha` on an object with no searchable field (two lookups and a `formula` title, say) | `400 INVALID_FIELD` — nothing to scan; declare a stored field searchable or mirror the title (see below) |

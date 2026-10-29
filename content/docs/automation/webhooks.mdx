@@ -624,7 +624,17 @@ The plugin mounts exactly **one** custom endpoint:
 | POST   | `/api/v1/webhooks/redeliver` | `{ deliveryId }`  | Re-queue a delivery that was **attempted** and failed. A row that was never attempted cannot be redelivered. |
 
 It delegates to `messaging.redeliverHttp(deliveryId)` and is guarded by the
-better-auth session (any authenticated user). Failures answer in the declared
+better-auth session **and by webhook-administration access**: the caller must be
+allowed to edit `sys_webhook` (the security service's object-level `update`
+admission, decided server-side before the request body is read). A signed-in
+caller without it is answered `403` `PERMISSION_DENIED` before any detail about
+the delivery; a deployment with no security service to decide answers `503`
+`SERVICE_UNAVAILABLE`. Grant webhook administration through a permission set
+(the shipped administrator sets carry it). The caller's active organization is
+vetted the way the data API vets it: on a walled tenancy posture (`isolated`,
+`group`) an organization claim that no current membership backs is answered with
+the same `403`, and a replay reaches only deliveries of the organization the
+caller was admitted in (`404` for any other). Failures answer in the declared
 envelope — `{ success: false, error: { code, message } }` — with `401`
 `UNAUTHENTICATED`, `400` `INVALID_REQUEST` or `MISSING_REQUIRED_FIELD`, `404`
 `RESOURCE_NOT_FOUND`, `409` `DELIVERY_NOT_ELIGIBLE`, or `409`

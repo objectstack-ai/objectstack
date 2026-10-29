@@ -223,7 +223,13 @@ export class SmtpTransport implements IEmailTransport {
     if (message.cc?.length) mail.cc = message.cc;
     if (message.bcc?.length) mail.bcc = message.bcc;
     if (message.replyTo) mail.replyTo = message.replyTo;
-    if (message.headers && Object.keys(message.headers).length > 0) mail.headers = message.headers;
+    // Custom headers go to nodemailer as an explicit list of name/value
+    // entries, one per key of the contract's `Record<string, string>`, so
+    // every key is read as exactly one header name: the list is the one
+    // `headers` form nodemailer reads without interpreting the container.
+    if (message.headers && Object.keys(message.headers).length > 0) {
+      mail.headers = Object.entries(message.headers).map(([key, value]) => ({ key, value }));
+    }
     if (message.attachments?.length) {
       mail.attachments = message.attachments.map((a) => ({
         filename: a.filename,

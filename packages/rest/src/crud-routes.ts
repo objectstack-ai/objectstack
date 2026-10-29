@@ -121,7 +121,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     const p = await this.resolveProtocol(environmentId, req);
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'list', context)) return;
                     // [#6877] Still NOT arity-gated as a whole, for the
                     // reason it never was: this route hands the WHOLE query
                     // record to `findData`, whose normalizer
@@ -198,7 +198,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     // says the downstream was built for it.
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'get', context)) return;
                     // [#7606] Closed parameter set, AFTER the capability
                     // gates for the same reason #7527 put it there: which
                     // parameters a route understands is information, and a
@@ -259,7 +259,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     const p = await this.resolveProtocol(environmentId, req);
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'create')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'create', context)) return;
                     // [#3899] The wire body IS the record. Validate the
                     // assembled protocol request (`CreateDataRequestSchema`,
                     // catalog `requestSchema`) so a non-record body — an
@@ -332,7 +332,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     const p = await this.resolveProtocol(environmentId, req);
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'list', context)) return;
                     // [#3899] Validate the QueryAST body against the declared
                     // contract (`FindDataRequestSchema`, catalog `requestSchema`).
                     // A malformed body used to be forwarded as-is — and since a
@@ -432,7 +432,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                         bodyVersion != null ? 'The body\'s `expectedVersion`' : 'The `If-Match` header',
                     );
                     if (versionRefusal) throw validationFailure(versionRefusal, []);
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'update')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'update', context)) return;
                     // [#3899] Same gate as create: the wire body is the bare
                     // field patch (`expectedVersion` already stripped above),
                     // validated as the assembled `UpdateDataRequestSchema`
@@ -533,7 +533,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                         queryVersion != null ? 'The `expectedVersion` query parameter' : 'The `If-Match` header',
                     );
                     if (versionRefusal) throw validationFailure(versionRefusal, []);
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'delete', context)) return;
                     const deleteRequest: ServerScopedDataRequest<DeleteDataRequest> = {
                         object: req.params.object,
                         id: req.params.id,

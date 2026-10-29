@@ -329,6 +329,7 @@ import {
     externalBindingSaveRefusal,
     objectNamespacePrefixViolation,
     objectsBoundExternallyTo,
+    permissionSetNameCollisionRefusal,
     refuseUngrammaticalMetaItemName,
     saveWriteBinding,
     unknownDatasourceSaveRefusal,
@@ -4640,9 +4641,11 @@ function pageWindowValue(value: unknown, param: string): number {
 /**
  * A refused query value as the refusal quotes it: JSON, so a blank or
  * whitespace-only value is visible, and bounded, so a long one cannot bury
- * the sentence around it.
+ * the sentence around it. [#27484] Exported for the search-fields gate
+ * (`protocol-query-validation.ts`), which refuses an empty override in the
+ * projection's words.
  */
-function quotedQueryValue(value: unknown): string {
+export function quotedQueryValue(value: unknown): string {
     // `String` for a number: `JSON.stringify(Infinity)` is `null`.
     const shown = typeof value === 'number' ? String(value) : JSON.stringify(value) ?? String(value);
     return shown.length > 64 ? `${shown.slice(0, 64)}…` : shown;
@@ -6991,6 +6994,15 @@ export class ObjectStackProtocolImplementation implements
      * judge, with its envelope, in the save door's order, ⛔ never a copy of a
      * rule:
      *
+     *  - [harden] a permission set whose name a different owner already holds
+     *    ({@link permissionSetNameCollisionRefusal}, `NAMESPACE_CONFLICT` /
+     *    422), judged against `binding` — the binding the restore lands in:
+     *    `restoreVersion` → `put` keeps the active row's `package_id`, and with
+     *    no active row it writes the package-unbound row, which `null` names.
+     *    The save door asks it before its schema gate, so it is asked first
+     *    here. A version restored after another owner took the name — its set
+     *    deleted, then a package declaring the name installed — is refused
+     *    rather than made a second holder;
      *  - a hook with no `body` ({@link runtimeHookWithoutBodyRefusal});
      *  - a second default record page of an object
      *    ({@link defaultRecordPageSaveRefusal});
@@ -7056,6 +7068,7 @@ export class ObjectStackProtocolImplementation implements
             credentialChannelFor: (...a) => this.credentialChannelFor(...a),
             defaultRecordPageSaveRefusal: (...a) => this.defaultRecordPageSaveRefusal(...a),
             externalBindingSaveRefusal: (...a) => this.externalBindingSaveRefusal(...a),
+            permissionSetNameCollisionRefusal: (...a) => this.permissionSetNameCollisionRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
         };
@@ -19516,6 +19529,50 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * The `NAMESPACE_CONFLICT` / 422 a permission-set write is refused with when
+     * its name is already held by a DIFFERENT owner — the security catalog's
+     * "one name, one holder" (maintainer rulings Q4 = A on #15196, record
+     * 6050490870, and A on #22307, record 6063176077) at every door a body
+     * reaches `active` through: the save door ({@link saveMetaItem}, draft and
+     * publish mode), the draft→active promotion ({@link promoteDraftForPublish},
+     * shared by the per-item publish and {@link publishPackageDrafts}) and the
+     * restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}, under
+     * `rollbackMetaItem` and `revertCommit`). The faces that write through the
+     * save door meet it there too: {@link duplicatePackage} reports a copied
+     * set's refusal in `failed[]`, and {@link migrateStoredMetadata} records it
+     * as the re-saved row's failure.
+     *
+     * `owner` is the binding the write LANDS IN, which each door resolves for
+     * itself: the save door's {@link packagelessDraftAddress} for a draft that
+     * names no package, the #23165 address for a publish-mode save; the
+     * promotion's `promoteInto`; the restore's active-row binding. See
+     * {@link permissionSetNameCollisionRefusal} for the two holder readings it
+     * meets (the stored rows, and the registry's own package-held reading,
+     * ruling letter B on #22371, record 6074838935), the package-less row it
+     * reads as a package's, and why a same-owner re-author is untouched.
+     *
+     * `NAMESPACE_CONFLICT` / 422 with the registry's words, because the rulings
+     * fix the rule's envelope at that code and status on every path: the code
+     * is `@objectstack/objectql`'s, co-registered under this package in the
+     * error-code ledger (ADR-0112). No code is minted.
+     */
+    private permissionSetNameCollisionRefusal(
+        singularType: string,
+        name: string,
+        owner: string | null | undefined,
+        verb: 'save' | 'publish' | 'restore',
+    ): Promise<(Error & { code: 'NAMESPACE_CONFLICT'; status: 422 }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof permissionSetNameCollisionRefusal> = {
+            get engine() { return readEngine(); },
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
+        };
+        return permissionSetNameCollisionRefusal.call(host, singularType, name, owner, verb);
+    }
+
+    /**
      * [ADR-0015 §4.2 · #25211] The save doors' half of "`object.external` only
      * on a datasource whose `schemaMode` is not 'managed'": the pair of the item
      * being saved and the stored or registered item on the other side of it,
@@ -20877,6 +20934,46 @@ export class ObjectStackProtocolImplementation implements
                     'save',
                 );
                 if (ownerRefusal) throw ownerRefusal;
+            }
+            // [harden] …and a permission set whose NAME another owner already
+            // holds, with `NAMESPACE_CONFLICT` / 422: a set's name is its
+            // identity across the deployment, and a grant resolves it by that
+            // name alone. See {@link permissionSetNameCollisionRefusal}.
+            //
+            // Judged against the binding the write LANDS IN — ⛔ not
+            // {@link saveWriteBinding}'s answer, which is the owner judge's: it
+            // reads the store only when the body carries a `packageId`, so for a
+            // body without one it named no package while the write went into
+            // one. A save that names a package writes that package's row (for a
+            // publish-mode save naming none, the package the #23165 address
+            // above resolved, already on `request`); a publish-mode save that
+            // names none and resolved none writes the package-unbound row. A
+            // draft save that names none writes the draft
+            // {@link packagelessDraftAddress} names — the address #23712 read
+            // above, read here for the server-stated rewrites it is not read
+            // for — whose `into` is the binding the repository stamps (#11087,
+            // `SysMetadataRepository.resolveWriteHead`): over package `P`'s
+            // active set it is `P`'s draft, the owning package's own edit
+            // through the console's plain `?mode=draft` save. An ambiguous
+            // address has no row to land in, and is refused with the refusal
+            // the repository answers it with.
+            if (singularType === 'permission') {
+                let landsIn: string | null = null;
+                if (typeof request.packageId === 'string' && request.packageId !== '') {
+                    landsIn = request.packageId;
+                } else if (mode === 'draft' && request.packageId == null) {
+                    const address = draftAddress ?? await this.packagelessDraftAddress(
+                        singularType, request.name, itemDiscriminator(singularType, request.item),
+                    );
+                    if (address.kind === 'ambiguous') {
+                        throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
+                    }
+                    landsIn = address.into;
+                }
+                const nameCollision = await this.permissionSetNameCollisionRefusal(
+                    singularType, request.name, landsIn, 'save',
+                );
+                if (nameCollision) throw nameCollision;
             }
             // [#21639] …and a view container whose save name, or any name its
             // expansion produces, is a name already served from elsewhere —
@@ -22936,6 +23033,21 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, promoteInto, 'publish',
             );
             if (ownerRefusal) throw ownerRefusal;
+        }
+        // [harden] …and a permission-set draft whose name a DIFFERENT owner
+        // already holds by the time it is published: a draft save judged the
+        // holders of its moment, and another owner may have taken that name
+        // since (or the draft was addressed to a second package in the first
+        // place). Judged again here, with the save door's own predicate and
+        // envelope, against the package promoted into (`promoteInto`, the
+        // binding the active row is written under), before `repo.promoteDraft`
+        // writes — so a batch publish aborts on it as it aborts on the owner
+        // refusal above. See {@link permissionSetNameCollisionRefusal}.
+        {
+            const nameCollision = await this.permissionSetNameCollisionRefusal(
+                singularType, request.name, promoteInto, 'publish',
+            );
+            if (nameCollision) throw nameCollision;
         }
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet

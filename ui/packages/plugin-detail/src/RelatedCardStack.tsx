@@ -7,14 +7,21 @@
  */
 
 import * as React from 'react';
-import { Badge, RelatedCountStore, cn, useRelatedCount } from '@object-ui/components';
+import { Badge, RelatedCountStore, Skeleton, cn, useRelatedCount } from '@object-ui/components';
+import type { FieldContainerLike } from '@object-ui/core';
 import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
 import { ChevronRight } from 'lucide-react';
-import { RELATED_CARD_DROP_LINE, RelatedCardChromeContext, type RelatedCardChrome } from './relatedListCompact';
+import {
+  RELATED_CARD_DROP_LINE,
+  RelatedCardChromeContext,
+  RelatedCardCountContext,
+  type RelatedCardChrome,
+} from './relatedListCompact';
 import { RelatedCardMenu } from './RelatedCardMenu';
 import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
 import { useRelatedArrangement } from './useRelatedArrangement';
 import { useDetailTranslation } from './useDetailTranslation';
+import { relatedCountTargetOf, useRelatedCounts, type RelatedCountTarget } from './useRelatedCounts';
 
 export interface RelatedCardStackProps {
   /**
@@ -32,6 +39,12 @@ export interface RelatedCardStackProps {
   onArrangementChange?: (next: RelatedArrangement) => void;
   /** Enlarge a card's list in place — the host's `?related=` (Target 9). */
   onEnlarge?: (id: RelatedCardId) => void;
+  /**
+   * The child objects' field definitions the host already holds (its
+   * metadata), so the up-front counts ask the relationship's arity without a
+   * schema read first (`useRelatedCounts`). Absent: the counts read it.
+   */
+  fieldsOf?: (objectName: string) => FieldContainerLike;
 }
 
 type PageNode = Record<string, any>;
@@ -52,20 +65,24 @@ function cardIdOf(node: unknown): RelatedCardId | null {
  * A collapsed card: its title and its count, nothing else (objectstack#27055,
  * Target 7: 「a collapsed card fetches no rows」). The count comes from the
  * shared count store, the same one-row `$count` probe the tab strip's badges
- * ask, so the card reads no rows.
+ * ask, so the card reads no rows. A stack that counted its cards up front
+ * hands the card its `count` (objectstack#27056), and the card asks nothing.
  */
-export const CollapsedRelatedCard: React.FC<{ node: PageNode; chrome: RelatedCardChrome; onExpand: () => void }> = ({
-  node,
-  chrome,
-  onExpand,
-}) => {
+export const CollapsedRelatedCard: React.FC<{
+  node: PageNode;
+  chrome: RelatedCardChrome;
+  onExpand: () => void;
+  count?: number;
+}> = ({ node, chrome, onExpand, count: counted }) => {
   const p = propsOf(node);
   const ctx = useRecordContext();
   const parentId = ctx?.recordId ?? undefined;
   const dataSource = ctx?.dataSource as any;
-  const count = useRelatedCount(p.objectName, p.relationshipField, parentId, p.filter);
+  const probed = useRelatedCount(p.objectName, p.relationshipField, parentId, p.filter);
+  const count = counted ?? probed;
+  const isCounted = counted !== undefined;
   React.useEffect(() => {
-    if (!dataSource || !parentId || typeof dataSource.find !== 'function') return;
+    if (isCounted || !dataSource || !parentId || typeof dataSource.find !== 'function') return;
     void RelatedCountStore.fetch(
       (object: string, query: any) => dataSource.find(object, query),
       p.objectName,
@@ -73,7 +90,7 @@ export const CollapsedRelatedCard: React.FC<{ node: PageNode; chrome: RelatedCar
       parentId,
       p.filter,
     ).catch(() => 0);
-  }, [dataSource, parentId, p.objectName, p.relationshipField, p.filter]);
+  }, [isCounted, dataSource, parentId, p.objectName, p.relationshipField, p.filter]);
   const title = typeof p.title === 'string' && p.title ? p.title : p.objectName;
   return (
     <section
@@ -113,6 +130,32 @@ export const CollapsedRelatedCard: React.FC<{ node: PageNode; chrome: RelatedCar
   );
 };
 
+/**
+ * A card whose count is still out (objectstack#27056, Target 3): its title and
+ * a placeholder where the count goes, the height of a folded card, so the
+ * column holds its shape while the counts land and the details beside it are
+ * already drawn.
+ */
+const PendingRelatedCard: React.FC<{ node: PageNode; chrome: RelatedCardChrome }> = ({ node, chrome }) => {
+  const p = propsOf(node);
+  const title = typeof p.title === 'string' && p.title ? p.title : p.objectName;
+  return (
+    <section
+      className="rounded-[10px] border border-border bg-card"
+      data-related-card=""
+      data-related-card-id={chrome.id}
+      data-related-card-pending=""
+      aria-label={title}
+      aria-busy="true"
+    >
+      <div className="flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold">
+        <span className="truncate">{title}</span>
+        <Skeleton className="h-4 w-6 shrink-0 rounded" />
+      </div>
+    </section>
+  );
+};
+
 const FreshBadge: React.FC = () => {
   const { t } = useDetailTranslation();
   return (
@@ -136,6 +179,11 @@ const FreshBadge: React.FC = () => {
  * foot says how many cards are hidden (「已隐藏 N 张 · 显示」) and, once the
  * reader has moved or hidden any, offers 「恢复默认顺序」 (objectstack#27241).
  *
+ * The cards' counts are asked up front, together (objectstack#27056,
+ * `useRelatedCounts`): until they answer each card is a placeholder, then its
+ * header draws from its count, a card at 0 reads no rows, and a card above 0
+ * reads its first rows once it is in view (`RelatedList`'s compact face).
+ *
  * ⛔ No wrapper element per card: the lists stay DOM siblings, so the
  * empty-list fold (`RelatedListEmptyFold`, which reads its stack off the
  * shared parent) keeps working; the chrome reaches each card through
@@ -146,8 +194,10 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
   arrangement,
   onArrangementChange,
   onEnlarge,
+  fieldsOf,
 }) => {
   const { t } = useDetailTranslation();
+  const ctx = useRecordContext();
   const cards = new Map<RelatedCardId, PageNode>();
   const rest: unknown[] = [];
   for (const node of nodes) {
@@ -170,6 +220,14 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
     onDragStart: setDragId,
     onDragEnd: endDrag,
   });
+  // The cards the reader sees — collapsed ones too, whose line shows the
+  // count — are counted in one set; a hidden card is not drawn, so not asked.
+  const countTargets: RelatedCountTarget[] = [];
+  for (const id of resolved.order) {
+    const target = relatedCountTargetOf(cards.get(id));
+    if (target) countTargets.push(target);
+  }
+  const counts = useRelatedCounts(countTargets, { parentId: ctx?.recordId, dataSource: ctx?.dataSource, fieldsOf });
 
   // ── Drag (desktop) ────────────────────────────────────────────────────
   const anchorRef = React.useRef<HTMLSpanElement>(null);
@@ -224,16 +282,22 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
       {resolved.order.map((id, index) => {
         const node = cards.get(id)!;
         const chrome = chromeOf(id, index);
+        const state = counts.stateOf(id);
+        if (state.kind === 'pending') return <PendingRelatedCard key={id} node={node} chrome={chrome} />;
+        const count = state.kind === 'counted' ? state.count : null;
         return resolved.collapsed.has(id) ? (
           <CollapsedRelatedCard
             key={id}
             node={node}
             chrome={chrome}
             onExpand={() => edit({ kind: 'collapse', id, collapsed: false })}
+            count={count ?? undefined}
           />
         ) : (
           <RelatedCardChromeContext.Provider key={id} value={chrome}>
-            <SchemaRenderer schema={toRenderableSchema(node as any)} />
+            <RelatedCardCountContext.Provider value={count}>
+              <SchemaRenderer schema={toRenderableSchema(node as any)} />
+            </RelatedCardCountContext.Provider>
           </RelatedCardChromeContext.Provider>
         );
       })}

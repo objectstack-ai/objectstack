@@ -71,3 +71,39 @@ export const RecordBodyTablesContext = React.createContext<ReadonlySet<string>>(
 
 /** Enlarge a related list in place — the host's `?related=` — for a body table. */
 export const RelatedEnlargeContext = React.createContext<((id: string) => void) | null>(null);
+
+/**
+ * The count of the compact card being drawn, counted up front by its stack
+ * (objectstack#27056, Targets 1 and 2): the card draws its header from it, a
+ * count of 0 folds the card to its one line and reads no rows, and a card
+ * above 0 reads its first rows only once it scrolls into view. `null` when
+ * the stack did not count the card (no data source in context, the read
+ * failed, or the card is drawn outside a stack): the card reads for itself.
+ */
+export const RelatedCardCountContext = React.createContext<number | null>(null);
+
+/**
+ * Has `el` come near the viewport yet (objectstack#27056, Target 2: only the
+ * cards in view read their rows)? A latch: once seen, a card keeps its rows
+ * when scrolled away. Cards just below the fold count as near (a 200 px
+ * margin under the viewport), so a short scroll finds them drawn. Where
+ * `IntersectionObserver` does not exist (SSR, jsdom) every card is seen, so
+ * no environment strands a card without its rows. With `enabled` false the
+ * answer is `true`: the list is not a lazy card.
+ */
+export function useSeenOnce(el: Element | null, enabled: boolean): boolean {
+  const observable = typeof IntersectionObserver !== 'undefined';
+  const [seen, setSeen] = React.useState(false);
+  React.useEffect(() => {
+    if (!enabled || seen || !observable || !el) return undefined;
+    const observer = new IntersectionObserver(
+      (records) => {
+        if (records.some((r) => r.isIntersecting)) setSeen(true);
+      },
+      { rootMargin: '0px 0px 200px 0px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el, enabled, seen, observable]);
+  return !enabled || !observable || seen;
+}

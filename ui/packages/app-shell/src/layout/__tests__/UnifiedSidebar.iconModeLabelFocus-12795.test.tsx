@@ -255,7 +255,7 @@ describe('UnifiedSidebar — a hidden group label is no focus stop in icon mode 
     expect(peer).toHaveAttribute('data-collapsible', 'icon');
 
     const walk = await tabWalk(screen.getByRole('link', { name: 'Page Authoring' }), sidebarOf(container));
-    expect(walk.map((el) => el.textContent?.trim())).toEqual(['Page Authoring', 'My Work', 'Tasks', 'All reports']);
+    expect(walk.map((el) => el.textContent?.trim())).toEqual(['Page Authoring', 'My Work', 'Tasks']);
     expect(walk.filter((el) => el.closest('[data-sidebar="group-label"]'))).toEqual([]);
     expect(screen.queryByRole('button', { name: 'Workspace' })).not.toBeInTheDocument();
 
@@ -282,7 +282,7 @@ describe('UnifiedSidebar — a hidden group label is no focus stop in icon mode 
     for (const label of labelsIn(container)) expectShown(label);
 
     const walk = await tabWalk(screen.getByRole('link', { name: 'Page Authoring' }), sidebarOf(container));
-    expect(walk.map((el) => el.textContent?.trim())).toEqual(['Page Authoring', 'Workspace', 'My Work', 'Tasks', 'All reports']);
+    expect(walk.map((el) => el.textContent?.trim())).toEqual(['Page Authoring', 'Workspace', 'My Work', 'Tasks']);
 
     const user = userEvent.setup();
     const workspace = screen.getByRole('button', { name: 'Workspace' });

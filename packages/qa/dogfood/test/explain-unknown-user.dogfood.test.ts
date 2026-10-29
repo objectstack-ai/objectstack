@@ -23,6 +23,9 @@
  *    `PERMISSION_DENIED` it gets naming a user who exists.
  *  - `[unknown]` the seed admin naming the unknown id → 404 `RECORD_NOT_FOUND`
  *    naming it, for `read` and `create`, consistent with the data door's 404.
+ *  - `[empty]` (#27442) an explicit empty `userId`, in the body or as
+ *    `?userId=`, is refused 400 `VALIDATION_FAILED`: it names nobody, so it is
+ *    never answered as the caller.
  *  - `[existing]` the seed admin explaining the member who exists is answered
  *    as before (200, the principal is that member), and explaining yourself is
  *    unchanged.
@@ -105,6 +108,24 @@ describe('#26641: security explain refuses a userId no sys_user row has', () => 
     for (const [label, r] of [['unknown id', unknown], ['existing user', existing]] as const) {
       expect(r.status, `${label}: ${r.text}`).toBe(403);
       expect(r.json?.error?.code, `${label}: ${r.text}`).toBe('PERMISSION_DENIED');
+    }
+  });
+
+  // [#27442] The same door's remaining gap: an explicit empty `userId` names
+  // nobody, and was dropped before the schema, so it explained the CALLER. It
+  // is refused 400 on both transports; an omitted `userId` (below) is the caller.
+  it('[empty] an explicit empty userId is refused 400 VALIDATION_FAILED, never answered as the caller', async () => {
+    const posted = await explain(adminTok, { object: OBJECT, operation: 'read', userId: '' });
+    const queried = await stack.apiAs(adminTok, 'GET', `/security/explain?object=${OBJECT}&operation=read&userId=`);
+    const queriedText = await queried.text();
+    let queriedJson: any = null;
+    try { queriedJson = JSON.parse(queriedText); } catch { /* the status still reports */ }
+    for (const [label, r] of [['POST', posted], ['GET', { status: queried.status, text: queriedText, json: queriedJson }]] as const) {
+      expect(r.status, `${label}: ${r.text}`).toBe(400);
+      expect(r.json?.success, `${label}: ${r.text}`).toBe(false);
+      expect(r.json?.error?.code, `${label}: ${r.text}`).toBe('VALIDATION_FAILED');
+      expect(r.json?.allowed, `${label}: no verdict is answered`).toBeUndefined();
+      expect(r.json?.principal, `${label}: no principal is answered`).toBeUndefined();
     }
   });
 

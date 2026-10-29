@@ -3,7 +3,7 @@
 // The IdP's `locale` claim → `sys_user.locale` — see `idp-locale-claim.ts`
 // for the rule this file pins.
 //
-// Two layers:
+// Three layers:
 //
 //  1. PURE — reading the claim off a `validateUserInfo` source, closing it
 //     against the supported locales, and the write decision.
@@ -12,10 +12,16 @@
 //     `/callback/:id`) through the platform IdP, a generic-OAuth provider
 //     whose token and userinfo endpoints are stubbed. The assertions read
 //     what landed: the `sys_user.locale` column and the IdP record beside it.
+//  3. The PACKAGE ENTRY — `AuthManager.applyIdpLocaleClaim`, the call a host
+//     whose sign-in skips the OIDC seams makes (the cloud's sso-exchange
+//     hand-off), imported from `./index` and run over the same engine; and
+//     the pin that it and the OIDC settle step are one method.
 
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
+// The package entry, as a host outside the package imports it.
+import * as entry from './index';
 import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking';
 import {
   IdpLocaleSync,
@@ -434,5 +440,120 @@ describe('a JIT sign-in through the platform IdP sets the user language preferen
 
     expect(userRow(engine).locale ?? null).toBeNull();
     expect(warn.mock.calls.filter(([m]) => String(m).includes('no i18n service reports a supported locale'))).toHaveLength(1);
+  });
+});
+
+describe('the OIDC JIT path and the entry call apply the rule through one method', () => {
+  it('a sign-in through the platform IdP settles its claim through IdpLocaleSync.apply', async () => {
+    const apply = vi.spyOn(IdpLocaleSync.prototype, 'apply');
+    try {
+      const engine = createMemoryEngine();
+      idpProfile = { locale: 'zh-CN' };
+
+      await signInWithIdp(makeManager(engine));
+
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(apply).toHaveBeenCalledWith(
+        userRow(engine).id,
+        { providerId: PLATFORM_IDP_PROVIDER_ID, value: 'zh-CN' },
+        expect.anything(),
+      );
+      expect(userRow(engine).locale).toBe('zh-CN');
+    } finally {
+      apply.mockRestore();
+    }
+  });
+});
+
+describe('the package entry applies the rule for a sign-in that skips the OIDC seams', () => {
+  const USER_ID = 'usr_entry_1';
+  const CLOUD = 'objectos-cloud';
+
+  /** A user the host's own hand-off already holds: created, never signed in through OIDC. */
+  const seedUser = async (engine: ReturnType<typeof createMemoryEngine>) => {
+    await engine.insert('sys_user', { id: USER_ID, email: EMAIL, name: 'Synthetic Person' });
+  };
+  const entryManager = (engine: unknown, config: Record<string, unknown> = {}) =>
+    new entry.AuthManager({
+      secret: SECRET,
+      baseUrl: BASE,
+      dataEngine: engine,
+      getI18n: () => ({ getLocales: () => SUPPORTED }),
+      ...config,
+    } as any);
+  const claim = (value: unknown): entry.IdpLocaleClaim => ({ providerId: CLOUD, value });
+  const userOf = (engine: ReturnType<typeof createMemoryEngine>) =>
+    (engine.tables.get('sys_user') ?? []).find((u: any) => u.id === USER_ID);
+  const verificationRows = (engine: ReturnType<typeof createMemoryEngine>) =>
+    JSON.stringify(engine.tables.get('sys_verification') ?? []);
+
+  it('⭐ unset: the claim is written, with the idp-locale record beside it', async () => {
+    const engine = createMemoryEngine();
+    await seedUser(engine);
+    const manager = entryManager(engine);
+
+    await expect(manager.applyIdpLocaleClaim(USER_ID, claim('zh-CN'))).resolves.toBeUndefined();
+
+    expect(userOf(engine).locale).toBe('zh-CN');
+    expect(recordOf(engine, USER_ID)).toBe('zh-CN');
+  });
+
+  it('⭐ still the recorded value: a later claim overwrites it, record and column alike', async () => {
+    const engine = createMemoryEngine();
+    await seedUser(engine);
+    const manager = entryManager(engine);
+    await manager.applyIdpLocaleClaim(USER_ID, claim('zh-CN'));
+
+    await manager.applyIdpLocaleClaim(USER_ID, claim('en-US'));
+
+    expect(userOf(engine).locale).toBe('en');
+    expect(recordOf(engine, USER_ID)).toBe('en');
+  });
+
+  it('⭐ a local choice: kept, and neither the column nor the record is written', async () => {
+    const engine = createMemoryEngine();
+    await seedUser(engine);
+    const manager = entryManager(engine);
+    await manager.applyIdpLocaleClaim(USER_ID, claim('zh-CN'));
+    userOf(engine).locale = 'ja-JP';
+    const update = vi.spyOn(engine, 'update');
+    const recordsBefore = verificationRows(engine);
+
+    await manager.applyIdpLocaleClaim(USER_ID, claim('en'));
+
+    expect(userOf(engine).locale).toBe('ja-JP');
+    expect(update).not.toHaveBeenCalled();
+    expect(verificationRows(engine)).toBe(recordsBefore);
+  });
+
+  it('runs through the same IdpLocaleSync.apply the OIDC settle step calls', async () => {
+    const apply = vi.spyOn(IdpLocaleSync.prototype, 'apply');
+    try {
+      const engine = createMemoryEngine();
+      await seedUser(engine);
+
+      await entryManager(engine).applyIdpLocaleClaim(USER_ID, claim('zh-CN'));
+
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(apply).toHaveBeenCalledWith(USER_ID, claim('zh-CN'));
+    } finally {
+      apply.mockRestore();
+    }
+  });
+
+  it('never throws: a user store that refuses the write is reported at warn', async () => {
+    const engine = createMemoryEngine();
+    await seedUser(engine);
+    const warn = vi.fn();
+    const manager = entryManager(engine, { logger: { warn, info: () => {}, error: () => {}, debug: () => {} } });
+    engine.failUpdates.add('sys_user');
+
+    await expect(manager.applyIdpLocaleClaim(USER_ID, claim('zh-CN'))).resolves.toBeUndefined();
+    await expect(manager.applyIdpLocaleClaim('', claim('zh-CN'))).resolves.toBeUndefined();
+    await expect(manager.applyIdpLocaleClaim(USER_ID, undefined as never)).resolves.toBeUndefined();
+
+    expect(userOf(engine).locale ?? null).toBeNull();
+    expect(recordOf(engine, USER_ID)).toBeUndefined();
+    expect(warn.mock.calls.filter(([m]) => String(m).includes('IdP locale claim was not applied'))).toHaveLength(1);
   });
 });

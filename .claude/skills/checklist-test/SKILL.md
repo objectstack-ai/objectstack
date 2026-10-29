@@ -48,6 +48,7 @@ node scripts/checklist-select.mjs <selector> --json
 | `surface:api` | 全部 API 面测试项(便宜 —— 不需要浏览器构建) |
 | `since:v17` | 某个 release 引入的全部项(release-sweep 过滤器) |
 | **`file:packages/plugins/plugin-approvals/src/approval-service.ts`** | **`source[]` 引用该文件的项 ——「测覆盖这个文件的一切」**(带 `/` 或代码扩展名的裸路径也自动按 `file:` 解析) |
+| `touched:<sha>` | `source[]` 或 `automated.ref` 引用的文件在 `<sha>..HEAD` 里改过的项(增量回归) |
 | `all` | 整份清单 |
 
 `--json` 给出可运行清单(id · priority · surface · revision)。**Blocked 项默认排
@@ -102,8 +103,16 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
   `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --tier <paths>` 的输出、
   ⛔ 不凭记忆(floor sonnet · default opus · ceiling fable);每个给:该项 JSON、RUNNER.md、dogfood 技
   能、自己的端口/DB、结果不进仓规则(§4)。
+- **effort 按卡形状定,派发写明,⛔ 不留空。** runner 卡(Tier 1 pin 批、手工 API/CLI 与浏览器
+  组、P0 冒烟、UX 走查)一律 `high`;`xhigh` 只给修安全发现的 `os-dev` 与争议判定的对抗复核。
+- **按后端传档。** `Agent` 子代理显式传 `effort`(本条即传参的依据)。云卡(`create_session`)不收
+  effort,卡的会话记录也不带 `effort_level`,跑在哪档读不回(实测):派发记录写「未指定」并附
+  发起会话 `get_session` 读到的档位;它高于卡形状时照 pm-dispatch `dispatch-runbook.md`
+  〈云卡五课〉五之 ② 行办,或改开项目线程、开时给档位(实测按所给,不随父会话)。
+- **花费行。** 波次锚卡的派发记录与每个 runner 终报带各卡报告时的花费(`get_session` 的
+  `external_metadata.usage.cost_usd`),供下一波校准。
 - **QA 运行不是车道卡。** runner(子代理或云卡)由发起本轮的会话直接派,⛔ 不走车道认领
-  与座位贴;pm-dispatch 只管写入门(§4)与安全修复派卡(Guardrails)。
+  与座位贴;pm-dispatch 管写入门(§4)、安全修复派发与 PR 持有(Guardrails)。
 - **没有子代理工具时,顺序跑 —— 并在运行记录里声明这一轮是顺序执行的。** 规则与它
   的论证住在 `checklist-author` 技能(维护者所定,一处成文);⛔ 不留第二份拷贝。
 - 忠实执行每项的 `steps`,按各自声明的 `oracle` 判定每条 `acceptance` 与 `negative`
@@ -126,10 +135,11 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 **issue 是纯文本 —— 永不放图。** 截图只为让你和子代理**现场**得出判定;它们是判断辅
 助,随运行环境一起丢弃。持久报告需要的是**复现规则,不是图片**。
 
-GitHub 写入只走 pm-dispatch 写入门:仓根直调 `scripts/pm/issue-create.mjs`、`post-stamped.mjs`、
-`close-cards.mjs`,批量先 `write-pace.mjs --announce-batch N`,云容器内自走 fleet relay;⛔ 永不 MCP
-`issue_write`(锁 1 已拒)或裸 `curl`。写入被会话权限拦下 ⛔ 不绕行:待发文本落文件、终报给
-出路径与正文,放行后照序补发 —— 写入未落地即未收口。记录这样写:
+一轮的每次 GitHub 写入与 issue / PR 处理(抽取、查重、收口)只走 pm-dispatch 写入门:仓根直调
+`scripts/pm/issue-create.mjs`、`post-stamped.mjs`、`close-cards.mjs`,批量先 `write-pace.mjs --announce-batch N`,云
+容器自走 fleet relay;⛔ 永不 MCP `issue_write`(锁 1 已拒)或裸 `curl`。写入门被本会话权限拦下
+⛔ 不绕行:待发文本落盘,路径与正文随终报或会话间消息交派发会话,由它照序经原写入门
+补发;其中 ⛔ 无安全复现 —— 写入未落地即未收口。记录这样写:
 
 - **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:唯一
   形状、严格解析、分数**强制**;语法与退役写法见 RUNNER.md「The record title」。
@@ -149,7 +159,7 @@ GitHub 写入只走 pm-dispatch 写入门:仓根直调 `scripts/pm/issue-create.
   取为独立 issue:标题自含、复现与机制条目化、指回本 run issue 取全量证据;缺陷卡不
   挂 `qa-run`,正常进分诊首触。清单准确性发现与 fixture 缺口归波次锚卡(sweep 跟踪
   issue)收口,⛔ 不抽取;环境阻塞记录在案即可。逐条 `fail` 的四分法处置、收口评论的
-  机器行与抽取卡的溯源行见 §5。⛔ 认证 / 授权漏洞的抽取卡不写复现,见 Guardrails。
+  机器行与抽取卡的溯源行见 §5。⛔ 安全发现不抽取、不立任何卡,见 Guardrails。
 - **完成判据** —— 一个区只有在**每一项都有判定**时才算跑完。跑不完的一轮照常立
   单:交出已有的判定,**外加一份点名未触达项的交接清单**,标题按上面的分数如实写。
   `not-run` 是诚实判定 —— 判 1 项、11 项没跑就写 `(1/12) · … · 11 NOT-RUN`。
@@ -160,8 +170,7 @@ GitHub 写入只走 pm-dispatch 写入门:仓根直调 `scripts/pm/issue-create.
 
 立单不是终点,收口是每一轮运行的一部分。RUNNER 的抽取义务条款给的是**抽什么**;本节
 给的是**一张记录什么时候才算关闭**,以及关闭这件事在别处怎么被读到。零新标签 ——
-下面
-每个状态都用现有载体承载。
+下面每个状态都用现有载体承载。
 
 **开着的 `qa-run` 数 = 未清的收口债**,与裸 `finding` 计数同一构造:它是可直接读的健
 康指标,所以⛔ 永不靠关掉记录让它变好看,只靠把下面几件事做完。
@@ -175,9 +184,9 @@ GitHub 写入只走 pm-dispatch 写入门:仓根直调 `scripts/pm/issue-create.
 | **过期规格** | 两边都按各自的声明行事,条款钉的是已被裁决改掉的旧形状 | 立 re-point 卡:把条款重新指向现行规格,引裁决 |
 | **配对无效** | 该项与这个 subject / fixture 根本不成立(错配的 revision、不适用的环境) | 记 `blocked` 说明,⛔ 不立卡 |
 
-四选一是**穷尽的**:落不进任何一格的 `fail` 说明你还没判完 —— ⛔ 永不把它留成一条无
-处
-置的红行。
+除安全发现外,四选一是**穷尽的**:落不进任何一格的 `fail` 说明你还没判完 —— ⛔ 永不把
+它留成一条无处置的红行。安全发现那一行本身即处置:⛔ 不立卡、不写 `Extracted:` 行,修复
+由派发它的 PM 会话派(Guardrails)。
 
 与 §4「清单准确性发现归波次锚卡」的分界,是**有没有一条 `fail` 要清**:由 `fail` 判出
 的断言缺陷 / 过期规格各自立卡(那条红行得有人负责变绿),运行中顺带看到的清单准确性问
@@ -206,28 +215,46 @@ QA-source: #运行记录号 · area.item · 条款
 `platform-core.console-login`)—— 解析器、run 记录的逐条款表、抽取卡三处同一把定位
 符,才互相 grep 得到;⛔ 不写只有 item 段的短形。**写进 GitHub 正文/评论时⛔ 不要用尖
 括号占位符**:`<`+字母会被写入层当标签吃掉,一行溯源就此消失在库里 —— 占位用中文词
-或
-直接填实值。
+或直接填实值。**唯一例外是 npm 冒烟**(§6):定位字段写冒烟选择器、条款写格号,如
+`QA-source: #运行记录号 · smoke:npm-18.2.0 · C3` —— 下一轮冒烟凭这一行重判它。
 
 **Supersede 协议** —— 重跑覆盖了旧记录的地面时,旧记录关闭(`not_planned` + 一行
 `Superseded-by:` 指向新记录),但**先把新一轮没有重新判定的判定结转过去**:结转行
 (`Carried-forward:`,引旧记录号)落在**新记录**上,supersede 行落在**旧记录**上。⛔
 永不用「新的一轮跑过了」直接关掉旧记录:没被重新覆盖的判定会随它一起消失,而记录被
-关
-闭这件事在别处不留任何痕迹。
+关闭这件事在别处不留任何痕迹。
 
-**重测触发,三条且只有三条**:
+**重测触发,四条且只有四条**:
 
 1. **发版候选** ⇒ 完整 Tier 1 重跑(§1 的分层)。
 2. **QA 抽取的修复卡落地** ⇒ **接受该卡的座位**把受影响的项追加到波次锚卡的重测清
-   单 —— 与跨仓联动同一纪律:第一产者是接受座位。
+   单 —— 与跨仓联动同一纪律:第一产者是接受座位。安全加固没有卡:落地它的 PM 会话自
+   己重跑该项,⛔ 不在任何卡上点名它。
 3. **维护者点名目标**。
+4. **常驻回归**(维护者所定,§6)⇒ 每周回归与发版后 npm 冒烟。
 
 ⛔ 其它一切都不是重测触发:凭手感「再跑一遍」只增加收口债,不增加覆盖。
 
-**验证重测**不是第四条触发:由同一 PR 对该项的清单编辑(§3)引发,⛔ 不立 `qa-run` 记录。
+**验证重测**不是第五条触发:由同一 PR 对该项的清单编辑(§3)引发,⛔ 不立 `qa-run` 记录。
 逐项判定表进 PR 正文,该项 `history` 行的 `ref` 指向该 PR;`partial`/`blocked` 的缺口进 PR
 正文与 `fixtures.knownGaps`;产品缺陷 `fail` 照常抽卡、溯源指向该 PR;条款过期在同一 diff 修。
+
+## 6. 常驻回归 —— 两次发版之间也重跑
+
+维护者所定的两条例行(裁定评论 6501246005);定时任务由派发的 PM 会话建,⛔ 不是仓库代码,也
+不是合并门禁。
+
+- **每周回归**,对 `main` HEAD,四张 `qa-run` 记录,一个选择器一张:
+  - 欠测清单:标题选择器写 `owed:weekly`(⛔ 不带冒号的词会被读成区),清单里每个 id
+    按 §0 裸 id 逐项解析;
+  - `touched:<上周 touched 记录的 subject sha>`;首周取最近一张发版全量重跑记录的 subject;
+  - `priority:P0` 与 `surface:api`。
+  §5 的 Supersede 让每条例行至多开着一张:选择器周周相同的三张直接适用;`touched:` 的 sha
+  每周都变,本周那张照样 supersede 上周那张,判定结转照 §5。
+- **发版后 npm 冒烟**:每次发布后跑 `smoke:npm-<版本>`,形状照上一张同类记录;上一轮冒烟抽出
+  的修复卡在这里重判(它们的溯源行见 §5 的冒烟例外)。
+- **欠测清单**由 `node scripts/qa/retest-owed.mjs` 只读算出(⛔ 不写 GitHub):
+  QA 抽取的修复卡关闭晚于该项最新判定的 subject,该项即欠测 —— 就是 §5 触发 2 的清单。
 
 ## Guardrails
 
@@ -235,12 +262,16 @@ QA-source: #运行记录号 · area.item · 条款
   或记 `blocked(environment)`;证到一半的项是 `partial`,不是 `pass`。带证据的
   blocked 判定是一次成功运行;伪造的 pass 不是。
 - **每个产品问题同一轮经 §4 立 issue。** `fail` 条款与条款外探测同样,⛔ 不只留在运行记
-  录或聊天;认证 / 授权类按下一条。
-- **认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方** —— 不进运行 issue,不进跟踪
-  卡,不进评论。卡只载项 id、条款与 `detail withheld pending maintainer`,复现留在会话里;修复直
-  接经 pm-dispatch 派卡:席内 `mode:subagent` 派 `os-dev`,复现只进派发令,⛔ 不等维护者;runner 无
-  派发通道时由派它的会话接手。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边
-  都不是对另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
+  录或聊天;安全发现按下一条。
+- **安全发现不立卡,复现不上 GitHub**(安全发现 = 认证 / 授权漏洞,或复现即利用配方的发
+  现):⛔ 不立任何卡,锚卡、跟踪卡不提;复现经会话间消息私报给**派发它的 PM 会话**(无此
+  通道则留本会话,终报报 blocked),由它经 pm-dispatch 派修复:席内 `os-dev` 子代理、`xhigh`,复现只
+  进派发令,PR、提交与 changeset 只写加固;要定契约的交维护者。运行记录只留一行
+  `area.item · 条款 · security finding — detail withheld, reported to PM`,算已完成判定、标题计 `FAIL`。
+- **runner 只测试。** 记录、缺陷卡、评论与 issue / PR 的每步处理都走 §4 写入门;⛔ 不派
+  `os-dev`,⛔ 不驱动 PR:一轮产出的每个 PR 归派发的 PM 会话复核、欠时契约复审、翻 ready 与
+  落地。⚠ 这两条与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边都不是对另一边的优先
+  级主张;完整论证与它的维护者裁定在 RUNNER。
 - **不把 blocked 项当可运行的跑** —— 解析器隐藏它们正为此。
 - **一个选择器、一次运行、一张 issue;验证重测不立 issue,证据进 PR 正文(§5)。** release
   sweep 把 `since:vN` 与 `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。

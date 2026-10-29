@@ -196,7 +196,8 @@ describe('#24720 — the object door gives the build\'s verdict', () => {
     expect(result.rulesRun).toContain('validateStackExpressions');
     const errs = expressionFindings(result.errors);
     expect(errs, dump(result)).toHaveLength(1);
-    expect(errs[0]).toMatchObject({ severity: 'error', where: WHERE, path: WHERE });
+    // [#27643] Located at the judged slot's key path; `where` stays the prose.
+    expect(errs[0]).toMatchObject({ severity: 'error', where: WHERE, path: 'objects.fx_line.validations[0].condition' });
     expect(errs[0]!.message).toContain("validation rule 'paid_lock' reads `parent`");
     // No longer an advisory: the finding moved, it was not duplicated.
     expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
@@ -207,7 +208,12 @@ describe('#24720 — the object door gives the build\'s verdict', () => {
     const atDoor = expressionFindings(gateObject(line([script(PARENT)]), [header]).errors);
 
     expect(atBuild, dump(atBuild)).toHaveLength(1);
-    expect(atDoor, dump(atDoor)).toEqual(atBuild);
+    // [#27643] Equal once the door's by-name spelling of the top-level index
+    // is applied to the build's positional key path (`objects[1]`, after the header).
+    expect(atBuild[0]!.path).toBe('objects[1].validations[0].condition');
+    expect(atDoor, dump(atDoor)).toEqual(
+      atBuild.map((f) => ({ ...f, path: f.path.replace(/^objects\[1\]/, 'objects.fx_line') })),
+    );
   });
 
   it('⭐ CONTROL — `parent` on a field\'s own `readonlyWhen` publishes clean, and the build agrees', () => {

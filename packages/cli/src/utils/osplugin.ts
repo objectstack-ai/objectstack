@@ -7,9 +7,10 @@
  *
  *   objectstack.plugin.json   ← compiled manifest (with `integrity`)
  *   dist/**                   ← bundled, @objectstack/*-externalized code
- *   assets/**                 ← optional static assets
- *   package.json              ← only for `packaging: manifest-deps`
- *   pnpm-lock.yaml            ← only for `packaging: manifest-deps`
+ *                               (every other dependency inlined: `bundled`
+ *                               is the one packaging strategy, ADR §3.3)
+ *   assets/**                 ← optional static assets (never a `.node`
+ *                               addon: `os plugin build` refuses one)
  *   SIGNATURE                 ← detached publisher signature (placeholder
  *                               until `os plugin sign`; ADR §3.4)
  *

@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-webhooks/src/redeliver-entitlement.ts",
+  "adrs": [
+    "ADR-0124"
+  ],
+  "invariant": "Who may press the webhook redeliver door (POST /api/v1/webhooks/redeliver, both faces) is decided SERVER-side (ADR-0124 D1), before the door reads the request body or looks up any delivery row: the security service's object-level `update` admission on sys_webhook, asked through ISecurityService.explain on the caller's ExecutionContext as the one request-context composition resolves it. That composition is handed the door's own `tenancy` resolver, so the session's organization claim is vetted against the posture in force exactly as on the data API (the per-request membership check of the 2026-09-05 ruling, option B), and the replay is scoped to the VETTED tenantId, never the raw claim; a claim the composition did not keep is refused with the caller-level 403, because a replay with no organization would be an unscoped write. A case the gate cannot decide is never admitted (ADR-0124 D3): no security service, a throwing decision, or a tenancy service that is registered and cannot answer is 503 SERVICE_UNAVAILABLE. Every refusal is about the caller and carries no row-specific detail. A client hiding the redeliver button is courtesy, never this gate."
+}

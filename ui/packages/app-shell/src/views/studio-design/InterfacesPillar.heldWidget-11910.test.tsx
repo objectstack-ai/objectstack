@@ -69,6 +69,8 @@ let refuseDashboard: Error | null;
 let dashFixture: Record<string, unknown> = SALES_DASH;
 
 const mockClient = {
+  // The Studio's dataset pickers read the draft-overlaid catalog (objectstack#27518).
+  withPreviewDrafts: vi.fn((): unknown => mockClient),
   save: vi.fn(async (type: string, _name: string, _body: Record<string, unknown>) => {
     if (type === 'dashboard' && refuseDashboard) throw refuseDashboard;
     return { success: true, version: 'v1', state: 'draft' };

@@ -330,6 +330,19 @@ export interface ProposedPlan {
    * reads it only when there is no `planCard`, whose views carry the same line.
    */
   viewIntents?: ProposedPlanViewLine[];
+  /**
+   * objectstack#27480 — the envelope's `decision: 'iterate_or_new'`: the plan
+   * overlaps an app that already exists (`existingAppOverlap`), so it is a
+   * QUESTION, not a plan to approve. The card asks whether to keep improving
+   * that app or build a separate one, and draws no "Build it" button. `app` is
+   * the overlapping app's `name` / `label`, absent when the envelope names none.
+   */
+  iterateOrNew?: ProposedPlanIterateOrNew;
+}
+
+/** objectstack#27480 — the extend-or-new question a `decision: 'iterate_or_new'` plan asks. */
+export interface ProposedPlanIterateOrNew {
+  app?: { name: string; label?: string };
 }
 
 /** One view's intent line: `viewIntents[]` and `planCard.views[]` both carry it. */
@@ -448,8 +461,11 @@ export function detectProposedPlan(result: unknown): ProposedPlan | undefined {
       },
     ];
   });
+  // objectstack#27480 — an `iterate_or_new` plan is a question; it is drawn
+  // even when it names no object, because what it asks is the whole card.
+  const iterateOrNew = liftIterateOrNew(obj);
   // No nameable objects → nothing reviewable; don't render an empty card.
-  if (objects.length === 0) return undefined;
+  if (objects.length === 0 && !iterateOrNew) return undefined;
 
   const num = (v: unknown, fallback: number): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback;
@@ -503,6 +519,7 @@ export function detectProposedPlan(result: unknown): ProposedPlan | undefined {
     ...(typeof targetApp === 'string' && targetApp ? { targetApp } : {}),
     ...(planCard ? { planCard } : {}),
     ...(viewIntents.length ? { viewIntents } : {}),
+    ...(iterateOrNew ? { iterateOrNew } : {}),
   };
 }
 
@@ -517,6 +534,20 @@ function viewLines(v: unknown[]): ProposedPlanViewLine[] {
     if (!r || !isText(r.view) || !isText(r.object) || !isText(r.line)) return [];
     return [{ view: r.view, object: r.object, ...(isText(r.label) ? { label: r.label } : {}), line: r.line }];
   });
+}
+
+/**
+ * objectstack#27480 — lift the extend-or-new question off an envelope whose
+ * `decision` is `iterate_or_new`. The overlapping app is read from
+ * `existingAppOverlap`'s own `name` / `label`, the keys the card that asked
+ * for this names; an overlap without a name leaves `app` absent, and the card
+ * then asks without naming the app. Any other `decision` lifts nothing.
+ */
+function liftIterateOrNew(envelope: Record<string, unknown>): ProposedPlanIterateOrNew | undefined {
+  if (envelope.decision !== 'iterate_or_new') return undefined;
+  const overlap = recordOf(envelope.existingAppOverlap);
+  if (!overlap || !isText(overlap.name)) return {};
+  return { app: { name: overlap.name, ...(isText(overlap.label) ? { label: overlap.label } : {}) } };
 }
 
 /**

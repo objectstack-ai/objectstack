@@ -916,13 +916,28 @@ export const SysUser = ObjectSchema.create({
     // #2766 V1.5 — phone-number sign-in identifier (better-auth phoneNumber
     // plugin, mapped via buildPhoneNumberPluginSchema). Unique when present;
     // null for email-only accounts. Written through better-auth, not CRUD.
+    //
+    // Declared in the `Admin` group, with `phone_number_verified` below, on
+    // purpose: a sign-in identifier is account-administration data, not
+    // directory data. The group is the declaration the shipped permission sets
+    // read (`identityAdminFieldSecurity` in plugin-security's
+    // `default-permission-sets.ts`): the non-admin sets (`member_default`,
+    // `viewer_readonly`, `external_default`) mark every group field
+    // `readable: false` and the admin sets keep it, so an org member reading
+    // the user directory is served a colleague's name and email but not their
+    // sign-in phone number. Field-level read security is row-blind (ADR-0066,
+    // 2026-10-26 note), so the member's OWN row on the generic data API is
+    // withheld it too; the holder's own number is read through auth context
+    // (better-auth's session user, which returns both phone fields), as every
+    // other group field is. Moving either field out of the group serves it to
+    // every org peer again.
     phone_number: Field.text({
       label: 'Phone Number',
       required: false,
       readonly: true,
       searchable: true,
       maxLength: 32,
-      group: 'Account',
+      group: 'Admin',
       description:
         'Sign-in phone number (E.164 recommended). Unique per user; managed by ' +
         'better-auth when the phoneNumber plugin is enabled.',
@@ -932,7 +947,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Phone Verified',
       defaultValue: false,
       readonly: true,
-      group: 'Account',
+      group: 'Admin', // withheld from org peers with `phone_number` (see the note above it)
       description:
         'Whether the phone number has been verified (OTP verification requires ' +
         'SMS infrastructure; false until that ships). System-managed.',

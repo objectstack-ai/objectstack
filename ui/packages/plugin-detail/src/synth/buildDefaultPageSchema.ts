@@ -230,12 +230,14 @@ export interface BuildPageOptions {
      */
     isPrimary?: boolean;
     /**
-     * The list is the record's own body (objectstack#27055, Target 8): a
-     * `master_detail` FK declaring `inlineEdit`, or `relatedList: 'primary'`.
-     * Drawn as a full-width table section in the Details tab, right after the
-     * first field section, instead of in the Related tab / related column.
-     * Absent: `isPrimary` decides. The host computes it from the FK (no spec
-     * key of its own).
+     * The list is the record's own body (objectstack#27055, Target 8):
+     * `relatedList: 'primary'`, or a `master_detail` FK declaring `inlineEdit`
+     * and no `relatedList`. Drawn as a full-width table section in the Details
+     * tab, right after the first field section, instead of in the Related tab /
+     * related column. Absent: `isPrimary` decides. The host computes it from
+     * the FK with `@objectstack/spec`'s `isBodyTableRelationship`
+     * (objectstack#27478) — the one predicate, which the spec's refusal of a
+     * field group naming a side card reads too (no spec key of its own).
      */
     isBody?: boolean;
   }>;
@@ -270,7 +272,7 @@ export interface BuildPageOptions {
    *   path). The override fires even when neither auto-emission
    *   condition is met.
    * - `details` — replaces the Details tab body (the `record:details`
-   *   node). Other tabs (Related / Activity / History) are unaffected.
+   *   node). Other tabs (Timeline / Related / Approvals) are unaffected.
    *   There is no `tabs` slot (objectstack#27053): the strip is composed
    *   from the object's roles and relationship flags, and a page that
    *   needs its own strip is a `kind: 'full'` page, drawn as authored.
@@ -920,7 +922,10 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    among the object's `fieldGroups`: after the sections of the groups
  *    declared before it, before those declared after it. Such a group holds
  *    no fields (the spec refuses one that does), so it is a position, never a
- *    section of its own;
+ *    section of its own. A group only POSITIONS a body table: only the
+ *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
+ *    the spec refuses a group naming a side card or a hidden list, by the same
+ *    `isBodyTableRelationship` the host computes `isBody` with);
  *  - every other body table goes right after the FIRST field section
  *    (conventionally 基本信息), stacked in the order given; with one section
  *    or none, after the details.
@@ -1009,8 +1014,12 @@ export function bodyTablePlacement(
 }
 
 /**
- * Sub-builder: the `page:tabs` node. Emits Details / Related /
- * Activity / History tabs in stable order based on the options.
+ * Sub-builder: the `page:tabs` node. Emits the Details tab, always first,
+ * then the Timeline tab (the one stream, objectstack#27055: field changes
+ * join it under its Changes filter, so there is no History tab), the Related
+ * tab and the Approvals tab, each of those three only when the options give
+ * it content. The order is stable: Timeline sits second for a worked object
+ * and last otherwise.
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into

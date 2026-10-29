@@ -26,6 +26,7 @@ import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manif
 import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { collectSeedFiles } from '../utils/bundle-seed-files.js';
+import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import {
   printHeader,
   printKV,
@@ -801,6 +802,31 @@ export default class Validate extends Command {
         console.log('');
         printError(`Seed file validation failed (${seedFiles.issues.length} issue${seedFiles.issues.length > 1 ? 's' : ''})`);
         for (const issue of seedFiles.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
+        this.exit(1);
+      }
+
+      // 3d-bis. [#27259] Seed record VALUES — each value a seed record writes,
+      //     judged by the insert write's own value verdict
+      //     (`validateInsertValues`, `@objectstack/objectql`), so a value the
+      //     seed load refuses (a currency written `{ value, currency }`) is
+      //     refused here with the load's code and sentence. ⛔ One judge: the
+      //     helper owns only the walk (`utils/seed-record-values.ts`). `os build`
+      //     runs the same call before it bundles the seed files.
+      const seedValueIssues = judgeSeedRecordValues(result.data as Record<string, unknown>);
+      if (seedValueIssues.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: seedValueIssues,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Seed record values the seed load refuses (${seedValueIssues.length} issue${seedValueIssues.length > 1 ? 's' : ''})`);
+        for (const issue of seedValueIssues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message} (${issue.code})`));
         this.exit(1);
       }
 

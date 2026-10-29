@@ -33,7 +33,9 @@
  * link — the same prompt `DefaultLoginPage` shows (#25886). The greeting
  * names the organization and the inviter when the signed-out invitation
  * preview answers, with the masked invited address as the one to use (#26473,
- * app-shell's `useInvitationPreview`); otherwise it keeps the generic copy.
+ * app-shell's `useInvitationArrival`); otherwise it keeps the generic copy.
+ * For an invitation the server no longer knows, the card holds app-shell's
+ * `InvitationGoneNotice` alone: no prompt, no form (#27509).
  *
  * Layout (objectui#12600): one 400 px column — brand mark, the card, a footer.
  * The card carries this page's own two-line header, so `<LoginForm>` renders
@@ -62,9 +64,10 @@ import {
   isInvitationRedirect,
   needsBootstrapProbe,
   useBootstrapStatus,
+  InvitationGoneNotice,
   InvitationSignUpPrompt,
   invitationArrivalCopy,
-  useInvitationPreview,
+  useInvitationArrival,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
@@ -158,10 +161,12 @@ export function LoginPage() {
     hasBootstrapped && !user && needsBootstrapProbe(authConfig, invitationRedirect),
   );
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
-  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
-  const invitationPreview = useInvitationPreview(redirect);
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic
+  // copy. #27509 — `gone` when the server no longer knows the invitation.
+  const invitationArrival = useInvitationArrival(redirect);
+  const invitationGone = invitationRedirect && invitationArrival.gone;
   const invitationCopy = invitationRedirect
-    ? invitationArrivalCopy('login', invitationPreview, t)
+    ? invitationArrivalCopy('login', invitationArrival.preview, t)
     : null;
 
   // Detect SSO hand-off so we can surface the relying-party host.
@@ -333,6 +338,8 @@ export function LoginPage() {
               retrying={configRead === 'loading'}
               onRetry={retryConfigRead}
             />
+          ) : invitationGone ? (
+            <InvitationGoneNotice />
           ) : (
             <>
               <div className="mb-5">

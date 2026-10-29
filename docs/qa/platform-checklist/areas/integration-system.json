@@ -582,7 +582,7 @@
       "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -614,7 +614,7 @@
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data (a `$filter` is a JSON filter object): one row per delivery with status/attempts/response_code",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
-        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as an authenticated user: capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
+        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as the seeded admin (the door is gated on webhook-administration access): capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
         "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there with `active` true, and the switch is still in force. No public door reads a declared webhook's switch: GET /api/v1/meta/webhook/showcase_task_changed serves the declaration, which answers isActive:false by design (the activation ledger is separate, ADR-0126 §4), so the in-force half is read off a fresh sys_http_delivery row for a task change made after the reboot (the switch is deployment state; the declaration is code)"
       ],
       "acceptance": [
@@ -643,9 +643,9 @@
           "evidence": "headers + delivery rows"
         },
         {
-          "clause": "POST /api/v1/webhooks/redeliver replays a TERMINAL delivery (status success/failed/dead with attempts > 0): the row resets and re-dispatches carrying the STORED HMAC signature byte-for-byte (signed at enqueue, replayed verbatim — still verifiable against the secret), the row updates, and the response is { id, status }. The refusal matrix never 500s for a caller-fixable state: anonymous → 401 UNAUTHENTICATED; non-JSON → 400 INVALID_REQUEST; missing deliveryId → 400 MISSING_REQUIRED_FIELD; unknown OR cross-organization deliveryId → 404 RESOURCE_NOT_FOUND (the caller's activeOrganizationId is threaded into the lookup, #10740 — another org's row is simply not found, not forbidden-with-a-hint); non-terminal row → 409 DELIVERY_NOT_ELIGIBLE; a PARKED row (attempts === 0, recordUndeliverable's record of a delivery never prepared) → 409 DELIVERY_NEVER_SENT, because redelivering it would be an UNSIGNED first delivery (#7799/#8069 — the redeliver guard also refuses when the signing configuration is gone, fail-closed on a guard that throws). ⚠ PIN THE POSTURE: there is deliberately NO capability gate above the auth floor — 'every authenticated user counts' (the plugin's own words); a non-admin session redelivering successfully is the designed behavior, not a missing-gate finding, and a run must neither file it nor 'fix' it",
+          "clause": "POST /api/v1/webhooks/redeliver replays a TERMINAL delivery (status success/failed/dead with attempts > 0): the row resets and re-dispatches carrying the STORED HMAC signature byte-for-byte (signed at enqueue, replayed verbatim — still verifiable against the secret), the row updates, and the response is { id, status }. The refusal matrix never 500s for a caller-fixable state: anonymous → 401 UNAUTHENTICATED; non-JSON → 400 INVALID_REQUEST; missing deliveryId → 400 MISSING_REQUIRED_FIELD; unknown OR cross-organization deliveryId → 404 RESOURCE_NOT_FOUND (the caller's activeOrganizationId is threaded into the lookup, #10740 — another org's row is simply not found, not forbidden-with-a-hint); non-terminal row → 409 DELIVERY_NOT_ELIGIBLE; a PARKED row (attempts === 0, recordUndeliverable's record of a delivery never prepared) → 409 DELIVERY_NEVER_SENT, because redelivering it would be an UNSIGNED first delivery (#7799/#8069 — the redeliver guard also refuses when the signing configuration is gone, fail-closed on a guard that throws). The door is gated on WEBHOOK-ADMINISTRATION access above the auth floor (redeliver-entitlement.ts: the security service's object-level `update` admission on sys_webhook, asked before the body is read): drive this clause as the seeded admin; a signed-in caller without that access, or whose active organization no current membership backs on a walled posture (the claim is vetted as the data API vets it), is answered 403 PERMISSION_DENIED before any row-specific detail, and no security service (or an undecidable check) is 503 SERVICE_UNAVAILABLE",
           "oracle": "api",
-          "verify": "the redeliver 200 + the receiver's replayed signature equal to the original (pinned byte-for-byte in http-signature-at-rest.integration.test.ts); each refusal against webhook-outbox-plugin.ts (401/400/400/404 arms) and http-outbox.ts (assertHttpRedeliverable / assertRedeliverAllowed — the 409 pair and the guard); the no-capability posture and the #10740 tenant threading in the route's own docblock",
+          "verify": "the redeliver 200 + the receiver's replayed signature equal to the original (pinned byte-for-byte in http-signature-at-rest.integration.test.ts); each refusal against webhook-outbox-plugin.ts (401/400/400/404 arms) and http-outbox.ts (assertHttpRedeliverable / assertRedeliverAllowed — the 409 pair and the guard); the webhook-administration gate (403 PERMISSION_DENIED, 503 SERVICE_UNAVAILABLE) and the replay's organization (the session's activeOrganizationId as the request-context composition vetted it against the tenancy posture, threaded per #10740) in redeliver-entitlement.ts's docblock and the route's own, both sides pinned in webhook-redeliver-entitlement.test.ts",
           "evidence": "the redeliver response + replayed receiver hit + the refusal responses, keyed by arm"
         },
         {
@@ -675,7 +675,7 @@
         "packages/spec/liveness/webhook.json (9 props live on the registry read; label/description live on the Studio metadata list and quick-find, which read the declared item over GET /api/v1/meta/webhook)",
         "packages/plugins/plugin-webhooks/src/declared-webhooks.ts + auto-enqueuer.ts (the registry read and its remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; the activation-ledger switch; an 18.0 database's seeded rows read beside the declaration)",
         "packages/services/service-messaging/src/http-outbox.ts#HttpRedeliverError (delivery statuses, attempts; HttpRedeliverError + assertHttpRedeliverable/assertRedeliverAllowed — terminal-only, the attempts===0 parked-row refusal, the fail-closed guard) + packages/services/service-messaging/src/http-signature-at-rest.integration.test.ts (redelivery replays the stored signature byte-for-byte)",
-        "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts#session (POST /api/v1/webhooks/redeliver — session auth with NO capability gate by design ('every authenticated user counts'), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
+        "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts#session (POST /api/v1/webhooks/redeliver — session auth, then the webhook-administration entitlement gate (redeliver-entitlement.ts — update on sys_webhook, asked before the body is read), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
         "packages/rest/src/rest-server.ts#deleteMany (#3897 — the batch routes parse against the spec contract and Zod STRIPS unknown keys, so options.multi/options.where cannot ride in; deleteMany deletes per id. This is why the bulk clause must be driven from a flow node, not REST)",
         "examples/app-showcase/src/automation/webhooks/index.ts (the shipped inactive fixture and its activation story)",
         "#3358 §9 (webhook undelete/api trigger removal gate)"
@@ -746,6 +746,18 @@
           "date": "2026-10-27",
           "change": "Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A). steps[4] and acceptance[3] named a delivery column `lastStatusCode` that no code defines: the sys_http_delivery column is response_code (packages/services/service-messaging/src/objects/http-delivery.object.ts). steps[1] names the activation row's `active` column beside the door's `enabled`. steps[4] says a `$filter` is JSON. steps[6] names the 4xx receiver a terminal row needs (http-sender.ts: 4xx except 408/429 is permanent, the rest retries). steps[7] and acceptance[6].verify stop citing a public read of 'the declaration still reads switched on': the meta read answers isActive:false by design and the run read the switch off a post-reboot delivery. acceptance[5].verify names the requires pair a scratch webhook stack needs. knownGaps[1] records that #23166, the blocked.ref the run cited, is a closed run record and no open card carries its maintainer question, and adds the wave-2 re-measure. Read at base e4ba846f. No clause's assertion changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 12,
+          "date": "2026-10-29",
+          "change": "the redeliver clause's posture sentence follows the door's hardening: redelivery is gated on webhook-administration access (update on sys_webhook, decided by the security service before the body is read), so the clause is driven as the seeded admin, and an unentitled caller's 403 / an undecidable check's 503 are named; the source line names the gate. The admin-driven assertions are unchanged",
+          "ref": "claude/harden-webhook-redeliver-door"
+        },
+        {
+          "revision": 13,
+          "date": "2026-10-29",
+          "change": "contract-review follow-up on the same hardening: acceptance[4].verify no longer cites a no-capability posture in the route's docblock (the docblock states the gate), and names where the gate and the replay's organization are stated and pinned; steps[6] drives the redeliver as the seeded admin, not as any authenticated user; acceptance[4] names the walled-posture refusal of an organization claim no current membership backs, vetted as the data API vets it. The admin-driven assertions are unchanged",
+          "ref": "#27474"
         }
       ],
       "enumSource": {
@@ -876,10 +888,10 @@
     },
     {
       "id": "integration-system.email-template-render",
-      "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
+      "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, requires manage_platform_settings, bounds sentBy, from, headers, organizationId and identityMail, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -913,7 +925,7 @@
         "edit the template wording as an admin in Studio (an environment overlay over the declared item), redeploy/reboot, and re-read the served item over GET /api/v1/meta/email_template/showcase_task_done_email — the admin's wording must still be served",
         "on the WRITABLE showcase copy (fixtures.requires[3]), edit the DECLARED source template and metadata-reload WITHOUT a reboot, then GET /api/v1/meta/email_template/<name> — the registry serves the edited item (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes). On the stock read-only showcase this half is not drivable: record it partial, as QA run #23166 did",
         "build the two rejection probes (stray key `body`; name 'BadName') and capture the errors",
-        "drive the raw send door POST /api/v1/email/send three ways: (a) authed with a well-formed message { to, subject, html } (or `text`; SendEmailInput's body keys are `html`/`text` — `bodyHtml`/`bodyText` are the TEMPLATE authoring fields, not wire keys) → capture status + the dev-transport landing; (b) anonymous (no session) → capture status; (c) a non-object / malformed body → capture the envelope",
+        "drive the raw send door POST /api/v1/email/send four ways: (a) as an admin (holding manage_platform_settings) with a well-formed message { to, subject, html } (or `text`; SendEmailInput's body keys are `html`/`text` — `bodyHtml`/`bodyText` are the TEMPLATE authoring fields, not wire keys) → capture status + the dev-transport landing; (b) anonymous (no session) → capture status; (c) a non-object / malformed body → capture the envelope; (d) as a member WITHOUT manage_platform_settings (mint one through admin create-user), and as the admin with a `from` other than the configured sender, with a `sentBy` naming another user, with a `headers` value that is not a plain object of single-line strings (a list of entries, say), with an `organizationId` other than the admin's active organization, and with `identityMail: true` → capture each refusal and confirm no new sys_email or sys_identity_email row; then send once more as the admin with no `organizationId` and confirm the new sys_email row's organization_id is the admin's active organization",
         "while you are at the raw door, send the wrong-vocabulary body { to, subject, bodyHtml } deliberately and capture the refusal — 400 VALIDATION_FAILED 'at least one of text or html is required'. This is the shape the checklist itself used to name (run #7690); keeping the probe pins the two vocabularies apart"
       ],
       "acceptance": [
@@ -960,10 +972,10 @@
           "evidence": "the error texts"
         },
         {
-          "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates and validates: an AUTHED well-formed message — { to, subject } plus AT LEAST ONE of `html` / `text` — lands at the dev transport (200 with result.status 'sent'); an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
+          "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates, authorizes and validates: an AUTHED well-formed message from a caller holding manage_platform_settings — { to, subject } plus AT LEAST ONE of `html` / `text` — lands at the dev transport (200 with result.status 'sent'), sent from the configured sender, attributed (sent_by) to the caller and recorded (organization_id) under the caller's active organization; an authenticated caller WITHOUT that capability is refused 403 PERMISSION_DENIED and nothing is sent; a `sentBy` naming another user, a `from` naming an address other than the configured sender, a `headers` value that is not a plain object mapping header names to single-line strings, a custom From / Sender / Return-Path header, an `organizationId` other than the caller's active organization, and an `identityMail` other than false are each refused 403 PERMISSION_DENIED before any send; an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
           "oracle": "api",
-          "verify": "the three POST /api/v1/email/send responses: authed 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code (email-routes.ts registerEmailEndpoints: enforceAuth, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider). ⚠ WIRE KEYS (corrected, run #7690): the send input is SendEmailInput { to, subject, text?, html?, from?, cc?, bcc?, replyTo?, … } (packages/spec/src/contracts/email-service.ts) — NOT `bodyHtml`. `bodyHtml`/`bodyText` are the email-TEMPLATE authoring fields (this item's own variants list at the `body:` and alias lines says so); posting them to this door is refused 400 'VALIDATION_FAILED: at least one of text or html is required' (packages/plugins/plugin-email/src/email-service.ts). A 400 here is the run using the wrong vocabulary, not a product defect — re-send with `html` before filing anything",
-          "evidence": "the three responses + the dev-transport landing (plus the wrong-vocabulary refusal, if the probe was driven)"
+          "verify": "the POST /api/v1/email/send responses: admin 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code, member 403 PERMISSION_DENIED, foreign from / sentBy / organizationId, off-shape headers and identityMail 403 PERMISSION_DENIED with no new mail-log row, and the admin's row stamped with the admin's active organization (email-routes.ts registerEmailEndpoints: enforceAuth, the capability / sentBy / sender / tenant bounds → 403 PERMISSION_DENIED, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider). ⚠ WIRE KEYS (corrected, run #7690): the send input is SendEmailInput { to, subject, text?, html?, from?, cc?, bcc?, replyTo?, … } (packages/spec/src/contracts/email-service.ts) — NOT `bodyHtml`. `bodyHtml`/`bodyText` are the email-TEMPLATE authoring fields (this item's own variants list at the `body:` and alias lines says so); posting them to this door is refused 400 'VALIDATION_FAILED: at least one of text or html is required' (packages/plugins/plugin-email/src/email-service.ts). A 400 here is the run using the wrong vocabulary, not a product defect — re-send with `html` before filing anything",
+          "evidence": "the responses + the dev-transport landing (plus the wrong-vocabulary refusal, if the probe was driven)"
         }
       ],
       "negative": [
@@ -976,14 +988,14 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts — on its own fixture package (auth.password_reset), not the showcase template: acceptance[0] (the registry serves the authored item beside the built-in and sendTemplate renders it, the subject exact and the body by containment), and halves only of acceptance[3] (the exact zh-CN member is reachable; not the no-folding case or the TEMPLATE_NOT_FOUND end) and of acceptance[5] (a Studio save sends on the next mail with no restart; not redeploy survival, not the declared-source reload). + packages/qa/dogfood/test/email-template-overlay-survives-boot.dogfood.test.ts ('after a cold boot the metadata door and the rendered mail both carry the admin's wording') — acceptance[5]'s redeploy-survival half on the showcase. + packages/qa/dogfood/test/email-template-two-locales-survive-boot.dogfood.test.ts ('control: a locale nobody saved keeps the package ladder') — acceptance[3]'s en-US rung for a locale with no row (ja-JP). acceptance[6] and [7] rest on no pin, and acceptance[1], [2] and [4] on one below their oracle's layer: packages/plugins/plugin-email/src/send-template.test.ts drives EmailService over a fake loader and a capture transport, asserting MISSING_VARIABLES (acceptance[1]), TEMPLATE_INACTIVE (acceptance[2]) and the fromOverride and derived text (acceptance[4]) at unit — whether the error names the variable, the registry-resolved inactive item, replyTo and the row stay hand-driven: drive them by hand"
+        "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts — on its own fixture package (auth.password_reset), not the showcase template: acceptance[0] (the registry serves the authored item beside the built-in and sendTemplate renders it, the subject exact and the body by containment), and halves only of acceptance[3] (the exact zh-CN member is reachable; not the no-folding case or the TEMPLATE_NOT_FOUND end) and of acceptance[5] (a Studio save sends on the next mail with no restart; not redeploy survival, not the declared-source reload). + packages/qa/dogfood/test/email-template-overlay-survives-boot.dogfood.test.ts ('after a cold boot the metadata door and the rendered mail both carry the admin's wording') — acceptance[5]'s redeploy-survival half on the showcase. + packages/qa/dogfood/test/email-template-two-locales-survive-boot.dogfood.test.ts ('control: a locale nobody saved keeps the package ladder') — acceptance[3]'s en-US rung for a locale with no row (ja-JP). acceptance[6] rests on no pin; acceptance[7]'s capability, sentBy, sender, headers-shape, organization and identity-mail bounds are pinned below the e2e layer by packages/rest/src/email-send-door-bounds.test.ts (the real Hono transport over a contract-typed mail-service double — the dev-transport landing and the sys_email row stay hand-driven), and acceptance[1], [2] and [4] on one below their oracle's layer: packages/plugins/plugin-email/src/send-template.test.ts drives EmailService over a fake loader and a capture transport, asserting MISSING_VARIABLES (acceptance[1]), TEMPLATE_INACTIVE (acceptance[2]) and the fromOverride and derived text (acceptance[4]) at unit — whether the error names the variable, the registry-resolved inactive item, replyTo and the row stay hand-driven: drive them by hand"
       },
       "source": [
         "packages/spec/src/system/email-template.zod.ts#fromOverride (requireds, dotted-name regex, aliases #5013, variables/required, fromOverride/replyTo/active)",
         "packages/spec/liveness/email_template.json#requireVars (the whole surface live via #4509; per-prop evidence incl. requireVars, TEMPLATE_INACTIVE, seed-not-clobber, runtime re-materialization)",
         "packages/plugins/plugin-email/src/email-service.ts ((name, locale) + fallback through the registry TemplateLoader; the requireVars and TEMPLATE_INACTIVE gates) + email-template-door.ts (the closed sys_email_template organization door, ADR-0131 D6) — the row projector bootstrap-declared-email-templates.ts was retired with the table projection (#22875)",
         "examples/app-showcase/src/system/emails/index.ts#showcase_task_done_email (showcase_task_done_email fixture)",
-        "packages/rest/src/email-routes.ts#registerEmailEndpoints (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
+        "packages/rest/src/email-routes.ts#registerEmailEndpoints (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, the manage_platform_settings / sentBy / configured-sender and headers-shape / caller-organization and identity-mail bounds → 403 PERMISSION_DENIED, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
         "packages/rest/src/rest-route-ledger.ts (email family — POST /api/v1/email/send → client email.send)",
         "packages/spec/src/api/error-code-ledger.zod.ts#EMAIL_SEND_FAILED (EMAIL_SEND_FAILED under @objectstack/rest)",
         "packages/spec/src/contracts/email-service.ts#SendEmailInput (SendEmailInput — the WIRE shape of POST /api/v1/email/send: to, subject, text?, html?; 'at least one of text or html must be supplied') + packages/plugins/plugin-email/src/email-service.ts#normalizeMessage (normalizeMessage — where the VALIDATION_FAILED texts come from)"
@@ -1042,6 +1054,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names send-template.test.ts under acceptance[1], [2] and [4]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the ref said those clauses rest on no pin, while the mapping pass scored them partial from that unit file. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-29",
+          "change": "acceptance[7] gains the send door's authorization bounds: the door now requires manage_platform_settings, records the caller as sent_by and the caller's active organization as organization_id, bounds from to the configured sender, accepts headers only as a plain object of single-line strings, and refuses identityMail (each refused 403 PERMISSION_DENIED before any send). Step (a) drives the door as an admin, a new step (d) drives the refusals and the organization stamp, and automated.ref names the REST-layer pin",
+          "ref": "claude/harden-email-send-door"
         }
       ]
     },
@@ -2295,7 +2313,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2313,7 +2331,7 @@
       "steps": [
         "fire the notify flow from a system-context run; GET /api/v1/data/sys_notification and read organization_id",
         "as the member POST /api/v1/notifications/read with the ADMIN's notification id; read readCount",
-        "POST /api/v1/webhooks/redeliver for that terminal delivery of the now-inactive webhook. ⛔ Not for a delivery still 'pending': it answers DELIVERY_NOT_ELIGIBLE too, for its non-terminal status rather than the webhook's switch (packages/services/service-messaging/src/http-outbox.ts#assertHttpRedeliverable), so it would read as a pass for the wrong reason",
+        "as the seeded admin (the door is gated on webhook-administration access), POST /api/v1/webhooks/redeliver for that terminal delivery of the now-inactive webhook. ⛔ Not for a delivery still 'pending': it answers DELIVERY_NOT_ELIGIBLE too, for its non-terminal status rather than the webhook's switch (packages/services/service-messaging/src/http-outbox.ts#assertHttpRedeliverable), so it would read as a pass for the wrong reason",
         "from the repo root run `os verify --app examples/app-showcase` (or boot from another cwd) and read the MCP connector health — no live clause scores this leg, only acceptance[0]'s pin (mcp-stdio-cwd.test.ts), so record the reading as corroboration, never as a clause verdict (QA run #24558)"
       ],
       "acceptance": [
@@ -2344,7 +2362,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts + packages/services/service-messaging/src/messaging-service.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-member.test.ts + packages/connectors/connector-mcp/src/mcp-stdio-cwd.test.ts"
+        "ref": "packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts + packages/services/service-messaging/src/messaging-service.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-member.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-entitlement.test.ts + packages/connectors/connector-mcp/src/mcp-stdio-cwd.test.ts"
       },
       "source": [
         "packages/services/service-messaging/src/messaging-service.ts",
@@ -2370,6 +2388,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1], [2] and [3] verify name the layer each pin drives — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a1: notification-organization-follows-event.integration.test.ts proves organization_id at the engine and asserts nothing about the '[notify] no organization in scope' line (whose source is gone on main 9753d163). a2: the foreign mark-read is pinned only at unit level (messaging-service.test.ts). a3: the redeliver pin drives Request→Response on a LiteKernel, not a served stack. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-29",
+          "change": "steps[2] names its persona: the redeliver door is now gated on webhook-administration access, so the inactive-webhook redeliver is driven as the seeded admin (an unentitled caller is refused 403 before any row-specific detail). automated.ref adds webhook-redeliver-entitlement.test.ts, which pins both sides of that gate. The admin-driven clause is unchanged",
+          "ref": "claude/harden-webhook-redeliver-door"
         }
       ]
     }

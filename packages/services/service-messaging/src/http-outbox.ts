@@ -265,12 +265,13 @@ export type RedeliverGuard = (
  *
  * ## Why the tenant is a REQUIRED property typed `string | undefined`
  * `redeliver` is the one door on `sys_http_delivery` that a request can reach:
- * `POST /api/v1/webhooks/redeliver` is served to any authenticated user. The
- * object is tenant-scoped (the kernel provisions `organization_id`), so on a
- * walled deployment (`OS_TENANCY_POSTURE=isolated|group`) a `redeliver` that
- * does not carry its caller's tenant is an unscoped write reachable by a user
- * — precisely the finding the driver's `auditMissingTenant` gate exists to
- * raise.
+ * `POST /api/v1/webhooks/redeliver`, served to a signed-in caller entitled to
+ * administer webhooks (`plugin-webhooks`' `redeliver-entitlement.ts`, which
+ * also vets the caller's organization). The object is tenant-scoped (the
+ * kernel provisions `organization_id`), so on a walled deployment
+ * (`OS_TENANCY_POSTURE=isolated|group`) a `redeliver` that does not carry its
+ * caller's tenant is an unscoped write reachable by a request — precisely the
+ * finding the driver's `auditMissingTenant` gate exists to raise.
  *
  * ⛔ The remedy for that finding is this field, and it is NEVER
  * `bypassTenantAudit`. Silencing the line would leave the hole and remove the

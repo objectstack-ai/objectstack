@@ -57,7 +57,7 @@ const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Arra
  * The stack's object declarations, from either spelling a stack carries: the
  * array, or the name-keyed map (whose key is the name when the entry omits it).
  */
-function objectsOf(value: unknown): AnyRec[] {
+export function objectsOf(value: unknown): AnyRec[] {
   if (Array.isArray(value)) return value.filter(isRec);
   if (!isRec(value)) return [];
   return Object.entries(value)
@@ -66,7 +66,7 @@ function objectsOf(value: unknown): AnyRec[] {
 }
 
 /** A copy registration may stamp without touching the stack the other rules read. */
-function registrationCopy(obj: AnyRec): AnyRec {
+export function registrationCopy(obj: AnyRec): AnyRec {
   if (!isRec(obj.fields)) return { ...obj };
   const fields: AnyRec = {};
   for (const [key, def] of Object.entries(obj.fields)) fields[key] = isRec(def) ? { ...def } : def;

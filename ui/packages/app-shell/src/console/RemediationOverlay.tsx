@@ -154,6 +154,11 @@ function ChangePasswordForm({ forcedReset, message }: { forcedReset: boolean; me
     e.preventDefault();
     setError(null);
     if (next !== confirm) { setError(t('auth.remediation.password.mismatch')); return; }
+    // A forced reset exists to move the user off the password an administrator
+    // issued, and the server refuses that password as the new one
+    // (`PASSWORD_REUSE`) whatever the history depth. Say so here, in the
+    // user's language, rather than sending a change that cannot complete.
+    if (forcedReset && next === current) { setError(t('auth.remediation.password.sameAsTemporary')); return; }
     setBusy(true);
     try {
       await changePassword(current, next);

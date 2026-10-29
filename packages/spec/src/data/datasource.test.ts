@@ -773,3 +773,78 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     expect(JSON.stringify(result.error?.issues ?? [])).toMatch(/permission set|RLS/i);
   });
 });
+
+// ── Credential prescriptions lead to a shape that parses ────────────────────
+//
+// Each `password` refusal below is followed exactly as written: the example
+// handle is read OUT of the refusal and written where it says, and the result
+// must parse. The earlier prescriptions failed that walk — "interpolate it
+// inside `config`" met the driver contract's `config.password` refusal, and
+// `secret:warehouse/password` parsed but is not a handle the shipped binder
+// resolves (only `sys_secret:` ones are).
+describe('datasource `password` guidance — following it parses', () => {
+  const refusalFor = (input: unknown): string => {
+    const result = DatasourceSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    const issue = result.success
+      ? undefined
+      : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue?.message).toContain('`password`');
+    return issue?.message ?? '';
+  };
+
+  it('top-level `password`: the prescribed `external.credentialsRef` handle parses on a managed datasource', () => {
+    const config = { host: 'db.internal', database: 'mydb', username: 'app' };
+    const message = refusalFor({ name: 'app_pg', driver: 'postgres', password: 'p', config });
+
+    const example = /`external: \{ credentialsRef: "([^"]+)" \}`/.exec(message)?.[1];
+    expect(example?.startsWith('sys_secret:')).toBe(true);
+    const followed = DatasourceSchema.safeParse({
+      name: 'app_pg',
+      driver: 'postgres',
+      config,
+      external: { credentialsRef: example },
+    });
+    expect(followed.success).toBe(true);
+    if (followed.success) {
+      expect(followed.data.schemaMode).toBe('managed');
+      expect(followed.data.external?.credentialsRef).toBe(example);
+    }
+
+    // The prescription it replaced: moving the secret into `config` is refused.
+    const intoConfig = DatasourceSchema.safeParse({
+      name: 'app_pg',
+      driver: 'postgres',
+      config: { ...config, password: 'p' },
+    });
+    expect(intoConfig.success).toBe(false);
+  });
+
+  it('`external.password`: the prescribed `credentialsRef` example is a `sys_secret:` handle and parses', () => {
+    const base = {
+      name: 'warehouse',
+      driver: 'postgres',
+      schemaMode: 'external',
+      config: { host: 'db.internal', database: 'analytics', username: 'readonly' },
+    } as const;
+    const message = refusalFor({ ...base, external: { password: 'p' } });
+
+    const example = /`credentialsRef: "([^"]+)"`/.exec(message)?.[1];
+    expect(example?.startsWith('sys_secret:')).toBe(true);
+    const followed = DatasourceSchema.safeParse({ ...base, external: { credentialsRef: example } });
+    expect(followed.success).toBe(true);
+    if (followed.success) expect(followed.data.external?.credentialsRef).toBe(example);
+  });
+
+  it('the drivers page read-only sample (managed, credential-free config, bound secret) parses', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'analytics',
+      label: 'Analytics (read-only account)',
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics', username: 'analytics_ro' },
+      external: { credentialsRef: 'sys_secret:9f2c…' },
+      active: true,
+    });
+    expect(result.success).toBe(true);
+  });
+});

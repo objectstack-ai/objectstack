@@ -170,6 +170,13 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // cross-package by construction, and the per-package stack a rule is handed
   // sees one side only. Both doors refuse the same errors at the same step.
   'checkDependencyRanges',
+  // [#27259] Seed record VALUES, judged by the insert write's value verdict
+  // (`validateInsertValues`, @objectstack/objectql) — the judge the seed load
+  // runs. Not a registry rule: the verdict needs the runtime registry's field
+  // map (a driverless `ObjectQL` holding the stack's objects and picklists),
+  // and the walk reads every dataset where it sits, the package bodies
+  // included, across the whole artifact.
+  'judgeSeedRecordValues',
 ];
 
 /**
