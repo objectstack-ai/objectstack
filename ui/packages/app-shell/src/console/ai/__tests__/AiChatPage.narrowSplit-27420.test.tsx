@@ -31,7 +31,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import React from 'react';
 
@@ -146,11 +146,14 @@ beforeEach(() => {
   vi.stubGlobal(
     'ResizeObserver',
     class {
-      private readonly notify: () => void;
-      constructor(cb: () => void) {
-        this.notify = () => cb();
+      private readonly cb: ResizeObserverCallback;
+      private notify: () => void = () => {};
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb;
       }
-      observe() {
+      observe(target: Element) {
+        const entry = { target, contentRect: { width: paneWidth, height: 0 } } as unknown as ResizeObserverEntry;
+        this.notify = () => this.cb([entry], this as unknown as ResizeObserver);
         observers.push(this.notify);
       }
       disconnect() {
@@ -189,6 +192,7 @@ function renderFullPage() {
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
       <MemoryRouter initialEntries={[`/ai/build?package=${PKG}`]}>
         <Routes>
+          <Route path="/ai/:agent/:conversationId" element={<AiChatPage apiBase={API} />} />
           <Route path="/ai/:agent" element={<AiChatPage apiBase={API} />} />
         </Routes>
       </MemoryRouter>
@@ -220,8 +224,18 @@ const SPLIT = { split: true, chatColumnSized: '480px', overlay: false, pill: fal
 const PILL = { split: false, chatColumnSized: '', overlay: false, pill: true };
 const OVERLAY = { split: false, chatColumnSized: '', overlay: true, pill: false };
 
-async function previewBuiltApp() {
-  fireEvent.click(await screen.findByTestId('preview-built-app', undefined, { timeout: 4000 }));
+/**
+ * Preview a built app once the chat has settled (the drafts ledger was read,
+ * so the pane keyed on the conversation has stopped remounting), and wait for
+ * the pane to show it, in `expected`.
+ */
+async function previewBuiltApp(expected: ReturnType<typeof presentation>) {
+  await waitFor(
+    () => expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/meta/_drafts'))).toBe(true),
+    { timeout: 4000 },
+  );
+  fireEvent.click(screen.getByTestId('preview-built-app'));
+  await waitFor(() => expect(presentation()).toEqual(expected), { timeout: 4000 });
 }
 
 describe('objectstack#27420 — a pane too narrow for the split previews the way a phone does', () => {
@@ -231,8 +245,7 @@ describe('objectstack#27420 — a pane too narrow for the split previews the way
   ])('%s at 760 px (a 1024 px window): no split column; the overlay opens, and closing it offers the pill', async (_host, mount) => {
     paneWidth = 760;
     mount();
-    await previewBuiltApp();
-    expect(presentation()).toEqual(OVERLAY);
+    await previewBuiltApp(OVERLAY);
     fireEvent.click(screen.getByTestId('live-canvas-close'));
     expect(presentation()).toEqual(PILL);
     fireEvent.click(screen.getByTestId('ai-chat-mobile-preview-open'));
@@ -245,16 +258,14 @@ describe('objectstack#27420 — a pane too narrow for the split previews the way
   ])('%s at 780 px, the split minimum: the preview opens beside the chat as before', async (_host, mount) => {
     paneWidth = 780;
     mount();
-    await previewBuiltApp();
     // 480 px is the default chat width; 780 − 420 caps it at 360 on a live resize.
-    expect(presentation()).toEqual(SPLIT);
+    await previewBuiltApp(SPLIT);
   });
 
   it('a resize across the threshold switches presentation, and holding a width never flips it back', async () => {
     paneWidth = 1100;
     renderDockBody();
-    await previewBuiltApp();
-    expect(presentation()).toEqual(SPLIT);
+    await previewBuiltApp(SPLIT);
 
     resizePane(779);
     expect(presentation()).toEqual(PILL);
@@ -272,7 +283,6 @@ describe('objectstack#27420 — a pane too narrow for the split previews the way
   it('an unmeasured pane (width 0) keeps the split, as before', async () => {
     paneWidth = 0;
     renderFullPage();
-    await previewBuiltApp();
-    expect(presentation()).toEqual(SPLIT);
+    await previewBuiltApp(SPLIT);
   });
 });
