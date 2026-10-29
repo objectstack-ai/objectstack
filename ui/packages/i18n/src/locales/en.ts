@@ -4193,9 +4193,9 @@ const en = {
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
     badgeTotal: '{{total}} total',
-    badgeNotifications: '{{count}} notifications',
-    badgeNotifications_one: '{{count}} notification',
-    badgeNotifications_other: '{{count}} notifications',
+    badgeNotifications: '{{count}} unread topics',
+    badgeNotifications_one: '{{count}} unread topic',
+    badgeNotifications_other: '{{count}} unread topics',
     badgeApprovals: '{{count}} pending approvals',
     badgeApprovals_one: '{{count}} pending approval',
     badgeApprovals_other: '{{count}} pending approvals',
