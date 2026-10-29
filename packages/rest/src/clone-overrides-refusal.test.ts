@@ -51,7 +51,7 @@ async function clone(body: string | undefined) {
         method: 'POST',
         ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body }),
     }));
-    return { status: res.status, body: await res.json(), cloneData };
+    return { status: res.status, body: (await res.json()) as any, cloneData };
 }
 
 describe('[#27489] clone — a non-object overrides is refused before cloneData', () => {
