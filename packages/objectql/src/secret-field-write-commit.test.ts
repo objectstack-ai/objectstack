@@ -21,6 +21,10 @@
  *    before, once storage confirms no row of that column still names it and
  *    the handle is this column's own. A handle a predicate write shared across
  *    rows outlives every row but the last.
+ *  - **Released when the record goes** ([#27581]). A committed delete, by id,
+ *    by predicate or by cascade, releases every handle the removed rows held,
+ *    through the same release and its same checks; a delete that is refused or
+ *    rolled back keeps the row.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -32,7 +36,13 @@ import { SECRET_MASK, isSecretRef, parseSecretRef } from './secret-fields.js';
 
 type Row = Record<string, unknown>;
 
-/** A stub driver whose stores can be counted, rolled back and told to refuse a statement. */
+/**
+ * A stub driver whose stores can be counted, rolled back and told to refuse a statement.
+ *
+ * A rollback restores the snapshot the unit began with, unless `isolation.on`: then it undoes
+ * only the writes made under that unit's handle, as a database does, so a write that escaped
+ * the unit survives the rollback ([#27581]).
+ */
 function makeDriver() {
   let stores = new Map<string, Map<string, Row>>();
   const storeFor = (o: string) => stores.get(o) ?? (stores.set(o, new Map()), stores.get(o)!);
@@ -48,6 +58,10 @@ function makeDriver() {
   /** Objects whose `count` throws, so a release cannot confirm anything. */
   const countFails = new Set<string>();
   const snapshots = new Map<unknown, typeof stores>();
+  const isolation = { on: false };
+  const undoLogs = new Map<unknown, Array<() => void>>();
+  /** Record how to take back one write, when it was made under an open unit's handle. */
+  const undoable = (opts: any, take: () => void) => { undoLogs.get(opts?.transaction)?.push(take); };
   let n = 0;
   const refused = (o: string) => {
     if (refuse.has(o)) throw Object.assign(new Error(`statement refused on ${o}`), { code: 'ETIMEDOUT' });
@@ -62,29 +76,46 @@ function makeDriver() {
       return page.map(copy);
     },
     async findOne(o: string, ast: any) { return (await this.find(o, ast))[0] ?? null; },
-    async create(o: string, data: Row) {
+    async create(o: string, data: Row, opts?: any) {
       refused(o);
       const row = { ...data, id: (data.id as string) ?? `${o}_${++n}` };
       storeFor(o).set(String(row.id), row);
+      undoable(opts, () => storeFor(o).delete(String(row.id)));
       return copy(row);
     },
-    async update(o: string, id: string, data: Row) {
+    async update(o: string, id: string, data: Row, opts?: any) {
       refused(o);
-      const row = { ...storeFor(o).get(String(id)), ...data, id };
+      const prior = storeFor(o).get(String(id));
+      const row = { ...prior, ...data, id };
       storeFor(o).set(String(id), row);
+      undoable(opts, () => (prior ? storeFor(o).set(String(id), prior) : storeFor(o).delete(String(id))));
       return copy(row);
     },
-    async updateMany(o: string, ast: any, data: Row) {
+    async updateMany(o: string, ast: any, data: Row, opts?: any) {
       refused(o);
       let k = 0;
       for (const [id, row] of storeFor(o)) {
         if (!matches(row, ast?.where)) continue;
         storeFor(o).set(id, { ...row, ...data, id });
+        undoable(opts, () => storeFor(o).set(id, row));
         k += 1;
       }
       return k;
     },
-    async delete(o: string, id: string) { return storeFor(o).delete(String(id)); },
+    async delete(o: string, id: string, opts?: any) {
+      const prior = storeFor(o).get(String(id));
+      if (prior) undoable(opts, () => storeFor(o).set(String(id), prior));
+      return storeFor(o).delete(String(id));
+    },
+    async deleteMany(o: string, ast: any, opts?: any) {
+      let k = 0;
+      for (const [id, row] of Array.from(storeFor(o))) {
+        if (!matches(row, ast?.where)) continue;
+        await this.delete(o, id, opts);
+        k += 1;
+      }
+      return k;
+    },
     async count(o: string, ast: any) {
       if (countFails.has(o)) throw new Error(`count unavailable on ${o}`);
       return (await this.find(o, ast)).length;
@@ -94,13 +125,19 @@ function makeDriver() {
     async beginTransaction() {
       const handle = { trx: snapshots.size + 1 };
       snapshots.set(handle, new Map(Array.from(stores, ([o, s]) => [o, new Map(Array.from(s, ([k, v]) => [k, { ...v }]))])));
+      undoLogs.set(handle, []);
       return handle;
     },
-    async commit(h: unknown) { snapshots.delete(h); },
-    async rollback(h: unknown) { stores = snapshots.get(h) ?? stores; snapshots.delete(h); },
+    async commit(h: unknown) { snapshots.delete(h); undoLogs.delete(h); },
+    async rollback(h: unknown) {
+      if (isolation.on) for (const take of (undoLogs.get(h) ?? []).reverse()) take();
+      else stores = snapshots.get(h) ?? stores;
+      snapshots.delete(h);
+      undoLogs.delete(h);
+    },
   };
   return {
-    driver, refuse, countFails,
+    driver, refuse, countFails, isolation,
     rowsOf: (o: string) => Array.from(storeFor(o).values()),
   };
 }
@@ -145,6 +182,16 @@ const other = {
 };
 
 const SYSTEM = { context: { isSystem: true } } as any;
+/** [#27581] A detail of the vault, holding its own secret: a cascade target. */
+const KEY = 'qa_vault_key';
+const vaultKey = {
+  name: KEY, label: 'Vault key',
+  fields: {
+    id: { name: 'id', type: 'text' }, name: { name: 'name', type: 'text' },
+    vault: { name: 'vault', type: 'master_detail', reference: VAULT },
+    key_token: { name: 'key_token', type: 'secret' },
+  },
+};
 
 describe('[#27495] a sys_secret row exists only while a committed row names it', () => {
   let engine: ObjectQL;
@@ -365,6 +412,117 @@ describe('[#27495] a sys_secret row exists only while a committed row names it',
       d.countFails.add(VAULT);
       await engine.update(VAULT, { id: 'r1', token: null });
       expect(stored('r1').token ?? null).toBeNull();
+      expect(secrets().map((s) => s.id)).toEqual([before]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain(`${VAULT}.token`);
+      expect(errors[0]).not.toContain(before);
+    });
+  });
+
+  describe('[#27581] a committed delete releases the handles the removed rows held', () => {
+    it('a by-id delete removes the row its record named', async () => {
+      const gone = await seed('r1', 'gone');
+      const kept = await seed('r2', 'kept');
+      await expect(engine.delete(VAULT, { where: { id: 'r1' } })).resolves.toBe(true);
+      expect(secrets().map((s) => s.id)).toEqual([kept]);
+      expect(secrets().some((s) => s.id === gone)).toBe(false);
+      expect(await engine.resolveSecretField(VAULT, 'r2', 'token')).toBe('kept');
+      expect(errors).toEqual([]);
+    });
+
+    it('a predicate delete removes every matched row\'s handle and no other', async () => {
+      await seed('r1', 'one');
+      await seed('r2', 'two');
+      await engine.update(VAULT, { id: 'r2', tier: 'silver' });
+      const silver = handleOf('r2');
+      await seed('r3', 'three');
+      await expect(engine.delete(VAULT, { where: { tier: 'gold' }, multi: true } as any)).resolves.toBe(2);
+      expect(secrets().map((s) => s.id)).toEqual([silver]);
+    });
+
+    it('a predicate delete with a per-row hook releases from the rows that hook read', async () => {
+      const seen: unknown[] = [];
+      engine.registerHook('afterDelete', (ctx: any) => { seen.push(ctx.previous?.id); }, { object: VAULT });
+      await seed('r1', 'one');
+      await seed('r2', 'two');
+      await engine.delete(VAULT, { where: { tier: 'gold' }, multi: true } as any);
+      expect(seen.sort()).toEqual(['r1', 'r2']);
+      expect(secrets()).toHaveLength(0);
+    });
+
+    it('a cascade removes the detail rows\' handles with the parent\'s, by id and by predicate', async () => {
+      engine.registry.registerObject(vaultKey as any);
+      await seed('r1', 'parent-1');
+      await seed('r2', 'parent-2');
+      await engine.insert(KEY, { id: 'k1', name: 'k1', vault: 'r1', key_token: 'child-1' }, SYSTEM);
+      await engine.insert(KEY, { id: 'k2', name: 'k2', vault: 'r2', key_token: 'child-2' }, SYSTEM);
+      expect(secrets()).toHaveLength(4);
+      await engine.delete(VAULT, { where: { id: 'r1' } });
+      expect(d.rowsOf(KEY).map((r) => r.id)).toEqual(['k2']);
+      expect(secrets().map((s) => s.key).sort()).toEqual(['key_token', 'token']);
+      await engine.delete(VAULT, { where: { tier: 'gold' }, multi: true } as any);
+      expect(d.rowsOf(KEY)).toHaveLength(0);
+      expect(secrets()).toHaveLength(0);
+    });
+
+    it('a handle another row still names outlives the delete of every row but the last', async () => {
+      await seed('r1', 'one');
+      await seed('r2', 'two');
+      await engine.update(VAULT, { token: 'shared' }, { where: { tier: 'gold' }, multi: true } as any);
+      const shared = handleOf('r1');
+      expect(handleOf('r2')).toBe(shared);
+
+      await engine.delete(VAULT, { where: { id: 'r1' } });
+      expect(secrets().map((s) => s.id)).toEqual([shared]);
+      expect(await engine.resolveSecretField(VAULT, 'r2', 'token')).toBe('shared');
+
+      await engine.delete(VAULT, { where: { id: 'r2' } });
+      expect(secrets()).toHaveLength(0);
+    });
+
+    it('deleting a row that holds another column\'s handle releases nothing', async () => {
+      const foreign = await seed('r1', 'theirs');
+      await engine.insert(OTHER, { id: 'o1', name: 'copy', other_token: `secret:${foreign}` }, SYSTEM);
+      await engine.delete(OTHER, { where: { id: 'o1' } });
+      expect(secrets().map((s) => s.id)).toEqual([foreign]);
+      expect(await engine.resolveSecretField(VAULT, 'r1', 'token')).toBe('theirs');
+    });
+
+    it('a delete rolled back with its unit keeps the row, though the record write was undone alone', async () => {
+      d.isolation.on = true;
+      const before = await seed('r1', 'stays');
+      await expect(engine.transaction(async (trx: any) => {
+        await engine.delete(VAULT, { where: { id: 'r1' }, context: trx });
+        throw new Error('roll the unit back');
+      }, SYSTEM.context)).rejects.toThrow(/roll the unit back/);
+      expect(stored('r1')).toBeDefined();
+      expect(secrets().map((s) => s.id)).toEqual([before]);
+      expect(await engine.resolveSecretField(VAULT, 'r1', 'token')).toBe('stays');
+    });
+
+    it('a delete refused by a beforeDelete hook, or rolled back by an aborting afterDelete, keeps the row', async () => {
+      const before = await seed('r1', 'stays');
+      engine.registerHook('beforeDelete', () => { throw Object.assign(new Error('hook says no'), { code: 'HOOK_REFUSED', status: 400 }); }, { object: VAULT });
+      await expect(engine.delete(VAULT, { where: { id: 'r1' } })).rejects.toMatchObject({ code: 'HOOK_REFUSED', status: 400 });
+      expect(secrets().map((s) => s.id)).toEqual([before]);
+
+      const other = await seed('o1', 'also-stays');
+      engine.registry.registerObject({ ...vault, name: 'qa_vault_two' } as any);
+      await engine.insert('qa_vault_two', { id: 't1', name: 't1', token: 'two-stays' }, SYSTEM);
+      const twoHandle = parseSecretRef(d.rowsOf('qa_vault_two')[0].token);
+      bindHooksToEngine(engine, [
+        { name: 'veto', object: 'qa_vault_two', events: ['afterDelete'], handler: () => { throw new Error('refused by the hook'); } } as unknown as Hook,
+      ], { packageId: 'app:t', logger });
+      await expect(engine.delete('qa_vault_two', { where: { id: 't1' } })).rejects.toThrow(/refused by the hook/);
+      expect(d.rowsOf('qa_vault_two')).toHaveLength(1);
+      expect(secrets().map((s) => s.id).sort()).toEqual([before, other, twoHandle].sort());
+    });
+
+    it('a release that cannot confirm the column let go keeps the row and says so', async () => {
+      const before = await seed('r1', 'stays-stored');
+      d.countFails.add(VAULT);
+      await engine.delete(VAULT, { where: { id: 'r1' } });
+      expect(d.rowsOf(VAULT)).toHaveLength(0);
       expect(secrets().map((s) => s.id)).toEqual([before]);
       expect(errors).toHaveLength(1);
       expect(errors[0]).toContain(`${VAULT}.token`);

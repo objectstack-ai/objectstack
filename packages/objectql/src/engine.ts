@@ -108,6 +108,8 @@ import { publishBulkDataEvent, publishDataEvent } from './engine-realtime-publis
 // [#25522 cut 5] The secret and internal-field bodies; the methods of the same
 // names below hand each body the members it reads (`SecretInternalFieldsHost`).
 import {
+  deletedSecretColumns,
+  deletedSecretSlots,
   encryptSecretFields,
   maskSecretFields,
   omitInternalFields,
@@ -10618,7 +10620,9 @@ export class ObjectQL implements IObjectQLEngine {
    * Two occasions reach it. `'refused'`: a write that sealed and wrote a row
    * did not complete, so the row may name nothing. `'retired'`: a committed
    * update cleared the field (`null`) or replaced its value, so the handle the
-   * column named before may name nothing. The same three checks decide both,
+   * column named before may name nothing; [#27581] a committed delete reaches
+   * it the same way, for every handle the removed rows held. The same three
+   * checks decide both,
    * and every one that cannot pass KEEPS the row, the recoverable direction
    * (deleting a handle a row still names destroys that credential, and nothing
    * can name what was lost):
@@ -19831,6 +19835,11 @@ export class ObjectQL implements IObjectQLEngine {
       // delete (`null` when no roll-up aggregates this object).
       let predicateMatchedRows: Record<string, unknown>[] | null = null;
       let summaryPriorRows: Record<string, unknown>[] | null = null;
+      // [#27581] The `secret` columns this object declares, and the handles the
+      // removed rows held in them: the by-id pre-image, or the predicate
+      // path's matched rows, read before the statement takes them away.
+      const secretColumns = deletedSecretColumns(deleteSchema);
+      let deletedSecrets: SecretHandleSlot[] = [];
 
       // [#5574] The dispatch ladder, resolved BEFORE the before phase — see
       // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
@@ -20052,6 +20061,8 @@ export class ObjectQL implements IObjectQLEngine {
                   if (plan === 'split') this.warnCascadeNotAtomic(object);
                   result = await runByIdDelete(opCtx.context);
               }
+              // [#27581] The handles the removed row held, off its pre-image.
+              deletedSecrets = deletedSecretSlots(deleteSchema, [priorRecord]);
           } else {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
@@ -20086,6 +20097,14 @@ export class ObjectQL implements IObjectQLEngine {
                    summaryPriorRows = predicateMatchedRows
                      ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
                  }
+                 // [#27581] The handles the matched rows hold, read BEFORE the
+                 // statement removes them: the per-row hook read when it was
+                 // made, otherwise only `id` and the secret columns, through
+                 // this write's AST and options. No secret column, no read.
+                 if (secretColumns.length > 0) {
+                   deletedSecrets = deletedSecretSlots(deleteSchema, predicateMatchedRows
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...secretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]));
+                 }
                  result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
                } else {
                  // Otherwise: resolve the matched rows through the composed,
@@ -20101,9 +20120,12 @@ export class ObjectQL implements IObjectQLEngine {
                  // branch's, for the same reasons (#7413).
                  const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
                    const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
-                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   // [#27581] The same read carries the secret columns, so the
+                   // handles released are those of the rows deleted.
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns, ...secretColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
+                   deletedSecrets = deletedSecretSlots(deleteSchema, matched);
                    // [#27004] One walk, rooted at the whole matched set.
                    await this.cascadeDeleteRelations(object, matchedIds, writeContext);
                    // The id set rides an `$in`; batched so one statement never
@@ -20165,6 +20187,14 @@ export class ObjectQL implements IObjectQLEngine {
               result: hookContext.result,
             });
           }
+
+          // [#27581] The delete is complete: release the handles the removed
+          // rows held, through the release a committed update uses, so each one
+          // goes only once storage confirms no row of its column still names it,
+          // inside this write's unit. After the `afterDelete` chain, so a hook
+          // can still dereference the value and a refusal that rolls the delete
+          // back never reaches here.
+          await this.releaseSecretHandles(object, deletedSecrets, opCtx.context, 'retired');
 
           // Roll-up: recompute the parent summary now that the child is gone,
           // from the row's FK values captured BEFORE deletion. [#5272] That
