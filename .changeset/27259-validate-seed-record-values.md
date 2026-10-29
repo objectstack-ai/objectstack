@@ -1,12 +1,12 @@
 ---
-'@objectstack/cli': patch
-'@objectstack/objectql': patch
+'@objectstack/cli': minor
+'@objectstack/objectql': minor
 ---
 
 fix(cli)!: `os validate` and `os build` refuse a seed record value the seed load would refuse, with the load's own code and sentence, located at the record's field (#27259)
 
 Clause-②: no (narrowing) — `os validate` and `os build` refuse a stack whose seed record carries a value the record validator refuses at seed load (a currency written `{ value, currency }`, an unreadable number, a value outside a field's options, an unreadable date), which both commands passed before. What the runtime stores and refuses does not move: every row refused here was already refused when the seed loaded. Nothing is widened.
-Metadata-protocol: none
+Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. The refusal moves earlier, from the seed load to the authoring commands, with the load's own wording: a seed row it names was already dropped at load, so there is nothing for a migration to rewrite and no tombstone. -->
 
