@@ -19,8 +19,12 @@
   "sideEffects": [
     "./dist/index.js",
     "./dist/index.umd.cjs",
+    "./dist/queueClaim.js",
+    "./dist/recordFieldAccess.js",
     "./dist/useRecordEditable.js",
     "./src/index.tsx",
+    "./src/queueClaim.ts",
+    "./src/recordFieldAccess.tsx",
     "./src/useRecordEditable.ts"
   ],
   "exports": {

@@ -21,4 +21,4 @@ Readers still read for themselves after the open (a refresh, a write, a change o
 - `@object-ui/types`: `DataSource.getRecordPage?` / `prefetchRecordPage?` and the `RecordPageRequest` / `RecordPagePayload` shapes.
 - `@object-ui/data-objectstack`: both methods; concurrent identical reads share one request, a prefetched answer is taken once, and a write drops them all.
 - `@object-ui/components`: `RelatedCountStore.seed` / `takeRows`.
-- `@object-ui/plugin-detail`: `seedRecordVerdict`, `seedRecordFieldAccess`, `seedQueueClaimDecision`, `normalizeRelatedListSort`, `COMPACT_RELATED_ROWS`; a compact related card takes its first rows from the record page's answer.
+- `@object-ui/plugin-detail`: `seedRecordVerdict`, `seedRecordFieldAccess`, `seedQueueClaimDecision`, `normalizeRelatedListSort`, `COMPACT_RELATED_ROWS`; a compact related card takes its first rows from the record page's answer. Its `sideEffects` array now names `queueClaim` and `recordFieldAccess` too: each drops a seeded answer on a data change through a bus subscription made at load.
