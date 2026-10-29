@@ -269,7 +269,7 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
         expect(back.status, 'the creator reads its new invoice').toBe(200);
       });
 
-      it('cannot create an invoice owned by someone else (create-time check)', async () => {
+      it('cannot create an invoice it does not own — foreign or absent owner (create-time check)', async () => {
         const name = `INV-FOREIGN-${p.route}`;
         const r = await stack.apiAs(tok(), 'POST', '/data/showcase_invoice', {
           name,
@@ -279,6 +279,17 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
         expect(r.status).toBe(403);
         expect(((await r.json()) as any)?.code).toBe('PERMISSION_DENIED');
         expect(await countNamed(name), 'nothing written').toBe(0);
+
+        // `owner` is a plain text field with no default: a create that omits it
+        // writes a row nobody owns, which is outside the caller's scope too.
+        const unowned = `INV-UNOWNED-${p.route}`;
+        const r2 = await stack.apiAs(tok(), 'POST', '/data/showcase_invoice', {
+          name: unowned,
+          account: await activeAccount(),
+        });
+        expect(r2.status, 'absent-owner create').toBe(403);
+        expect(((await r2.json()) as any)?.code).toBe('PERMISSION_DENIED');
+        expect(await countNamed(unowned), 'nothing written').toBe(0);
       });
 
       it("cannot clone an invoice into someone else's ownership; a same-owner clone is admitted", async () => {
