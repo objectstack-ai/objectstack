@@ -356,7 +356,7 @@ isRTL('en'); // false
 Server-driven metadata types a label as a plain string **or** an inline
 per-locale map (`{ en: 'Pricing', 'zh-CN': '定价' }`). An authoring surface that
 shows one locale in one text input has to answer three separate questions, so
-there are three functions and each answers exactly one:
+there is one function per question:
 
 ```tsx
 import { pickLocalized, setLocalized, clearLocalized } from '@object-ui/i18n';

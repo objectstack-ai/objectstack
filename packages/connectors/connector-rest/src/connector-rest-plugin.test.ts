@@ -152,3 +152,62 @@ describe('ConnectorRestPlugin — end to end with the automation engine', () => 
         await kernel.shutdown();
     });
 });
+
+// [#27237] The ruling on #27237 (comment 6470087293), on the REAL rest
+// provider: its handler answers an upstream 401 as `{ status, ok, body }`, so
+// the automation service reads the refusal off the first credentialed call —
+// the call still answers as it was, and the instance is degraded after it,
+// naming the reference, with the echoed credential withheld.
+describe('ConnectorRestPlugin — a credential the upstream refuses (#27237)', () => {
+    it('degrades the declarative instance on the first call answering 401', async () => {
+        const DUMMY = 'dummy-vault-token-0005';
+        const calls: string[] = [];
+        const impl = (async (url: string) => {
+            calls.push(url);
+            return {
+                status: 401,
+                ok: false,
+                headers: { get: (h: string) => (h.toLowerCase() === 'content-type' ? 'application/json' : null) },
+                json: async () => ({ message: `bad credentials: ${DUMMY}` }),
+                text: async () => JSON.stringify({ message: `bad credentials: ${DUMMY}` }),
+            };
+        }) as unknown as typeof fetch;
+        const declared = [{
+            name: 'billing',
+            label: 'Billing API',
+            type: 'api',
+            provider: 'rest',
+            providerConfig: { baseUrl: 'https://billing.example.com' },
+            auth: { type: 'bearer', credentialRef: 'DUMMY_BILLING_TOKEN_27237' },
+        }];
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin({ credentialResolver: (r) => (r === 'DUMMY_BILLING_TOKEN_27237' ? DUMMY : undefined) }));
+        kernel.use(new ConnectorRestPlugin({ fetchImpl: impl }));
+        kernel.use({
+            name: 'test.metadata',
+            type: 'standard',
+            version: '1.0.0',
+            dependencies: [],
+            async init(ctx: any) {
+                ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        const engine = kernel.getService<AutomationEngine>('automation');
+        expect(engine.getConnectorDegradedReason('billing')).toBeUndefined();
+
+        const answered = await engine.resolveConnectorAction('billing', 'request')!({ path: '/invoices' }, {} as never);
+        expect(answered).toMatchObject({ status: 401, ok: false });
+        expect(calls).toEqual(['https://billing.example.com/invoices']);
+
+        const reason = engine.getConnectorDegradedReason('billing') ?? '';
+        expect(reason).toContain('(HTTP 401) on a call');
+        expect(reason).toContain("credential 'DUMMY_BILLING_TOKEN_27237'");
+        expect(reason).toContain('[credential withheld]');
+        expect(reason.includes(DUMMY)).toBe(false);
+        expect(engine.resolveConnectorAction('billing', 'request')).toBeUndefined();
+
+        await kernel.shutdown();
+    });
+});

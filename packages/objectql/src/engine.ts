@@ -302,7 +302,7 @@ import {
 // each body the members it reads (`CountAggregateHost`).
 import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
-import { assertProjectionNamesAField } from './empty-projection-door.js';
+import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
 import { assertRecordCurrencyCodes, touchesRecordCurrency } from './validation/record-currency-code.js';
@@ -335,7 +335,7 @@ import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, isScannableValueShapeField } from './validation/record-validator.js';
-import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
+import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink, ValidationMessageContext } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -9542,11 +9542,13 @@ export class ObjectQL implements IObjectQLEngine {
     // Only `locale` is read — narrower than `ExecutionContext` so both the
     // resolved and the input-shaped envelope satisfy it.
     context?: { locale?: string },
-  ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
+  ): ValidationMessageContext & { objectName: string } {
     // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
     const readI18nService = () => this.i18nService;
+    const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof validationMessageContext> = {
       get i18nService() { return readI18nService(); },
+      get registry() { return readRegistry(); },
       negotiatedMessageLocale: (...a) => this.negotiatedMessageLocale(...a),
     };
     return validationMessageContext.call(host, objectName, context);
@@ -13634,10 +13636,10 @@ export class ObjectQL implements IObjectQLEngine {
       // Whole names, no head-splitting: only plain entries reach here (the
       // dotted refusal above fired on anything carrying a '.').
       const filtered = ast.fields.filter(f => known.has(f));
-      // Guard against an empty projection — fall back to `*` so the
-      // request still returns rows. An empty SELECT list would either
-      // 400 in Postgres or silently project nothing.
-      ast.fields = filtered.length > 0 ? filtered : undefined;
+      // [#27165] Nothing left is an empty projection, refused as `fields: []`
+      // is — never read as every column.
+      if (filtered.length === 0) refuseProjectionOfUnknownColumns(object, 'find', ast.fields);
+      ast.fields = filtered;
     }
 
     const opCtx: OperationContext = {
@@ -13940,7 +13942,9 @@ export class ObjectQL implements IObjectQLEngine {
       // in schema.fields (matches `find()` behavior, one list).
       const known = new Set<string>([...Object.keys(_findOneSchema.fields), ...PLATFORM_PROVISIONED_COLUMNS]);
       const filtered = ast.fields.filter(f => known.has(f));
-      ast.fields = filtered.length > 0 ? filtered : undefined;
+      // [#27165] Same refusal as `find`.
+      if (filtered.length === 0) refuseProjectionOfUnknownColumns(objectName, 'findOne', ast.fields);
+      ast.fields = filtered;
     }
 
     const opCtx: OperationContext = {

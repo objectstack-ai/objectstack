@@ -3,6 +3,7 @@
 import { Plugin, PluginContext } from './types.js';
 import type { Logger } from '@objectstack/spec/contracts';
 import { parseSignature } from './security/plugin-artifact-signature.js';
+import { pluginArtifactVerdict } from './security/plugin-artifact-verdict.js';
 import { serviceNotRegisteredError } from './service-not-registered.js';
 import { assertPluginContract } from './plugin-contract.js';
 import { SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
@@ -51,7 +52,13 @@ export interface PluginMetadata extends Plugin {
     // config-validation surface is a fresh decision for the day the ADR-0025
     // distribution layer lands.
 
-    /** Plugin signature for security verification */
+    /**
+     * The detached signature its artifact verified under. Not a verification
+     * by itself: the loader refuses a plugin carrying one unless the host that
+     * verified the artifact recorded that verdict against this object
+     * (`recordPluginArtifactVerdict`). Leave it unset on a plugin you register
+     * yourself.
+     */
     signature?: string;
     
     /** Plugin health check function */
@@ -513,25 +520,38 @@ export class PluginLoader {
         if (!plugin.signature) {
             return;
         }
-        
-        // Cryptographic verification of a third-party plugin's PUBLISHER and
-        // PLATFORM signatures is performed against the `.osplugin` artifact
-        // bytes + version identity at materialize/install time, by
-        // `verifyPluginArtifact` (security/plugin-artifact-signature.ts —
-        // ADR-0025 §3.7). By the time a plugin reaches loadPlugin() it is an
-        // in-memory module with no artifact bytes, so we cannot re-run the
-        // artifact chains here; we only validate that any signature carried
-        // on the metadata is well-formed (`ed25519:<keyId>:<base64url>`) and
-        // surface its keyId, failing fast on a malformed value.
+
+        // [ADR-0025 §3.5 M1] A signature covers the `.osplugin` artifact bytes,
+        // and by the time a plugin reaches loadPlugin() it is an in-memory
+        // module with none, so the artifact chains cannot run here. The host
+        // that verified the artifact runs them — the runtime's boot-time loader
+        // for installed plugins (`verifyPluginArtifact` over the kept artifact,
+        // against the environment's trusted keys) — and records its verdict
+        // against the plugin object (security/plugin-artifact-verdict.ts).
+        //
+        // This check reads that verdict. A plugin carrying a signature no host
+        // verified is REFUSED: a signature string a module declares for itself
+        // proves nothing, and passing it as well-formed would let it read as
+        // signed. A malformed one is refused by name first. It is a check on
+        // what a plugin object carries, not a boundary against code already
+        // running in this process, which can record a verdict itself.
         const parsed = parseSignature(plugin.signature);
         if (!parsed) {
             throw new Error(
                 `Plugin ${plugin.name} carries a malformed signature (expected ed25519:<keyId>:<base64url>)`,
             );
         }
+        const verdict = pluginArtifactVerdict(plugin);
+        if (!verdict || verdict.signature !== plugin.signature) {
+            throw new Error(
+                `Plugin ${plugin.name} carries a signature (keyId=${parsed.keyId}) that no host verified against its artifact. ` +
+                'A signature is verified over the .osplugin bytes when the plugin is installed and again at boot ' +
+                '(`os plugin install`, then the boot-time loader); a `signature` field alone does not make a plugin signed.',
+            );
+        }
         this.logger.debug(
-            `Plugin ${plugin.name} signature well-formed (alg=${parsed.alg}, keyId=${parsed.keyId}); ` +
-            `artifact verification occurs at materialize time`,
+            `Plugin ${plugin.name} signature verified by its host (alg=${parsed.alg}, keyId=${parsed.keyId}, ` +
+            `artifact sha256=${verdict.artifactSha256})`,
         );
     }
 

@@ -281,6 +281,7 @@ interface LedgerRow {
 const LOOKUP = 'entry@fields/src/widgets/LookupField.tsx';
 const USER = 'entry@fields/src/widgets/UserField.tsx';
 const CURRENCY = 'entry@i18n/src/currency.ts';
+const USED_CODES = 'entry@components/src/renderers/form/usedCurrencyCodes.ts';
 
 /**
  * Every key the channel reads that `FormFieldSchema` does not declare, with its
@@ -310,13 +311,20 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
   },
   // ── runtime-only, by an existing ruling ─────────────────────────────────
   field: {
-    readers: ['entry@components/src/renderers/form/form.tsx', 'entry@core/src/validation/server-owned-value.ts', LOOKUP, USER],
+    readers: [
+      'entry@components/src/renderers/form/form.tsx', USED_CODES, 'entry@core/src/validation/server-owned-value.ts', LOOKUP, USER,
+    ],
     why: 'RUNTIME-ONLY (objectui#6609) — the resolved object-field metadata stash; in the authored vocabulary the same '
       + 'key names an object field (objectui#3090).',
   },
   mobile_fullscreen: {
     readers: ['entry@fields/src/widgets/RichTextField.tsx'],
     why: 'RUNTIME-ONLY (objectui#3245) — stamped by `ObjectForm` from `ObjectFormSchema.mobile.fullscreenLongText`.',
+  },
+  valueDomain: {
+    readers: [USED_CODES, 'entry@fields/src/widgets/CurrencyCodeField.tsx'],
+    why: 'RUNTIME-ONLY (objectstack#27188) — object-field metadata (the spec\'s `FieldSchema.valueDomain`, ADR-0144 D2) read '
+      + 'off the resolved `field` stash: a record-currency code field takes its domain from the object, not from the form.',
   },
   currency: {
     readers: [CURRENCY],

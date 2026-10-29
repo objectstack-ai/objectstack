@@ -48,6 +48,26 @@ export {
   type VerifyIntegrityResult,
 } from './plugin-artifact-integrity.js';
 
+// [ADR-0025 §3.5 M1] Reading an `.osplugin` (gunzip bounded, then ustar) — one
+// reader for `os plugin install` and the runtime's boot-time loader, which
+// re-reads the artifact an install kept. The writer stays with `os plugin build`.
+export {
+  MAX_UNPACKED_ARTIFACT_BYTES,
+  readTar,
+  readTarGz,
+  sha256Hex,
+  type ArchiveFile,
+} from './plugin-artifact-archive.js';
+
+// [ADR-0025 §3.5 M1] The verdict the host that verified an installed plugin's
+// artifact records against the plugin object, which `PluginLoader` reads: a
+// plugin carrying a signature no host verified is refused.
+export {
+  recordPluginArtifactVerdict,
+  pluginArtifactVerdict,
+  type PluginArtifactVerdict,
+} from './plugin-artifact-verdict.js';
+
 // The outbound HTTP signature scheme (`X-Objectstack-Signature`) — one
 // definition shared by the messaging outbox and the flow `http` node's inline
 // arm, which cannot import each other; `@objectstack/service-messaging`

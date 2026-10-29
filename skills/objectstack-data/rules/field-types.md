@@ -6,7 +6,7 @@
 - [Common Field Configurations](#common-field-configurations)
 - [Incorrect vs Correct](#incorrect-vs-correct)
 
-Quick reference for choosing the right field type from 49 available options.
+Quick reference for choosing the right field type from the available options.
 
 ## Two spellings: `Field.*` factory or object literal
 

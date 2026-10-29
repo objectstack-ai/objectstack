@@ -253,3 +253,80 @@ describe('#27135 the fields and actions overlays are unchanged', () => {
     expect('validations' in out).toBe(false);
   });
 });
+
+/**
+ * ADR-0029 D9.2a — the catalog LOSES to a tenant's rewrite of a rule message.
+ *
+ * The catalog translates the PACKAGED rule, so a served message that diverged
+ * from the packaged rule of the same name is the tenant's own sentence and is
+ * served as written, in every locale. The comparison is the one every other
+ * string on the object is judged by (`valueOverridesPackagedBase`), against
+ * the packaged object the serving layer hands over as `packagedBase`. The
+ * refusal of the same write applies the same rule beside the evaluator, in
+ * objectql's `engine-validation-tenant-rewrite`.
+ */
+describe('ADR-0029 D9.2a a tenant-rewritten rule message beats the packaged translation', () => {
+  const REWRITE = {
+    closed_is_final: 'Closed tickets stay closed — open a new one instead.',
+    vip_branch: 'Every VIP ticket needs a named owner.',
+  };
+
+  /**
+   * The tenant's overlay: two messages rewritten, and one rule the packaged
+   * object does not declare (as an `objectExtensions` rule is folded on).
+   */
+  const tenantDoc = () => {
+    const doc = clone(DOC);
+    doc.validations[0].message = REWRITE.closed_is_final;
+    doc.validations[3].then.message = REWRITE.vip_branch;
+    doc.validations.push(rule({
+      type: 'script',
+      name: 'unpackaged_rule',
+      message: 'A rule the package does not declare.',
+      condition: 'record.owner == null',
+    }));
+    return doc;
+  };
+
+  /** The catalog carries an entry for the unpackaged rule under its own name. */
+  const bundle = TranslationBundleSchema.parse({
+    'zh-CN': localeData({ ...ZH, unpackaged_rule: '套件未声明的规则。' }),
+  });
+
+  it('serves the rewrite as written, and still translates every rule the tenant left alone', () => {
+    const out = translateObject(tenantDoc(), bundle, { locale: 'zh-CN', packagedBase: clone(DOC) }) as any;
+    expect(messagesOf(out)).toEqual({
+      closed_is_final: REWRITE.closed_is_final,
+      refund_needs_reason: ZH.refund_needs_reason,
+      untranslated_rule: AUTHORED.untranslated_rule,
+      wrapper: AUTHORED.wrapper,
+      vip_branch: REWRITE.vip_branch,
+      standard_branch: ZH.standard_branch,
+      // Nothing to diverge from: its own entry still applies.
+      unpackaged_rule: '套件未声明的规则。',
+    });
+  });
+
+  it('applies the catalog to every rule when the packaged object declares none', () => {
+    const { validations: _dropped, ...bare } = clone(DOC);
+    const out = translateObject(tenantDoc(), bundle, { locale: 'zh-CN', packagedBase: bare }) as any;
+    expect(out.validations[0].message).toBe(ZH.closed_is_final);
+    expect(out.validations[3].then.message).toBe(ZH.vip_branch);
+    expect(out.validations[4].message).toBe('套件未声明的规则。');
+  });
+
+  it('infers nothing without a packaged base: the catalog applies, as before', () => {
+    const out = translateObject(tenantDoc(), bundle, { locale: 'zh-CN' }) as any;
+    expect(out.validations[0].message).toBe(ZH.closed_is_final);
+    expect(out.validations[3].then.message).toBe(ZH.vip_branch);
+  });
+
+  it('is reached through the /meta door with the base the serving layer supplies', () => {
+    const out = translateMetadataDocument('object', tenantDoc(), bundle, {
+      locale: 'zh-CN',
+      packagedBase: clone(DOC),
+    }) as any;
+    expect(out.validations[0].message).toBe(REWRITE.closed_is_final);
+    expect(out.validations[1].message).toBe(ZH.refund_needs_reason);
+  });
+});

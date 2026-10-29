@@ -341,7 +341,7 @@ single dropdown does.
 `visibleWhen` CEL predicate (offered only when TRUE, evaluated against the live
 record + `current_user`) and a field-level `dependsOn`. Together they drive
 dependent selects (country → province → city) and role-gated options with no
-bespoke matrix — the same primitives dependent lookups use. All four widgets
+bespoke matrix — the same primitives dependent lookups use. All of these widgets
 resolve this through the shared [`useCascadingOptions`](./src/widgets/useCascadingOptions.ts)
 hook, which wraps the pure `resolveCascadingOptions` helper in `@object-ui/core`
 (also used by the form renderer's inline pre-filter, so gating and filtering
@@ -351,7 +351,7 @@ change re-filters the list and clears a now-invalid value (scalar `select` /
 offered-out entries).
 An option whose `label` is blank (the empty string is a legal label; an absent one is
 not) displays its `value` instead of an empty row, on the editable and the read-only
-path alike — all eight read sites across the four widgets share the one
+path alike — every read site across these widgets shares the one
 `optionDisplayLabel` helper in `@object-ui/core` (objectui#9230).
 Client-side hiding is UX only — gate authorization-sensitive values on the
 server too. See

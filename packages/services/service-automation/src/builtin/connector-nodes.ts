@@ -63,14 +63,16 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             if (!handler) {
                 // A degraded declarative instance (#3017) is registered but has no
                 // handlers — say WHY dispatch fails and that recovery is automatic,
-                // instead of the generic wiring hint below.
+                // instead of the generic wiring hint below. The reason names the
+                // cause: an unreachable upstream, or (#27237) a credential that
+                // is not set.
                 const degraded = engine.getConnectorDegradedReason(cfg.connectorId);
                 if (degraded) {
                     return {
                         success: false,
                         error:
                             `connector_action '${node.id}': connector '${cfg.connectorId}' is degraded — ${degraded}. `
-                            + `Dispatch is unavailable until its upstream recovers; the platform retries automatically.`,
+                            + `Dispatch is unavailable until that is resolved; the platform retries automatically.`,
                     };
                 }
                 return {

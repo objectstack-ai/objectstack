@@ -17,6 +17,12 @@
  * `--trust-unsigned`, installs an UNSIGNED artifact and says so on stderr; it
  * never makes a present signature pass, whatever is wrong with it.
  *
+ * [Slice 2] The signature is verified over the raw bytes BEFORE anything is
+ * inflated, so an artifact signed by an untrusted key is refused for its key
+ * even when it is not an archive at all; a tier the boot does not dispatch
+ * installs with a warning naming the boot's refusal; and `os plugin disable |
+ * enable | uninstall` refuse an id this project has not installed by name.
+ *
  * Each case builds its own home, project and database, so the cases hold in
  * any order and one at a time.
  *
@@ -25,17 +31,20 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { generateEd25519KeyPair, signPayload } from '@objectstack/core';
+import { MAX_UNPACKED_ARTIFACT_BYTES, generateEd25519KeyPair, signPayload } from '@objectstack/core';
 import { loadPluginInstallations, pluginInstallDir, pluginInstallationsFile, readPublisherPublicKey } from '@objectstack/runtime';
 import { isExitSignal } from '../../utils/format.js';
 import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from '../../utils/osplugin.js';
 import { INSTALLED_ARTIFACT_FILE, INSTALLED_SIGNATURE_FILE } from '../../utils/plugin-install.js';
 import PluginInstall from './install.js';
+import PluginDisable from './disable.js';
+import PluginEnable from './enable.js';
+import PluginUninstall from './uninstall.js';
 import PluginTrustAdd from './trust/add.js';
 import PluginTrustRevoke from './trust/revoke.js';
 
@@ -100,13 +109,13 @@ const KEY_ID = 'acme-2026';
 const text = (t: string) => new TextEncoder().encode(t);
 
 /** A `.osplugin` built as `os plugin build` builds one, its integrity map computed unless given. */
-function artifact(name: string, opts: { id: string; version?: string; files?: ArchiveFile[]; integrity?: Record<string, string>; dir?: string }): string {
+function artifact(name: string, opts: { id: string; version?: string; runtime?: string; files?: ArchiveFile[]; integrity?: Record<string, string>; dir?: string }): string {
   const files: ArchiveFile[] = opts.files ?? [{ path: 'dist/index.mjs', data: text(`export const id = ${JSON.stringify(opts.id)};\n`) }];
   const manifest = {
     id: opts.id,
     version: opts.version ?? '1.0.0',
     type: 'plugin',
-    runtime: 'node',
+    runtime: opts.runtime ?? 'node',
     packaging: 'bundled',
     integrity: opts.integrity ?? computeIntegrity(files),
   };
@@ -271,6 +280,17 @@ describe('os plugin install (ADR-0025 §3.5 M1)', () => {
     expect(existsSync(join(home, 'plugins'))).toBe(false);
   }, CASE_TIMEOUT_MS);
 
+  it('[slice 2] refuses, unread, an artifact file larger than any artifact may unpack to', async () => {
+    const path = join(project, 'too-large.osplugin');
+    writeFileSync(path, '');
+    truncateSync(path, MAX_UNPACKED_ARTIFACT_BYTES + 1); // sparse: no bytes are written
+    const result = await run(PluginInstall, [path, '--trust-unsigned', ...db(), '--json']);
+    expect(result.payload, result.stdout.slice(-400)).toMatchObject({ error: 'artifact_unreadable' });
+    expect(result.payload.message).toContain(`it is ${MAX_UNPACKED_ARTIFACT_BYTES + 1} bytes, more than the ${MAX_UNPACKED_ARTIFACT_BYTES}`);
+    expect(result.exitCode).toBe(1);
+    expect(existsSync(join(home, 'plugins'))).toBe(false);
+  }, CASE_TIMEOUT_MS);
+
   it('refuses a malformed signature by name', async () => {
     const path = artifact('malformed', { id: 'com.acme.malformed' });
     writeFileSync(`${path}.sig`, 'not-a-signature');
@@ -292,6 +312,9 @@ describe('os plugin install (ADR-0025 §3.5 M1)', () => {
     const integrity = computeIntegrity([{ path: 'dist/index.mjs', data: text('export const declared = 1;\n') }]);
     const path = artifact('mismatch', { id: 'com.acme.mismatch', files, integrity });
     sign(path);
+    // The signature is verified first (before anything is inflated), so the
+    // key is trusted for the integrity check to be what refuses.
+    await trustPublisher();
     const result = await run(PluginInstall, [path, ...db(), '--json']);
     expectRefused(result, 'integrity_mismatch', 'com.acme.mismatch');
     expect(JSON.stringify(result.payload.details)).toContain('dist/index.mjs');
@@ -301,6 +324,7 @@ describe('os plugin install (ADR-0025 §3.5 M1)', () => {
     const files: ArchiveFile[] = [{ path: '../escape.txt', data: text('x') }];
     const path = artifact('escape', { id: 'com.acme.escape', files });
     sign(path);
+    await trustPublisher();
     expectRefused(await run(PluginInstall, [path, ...db(), '--json']), 'artifact_entries_refused', 'com.acme.escape');
     expect(existsSync(join(home, 'plugins', 'env_local', 'com.acme.escape', 'escape.txt'))).toBe(false);
     expect(existsSync(join(home, 'plugins', 'env_local', 'escape.txt'))).toBe(false);
@@ -399,5 +423,79 @@ describe('os plugin install (ADR-0025 §3.5 M1)', () => {
     const same = await run(PluginInstall, [second, '--trust-unsigned', '--json']);
     expect(same.exitCode, same.stdout.slice(-400)).toBe(0);
     expect(loadPluginInstallations('env_local').map((r) => r.id)).toEqual([id]);
+  }, CASE_TIMEOUT_MS);
+
+  it('[slice 2] verifies the signature over the raw bytes before inflating anything', async () => {
+    // Not an archive at all: signed by a key nobody trusts, the refusal is the
+    // key's, because nothing is inflated before the signature passes.
+    const path = join(project, 'not-an-archive.osplugin');
+    writeFileSync(path, 'these bytes are not gzip');
+    sign(path, stranger.privateKeyPem, 'stranger');
+    const untrusted = await run(PluginInstall, [path, ...db(), '--json']);
+    expect(untrusted.payload, untrusted.stdout.slice(-400)).toMatchObject({ error: 'signature_key_untrusted' });
+    // Signed by the trusted key, the same bytes reach the inflate, which refuses them.
+    await trustPublisher();
+    sign(path);
+    const unreadable = await run(PluginInstall, [path, ...db(), '--json']);
+    expect(unreadable.payload, unreadable.stdout.slice(-400)).toMatchObject({ error: 'artifact_unreadable' });
+    expect(unreadable.exitCode).toBe(1);
+    expect(existsSync(join(home, 'plugins'))).toBe(false);
+  }, CASE_TIMEOUT_MS);
+
+  it('[slice 2] installs a sandbox-tier artifact with a warning that the boot refuses it until M3', async () => {
+    await trustPublisher();
+    const path = artifact('sandboxed', { id: 'com.acme.sandboxed', runtime: 'sandbox' });
+    sign(path);
+    const result = await run(PluginInstall, [path, ...db(), '--json']);
+    expect(result.exitCode, result.stdout.slice(-400)).toBe(0);
+    expect(result.payload).toMatchObject({ installed: { runtime: 'sandbox' }, boot: { loads: false, error: 'runtime_not_dispatched' } });
+    expect(result.stderr).toMatch(/the next boot will refuse to load it \(runtime_not_dispatched\)/);
+    // Control: a node artifact loads at boot, and says so.
+    const node = artifact('node-tier', { id: 'com.acme.node-tier' });
+    sign(node);
+    const ok = await run(PluginInstall, [node, ...db(), '--json']);
+    expect(ok.payload).toMatchObject({ boot: { loads: true } });
+    expect(ok.stderr).not.toMatch(/refuse to load/);
+  }, CASE_TIMEOUT_MS);
+});
+
+describe('[#27123 slice 2] os plugin disable | enable | uninstall', () => {
+  async function installUnsigned(id: string): Promise<void> {
+    const result = await run(PluginInstall, [artifact(id, { id }), '--trust-unsigned', '--json']);
+    expect(result.exitCode, result.stdout.slice(-400)).toBe(0);
+  }
+
+  it('refuses an id this project has not installed, by name, naming what is installed', async () => {
+    for (const command of [PluginDisable, PluginEnable, PluginUninstall]) {
+      const none = await run(command, ['com.acme.absent', '--json']);
+      expect(none.payload).toMatchObject({ error: 'plugin_not_installed' });
+      expect(none.payload.message).toMatch(/nothing is installed/);
+      expect(none.exitCode).toBe(1);
+    }
+    await installUnsigned('com.acme.present');
+    const named = await run(PluginDisable, ['com.acme.absent', '--json']);
+    expect(named.payload.message).toContain('installed: com.acme.present');
+  }, CASE_TIMEOUT_MS);
+
+  it('disable and enable flip the state once, and a repeat writes nothing', async () => {
+    await installUnsigned('com.acme.toggle');
+    expect((await run(PluginDisable, ['com.acme.toggle', '--json'])).payload).toMatchObject({ disabled: true, changed: true });
+    expect((await run(PluginDisable, ['com.acme.toggle', '--json'])).payload).toMatchObject({ disabled: true, changed: false });
+    expect((await run(PluginEnable, ['com.acme.toggle', '--json'])).payload).toMatchObject({ disabled: false, changed: true });
+    expect((await run(PluginEnable, ['com.acme.toggle', '--json'])).payload).toMatchObject({ disabled: false, changed: false });
+  }, CASE_TIMEOUT_MS);
+
+  it('uninstall marks the record and removes nothing yet; disable then refuses it as pending', async () => {
+    await installUnsigned('com.acme.leaving');
+    const dir = pluginInstallDir('env_local', 'com.acme.leaving', '1.0.0');
+    const marked = await run(PluginUninstall, ['com.acme.leaving', '--json']);
+    expect(marked.payload).toMatchObject({ status: 'uninstall-pending', dir, changed: true });
+    expect(existsSync(dir)).toBe(true);
+    expect((await run(PluginUninstall, ['com.acme.leaving', '--json'])).payload).toMatchObject({ changed: false });
+    const pending = await run(PluginDisable, ['com.acme.leaving', '--json']);
+    expect(pending.payload).toMatchObject({ error: 'plugin_uninstall_pending' });
+    // Installing it again before the boot keeps it.
+    await installUnsigned('com.acme.leaving');
+    expect(loadPluginInstallations('env_local')).toEqual([expect.objectContaining({ id: 'com.acme.leaving', status: 'installed' })]);
   }, CASE_TIMEOUT_MS);
 });
