@@ -7,6 +7,7 @@ import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { resolveValueSlotMap } from './value-slot-map.js';
 import { refuseNode } from '../guard-refusal.js';
+import { carriedRefusalOfResult } from '../inner-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 
 /** Hard cap on subflow nesting — turns an accidental cycle into a clean error. */
@@ -169,6 +170,9 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
         return {
           success: false,
           error: `subflow '${flowName}' failed: ${child.error ?? 'unknown error'}`,
+          // The child's refusal, carried beside the re-worded `error`
+          // (`inner-refusal.ts`); `{}` for a child that met none.
+          ...carriedRefusalOfResult(child),
           ...(rolled ? { metrics: rolled } : {}),
         };
       }

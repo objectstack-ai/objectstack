@@ -1154,11 +1154,13 @@ function SankeyOmittedRowsNote({ shown, total, dataKey }: { shown: number; total
 }
 
 /**
- * The series a sankey draws as FLOWS (objectstack#27460): every series except a
- * comparison overlay, which is the same measure one period back and no group of
- * it, so it never becomes a flow.
+ * The series a one-series family (sankey, treemap, pie, donut, funnel) reads as
+ * the GROUPS of a pivoted second dimension (objectstack#27460,
+ * objectstack#27563): every series except a comparison overlay, which is the
+ * same measure one period back and no group of it. Two or more of them mean the
+ * chart's one measure arrived split by a second dimension; one means it did not.
  */
-const sankeyFlowSeries = (series: readonly NormalizedSeries[]): NormalizedSeries[] =>
+const groupSeries = (series: readonly NormalizedSeries[]): NormalizedSeries[] =>
   series.filter((s) => s.variant !== 'comparison');
 
 /** One drawn flow of a two-level sankey, and the cell it was drawn from. */
@@ -1238,6 +1240,68 @@ function buildSankeyCellFlows(
     return shown < total ? [{ label: String(s.label ?? s.dataKey), shown, total }] : [];
   });
   return { nodes, links, omitted };
+}
+
+/**
+ * One leaf of a two-level treemap: a (category, group) cell, and the row and
+ * series it was drawn from. A type alias, not an interface: Recharts' treemap
+ * datum is an index-signature record, which only an alias is assignable to.
+ */
+type TreemapCellLeaf = {
+  name: string;
+  size: number;
+  fill: string;
+  /** The `data` row the cell belongs to — what a click drills to, with `seriesKey`. */
+  rowIndex: number;
+  /** The series (the second dimension's group) the cell is. */
+  seriesKey: string;
+};
+
+/**
+ * A TWO-LEVEL treemap: each row's category is a parent, and each group it
+ * carries is a leaf inside it (objectstack#27563).
+ *
+ * The treemap counterpart of {@link buildSankeyCellFlows}, for the same input:
+ * two or more groups reaching the arm are the groups of its one measure, split
+ * by a pivoted second dimension. Nesting is native to Recharts' `Treemap` (a
+ * parent's area is the sum of its leaves), so every cell is drawn; the arm used
+ * to read `series[0]` alone and drew the first group's cells as the whole chart.
+ *
+ * A cell the row does not CARRY is no leaf and no omission (the pivot writes a
+ * column only for a combination the dataset answered). A carried cell that
+ * cannot be sized (not a finite number above zero, the `countSizableRows` test)
+ * is left out and counted per group, so the chart says which group lost it.
+ * A leaf is named `category / group`, the title the dashboard's drill gives the
+ * same cell, because a parent's own name is painted over by its leaves; the
+ * leaves of one category share its colour.
+ */
+function buildTreemapGroups(
+  data: ReadonlyArray<Record<string, unknown>>,
+  xAxisKey: string,
+  groups: readonly NormalizedSeries[],
+  palette: readonly string[],
+): { nodes: Array<{ name: string; fill: string; children: TreemapCellLeaf[] }>; carried: number; omitted: SankeyOmittedColumn[] } {
+  const isSizable = (v: unknown) => Number.isFinite(Number(v)) && Number(v) > 0;
+  const carries = (row: Record<string, unknown> | null | undefined, key: string) =>
+    row != null && Object.prototype.hasOwnProperty.call(row, key);
+  const nodes = data.flatMap((row, rowIndex) => {
+    const category = String(row?.[xAxisKey] ?? '');
+    const fill = resolveColor(palette[rowIndex % palette.length]);
+    const children = groups.flatMap((s) =>
+      carries(row, s.dataKey) && isSizable(row[s.dataKey])
+        ? [{ name: `${category} / ${String(s.label ?? s.dataKey)}`, size: Number(row[s.dataKey]), fill, rowIndex, seriesKey: s.dataKey }]
+        : [],
+    );
+    return children.length > 0 ? [{ name: category, fill, children }] : [];
+  });
+  let carried = 0;
+  const omitted = groups.flatMap((s) => {
+    const total = data.filter((row) => carries(row, s.dataKey)).length;
+    const shown = data.filter((row) => carries(row, s.dataKey) && isSizable(row[s.dataKey])).length;
+    carried += total;
+    return shown < total ? [{ label: String(s.label ?? s.dataKey), shown, total }] : [];
+  });
+  return { nodes, carried, omitted };
 }
 
 /**
@@ -1385,12 +1449,60 @@ function countSizableRows(rows: unknown[], dataKey: string): { sizable: number; 
  * exist. That is the empty-RESULT question (objectui#7130), answered upstream in
  * `ObjectChart` where the query outcome is known — so every no-rows tile is left
  * byte-for-byte as it was.
+ *
+ * A two-level treemap (objectstack#27563) tests every group's column, so it
+ * hands a list and the sentence names each one, as `no-positive-flow` does.
  */
-function MagnitudeRefusal({ dataKey, className }: { dataKey: string; className?: string }) {
+function MagnitudeRefusal({ dataKey, className }: { dataKey: string | readonly string[]; className?: string }) {
+  const keys = typeof dataKey === 'string' ? [dataKey] : dataKey;
   return (
     <ChartRefusal code="no-positive-magnitude" className={className}>
       This chart has nothing to size: no row&apos;s{' '}
-      <code className="font-mono">{dataKey}</code> is above zero.
+      {keys.map((key, i) => (
+        <React.Fragment key={`${i}-${key}`}>
+          {i > 0 ? ' / ' : null}
+          <code className="font-mono">{key}</code>
+        </React.Fragment>
+      ))}{' '}
+      is above zero.
+    </ChartRefusal>
+  );
+}
+
+/**
+ * The refusal a ONE-series family (pie, donut, funnel) renders when it is
+ * handed two or more groups (objectstack#27563).
+ *
+ * Those groups are almost always a second dimension the dataset pivoted into
+ * one series per value. A pie's angle is one share of one whole and a funnel's
+ * width one total per stage, so neither has a place for a second series, and
+ * drawing the first one alone is a partial chart that looks complete: every
+ * other group silently dropped. So the chart draws nothing and names every
+ * group, which stays true when the series are measures instead of groups.
+ * (The treemap nests them and the sankey flows them; both draw every group.)
+ *
+ * Called only with rows to draw: handed NO rows, the chart is the empty-result
+ * tile it always was, as `MagnitudeRefusal`'s callers gate on `total > 0`.
+ */
+function OneSeriesFamilyRefusal({
+  family,
+  groups,
+  className,
+}: {
+  family: string;
+  groups: readonly NormalizedSeries[];
+  className?: string;
+}) {
+  return (
+    <ChartRefusal code="one-series-family" className={className}>
+      A {family} draws one series, and this chart carries {groups.length}:{' '}
+      {groups.map((s, i) => (
+        <React.Fragment key={s.dataKey}>
+          {i > 0 ? ', ' : null}
+          <code className="font-mono">{String(s.label ?? s.dataKey)}</code>
+        </React.Fragment>
+      ))}
+      . Drawing only the first would hide the others, so none is drawn.
     </ChartRefusal>
   );
 }
@@ -2137,6 +2249,27 @@ function AdvancedChartImplInner({
     });
   }, [onChartClick, data, xAxisKey, series]);
 
+  // A two-level treemap (objectstack#27563) drills on a LEAF, which is exactly
+  // one cell: Recharts reports only leaf clicks, and each leaf carries its row
+  // and series, the `{ category, series }` pair the drill lookup resolves to one
+  // dataset row — the two-level sankey's flow click, for a leaf.
+  const handleTreemapCellClick = React.useCallback((node: unknown) => {
+    if (!onChartClick) return;
+    const leaf = node as Partial<TreemapCellLeaf> | undefined;
+    const row = typeof leaf?.rowIndex === 'number' ? data[leaf.rowIndex] : undefined;
+    const key = leaf?.seriesKey;
+    if (!row || typeof key !== 'string') return;
+    const cat = row[xAxisKey];
+    onChartClick({
+      category: cat != null ? String(cat) : undefined,
+      categoryId: chartRowBucketId(row),
+      series: key,
+      seriesLabel: seriesLabelForKey(key, series),
+      value: typeof row[key] === 'number' ? row[key] : undefined,
+    });
+  }, [onChartClick, data, xAxisKey, series]);
+
+  const treemapCellClickProps = onChartClick ? { onClick: handleTreemapCellClick, style: { cursor: 'pointer' as const } } : {};
   const sankeyClickProps = onChartClick ? { onClick: handleSankeyClick, style: { cursor: 'pointer' as const } } : {};
   const sankeyFlowClickProps = onChartClick ? { onClick: handleSankeyFlowClick, style: { cursor: 'pointer' as const } } : {};
 
@@ -2617,6 +2750,12 @@ function AdvancedChartImplInner({
 
   // Pie and Donut charts
   if (chartType === 'pie' || chartType === 'donut') {
+    // objectstack#27563 — two or more groups have no ring to go on; see
+    // `OneSeriesFamilyRefusal`. Never the first group's slices alone.
+    const pieGroups = groupSeries(series);
+    if (pieGroups.length >= 2 && data.length > 0) {
+      return <OneSeriesFamilyRefusal family={chartType} groups={pieGroups} className={className} />;
+    }
     const innerRadius = chartType === 'donut' ? '52%' : 0;
     const palette = getPalette();
     // objectui#7147 — see `countSizableRows`. A slice's angle is its share of
@@ -2690,6 +2829,11 @@ function AdvancedChartImplInner({
 
   // Funnel chart — uses recharts FunnelChart (single series only)
   if (chartType === 'funnel') {
+    // objectstack#27563 — a funnel stage is one total; see `OneSeriesFamilyRefusal`.
+    const funnelGroups = groupSeries(series);
+    if (funnelGroups.length >= 2 && data.length > 0) {
+      return <OneSeriesFamilyRefusal family="funnel" groups={funnelGroups} className={className} />;
+    }
     const dataKey = series[0]?.dataKey || 'value';
     const palette = getPalette();
     // objectui#7147 — see `countSizableRows`. Recharts derives each segment's
@@ -2782,6 +2926,35 @@ function AdvancedChartImplInner({
   // chart root (no wrapping cartesian chart); a custom content paints each
   // leaf with a palette color + label.
   if (chartType === 'treemap') {
+    // Two or more groups are a pivoted second dimension, drawn as a second
+    // level of leaves (objectstack#27563, `buildTreemapGroups`). One group
+    // keeps the one-level treemap below.
+    const treemapGroups = groupSeries(series);
+    if (treemapGroups.length >= 2 && data.length > 0) {
+      const cells = buildTreemapGroups(data, xAxisKey, treemapGroups, getPalette());
+      if (cells.nodes.length === 0 && cells.carried > 0) {
+        return <MagnitudeRefusal dataKey={treemapGroups.map((s) => String(s.label ?? s.dataKey))} className={className} />;
+      }
+      return (
+        <ChartFootnote
+          note={
+            cells.omitted.length > 0 ? (
+              <>
+                {cells.omitted.map((c) => (
+                  <React.Fragment key={c.label}>{unsizedRowsNote(c.shown, c.total, c.label)}</React.Fragment>
+                ))}
+              </>
+            ) : null
+          }
+        >
+          <ChartContainer config={config} className={className} {...containerProps}>
+            <Treemap data={cells.nodes} dataKey="size" nameKey="name" {...animProps} content={<TreemapCell />} {...treemapCellClickProps}>
+              <Tooltip />
+            </Treemap>
+          </ChartContainer>
+        </ChartFootnote>
+      );
+    }
     const dataKey = series[0]?.dataKey || 'value';
     const palette = getPalette();
     // objectui#7147 — see `countSizableRows`. A treemap's leaf area IS its
@@ -2820,7 +2993,7 @@ function AdvancedChartImplInner({
     // Two or more flow series are the groups of a pivoted second dimension,
     // drawn as a second column of nodes (objectstack#27460,
     // `buildSankeyCellFlows`). One series keeps the one-level flow below.
-    const flowSeries = sankeyFlowSeries(series);
+    const flowSeries = groupSeries(series);
     if (flowSeries.length >= 2) {
       const flows = buildSankeyCellFlows(data, xAxisKey, flowSeries, getPalette());
       if (flows.links.length === 0) {

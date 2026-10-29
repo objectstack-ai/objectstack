@@ -23,7 +23,9 @@
  *     `resumeInternal` stranded exit (a write behind a screen — the card's
  *     measured case) and the retry exits; a `loop` frame the failure unwinds
  *     through does not lose them; a `fault` edge that handles the failure
- *     leaves the run with none;
+ *     leaves the run with none; a `map` item's or a `subflow` child's
+ *     refusal crosses that container (nested too), and a child that met no
+ *     refusal carries none;
  *  4. ⛔ `error` is byte-identical to the composition it always had — the
  *     diagnostic channel does not move.
  *
@@ -39,6 +41,8 @@ import { AutomationEngine } from './engine.js';
 import type { NodeExecutor } from './engine.js';
 import { registerCrudNodes } from './builtin/crud-nodes.js';
 import { registerLoopNode } from './builtin/loop-node.js';
+import { registerMapNode } from './builtin/map-node.js';
+import { registerSubflowNode } from './builtin/subflow-node.js';
 import { DuplicateRecordError, ValidationError } from '@objectstack/objectql';
 import { PermissionDeniedError } from '@objectstack/plugin-security';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
@@ -357,5 +361,140 @@ describe('#24914 — every terminal exit the ruling names carries the members', 
         expect(result.success).toBe(true);
         expect('innerRefusal' in result).toBe(false);
         expect('userMessage' in result).toBe(false);
+    });
+});
+
+describe('a `map` item and a `subflow` child carry the refusal across the container', () => {
+    /** start → mk (create_record) → end — the per-item / called flow that meets the refusal. */
+    const WRITER = 'write_one';
+
+    /** start → seed (rows) → each (map over `flowName`) → end. */
+    function mapFlow(name: string, flowName: string): any {
+        return {
+            name, label: name, type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'query', type: 'seed', label: 'Seed' },
+                {
+                    id: 'each', type: 'map', label: 'Each',
+                    config: { collection: { dialect: 'cel', source: 'rows' }, flowName, iteratorVariable: 'row' },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'query' },
+                { id: 'e2', source: 'query', target: 'each' },
+                { id: 'e3', source: 'each', target: 'end' },
+            ],
+        };
+    }
+
+    /** start → call (subflow `flowName`) → end. */
+    function subflowFlow(name: string, flowName: string): any {
+        return {
+            name, label: name, type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'call', type: 'subflow', label: 'Call', config: { flowName } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        };
+    }
+
+    function containerEngine(data: any): AutomationEngine {
+        const engine = new AutomationEngine(makeLogger());
+        const ctx = ctxWith(data);
+        registerCrudNodes(engine, ctx);
+        registerMapNode(engine, ctx);
+        registerSubflowNode(engine, ctx);
+        engine.registerNodeExecutor({
+            type: 'seed',
+            async execute(_node, variables) {
+                variables.set('rows', [{ n: 1 }, { n: 2 }]);
+                return { success: true };
+            },
+        } as NodeExecutor);
+        engine.registerFlow(WRITER, createFlow(WRITER));
+        return engine;
+    }
+
+    const childText = (err: Error) => `Node 'mk' failed: create_record(crm_account) failed: ${err.message}`;
+
+    it('map: the failing item\'s refusal reaches the run — code and userMessage — and the text keeps its chain', async () => {
+        const err = markedHook();
+        const engine = containerEngine(refusingData(err));
+        engine.registerFlow('recalc', mapFlow('recalc', WRITER));
+
+        const result = await engine.execute('recalc', { userId: 'u1' });
+
+        expect(result.status).toBe('failed');
+        expect(result.innerRefusal).toEqual({ code: 'RESOURCE_CONFLICT', message: err.message });
+        expect(result.userMessage).toBe(HOOK_USER_TEXT);
+        expect(result.error).toBe(`Node 'each' failed: map 'each': item 0 (subflow '${WRITER}') failed: ${childText(err)}`);
+    });
+
+    it('map: the batch stops at the first failing item, so the run carries THAT item\'s refusal', async () => {
+        const first = validation();
+        const second = permission();
+        let calls = 0;
+        const data = refusingData(undefined);
+        data.insert = async () => { calls += 1; throw calls === 1 ? first : second; };
+        const engine = containerEngine(data);
+        engine.registerFlow('recalc', mapFlow('recalc', WRITER));
+
+        const result = await engine.execute('recalc', { userId: 'u1' });
+
+        expect(calls).toBe(1);
+        expect(result.innerRefusal).toEqual({ code: 'VALIDATION_FAILED', message: 'Amount must be positive' });
+    });
+
+    it('subflow: the child\'s refusal reaches the parent run — code and userMessage', async () => {
+        const err = markedHook();
+        const engine = containerEngine(refusingData(err));
+        engine.registerFlow('outer', subflowFlow('outer', WRITER));
+
+        const result = await engine.execute('outer', { userId: 'u1' });
+
+        expect(result.status).toBe('failed');
+        expect(result.innerRefusal).toEqual({ code: 'RESOURCE_CONFLICT', message: err.message });
+        expect(result.userMessage).toBe(HOOK_USER_TEXT);
+        expect(result.error).toBe(`Node 'call' failed: subflow '${WRITER}' failed: ${childText(err)}`);
+    });
+
+    it('map → subflow nested: the refusal two containers deep reaches the top run', async () => {
+        const err = permission();
+        const engine = containerEngine(refusingData(err));
+        engine.registerFlow('item_flow', subflowFlow('item_flow', WRITER));
+        engine.registerFlow('recalc', mapFlow('recalc', 'item_flow'));
+
+        const result = await engine.execute('recalc', { userId: 'u1' });
+
+        expect(result.status).toBe('failed');
+        expect(result.innerRefusal).toEqual({ code: 'PERMISSION_DENIED', message: err.message });
+        expect(result.error).toBe(
+            `Node 'each' failed: map 'each': item 0 (subflow 'item_flow') failed: `
+            + `Node 'call' failed: subflow '${WRITER}' failed: ${childText(err)}`,
+        );
+    });
+
+    it('control: a child that failed with NO refusal (a fault) leaves both containers carrying neither member', async () => {
+        const fault = new Error('ECONNREFUSED: could not reach the store');
+        const engine = containerEngine(refusingData(fault));
+        engine.registerFlow('item_flow', subflowFlow('item_flow', WRITER));
+        engine.registerFlow('recalc', mapFlow('recalc', 'item_flow'));
+        engine.registerFlow('outer', subflowFlow('outer', WRITER));
+
+        for (const name of ['recalc', 'outer']) {
+            const result = await engine.execute(name, { userId: 'u1' });
+            expect(result.status).toBe('failed');
+            expect('innerRefusal' in result).toBe(false);
+            expect('userMessage' in result).toBe(false);
+        }
+        const outer = await engine.execute('outer', { userId: 'u1' });
+        expect(outer.error).toBe(`Node 'call' failed: subflow '${WRITER}' failed: ${childText(fault)}`);
     });
 });
