@@ -1242,8 +1242,12 @@ function buildSankeyCellFlows(
   return { nodes, links, omitted };
 }
 
-/** One leaf of a two-level treemap: a (category, group) cell, and the row and series it was drawn from. */
-interface TreemapCellLeaf {
+/**
+ * One leaf of a two-level treemap: a (category, group) cell, and the row and
+ * series it was drawn from. A type alias, not an interface: Recharts' treemap
+ * datum is an index-signature record, which only an alias is assignable to.
+ */
+type TreemapCellLeaf = {
   name: string;
   size: number;
   fill: string;
@@ -1251,7 +1255,7 @@ interface TreemapCellLeaf {
   rowIndex: number;
   /** The series (the second dimension's group) the cell is. */
   seriesKey: string;
-}
+};
 
 /**
  * A TWO-LEVEL treemap: each row's category is a parent, and each group it
