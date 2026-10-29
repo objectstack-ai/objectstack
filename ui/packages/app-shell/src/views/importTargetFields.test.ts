@@ -77,6 +77,18 @@ describe('importTargetFields', () => {
     expect(editOnly.find((f) => f.name === 'name')).toMatchObject({ matchOnly: true, required: false });
   });
 
+  it('#27567: carries the schema\'s `multiple: true`, so "Match on" can leave a list field out', () => {
+    const out = importTargetFields('device', {
+      owners: { type: 'lookup', label: 'Owners', reference: 'user', multiple: true },
+      owner: { type: 'lookup', label: 'Owner', reference: 'user', multiple: false },
+      name: { type: 'text', label: 'Name' },
+    });
+    const byName = Object.fromEntries(out.map((f) => [f.name, f]));
+    expect(byName.owners.multiple).toBe(true);
+    expect(byName.owner.multiple).toBeUndefined();
+    expect(byName.name.multiple).toBeUndefined();
+  });
+
   it('without a loaded perms channel, falls back to schema-only derivation', () => {
     const out = importTargetFields('device', fields, { isLoaded: false, checkField: () => false });
     expect(out.map((f) => f.name).sort()).toEqual(
