@@ -73,6 +73,17 @@ import {
   narrowNumberComparands,
 } from './number-comparand-declared-type-door.js';
 
+/**
+ * The credential-column guard (ADR-0100, `credential-evaluation-guard.ts`)
+ * refuses a non-system caller's predicate on a `password` / `secret` column
+ * before this door is reached. This door's verdict does not depend on the
+ * caller, so the cells over those two types are driven as a SYSTEM caller —
+ * the one caller the guard serves — and the door is still the thing measured.
+ */
+const CREDENTIAL_COLUMN_TYPES: ReadonlySet<string> = new Set(['password', 'secret']);
+const readAs = (declaredType: string, where: unknown): any =>
+  (CREDENTIAL_COLUMN_TYPES.has(declaredType) ? { where, context: { isSystem: true } } : { where });
+
 const OBJECT = NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT;
 
 /**
@@ -237,7 +248,7 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
     for (const c of PASSES) {
       reads.length = 0;
       const filter = c.filter();
-      await expect(engine.find(OBJECT, { where: filter }), c.name).resolves.toBeDefined();
+      await expect(engine.find(OBJECT, readAs(c.declaredType, filter)), c.name).resolves.toBeDefined();
       expect(reads, `${c.name}: the driver must have been read`).toHaveLength(1);
       expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(lowered(filter));
     }
