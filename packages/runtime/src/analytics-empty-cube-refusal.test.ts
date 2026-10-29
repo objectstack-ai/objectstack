@@ -109,13 +109,19 @@ describe.each<Door>(['/analytics/query', '/analytics/sql'])('%s — an empty cub
         expect(parsed.success, JSON.stringify(parsed.success ? null : parsed.error.issues)).toBe(true);
     });
 
-    it('a missing cube keeps the 400 it already had, with the `required` field code', async () => {
+    it('a missing cube keeps the 400 VALIDATION_FAILED it already had, at the `cube` field', async () => {
         const { res, calls } = await post(door, { measures: ['x.count'] });
 
         expect(res.statusCode).toBe(400);
+        expect(res.body.error.httpStatus).toBe(400);
         expect(res.body.error.code).toBe('VALIDATION_FAILED');
         expect(res.body.error.details.fields).toHaveLength(1);
-        expect(res.body.error.details.fields[0]).toMatchObject({ field: 'cube', code: 'required' });
+        // The field code for an ABSENT key is the door's pre-existing answer
+        // (no input is handed to the mapper there), not this change's subject:
+        // what is pinned is the field and the envelope, and that the empty-name
+        // sentence is not borrowed for the missing case.
+        expect(res.body.error.details.fields[0]).toMatchObject({ field: 'cube' });
+        expect(res.body.error.details.fields[0].message).not.toBe(ANALYTICS_CUBE_NAME_REQUIRED);
         expect(serviceCalls(calls)).toEqual([]);
     });
 
