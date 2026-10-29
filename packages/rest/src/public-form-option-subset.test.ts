@@ -40,6 +40,7 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
 const OBJECT = 'pf_subset_case_27606';
 const SLUG = 'pf-subset-27606';
 const WIDE_SLUG = 'pf-subset-wide-27606';
+const LOOSE_SLUG = 'pf-subset-loose-27606';
 const SYS = { context: { isSystem: true } };
 
 const CASE = {
@@ -121,6 +122,20 @@ const WIDE_FORM = form('pf_subset_case_wide_form', WIDE_SLUG, [
   { name: 'second', fields: ['priority'] },
 ]);
 
+// Option shapes the strict row schema refuses, reaching the door only from an
+// unparsed source: bare-string options read as their own values, and options
+// that carry no value at all narrow nothing.
+const LOOSE_FORM = form('pf_subset_case_loose_form', LOOSE_SLUG, [
+  {
+    name: 'loose',
+    fields: [
+      { field: 'subject' },
+      { field: 'priority', options: ['low', 'medium'] },
+      { field: 'channel', options: [{ label: 'Web' }] },
+    ],
+  },
+]);
+
 function mockServer() {
   const noop = () => {};
   return { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
@@ -156,7 +171,7 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
     const protocol: any = new ObjectStackProtocolImplementation(engine as any);
     const realGetMetaItems = protocol.getMetaItems.bind(protocol);
     protocol.getMetaItems = async (request: any) => {
-      if (request?.type === 'view') return [FORM, WIDE_FORM];
+      if (request?.type === 'view') return [FORM, WIDE_FORM, LOOSE_FORM];
       if (request?.type === 'object') return [CASE];
       return realGetMetaItems(request);
     };
@@ -179,10 +194,10 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
   });
 
   /** A refusal naming exactly `expected` (field, code, label) in order, the write never attempted, no row stored. */
-  const expectRefused = async (body: Record<string, unknown>, expected: Array<[string, string, string]>) => {
+  const expectRefused = async (body: Record<string, unknown>, expected: Array<[string, string, string]>, slug?: string) => {
     const before = (await rows()).length;
     const calls = createData.mock.calls.length;
-    const answer = await post(body);
+    const answer = await post(body, slug);
     expect(answer.status, JSON.stringify(answer.body)).toBe(400);
     expect(answer.body.code).toBe('VALIDATION_FAILED');
     expect(answer.body.fields.map((f: any) => [f.field, f.code, f.label])).toEqual(expected);
@@ -209,6 +224,8 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
     // The refusal discloses nothing the form does not publish.
     expect(JSON.stringify(answer.body)).not.toContain('Critical');
     expect(refusal.message).not.toContain('critical');
+    // The engine's single-value `invalid_option` ships no `value`; neither does the door's.
+    expect(refusal).not.toHaveProperty('value');
   }, 60_000);
 
   it('a value that is no member of the object at all is refused by the same judgement', async () => {
@@ -221,6 +238,9 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
       [['topics', 'invalid_option', 'Topics']],
     );
     expect(answer.body.fields[0].message).toContain('security');
+    // The offending element, as the engine's multi-valued `invalid_option` ships it.
+    expect(answer.body.fields[0].value).toBe('security');
+    expect(answer.body.fields[0].constraint).toEqual({ allowed: 'billing, outage' });
   }, 60_000);
 
   it('one envelope with the form\'s `required`: a missing required field and an outside value are told at once', async () => {
@@ -245,6 +265,18 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
 
   it('BOUNDARY — a row that lists no `options` keeps the object\'s full set', async () => {
     const stored = await expectStored({ subject: 'Called in', channel: 'phone' });
+    expect(stored?.channel).toBe('phone');
+  }, 60_000);
+
+  it('a bare-string option is read as its own value', async () => {
+    const answer = await expectRefused({ subject: 'Site down', priority: 'critical' }, [['priority', 'invalid_option', 'Priority']], LOOSE_SLUG);
+    expect(answer.body.fields[0].constraint).toEqual({ allowed: 'low, medium' });
+    const stored = await expectStored({ subject: 'Slow page', priority: 'medium' }, LOOSE_SLUG);
+    expect(stored?.priority).toBe('medium');
+  }, 60_000);
+
+  it('BOUNDARY — options that carry no value narrow nothing (never refuse every value)', async () => {
+    const stored = await expectStored({ subject: 'Called in', channel: 'phone' }, LOOSE_SLUG);
     expect(stored?.channel).toBe('phone');
   }, 60_000);
 

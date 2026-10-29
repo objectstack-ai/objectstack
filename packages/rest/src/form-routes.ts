@@ -480,7 +480,12 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                 optionSubsets.set(f.field, null);
                             } else {
                                 const subset = sofar ?? new Set<string>();
-                                for (const o of offered) if (o?.value !== undefined) subset.add(String(o.value));
+                                for (const o of offered) {
+                                    // A bare-string option is its own value, as the engine's
+                                    // and the console's option readers take it.
+                                    const v = typeof o === 'string' ? o : o?.value;
+                                    if (v !== undefined && v !== null) subset.add(String(v));
+                                }
                                 optionSubsets.set(f.field, subset);
                             }
                             if (
@@ -670,6 +675,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                         message: string;
                         label: string;
                         constraint?: Record<string, unknown>;
+                        value?: string;
                     }> = [];
                     for (const name of judged) {
                         const def = objectDef?.fields?.[name];
@@ -703,7 +709,9 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                     }
                     for (const name of valued) {
                         const subset = optionSubsets.get(name);
-                        if (!subset) continue;
+                        // A subset that collected no values narrows nothing (fail
+                        // open to the engine's judgement, never refuse every value).
+                        if (!subset || subset.size === 0) continue;
                         const def = objectDef?.fields?.[name];
                         const value = filteredData[name];
                         const empty = def && typeof def.type === 'string'
@@ -728,6 +736,9 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                 : renderValidationMessage({ messageKey: 'invalid_option', label, field: name, params: { allowed } }),
                             label,
                             constraint: { allowed },
+                            // The offending element, as the engine's multi-valued
+                            // `invalid_option` ships it; its single-value arm ships none.
+                            ...(Array.isArray(value) ? { value: String(elements[outside]) } : {}),
                         });
                     }
                     if (refused.length > 0) {
