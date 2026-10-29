@@ -3,8 +3,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "We have a React + Vite internal app for inventory. Please create a schema-driven list page for products with search, status filter, row actions, and a create-product action. Use ObjectUI patterns and include integration snippets.",
-      "expected_output": "Produces a complete page schema JSON for list/grid behavior, includes integration wiring steps for SchemaRenderer and component registration, and provides a validation checklist.",
+      "prompt": "Create a schema-driven list page for products in our React + Vite inventory app: search, status filter, row actions and a create-product action, with ObjectUI integration snippets.",
+      "expected_output": "A complete list/grid page schema JSON, SchemaRenderer wiring and component registration steps, and a validation checklist.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -22,8 +22,8 @@
     },
     {
       "id": 2,
-      "prompt": "Please convert our existing customer detail page to Schema-Driven UI. It needs three sections — Basic Info, Contacts, and Recent Orders — and the 'Edit Customer' button must be visible only to admins. Stack: React + TypeScript.",
-      "expected_output": "Provides a structured detail-page schema with expression-based visibility for admin-only actions, keeps sections modular, and explains how to integrate into an app project.",
+      "prompt": "Convert our customer detail page (React + TypeScript) to schema-driven UI: sections Basic Info, Contacts and Recent Orders, and an 'Edit Customer' button visible only to admins.",
+      "expected_output": "A detail-page schema with modular sections, expression-based visibility on the admin-only action, and app integration steps.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -39,8 +39,8 @@
     },
     {
       "id": 3,
-      "prompt": "Build a console-like analytics dashboard page in an existing ObjectUI project: KPI cards on top, trend chart in the middle, and recent activity list at the bottom. Also include action definitions for refresh and navigate-to-report.",
-      "expected_output": "Generates dashboard schema with layout composition, plugin-oriented chart usage, action definitions as data, and testing guidance for responsiveness and interaction.",
+      "prompt": "Build an analytics dashboard page in an existing ObjectUI project: KPI cards on top, a trend chart, a recent-activity list at the bottom, plus refresh and navigate-to-report actions.",
+      "expected_output": "A dashboard schema with layout composition, a plugin chart, actions as data, and responsiveness and interaction testing guidance.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -50,6 +50,22 @@
           "navigate"
         ],
         "must_not_contain": []
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Add a 'Delete product' button to the product detail page. It must read as destructive and ask the user to confirm before the record is removed.",
+      "expected_output": "An action:button whose properties carry label, actionType, target, a confirmText question and variant 'danger': the button draws red and asks that question through the destructive confirm button. On an action block the Button primitive's spelling of that arm is refused at save; danger is the action runner's word.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "action:button",
+          "\"variant\": \"danger\"",
+          "confirmText"
+        ],
+        "must_not_contain": [
+          "\"variant\": \"destructive\""
+        ]
       }
     }
   ]
