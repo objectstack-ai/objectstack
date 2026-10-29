@@ -87,7 +87,7 @@ afterEach(() => {
   log.mockRestore();
 });
 
-const printedLines = () => log.mock.calls.map((c: unknown[]) => c.map(String).join(' ')).join('\n').split('\n');
+const printedLines = (): string[] => log.mock.calls.map((c: unknown[]) => c.map(String).join(' ')).join('\n').split('\n');
 
 describe('os migrate record-currency-codes', () => {
   it('is a dry run by default, and --yes is opt-in', () => {
