@@ -276,7 +276,9 @@ export type SchemaMode = z.input<typeof SchemaModeSchema>;
  * `connector` is the other credential channel (ADR-0015 amendment D7, ruling
  * 6486136301): an API-backed datasource names a declared connector instance
  * and borrows that instance's credential, so one Connect per vendor serves
- * both flows and virtual objects. The two channels are exclusive, and the
+ * both flows and virtual objects. The credential is whatever the instance's
+ * `auth` declares, resolved as ADR-0143 D4 resolves the instance's own: a
+ * static kind once at materialization, a grant-bearing kind per dispatch. The two channels are exclusive, and the
  * datasource-level refinement below refuses the pairings that can never work
  * (both channels at once, a built-in database driver, a managed datasource);
  * whether the named instance is declared is judged where the stack's
@@ -363,8 +365,9 @@ export const ExternalDatasourceSettingsSchema = strictObject(
       + 'Valid in every schemaMode — the one `external` key a managed datasource may carry.'),
   connector: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional()
     .describe('Name of a declared connector instance (a `connectors` entry with a `provider`) whose '
-      + 'credential this API-backed datasource borrows — static, `oauth2`, `app-credential` and '
-      + '`signed` kinds alike, resolved the way the connector resolves it. One Connect serves '
+      + 'credential this API-backed datasource borrows — whichever kind the instance\'s `auth` '
+      + 'declares (`bearer`, `api-key` or `basic`; ADR-0143 D2 adds the grant-bearing kinds), resolved '
+      + 'the way the connector resolves it. One Connect serves '
       + 'both the connector\'s actions and this datasource\'s records. Exclusive with '
       + '`credentialsRef`; refused on a built-in database driver and on a managed datasource.'),
   queryTimeoutMs: z.number().default(30_000)
@@ -532,8 +535,9 @@ const CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED =
  *    test is truthy), so it does not count as the second channel.
  *  - **a built-in driver** — every driver in `DRIVER_VOCABULARY` connects to a
  *    database with a database credential. A connector instance lends an HTTP
- *    credential (a bearer token, an API key, an OAuth grant, a request
- *    signer), which only an API-backed, plugin-contributed driver can present.
+ *    credential (a bearer token, an API key, basic auth; ADR-0143 D2's
+ *    grant-bearing kinds alike), which only an API-backed, plugin-contributed
+ *    driver can present.
  *  - **a managed datasource** — an API-backed datasource's schema lives in the
  *    remote system, so `schemaMode: 'managed'` is the wrong mode, and the
  *    prescription is the mode, not the deletion the generic managed-block
@@ -548,7 +552,7 @@ const CONNECTOR_WITH_CREDENTIALS_REF_REFUSED =
 
 function connectorOnBuiltinDriverRefusal(driverId: string): string {
   return `\`external.connector\` lends a connector instance's HTTP credential (a bearer token, an `
-    + `API key, an OAuth grant or a request signer), which only an API-backed driver presents; the `
+    + `API key or basic auth), which only an API-backed driver presents; the `
     + `'${driverId}' driver connects to a database with a database credential. Bind that secret with `
     + '`external.credentialsRef` (the Setup → Datasources connection form mints the handle) and '
     + 'remove `connector`.';

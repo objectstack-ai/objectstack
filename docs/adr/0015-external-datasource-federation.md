@@ -10,8 +10,11 @@
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
 > database. An **API-backed** datasource (a plugin-contributed driver over a vendor API, such as
 > OData) may instead name a declared connector instance in `external.connector` and borrow that
-> instance's credential — static, `oauth2`, `app-credential` and `signed` kinds alike — through
-> ADR-0143 D4's per-dispatch resolver. One Connect per vendor then serves both the connector's
+> instance's credential — whichever kind its `auth` declares (`ConnectorInstanceAuthSchema`:
+> `bearer`, `api-key` and `basic` today; ADR-0143 D2 adds the grant-bearing `oauth2`,
+> `app-credential` and `signed`), resolved as ADR-0143 D4 resolves the instance's own: a static kind
+> once at materialization, a grant-bearing kind per dispatch. The datasource connection service hands
+> it to the driver (the runtime half, #27746). One Connect per vendor then serves both the connector's
 > actions (flows) and the datasource's records (virtual objects), and one reconnect restores both.
 > The contract (`packages/spec/src/data/datasource.zod.ts#ExternalDatasourceSettingsSchema`):
 >

@@ -4372,9 +4372,10 @@ function collectExternalBindingDatasourceErrors(config: ObjectStackDefinition): 
 }
 
 /**
- * [ADR-0015 amendment D7] A datasource's `external.connector` must name a
- * connector instance this stack declares: a `connectors` entry with a
- * `provider` and an `auth` that is not `none`.
+ * [ADR-0015 amendment D7 · ADR-0143] A datasource's `external.connector` must
+ * name a connector instance this stack declares: a `connectors` entry with a
+ * `provider` and an `auth` that is not `none` — the ADR-0143 instance auth
+ * contract whose credential the datasource borrows.
  *
  * The datasource borrows that instance's credential, so a name this stack
  * cannot resolve would leave an API-backed datasource with no credential at
