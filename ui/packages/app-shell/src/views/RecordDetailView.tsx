@@ -48,6 +48,7 @@ import { resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionFailureMessage } from '../utils/flowResponse.js';
+import { findDeclaredApiAction, isSameOriginApiTarget, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
 // Audit provenance renders as the one-line <RecordMetaFooter>; the other
 // framework-injected bookkeeping columns are hidden from the body outright.
@@ -1426,8 +1427,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       delete params._rowRecord;
 
       // Absolute HTTP target — mirror of useConsoleActionRuntime.apiHandler's
-      // canonical branch (fetch + recordIdParam/bodyExtra/bodyShape +
-      // active-org injection for better-auth endpoints). The legacy
+      // canonical branch (the action door for a declared same-origin action;
+      // otherwise fetch + recordIdParam/bodyExtra/bodyShape + active-org
+      // injection for better-auth endpoints). The legacy
       // dataSource.update mapping below MUST NOT see these: routing a
       // better-auth row action (remove_member / update_member_role) through
       // it either silently no-opped (no collected params) or bypassed
@@ -1435,6 +1437,38 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       const targetStr = typeof target === 'string' ? target : '';
       if (targetStr.startsWith('/') || /^https?:\/\//i.test(targetStr)) {
         const baseUrl = import.meta.env.VITE_SERVER_URL || '';
+
+        // The action door (objectstack#27611 — see utils/apiActionDoor): a
+        // DECLARED action whose target is a path on this origin, looked up in
+        // this page's `objects` as the flow launch looks it up. The server
+        // assembles the target's request from the declaration and loads the
+        // subject row itself, so the click sends that row's id — the stashed
+        // row's, else a related-list row's explicit `recordId`, else this
+        // page's own for an action on this page's object — and the params bag.
+        const doorObject = action.objectName ?? objectName;
+        if (isSameOriginApiTarget(targetStr) && action.name
+            && findDeclaredApiAction(objects, doorObject, action.name, targetStr)) {
+          const door = await sendApiActionThroughDoor({
+            fetch: authFetch,
+            baseUrl,
+            action,
+            objectName: doorObject!,
+            recordId: rowRecord?.id
+              ?? (action as { recordId?: unknown }).recordId
+              ?? (doorObject === objectName ? pureRecordId : undefined),
+            params,
+          });
+          if (!door.answered) return door.result;
+          if (!door.res.ok) {
+            return { success: false, error: apiActionFailureMessage(door.res, door.json, `HTTP ${door.res.status}`, language) };
+          }
+          // The door's body, as this page has always handed back its target's:
+          // byte for byte the target's own answer when the target answers the
+          // platform `{ success, data }` envelope.
+          if (action.refreshAfter === true) notifyRecordChanged();
+          return { success: true, data: door.json, reload: action.refreshAfter === true };
+        }
+
         // Interpolate `{field}` tokens in the target URL. Source: the stashed
         // row when the dispatch carries one (related-list rows; page:header
         // since objectui#3391), else THIS page's record — but only when the
@@ -1644,7 +1678,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [dataSource, objectName, objectDef, pureRecordId, pageRecord, authFetch, activeOrganization, language]);
+  }, [dataSource, objectName, objectDef, objects, pureRecordId, pageRecord, authFetch, activeOrganization, language]);
 
   // Client-side modal transport: `type:'modal'` actions open here (Dialog /
   // Sheet / Drawer by `placement`) and render arbitrary SchemaNode content.
