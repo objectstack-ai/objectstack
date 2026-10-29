@@ -1391,7 +1391,6 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 let exported = 0;
                 let firstChunk = true;
                 let skip = 0;
-                if (format === 'json') res.write('[');
                 const xlsx = format === 'xlsx' ? await createXlsxStream(res, styled) : null;
 
                 while (exported < limit) {
@@ -1433,6 +1432,15 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         : Array.isArray(result?.data) ? result.data
                             : Array.isArray(result?.rows) ? result.rows
                                 : Array.isArray(result) ? result : [];
+
+                    // [#27682] json's opening bracket follows the FIRST read, as
+                    // csv's first byte does: the first `res.write` commits the
+                    // response to a streaming 200, so writing it before
+                    // `findData` turned a refused query into a 200 carrying a
+                    // lone `[` instead of the 400 envelope. The loop always
+                    // runs at least once (`limit` is at least 1), so the
+                    // closing `]` below always has its opener.
+                    if (format === 'json' && firstChunk) res.write('[');
 
                     if (rows.length === 0) break;
 
