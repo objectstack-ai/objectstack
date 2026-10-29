@@ -364,7 +364,7 @@ export const ExternalDatasourceSettingsSchema = strictObject(
   connector: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional()
     .describe('Name of a declared connector instance (a `connectors` entry with a `provider`) whose '
       + 'credential this API-backed datasource borrows — static, `oauth2`, `app-credential` and '
-      + '`signed` kinds alike, resolved per dispatch as for the connector itself. One Connect serves '
+      + '`signed` kinds alike, resolved the way the connector resolves it. One Connect serves '
       + 'both the connector\'s actions and this datasource\'s records. Exclusive with '
       + '`credentialsRef`; refused on a built-in database driver and on a managed datasource.'),
   queryTimeoutMs: z.number().default(30_000)
