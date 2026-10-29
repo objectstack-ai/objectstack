@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { uiTurboConfigPath } from '../workspace-root.mjs';
+import { turboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -142,7 +142,10 @@ function declaredOutputs(configPath: string): string[] | undefined {
   return config.tasks?.[TASK]?.outputs;
 }
 
-const ROOT_OUTPUTS = declaredOutputs(uiTurboConfigPath());
+// The config turbo runs: the nearest `turbo.json` upward, which under the
+// monorepo is the root one. `outputs` are package-relative, so no narrowing to
+// this tree applies to them.
+const ROOT_OUTPUTS = declaredOutputs(turboConfigPath());
 if (!ROOT_OUTPUTS || ROOT_OUTPUTS.length === 0) {
   throw new Error(`turbo.json must declare \`${TASK}\` outputs`);
 }
