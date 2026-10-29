@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>抽屉 v4 · 有界侧窥 · 720 封顶 · 不压暗 · 列表可点换记录 · ⤢ 原地铺满</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#ffffff}
+:root{--bg:#ffffff;--fg:#0f172a;--muted:#f1f5f9;--muted-fg:#64748b;--border:#e2e8f0;--sidebar:#fafafa;--primary-soft:#eef2ff;--primary-fg:#ffffff;--amber:#b45309;--amber-soft:#fef3c7;--green:#15803d;--green-soft:#dcfce7;--red:#b91c1c;--red-soft:#fee2e2;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+a{color:var(--primary);text-decoration:none}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:500}
+.btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:12.5px;font-weight:500;color:var(--fg)}
+.iconbtn{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:5px;background:var(--muted);color:var(--fg);font-size:11.5px}
+.chip.soft{background:var(--primary-soft);color:var(--primary)}
+.chip.ok{background:var(--green-soft);color:var(--green)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.k{font-family:var(--mono);font-size:11px;color:var(--muted-fg)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;font-size:13px;color:var(--fg)}
+.nav.on{background:var(--primary-soft);color:var(--primary);font-weight:500}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{text-align:left;font-weight:500;color:var(--muted-fg);font-size:11.5px;height:36px;padding:0 10px;border-bottom:1px solid var(--border);background:var(--sidebar);white-space:nowrap}
+td{height:40px;padding:0 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+tr.sel td{background:var(--primary-soft)}
+td.a{color:var(--primary)}
+.tab{height:36px;display:inline-flex;align-items:center;gap:6px;padding:0 2px;margin-right:16px;font-size:13px;color:var(--muted-fg);border-bottom:2px solid transparent}
+.tab.on{color:var(--fg);border-bottom-color:var(--primary);font-weight:500}
+.hl{display:flex;flex-direction:column;gap:2px;min-width:0}
+.hl .l{font-size:11px;color:var(--muted-fg)}
+.hl .v{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sect{display:flex;align-items:center;justify-content:space-between;height:36px;font-size:12.5px;font-weight:600}
+.fld{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fld .l{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-fg)}
+.fld .v{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage{display:flex;gap:4px;align-items:center}
+.stage span{flex:1;height:6px;border-radius:3px;background:var(--muted)}
+.stage span.done{background:var(--green)}
+.stage span.cur{background:var(--primary)}
+.tl{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px}
+.tl .ic{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:11px;background:var(--muted);color:var(--muted-fg);flex:none;font-size:11px}
+
+.pnl{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;position:relative}
+.pnl .h{display:flex;align-items:center;gap:6px;height:34px;padding:0 8px 0 12px;font-size:12.5px;font-weight:600}
+.pnl .h .chev{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-fg);font-size:10px}
+.pnl .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:32px;padding:0 10px;border-top:1px solid var(--border);font-size:12.5px}
+.pnl.empty .h{color:var(--muted-fg);font-weight:500;height:30px}
+.ann{position:absolute;padding:4px 8px;border-radius:6px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;font-size:11px;line-height:1.3;white-space:nowrap;z-index:5}
+tr.hov td{background:var(--sidebar)}
+.coltitle{display:flex;align-items:center;justify-content:space-between;height:34px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--border);margin-bottom:8px}
+</style>
+</helmet>
+<div style="width:100%;min-height:900px;display:grid;grid-template-rows:48px 1fr;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.45;--primary:{{accent}}">
+  <header style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:8px"><button type="button" class="iconbtn" aria-label="切换侧边栏">▤</button><span style="display:inline-flex;width:26px;height:26px;align-items:center;justify-content:center;border-radius:7px;background:var(--primary);color:#fff;font-size:12px;font-weight:700">O</span><span style="color:var(--muted-fg)">/</span><button type="button" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px 0 6px;border-radius:8px;border:1px solid var(--border)"><span style="display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;border-radius:5px;background:#f97316;color:#fff;font-size:11px;font-weight:700">H</span><span style="font-weight:600">HotCRM</span></button></div>
+    <button type="button" style="display:inline-flex;align-items:center;gap:8px;width:300px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:13px"><span style="flex:1;text-align:left">搜索…</span><kbd class="k" style="padding:1px 5px;border:1px solid var(--border);border-radius:4px">⌘K</kbd></button>
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><span class="k" style="padding:2px 8px;border:1px solid var(--border);border-radius:6px">/apps/hotcrm/crm_contact?recordId=bI3w…</span><button type="button" aria-label="账户" style="display:inline-flex;width:28px;height:28px;margin-left:6px;align-items:center;justify-content:center;border-radius:14px;background:var(--primary);color:#fff;font-size:11px;font-weight:600">DA</button></div>
+  </header>
+  <div style="position:relative;display:grid;grid-template-columns:200px 1fr;min-height:0;overflow:hidden">
+    <aside style="border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px">
+      <div class="nav">首页</div><div class="nav">销售主页</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">销售</div>
+      <div class="nav">线索</div><div class="nav">客户</div><div class="nav on">联系人</div><div class="nav">商机</div><div class="nav">报价</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">我的工作</div>
+      <div class="nav">我的任务</div><div class="nav">我的商机</div>
+    </aside>
+
+    <section style="min-width:0;display:flex;flex-direction:column;position:relative">
+      <div style="display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 20px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px"><span style="font-size:17px;font-weight:600">联系人</span><span style="color:var(--muted-fg)">21 条</span></div>
+        <div style="display:flex;gap:6px"><button type="button" class="btn-primary">＋ 新建</button><button type="button" class="iconbtn" aria-label="更多">⋯</button></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 20px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center"><span class="tab on">全部联系人</span><span class="tab">我的联系人</span><span class="tab">本周新增</span></div>
+        <div style="display:flex;align-items:center;gap:6px"><span class="chip soft" style="height:26px;padding:0 10px">排序 1 ×</span><button type="button" class="iconbtn" aria-label="显示">⚙</button></div>
+      </div>
+      <table>
+        <thead><tr><th style="width:36px"></th><th>姓名</th><th>公司</th><th>邮箱</th><th>职务</th><th>状态</th><th>负责人</th></tr></thead>
+        <tbody><tr class="sel"><td><span class="k" title="在整页打开">↗</span></td><td class="a">John Smith</td><td>Acme Corp</td><td class="a">john.smith@acme.com</td><td>VP Sales</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr>
+<tr class="hov"><td><span class="k" title="在整页打开">↗</span></td><td class="a">Sarah Johnson</td><td>TechStart</td><td class="a">sarah.j@techstart.io</td><td>CTO</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Emily Davis</td><td>Cloud Nine</td><td class="a">emily@cloudnine.co</td><td>Procurement</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Michael Brown</td><td>Globex</td><td class="a">mbrown@globex.com</td><td>COO</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Olivia Chen</td><td>Initech</td><td class="a">olivia.chen@initech.com</td><td>Buyer</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Daniel Kim</td><td>Umbrella</td><td class="a">dkim@umbrella.org</td><td>Director</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Lucas Martin</td><td>Vandelay</td><td class="a">lucas@vandelay.com</td><td>Engineer</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Ava Wilson</td><td>Hooli</td><td class="a">ava.w@hooli.com</td><td>PM</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Noah Garcia</td><td>Soylent</td><td class="a">noah.g@soylent.com</td><td>CFO</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr></tbody>
+      </table>
+      <span class="ann" style="left:46px;top:150px">悬停行：首列 ↗ 在整页打开（#27031）；点击行 = 抽屉换记录，栈不动</span>
+      <div style="margin-top:auto;height:36px;display:flex;align-items:center;padding:0 20px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">21 条记录</div>
+    </section>
+
+    <aside style="position:absolute;top:0;right:0;bottom:0;width:720px;display:grid;grid-template-rows:auto auto auto 1fr;background:var(--bg);border-left:1px solid var(--border);box-shadow:-12px 0 32px rgba(15,23,42,.14)">
+      <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 8px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">
+        <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;padding-left:4px"><span style="color:var(--fg)">联系人</span><span class="k">3 / 21</span></span>
+        <span style="display:inline-flex;gap:2px"><button type="button" class="iconbtn" aria-label="上一条 · K" style="width:24px;height:24px">↑</button><button type="button" class="iconbtn" aria-label="下一条 · J" style="width:24px;height:24px">↓</button><button type="button" class="iconbtn" aria-label="铺满（原地）" title="铺满 · ⌘⇧↵" style="width:24px;height:24px;margin:0 4px">⤢</button><button type="button" class="iconbtn" aria-label="关闭" style="width:24px;height:24px">✕</button></span>
+      </div>
+      
+      <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="min-width:0"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px;font-weight:600">John Smith</span><span class="chip">联系人</span></div><div style="color:var(--muted-fg)">VP Sales · <a href="#">Acme Corp</a></div></div>
+          <div style="display:flex;gap:6px;flex:none"><button type="button" class="btn-primary">记录通话</button><button type="button" class="btn-outline">编辑</button><button type="button" class="iconbtn" aria-label="更多：在整页打开、刷新、克隆、共享、删除" title="更多">⋯</button></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px">
+          <div class="hl"><span class="l">状态</span><span class="v"><span class="chip ok">活跃</span></span></div><div class="hl"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">john.smith@acme.com</span></div><div class="hl"><span class="l">电话</span><span class="v">+1 555 0100</span></div><div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border)"><span class="tab on">详情</span><span class="tab">关联 <span class="chip" style="height:16px;padding:0 5px">3</span></span><span class="tab">时间线 <span class="chip" style="height:16px;padding:0 5px">12</span></span></div>
+      <div style="overflow:auto;padding:4px 16px 16px;position:relative">
+        
+        <div class="sect">基本信息</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">姓名</span><span class="v">John Smith</span></div><div class="fld"><span class="l">公司</span><span class="v" style="color:var(--primary)">Acme Corp</span></div><div class="fld"><span class="l">职务</span><span class="v">VP Sales</span></div><div class="fld"><span class="l">部门</span><span class="v">销售</span></div><div class="fld"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">john.smith@acme.com</span></div><div class="fld"><span class="l">电话</span><span class="v">+1 555 0100</span></div></div>
+        <div class="sect" style="margin-top:8px">地址 <span class="k">显示 2 个空字段</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">城市</span><span class="v">San Francisco</span></div><div class="fld"><span class="l">国家</span><span class="v">US</span></div></div>
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">创建于 10月20日 · 更新于 今天 · Dev Admin · <span class="k">C-1001</span></div>
+
+        <div style="margin-top:14px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">抽屉 = 有界侧窥：`size:'auto'` 封顶 md 720（不再按字段数撑到 960 / 1200），拖拽上限 60vw；没有压暗遮罩，左边的列表照常可读可点；点另一行 = 换记录；⤢ 原地铺满，URL 仍是 ?recordId=；「在整页打开」只在列表行 ↗ 与头部 ⋯ 里。</div>
+        <span class="ann" style="right:12px;top:-6px">720 &lt; 760 ⇒ 页签层（#27524 第 8 项）</span>
+      </div>
+    </aside>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4f46e5","options":["#4f46e5","#2563eb","#0f766e","#0f172a"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#4f46e5' };
+  }
+}
+</script>
+</body>
+</html>
