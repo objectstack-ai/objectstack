@@ -1688,6 +1688,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     return new Map([...publishRefusals].filter(([key]) => listed.has(key)));
   }, [feedCount, pendingEntries, publishRefusals]);
 
+  // The publish toast's way to the Access pillar; set once the router's
+  // navigate is in hand below.
+  const openAccessRef = React.useRef<() => void>(() => {});
+
   // `options` is the review sheet's (objectui#12929): its checked backfill
   // choices, or nothing. Only the package batch door below carries it; the
   // sheet offers no choice in the package-less scope.
@@ -1859,10 +1863,28 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         // wrote. A field that stopped short leaves the publish standing, so the
         // toast still says what went live, as a warning that carries why.
         const receipt = payload?.backfillApplied;
+        // A published app or object reaches members only through a permission
+        // set, so the toast points the author to Access.
+        const reachesMembers =
+          Array.isArray(published) &&
+          published.some((p) => {
+            const type = (p as { type?: unknown } | null)?.type;
+            return type === 'app' || type === 'object';
+          });
+        const access = reachesMembers
+          ? {
+              action: {
+                label: t('engine.studio.publishedOpenAccess', locale),
+                onClick: () => openAccessRef.current(),
+              },
+            }
+          : {};
         if (receipt) {
           const description = formatBackfillReceipt(receipt, locale);
-          if (receipt.success === false) toast.warning(title, { description });
-          else toast.success(title, { description });
+          if (receipt.success === false) toast.warning(title, { description, ...access });
+          else toast.success(title, { description, ...access });
+        } else if (reachesMembers) {
+          toast.success(title, { description: t('engine.studio.publishedAccessHint', locale), ...access });
         } else {
           toast.success(title);
         }
@@ -1934,6 +1956,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // package ships an app, offer Open app — opened in a new tab so the builder
   // context survives. (App → builder is the reverse bridge, tracked separately.)
   const shellNavigate = useNavigate();
+  React.useEffect(() => {
+    openAccessRef.current = () => {
+      if (confirmLeavePillar()) shellNavigate(`/studio/${scopeSegment}/access`);
+    };
+  });
   // objectui#11181 — `label` is the app's own `I18nLabel` (a plain string or an
   // inline locale map), held as the spec types it and never `String()`ed: a map
   // would read `[object Object]`. Only the presence of `packageApp` is read
@@ -6942,7 +6969,18 @@ export function DataPillar({
     };
   }, [client, current, packageId, publishNonce, objReloadNonce, recordObjRead]);
 
-  const fieldCount = React.useMemo(() => readFields(objDraft.fields).entries.length, [objDraft]);
+  // The header counts the fields the canvas shows, and names the platform's
+  // own columns apart: "2 fields (+8 system)".
+  const fieldCount = React.useMemo(() => {
+    const all = readFields(objDraft.fields).entries.length;
+    const own = formFieldNames(objDraft.fields).length;
+    return { own, system: all - own };
+  }, [objDraft]);
+  const fieldCountText =
+    tFormat(fieldCount.own === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
+      count: fieldCount.own,
+    }) +
+    (fieldCount.system > 0 ? ` ${tFormat('engine.studio.data.systemFieldCount', locale, { count: fieldCount.system })}` : '');
 
   /**
    * The design-mode grid's columns: the object's own fields in metadata order,
@@ -7573,7 +7611,7 @@ export function DataPillar({
             title={current ? current.label : t('engine.studio.data.objects', locale)}
             titleProps={current ? undefined : { className: 'text-[13px] font-normal text-muted-foreground' }}
             apiName={current?.name}
-            meta={current && objLoaded ? tFormat('engine.studio.data.fieldCount', locale, { count: fieldCount }) : undefined}
+            meta={current && objLoaded ? fieldCountText : undefined}
             status={objDraftStatus}
             actions={
               <>

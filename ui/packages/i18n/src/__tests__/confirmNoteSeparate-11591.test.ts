@@ -43,7 +43,7 @@ const LANGS = Object.keys(builtInLocales) as LocaleCode[];
 
 /** The atomicity claim, as each pack's package sentence spells it. */
 const CLAIM: Record<LocaleCode, RegExp> = {
-  en: /atomically/u,
+  en: /go live, or none do|goes live, or nothing changes/u,
   de: /atomar/u,
   es: /atómicamente/u,
   fr: /atomiquement/u,

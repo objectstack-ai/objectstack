@@ -31,7 +31,7 @@ import { BOOLEAN_VALUE_TYPES, expandEmptyOperator, type EmptyOperatorArm } from 
 import { useObjectFields } from '../previews/useObjectFields.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import type { CelLintIssue } from '../celAuthoring.js';
-import { t, useMetadataLocale } from '../i18n.js';
+import { t, tFormat, useMetadataLocale } from '../i18n.js';
 
 type Op = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'truthy' | 'falsy';
 
@@ -921,27 +921,33 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
    * advertisement and the placeholder teaches its whole example, both unchanged.
    */
   const offeredRoots = roots ?? (scope === 'record' ? RECORD_CONDITION_ROOTS : undefined);
+  const locale = useMetadataLocale();
   const subjectOptions = React.useMemo(() => {
     const visible = fields.filter((f) => !f.hidden);
+    // A field reads by its label, with the subject spelling beside it.
     const fieldOpts = visible.map((f) => ({
       value: `${fieldPrefix}${f.name}`,
-      label: `${fieldPrefix}${f.name}`,
+      label: f.label || `${fieldPrefix}${f.name}`,
+      hint: f.label ? `${fieldPrefix}${f.name}` : undefined,
     }));
     // The whole-record `previous` comes first: `previous == null` is how an
     // author branches on the create leg of a create-or-update trigger, and it
     // reads as the head of the group rather than as one more field.
     const previousOpts = includePrevious
       ? [
-          { value: 'previous', label: 'previous' },
-          ...visible.map((f) => ({ value: `previous.${f.name}`, label: `previous.${f.name}` })),
+          { value: 'previous', label: 'previous', hint: undefined },
+          ...visible.map((f) => ({
+            value: `previous.${f.name}`,
+            label: f.label ? tFormat('engine.inspector.condition.previousField', locale, { field: f.label }) : `previous.${f.name}`,
+            hint: f.label ? `previous.${f.name}` : undefined,
+          })),
         ]
       : [];
-    const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value }));
+    const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value, hint: undefined }));
     return [...fieldOpts, ...previousOpts, ...contextOpts];
-  }, [fields, fieldPrefix, includePrevious, contextSubjects]);
+  }, [fields, fieldPrefix, includePrevious, contextSubjects, locale]);
   // The raw-expression editor's CEL assists (#1582): field-existence lint +
   // autocomplete need the bare field-name catalog and a locale-bound `t`.
-  const locale = useMetadataLocale();
   const tLocal = React.useCallback((k: string) => t(k, locale), [locale]);
   const fieldNames = React.useMemo(
     () => fields.filter((f) => !f.hidden).map((f) => f.name),
@@ -1145,7 +1151,12 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
                   <Select value={r.subject} onValueChange={(v) => update(rows.map((x, j) => j === i ? { ...x, subject: v } : x))} disabled={disabled}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue placeholder={tLocal('engine.inspector.condition.subjectPlaceholder')} /></SelectTrigger>
                     <SelectContent>
-                      {subjectOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      {subjectOptions.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                          {o.hint && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{o.hint}</span>}
+                        </SelectItem>
+                      ))}
                       {r.subject && !subjectOptions.some((o) => o.value === r.subject) && (
                         <SelectItem value={r.subject}>{r.subject}</SelectItem>
                       )}

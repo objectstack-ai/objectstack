@@ -1783,7 +1783,7 @@ const zh = {
   console: {
     studio: {
       title: 'Studio',
-      accessRequired: '你需要 Studio 访问权限才能打开 Studio。',
+      accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集”中通过权限集授予。',
     },
     saveAdvisoryTitle: '已保存 — 编辑检查提出了 {{count}} 条建议',
     saveAdvisoryTitle_one: '已保存 — 编辑检查提出了 {{count}} 条建议',
@@ -3310,9 +3310,9 @@ const zh = {
       detailChangedKeys: '其他变更：',
       detailNewKeys: '包含：',
       generatedGroup: '平台生成（{{n}}）',
-      confirmNote: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
-      confirmNote_one: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
-      confirmNote_other: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
+      confirmNote: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
+      confirmNote_one: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
+      confirmNote_other: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: '发布会逐个单独发布这 {{count}} 个待发布草稿：发布失败的草稿仍保持待发布，其余草稿照常发布。',
