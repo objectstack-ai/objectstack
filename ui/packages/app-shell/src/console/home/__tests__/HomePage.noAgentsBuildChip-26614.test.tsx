@@ -134,6 +134,10 @@ vi.mock('../../../preview/usePublishAllDrafts', () => ({
   usePublishAllDrafts: () => ({ publishAll: async () => ({ ok: true }), publishing: false }),
 }));
 
+// Home marks an opened notification read through the bell's own write
+// (`useInboxBell`); this harness serves no inbox feed, so the write is stubbed.
+vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead: vi.fn() }) }));
+
 import { HomePage } from '../HomePage';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../../views/studio-design/studioNewPackage';
 
