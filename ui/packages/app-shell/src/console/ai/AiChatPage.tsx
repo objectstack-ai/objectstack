@@ -2875,6 +2875,11 @@ export function ChatPane({
         planAnswerMessage={(question, option) =>
           outboundText('planAnswerMessage', { question, option })
         }
+        // objectstack#27480 — the two answers of the extend-or-new question an
+        // `iterate_or_new` plan asks: outbound text, so the conversation's
+        // language picks them, like every message above.
+        planExtendExistingMessage={(app) => outboundText('planExtendExistingMessage', { app })}
+        planBuildNewAppMessage={outboundText('planBuildNewAppMessage')}
         // Self-use "magic moment": when the plan enables it, publish the drafted
         // app automatically the moment the agent finishes — no manual click; the
         // user refreshes and sees it live WITH data. Same governed endpoint.

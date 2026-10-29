@@ -170,6 +170,21 @@ describe('@object-ui/i18n', () => {
       expect(msg).not.toMatch(GATE);
     });
 
+    it('the extend-or-new answers answer a question without reading as approval (objectstack#27480)', () => {
+      // An `iterate_or_new` plan overlaps an app that already exists, and its
+      // two answers tell the agent which way to go. Read as approval, either
+      // one would let the gate build the overlapping plan exactly as proposed —
+      // the one-click duplicate the question exists to prevent.
+      for (const lang of ['zh', 'en']) {
+        const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+        for (const key of ['console.ai.planExtendExistingMessage', 'console.ai.planBuildNewAppMessage']) {
+          const msg = i18n.t(key, { app: 'Library' });
+          expect(msg, `${lang} ${key} must not fall through to its raw key`).not.toBe(key);
+          expect(msg, `${lang} ${key} reads as approval to the cloud APPROVAL_RE`).not.toMatch(GATE);
+        }
+      }
+    });
+
     it('the inline HITL deny reason never reads as approval, in any pack (objectui#11667)', () => {
       // `console.ai.toolDenyReason` is a label — it follows the UI locale, so
       // all ten packs define it — but it does not stay on screen: the reject
