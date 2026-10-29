@@ -7,8 +7,12 @@ import {
   ActionGroupPropsSchema,
   ActionIconPropsSchema,
   ActionMenuPropsSchema,
+  ElementButtonPropsSchema,
+  RecordAlertActionSchema,
+  RecordQuickActionsProps,
 } from '../ui/component.zod.js';
 import { ActionSchema } from '../ui/action.zod.js';
+import { MIGRATIONS_BY_MAJOR } from '../migrations/registry.js';
 import { applyConversions } from './apply.js';
 import { ALL_CONVERSIONS } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
@@ -33,8 +37,11 @@ import type { ConversionNotice } from './types.js';
  *   - the authoring funnel does NOT replay it;
  *   - the same seam renames an `action:bar`'s own `variant` and its members',
  *     though the bar has no row: it draws its members through the blocks;
- *   - another component's `destructive` (the Button primitive's own word) and
- *     every other variant are left byte-identical with no notice;
+ *   - another component type's `variant`, even `destructive`, and every other
+ *     variant are left byte-identical with no notice;
+ *   - the D3 entry's text says what the rows measure: `element:button` spells
+ *     the arm `danger` and refuses `destructive`, and only the record blocks
+ *     that forward to the Button primitive still take its `destructive`;
  *   - idempotence, and copy-on-write identity for a page with nothing to do.
  */
 const ID = 'page-action-block-variant-destructive-to-danger';
@@ -177,7 +184,7 @@ describe('page-action-block-variant-destructive-to-danger (ADR-0087 D2)', () => 
   it.each([
     ['the canonical `danger`', { type: 'action:button', properties: { label: 'Purge', variant: 'danger' } }],
     ['another variant', { type: 'action:icon', properties: { icon: 'copy', variant: 'outline' } }],
-    ["an `element:button`'s `destructive` (the Button primitive's own word)", { type: 'element:button', properties: { label: 'Reset', variant: 'destructive' } }],
+    ["another component type's `destructive` (an `element:button`, whose own row refuses it)", { type: 'element:button', properties: { label: 'Reset', variant: 'destructive' } }],
     ["a `destructive` member on a block that has no members", { type: 'action:button', properties: { label: 'Go', actions: [{ variant: 'destructive' }] } }],
     ['a member that is not an object', { type: 'action:menu', properties: { actions: ['destructive'] } }],
     ['`actions` that is not a list', { type: 'action:group', properties: { actions: { variant: 'destructive' } } }],
@@ -214,5 +221,49 @@ describe('page-action-block-variant-destructive-to-danger (ADR-0087 D2)', () => 
     const out = applyConversions(authored, { onNotice: (n) => notices.push(n) });
     expect(out).toBe(authored);
     expect(notices.filter((n) => n.conversionId === ID)).toEqual([]);
+  });
+});
+
+/**
+ * The D3 entry's `reason` is compiled into the 18.x upgrade guide, so its
+ * sentence about the components this rename leaves alone is pinned against
+ * the rows it describes (#27589). It once said `element:button` keeps
+ * `destructive`, a value that row refuses: an author who followed the guide
+ * wrote a page the save door rejects.
+ */
+describe('the D3 entry says what the untouched components accept (#27589)', () => {
+  // Read from the generated chain, the source `build-upgrade-guide.ts` prints.
+  const refusedEntry = MIGRATIONS_BY_MAJOR[18]!.semantic.find(
+    (s) => s.id === 'ui-page-action-block-variant-destructive-refused',
+  )!;
+
+  it('is registered on the protocol 18 step', () => {
+    expect(refusedEntry, 'the D3 entry is on step 18').toBeDefined();
+  });
+
+  it('`element:button` spells the arm `danger` and refuses `destructive`', () => {
+    expect(ElementButtonPropsSchema.safeParse({ label: 'Reset', variant: 'danger' }).success).toBe(true);
+    expect(ElementButtonPropsSchema.safeParse({ label: 'Reset', variant: 'destructive' }).success).toBe(false);
+    expect(refusedEntry.reason).toContain(
+      '`element:button` already spells it `danger` (`ElementButtonPropsSchema.variant`) and refuses `destructive`, '
+        + 'so it is not touched.',
+    );
+  });
+
+  it('the record blocks that forward to the Button primitive still take its `destructive`', () => {
+    expect(RecordQuickActionsProps.safeParse({ actionNames: ['purge'], variant: 'destructive' }).success).toBe(true);
+    expect(RecordAlertActionSchema.safeParse({ actionName: 'purge', variant: 'destructive' }).success).toBe(true);
+    expect(refusedEntry.reason).toContain(
+      "`destructive` is the React Button primitive's own word; the two record blocks that forward a variant to that "
+        + 'primitive unchanged, `record:quick_actions` and a `record:alert` action, still take it and are not touched '
+        + 'either.',
+    );
+  });
+
+  it('no longer tells an author that `element:button` keeps `destructive`', () => {
+    for (const text of [refusedEntry.reason, refusedEntry.replacement, refusedEntry.acceptanceCriteria]) {
+      expect(text).not.toMatch(/keeps? `destructive`/);
+      expect(text).not.toContain('`element:button` and the like');
+    }
   });
 });
