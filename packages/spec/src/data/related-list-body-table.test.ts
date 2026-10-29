@@ -91,7 +91,7 @@ describe('fieldGroups[i].relatedList describes the body-table rule it enforces',
   it('says it names a body table only, and that any other list is refused with the remedy', () => {
     expect(text).toContain("It names a body table only (a FK declaring relatedList: 'primary', or a master_detail FK that sets inlineEdit and declares no relatedList)");
     expect(text).toContain('a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused');
-    expect(text).toContain("set relatedList: 'primary' on it, or remove the group's relatedList");
+    expect(text).toContain("set relatedList: 'primary' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group's relatedList");
   });
 
   it('no longer says relatedList: false still hides a placed table', () => {
