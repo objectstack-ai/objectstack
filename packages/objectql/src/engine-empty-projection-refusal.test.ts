@@ -216,3 +216,48 @@ describe('[#27008] the in-process engine refuses an empty projection', () => {
     expect(row).toEqual({ title: 'Ship', project_id: { name: 'Apollo' } });
   });
 });
+
+/**
+ * [#27165] A projection that is empty AFTER the unknown-plain-column tolerance
+ * dropped every entry is an empty projection, and is refused with the same
+ * refusal. Before, `find(obj, { fields: ['nope'] })` dropped `nope` (the #7589
+ * tolerance) and then fell back to every column: a narrower request answered
+ * wider. The tolerance itself stays for a mix of known and unknown columns.
+ */
+describe('[#27165] a projection whose every column is unknown is an empty projection', () => {
+  let engine: ObjectQL;
+  let reads: Array<{ object: string; fields: unknown }>;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const made = makeDriver();
+    reads = made.reads;
+    engine.registerDriver(made.driver, true);
+    await engine.init();
+    engine.registry.registerObject(projectObject, 'test-package');
+    engine.registry.registerObject(taskObject, 'test-package');
+  });
+
+  it('find with only unknown columns is refused 400 VALIDATION_ERROR, naming them, before any driver read', async () => {
+    const answer = await wireAnswer(engine.find('task_27008', { fields: ['nope', 'nada'] }));
+    expect(answer).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    expect(answer.message).toContain(declaredRefusal());
+    expect(answer.message).toMatch(/^ObjectQL\.find\('task_27008'\) names no field in 'fields': got \["nope","nada"\]/);
+    expect(reads).toEqual([]);
+  });
+
+  it('findOne with only unknown columns is refused the same way, before any driver read', async () => {
+    const answer = await wireAnswer(engine.findOne('task_27008', { where: { id: 't1' }, fields: ['nope'] }));
+    expect(answer).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    expect(answer.message).toContain(declaredRefusal());
+    expect(answer.message).toMatch(/^ObjectQL\.findOne\('task_27008'\) names no field in 'fields': got \["nope"\]/);
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: a mix of known and unknown columns keeps the tolerance and projects the known ones', async () => {
+    const [row] = await engine.find('task_27008', { fields: ['nope', 'title'] });
+    expect(row).toEqual({ title: 'Ship' });
+    const one = await engine.findOne('task_27008', { where: { id: 't1' }, fields: ['nope', 'title'] });
+    expect(one).toEqual({ title: 'Ship' });
+  });
+});

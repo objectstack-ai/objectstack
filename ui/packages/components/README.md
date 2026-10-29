@@ -6,7 +6,7 @@ Standard UI component library for Object UI, built with Shadcn UI + Tailwind CSS
 
 - 🎨 **Tailwind Native** - Built entirely with Tailwind CSS utility classes
 - 🧩 **Shadcn UI** - Based on Radix UI primitives for accessibility
-- 📦 **60+ Components** - Complete set of UI components (46 from Shadcn + 14 custom)
+- 📦 **Components** - A complete set of UI components, Shadcn's plus custom ones
 - ♿ **Accessible** - WCAG compliant components
 - 🎯 **Type-Safe** - Full TypeScript support
 - 🔌 **Extensible** - Easy to customize and extend

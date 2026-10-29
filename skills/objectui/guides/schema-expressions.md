@@ -228,7 +228,7 @@ ${DATEDIFF(startDate, endDate, 'days')}
 ${DATEFORMAT(createdAt, 'YYYY-MM-DD')}
 ```
 
-That is the whole registry — **30 functions**, all of them registered by
+That is the whole registry, all of it registered by
 `FormulaFunctions.registerDefaults()`. `register(name, fn)` upper-cases the
 name, so calls are case-insensitive.
 

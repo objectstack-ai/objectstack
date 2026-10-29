@@ -203,11 +203,11 @@ describe.each<Behaviour>(['whole row', 'projection', 'ladder'])(
     });
 
     it('door: an explicit projection naming ONLY a retired column', async () => {
-      // The engine's unknown-plain tolerance drops the name and reads the
-      // default projection; it must not read every column.
-      const rows = await h.engine.find(CONTACT, { fields: ['mailing_street'] });
-      expect(rows[0]).toMatchObject({ id: 'con_1', name: 'Ada' });
-      expectNoRetiredColumn(rows);
+      // The engine's unknown-plain tolerance drops the name, which leaves an
+      // empty projection: [#27165] refused, as `fields: []` is, so the
+      // retired column is never read and no row is served.
+      const err: any = await h.engine.find(CONTACT, { fields: ['mailing_street'] }).then(() => null, (e: unknown) => e);
+      expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
     });
 
     it('door: expand — the related record is the related object\'s declared fields', async () => {

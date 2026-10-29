@@ -205,7 +205,7 @@ through a new ADR — loader first, vocabulary second.
 | :--- | :--- | :--- |
 | Plugin Registration | ✅ | `manifest.zod.ts` — `objectstack.config.ts` plugin array, ordered initialization |
 | Lifecycle Hooks | ✅ | `plugin.zod.ts` — `init()` → `start()` → `healthCheck()` → `destroy()` |
-| Service Registry | ✅ | `service-registry.zod.ts` — 17 services across 13 plugins via `ctx.registerService()` |
+| Service Registry | ✅ | `service-registry.zod.ts` — services registered by plugins via `ctx.registerService()` |
 | Event Bus | ✅ | `events.zod.ts` — Pub/sub with pattern matching |
 | Dependency Resolution | ✅ | `manifest.zod.ts` (`dependencies`) + `packages/core/src/plugin-order.ts` — `resolvePluginOrder` topologically orders plugins from each composed plugin's `dependencies` / `optionalDependencies`, erroring on a cycle or a missing hard dependency. (The `PluginDependencyResolution` *config* schema this row used to cite was inert and went with the `loading` block in #4914 — the capability is real, the configuration surface was not) |
 | Health Checks | ✅ | `plugin.zod.ts` `healthCheck()` + kernel `checkPluginHealth()` (kernel-wired); `plugin-lifecycle-advanced.zod.ts` carries the vocabularies of the host-driven `PluginHealthMonitor` library (`@objectstack/core`), which no runtime composes — a host constructs it and passes `PluginHealthCheck` directly. (The `AdvancedPluginLifecycleConfig` container this row used to imply was retired in #11825 — zero readers) |
