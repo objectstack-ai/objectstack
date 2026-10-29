@@ -4729,6 +4729,7 @@ const pt = {
     on: "Ativado",
     off: "Desativado",
     notRunning: "Não está em execução aqui",
+    notRunningDeploymentPolicy: "Ativado, mas esta implantação não executa tarefas agendadas",
     clone: "Clonar",
     cloneTitle: "Clonar fluxo do pacote",
     cloneBody: "A cópia mantém toda a definição e exige um novo nome de máquina e um novo rótulo. Edite a cópia no Studio.",

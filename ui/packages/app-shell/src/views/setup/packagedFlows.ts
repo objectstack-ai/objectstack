@@ -63,8 +63,9 @@ export interface PackagedFlowRow {
    * row carried a non-empty string one, which the contract sends exactly when
    * the flow is enabled, declares a trigger, and that trigger is NOT armed on
    * this deployment. Read for its PRESENCE by {@link activationReading}: the
-   * flow does not run, whichever cause it is (objectui#13159). No cause is
-   * told apart on this page.
+   * flow does not run, whichever cause it is (objectui#13159). The page tells
+   * one cause apart: a `deployment_policy` row says what that policy is in
+   * plain words (objectstack#27378); every other cause reads alike.
    */
   unboundCause?: string;
 }

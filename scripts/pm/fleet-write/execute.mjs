@@ -212,12 +212,15 @@
  * platform lists them (`resultOf`). Both legs are paced like every other
  * write verb.
  *
- * ## The governed-review follow-up — after `pr_create` and after `pr_ready`
+ * ## The governed-review follow-up — after `pr_ready`, ⛔ never after `pr_create`
  *
  * Once a `governedReview` row's own requests have landed (`GOVERNED_REVIEW_OPS`
- * in `ops.mjs`, its header section of this name: `pr_create` at the number the
- * CREATE answered — ⛔ never one the request named — and `pr_ready` at the pull
- * the action names), `requestGovernedReview` reads the pull's file list in
+ * in `ops.mjs`, its header section of this name: `pr_ready` alone, at the pull
+ * the action names — the draft open summons nobody, because a human is asked
+ * only at the seat's hand-off, `pr_request_reviewers` after its `## 席位核对`
+ * ACCEPT and a same-head `## Contract review` PASS, so a `pr_create` is the
+ * create plus the legs the caller spelled and nothing reads the pull's files
+ * there), `requestGovernedReview` reads the pull's file list in
  * full (`readPullFiles`: every page, a cap that reds as a truncated subset) and
  * hands the paths to `governedReviewPlan`, a pure function over the register:
  * `governedPathsIn` scoped to `payload.repo` through `repoIdForSlug`, then
@@ -227,7 +230,7 @@
  * reads the pull (its author, pending `requested_reviewers`, `assignees`) and
  * its submitted reviews, and the plan is the `GOVERNED_APPROVERS` accounts
  * NOT in that union — requested, assigned or reviewed, the coverage the H43
- * patrol reads — so a re-run, a `pr_ready` after a `pr_create`, or the
+ * patrol reads — so a re-run, a `pr_ready` after the seat's hand-off, or the
  * platform's own CODEOWNERS request landing first costs no write. The pull's
  * own author is never requested (GitHub answers 422) — a missing approver
  * who IS the author is ASSIGNED instead, the documented fallback. The writes
@@ -1127,8 +1130,9 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         log(`  ⚠ action ${i + 1} ${action.op}: no annotation — ${scrub(why, [token])}; a seat reading this run finds the card on the board instead.`);
       }
     }
-    // The governed-review follow-up (header): after the row's own requests landed, at the number the CREATE
-    // answered for pr_create — never one the request named — and at the pull the action names for pr_ready.
+    // The governed-review follow-up (header): after the row's own requests landed, at the pull the action names
+    // (`pr_ready`); a row without `pull` would fall back to the opener's ANSWERED number — never one the request
+    // named — and no such row carries `governedReview` today: the draft open summons nobody.
     if (stoppedAt === null && GOVERNED_REVIEW_OPS.includes(action.op)) {
       const pull = Number.isInteger(action.pull) ? action.pull : opener?.json?.number;
       let followed;
@@ -1177,7 +1181,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
   'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
   "the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write": 10,
-  "the governed-review follow-up: after pr_create (at the number the create answered) and after pr_ready, the pull's file list is read in full; a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 29,
+  // 29 → 30 as the follow-up left the draft open: three pr_create NEGATIVE pins (no read, no request, no assignee) replace the create-side runs.
+  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 30,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
@@ -1291,13 +1296,12 @@ export async function selfTest() {
       const pr = await run(base([{ op: 'pr_create', title: 'T', head: 'h', base: 'main' }, { op: 'issue_create', title: 'I', body: 'B', labels: ['l'] }]), {
         ...allowed,
         [`POST /repos/${REPO}/pulls`]: { status: 201, json: { number: 9, html_url: 'https://github.test/p/9' } },
-        // The governed-review follow-up reads the created pull's files (its own battery below); an empty list is an ungoverned diff.
-        [`GET /repos/${REPO}/pulls/9/files`]: { status: 200, json: [] },
+        // ⛔ No governed-review follow-up after a create (its own battery below): the pull's files are never read here.
         [`POST /repos/${REPO}/issues`]: { status: 201, json: { number: 10, html_url: 'https://github.test/i/10' } },
       }, { file: paceFile });
       t('pr_create sends draft: true whatever was asked', writes(pr.seen)[0].body, { title: 'T', head: 'h', base: 'main', draft: true });
       t('issue_create sends title, body and the optional lists it was given', writes(pr.seen)[1].body, { title: 'I', body: 'B', labels: ['l'] });
-      t('…and the rows carry the numbers', pr.rows.map((r) => r.result), ['#9 https://github.test/p/9', 'governed review: no governed row hit across 0 file(s) — no review requested', '#10 https://github.test/i/10']);
+      t('…and the rows carry the numbers — and nothing between them: a create owes no governed-review row', pr.rows.map((r) => r.result), ['#9 https://github.test/p/9', '#10 https://github.test/i/10']);
     }
 
     // ── the run ─────────────────────────────────────────────────────────────
@@ -1450,8 +1454,8 @@ export async function selfTest() {
       const ASSIGN = (n) => `POST /repos/${REPO}/issues/${n}/assignees`;
       const create = (assignees, extra = []) => base([{ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', ...(assignees ? { assignees } : {}) }, ...extra]);
       const opened = { status: 201, json: { number: 22700, html_url: `https://github.test/${REPO}/pull/22700` } };
-      // The governed-review follow-up reads the created pull's files after the legs land (its own battery below); an empty list is an ungoverned diff.
-      const NOFILES = { [`GET /repos/${REPO}/pulls/22700/files`]: { status: 200, json: [] } };
+      // ⛔ No governed-review follow-up runs after a create (its own battery below): the pull's files are never read here.
+      const FILES22700 = `GET /repos/${REPO}/pulls/22700/files`;
       const assignedTo = (logins, n = 22700) => ({ status: 201, json: { number: n, html_url: `https://github.test/${REPO}/pull/${n}`, assignees: logins.map((login) => ({ login })) } });
 
       const legs = OPS.pr_create.requests({ op: 'pr_create', title: 'T', head: 'h', base: 'main', assignees: ['marchtian'] }, REPO);
@@ -1459,10 +1463,10 @@ export async function selfTest() {
       t('the fill: the placeholder becomes the positive integer the previous answer carries at that field, and nothing else about the leg changes', fillFromAnswer(legs[1], { call: 'POST /x', status: 201, json: { number: 22700 } }).req, { ...legs[1], path: `/repos/${REPO}/issues/22700/assignees` });
       t('…a previous answer without it — absent, a numeric string, zero, a float — or no previous answer at all, is a refusal to send that names the field', [{ json: {} }, { json: { number: '22700' } }, { json: { number: 0 } }, { json: { number: 1.5 } }, null].map((prev) => { const f = fillFromAnswer(legs[1], prev ? { call: 'POST /x', status: 201, ...prev } : null).fail; return typeof f === 'string' && f.includes('number'); }), [true, true, true, true, true]);
 
-      const ok = await run(create(['marchtian']), { ...allowed, ...NOFILES, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian']) }, { file: paceFile });
+      const ok = await run(create(['marchtian']), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian']) }, { file: paceFile });
       t('the run: the create, then the assignee POST at the number the create ANSWERED, both under the App token — exit 0', [ok.exit, writes(ok.seen).map((s) => [s.call, s.body, s.auth === `Bearer ${TOKEN}`])], [EXIT_OK, [[PULLS, { title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', draft: true }, true], [ASSIGN(22700), { assignees: ['marchtian'] }, true]]]);
-      t("…and the leg's row prints the pull and the assignees as the platform lists them, the governed-review verdict row behind it", ok.rows.map((r) => [r.action, r.op, r.call, r.status, r.result]), [[1, 'pr_create', PULLS, 201, `#22700 https://github.test/${REPO}/pull/22700`], [1, 'pr_create', ASSIGN(22700), 201, `#22700 https://github.test/${REPO}/pull/22700 · assignees marchtian`], [1, 'pr_create', `GET /repos/${REPO}/pulls/22700/files`, 200, 'governed review: no governed row hit across 0 file(s) — no review requested']]);
-      const plain = await run(create(null), { ...allowed, ...NOFILES, [PULLS]: opened }, { file: paceFile });
+      t("…and the leg's row prints the pull and the assignees as the platform lists them, with NO governed-review row behind it and the pull's files never read", [ok.rows.map((r) => [r.action, r.op, r.call, r.status, r.result]), ok.seen.some((s) => s.call === FILES22700)], [[[1, 'pr_create', PULLS, 201, `#22700 https://github.test/${REPO}/pull/22700`], [1, 'pr_create', ASSIGN(22700), 201, `#22700 https://github.test/${REPO}/pull/22700 · assignees marchtian`]], false]);
+      const plain = await run(create(null), { ...allowed, [PULLS]: opened }, { file: paceFile });
       t('no assignees, no second request: the create alone, as before', [plain.exit, writes(plain.seen).map((s) => s.call)], [EXIT_OK, [PULLS]]);
       const dropped = await run(create(['marchtian', 'nobody-here'], [{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian']), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
       t('⛔ a 201 whose answer lists fewer logins than sent is a FAILED action naming the one not assigned — never a quiet partial — and the stroke stops there', [dropped.exit, dropped.rows[1]?.result.includes('nobody-here not assigned'), dropped.rows[1]?.result.includes('lists marchtian'), writes(dropped.seen).length, dropped.summary.includes('1 later action(s) NOT attempted')], [EXIT_ACTION_FAILED, true, true, 2, true], dropped.rows[1]?.result);
@@ -1480,10 +1484,10 @@ export async function selfTest() {
       const both = OPS.pr_create.requests({ op: 'pr_create', title: 'T', head: 'h', base: 'main', assignees: ['marchtian'], labels: ['skip-changeset'] }, REPO);
       t('the table half: with labels the row carries a POST to the issue-labels path at the placeholder, fromAnswer number, the names as labelled — after the assignees leg when both are sent', both.map((r) => [r.verb, r.path, r.fromAnswer ?? null, r.assigned ?? null, r.labelled ?? null]), [['POST', `/repos/${REPO}/pulls`, null, null, null], ['POST', `/repos/${REPO}/issues/${answerPlaceholder('number')}/assignees`, 'number', ['marchtian'], null], ['POST', `/repos/${REPO}/issues/${answerPlaceholder('number')}/labels`, 'number', null, ['skip-changeset']]]);
       // The assignee answer here carries a DIFFERENT number: the label leg must still land on the pull the CREATE answered.
-      const labelled = await run(createWith({ assignees: ['marchtian'], labels: ['skip-changeset'] }), { ...allowed, ...NOFILES, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian'], 99999), [LABEL(22700)]: labelsOn(['skip-changeset', 'documentation']) }, { file: paceFile });
+      const labelled = await run(createWith({ assignees: ['marchtian'], labels: ['skip-changeset'] }), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian'], 99999), [LABEL(22700)]: labelsOn(['skip-changeset', 'documentation']) }, { file: paceFile });
       t("the run: the create, the assignee POST, then the label POST — at the number the CREATE answered, not the assignee answer's — exit 0", [labelled.exit, writes(labelled.seen).map((s) => [s.call, s.body])], [EXIT_OK, [[PULLS, { title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', draft: true }], [ASSIGN(22700), { assignees: ['marchtian'] }], [LABEL(22700), { labels: ['skip-changeset'] }]]]);
       t("…and the leg's row prints the labels as the platform lists them — more than sent (the Auto Label workflow's additive writes) is a landing, never a failure", labelled.rows[2], { action: 1, op: 'pr_create', call: LABEL(22700), status: 200, result: '2 label(s) now on the pull · labels skip-changeset, documentation' });
-      const labelsOnly = await run(createWith({ labels: ['skip-changeset'] }), { ...allowed, ...NOFILES, [PULLS]: opened, [LABEL(22700)]: labelsOn(['skip-changeset']) }, { file: paceFile });
+      const labelsOnly = await run(createWith({ labels: ['skip-changeset'] }), { ...allowed, [PULLS]: opened, [LABEL(22700)]: labelsOn(['skip-changeset']) }, { file: paceFile });
       t('labels without assignees: the create, then the label POST alone', [labelsOnly.exit, writes(labelsOnly.seen).map((s) => s.call)], [EXIT_OK, [PULLS, LABEL(22700)]]);
       const unlabelled = await run(createWith({ labels: ['skip-changeset', 'no-such-label'] }, [{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: opened, [LABEL(22700)]: labelsOn(['skip-changeset']), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
       t('⛔ a 200 whose answer lacks a name sent is a FAILED action naming it — never a quiet partial — and the stroke stops there', [unlabelled.exit, unlabelled.rows[1]?.result.includes('no-such-label not applied'), unlabelled.rows[1]?.result.includes('lists skip-changeset'), writes(unlabelled.seen).length, unlabelled.summary.includes('1 later action(s) NOT attempted')], [EXIT_ACTION_FAILED, true, true, 2, true], unlabelled.rows[1]?.result);
@@ -1494,7 +1498,7 @@ export async function selfTest() {
     }
 
     // ── the governed-review follow-up ───────────────────────────────────────
-    battery("the governed-review follow-up: after pr_create (at the number the create answered) and after pr_ready, the pull's file list is read in full; a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action");
+    battery("the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action");
     {
       const PULLS = `POST /repos/${REPO}/pulls`;
       const N = 25050;
@@ -1503,6 +1507,7 @@ export async function selfTest() {
       const REVIEWS = `GET /repos/${REPO}/pulls/${N}/reviews`;
       const REQUEST = `POST /repos/${REPO}/pulls/${N}/requested_reviewers`;
       const ASSIGN = `POST /repos/${REPO}/issues/${N}/assignees`;
+      const GRAPHQL = 'POST /graphql';
       // The approvers are READ from the constant, never restated: a change there moves every expectation here with it.
       const [A1, A2] = GOVERNED_APPROVERS;
       const URL = `https://github.test/${REPO}/pull/${N}`;
@@ -1513,11 +1518,14 @@ export async function selfTest() {
       const requestedAnswer = (logins) => ({ status: 201, json: { number: N, html_url: URL, requested_reviewers: logins.map((login) => ({ login })) } });
       const assignedAnswer = (logins) => ({ status: 201, json: { number: N, html_url: URL, assignees: logins.map((login) => ({ login })) } });
       const create = (extra = []) => base([{ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B' }, ...extra]);
-      const tierH = { [PULLS]: opened, [FILES]: files('docs/adr/0140-x.md', 'packages/core/src/a.ts'), [PULL]: pullOf(), [REVIEWS]: reviewsBy() };
+      const ready = (extra = []) => base([{ op: 'pr_ready', pull: N }, ...extra]);
+      const readied = { [GRAPHQL]: { status: 200, json: { data: { markPullRequestReadyForReview: { pullRequest: { number: N, isDraft: false } } } } } };
+      const tierHFiles = files('docs/adr/0140-x.md', 'packages/core/src/a.ts');
+      const tierH = { [PULL]: pullOf(), ...readied, [FILES]: tierHFiles, [REVIEWS]: reviewsBy() };
       const pick = (plan) => [plan.tier, plan.toRequest, plan.toAssign, plan.covered];
 
       // The table half.
-      t('the table half: GOVERNED_REVIEW_OPS is exactly pr_create and pr_ready — derived from the rows, never listed — and both spend issues (the assignee fallback) as alsoSpends', [GOVERNED_REVIEW_OPS, GOVERNED_REVIEW_OPS.every((op) => (OPS[op].alsoSpends ?? []).includes('issues'))], [['pr_create', 'pr_ready'], true]);
+      t("⭐ the table half: GOVERNED_REVIEW_OPS is exactly pr_ready — derived from the rows, never listed — pr_create is OFF it (the draft open summons nobody; the hand-off is the seat's pr_request_reviewers), and the row spends issues (the assignee fallback) as alsoSpends", [GOVERNED_REVIEW_OPS, OPS.pr_create.governedReview ?? null, GOVERNED_REVIEW_OPS.every((op) => (OPS[op].alsoSpends ?? []).includes('issues'))], [['pr_ready'], null, true]);
       t('…governedReviewRequests spells ONE requested_reviewers POST carrying the logins as requested and ONE issue-assignees POST carrying them as assigned; an empty list spells nothing', [governedReviewRequests(REPO, N, { reviewers: [A1, A2], assignees: [A2] }).map((r) => [r.verb, r.path, r.body, r.requested ?? null, r.assigned ?? null]), governedReviewRequests(REPO, N), governedReviewRequests(REPO, N, { reviewers: [], assignees: [] })], [[['POST', `/repos/${REPO}/pulls/${N}/requested_reviewers`, { reviewers: [A1, A2] }, [A1, A2], null], ['POST', `/repos/${REPO}/issues/${N}/assignees`, { assignees: [A2] }, null, [A2]]], [], []]);
       // The plan — pure, over the real register.
       t('the plan: a Tier H path with nobody covered requests every GOVERNED_APPROVERS account, in its order, and assigns nobody', pick(governedReviewPlan({ paths: ['docs/adr/0140-x.md', 'README.md'], repo: REPO })), [GOVERNED_TIER_H, [A1, A2], [], []]);
@@ -1531,43 +1539,46 @@ export async function selfTest() {
       t('…the approver list is INJECTED from GOVERNED_APPROVERS, never baked in: another list is requested in its place', governedReviewPlan({ paths: ['AGENTS.md'], repo: REPO, approvers: ['someone-else'] }).toRequest, ['someone-else']);
       t('…the verdict words name the tier, the rows hit, who is covered and what is sent', [governedReviewText(governedReviewPlan({ paths: ['docs/adr/0140-x.md'], repo: REPO, requested: [A1] }), { repo: REPO, files: 1 }), governedReviewText(governedReviewPlan({ paths: ['x.ts'], repo: REPO }), { repo: REPO, files: 1 })], [`governed review: Tier H (\`docs/adr/**\`×1) — \`${A1}\` already covered; requesting \`${A2}\``, 'governed review: no governed row hit across 1 file(s) — no review requested']);
 
-      // The run — pr_create.
-      const both = await run(create(), { ...allowed, ...tierH, [REQUEST]: requestedAnswer([A1, A2]) });
-      t('⭐ pr_create on a Tier H diff: the create, then ONE requested_reviewers POST naming BOTH approvers, at the number the create ANSWERED, under the App token — exit 0', [both.exit, writes(both.seen).map((s) => [s.call, s.body, s.auth === `Bearer ${TOKEN}`])], [EXIT_OK, [[PULLS, { title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', draft: true }, true], [REQUEST, { reviewers: [A1, A2] }, true]]], both.logs.join(' | '));
-      t('…the file list, the pull and its reviews were read first, in that order, and the rows say the verdict and the landing', [both.seen.map((s) => s.call), both.rows.map((r) => [r.action, r.op, r.call, r.status, r.result])], [[PERM, PULLS, FILES, PULL, REVIEWS, REQUEST], [[1, 'pr_create', PULLS, 201, `#${N} ${URL}`], [1, 'pr_create', FILES, 200, `governed review: Tier H (\`docs/adr/**\`×1) — requesting \`${A1}\`, \`${A2}\``], [1, 'pr_create', REQUEST, 201, `#${N} ${URL} · review requested from ${A1}, ${A2}`]]]);
-      const none = await run(create([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: opened, [FILES]: files('packages/core/src/a.ts', 'README.md'), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
-      t('a non-governed diff: the file list is read, NOTHING is requested, the row says so, and the later action runs', [none.exit, writes(none.seen).map((s) => s.call), none.rows[1]?.result, none.seen.some((s) => s.call === PULL)], [EXIT_OK, [PULLS, `POST /repos/${REPO}/issues/1/comments`], 'governed review: no governed row hit across 2 file(s) — no review requested', false]);
-      const tierS = await run(create(), { ...allowed, [PULLS]: opened, [FILES]: files('.claude/skills/pm-dispatch/SKILL.md') });
-      t("a Tier S diff (.claude/** alone) requests nobody — it lands on a seat's review of record", [tierS.exit, writes(tierS.seen).map((s) => s.call), tierS.rows[1]?.result], [EXIT_OK, [PULLS], "governed review: Tier S (`.claude/**`×1) lands on a seat's review of record — no review requested"]);
-      const authored = await run(create(), { ...allowed, ...tierH, [PULL]: pullOf({ author: A2 }), [REQUEST]: requestedAnswer([A1]), [ASSIGN]: assignedAnswer([A2]) });
-      t('⭐ the author-identity branch: a pull authored by an approver requests the OTHER approver and ASSIGNS the author — never a request naming the author', [authored.exit, writes(authored.seen).map((s) => [s.call, s.body]), authored.rows.map((r) => r.result).slice(1)], [EXIT_OK, [[PULLS, { title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', draft: true }], [REQUEST, { reviewers: [A1] }], [ASSIGN, { assignees: [A2] }]], [`governed review: Tier H (\`docs/adr/**\`×1) — requesting \`${A1}\` and assigning the author \`${A2}\` (a request naming the author is a 422)`, `#${N} ${URL} · review requested from ${A1}`, `#${N} ${URL} · assignees ${A2}`]]);
-      const covered = await run(create(), { ...allowed, ...tierH, [PULL]: pullOf({ requested: [A1] }), [REVIEWS]: reviewsBy(A2) });
-      t('⭐ idempotent: one approver already requested and the other already reviewed — ZERO writes beyond the create, the row says nothing to send, exit 0', [covered.exit, writes(covered.seen).map((s) => s.call), covered.rows[1]?.result], [EXIT_OK, [PULLS], `governed review: Tier H (\`docs/adr/**\`×1) — \`${A1}\`, \`${A2}\` already requested, assigned or reviewed; nothing to send`]);
-      const partial = await run(create(), { ...allowed, ...tierH, [PULL]: pullOf({ assignees: [A2] }), [REQUEST]: requestedAnswer([A1]) });
+      // The run — pr_create: NOTHING. The draft open summons nobody; the fake platform is primed with every answer the old follow-up would have asked for, and none is asked.
+      const draft = await run(create([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: opened, [FILES]: tierHFiles, [PULL]: pullOf(), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('⭐ pr_create on a Tier H diff: the create and NOTHING else — no file list, pull or review read, no request, no assignee — and the later action runs, exit 0', [draft.exit, draft.seen.map((s) => s.call), writes(draft.seen).map((s) => s.call), draft.rows.length, draft.rows[0]], [EXIT_OK, [PERM, PULLS, `POST /repos/${REPO}/issues/1/comments`], [PULLS, `POST /repos/${REPO}/issues/1/comments`], 2, { action: 1, op: 'pr_create', call: PULLS, status: 201, result: `#${N} ${URL}` }], draft.logs.join(' | '));
+      const draftAuthored = await run(create(), { ...allowed, [PULLS]: opened, [FILES]: tierHFiles, [PULL]: pullOf({ author: A2 }), [REVIEWS]: reviewsBy(), [ASSIGN]: assignedAnswer([A2]) });
+      t("…an approver-authored pull is not assigned at the open either: the author-is-approver fallback is the seat's hand-off stroke (`assign`), never the create's", [draftAuthored.exit, writes(draftAuthored.seen).map((s) => s.call), draftAuthored.seen.some((s) => [ASSIGN, REQUEST, FILES, REVIEWS].includes(s.call))], [EXIT_OK, [PULLS], false]);
+      const numberless = await run(create([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: { status: 201, json: { html_url: 'https://github.test/x' } }, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('a create whose answer carries no number owes no follow-up, so nothing fails on its account: the create row stands, no file list is read, the later action runs', [numberless.exit, numberless.rows.length, numberless.seen.some((s) => s.call.includes('/files'))], [EXIT_OK, 2, false], numberless.logs.join(' | '));
+
+      // The run — pr_ready, the one follow-up left.
+      const both = await run(ready(), { ...allowed, ...tierH, [REQUEST]: requestedAnswer([A1, A2]) });
+      t('⭐ pr_ready on a Tier H pull: the node id, the mutation, then ONE requested_reviewers POST naming BOTH approvers at the pull the action names, under the App token — exit 0', [both.exit, writes(both.seen).map((s) => [s.call, s.auth === `Bearer ${TOKEN}`]), writes(both.seen)[1]?.body], [EXIT_OK, [[GRAPHQL, true], [REQUEST, true]], { reviewers: [A1, A2] }], both.logs.join(' | '));
+      t('…the file list, the pull and its reviews were read first, in that order, and the rows say the verdict and the landing', [both.seen.map((s) => s.call), both.rows.slice(1).map((r) => [r.action, r.op, r.call, r.status, r.result])], [[PERM, PULL, GRAPHQL, FILES, PULL, REVIEWS, REQUEST], [[1, 'pr_ready', FILES, 200, `governed review: Tier H (\`docs/adr/**\`×1) — requesting \`${A1}\`, \`${A2}\``], [1, 'pr_ready', REQUEST, 201, `#${N} ${URL} · review requested from ${A1}, ${A2}`]]]);
+      const none = await run(ready([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('packages/core/src/a.ts', 'README.md'), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('a non-governed diff: the file list is read, NOTHING is requested, the row says so, and the later action runs', [none.exit, writes(none.seen).map((s) => s.call), none.rows[1]?.result, none.seen.filter((s) => s.call === PULL).length], [EXIT_OK, [GRAPHQL, `POST /repos/${REPO}/issues/1/comments`], 'governed review: no governed row hit across 2 file(s) — no review requested', 1]);
+      const tierS = await run(ready(), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('.claude/skills/pm-dispatch/SKILL.md') });
+      t("a Tier S diff (.claude/** alone) requests nobody — it lands on a seat's review of record", [tierS.exit, writes(tierS.seen).map((s) => s.call), tierS.rows[1]?.result], [EXIT_OK, [GRAPHQL], "governed review: Tier S (`.claude/**`×1) lands on a seat's review of record — no review requested"]);
+      const authored = await run(ready(), { ...allowed, ...tierH, [PULL]: pullOf({ author: A2 }), [REQUEST]: requestedAnswer([A1]), [ASSIGN]: assignedAnswer([A2]) });
+      t('⭐ the author-identity branch: a pull authored by an approver requests the OTHER approver and ASSIGNS the author — never a request naming the author', [authored.exit, writes(authored.seen).slice(1).map((s) => [s.call, s.body]), authored.rows.map((r) => r.result).slice(1)], [EXIT_OK, [[REQUEST, { reviewers: [A1] }], [ASSIGN, { assignees: [A2] }]], [`governed review: Tier H (\`docs/adr/**\`×1) — requesting \`${A1}\` and assigning the author \`${A2}\` (a request naming the author is a 422)`, `#${N} ${URL} · review requested from ${A1}`, `#${N} ${URL} · assignees ${A2}`]]);
+      const covered = await run(ready(), { ...allowed, ...tierH, [PULL]: pullOf({ requested: [A1] }), [REVIEWS]: reviewsBy(A2) });
+      t("⭐ idempotent — the seat's hand-off already made: one approver requested and the other already reviewed — ZERO writes beyond the mutation, the row says nothing to send, exit 0", [covered.exit, writes(covered.seen).map((s) => s.call), covered.rows[1]?.result], [EXIT_OK, [GRAPHQL], `governed review: Tier H (\`docs/adr/**\`×1) — \`${A1}\`, \`${A2}\` already requested, assigned or reviewed; nothing to send`]);
+      const partial = await run(ready(), { ...allowed, ...tierH, [PULL]: pullOf({ assignees: [A2] }), [REQUEST]: requestedAnswer([A1]) });
       t('…an assigned approver counts as covered, and only the missing one is requested', [partial.exit, writes(partial.seen).map((s) => [s.call, s.body]).slice(1)], [EXIT_OK, [[REQUEST, { reviewers: [A1] }]]]);
-      // The run — pr_ready.
-      const readyH = await run(base([{ op: 'pr_ready', pull: N }, { op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULL]: pullOf(), 'POST /graphql': { status: 200, json: { data: { markPullRequestReadyForReview: { pullRequest: { number: N, isDraft: false } } } } }, [FILES]: files('skills/objectstack-ui/SKILL.md'), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
-      t('⭐ pr_ready on a Tier H pull: the mutation lands, then the same follow-up at the pull the action names — both approvers requested, the later action still runs', [readyH.exit, readyH.seen.map((s) => s.call), writes(readyH.seen)[1]?.body], [EXIT_OK, [PERM, PULL, 'POST /graphql', FILES, PULL, REVIEWS, REQUEST, `POST /repos/${REPO}/issues/1/comments`], { reviewers: [A1, A2] }]);
-      const readyFailed = await run(base([{ op: 'pr_ready', pull: N }]), { ...allowed, [PULL]: pullOf(), 'POST /graphql': { status: 200, json: { data: { markPullRequestReadyForReview: { pullRequest: { number: N, isDraft: true } } } } }, [FILES]: files('docs/adr/0140-x.md') });
+      const readyFailed = await run(ready(), { ...allowed, [PULL]: pullOf(), [GRAPHQL]: { status: 200, json: { data: { markPullRequestReadyForReview: { pullRequest: { number: N, isDraft: true } } } } }, [FILES]: files('docs/adr/0140-x.md') });
       t('a pr_ready that did not land runs no follow-up: no file list read, no request', [readyFailed.exit, readyFailed.seen.some((s) => s.call === FILES)], [EXIT_ACTION_FAILED, false]);
       // The refusals.
-      const unread = await run(create([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: opened, [FILES]: { status: 503, json: { message: 'down' } }, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
-      t('⛔ an unreadable file list is a FAILED action — the pull is open (its row 201), the follow-up row names the read, exit 5, the later action never attempted — never a quiet "not governed"', [unread.exit, unread.rows.map((r) => [r.status, r.result.startsWith('FAILED') ? r.result.includes('file list could not be read') : r.result]), writes(unread.seen).map((s) => s.call), unread.summary.includes('1 later action(s) NOT attempted')], [EXIT_ACTION_FAILED, [[201, `#${N} ${URL}`], [503, true]], [PULLS], true], unread.rows[1]?.result);
+      const unread = await run(ready([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: { status: 503, json: { message: 'down' } }, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('⛔ an unreadable file list is a FAILED action — the pull is ready (its row landed), the follow-up row names the read, exit 5, the later action never attempted — never a quiet "not governed"', [unread.exit, unread.rows.map((r) => [r.status, r.result.startsWith('FAILED') ? r.result.includes('file list could not be read') : 'landed']), writes(unread.seen).map((s) => s.call), unread.summary.includes('1 later action(s) NOT attempted')], [EXIT_ACTION_FAILED, [[200, 'landed'], [503, true]], [GRAPHQL], true], unread.rows[1]?.result);
       const page = (n) => files(...Array.from({ length: n }, (_, i) => `packages/core/src/f${i}.ts`));
-      const twoPages = await run(create(), { ...allowed, [PULLS]: opened, [FILES]: [page(100), files('docs/adr/0140-x.md')], [PULL]: pullOf(), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]) });
-      t('the walk reads EVERY page: a governed path on the second page is found, and the pages were asked in order', [twoPages.exit, twoPages.seen.filter((s) => s.call === FILES).length, writes(twoPages.seen).map((s) => s.call)], [EXIT_OK, 2, [PULLS, REQUEST]]);
-      const truncated = await run(create(), { ...allowed, [PULLS]: opened, [FILES]: Array.from({ length: GOVERNED_REVIEW_FILES_PAGE_CAP }, () => page(100)) });
+      const twoPages = await run(ready(), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: [page(100), files('docs/adr/0140-x.md')], [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]) });
+      t('the walk reads EVERY page: a governed path on the second page is found, and the pages were asked in order', [twoPages.exit, twoPages.seen.filter((s) => s.call === FILES).length, writes(twoPages.seen).map((s) => s.call)], [EXIT_OK, 2, [GRAPHQL, REQUEST]]);
+      const truncated = await run(ready(), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: Array.from({ length: GOVERNED_REVIEW_FILES_PAGE_CAP }, () => page(100)) });
       t('⛔ a walk that would need more than the page cap is a FAILED action naming the cap — a truncated list is a subset, never "nothing governed"', [truncated.exit, truncated.seen.filter((s) => s.call === FILES).length, truncated.rows[1]?.result.includes(`${GOVERNED_REVIEW_FILES_PAGE_CAP}-page cap`)], [EXIT_ACTION_FAILED, GOVERNED_REVIEW_FILES_PAGE_CAP, true], truncated.rows[1]?.result);
-      const short = await run(create(), { ...allowed, ...tierH, [REQUEST]: requestedAnswer([A1]) });
+      const short = await run(ready(), { ...allowed, ...tierH, [REQUEST]: requestedAnswer([A1]) });
       t('⛔ a 201 whose answer lists fewer reviewers than sent is a FAILED action naming the one not requested — never a quiet partial', [short.exit, short.rows[2]?.result.includes(`${A2} not requested`), short.rows[2]?.result.includes(`lists ${A1}`)], [EXIT_ACTION_FAILED, true, true], short.rows[2]?.result);
-      const refused = await run(create(), { ...allowed, ...tierH, [REQUEST]: { status: 422, json: { message: 'Reviews may only be requested from collaborators.' } } });
-      t("a refused request is a FAILED action with the platform's sentence, the pull already open", [refused.exit, refused.rows.map((r) => r.status), refused.rows[2]?.result.includes('Reviews may only be requested from collaborators')], [EXIT_ACTION_FAILED, [201, 200, 422], true]);
-      const noPull = await run(create(), { ...allowed, ...tierH, [PULL]: { status: 503, json: { message: 'down' } } });
-      const noReviews = await run(create(), { ...allowed, ...tierH, [REVIEWS]: { status: 503, json: { message: 'down' } } });
+      const refused = await run(ready(), { ...allowed, ...tierH, [REQUEST]: { status: 422, json: { message: 'Reviews may only be requested from collaborators.' } } });
+      t("a refused request is a FAILED action with the platform's sentence, the pull already ready", [refused.exit, refused.rows.map((r) => r.status), refused.rows[2]?.result.includes('Reviews may only be requested from collaborators')], [EXIT_ACTION_FAILED, [200, 200, 422], true]);
+      const noPull = await run(ready(), { ...allowed, ...tierH, [PULL]: [pullOf(), { status: 503, json: { message: 'down' } }] });
+      const noReviews = await run(ready(), { ...allowed, ...tierH, [REVIEWS]: { status: 503, json: { message: 'down' } } });
       t('an unreadable pull or review list on a Tier H hit is FAILED naming the read — never a request sent blind, never a quiet skip', [noPull.exit, noPull.rows[1]?.result.includes('could not be re-read'), noReviews.exit, noReviews.rows[1]?.result.includes('reviews could not be read'), [...noPull.seen, ...noReviews.seen].some((s) => s.call === REQUEST)], [EXIT_ACTION_FAILED, true, EXIT_ACTION_FAILED, true, false]);
-      const numberless = await run(create([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: { status: 201, json: { html_url: 'https://github.test/x' } }, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
-      t('a create whose answer carries no number: the follow-up cannot run — FAILED, its row says not sent, no file list read, the later action never attempted', [numberless.exit, numberless.rows[1]?.status, numberless.rows[1]?.result.includes('without a positive integer number'), numberless.seen.some((s) => s.call.includes('/files')), writes(numberless.seen).map((s) => s.call)], [EXIT_ACTION_FAILED, 'not sent', true, false, [PULLS]]);
-      t('no annotation is emitted for the follow-up — neither row is an annotated op', [both.annotations, authored.logs.some((l) => l.startsWith('::notice'))], [[], false]);
+      t('no annotation is emitted for the follow-up — pr_ready is not an annotated op', [both.annotations, authored.logs.some((l) => l.startsWith('::notice'))], [[], false]);
     }
 
     // ── the transfer ────────────────────────────────────────────────────────
@@ -1998,8 +2009,7 @@ export async function selfTest() {
         [`POST /repos/${REPO}/issues/1/labels`]: { status: 200, json: [{ name: 'x' }] },
         [`PATCH /repos/${REPO}/issues/1`]: { status: 200, json: { number: 1, html_url: issueUrl(REPO, 1) } },
         [`POST /repos/${REPO}/pulls`]: { status: 201, json: { number: 9, html_url: `https://github.test/${REPO}/pull/9` } },
-        // The governed-review follow-up reads the created pull's files (its own battery); an empty list is an ungoverned diff, and it emits no note either.
-        [`GET /repos/${REPO}/pulls/9/files`]: { status: 200, json: [] },
+        // ⛔ No governed-review follow-up after a create (its own battery): the pull's files are never read, and no note is emitted.
       }, { file: paceFile });
       t('no other op emits one — a comment, labels, a patch and a NEW PULL REQUEST all landed, zero workflow commands, zero notes', [quiet.exit, notices(quiet), quiet.annotations], [EXIT_OK, [], []]);
 
@@ -2096,7 +2106,7 @@ export async function selfTest() {
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
       'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, ' +
-      'a governed-review follow-up after pr_create and pr_ready that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
+      'a governed-review follow-up after pr_ready alone (the draft open summons nobody — a human is asked at the seat\'s hand-off) that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
       "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, " +
       "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, one summary row per request, " +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
