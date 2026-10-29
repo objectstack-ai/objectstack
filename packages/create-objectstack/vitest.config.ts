@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
-import { memoryBackedTmpEnv } from '../../vitest.memory-tmp.mts';
+import { memoryBackedTmpEnv } from '../../scripts/vitest-memory-tmp.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,11 +40,11 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, 'src/templates/**'],
     environment: 'node',
     // Every scaffold these tests write lands under `os.tmpdir()`, children
-    // included (#27306; vitest.memory-tmp.mts). The cost on a loaded disk is
-    // not fsync (four calls in the whole suite, by strace) but creating and
-    // removing those trees: ~4,000 unlinks and ~6,000 rmdirs. Measured beside
-    // four `dd … conv=fsync` writers on the same disk: all 301 cases passed,
-    // but the `afterAll` that removes the scaffolded tree in
+    // included (#27306; scripts/vitest-memory-tmp.mjs). The cost on a loaded
+    // disk is not fsync (four calls in the whole suite, by strace) but creating
+    // and removing those trees: ~4,000 unlinks and ~6,000 rmdirs. Measured
+    // beside four `dd … conv=fsync` writers on the same disk: all 301 cases
+    // passed, but the `afterAll` that removes the scaffolded tree in
     // `created-summary.test.ts` and `scaffold-skills-single-copy.test.ts` ran
     // past its 10 s hook budget, so two files failed with no failed case, and
     // the run took 236 s against 21 s idle. With TMPDIR there, under the same

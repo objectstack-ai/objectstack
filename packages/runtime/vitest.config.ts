@@ -34,7 +34,7 @@
 // author can see it.
 
 import { configDefaults, defineConfig } from 'vitest/config';
-import { memoryBackedTmpEnv } from '../../vitest.memory-tmp.mts';
+import { memoryBackedTmpEnv } from '../../scripts/vitest-memory-tmp.mjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseCLI } from 'vitest/node';
@@ -234,7 +234,7 @@ export default defineConfig({
     // check-registry-log-declared / check-console-intercept-disarm).
     //
     // Each project's `env` also moves `os.tmpdir()` onto /dev/shm when it is
-    // writable (#27306; vitest.memory-tmp.mts): the package-lifecycle
+    // writable (#27306; scripts/vitest-memory-tmp.mjs): the package-lifecycle
     // integration tests keep their SQLite databases in an `mkdtemp` under it.
     // Measured on the 51 test files that do, beside four `dd … conv=fsync`
     // writers on the same disk: 25 of 685 cases timed out across 7 files

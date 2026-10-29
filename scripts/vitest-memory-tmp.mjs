@@ -10,7 +10,11 @@ import { accessSync, constants } from 'node:fs';
 //
 // Not a key of `vitest.preset.mts`: that preset carries one setting for every
 // re-exporter, and this one belongs only to the suites whose wall time was
-// measured against the disk.
+// measured against the disk. A `.mjs` with a hand-written `.d.mts` beside it,
+// like `tsup-drop-sources-content.mjs`: a package's `tsconfig.test.json`
+// type-checks its `vitest.config.ts`, where a `.mts` import path is TS5097
+// and an untyped `.mjs` one is TS7016 (`check:declaration-mirrors` holds the
+// pair in step).
 //
 // ## Why
 //
@@ -31,7 +35,8 @@ import { accessSync, constants } from 'node:fs';
 // directory: the setting is absent there, not an error.
 const MEMORY_BACKED_TMP = '/dev/shm';
 
-function writableDir(dir: string): boolean {
+/** @param {string} dir */
+function writableDir(dir) {
   try {
     accessSync(dir, constants.W_OK);
     return true;
@@ -40,6 +45,7 @@ function writableDir(dir: string): boolean {
   }
 }
 
-export function memoryBackedTmpEnv(): Record<string, string> {
+/** @returns {Record<string, string>} */
+export function memoryBackedTmpEnv() {
   return writableDir(MEMORY_BACKED_TMP) ? { TMPDIR: MEMORY_BACKED_TMP } : {};
 }

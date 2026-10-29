@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { defineConfig } from 'vitest/config';
-import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
+import { memoryBackedTmpEnv } from '../../../scripts/vitest-memory-tmp.mjs';
 
 // This package re-exported the shared preset until #27076. It now carries one
 // key of its own, `test.env.TMPDIR`, so the preset's one setting is restated
@@ -28,8 +28,8 @@ import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
 // (bytes on disk, atomic rename, the flush chain, the failure report) is
 // unchanged; only the wait for unrelated I/O is gone. Budgets, fixtures and
 // cases are untouched. The setting itself, and the host without a writable
-// /dev/shm, live in vitest.memory-tmp.mts, shared since #27306 with the other
-// packages whose tests write SQLite files under `os.tmpdir()`.
+// /dev/shm, live in scripts/vitest-memory-tmp.mjs, shared since #27306 with the
+// other packages whose tests write SQLite files under `os.tmpdir()`.
 
 export default defineConfig({
   test: {

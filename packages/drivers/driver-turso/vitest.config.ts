@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { defineConfig } from 'vitest/config';
-import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
+import { memoryBackedTmpEnv } from '../../../scripts/vitest-memory-tmp.mjs';
 
 // This package re-exported the shared preset until #27306. It now carries one
 // key of its own, `test.env`, so the preset's one setting is restated below (a
@@ -10,7 +10,7 @@ import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
 // under the bare re-export.
 //
 // `test.env` moves `os.tmpdir()` onto /dev/shm when it is writable
-// (vitest.memory-tmp.mts): the local and remote-face tests open `file:`
+// (scripts/vitest-memory-tmp.mjs): the local and remote-face tests open `file:`
 // databases in an `mkdtemp` under it. Measured on the 14 test files that do,
 // beside four `dd … conv=fsync` writers on the same disk: 21 of 502 cases
 // timed out across 4 files (inherited-members, external-object-parity,

@@ -6,7 +6,7 @@
 // incident that taught that).
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
-import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
+import { memoryBackedTmpEnv } from '../../../scripts/vitest-memory-tmp.mjs';
 
 export default defineConfig({
   test: {
@@ -20,12 +20,12 @@ export default defineConfig({
     // #13517: quiet the registry's per-item registration chatter — the
     // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
     // default. Enforced by scripts/check-registry-log-declared.mjs.
-    // TMPDIR on /dev/shm when it is writable (#27306; vitest.memory-tmp.mts):
-    // the two tests that open a SQLite file do it in an `mkdtemp` under it.
-    // Measured beside four `dd … conv=fsync` writers on the same disk: green
-    // in that run, but the slowest case went from 0.17 s idle to 3.04 s, 61%
-    // of its 5 s budget, for no change in the code; with TMPDIR there, under
-    // the same writers, 0.15 s.
+    // TMPDIR on /dev/shm when it is writable (#27306;
+    // scripts/vitest-memory-tmp.mjs): the two tests that open a SQLite file do
+    // it in an `mkdtemp` under it. Measured beside four `dd … conv=fsync`
+    // writers on the same disk: green in that run, but the slowest case went
+    // from 0.17 s idle to 3.04 s, 61% of its 5 s budget, for no change in the
+    // code; with TMPDIR there, under the same writers, 0.15 s.
     env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
   },
   resolve: {
