@@ -323,7 +323,15 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
             // in `rest-server.ts`), which refuses a credential validated in a
             // different environment. Same status as `__authEnvironmentId`.
             '__environmentId',
+            // The FOURTH post-assembly internal key: which credential admitted
+            // the caller (`'session'` here), as the shared resolver told this
+            // door through `onAdmission`. Read by ONE reader inside
+            // `rest-server.ts`, `enforceApiAccess` (changing an API key is a
+            // signed-in-session act, `apiKeyManagementCredentialRefusal`); same
+            // status as `__authEnvironmentId`: not an `ExecutionContext` field.
+            '__admittedBy',
         ]));
+        expect(ctx.__admittedBy).toBe('session');
     });
 
     it('still WITHHOLDS accessToken — the named per-face divergence, not an omission', async () => {

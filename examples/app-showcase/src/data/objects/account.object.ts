@@ -34,11 +34,14 @@ export const Account = ObjectSchema.create({
   // every surface, no per-page config.
   highlightFields: ['status', 'industry', 'annual_revenue'],
 
-  // Show the record **History tab** (audit-trail UI). The console gates the tab
-  // on object-level `enable.trackHistory` (RecordDetailView) — audit *capture*
-  // is always on, but the tab is opt-in — so without this the tab never renders
-  // and the feature is undemonstrable. Paired with the per-field `trackHistory`
-  // on `industry` / `status` below so those changes get summarized diffs
+  // Show the record's field-change history (audit-trail UI). The console reads
+  // `sys_audit_log` for the record page only on object-level
+  // `enable.trackHistory` (RecordDetailView) and lists the rows as change lines
+  // under the timeline stream's Changes chip (record page v3 draws no tab
+  // named History). Audit *capture* is always on, but the display is opt-in,
+  // so without this the feature is undemonstrable. Paired with the per-field
+  // `trackHistory` on `industry` / `status` below so those changes get
+  // summarized diffs
   // (display values, not raw ids; computed fields excluded — #2691/#3293).
   enable: { trackHistory: true },
 

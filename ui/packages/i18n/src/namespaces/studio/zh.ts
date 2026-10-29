@@ -2000,9 +2000,9 @@ const STUDIO_ZH: Record<string, string> = {
     '记录可见性通过主从(master-detail)关系继承自父级(主)记录。',
   'engine.studio.settings.capabilities': '能力开关(enable.*)',
   'engine.studio.settings.capabilitiesHint': '记录页能力 —— 这里的每个开关都由运行时真实强制',
-  'engine.studio.settings.capTrackHistory': '历史标签页(trackHistory)',
+  'engine.studio.settings.capTrackHistory': '字段变更历史(trackHistory)',
   'engine.studio.settings.capTrackHistoryDesc':
-    '在记录页显示只读的历史标签页(审计轨迹)。配合字段级历史跟踪可得到可读的字段级差异;审计采集本身始终开启(合规要求)。',
+    '显示记录的字段变更:在默认记录页上,它们并入记录唯一的时间线,归在「变更」筛选下。配合字段级历史跟踪可选择汇总哪些字段的差异;审计采集本身始终开启(合规要求)。',
   'engine.studio.settings.capFiles': '附件(files)',
   'engine.studio.settings.capFilesDesc':
     '记录页通用附件面板(上传/下载/删除)。关闭后服务端同时拒绝指向该对象的新附件。',
@@ -2681,7 +2681,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.needsRuleField': '规则「{rule}」需要选择一个字段',
   'engine.studio.held.needsRuleMessage': '规则「{rule}」需要一条错误消息',
   'engine.studio.held.widgetNeedsInput': '组件「{widget}」的「{input}」需要填写',
+  // objectstack#27464 — a navigation rename typed but not committed yet.
+  'engine.studio.held.navRename': '导航项「{item}」的重命名尚未完成',
   'engine.studio.held.celInvalid': '字段「{field}」的表达式有错误需要修正',
+  'engine.studio.held.celInvalidRule': '规则「{rule}」的表达式有错误需要修正',
+  'engine.studio.held.celInvalidAction': '动作「{action}」的表达式有错误需要修正',
+  'engine.studio.held.inspectorInvalid': '「{item}」在检查器中有错误需要修正',
   'engine.studio.held.line': '尚未保存：{clause}。更改已保留在此处，补全后会自动保存。',
   'engine.studio.held.publish': '未发布：{clause}，该更改尚未保存。请先补全，再发布。',
   'engine.studio.held.inputHint': '必填。填写后才会保存更改。',

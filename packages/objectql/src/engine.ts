@@ -125,6 +125,7 @@ import {
   stripSearchCompanionFromRead,
   type PendingSecretRow,
   type SecretHandleSlot,
+  type StoredRowsReader,
 } from './engine-secret-internal-fields.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
@@ -10575,7 +10576,16 @@ export class ObjectQL implements IObjectQLEngine {
    *    (maintainer ruling 2026-08-13 on #8559). The `password` half of the same
    *    ruling lands at its own seam — {@link refuseEmptyPasswordFields} — since
    *    the two types share the read mask but not this encryption path.
-   *  - Secret value already a ref (re-save of an unchanged ref) ⇒ left as-is.
+   *  - Secret value already a ref ⇒ [#27582] a non-system write may only seal
+   *    a new value or keep its own record's ref. From the system principal
+   *    (`context.isSystem === true`) it is left as-is, as it always was. From
+   *    any other caller it is kept only when every row the write lands on
+   *    already holds exactly that ref in that column — read from `storedRows`,
+   *    which each call site supplies (none for an insert, the pre-image for a
+   *    by-id update, the matched rows for a predicate update) — and then the
+   *    key is dropped, as the echoed mask is. Any other ref is REFUSED with
+   *    {@link SecretRefWriteError} (ADR-0112 `VALIDATION_ERROR`/400), one
+   *    answer whatever the ref names.
    *  - **Fail-closed:** any other secret value with no CryptoProvider registered,
    *    or no reachable `sys_secret` store, THROWS — never persists cleartext.
    *    (A `password` field needs no CryptoProvider — it is stored as-is.)
@@ -10585,6 +10595,7 @@ export class ObjectQL implements IObjectQLEngine {
     row: Record<string, unknown>,
     context: ExecutionContext | undefined,
     driverOptions: unknown,
+    storedRows: StoredRowsReader,
   ): Promise<PendingSecretRow[]> {
     // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
     const readRegistry = () => this._registry;
@@ -10594,7 +10605,7 @@ export class ObjectQL implements IObjectQLEngine {
       get cryptoProvider() { return readCryptoProvider(); },
       getDriver: (...a) => this.getDriver(...a),
     };
-    return encryptSecretFields.call(host, object, row, context, driverOptions);
+    return encryptSecretFields.call(host, object, row, context, driverOptions, storedRows);
   }
 
   /**
@@ -15374,7 +15385,8 @@ export class ObjectQL implements IObjectQLEngine {
             // carries the secret-arm refusal). Same try, so partial mode
             // reports either refusal per-row instead of killing the batch.
             this.refuseEmptyPasswordFields(object, rows[i]);
-            sealedSecrets[i] = await this.encryptSecretFields(object, rows[i], opCtx.context, driverOptions);
+            // [#27582] A new record holds no ref of its own: no stored rows.
+            sealedSecrets[i] = await this.encryptSecretFields(object, rows[i], opCtx.context, driverOptions, async () => []);
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -17029,7 +17041,8 @@ export class ObjectQL implements IObjectQLEngine {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
-               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
+               // [#27582] This record's own stored row is the pre-image read above.
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options, async () => [priorRecord]);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a
@@ -17426,7 +17439,9 @@ export class ObjectQL implements IObjectQLEngine {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
-               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
+               // [#27582] The rows this write lands on are the matched rows: the
+               // D7 memo, read here only when a non-system payload carries a ref.
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options, readPriorRows);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a

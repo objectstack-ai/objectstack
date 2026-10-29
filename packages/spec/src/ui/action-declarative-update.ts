@@ -121,7 +121,7 @@ function updateOperationExecutorRefusal(surface: DeclarativeUpdateSurface, execu
     : `\`${surface.executorKey}\` names that route or nothing`;
   return "`operation: 'update'` is performed by the platform action route — the route "
     + `${aSpelled(surface, 'script')} action posts to — so ${keep}; leave it off. `
-    + `${ASpelled(surface, executor)} action dispatches on \`target\` (\`api\` makes the browser call the endpoint itself) `
+    + `${ASpelled(surface, executor)} action dispatches on \`target\` (\`api\` calls the endpoint it names) `
     + 'and never performs the write.';
 }
 

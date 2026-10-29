@@ -66,6 +66,16 @@ const WHERE: Readonly<Record<Slot, string>> = {
   'validation condition': "object 'fx_probe' · validation 'probe_rule'",
 };
 
+/**
+ * The door finding's `path`: the `where` prose on the two field slots, and on
+ * the validation rule (#27643) the judged slot's key path, its top-level index
+ * re-spelled by name at the door.
+ */
+const DOOR_PATH: Readonly<Record<Slot, string>> = {
+  ...WHERE,
+  'validation condition': 'objects.fx_probe.validations[0].condition',
+};
+
 const SLOTS = Object.keys(WHERE) as Slot[];
 
 /** Every member spelling that names `f`; the dot row is the one that was already refused. */
@@ -103,7 +113,7 @@ describe('an undeclared field is refused in every member spelling, at both doors
         expect(door.rulesRun).toContain('validateStackExpressions');
         const errs = expressionFindings(door.errors);
         expect(errs, dump(door)).toHaveLength(1);
-        expect(errs[0]).toMatchObject({ severity: 'error', where: WHERE[slot], path: WHERE[slot] });
+        expect(errs[0]).toMatchObject({ severity: 'error', where: WHERE[slot], path: DOOR_PATH[slot] });
         expect(errs[0]!.message).toContain('unknown field `zz_typo`');
       });
     }

@@ -274,7 +274,12 @@ describe('names who the pending step waits on (objectui#12482)', () => {
       pending_approvers: [id, id, id],
       pending_approver_names: { [id]: 'Ada Lovelace' },
     });
-    expect(chips().map((chip) => chip.textContent)).toEqual(['Ada Lovelace×3']);
+    // The count is drawn in words (objectstack#27615). This render runs with no
+    // i18next instance, so the inline default is drawn: the slot family's
+    // count-invariant row.
+    expect(chips().map((chip) => chip.textContent)).toEqual([
+      `Ada Lovelace· ${builtInLocales.en.approvalsInbox.approverSlots.replace('{{count}}', '3')}`,
+    ]);
     expect(chips()[0].getAttribute('title')).toBe(id);
     expect(panelText()).not.toContain('qFpo');
   });

@@ -50,6 +50,7 @@ vi.mock('sonner', () => ({
 
 import { AdapterCtx, MetadataCtx, useAdapter } from '@object-ui/react';
 import { I18nProvider, type I18nConfig } from '@object-ui/i18n';
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { RecordDetailView } from '@object-ui/app-shell';
 import { PageSchema } from '@objectstack/spec/ui';
 import { APPROVAL_ACTION_OBJECT, APPROVAL_REQUEST_OBJECT } from './approvalRequestsDataSource';
@@ -353,7 +354,11 @@ describe('the served request page names who the pending step waits on (objectui#
 
   it("objectui#12077's case: one approver in three quorum slots is named once, with a count, and the id is printed nowhere", async () => {
     const panel = await openServedPage(QUORUM_ROW);
-    expect(chips(panel).map((chip) => chip.textContent)).toEqual(['Ada Lovelace×3']);
+    // The count is drawn in the en pack's words for it (objectstack#27615):
+    // the `approverSlots` family's plural row at 3, never a bare "×3".
+    const words = builtInLocales.en.approvalsInbox.approverSlots_other.replace('{{count}}', '3');
+    expect(chips(panel).map((chip) => chip.textContent)).toEqual([`Ada Lovelace· ${words}`]);
+    expect(pageText()).not.toContain('×3');
     expect(pageText()).not.toContain('qFpo');
     expect(pageText().match(/Ada Lovelace/g) ?? []).toHaveLength(1);
   });
