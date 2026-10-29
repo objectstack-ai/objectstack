@@ -474,9 +474,11 @@ export class SqlHttpOutbox implements IHttpOutbox {
      * only site in this class that is tenant-SCOPED rather than declared
      * global.
      *
-     * `POST /api/v1/webhooks/redeliver` serves any authenticated user, so on a
-     * walled deployment the caller's organization is exactly the predicate
-     * this write is missing — and `options.tenantId` supplies it, to the reads
+     * `POST /api/v1/webhooks/redeliver` serves a signed-in caller entitled to
+     * administer webhooks, in the organization that caller was admitted in
+     * (`plugin-webhooks`' `redeliver-entitlement.ts`), so on a walled
+     * deployment the caller's organization is exactly the predicate this
+     * write is missing — and `options.tenantId` supplies it, to the reads
      * as well as the write. ⛔ `bypassTenantAudit` is NOT an option here: the
      * two produce the same silence in the log, and the audit line is the only
      * thing that would ever report this hole. See {@link RedeliverOptions}.

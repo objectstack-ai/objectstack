@@ -582,7 +582,7 @@
       "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -614,7 +614,7 @@
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data (a `$filter` is a JSON filter object): one row per delivery with status/attempts/response_code",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
-        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as an authenticated user: capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
+        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as the seeded admin (the door is gated on webhook-administration access): capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
         "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there with `active` true, and the switch is still in force. No public door reads a declared webhook's switch: GET /api/v1/meta/webhook/showcase_task_changed serves the declaration, which answers isActive:false by design (the activation ledger is separate, ADR-0126 §4), so the in-force half is read off a fresh sys_http_delivery row for a task change made after the reboot (the switch is deployment state; the declaration is code)"
       ],
       "acceptance": [
@@ -643,9 +643,9 @@
           "evidence": "headers + delivery rows"
         },
         {
-          "clause": "POST /api/v1/webhooks/redeliver replays a TERMINAL delivery (status success/failed/dead with attempts > 0): the row resets and re-dispatches carrying the STORED HMAC signature byte-for-byte (signed at enqueue, replayed verbatim — still verifiable against the secret), the row updates, and the response is { id, status }. The refusal matrix never 500s for a caller-fixable state: anonymous → 401 UNAUTHENTICATED; non-JSON → 400 INVALID_REQUEST; missing deliveryId → 400 MISSING_REQUIRED_FIELD; unknown OR cross-organization deliveryId → 404 RESOURCE_NOT_FOUND (the caller's activeOrganizationId is threaded into the lookup, #10740 — another org's row is simply not found, not forbidden-with-a-hint); non-terminal row → 409 DELIVERY_NOT_ELIGIBLE; a PARKED row (attempts === 0, recordUndeliverable's record of a delivery never prepared) → 409 DELIVERY_NEVER_SENT, because redelivering it would be an UNSIGNED first delivery (#7799/#8069 — the redeliver guard also refuses when the signing configuration is gone, fail-closed on a guard that throws). ⚠ PIN THE POSTURE: there is deliberately NO capability gate above the auth floor — 'every authenticated user counts' (the plugin's own words); a non-admin session redelivering successfully is the designed behavior, not a missing-gate finding, and a run must neither file it nor 'fix' it",
+          "clause": "POST /api/v1/webhooks/redeliver replays a TERMINAL delivery (status success/failed/dead with attempts > 0): the row resets and re-dispatches carrying the STORED HMAC signature byte-for-byte (signed at enqueue, replayed verbatim — still verifiable against the secret), the row updates, and the response is { id, status }. The refusal matrix never 500s for a caller-fixable state: anonymous → 401 UNAUTHENTICATED; non-JSON → 400 INVALID_REQUEST; missing deliveryId → 400 MISSING_REQUIRED_FIELD; unknown OR cross-organization deliveryId → 404 RESOURCE_NOT_FOUND (the caller's activeOrganizationId is threaded into the lookup, #10740 — another org's row is simply not found, not forbidden-with-a-hint); non-terminal row → 409 DELIVERY_NOT_ELIGIBLE; a PARKED row (attempts === 0, recordUndeliverable's record of a delivery never prepared) → 409 DELIVERY_NEVER_SENT, because redelivering it would be an UNSIGNED first delivery (#7799/#8069 — the redeliver guard also refuses when the signing configuration is gone, fail-closed on a guard that throws). The door is gated on WEBHOOK-ADMINISTRATION access above the auth floor (redeliver-entitlement.ts: the security service's object-level `update` admission on sys_webhook, asked before the body is read): drive this clause as the seeded admin; a signed-in caller without that access, or whose active organization no current membership backs on a walled posture (the claim is vetted as the data API vets it), is answered 403 PERMISSION_DENIED before any row-specific detail, and no security service (or an undecidable check) is 503 SERVICE_UNAVAILABLE",
           "oracle": "api",
-          "verify": "the redeliver 200 + the receiver's replayed signature equal to the original (pinned byte-for-byte in http-signature-at-rest.integration.test.ts); each refusal against webhook-outbox-plugin.ts (401/400/400/404 arms) and http-outbox.ts (assertHttpRedeliverable / assertRedeliverAllowed — the 409 pair and the guard); the no-capability posture and the #10740 tenant threading in the route's own docblock",
+          "verify": "the redeliver 200 + the receiver's replayed signature equal to the original (pinned byte-for-byte in http-signature-at-rest.integration.test.ts); each refusal against webhook-outbox-plugin.ts (401/400/400/404 arms) and http-outbox.ts (assertHttpRedeliverable / assertRedeliverAllowed — the 409 pair and the guard); the webhook-administration gate (403 PERMISSION_DENIED, 503 SERVICE_UNAVAILABLE) and the replay's organization (the session's activeOrganizationId as the request-context composition vetted it against the tenancy posture, threaded per #10740) in redeliver-entitlement.ts's docblock and the route's own, both sides pinned in webhook-redeliver-entitlement.test.ts",
           "evidence": "the redeliver response + replayed receiver hit + the refusal responses, keyed by arm"
         },
         {
@@ -675,7 +675,7 @@
         "packages/spec/liveness/webhook.json (9 props live on the registry read; label/description live on the Studio metadata list and quick-find, which read the declared item over GET /api/v1/meta/webhook)",
         "packages/plugins/plugin-webhooks/src/declared-webhooks.ts + auto-enqueuer.ts (the registry read and its remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; the activation-ledger switch; an 18.0 database's seeded rows read beside the declaration)",
         "packages/services/service-messaging/src/http-outbox.ts#HttpRedeliverError (delivery statuses, attempts; HttpRedeliverError + assertHttpRedeliverable/assertRedeliverAllowed — terminal-only, the attempts===0 parked-row refusal, the fail-closed guard) + packages/services/service-messaging/src/http-signature-at-rest.integration.test.ts (redelivery replays the stored signature byte-for-byte)",
-        "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts#session (POST /api/v1/webhooks/redeliver — session auth with NO capability gate by design ('every authenticated user counts'), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
+        "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts#session (POST /api/v1/webhooks/redeliver — session auth, then the webhook-administration entitlement gate (redeliver-entitlement.ts — update on sys_webhook, asked before the body is read), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
         "packages/rest/src/rest-server.ts#deleteMany (#3897 — the batch routes parse against the spec contract and Zod STRIPS unknown keys, so options.multi/options.where cannot ride in; deleteMany deletes per id. This is why the bulk clause must be driven from a flow node, not REST)",
         "examples/app-showcase/src/automation/webhooks/index.ts (the shipped inactive fixture and its activation story)",
         "#3358 §9 (webhook undelete/api trigger removal gate)"
@@ -746,6 +746,18 @@
           "date": "2026-10-27",
           "change": "Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A). steps[4] and acceptance[3] named a delivery column `lastStatusCode` that no code defines: the sys_http_delivery column is response_code (packages/services/service-messaging/src/objects/http-delivery.object.ts). steps[1] names the activation row's `active` column beside the door's `enabled`. steps[4] says a `$filter` is JSON. steps[6] names the 4xx receiver a terminal row needs (http-sender.ts: 4xx except 408/429 is permanent, the rest retries). steps[7] and acceptance[6].verify stop citing a public read of 'the declaration still reads switched on': the meta read answers isActive:false by design and the run read the switch off a post-reboot delivery. acceptance[5].verify names the requires pair a scratch webhook stack needs. knownGaps[1] records that #23166, the blocked.ref the run cited, is a closed run record and no open card carries its maintainer question, and adds the wave-2 re-measure. Read at base e4ba846f. No clause's assertion changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 12,
+          "date": "2026-10-29",
+          "change": "the redeliver clause's posture sentence follows the door's hardening: redelivery is gated on webhook-administration access (update on sys_webhook, decided by the security service before the body is read), so the clause is driven as the seeded admin, and an unentitled caller's 403 / an undecidable check's 503 are named; the source line names the gate. The admin-driven assertions are unchanged",
+          "ref": "claude/harden-webhook-redeliver-door"
+        },
+        {
+          "revision": 13,
+          "date": "2026-10-29",
+          "change": "contract-review follow-up on the same hardening: acceptance[4].verify no longer cites a no-capability posture in the route's docblock (the docblock states the gate), and names where the gate and the replay's organization are stated and pinned; steps[6] drives the redeliver as the seeded admin, not as any authenticated user; acceptance[4] names the walled-posture refusal of an organization claim no current membership backs, vetted as the data API vets it. The admin-driven assertions are unchanged",
+          "ref": "#27474"
         }
       ],
       "enumSource": {
@@ -2295,7 +2307,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2313,7 +2325,7 @@
       "steps": [
         "fire the notify flow from a system-context run; GET /api/v1/data/sys_notification and read organization_id",
         "as the member POST /api/v1/notifications/read with the ADMIN's notification id; read readCount",
-        "POST /api/v1/webhooks/redeliver for that terminal delivery of the now-inactive webhook. ⛔ Not for a delivery still 'pending': it answers DELIVERY_NOT_ELIGIBLE too, for its non-terminal status rather than the webhook's switch (packages/services/service-messaging/src/http-outbox.ts#assertHttpRedeliverable), so it would read as a pass for the wrong reason",
+        "as the seeded admin (the door is gated on webhook-administration access), POST /api/v1/webhooks/redeliver for that terminal delivery of the now-inactive webhook. ⛔ Not for a delivery still 'pending': it answers DELIVERY_NOT_ELIGIBLE too, for its non-terminal status rather than the webhook's switch (packages/services/service-messaging/src/http-outbox.ts#assertHttpRedeliverable), so it would read as a pass for the wrong reason",
         "from the repo root run `os verify --app examples/app-showcase` (or boot from another cwd) and read the MCP connector health — no live clause scores this leg, only acceptance[0]'s pin (mcp-stdio-cwd.test.ts), so record the reading as corroboration, never as a clause verdict (QA run #24558)"
       ],
       "acceptance": [
@@ -2344,7 +2356,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts + packages/services/service-messaging/src/messaging-service.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-member.test.ts + packages/connectors/connector-mcp/src/mcp-stdio-cwd.test.ts"
+        "ref": "packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts + packages/services/service-messaging/src/messaging-service.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-member.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-entitlement.test.ts + packages/connectors/connector-mcp/src/mcp-stdio-cwd.test.ts"
       },
       "source": [
         "packages/services/service-messaging/src/messaging-service.ts",
@@ -2370,6 +2382,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1], [2] and [3] verify name the layer each pin drives — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a1: notification-organization-follows-event.integration.test.ts proves organization_id at the engine and asserts nothing about the '[notify] no organization in scope' line (whose source is gone on main 9753d163). a2: the foreign mark-read is pinned only at unit level (messaging-service.test.ts). a3: the redeliver pin drives Request→Response on a LiteKernel, not a served stack. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-29",
+          "change": "steps[2] names its persona: the redeliver door is now gated on webhook-administration access, so the inactive-webhook redeliver is driven as the seeded admin (an unentitled caller is refused 403 before any row-specific detail). automated.ref adds webhook-redeliver-entitlement.test.ts, which pins both sides of that gate. The admin-driven clause is unchanged",
+          "ref": "claude/harden-webhook-redeliver-door"
         }
       ]
     }
