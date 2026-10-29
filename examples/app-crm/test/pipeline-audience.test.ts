@@ -69,8 +69,8 @@ describe('Pipeline dashboard audience (#27735)', () => {
       .map((p) => p.name)
       .sort();
     expect(distributed).toEqual(['finance_approver', 'sales_manager', 'sales_rep']);
-    // A member without a sales position holds none of the stack's other sets'
-    // system permissions toward this gate.
+    // A member without a sales position is left with the stack's other sets,
+    // and none of them grants the gate.
     const others = sets.filter((s) => s.name !== 'crm_sales_user');
     expect(others.map((s) => s.name)).toEqual(['guest_portal']);
     for (const s of others) {
