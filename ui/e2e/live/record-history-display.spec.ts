@@ -42,17 +42,22 @@ async function seededUsers(request: APIRequestContext): Promise<{ actor: SysUser
 
 /**
  * The synthesized record page lays itself out by the width of the view it
- * occupies (objectstack#26678): below the two-column floor
- * (`RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` in `@object-ui/plugin-detail`) it is the
- * tab strip, Details / Related / Timeline. A 1024 px window with the console
- * sidebar expanded is already two columns (objectstack#27241), so the spec
- * pins a viewport whose record view stays under that floor once the 256 px
- * sidebar takes its share — the page's tabbed tier, where the stream is the
- * Timeline tab. (In the column tiers the same stream is resident, in the
- * timeline column or, with the reader's timeline switch off, in the Activity
- * card at the related column's foot.)
+ * occupies (objectstack#26678): a column tier at `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH`
+ * (`@object-ui/plugin-detail`) and wider, the tab strip below it. The stream
+ * is resident in either column tier — the timeline column, or, while the
+ * reader's timeline switch is off (the default for showcase_account, which is
+ * not a worked object), the Activity card at the related column's foot — and
+ * mounted at open, so the spec needs no tab and no switch.
+ *
+ * A 1440 px window is a column tier whatever the console sidebar does: 1184 px
+ * of record view with the sidebar expanded (objectstack#27241's three-column
+ * window), more with it collapsed. ⛔ Not a window near 1000 px: whether that
+ * is the tabbed tier depends on the sidebar's state. Measured on the showcase
+ * at 1000×800 the sidebar came up as its icon rail and the page drew two
+ * columns with no tab strip at all, so a spec that waited for a tab there
+ * timed out.
  */
-test.use({ viewport: { width: 1000, height: 800 } });
+test.use({ viewport: { width: 1440, height: 900 } });
 
 test('the timeline stream\'s Changes chip shows display values (localized dates, option labels, resolved lookups, real actor) instead of raw audit payloads', async ({ page, request }) => {
   const { actor, other } = await seededUsers(request);
@@ -78,21 +83,18 @@ test('the timeline stream\'s Changes chip shows display values (localized dates,
     expect(res.ok()).toBeTruthy();
   }
 
-  // 2) Open the synthesized record page, its Timeline tab and the stream's
+  // 2) Open the synthesized record page and select the timeline stream's
   //    Changes chip — the field changes alone (the audit entries, plus the
   //    activity stream's own `created` row).
   await page.goto(`/apps/showcase_app/showcase_account/record/${id}`);
-  const timelineTab = page.getByRole('tab', { name: /^(Timeline|时间线)/ });
-  await timelineTab.waitFor({ state: 'visible', timeout: 15_000 });
-  await timelineTab.click();
-
-  const panel = page.getByRole('tabpanel', { name: /Timeline|时间线/ });
-  const changesChip = panel.locator('[data-stream-filter="changes"]');
+  const stream = page.getByRole('region', { name: /^(Timeline|时间线)$/ });
+  const changesChip = stream.locator('[data-stream-filter="changes"]');
+  await changesChip.waitFor({ state: 'visible', timeout: 15_000 });
   await changesChip.click();
   await expect(changesChip).toHaveAttribute('aria-pressed', 'true');
   // The three UPDATE entries render as change lines; wait for the latest one.
-  await expect(panel.locator('[data-stream-change]', { hasText: 'Owner' }).first()).toBeVisible({ timeout: 15_000 });
-  const text = (await panel.innerText()).replace(/\s+/g, ' ');
+  await expect(stream.locator('[data-stream-change]', { hasText: 'Owner' }).first()).toBeVisible({ timeout: 15_000 });
+  const text = (await stream.innerText()).replace(/\s+/g, ' ');
 
   // 3) Actor attribution: the audit user resolves to a display name —
   //    never the raw id, never the unknown-user fallback (`detail.unknownUser`).
