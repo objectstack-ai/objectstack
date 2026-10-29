@@ -1154,12 +1154,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       revoke_api_key: {
         label: "撤销 API 密钥",
         confirmText: "要撤销该 API 密钥吗？所有使用该密钥的客户端都将立即失去访问权限。",
-        successMessage: "API 密钥已撤销"
+        successMessage: "API 密钥「{{ record.name }}」已撤销"
       },
       restore_api_key: {
         label: "恢复 API 密钥",
         confirmText: "要恢复已撤销的 API 密钥吗？持有该密钥的现有客户端将重新获得访问权限。",
-        successMessage: "API 密钥已恢复"
+        successMessage: "API 密钥「{{ record.name }}」已恢复"
       }
     }
   },

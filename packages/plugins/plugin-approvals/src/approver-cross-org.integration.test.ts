@@ -59,6 +59,8 @@ function makeEngine(seed: Record<string, Row[]> = {}) {
 
 /** Plant A sits under the group; the CFO's position lives in the group org. */
 const SEED = () => ({
+  // A `user` approver holds a slot only when an account carries it (#27397).
+  sys_user: [{ id: 'u_cfo' }, { id: 'u_plant_mgr' }],
   sys_organization: [
     { id: 'o_group', slug: 'acme-group', parent_organization_id: null },
     { id: 'o_plant', slug: 'acme-plant-a', parent_organization_id: 'o_group' },

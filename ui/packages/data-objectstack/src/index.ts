@@ -6809,10 +6809,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *   `timeDimensions` to `unknown[]` and `runtimeFilter` to
    *   `Record<string, unknown>`, and it had never grown `dateGranularity` at
    *   all. Pinned in `queryDataset.test.ts`.
+   * @param options - `previewDrafts` asks for the draft world explicitly (the
+   *   draft-overlaid dataset definitions and the pending seed drafts' rows, as
+   *   `?preview=draft` does), the way `listViews({ previewDrafts })` asks for
+   *   draft views. A surface that is a draft window without carrying the URL
+   *   flag passes it: the Studio canvas. When the option is absent, the page
+   *   URL decides (see the body).
    */
   async queryDataset(
     dataset: Record<string, unknown> | string,
     selection: DatasetSelection,
+    options?: { previewDrafts?: boolean },
   ): Promise<{
     rows: Array<Record<string, unknown>>;
     /**
@@ -6873,10 +6880,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // iframe), so the adapter reads it straight off the location rather than
     // threading a React context down through every widget package. When set,
     // the server overlays the pending seed draft's rows on the dataset query
-    // and resolves draft-overlaid dataset definitions.
-    const previewDrafts =
-      typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).get('preview') === 'draft';
+    // and resolves draft-overlaid dataset definitions. An explicit
+    // `options.previewDrafts` is the caller's answer and wins over the URL.
+    const previewDrafts = options?.previewDrafts !== undefined
+      ? options.previewDrafts === true
+      : typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('preview') === 'draft';
     const requestBody = typeof dataset === 'string'
       ? { datasetName: dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) }
       : { dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) };

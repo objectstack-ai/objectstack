@@ -1154,12 +1154,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       revoke_api_key: {
         label: "Revocar clave de API",
         confirmText: "¿Revocar esta clave de API? Los clientes que la utilicen perderán el acceso inmediatamente.",
-        successMessage: "Clave de API revocada"
+        successMessage: "Clave de API \"{{ record.name }}\" revocada"
       },
       restore_api_key: {
         label: "Restaurar clave de API",
         confirmText: "¿Restaurar esta clave de API revocada? Los clientes existentes que la conserven recuperarán el acceso.",
-        successMessage: "Clave de API restaurada"
+        successMessage: "Clave de API \"{{ record.name }}\" restaurada"
       }
     }
   },

@@ -324,7 +324,7 @@ describe('[#7543] a hook that deliberately refuses still speaks in its own words
         expect(r.body.error).not.toBe(INTERNAL_ERROR_MESSAGE);
     });
 
-    it('the refusal envelope carries no `code` when the hook declared none', () => {
+    it('the refusal envelope carries `HOOK_ABORTED` when the hook declared no code', () => {
         // [commit cad8b42f0] Re-read, not rewritten to fit. This assertion always tested a
         // producer that declares NO code, so it pins ADR-0112's "nothing is
         // invented for a half-declaration" and is green on both sides of that
@@ -332,8 +332,12 @@ describe('[#7543] a hook that deliberately refuses still speaks in its own words
         // — is that the door withholds a code the producer DID declare; that
         // claim was the defect, and its "older clients prepend the code to the
         // message" rationale is retired (see `error-response.ts`).
+        //
+        // [#27597] Flipped: the undeclared abort answers the ledgered
+        // `HOOK_ABORTED`, and still no `declaredCode`.
         const r = mapDataError(hookRefusal('h', 'month-end close is in progress'), 'showcase_task');
-        expect(r.body).not.toHaveProperty('code');
+        expect(r.body.code).toBe('HOOK_ABORTED');
+        expect(r.body).not.toHaveProperty('declaredCode');
     });
 
     it('an English refusal that merely MENTIONS a native error name is still a refusal', () => {

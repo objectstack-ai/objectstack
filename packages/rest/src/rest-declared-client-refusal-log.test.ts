@@ -273,17 +273,20 @@ describe('[#27508] a hook `onError: abort` is a refusal the route answered — q
         innerMessage: 'boom abort',
     });
 
-    it('POST /data/:object answers the same code-less 400 and prints no "[REST] Unhandled error"', async () => {
+    it('POST /data/:object answers the same 400 and prints no "[REST] Unhandled error"', async () => {
         const res = await postRecord(serverRejecting(hookAbort()));
         expect(res.statusCode).toBe(400);
-        expect(res.body).toEqual({ error: 'boom abort', object: 'qa_media' });
+        // [#27597] The door adds the ledgered `HOOK_ABORTED` to an undeclared
+        // abort's answer; the log verdict reads the thrown error, so it stays quiet.
+        expect(res.body).toEqual({ error: 'boom abort', code: 'HOOK_ABORTED', object: 'qa_media' });
         expect(unhandledLogs()).toHaveLength(0);
     });
 
     it('the handleRouteError door agrees: same answer it always gave, no unhandled line', async () => {
         const res = await putMeta(serverRejecting(hookAbort()));
         expect(res.statusCode).toBe(400);
-        expect(res.body).toEqual({ error: 'boom abort' });
+        // [#27597] Same door-added code as above.
+        expect(res.body).toEqual({ error: 'boom abort', code: 'HOOK_ABORTED' });
         expect(unhandledLogs()).toHaveLength(0);
     });
 
