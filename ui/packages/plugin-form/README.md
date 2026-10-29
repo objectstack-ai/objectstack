@@ -965,7 +965,7 @@ with no adapter to fetch it and no host seam to hand the values to — **refuses
 the submit with `DataSource is required for form submission (inline mode not
 configured)`. The error reaches `schema.onError` and is rethrown.
 
-This is uniform across all five renderers (`simple`, `tabbed`, `wizard`,
+This is uniform across all renderers (`simple`, `tabbed`, `wizard`,
 `drawer`, `modal`). It used to be uniform in the other direction: the five
 variant renderers answered an adapter-less submit by calling `onSuccess` and
 returning, which reported a save that never happened and, through

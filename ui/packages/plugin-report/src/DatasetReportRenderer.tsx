@@ -75,6 +75,7 @@ import { Loader2, AlertTriangle, Table2, ShieldAlert } from 'lucide-react';
 import {
   ComponentRegistry,
   formatMeasure,
+  measureCellCurrency,
   formatDimensionValue,
   buildDatasetFieldHelpers,
   buildDatasetDrillFilter,
@@ -888,8 +889,11 @@ function DatasetReportTable({
     ? state.totals?.find((t) => Array.isArray(t.dimensions) && t.dimensions.length === 0)?.rows?.[0]
     : undefined;
   const totalText = tt('report.total', 'Total');
-  const fmt = (measure: string, value: unknown) =>
-    formatMeasure(value, measureField(measure)?.format, measureField(measure)?.currency, measureField(measure)?.percentScale, displayLocale);
+  // `row` is the RAW row a body cell belongs to: a record-mode column takes
+  // each row's own currency from it (`measureCellCurrency`, ADR-0144 D9). The
+  // grand total passes none and so draws no symbol on such a column.
+  const fmt = (measure: string, value: unknown, row?: Readonly<Record<string, unknown>>) =>
+    formatMeasure(value, measureField(measure)?.format, measureCellCurrency(measureField(measure), row), measureField(measure)?.percentScale, displayLocale);
   // The cells below, as the export writes them (`ReportExport.tsx`).
   const snapshot: ReportTableSnapshot = {
     object: state.object,
@@ -898,7 +902,7 @@ function DatasetReportTable({
       ...layout.map((i) =>
         columns.map((c) =>
           values.includes(c)
-            ? exportMeasureCell(fmt(c, displayRows[i][c]), displayRows[i][c])
+            ? exportMeasureCell(fmt(c, displayRows[i][c], state.rows[i]), displayRows[i][c])
             : exportDimensionCell(formatDimensionValue(displayRows[i][c], displayLocale)),
         ),
       ),
@@ -936,7 +940,7 @@ function DatasetReportTable({
               {columns.map((c) => (
                 <td key={c} className="px-2 py-1 tabular-nums whitespace-nowrap">
                   {values.includes(c)
-                    ? formatMeasure(displayRows[i][c], measureField(c)?.format, measureField(c)?.currency, measureField(c)?.percentScale, displayLocale)
+                    ? fmt(c, displayRows[i][c], state.rows[i])
                     : formatDimensionValue(displayRows[i][c], displayLocale)}
                 </td>
               ))}

@@ -98,7 +98,7 @@ ComponentRegistry.register('my-grid', ObjectGridRenderer, {
 
 ### Exports
 
-The complete public surface — 20 values and 29 types:
+The complete public surface:
 
 ```typescript
 import {

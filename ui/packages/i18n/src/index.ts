@@ -154,7 +154,7 @@ export {
 
 export { pickLocalized, setLocalized, clearLocalized } from './pickLocalized.js';
 export { LocalizationProvider, useLocalization, type LocalizationValue } from './LocalizationContext.js';
-export { resolveFieldCurrency } from './currency.js';
+export { resolveFieldCurrency, recordCurrencyField, type FieldCurrencyConfig } from './currency.js';
 
 // The one number-display formatter (objectui#4033) and the locale it formats
 // in. Every field cell / widget / metric renderer goes through this pair —

@@ -119,7 +119,11 @@ export interface SharedFieldDisplay {
   /** A picklist's options: value, authored label and colour. */
   options?: Array<{ value: string; label: string; color?: string }>;
   multiple?: true;
-  currencyConfig?: { currencyMode?: string; defaultCurrency?: string };
+  /**
+   * A currency field's currency. `currencyField` names a `record`-mode
+   * amount's code field (ADR-0144 D2), present only when `record` carries it.
+   */
+  currencyConfig?: { currencyMode?: string; defaultCurrency?: string; currencyField?: string };
   /** A lookup's target object. The record's value stays the stored id. */
   reference?: string;
   displayField?: string;

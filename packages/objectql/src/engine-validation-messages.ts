@@ -33,6 +33,7 @@
  * closure, which runs after `validationMessageContext` has returned and sees
  * whatever service `setI18nService` has installed by then, as it did.
  * `setI18nService` itself stays in the class: it is the field's setter.
+ * `registry` (ADR-0029 D9.2a, the packaged rule lookup) goes as a getter too.
  *
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
@@ -40,6 +41,7 @@
  */
 
 import type { ObjectQL } from './engine.js';
+import type { ValidationMessageContext } from './validation/record-validator.js';
 import { objectLabelKey, resolveBundleLocale } from '@objectstack/spec/system';
 
 /**
@@ -52,22 +54,88 @@ import { objectLabelKey, resolveBundleLocale } from '@objectstack/spec/system';
  */
 export interface ValidationMessageHost {
   readonly i18nService: ObjectQL['i18nService'];
+  readonly registry: ObjectQL['registry'];
   negotiatedMessageLocale: ObjectQL['negotiatedMessageLocale'];
 }
 
-/** The body of `ObjectQL#validationMessageContext`; the method's docblock there is its contract. */
+/**
+ * The body of `ObjectQL#validationMessageContext`; the method's docblock there is its contract.
+ *
+ * [ADR-0029 D9.2a] It also carries `packagedRule` (`ValidationMessageContext`),
+ * the lookup the rule evaluator judges a tenant's rewrite of a rule message by,
+ * when the object has a packaged owner — see {@link packagedRuleLookup}.
+ */
 export function validationMessageContext(
-  this: Pick<ValidationMessageHost, 'i18nService' | 'negotiatedMessageLocale'>,
+  this: Pick<ValidationMessageHost, 'i18nService' | 'registry' | 'negotiatedMessageLocale'>,
   objectName: string,
   // Only `locale` is read — narrower than `ExecutionContext` so both the
   // resolved and the input-shaped envelope satisfy it.
   context?: { locale?: string },
-): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
+): ValidationMessageContext & { objectName: string } {
   const t = this.i18nService?.t;
+  const packagedRule = packagedRuleLookup(this.registry, objectName);
   return {
     objectName,
     locale: this.negotiatedMessageLocale(context?.locale),
     translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
+    ...(packagedRule !== undefined ? { packagedRule } : {}),
+  };
+}
+
+/**
+ * How deep {@link packagedRuleLookup} follows `conditional` branches — the
+ * bound `/meta`'s `translateObjectValidations` walks to, so both readers judge
+ * the same branches.
+ */
+const MAX_VALIDATION_DEPTH = 10;
+
+/**
+ * [ADR-0029 D9.2a] The packaged (code-shipped) rule of a name on `objectName`,
+ * for the rule evaluator's divergence test.
+ *
+ * The declaration is the packaged OWNER's (`getPackagedObjectOwner`, pre-fold),
+ * the same body `/meta` hands `translateObject` as `packagedBase` through
+ * `getPackagedObjectBase`, so both readers compare a served message against one
+ * packaged rule. Rules are keyed by `name`, each `conditional` branch under its
+ * own name; the first rule of a name wins, as on `/meta`.
+ *
+ * `undefined` — nothing inferred, the catalog applies — when no packaged owner
+ * is registered for the object, or the registry cannot answer (a partial
+ * double). The index is built on the first lookup, which a write that refuses
+ * nothing never makes.
+ */
+function packagedRuleLookup(
+  registry: ValidationMessageHost['registry'] | undefined,
+  objectName: string,
+): ((ruleName: string) => unknown) | undefined {
+  if (typeof registry?.getPackagedObjectOwner !== 'function') return undefined;
+  let definition: unknown;
+  try {
+    definition = registry.getPackagedObjectOwner(objectName)?.definition;
+  } catch {
+    // A read over in-memory contributors must not turn a 400 into a 500.
+    return undefined;
+  }
+  if (!definition || typeof definition !== 'object') return undefined;
+  const validations = (definition as { validations?: unknown }).validations;
+  let byName: Map<string, unknown> | undefined;
+  return (ruleName) => {
+    if (byName === undefined) {
+      const index = new Map<string, unknown>();
+      const visit = (raw: unknown, depth: number): void => {
+        if (!raw || typeof raw !== 'object' || depth >= MAX_VALIDATION_DEPTH) return;
+        const rule = raw as { type?: unknown; name?: unknown; then?: unknown; otherwise?: unknown };
+        if (rule.type === 'conditional') {
+          visit(rule.then, depth + 1);
+          visit(rule.otherwise, depth + 1);
+          return;
+        }
+        if (typeof rule.name === 'string' && rule.name.length > 0 && !index.has(rule.name)) index.set(rule.name, rule);
+      };
+      if (Array.isArray(validations)) for (const raw of validations) visit(raw, 0);
+      byName = index;
+    }
+    return byName.get(ruleName);
   };
 }
 

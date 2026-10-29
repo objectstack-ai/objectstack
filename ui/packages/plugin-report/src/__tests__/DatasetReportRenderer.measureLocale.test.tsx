@@ -163,6 +163,32 @@ describe('report grouped table follows the display locale (objectui#4575)', () =
     expect(await screen.findByText(`1.234,50${NBSP}€`, KEEP_NBSP)).toBeInTheDocument();
   });
 
+  it('formats a record-mode column in each row\'s own currency, and the total plain (objectstack#27188, ADR-0144 D9)', async () => {
+    // A grouped answer over a `record`-mode amount: the measure column names
+    // the result column holding each row's code (objectstack#27338).
+    const result = {
+      rows: [
+        { bucket: 1, currency_code: 'USD', revenue: 1234.5 },
+        { bucket: 2, currency_code: 'EUR', revenue: 99 },
+        { bucket: 3, currency_code: null, revenue: 7 },
+      ] as Row[],
+      fields: [
+        { name: 'bucket', type: 'number', label: 'Bucket' },
+        { name: 'currency_code', type: 'text', label: 'Currency' },
+        { name: 'revenue', type: 'number', label: 'Revenue', format: '0.00', currencyField: 'currency_code' },
+      ],
+      totals: [{ dimensions: [] as string[], rows: [{ revenue: 1340.5 }] }],
+    };
+    renderIn(
+      'en-US',
+      <DatasetReportRenderer report={SUMMARY_REPORT as never} dataSource={sourceOf(result)} />,
+    );
+    expect(await screen.findByText('$1,234.50', KEEP_NBSP)).toBeInTheDocument();
+    expect(screen.getByText('€99.00', KEEP_NBSP)).toBeInTheDocument();
+    expect(screen.getByText('7.00', KEEP_NBSP)).toBeInTheDocument();
+    expect(within(screen.getByTestId('dataset-report-total-row')).getByText('1,340.50', KEEP_NBSP)).toBeInTheDocument();
+  });
+
   it('keeps the en currency form byte-identical (must-not-change)', async () => {
     const result = {
       rows: [{ bucket: 1, revenue: 1234.5 }] as Row[],
