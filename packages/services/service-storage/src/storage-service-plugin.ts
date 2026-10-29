@@ -63,6 +63,7 @@ import { registerStorageFamily } from './storage-routes.js';
 import type { FileReadVerdict, StorageGatedSessionReader, StorageUploadSession } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks, type FileReferenceEngine } from './file-reference-lifecycle.js';
+import { installSysFileStorageOwnedColumnsGuard } from './sys-file-storage-owned-columns.js';
 import type { FileReferenceReadAuthorizer } from './referenceable-file.js';
 import {
   installAttachmentAccessHooks,
@@ -488,6 +489,10 @@ export class StorageServicePlugin implements Plugin {
       // lifecycle sweep. Both degrade silently on bare kernels.
       if (engine && typeof (engine as any).registerHook === 'function') {
         installAttachmentLifecycleHooks(engine as any, ctx.logger);
+        // The create-side guard of sys_file's storage-owned columns: the engine
+        // strips them off a non-system UPDATE (they are `readonly`) but leaves a
+        // `sys_` INSERT to the object's own guard.
+        installSysFileStorageOwnedColumnsGuard(engine as any, ctx.logger);
         // [#25692] The download door's verdict on one file for one caller,
         // bound once from the live registry and handed to BOTH write doors
         // that name a `sys_file` id — a file-class field and a
