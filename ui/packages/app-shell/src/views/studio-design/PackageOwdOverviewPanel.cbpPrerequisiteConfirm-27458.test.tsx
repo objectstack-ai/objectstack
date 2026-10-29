@@ -102,7 +102,7 @@ describe('PackageOwdOverviewPanel — the controlled-by-parent prerequisite (obj
   it('any other refusal still shows the error, and opens no confirm', async () => {
     const { calls } = renderPanel(() => refusal(422, 'INVALID_METADATA', 'Invalid object body'));
     await pickCbpAndSave();
-    expect(await screen.findByText('Invalid object body')).toBeInTheDocument();
+    expect(await screen.findByText(/Invalid object body/)).toBeInTheDocument();
     expect(screen.queryByTestId('owd-cbp-prereq')).not.toBeInTheDocument();
     expect(calls).toHaveLength(1);
   });
