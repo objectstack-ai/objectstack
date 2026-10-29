@@ -10,6 +10,7 @@ import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
+import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
 import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
@@ -4731,6 +4732,16 @@ export default class Serve extends Command {
         }
       }
 
+      // [ADR-0025 §3.5 M1] The plugins `os plugin install` installed for this
+      // project and environment, verified again before any of their code is
+      // imported (the kept artifact's sha256, its signature against the
+      // environment's trusted keys, the unpacked tree, the `runtime` tier) and
+      // registered here, after the config's own `plugins`, while the kernel
+      // still takes plugins. Only `runtime: 'node'` is dispatched; a refused
+      // plugin is printed by name and the boot goes on without it. No
+      // installations file, no read. See `../utils/installed-plugins-boot.ts`.
+      const installedPluginsBoot = await registerInstalledPlugins({ kernel, track: trackPlugin });
+
       // Register REST API and Dispatcher plugins (consume http.server + protocol services)
       //
       // [#22202] The REST API plugin is composed on EVERY boot; only the
@@ -5794,6 +5805,7 @@ export default class Serve extends Command {
         isDev,
         pluginCount: loadedPlugins.length,
         pluginNames: loadedPlugins,
+        installedPluginsRefused: installedPluginsBoot?.refused.length ?? 0,
         uiEnabled: enableUI,
         consolePath: loadedPlugins.includes('ConsoleUI') ? CONSOLE_PATH : undefined,
         driverLabel: resolvedDriverLabel,

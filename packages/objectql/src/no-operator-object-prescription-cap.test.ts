@@ -57,8 +57,12 @@ function clientReads(fn: () => unknown): { status: number; code: unknown; text: 
   return { status, code: body.code, text: String(body.error), full: (thrown as Error).message };
 }
 
-/** The route is whole in what the client reads, ends MARGIN inside the cut, and precedes "NOT applied". */
-function expectRouteInside(fn: () => unknown, [open, close]: readonly [string, string]): void {
+/** The route is whole in what the client reads, ends by `limit` (MARGIN inside the cut), and precedes "NOT applied". */
+function expectRouteInside(
+  fn: () => unknown,
+  [open, close]: readonly [string, string],
+  limit = CLIENT_CUT - MARGIN,
+): void {
   const read = clientReads(fn);
   expect(read.status).toBe(400);
   expect(read.code).toBe('INVALID_FILTER');
@@ -68,8 +72,8 @@ function expectRouteInside(fn: () => unknown, [open, close]: readonly [string, s
   expect(closeAt, read.full).toBeGreaterThan(start);
   const end = closeAt + close.length;
   expect(read.text, 'the client text holds the whole route').toContain(read.full.slice(start, end));
-  expect(end, `the route ends at ${end}, within ${MARGIN} of the ${CLIENT_CUT}-character cut`)
-    .toBeLessThanOrEqual(CLIENT_CUT - MARGIN);
+  expect(end, `the route ends at ${end}; the limit is ${limit} (the cut is ${CLIENT_CUT})`)
+    .toBeLessThanOrEqual(limit);
   const notApplied = read.full.indexOf(' was NOT applied');
   expect(notApplied, read.full).toBeGreaterThan(end - 1);
 }
@@ -104,5 +108,61 @@ describe('[#27337] the no-operator-object refusal: every route lands inside the 
     expectRouteInside(() => narrowNumberComparands(OBJECT, 'find', SCHEMA, nested('contract_value_amount')), SCALAR_ROUTE);
     expectRouteInside(aggregationFilter('contract_value_amount'), SCALAR_ROUTE);
     expectRouteInside(having('contract_value_amount', 'number'), SCALAR_ROUTE);
+  });
+});
+
+/**
+ * [#27351] The stress fixture: a 27-character object and target, 32-character
+ * fields, a four-key object and a path through `aggregations[12].filter` and a
+ * three-deep `$and` / `$or` / `$and`. The shared head (context, field, keys,
+ * path) is long enough here that every route must still end inside the cut —
+ * the head names the object's first key and counts the rest. Against the head
+ * as it stood on `origin/main` `cf218eed1` (three keys shown), six rows end
+ * past the cut (501–532).
+ */
+describe('[#27351] the no-operator-object refusal: the stress fixture keeps every route inside the cut', () => {
+  const STRESS_OBJECT = 'customer_support_case_entry';
+  const STRESS_TARGET = 'enterprise_customer_account';
+  const STRESS_VALUE = { region_code: 'x', service_tier: 'x', account_status: 'x', billing_country: 'x' };
+  const F = {
+    lookup: 'primary_customer_account_manager',
+    multi: 'secondary_account_manager_owners',
+    json: 'integration_metadata_payload_raw',
+    address: 'primary_shipping_destination_adr',
+    number: 'contract_value_amount_in_dollars',
+  } as const;
+  const STRESS_SCHEMA = {
+    fields: {
+      [F.lookup]: { name: F.lookup, type: 'lookup', reference: STRESS_TARGET },
+      [F.multi]: { name: F.multi, type: 'lookup', reference: STRESS_TARGET, multiple: true },
+      [F.json]: { name: F.json, type: 'json' },
+      [F.address]: { name: F.address, type: 'address' },
+      [F.number]: { name: F.number, type: 'number' },
+      amount: { name: 'amount', type: 'number' },
+    },
+  };
+  const deep = (field: string) => ({
+    $and: [{ amount: 1 }, { $or: [{ $and: [{ amount: 2 }, { [field]: STRESS_VALUE }] }] }],
+  });
+  const at = {
+    where: (field: string) => () => narrowNumberComparands(STRESS_OBJECT, 'find', STRESS_SCHEMA, deep(field)),
+    filter: (field: string) => () =>
+      narrowNumberComparands(STRESS_OBJECT, 'aggregate', STRESS_SCHEMA, deep(field), 'aggregations[12].filter'),
+    having: (field: string, type: string) => () =>
+      narrowHavingNumberComparands(STRESS_OBJECT, { [field]: STRESS_VALUE }, new Map(), new Map([[field, type]])),
+  };
+
+  it('every kind, at every position it is refused', () => {
+    expectRouteInside(at.filter(F.lookup), SINGLE_LOOKUP_ROUTE, CLIENT_CUT);
+    expectRouteInside(at.having(F.lookup, 'lookup'), SINGLE_LOOKUP_ROUTE, CLIENT_CUT);
+    expectRouteInside(at.filter(F.multi), MULTI_LOOKUP_ROUTE, CLIENT_CUT);
+    for (const kind of ['json', 'address'] as const) {
+      expectRouteInside(at.where(F[kind]), JSON_ROUTE, CLIENT_CUT);
+      expectRouteInside(at.filter(F[kind]), JSON_ROUTE, CLIENT_CUT);
+      expectRouteInside(at.having(F[kind], kind), JSON_ROUTE, CLIENT_CUT);
+    }
+    expectRouteInside(at.where(F.number), SCALAR_ROUTE, CLIENT_CUT);
+    expectRouteInside(at.filter(F.number), SCALAR_ROUTE, CLIENT_CUT);
+    expectRouteInside(at.having(F.number, 'number'), SCALAR_ROUTE, CLIENT_CUT);
   });
 });

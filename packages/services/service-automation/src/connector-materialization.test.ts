@@ -6,8 +6,8 @@
 // resolves `auth.credentialRef`, and registers the resulting `{ def, handlers }`
 // on the connector registry — so `connector_action` dispatches it and
 // `GET /connectors` lists it, indistinguishable from a hand-written connector.
-// Boot fails loudly for unknown provider / unresolvable credentialRef / name
-// conflict / factory failure.
+// Boot fails loudly for unknown provider / name conflict / factory failure; a
+// credentialRef nothing resolves degrades the instance naming it (#27237).
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -328,14 +328,19 @@ describe('ADR-0097 — declarative connector materialization', () => {
         ).rejects.toThrow(/provider 'openapi'.*no provider factory/s);
     });
 
-    it('fails boot loudly when credentialRef does not resolve', async () => {
-        const { factory } = makeFakeProvider();
-        await expect(
-            boot([providerConnector('billing', { auth: { type: 'bearer', credentialRef: 'MISSING' } })], {
-                providerFactory: factory,
-                credentialResolver: () => undefined,
-            }),
-        ).rejects.toThrow(/credentialRef 'MISSING' did not resolve/);
+    // [#27237] Ruling A on #27230: an administrator installs the app first and
+    // fills the credential after, so a reference no arm of the chain answers
+    // for degrades its instance — named — instead of failing the boot.
+    it('degrades the instance, naming the reference, when credentialRef does not resolve', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('billing', { auth: { type: 'bearer', credentialRef: 'MISSING' } })], {
+            providerFactory: factory,
+            credentialResolver: () => undefined,
+        });
+        const engine = automationOf(kernel);
+        expect(calls).toHaveLength(0);
+        expect(engine.getConnectorDegradedReason('billing')).toMatch(/credential 'MISSING'/);
+        await kernel.shutdown();
     });
 
     it('fails boot loudly when a provider factory throws (invalid providerConfig)', async () => {
