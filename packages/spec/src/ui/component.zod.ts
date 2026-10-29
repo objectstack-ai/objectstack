@@ -89,6 +89,9 @@ import { ChartDrillDownSchema, ChartGroupBySchema } from './chart.zod';
 // [#21464] `object-metric.compareTo.kind` is the dashboard widget comparison's
 // own `kind` vocabulary, by reference — the executor's two kinds.
 import { DashboardWidgetSchema } from './dashboard.zod';
+// [#27347] `object-metric.polarity` is the dataset measure's own polarity
+// vocabulary, by reference — one spelling of which direction is good news.
+import { DatasetMeasurePolarity } from './dataset.zod';
 // [#21464] `object-metric.drillDown.report` is the report contract itself, by
 // reference (decision card #21704, fork 1, letter B): a joined report refuses a
 // block that binds no dataset, so a report this schema admits is one the drill
@@ -5616,6 +5619,16 @@ const ObjectMetricCompareToSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * [#27347] A boolean "is higher better?" flag has no word for a tile where
+ * neither direction is good news, so the tile's polarity is the dataset
+ * measure's one key with three peer values.
+ */
+const OBJECT_METRIC_POLARITY_NOT_A_FLAG =
+  'a metric tile declares which direction is good news with `polarity`, not a boolean: '
+  + "`polarity: 'higher'` (a rise is good), `polarity: 'lower'` (a fall is good: turnaround days, overdue "
+  + "counts, cost) or `polarity: 'neutral'` (neither, the badge is drawn without a good or bad colour).";
+
+/**
  * `object-metric` (objectui's `ObjectMetricWidget`; read points recorded in
  * `liveness/page.json`, row `regions`). The widget destructures every prop it
  * reads (`ObjectMetricWidgetProps` — the complete read set), and the
@@ -5627,7 +5640,23 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-metric`',
   history: objectBlockHistory('object-metric'),
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
-  aliases: FILTERS_TO_FILTER,
+  // [#27347] The dataset measure's near-misses for `polarity`, less its
+  // `direction` entry: on this tile `direction` is the static `trend` badge's
+  // arrow, so the bare word gets a prescription naming both keys instead.
+  aliases: {
+    ...FILTERS_TO_FILTER,
+    betterWhen: 'polarity',
+    goodDirection: 'polarity',
+    trendDirection: 'polarity',
+  },
+  guidance: {
+    direction:
+      '`direction` is not a member of the tile: the arrow of a static badge goes INSIDE `trend` '
+      + '(`trend: { value, direction }`), and which direction of change is good news is `polarity` '
+      + "(`polarity: 'lower'` draws a rise red and a fall green).",
+    higherIsBetter: OBJECT_METRIC_POLARITY_NOT_A_FLAG,
+    lowerIsBetter: OBJECT_METRIC_POLARITY_NOT_A_FLAG,
+  },
 }, {
   objectName: z.string().optional()
     .describe('Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead'),
@@ -5723,6 +5752,36 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    */
   compareTo: ObjectMetricCompareToSchema.optional()
     .describe("Period-over-period comparison `{ kind }` — `previousPeriod` or `previousYear`, shifting the date macros in the tile's own `filter`. `dimension` is refused: this tile never reads a dataset time dimension"),
+  /**
+   * [#27347] Which direction of change is good news for the tile's number —
+   * the dataset measure's {@link DatasetMeasurePolarity}, BY REFERENCE: one
+   * vocabulary and one spelling. This tile aggregates a field, not a dataset
+   * measure, so a measure's `polarity` has nothing to attach to here and the
+   * tile declares its own.
+   *
+   * Read points recorded in `liveness/page.json`, row `regions`:
+   * `ObjectMetricWidget` forwards it to `MetricWidget`, which colours the badge
+   * it draws by the rule the dataset-bound tile applies to its delta
+   * (`deltaToneClass`), so one KPI is drawn one way on either surface.
+   *
+   * A TOP-LEVEL key, not a `compareTo` member, because the badge it colours is
+   * `derivedTrend ?? trend`: the static `trend` badge was coloured by its
+   * `direction` alone too, so one key covers the computed and the static
+   * badge.
+   *
+   * - `higher`, and undeclared: a rise green, a fall red, the colours the tile
+   *   always had.
+   * - `lower`: a fall green, a rise red. Turnaround, overdue counts, cost.
+   * - `neutral`: neither; the badge keeps its arrow and percentage, muted.
+   *
+   * The arrow always shows which way the NUMBER moved; polarity decides only
+   * the colour. Nothing infers a polarity from the aggregated field's name.
+   */
+  polarity: DatasetMeasurePolarity.optional().describe(
+    'Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) '
+    + 'or neutral (no good/bad colour). Colours the trend badge, computed (`compareTo`) or static (`trend`); '
+    + 'undeclared keeps rise green, fall red',
+  ),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;

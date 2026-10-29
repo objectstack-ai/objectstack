@@ -279,7 +279,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 108 rows.
+ * CENSUS (generated): this list holds 109 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -382,6 +382,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /security/suggested-bindings', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.list' },
   { route: 'POST /security/suggested-bindings/:id/confirm', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.confirm' },
   { route: 'POST /security/suggested-bindings/:id/dismiss', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.dismiss' },
+  { route: 'POST /security/suggested-bindings/:id/reopen', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.reopen' },
   { route: 'POST /security/_activation/:type/:name', domain: '/security', disposition: 'server-only',
     note: 'ADR-0126 §3 regime C, as ADR-0131 D6 amends it — switch ONE position (`:type` = `position`), permission set '
       + '(`:type` = `permission`) or declared sharing rule (`:type` = `sharing_rule`, resolved by the `sharingRules` service; '

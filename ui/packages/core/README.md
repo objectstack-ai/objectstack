@@ -369,11 +369,11 @@ This allows the core types and logic to be used in:
 
 ## API Reference
 
-See [full documentation](https://objectui.org/docs/api) for detailed API reference.
+See [full documentation](https://objectstack.ai/docs/frontend) for detailed API reference.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/guide/architecture)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/core)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

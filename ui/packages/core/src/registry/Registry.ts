@@ -533,7 +533,7 @@ export class Registry<T = any> {
         `  registry.register('${type}', MyComponent);\n\n` +
         `  // After:\n` +
         `  registry.register('${type}', MyComponent, { namespace: 'my-plugin' });\n\n` +
-        `  See: https://www.objectui.org/docs/guide/plugin-development#namespaced-registration`
+        `  See: https://objectstack.ai/docs/frontend/plugin-development#namespaced-registration`
       );
     }
     

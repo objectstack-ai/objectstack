@@ -382,6 +382,7 @@ const DISPOSITIONS: Record<string, Disposition> = {
 
   'POST /api/v1/security/suggested-bindings/:id/confirm': { kind: 'no-record-echo', why: 'Binding receipt.' },
   'POST /api/v1/security/suggested-bindings/:id/dismiss': { kind: 'no-record-echo', why: 'Dismissal receipt.' },
+  'POST /api/v1/security/suggested-bindings/:id/reopen': { kind: 'no-record-echo', why: 'Re-open receipt.' },
   'POST /api/v1/security/explain': { kind: 'no-record-echo', why: 'Permission explanation verdict.' },
 
   // Import: per-row RECEIPTS (row number, action, id, warnings/errors) plus

@@ -49,7 +49,7 @@
     "vite-plugin-dts": "^5.1.2",
     "vitest": "^4.1.10"
   },
-  "description": "Layout components for Object UI — AppShell, PageHeader, SidebarNav and responsive containers with React Router integration",
+  "description": "Layout components for ObjectUI — AppShell, PageHeader, SidebarNav and responsive containers with React Router integration",
   "keywords": [
     "objectui",
     "sdui",
@@ -74,7 +74,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/layout",
+  "homepage": "https://objectstack.ai/docs/frontend/layout",
   "publishConfig": {
     "access": "public"
   },

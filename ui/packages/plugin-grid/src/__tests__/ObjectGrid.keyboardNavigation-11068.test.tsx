@@ -27,7 +27,7 @@
  * Each "off" reading is paired with an "on" reading on the same probe.
  */
 import React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
@@ -54,6 +54,20 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 import { ActionProvider, SchemaRenderer } from '@object-ui/react';
 // Registers `object-grid`, the block under test.
 import { ObjectGridRenderer } from '../index';
+import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
+import { installExplainDouble } from './explainDouble';
+
+// objectstack#27365 — an editable grid asks the record-grained `update`
+// verdict for the rows on screen even with no kebab Edit wired. Answer it from
+// the double (every row permitted), never the network.
+beforeEach(() => {
+  __clearRecordCrudVerdictCache();
+  installExplainDouble();
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 afterEach(() => {
   cleanup();

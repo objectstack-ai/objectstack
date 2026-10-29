@@ -642,15 +642,15 @@ mounted warns in dev instead of vanishing.
 leaves the surface on its own anchor), `visibleNotificationStack` (`maxVisible` +
 `stackDirection`), and the context's `pauseAutoDismiss` / `resumeAutoDismiss`
 (`pauseOnHover`). See the
-[notifications guide](https://objectui.org/docs/guide/notifications).
+[notifications guide](https://objectstack.ai/docs/build-without-code).
 
 ## API Reference
 
-See [full documentation](https://objectui.org/docs/core/schema-renderer) for detailed API reference.
+See [full documentation](https://objectstack.ai/docs/frontend/schema-rendering) for detailed API reference.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/core/schema-renderer)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/schema-rendering)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/react)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

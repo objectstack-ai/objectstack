@@ -60,7 +60,7 @@
 ## 认领(先认领后动工)
 
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
-- 卡 assignee 归 PM,dev 恒不写;PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`。
+- 卡 assignee 归 PM,dev 恒不写;PR ⛔ 不派席位账号;在飞 PR 读 `head:claude/` 开 PR 正文点名的卡。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
 - 同笔 `Release:` 行点名已落项与余项;余项整树归他席 ⇒ 点名该席改标,拆分加 `pm:retriage`。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。

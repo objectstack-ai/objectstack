@@ -130,6 +130,7 @@ Advice for the plugin you are about to write, beyond whatever the scaffold hands
   third-party libraries are allowed to live, which makes it the layer that most needs a
   `React.lazy` boundary, so an app that never renders your component never pays for it:
 
+  {/* doc-snippet: fragment — the lazy boundary points at `./HeavyImpl`, a module in the READER's own plugin that cannot exist beside this page, and `React` is the UMD global a one-line excerpt does not import (measured: TS2307 x1, TS2686 x1). Adding an import would make the snippet about this repository rather than about the plugin the reader is scaffolding. */}
   ```tsx
   const HeavyImpl = React.lazy(() => import('./HeavyImpl'));
   ```

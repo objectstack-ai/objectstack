@@ -7,7 +7,7 @@
  */
 
 /**
- * `content/docs/guide/layout.md`'s SidebarNav material teaches the real
+ * `content/docs/frontend/layout.mdx`'s SidebarNav material teaches the real
  * component (objectui#4840), and its Responsive Behavior section describes the
  * real breakpoints (objectui#4842).
  *
@@ -15,7 +15,7 @@
  *
  * This is the same phantom-shape family as objectui#3999 (`packages/layout/README.md`,
  * pinned by `readme-sidebar-nav-example.test.ts`) and objectui#4793
- * (`content/docs/layout/app-shell.mdx`, pinned by `app-shell-docs-nav-example.test.ts`),
+ * (`content/docs/frontend/app-shell.mdx`, pinned by `app-shell-docs-nav-example.test.ts`),
  * on a THIRD surface — and this one went one level further than either. Those
  * two misspelled the keys of a real React component. This page taught a JSON
  * NODE TYPE that does not exist: `registerLayout()` registers `page:card` and
@@ -53,7 +53,7 @@
  * header)` below 768px. `AppShell`'s header renders `{navbar}` and nothing else,
  * so a reader who believed it never put a `SidebarTrigger` in `navbar` and the
  * mobile sidebar had no way to open — silently, with nothing logged.
- * `content/docs/layout/app-shell.mdx` already stated this correctly ("no sidebar
+ * `content/docs/frontend/app-shell.mdx` already stated this correctly ("no sidebar
  * toggle"); the two pages disagreed and this was the wrong one.
  *
  * Auditing the rest of that section found the tier structure itself was
@@ -65,7 +65,7 @@
  *
  * ## Scan surface — deliberately narrow
  *
- * This file judges `content/docs/guide/layout.md`'s SIDEBARNAV material and its
+ * This file judges `content/docs/frontend/layout.mdx`'s SIDEBARNAV material and its
  * Responsive Behavior section only. The `### Props` / `#### NavItem` /
  * `#### NavGroup` tables are read from inside the `## SidebarNav Component`
  * section, NOT page-wide — the same page has a second `### Props` table, for
@@ -82,7 +82,7 @@
  * page-wide ban on `icon: '…'` would be wrong.
  *
  * `packages/layout/README.md` belongs to `readme-sidebar-nav-example.test.ts`
- * and `content/docs/layout/app-shell.mdx` to `app-shell-docs-nav-example.test.ts`;
+ * and `content/docs/frontend/app-shell.mdx` to `app-shell-docs-nav-example.test.ts`;
  * pinning the whole docs tree to source is objectui#3786's problem, not this one.
  */
 
@@ -105,7 +105,7 @@ const mask: (source: string) => string = maskComments;
 
 /** Repo root — five levels up from `packages/layout/src/__tests__`. */
 const REPO_ROOT = resolve(__dirname, '../../../..');
-const GUIDE = readFileSync(join(REPO_ROOT, 'content', 'docs', 'guide', 'layout.md'), 'utf8');
+const GUIDE = readFileSync(join(REPO_ROOT, '..', 'content', 'docs', 'frontend', 'layout.mdx'), 'utf8');
 const SIDEBAR_NAV_SRC = readFileSync(
   join(REPO_ROOT, 'packages', 'layout', 'src', 'SidebarNav.tsx'),
   'utf8',
@@ -228,7 +228,7 @@ function interfaceProps(src: string, name: string): DeclaredProp[] {
 function sidebarNavSectionLines(): string[] {
   const start = GUIDE_LINES.indexOf('## SidebarNav Component');
   if (start === -1) {
-    throw new Error('content/docs/guide/layout.md no longer has a `## SidebarNav Component` section');
+    throw new Error('content/docs/frontend/layout.mdx no longer has a `## SidebarNav Component` section');
   }
   let end = GUIDE_LINES.length;
   for (let i = start + 1; i < GUIDE_LINES.length; i += 1) {
@@ -253,7 +253,7 @@ function documentedProps(lines: string[], heading: string): DeclaredProp[] {
   const start = lines.indexOf(heading);
   if (start === -1) {
     throw new Error(
-      `The SidebarNav section of content/docs/guide/layout.md no longer has a \`${heading}\` heading`,
+      `The SidebarNav section of content/docs/frontend/layout.mdx no longer has a \`${heading}\` heading`,
     );
   }
   const props: DeclaredProp[] = [];
@@ -386,7 +386,7 @@ describe("the guide's SidebarNav tables name exactly the real keys (objectui#484
     expect(
       documentedProps(sidebarNavSectionLines(), heading).map(format),
       [
-        `The \`${heading}\` table in content/docs/guide/layout.md and \`${name}\` in`,
+        `The \`${heading}\` table in content/docs/frontend/layout.mdx and \`${name}\` in`,
         'packages/layout/src/SidebarNav.tsx disagree about which keys exist. Those tables',
         'replaced a `Schema API` block that was wrong in seven ways at once (objectui#4840):',
         '`label` for `title`, `icon` as a string rather than a component, `items` for',
@@ -445,7 +445,7 @@ describe("the guide's SidebarNav examples pass only real props (objectui#4840)",
     const navFences = sidebarNavFences();
     expect(
       navFences.length,
-      'no SidebarNav code fence found in content/docs/guide/layout.md at all',
+      'no SidebarNav code fence found in content/docs/frontend/layout.mdx at all',
     ).toBeGreaterThan(0);
 
     const used = [...new Set(navFences.flatMap((fence) => sidebarNavTagProps(fence.body)))];
@@ -454,7 +454,7 @@ describe("the guide's SidebarNav examples pass only real props (objectui#4840)",
     expect(
       used.filter((prop) => !declared.includes(prop)),
       [
-        'A `<SidebarNav>` example in content/docs/guide/layout.md passes a prop the component',
+        'A `<SidebarNav>` example in content/docs/frontend/layout.mdx passes a prop the component',
         'does not declare (objectui#4840). The expected list is READ OUT OF',
         'packages/layout/src/SidebarNav.tsx on every run, so this is never "update the test":',
         'add the prop to `SidebarNavProps`, or stop teaching it.',
@@ -478,7 +478,7 @@ describe("the guide's SidebarNav examples pass only real props (objectui#4840)",
       expect(
         bodies.includes(spelling),
         [
-          `No SidebarNav example in content/docs/guide/layout.md spells \`${spelling}\` any more.`,
+          `No SidebarNav example in content/docs/frontend/layout.mdx spells \`${spelling}\` any more.`,
           'The page used to teach `label:` for the row label and a nested `items:` for child',
           'rows; `title` and `children` are the real keys that replaced them (objectui#4840).',
           'A page that stops showing them sends readers back to the shape that renders a row',
@@ -493,7 +493,7 @@ describe("the guide's SidebarNav examples pass only real props (objectui#4840)",
       expect(
         /\bicon\s*:\s*['"`]/.test(fence.body),
         [
-          `The SidebarNav example at content/docs/guide/layout.md:${fence.line} writes \`icon\` as a`,
+          `The SidebarNav example at content/docs/frontend/layout.mdx:${fence.line} writes \`icon\` as a`,
           'quoted string. `NavItem.icon` is a `React.ComponentType`, rendered as `<item.icon />`',
           '(SidebarNav.tsx:60 and :109) — a string reaches React as an unknown lowercase tag and',
           'renders nothing (objectui#4840, objectui#3999). Import the Lucide component and pass it.',
@@ -514,7 +514,7 @@ describe('the guide authors no `sidebar-nav` JSON node (objectui#4840)', () => {
     expect(
       keys,
       [
-        '`sidebar-nav` is now registered. content/docs/guide/layout.md states as measured fact',
+        '`sidebar-nav` is now registered. content/docs/frontend/layout.mdx states as measured fact',
         'that the key does not resolve and that a node renders "Unknown component type"',
         '(objectui#4840). That paragraph is now false, and the PAGE — not this assertion — is',
         'what has to change: document the node, its `inputs`, and which of `SidebarNavProps`',
@@ -550,7 +550,7 @@ describe('the guide authors no `sidebar-nav` JSON node (objectui#4840)', () => {
     expect(
       named.slice().sort(),
       [
-        'The key list in content/docs/guide/layout.md and the `ComponentRegistry.register` calls',
+        'The key list in content/docs/frontend/layout.mdx and the `ComponentRegistry.register` calls',
         'in packages/layout/src/index.ts disagree. The page names that list to make the point',
         'that `sidebar-nav` is absent from it (objectui#4840), so a stale list undermines the',
         'only claim it is there to support.',
@@ -577,9 +577,9 @@ describe('the guide authors no `sidebar-nav` JSON node (objectui#4840)', () => {
     );
 
     expect(
-      offenders.map((fence) => `content/docs/guide/layout.md:${fence.line}`),
+      offenders.map((fence) => `content/docs/frontend/layout.mdx:${fence.line}`),
       [
-        'A fence in content/docs/guide/layout.md authors a `sidebar-nav` node again',
+        'A fence in content/docs/frontend/layout.mdx authors a `sidebar-nav` node again',
         '(objectui#4840). The key is not registered anywhere in this repo, so the node does not',
         'resolve at all: the renderer replaces it with the red "Unknown component type:',
         'sidebar-nav" panel (OBJUI-001) and no sidebar renders. Teach the React composition',
@@ -598,10 +598,10 @@ describe("the source facts the guide's Responsive Behavior section rests on (obj
       header[0],
       [
         'The `header` element in packages/layout/src/AppShell.tsx now renders something besides',
-        '`{navbar}`. content/docs/guide/layout.md tells readers the header adds no controls of',
+        '`{navbar}`. content/docs/frontend/layout.mdx tells readers the header adds no controls of',
         'its own — in particular no sidebar toggle — and that they must render a',
         '`SidebarTrigger` inside `navbar` themselves, or the mobile sidebar can only be opened',
-        'with Cmd/Ctrl+B (objectui#4842). content/docs/layout/app-shell.mdx says the same.',
+        'with Cmd/Ctrl+B (objectui#4842). content/docs/frontend/app-shell.mdx says the same.',
         'If the shell now supplies a toggle, BOTH pages are wrong and have to change.',
       ].join('\n'),
     ).not.toMatch(/SidebarTrigger|toggleSidebar/);
@@ -619,7 +619,7 @@ describe("the source facts the guide's Responsive Behavior section rests on (obj
     expect(
       /(sm|md|lg):h-/.test(header[0]),
       [
-        'The header now has a responsive height variant. content/docs/guide/layout.md states it',
+        'The header now has a responsive height variant. content/docs/frontend/layout.mdx states it',
         'is `h-12` at every breakpoint and that there is no compact variant (objectui#4842) —',
         'the page, not this assertion, is what has to change.',
       ].join('\n'),
@@ -638,7 +638,7 @@ describe("the source facts the guide's Responsive Behavior section rests on (obj
     expect(
       Number(breakpoint[1]),
       [
-        'The sidebar breakpoint moved. content/docs/guide/layout.md is written around a single',
+        'The sidebar breakpoint moved. content/docs/frontend/layout.mdx is written around a single',
         '768px boundary — Tailwind `md`, and this constant — after its three fictional tiers',
         'split at 1024px were removed (objectui#4842). Update the page with the new number.',
       ].join('\n'),
@@ -655,7 +655,7 @@ describe("the source facts the guide's Responsive Behavior section rests on (obj
         /\blg:\S/.test(src),
         [
           `packages/layout/src/${name} now uses an \`lg:\` (1024px) utility.`,
-          'content/docs/guide/layout.md states there is no separate tablet/desktop tier and that',
+          'content/docs/frontend/layout.mdx states there is no separate tablet/desktop tier and that',
           '800px and 1400px get the same layout (objectui#4842). A real `lg` rule makes that',
           'false — re-audit the section against the new classes.',
         ].join('\n'),
@@ -675,7 +675,7 @@ describe("the source facts the guide's Responsive Behavior section rests on (obj
         content[1],
         [
           `The content element in packages/layout/src/AppShell.tsx no longer has \`${cls}\`.`,
-          'content/docs/guide/layout.md quotes these padding steps literally (objectui#4842);',
+          'content/docs/frontend/layout.mdx quotes these padding steps literally (objectui#4842);',
           'update the page to match the new classes.',
         ].join('\n'),
       ).toContain(cls);

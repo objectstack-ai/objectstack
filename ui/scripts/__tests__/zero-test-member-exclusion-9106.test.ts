@@ -41,6 +41,8 @@ import { fileURLToPath } from 'node:url';
  *   pnpm exec vitest run examples/byo-backend-console/  exit 1  no test files found
  *   pnpm exec vitest run packages/layout/               exit 0  21 files, 217 tests
  *
+ * (`apps/site` has since been deleted, by objectstack#27145.)
+ *
  * The exit 1 is the root config working as designed: it does not set
  * `passWithNoTests` to a constant, it sets it to the negation of whether the CLI
  * named test filters, so a positional filter collecting nothing is precisely the
@@ -85,14 +87,8 @@ const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
  * objectui#9105 did) and "is it genuinely test-less" (then record it here).
  */
 const ZERO_TEST_MEMBERS = [
-  {
-    dir: 'apps/site',
-    pkgName: '@object-ui/site',
-    // A second, independent reason, re-derived below: no vitest project collects
-    // this directory at all, so any positional entry would be green by
-    // construction and could never notice a test file appearing.
-    why: 'the docs site; no test files, and no vitest project covers apps/site',
-  },
+  // `apps/site` (`@object-ui/site`, the docs site) stood here until
+  // objectstack#27145 deleted it with the objectui.org site.
   {
     dir: 'examples/hello-world',
     pkgName: '@object-ui/example-hello-world',
@@ -150,8 +146,8 @@ function memberDirs(): string[] {
  *
  * Skips the same two directories the sibling pins skip (`node_modules`, `dist`)
  * plus dot-directories: the root config's shared exclude list drops
- * `.{idea,git,cache,output,temp}`, `.claude` and `.wt-*`, and `apps/site` carries
- * a generated `.source/` tree. Counting a file the root config would never
+ * `.{idea,git,cache,output,temp}`, `.claude` and `.wt-*`, and a docs site's
+ * generated `.source/` tree is one of them. Counting a file the root config would never
  * collect would make a member look testable when the runner disagrees.
  */
 function collectTestFiles(dir: string): string[] {
@@ -298,24 +294,5 @@ describe('objectui#9106 — the premises the exclusion rests on', () => {
     // being true and the reason these members have no `test` script needs
     // re-reading rather than re-spelling.
     expect(rootConfigText).toMatch(/passWithNoTests:\s*!cliHasTestFilters\(process\.argv\)/);
-  });
-
-  it('apps/site is reached by NO vitest project, which is why no entry could work for it', () => {
-    // Re-derived, not cited. objectui#8240 established for `apps/console` that an
-    // app comes back through the root config's `projects` array as its OWN
-    // project rooted at the app directory, so a positional naming `apps/console/`
-    // is matched against project-relative paths and can never contain it.
-    //
-    // For `apps/site` that mechanism does not even get to apply, and the reason
-    // is stronger: `apps/site` is in no project at all. The root-level projects
-    // exclude `apps/**` and their include globs name packages/examples/
-    // eslint-rules/scripts, and the only app config the `projects` array pulls in
-    // is the console's. So a `--passWithNoTests` positional entry for apps/site
-    // would be green BY CONSTRUCTION, and `--project @object-ui/site` names a
-    // project that does not exist.
-    expect(rootConfigText).toContain("'./apps/console/vitest.config.ts'");
-    expect(rootConfigText).not.toContain('./apps/site/vitest.config.ts');
-    expect(fs.existsSync(path.join(repoRoot, 'apps/site/vitest.config.ts'))).toBe(false);
-    expect(rootConfigText).toContain("'apps/**'");
   });
 });

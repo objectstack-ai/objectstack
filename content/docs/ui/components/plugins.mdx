@@ -85,6 +85,7 @@ Namespace `plugin-dashboard`.
 | `fallbackValue` | `string` |  | Value shown when no data source resolves. For static/demo tiles; a bound metric should not need it. |
 | `trend` | `object` |  | Static trend badge: `{ value, label, direction }`. Use `compareTo` instead when the trend should be computed from data. |
 | `compareTo` | `object` |  | Period-over-period comparison, `{ kind: "previousPeriod" }` or `{ kind: "previousYear" }` — the computed alternative to a static `trend`. |
+| `polarity` | `enum`: `higher`, `lower`, `neutral` |  | Which direction of change is good news. Colours the trend badge, computed (`compareTo`) or static (`trend`): `lower` draws a rise red and a fall green (turnaround, overdue counts, cost), `neutral` draws it muted. Omit it for rise green, fall red. The arrow always shows which way the number moved. |
 | `drillDown` | `object` |  | Click-through config that opens the records behind the number. `drillDown.filter` and `drillDown.mode` do not apply to a metric, which has no clicked point to filter by and no row to open, so the list is always scoped by this block’s own `filter`; a drill `filter` belongs on `object-chart` or `object-pivot`, and `mode` on `object-data-table`. |
 | `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
 

@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Rich text editor plugin for Object UI, powered by Monaco Editor",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-editor",
+  "description": "Rich text editor plugin for ObjectUI, powered by Monaco Editor",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-editor",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

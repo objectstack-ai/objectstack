@@ -81,7 +81,7 @@ import type { DataSource, TextSchema } from '@object-ui/types';
 import { uiRoot } from '../../../../scripts/ui-root.mjs';
 
 const ROOT = uiRoot();
-const GUIDE = 'content/docs/guide/schema-rendering.md';
+const GUIDE = '../content/docs/frontend/schema-rendering.mdx';
 const readDoc = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
 
 /**

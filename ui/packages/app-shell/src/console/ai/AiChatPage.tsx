@@ -68,6 +68,7 @@ import {
   detectAuthoringVerdict,
   detectBuiltAppPackage,
   buildProgressFromDraftReview,
+  chartsFromParts,
   // The authoring/honest -> runtime message seam (objectui#4399 / PR #4416),
   // consumed here one hop up from the plugin's own renderers (objectui#4437).
   // See `runtimeMessages` below for why this host calls it exactly once.
@@ -294,12 +295,20 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
       }
     }
 
+    // objectstack#25908 — the answer's charts, read off the `data-chart`
+    // parts the cache wrote or the `visualize_data` results the server
+    // persisted, each at the offset into `content` where its part sat. The
+    // live stream's chart part is never stored, so this is the only way a
+    // chart survives a reload.
+    const charts = message.role === 'assistant' ? chartsFromParts(message.parts) : undefined;
+
     return {
       id: message.id,
       role: message.role,
       content,
       ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
       ...(buildProgress ? { buildProgress } : {}),
+      ...(charts ? { charts } : {}),
     };
   });
 }
