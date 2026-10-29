@@ -86,9 +86,33 @@ export interface AnalyticsResult {
          * in `spec/data`; the amount itself stays a bare number (ADR-0104).
          * Absent on non-monetary columns, which must never render a symbol,
          * and when no step answers, in which case the amount renders as a
-         * plain number.
+         * plain number. Absent, too, on a column that carries
+         * `currencyField`: its currency is per row, not per column.
          */
         currency?: string;
+        /**
+         * [ADR-0144 D2] The PER-ROW currency of a measure column over a
+         * `currencyMode: 'record'` amount: the `name` of another column of
+         * this answer — the dimension that groups by the amount's code field
+         * (`currencyConfig.currencyField`) — whose value in each row of `rows`
+         * (and of each `totals` entry that groups by it) is that row's ISO
+         * 4217 code. A renderer formats `row[name]` in the currency
+         * `row[currencyField]`.
+         *
+         * A record-mode amount holds one currency per record, so no single
+         * `currency` can describe its column: when this key is present
+         * `currency` is absent. The amount stays a bare number (ADR-0104 D1),
+         * and a measure-level `currency` over it is refused at compile. A
+         * `sum` / `avg` / `min` / `max` over such an amount is refused unless
+         * the query groups by its code field, so every grouped answer carries
+         * this column. A `count` / `count_distinct` over the amount reads no
+         * amount and carries neither key, grouped or not.
+         *
+         * Present only on a measure column of a `queryDataset` answer, its
+         * `__compare` column included; absent on dimension columns, on
+         * derived measures and on a `query` (cube) answer.
+         */
+        currencyField?: string;
         /**
          * The column's percent SCALE, when it is a percentage: `fraction` for a
          * 0–1 ratio (`1` ⇒ "100%"), `whole` for percentage points (`1` ⇒ "1%").

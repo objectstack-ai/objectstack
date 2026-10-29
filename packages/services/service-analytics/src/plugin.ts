@@ -1440,14 +1440,26 @@ export class AnalyticsServicePlugin implements Plugin {
               type?: string;
               multiple?: boolean;
               max?: number;
-              currencyConfig?: { currencyMode?: string; defaultCurrency?: string };
+              currencyConfig?: { currencyMode?: string; defaultCurrency?: string; currencyField?: string };
             }
           | undefined;
         if (!f) return undefined;
         const fixedCurrency = f.currencyConfig?.currencyMode === 'fixed'
           ? f.currencyConfig.defaultCurrency
           : undefined;
-        return { type: f.type, multiple: f.multiple === true, max: f.max, defaultCurrency: fixedCurrency };
+        // [ADR-0144 D2] …and `currencyField` ONLY under `currencyMode ===
+        // 'record'`, by the same rule: the spec reads the pointer under that
+        // mode alone (`CurrencyConfigSchema` refuses it under the other two).
+        const recordCurrencyField = f.currencyConfig?.currencyMode === 'record'
+          ? f.currencyConfig.currencyField
+          : undefined;
+        return {
+          type: f.type,
+          multiple: f.multiple === true,
+          max: f.max,
+          defaultCurrency: fixedCurrency,
+          currencyField: recordCurrencyField,
+        };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
       // actual cause when a dataset's SQL references a table that is not on the

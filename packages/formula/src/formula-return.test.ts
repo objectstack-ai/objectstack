@@ -169,3 +169,40 @@ describe('CONTROL — a numeric formula stays `number`', () => {
     expect(inferFormulaReturn('record.amount *', FIELDS)).toEqual({});
   });
 });
+
+describe('a formula over a record-mode amount carries the record currency (ADR-0144 D2)', () => {
+  const RECORD = { currencyMode: 'record', currencyField: 'currency_code' } as const;
+  const RECORD_FIELDS: Readonly<Record<string, FormulaSourceField>> = {
+    currency_code: { type: 'text' },
+    other_code: { type: 'text' },
+    amount: { type: 'currency', currencyConfig: RECORD },
+    tax: { type: 'currency', currencyConfig: RECORD },
+    fee: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'other_code' } },
+    budget: { type: 'currency' },
+    usd: { type: 'currency', currencyConfig: USD },
+    quantity: { type: 'number' },
+  };
+
+  it('stamps `record` mode with the source amount\'s code field, never the tenant default', () => {
+    expect(inferFormulaReturn('record.amount * 0.1', RECORD_FIELDS))
+      .toEqual({ returnType: 'currency', currencyConfig: RECORD });
+    expect(inferFormulaReturn('record.amount + record.tax', RECORD_FIELDS))
+      .toEqual({ returnType: 'currency', currencyConfig: RECORD });
+    expect(inferFormulaReturn('round(record.amount * record.quantity)', RECORD_FIELDS))
+      .toEqual({ returnType: 'currency', currencyConfig: RECORD });
+  });
+
+  it('an amount over its own currency is a plain ratio', () => {
+    expect(inferFormulaReturn('record.tax / record.amount', RECORD_FIELDS).returnType).not.toBe('currency');
+  });
+
+  it('two different currencies meeting are not one amount', () => {
+    for (const source of [
+      'record.amount + record.fee', // two code fields
+      'record.amount + record.budget', // record + the tenant default
+      'record.amount + record.usd', // record + fixed USD
+    ]) {
+      expect(inferFormulaReturn(source, RECORD_FIELDS).returnType, source).not.toBe('currency');
+    }
+  });
+});
