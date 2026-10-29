@@ -743,6 +743,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${D7}: every sys_secret read is by id under the system context, never by organization; systemFields.tenant: ` +
       'false with the open ceremony (18.x step 6, line fact F2)',
   },
+  {
+    object: 'sys_trusted_key',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the environment's trusted plugin-publisher keys, ` +
+      'read by key id under the system context, never by organization',
+  },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   {
     object: 'sys_flow_credential',

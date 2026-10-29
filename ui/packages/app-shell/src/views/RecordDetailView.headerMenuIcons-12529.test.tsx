@@ -203,7 +203,8 @@ describe('record header: iconed system entries, Delete set apart in the ⋯, Edi
   it('the ⋯ holds the system group with Delete last, after a separator; Edit is not in it', async () => {
     await mountRecordPage(FULL_ROW);
     const menu = await openOverflow();
-    expect(menuRows(menu)).toEqual(['Add to favorites', 'Share', '---', 'Delete']);
+    // The host's Refresh leads the ⋯, set apart (objectstack#27055).
+    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Add to favorites', 'Share', '---', 'Delete']);
   });
 
   it('with three app actions in the header, Edit stays a labelled button after them, opens the edit session, and nothing is icon-only', async () => {
@@ -232,6 +233,7 @@ describe('record header: iconed system entries, Delete set apart in the ⋯, Edi
 
     // The ⋯ then holds only the menu-pinned system entries.
     const menu = await openOverflow();
-    expect(menuRows(menu)).toEqual(['Add to favorites', 'Share', '---', 'Delete']);
+    // The host's Refresh leads the ⋯, set apart (objectstack#27055).
+    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Add to favorites', 'Share', '---', 'Delete']);
   });
 });

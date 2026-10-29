@@ -227,11 +227,11 @@ async function mountObjectList(view: Record<string, unknown>) {
       </MemoryRouter>
     </ExpressionProvider>,
   );
-  // `options` is built unconditionally by the same object literal as the rung
+  // `kanban` is built unconditionally by the same object literal as the rung
   // under test, so its arrival is the signal that the relay actually ran —
   // waiting on `options.chart` itself would hang rather than fail.
   await waitFor(() => {
-    expect(captured?.options).toBeTruthy();
+    expect(captured?.kanban).toBeTruthy();
   });
 }
 
@@ -296,7 +296,7 @@ describe('the object-view relay forwards the authored chart block WHOLE (objectu
     // object pins BOTH directions: no declared key is dropped, and no key the
     // author did not write is invented on the way through.
     await mountObjectList({ chart: ADR_0021_BLOCK });
-    expect(captured.options.chart).toEqual(ADR_0021_BLOCK);
+    expect(captured.chart).toEqual(ADR_0021_BLOCK);
   });
 
   it('THE FIX: the pointer carries a retired `categoryField` / `valueField` block whole; the gate offers it no toggle', async () => {
@@ -307,7 +307,7 @@ describe('the object-view relay forwards the authored chart block WHOLE (objectu
     // arrives whole and is offered nothing.
     expect(await chartOffered({ chart: { categoryField: 'status', valueField: 'hours' } })).toBe(false);
     await mountObjectList({ chart: { categoryField: 'status', valueField: 'hours' } });
-    expect(captured.options.chart).toEqual({ categoryField: 'status', valueField: 'hours' });
+    expect(captured.chart).toEqual({ categoryField: 'status', valueField: 'hours' });
   });
 
   it('THE FIX: keys beyond the block are relayed verbatim, not whitelisted', async () => {
@@ -316,7 +316,7 @@ describe('the object-view relay forwards the authored chart block WHOLE (objectu
     // grows a tenth, which is precisely the trap being closed.
     const block = { ...ADR_0021_BLOCK, filter: [{ field: 'status', op: 'eq', value: 'open' }], config: { stacked: true } };
     await mountObjectList({ chart: block });
-    expect(captured.options.chart).toEqual(block);
+    expect(captured.chart).toEqual(block);
   });
 
   it('CONTROL: the retired `xAxisField` / `yAxisFields` block resolves no toggle (objectui#6152 round 15)', async () => {
@@ -336,7 +336,7 @@ describe('the object-view relay forwards the authored chart block WHOLE (objectu
     // observable answer is the same — this pins that it stays the same.
     expect(await chartOffered({})).toBe(false);
     await mountObjectList({});
-    expect(captured.options.chart).toBeUndefined();
+    expect(captured.chart).toBeUndefined();
   });
 
   it('NEGATIVE CONTROL: an EMPTY chart block is offered no toggle', async () => {

@@ -45,9 +45,14 @@ import { SchemaRenderer } from '@object-ui/react';
 // object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../renderers';
 
-/** Exactly the tokens `buildDefaultPageSchema` writes onto its tab nodes. */
+/**
+ * The tokens `buildDefaultPageSchema` writes onto its tab nodes (Details,
+ * Timeline, Related, Approvals since objectstack#27055), plus the ones it wrote
+ * before, which the strip still localizes.
+ */
 const SYNTHESIZED_TABS: Array<{ token: string; packKey: keyof typeof builtInLocales.en.detail }> = [
   { token: 'Details', packKey: 'details' },
+  { token: 'Timeline', packKey: 'timeline' },
   { token: 'Related', packKey: 'related' },
   { token: 'Attachments', packKey: 'attachments' },
   { token: 'Activity', packKey: 'activity' },
@@ -138,9 +143,11 @@ describe('page:tabs — built-in record-detail labels speak the session locale (
 
     expect(texts).toContain('詳情');
     expect(texts).toContain('相關');
+    expect(texts).toContain('時間線');
     // The Simplified pack values, which a pack-first order would have produced.
     expect(texts).not.toContain('详情');
     expect(texts).not.toContain('相关');
+    expect(texts).not.toContain('时间线');
   });
 
   /**

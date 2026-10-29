@@ -555,9 +555,12 @@ describe('objectui#11572 — the population is derived, never written down', () 
     // something, or every check below would be vacuously true. These are
     // members the file plainly reads, through each read shape: a plain access,
     // an `as any` cast, a helper that takes the schema whole, the prop alias.
+    // (`options` left this list with objectstack#25923, which removed every read
+    // of the retired bag; `map` is read through `resolveListMapConfig`.)
     expect(POPULATION).toEqual(
-      expect.arrayContaining(['columns', 'kanban', 'tree', 'chart', 'grouping', 'rowColor', 'pagination', 'options', 'showViewSwitcher']),
+      expect.arrayContaining(['columns', 'kanban', 'tree', 'chart', 'map', 'grouping', 'rowColor', 'pagination', 'showViewSwitcher']),
     );
+    expect(POPULATION).not.toContain('options');
   });
 
   it('the reading answers both ways: the §1 scan, run on a fixture, sees code and not prose, and flags an unfollowable escape', () => {
@@ -608,7 +611,10 @@ describe('objectui#11572 — the population is derived, never written down', () 
   });
 
   it('re-derives the relay literal, and finds it reading both the view and the page', () => {
-    expect([...WRITTEN.keys()]).toEqual(expect.arrayContaining(['columns', 'kanban', 'options', 'userActions']));
+    // objectstack#25923: the page sends one `map` block (its derivation with
+    // the authored keys laid over) and no `options` bag.
+    expect([...WRITTEN.keys()]).toEqual(expect.arrayContaining(['columns', 'kanban', 'map', 'userActions']));
+    expect([...WRITTEN.keys()]).not.toContain('options');
     expect([...VIEW_DERIVED]).toEqual(expect.arrayContaining(['view', 'appearance', 'allowed', 'kanban', 'columns']));
     // `userActions` is the page's, and must not be taken for the view's.
     expect([...PAGE_DERIVED]).toContain('userActions');

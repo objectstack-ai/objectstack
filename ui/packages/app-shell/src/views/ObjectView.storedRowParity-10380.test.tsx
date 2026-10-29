@@ -61,6 +61,18 @@
  * well. `ListView` reads `groupByField` as a flat timeline key off the
  * top-level block only, so the merged block exposed the bag's key on the object
  * page alone. Both runs are quoted in the PR body.
+ *
+ * ## objectstack#25923: the bag is folded on read, and neither page reads it
+ *
+ * The spec retired the bag. Its ADR-0087 D2 conversion
+ * `list-view-options-bag-folded` folds each stored `options.KIND` onto the
+ * top-level `KIND` block, the top-level value winning per key, before a row is
+ * served, and both pages stopped forwarding `options`. So every row below now
+ * reaches the pages as SERVED: run through the spec's own stored-item
+ * conversion first. The cases and their expectations are unchanged; the
+ * precedence the two pages used to reach through `ListView`'s merge is now the
+ * fold's. The last block pins that a bag the server never folded is read by
+ * neither page.
  */
 
 import * as React from 'react';
@@ -151,12 +163,20 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { ComponentRegistry } from '@object-ui/core';
-import { ObjectView, storedLegacyOptions } from './ObjectView';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
+import { ObjectView } from './ObjectView';
 import { InterfaceListPage } from './InterfaceListPage';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
 const OBJECT_NAME = 'parity_task';
 const VIEW_KEY = `${OBJECT_NAME}.ops`;
+
+/** A stored flat list overlay as the server serves it: after the spec's stored-item conversions. */
+function served(row: Record<string, unknown>): Record<string, unknown> {
+  const out = applyConversionsToStoredItem('view', structuredClone({ name: VIEW_KEY, object: OBJECT_NAME, viewKind: 'list', ...row }));
+  const { object: _o, viewKind: _k, ...overlay } = out as Record<string, unknown>;
+  return overlay;
+}
 
 /** One stored flat list overlay, as the console merges it into `listViews`. */
 function objectsWith(row: Record<string, unknown>) {
@@ -205,9 +225,9 @@ async function objectPageSchema(row: Record<string, unknown>): Promise<any> {
       </MemoryRouter>
     </ExpressionProvider>,
   );
-  // `options` is written by the same literal as every rung under test, so its
-  // arrival says the relay ran.
-  await waitFor(() => expect(capturedListSchema?.options).toBeTruthy());
+  // `kanban` is built unconditionally by the same relay as every block under
+  // test, so its arrival says the relay ran.
+  await waitFor(() => expect(capturedListSchema?.kanban).toBeTruthy());
   const schema = capturedListSchema;
   cleanup();
   return schema;
@@ -293,8 +313,9 @@ const RENDERERS: Record<string, { rendererType: string; project: (node: any) => 
   map: { rendererType: 'object-map', project: mapConfig },
 };
 
-/** What each page's renderer receives for one stored row. */
-async function bothPages(row: Record<string, unknown>) {
+/** What each page's renderer receives for one stored row, served (folded) unless `asWritten`. */
+async function bothPages(stored: Record<string, unknown>, asWritten = false) {
+  const row = asWritten ? stored : served(stored);
   const viewType = row.type as string;
   const { rendererType, project } = RENDERERS[viewType];
   const objectSchema = await objectPageSchema(row);
@@ -386,18 +407,38 @@ describe('objectui#10380 — the top-level block wins per key over the bag, on b
       kanban: { groupByField: 'region', columns: ['name'] },
       options: { kanban: { groupByField: 'status' } },
     });
-    expect(objectPage).toEqual(interfacePage);
     expect(objectPage.groupBy).toBe('region');
+    expect(interfacePage.groupBy).toBe('region');
+    expect(objectPage.cardFields).toEqual(interfacePage.cardFields);
+    // objectstack#25923: the card title no longer agrees, and that is not the
+    // fold's doing. The object page floors an undeclared kanban `titleField` at
+    // `name` (pinned in `ObjectView.kanbanLane-8193`) and the interface page
+    // sends none, which already holds on main for every kanban row without a
+    // bag. This row agreed only because a bag's block used to replace the
+    // object page's synthesized one; served, it has no bag. Pinned as observed
+    // so a change to either side is seen here.
+    expect(objectPage.titleField).toBe('name');
+    expect(interfacePage.titleField).toBeUndefined();
   });
 });
 
-describe('storedLegacyOptions — what counts as a bag', () => {
-  it('a plain object is the bag; anything else is no bag', () => {
-    const bag = { kanban: { titleField: 'region' } };
-    expect(storedLegacyOptions({ options: bag })).toBe(bag);
-    expect(storedLegacyOptions({})).toEqual({});
-    expect(storedLegacyOptions(undefined)).toEqual({});
-    expect(storedLegacyOptions({ options: ['kanban'] })).toEqual({});
-    expect(storedLegacyOptions({ options: 'kanban' })).toEqual({});
+describe('objectstack#25923 — a bag the server never folded is read by neither page', () => {
+  it('CONTROL: a timeline title carried only in an unfolded bag reaches neither renderer', async () => {
+    const { objectPage, interfacePage } = await bothPages(
+      { type: 'timeline', options: { timeline: { titleField: 'region' } } },
+      true,
+    );
+    // The two pages derive different defaults for a row with no timeline block
+    // (a page-side difference this card does not touch), so only the bag's own
+    // key is compared: neither page reads it, flat or in the block.
+    for (const node of [objectPage, interfacePage]) {
+      expect(node.titleField).not.toBe('region');
+      expect(node.timeline?.titleField).not.toBe('region');
+    }
+  });
+
+  it('CONTROL: the same row as served carries the title on both pages — the fold is what moves it', async () => {
+    const row = served({ type: 'timeline', options: { timeline: { titleField: 'region' } } });
+    expect(row).toEqual({ name: VIEW_KEY, type: 'timeline', timeline: { titleField: 'region' } });
   });
 });

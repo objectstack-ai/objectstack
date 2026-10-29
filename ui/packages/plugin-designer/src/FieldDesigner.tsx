@@ -340,7 +340,9 @@ export function FieldDesigner({
         unique: data.unique === true,
         readonly: data.readonly === true,
         hidden: data.hidden === true,
-        externalId: data.externalId === true,
+        // No `externalId` here (objectstack#26674): the drawer no longer
+        // offers it, so the spread above carries a stored value through an
+        // edit untouched.
         trackHistory: data.trackHistory === true,
         defaultValue: data.defaultValue ? String(data.defaultValue) : undefined,
         placeholder: data.placeholder ? String(data.placeholder) : undefined,
@@ -360,7 +362,6 @@ export function FieldDesigner({
         unique: data.unique === true,
         readonly: data.readonly === true,
         hidden: data.hidden === true,
-        externalId: data.externalId === true,
         trackHistory: data.trackHistory === true,
         defaultValue: data.defaultValue ? String(data.defaultValue) : undefined,
         placeholder: data.placeholder ? String(data.placeholder) : undefined,
@@ -473,7 +474,11 @@ export function FieldDesigner({
           // index flag — `FieldSchema.safeParse` rejects `indexed` by name, so
           // ticking it only ever produced a 422 on save. Object-level
           // `indexes[]` is the real surface.
-          { name: 'externalId', label: t('appDesigner.fieldDesigner.externalId'), type: 'boolean', disabled: readOnly },
+          // No `externalId` control (objectstack#26674): `field.externalId`
+          // is graded `dead` — no upsert, import or seed matches on it — so
+          // the switch only invited an author to rely on it. A stored value
+          // is carried through an edit by `handleFormSuccess`'s spread, never
+          // stripped.
           { name: 'trackHistory', label: t('appDesigner.fieldDesigner.trackHistory'), type: 'boolean', disabled: readOnly },
           { name: 'readonly', label: t('appDesigner.fieldDesigner.readOnly'), type: 'boolean', disabled: readOnly },
           { name: 'hidden', label: t('appDesigner.fieldDesigner.hidden'), type: 'boolean', disabled: readOnly },
@@ -491,7 +496,6 @@ export function FieldDesigner({
           unique: editingField.unique || false,
           readonly: editingField.readonly || false,
           hidden: editingField.hidden || false,
-          externalId: editingField.externalId || false,
           trackHistory: editingField.trackHistory || false,
           defaultValue: editingField.defaultValue != null ? String(editingField.defaultValue) : '',
           placeholder: editingField.placeholder || '',

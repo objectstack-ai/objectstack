@@ -15,6 +15,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { collectAndLintDocs, lintDocNavTargets } from './collect-docs.js';
 
 const app = (navigation: unknown[]) => ({ name: 'crm_app', label: 'CRM', navigation });
@@ -86,6 +87,21 @@ describe('docs/nav-target — a doc nav item must open something this package ha
       manifest: { ...STACK.manifest, navigationContributions: [{ app: 'setup', items: [{ id: 'nav_crm_help', type: 'doc', doc: 'ghost_doc' }] }] },
     }, DOCS);
     expect(issues.map((i) => i.path)).toEqual(['apps/setup/navigation/nav_crm_help']);
+  });
+
+  it('judges an app a package body carries on a multi-package `preserve` artifact', () => {
+    // The real composer: a `preserve` artifact keeps `apps` in the package body, not at its top level.
+    const composed = (doc: string) => JSON.parse(JSON.stringify(composeStacks([
+      defineStack({ manifest: { id: 'com.example.svc', name: 'svc', namespace: 'svc', version: '1.0.0', type: 'app' } } as never, { strict: false }),
+      defineStack({
+        manifest: { id: 'com.example.crm', name: 'crm', namespace: 'crm', version: '1.0.0', type: 'app' },
+        apps: [app([{ id: 'nav_page', type: 'doc', label: 'Guide', doc }])],
+      } as never, { strict: false }),
+    ], { manifest: 'preserve' }))) as Record<string, unknown>;
+    expect(composed('crm_lead_guide').apps).toBeUndefined();
+    expect(lintDocNavTargets(composed('crm_lead_guide'), DOCS)).toEqual([]);
+    const issues = lintDocNavTargets(composed('crm_lead_gide'), DOCS);
+    expect(issues.map((i) => [i.rule, i.path])).toEqual([['docs/nav-target', 'apps/crm_app/navigation/nav_page']]);
   });
 
   it('resolves a book declared on a package body, and that package id as its implicit book', () => {

@@ -55,7 +55,8 @@
  * The rows double as the member pins the console's repo-wide parity gate
  * registers for this block's array/object-armed inputs (`list-view.data`,
  * `list-view.columns`, `list-view.filter`, `list-view.sort`,
- * `list-view.options`, and every structured key published here).
+ * and every structured key published here; `list-view.options` left with the
+ * retired bag, objectstack#25923).
  */
 
 import React from 'react';
@@ -479,23 +480,15 @@ describe('objectui#13047 — the record-source and query keys (the member pins t
     expect(orderby.map((s) => `${s.field} ${s.order}`)).toEqual(['amount desc', 'name asc']);
   });
 
-  it('`options`: the per-kind bag binds the kind it names — `options.kanban.groupByField` lanes the board on a field the list would not pick', async () => {
-    // CONTROL first: the bare kanban node lanes on a field the list derives
-    // itself (the fixture's select field), so the authored `owner` below can
-    // only come from the bag.
-    const control = mount({ type: 'kanban' });
-    await loaded(control.dataSource);
-    const derived = lastHanded('object-kanban')?.groupBy;
-    expect(derived).not.toBe('owner');
-    cleanup();
-    resetHanded();
-
-    const { dataSource } = mount({ type: 'kanban', options: { kanban: { groupByField: 'owner', columns: ['name'] } } });
-    const board = await handedTo('object-kanban');
-    await loaded(dataSource);
-    expect(board.type).toBe('object-kanban');
-    expect(lastHanded('object-kanban').groupBy).toBe('owner');
-    expect(lastHanded('object-kanban').cardFields).toEqual(['name']);
+  it('`options` is no input (objectstack#25923): the spec\'s `list-view` row refuses the retired bag by name, so no fixture here can mount one', () => {
+    // The member this row pinned (`options.kanban.groupByField` laning the
+    // board) is the top-level `kanban` block now, pinned with the other
+    // structured keys. What is left to pin is the door: the bag never reaches
+    // the renderer from a page, because the save gate refuses it.
+    expect(() => node({ type: 'kanban', options: { kanban: { groupByField: 'owner', columns: ['name'] } } })).toThrow(
+      /`options` bag was removed/,
+    );
+    expect(() => node({ type: 'kanban', kanban: { groupByField: 'owner', columns: ['name'] } })).not.toThrow();
   });
 });
 

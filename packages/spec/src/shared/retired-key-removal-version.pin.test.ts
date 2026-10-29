@@ -92,7 +92,7 @@ import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { TursoConfigSchema } from '../data/driver/turso.zod';
 import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
+import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema, VIEW_METADATA_MEMBERS } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -394,6 +394,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   // #26677: value-level retirements — each retired member is refused by the
   // enum's own error map with its prescription, so the refusal is the parse.
+  'list-view-options-bag-folded': [tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'options')],
   'navigation-mode-overlay-values-removed': [
     ...(['modal', 'split', 'popover'] as const).map((mode) =>
       refusal(`navigation.mode '${mode}'`, () => NavigationModeSchema.safeParse(mode)),
