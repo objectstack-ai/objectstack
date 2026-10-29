@@ -2,8 +2,8 @@
   "number": 27276,
   "kind": "issue",
   "title": "spike(objectql): a virtual object on a plugin driver — external-bound object boots without introspection, reads with filters, formula over current_user, beforeUpdate hook → driver.update, gantt drag writes (epic #27261 P0 · #27130 route d)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p1"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T14:16:33Z",
-  "updated_at": "2026-10-28T17:37:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T01:06:22Z",
+  "closed_at": "2026-10-29T01:04:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27276",
   "body": "Filing gate ③ (maintainer-directed). Ruling 6471382887 on #27261 (batch #423, maintainer 「立专题卡」 2026-10-28): the ontology-over-external-systems epic opens with Tier A (plugin driver, zero protocol change). Part of #27261. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane and grade. Design: #27261 body; the first customer pull: #27130 (route d, design 6468011868).\n\nRuling-ref: 6471382887\n\n## 维护者速读\n\n- **改了什么：** 树内一个测试证明「插件 driver + 外部绑定对象」整条路贯通：内存自定义 driver 作为 `driver.spike_tree` 服务注册、`checkOnBoot:false` 的外部数据源、带自引用 `parent`/`plan_locked`/`current_user` 公式 `locked` 的外部对象、`beforeUpdate` hook；七步各证一件（见 Task）。\n- **为什么改：** #27130 客户（Enterprise，17.3→18.2 升级受阻）的甘特图写回只能走这条路；它也是 #27261 整个专题的地基。\n- **风险与回滚：** 只加测试；哪步不通立一张具名小卡，不在本卡修。\n- **先看：** `packages/objectql/src/plugin.ts:1145–1158`（driver 服务注册）、`engine.ts:21201`（按对象找 driver）、`runtime/src/external-validation-plugin.ts:290–305`（checkOnBoot）、`object.zod.ts:1296`（外部绑定）。\n- **两分钟验证：** 测试绿；报告逐步写「通 / 不通 + 现象」。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] (a) `defineStack` accepts a datasource whose driver is a plugin-published `driver.<name>` service (record how the datasource names it: by name, or a driver config the driver validates — `datasource.zod.ts:186, 502–525`).\n- [ ] (b) The stack boots with `external.validation.checkOnBoot: false` and no `introspectSchema`.\n- [ ] (c) `GET /data/spike_node` with the view's filter and sort reaches `driver.find` with a `DriverQuery`; record which parts arrive.\n- [ ] (d) A formula field over `current_user` on the external object evaluates per caller.\n- [ ] (e) `PATCH /data/spike_node/:id` reaches the `beforeUpdate` hook first; a hook refusal returns 4xx with the message; an allowed write reaches `driver.update` and the returned row is served.\n- [ ] (f) A gantt view (`parentField`, `lockField`, `dependenciesField`) on the object renders the tree and a drag issues the PATCH (plugin-gantt unit test or the live lane).\n- [ ] (g) Object permission sets apply to the external object (a denied profile gets 403).\n- [ ] Report: one line per step; every failing step names the smallest platform change it needs.\n\n`Clause-②: no` · `Metadata-protocol: none`. Size S. Lane: server (objectql); the gantt step may need the ui seat.\n\nEpic: #27261 (parent; the epic PM dispatches `pm:epic` children). Dedupe: #27261, #27130, ADR-0015; no open card carries this slice."

@@ -14,19 +14,21 @@
     "area:devpath",
     "documentation",
     "domain:devx",
-    "pm:blocked",
+    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T14:18:01Z",
-  "updated_at": "2026-10-28T17:41:15Z",
+  "updated_at": "2026-10-29T02:05:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27278",
   "body": "Blocked-by: #27276\n\nFiling gate ③ (maintainer-directed). Ruling 6471382887 on #27261 (batch #423, maintainer 「立专题卡」 2026-10-28): the ontology-over-external-systems epic opens with Tier A (plugin driver, zero protocol change). Part of #27261. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane and grade. Design: #27261 body; the first customer pull: #27130 (route d, design 6468011868).\n\nRuling-ref: 6471382887\n\n## 维护者速读\n\n- **改了什么：** 指南：虚拟对象的完整配方（数据源、外部绑定对象、`current_user` 公式锁、`beforeUpdate` hook、视图）+ driver 骨架 + 五个业务例（港口排程、SAP 订单、HR 目录、设备实时状态、反例：慢变参考数据用真对象 + DataSync）+ 三分法 + driver 形状 pin 测试模板。\n- **为什么改：** 这是回复 #27130 客户的配方，也是 AI 作者照抄的样板。\n- **风险与回滚：** 纯文档；配方以 P0 的测试为可执行示例。\n- **先看：** `content/docs/`（数据建模 / 集成）；P0 测试文件。\n- **两分钟验证：** docs-audit 通过；按配方在本地跑通 P0 测试的例子。\n- **需要您做的：** 文档落地后由分诊席在 #27130 线程用席位的话回复客户（不复述其指令形文字）。\n\n## Task\n\n- [ ] Write the guide from the P0 test; the three-way rule (computed / must-not-land / real-time ⇒ virtual; slow reference data ⇒ real object + DataSync).\n- [ ] Driver skeleton and the shape-pin test template.\n- [ ] docs-audit affected-docs green.\n\n`Clause-②: no` · `Metadata-protocol: none`. Size S. Lane: devx.\n\nEpic: #27261 (parent; the epic PM dispatches `pm:epic` children). Dedupe: #27261, #27130, ADR-0015; no open card carries this slice."

@@ -13,17 +13,21 @@
   "labels": [
     "area:records",
     "domain:spec",
-    "finding"
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T16:13:49Z",
-  "updated_at": "2026-10-28T16:13:49Z",
+  "updated_at": "2026-10-29T02:17:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27311",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\n## Observed (main after PR #27215, measured on the showcase app from PR #27303's branch)\n\n`ObjectSchema.relatedLists`'s `.describe()` (`packages/spec/src/data/object.zod.ts`, the #27069 block) says: an entry that matches no inbound `lookup` / `master_detail` field of this object is refused. On a Studio package publish (`PUT /api/v1/meta/object/desk_customer?mode=draft`, then the package publish) a stored `relatedLists: ['nope', 'desk_ticket']` was accepted and persisted with no refusal. `packages/lint/src/validate-related-list-refs.ts` judges an unknown child only under `wholeCollection`, which a package-closure publish does not set; the rule's header documents that boundary as deliberate (a downstream package's child may point in).\n\nThe Studio editor from PR #27303 closes the Studio half (its pre-write check never writes such an entry), so this is about the contract text versus the gate for every other writer: a stack author, a generated app, a direct API write.\n\n## Reach\n\nPublic door: the metadata API's object write + package publish; also `defineStack` compile if the same gate runs there. Measured once on the showcase app (see PR #27303's report comment 6473641463 on #27054).\n\n## Options for the spec lane\n\nA. By design: keep the gate's boundary and reword the `.describe()` to say what is enforced (\"refused when the collection is whole; a package closure may name a child a downstream package contributes\"), so the contract text does not promise a refusal the runtime does not make.\nB. Enforce: judge an unknown child at package-closure publish too, with the downstream-package case carried by an explicit declaration.\n\nThe seat does not rule this: it is a published contract's wording versus its gate. Governing text: `.describe()` of `relatedLists`; `packages/lint` `validate-related-list-refs` header; AGENTS.md \"declared is enforced\".\n\n## Dedupe words\n\nrelatedLists unknown child publish accepted package closure wholeCollection validate-related-list-refs describe\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 from PR #27303's out-of-scope findings (class b, reach measured), under epic #26676.</sub>"

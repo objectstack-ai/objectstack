@@ -2,8 +2,8 @@
   "number": 27183,
   "kind": "issue",
   "title": "docs(adr): ADR for multi-currency — record currency, dated rates, write-time home projection (Q0–Q4 and parameters 1–4 as ruled on #27119); dated note on ADR-0104 (epic #8345, lands in R1 first)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:36:00Z",
-  "updated_at": "2026-10-28T12:06:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T02:08:28Z",
+  "closed_at": "2026-10-29T02:08:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

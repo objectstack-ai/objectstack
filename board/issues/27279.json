@@ -2,8 +2,8 @@
   "number": 27279,
   "kind": "issue",
   "title": "ui(studio): external-object fields show their datasource and read-only state; no DDL affordances on an external object (epic #27261 P1, D6 first half)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p3"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T14:18:30Z",
-  "updated_at": "2026-10-28T17:36:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T01:05:32Z",
+  "closed_at": "2026-10-29T01:03:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27279",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate ③ (maintainer-directed). Ruling 6471382887 on #27261 (batch #423, maintainer 「立专题卡」 2026-10-28): the ontology-over-external-systems epic opens with Tier A (plugin driver, zero protocol change). Part of #27261. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane and grade. Design: #27261 body; the first customer pull: #27130 (route d, design 6468011868).\n\nRuling-ref: 6471382887\n\n## 维护者速读\n\n- **改了什么：** Studio 对象页：外部绑定对象的字段标出来源数据源与只读；不显示会触发 DDL 的操作（加列 / 改类型）。\n- **为什么改：** ADR-0015 欠的 Studio 半边里最小的一块；避免作者在 Studio 里对外部对象做平台会拒绝的事。\n- **风险与回滚：** 只读显示；数据源页与 OpenAPI 导入是 P2。\n- **先看：** `ui/packages/app-shell/src/views/metadata-admin/`。\n- **两分钟验证：** 一个外部对象在 Studio 里字段带「来自 plan_gantt · 只读」标记，无「添加字段」按钮。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Read `object.datasource` / `object.external` in the object inspector; render the badge; hide DDL affordances.\n- [ ] Unit test.\n\n`Clause-②: no` · `Metadata-protocol: none`. Size S. Lane: ui.\n\nEpic: #27261 (parent; the epic PM dispatches `pm:epic` children). Dedupe: #27261, #27130, ADR-0015; no open card carries this slice."

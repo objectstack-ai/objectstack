@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:38:44Z",
-  "updated_at": "2026-10-28T14:00:07Z",
+  "updated_at": "2026-10-28T21:12:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27188",
   "body": "Blocked-by: #27184\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** 前端按每行自己的币种显示 record 模式金额：`resolveFieldCurrency` 读兄弟字段的值；表单里币种码下拉（ISO 4217 值域驱动，分「本组织可用」与「全部」两组）预填组织默认币种；金额框符号与小数位跟着币种走；页脚合计只对分组或影子列显示；Studio 字段编辑器加 record 模式与字段选择。\n- **为什么改：** 没有这一步，record 字段会显示租户符号——比今天更错。⛔ R1 必含。\n- **风险与回滚：** 只影响 record 字段；29 个引用文件为上界，约 8 个源文件。\n- **先看：** `ui/packages/i18n/src/currency.ts`、`fields/src/widgets/CurrencyField.tsx`、`GridField.tsx`、`plugin-dashboard` 指标卡、app-shell 记录抽屉与表单。\n- **两分钟验证：** 三张不同币种的发票在列表里显示 $ / € / ¥；新建表单币种预填组织币种。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Resolver: record mode → the code field's value on the record in scope; no value ⇒ no symbol (never the tenant default for a record-mode field).\n- [ ] Form: the code field renders as a searchable select grouped \"available\" (home + rated + used) / \"all ISO 4217\"; pre-filled with `localization.currency`; the stored value is always explicit.\n- [ ] Amount inputs: symbol prefix and minor-unit decimals follow the selected code (`CURRENCY_FRACTION_DIGITS` reader).\n- [ ] Grid footer: sum only when grouped by code or over the home field; filters on a record-mode amount add the code condition.\n- [ ] Studio: `record` mode + `currencyField` picker listing only ISO-domain text fields, with a \"create currency field\" shortcut that writes explicit metadata.\n- [ ] Tests per widget.\n\nLane: ui · Size: M–L · Review: default. `Clause-②: no` · `Metadata-protocol: none`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."
