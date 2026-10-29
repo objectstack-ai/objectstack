@@ -1237,6 +1237,7 @@ const ru = {
     relatedCardCount_other: "{{count}} записи · увеличить",
     relatedDefaultChanged: "Порядок по умолчанию обновлён",
     relatedRestoreDefault: "Восстановить по умолчанию",
+    relatedRestoreDefaultOrder: "Восстановить порядок по умолчанию",
     relatedHiddenCount: "Скрыто: {{count}}",
     relatedHiddenCount_one: "Скрыто: {{count}}",
     relatedHiddenCount_few: "Скрыто: {{count}}",

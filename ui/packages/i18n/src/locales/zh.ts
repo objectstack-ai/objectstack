@@ -1245,6 +1245,7 @@ const zh = {
     relatedCardCount_other: '{{count}} 条记录 · 放大',
     relatedDefaultChanged: '默认顺序已更新',
     relatedRestoreDefault: '恢复默认',
+    relatedRestoreDefaultOrder: '恢复默认顺序',
     relatedHiddenCount: '已隐藏 {{count}} 张',
     relatedHiddenCount_one: '已隐藏 {{count}} 张',
     relatedHiddenCount_other: '已隐藏 {{count}} 张',

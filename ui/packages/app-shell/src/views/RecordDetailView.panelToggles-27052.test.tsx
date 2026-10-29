@@ -22,10 +22,16 @@
  *  - an object that is not worked opens with the timeline off — including
  *    one whose only claim is being another object's `master_detail` parent;
  *  - `⌘⇧.` / `⌘⇧,` flip the switches, matched by the physical key (Shift
- *    types `>` / `<` there), and do nothing while a text field has focus;
- *    the browser's own `⌘⇧T` / `⌘⇧R` are not theirs;
- *  - the toggles are drawn only in a column tier: not in the tabbed tier, not
- *    in the drawer / split pane.
+ *    types `>` / `<` there) or, for an event that carries no `code`, by the
+ *    character it typed (objectstack#27241), and do nothing while a text
+ *    field has focus; the browser's own `⌘⇧T` / `⌘⇧R` are not theirs;
+ *  - the toggles are ONE segmented control at the end of the record header's
+ *    action row (objectstack#27241), in both column tiers — not on the crumb
+ *    row, which keeps only the ways back and has no child without one;
+ *  - they are drawn only in a column tier: not in the tabbed tier, not in the
+ *    drawer / split pane;
+ *  - the related switch decides whether the related column exists: OFF in the
+ *    two-column tier leaves no rail toggle (objectstack#27241).
  */
 
 import * as React from 'react';
@@ -203,7 +209,16 @@ describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
   it('a worked object opens with three columns; timeline off draws details | related with a folded 「动态」 card; on restores', async () => {
     const { container } = renderPage();
     const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(group.closest('[data-record-crumb-row]')).not.toBeNull();
+    // objectstack#27241 — the end of the header's action row, after ⋯ and a
+    // hairline; the crumb row keeps only the ways back (none on a direct open).
+    expect(group.closest('[data-record-crumb-row]')).toBeNull();
+    const toolbar = group.closest('[role="toolbar"]')!;
+    expect(toolbar).not.toBeNull();
+    expect(toolbar.closest('[data-record-column]')).toBeNull();
+    const trailing = group.closest('[data-page-header-trailing]')!;
+    expect(trailing.querySelector('[role="separator"][aria-orientation="vertical"]')).not.toBeNull();
+    expect(toolbar.lastElementChild).toBe(trailing);
+    expect(container.querySelector('[data-record-crumb-row]')?.childElementCount ?? 0).toBe(0);
     expect(shown(container)).toBe('details timeline related');
     expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('true');
     expect(toggle(/^Related column$/).getAttribute('aria-pressed')).toBe('true');
@@ -280,6 +295,35 @@ describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
     await waitFor(() => expect(shown(container)).toBe('details timeline'));
   });
 
+  it('an event that carries no `code` still flips the switches by the character it typed (objectstack#27241)', async () => {
+    const { container } = renderPage();
+    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    press({ key: '>', code: '' });
+    await waitFor(() => expect(shown(container)).toBe('details related'));
+    press({ key: '.', code: '' });
+    await waitFor(() => expect(shown(container)).toBe('details timeline related'));
+    press({ key: '<', code: '' });
+    await waitFor(() => expect(shown(container)).toBe('details timeline'));
+    press({ key: ',', code: '' });
+    await waitFor(() => expect(shown(container)).toBe('details timeline related'));
+  });
+
+  it('the two-column tier draws the same control in the header row; related OFF leaves no rail toggle (objectstack#27241)', async () => {
+    const { container } = renderPage({ width: 900 });
+    const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    expect(container.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('two-column');
+    expect(group.closest('[role="toolbar"]')).not.toBeNull();
+    expect(shown(container)).toBe('details timeline');
+    // Related ON with no room: the rail toggle, and it opens the column.
+    fireEvent.click(screen.getByTestId('record-related-rail-toggle'));
+    await waitFor(() => expect(container.querySelector('[data-record-column="related"]')).not.toBeNull());
+    // Related OFF: no column, no rail toggle.
+    fireEvent.click(toggle(/^Related column$/));
+    await waitFor(() => expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull());
+    expect(container.querySelector('[data-record-column="related"]')).toBeNull();
+    expect(shown(container)).toBe('details timeline');
+  });
+
   it('the tooltip names each shortcut, and the shortcut is announced', async () => {
     renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
@@ -288,7 +332,7 @@ describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
   });
 
   it('not drawn in the tabbed tier, nor in the drawer / split pane; the shortcut does nothing there', async () => {
-    const tabbed = renderPage({ width: 900 });
+    const tabbed = renderPage({ width: 700 });
     expect(await screen.findByRole('tablist', undefined, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
     press('timeline');
