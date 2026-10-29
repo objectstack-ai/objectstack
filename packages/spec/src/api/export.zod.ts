@@ -312,10 +312,11 @@ export const ImportRequestSchema = lazySchema(() => z.object({
       'value — a `multiple: true` select, radio, lookup, user, file or image field, a `multiselect`, ' +
       '`checkboxes` or `tags` field, or a `json`, `composite`, `repeater`, `record`, `location`, ' +
       '`address` or `vector` field, the population `isMultiValueField` and `STRUCTURED_JSON_TYPES` ' +
-      'define — is refused with `400 INVALID_REQUEST` before any row is matched or written, naming each ' +
-      'such field (match on single-value fields: a code, a name, an email); a caller that hands rows to ' +
+      'define — is refused with `400 INVALID_REQUEST` before any row is matched or written, on a dry run ' +
+      'as on the import, naming each such field (match on single-value fields: a code, a name, an email); ' +
+      'a caller that hands rows to ' +
       'the import runner without this door (a mapping\'s connector pull) gets every row failed with ' +
-      '`VALIDATION_ERROR` and the same message instead.',
+      '`VALIDATION_ERROR` and the same refusal instead.',
     ),
   runAutomations: z.boolean().default(true)
     .describe(
