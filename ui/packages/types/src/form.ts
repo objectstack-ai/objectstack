@@ -2430,6 +2430,20 @@ export interface FormSchema extends BaseSchema {
    */
   showCancel?: boolean;
   /**
+   * Show a Reset button in the form's action bar (objectstack#27247). It
+   * restores the form to the values it opened with (`defaultValues`) without
+   * saving. A footer outside the form (the drawer and modal presentations)
+   * reaches the same restore with a `type="reset"` button naming the form's
+   * `id`. Not `resetOnSubmit`, which clears the form after a save.
+   * @default false
+   */
+  showReset?: boolean;
+  /**
+   * Reset button label. Unset falls back to the session language's
+   * `common.reset`; an authored `''` stays blank.
+   */
+  resetLabel?: string;
+  /**
    * Show the submit button (objectui#11070).
    *
    * The `form` renderer destructures this off the node with a `true` default
