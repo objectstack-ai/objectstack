@@ -1,7 +1,7 @@
 # 多仓协调
 
 - 产品依赖方向固定:`objectstack`(后端与 `ui/` 前端,`packages/spec` 唯一契约)→ `cloud`、`hotcrm`。
-- 多车道仓 `objectstack`:中央分诊是 `domain:*`/type/定级的唯一生产者。
+- 多车道仓 `objectstack`:中央分诊唯一生产 `domain:*`/type/定级,定级例外见 triage-duties 自分诊。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
 - 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
 - 机械三务 = 自扫 sweep、自打 `type`、自做首触(含 `finding`;业务理由归召唤的总监席)。
@@ -28,7 +28,7 @@
 - 规则 3:联动杂事立单,不靠记忆。
 - 已验收 PR 的产物流向另一仓,接受该 PR 的执行席立即在消费仓立后续单,带 `Blocked-by:`。
 - 规则 4:纵向拆分,一个分诊 PM + N 个执行 PM;一人恰一车道,一车道可坐多席。
-- 多车道仓:分诊唯一生产定级/路由/type/查重/shadow/`duplicate_of`;执行席永不定级或路由裸卡。
+- 多车道仓:分诊唯一生产路由/type/查重/shadow/`duplicate_of`;执行席永不路由裸卡,定级见上。
 - 执行座位信任标签,只在本车道认领;误标挂 `pm:retriage`+异议同笔,整树归本席者席改标。
 - 突发积压调频率或 `batch`,持续积压按仓拆席走 PR;⛔ 不跨车道借调。
 - 维护者直派通道:当面指挥的 PM 会话直接路由,只对明示指挥的卡成立。
