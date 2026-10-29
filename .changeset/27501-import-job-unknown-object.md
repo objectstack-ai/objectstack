@@ -12,7 +12,7 @@ Metadata-protocol: none
 **BREAKING** accept-set narrowing at one REST data door (`@objectstack/rest`).
 
 - **Before.** `POST /data/no_such_object/import/jobs` answered `201` with a job id and persisted a `sys_import_job` row. The job then ran, every row failed with `OBJECT_NOT_FOUND`, and the job read `succeeded`.
-- **Now.** The door answers `404` with `error.code: 'OBJECT_NOT_FOUND'`, the same envelope `POST /data/no_such_object` answers, before the body is parsed. No job row is written and no worker runs. An object of a disabled package is refused the same way the data door refuses it, `404 OBJECT_PACKAGE_DISABLED`.
+- **Now.** The door answers `404` with `error.code: 'OBJECT_NOT_FOUND'`, the same envelope `POST /data/no_such_object` answers, before the body is parsed. No job row is written and no worker runs.
 - **Unchanged.** A registered object gets `201` and a job exactly as before. A job whose rows partly fail still ends `succeeded`, as before.
 - **Who sees it.** An import client that sends an object name nothing is behind, for example a typo. Such a request used to look accepted while it could import nothing.
 

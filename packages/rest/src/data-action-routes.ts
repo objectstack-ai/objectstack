@@ -319,9 +319,10 @@ function importUndoFailure(id: string, action: ImportUndoFailure['action'], erro
  *
  * The object is read by name as the exposure gate reads it (the execution face
  * where the protocol has one, else `getMetaItem`), and counts only under its
- * own name. A read the protocol refuses — `OBJECT_PACKAGE_DISABLED` for an
- * object of a disabled package, the data door's code for it too — or a read
- * that faults propagates to the caller as thrown; ⛔ never turned into a job.
+ * own name. A read the protocol refuses (its by-name read documents
+ * `OBJECT_PACKAGE_DISABLED` for an object of a disabled package, the data
+ * door's code for it too) or a read that faults propagates to the caller as
+ * thrown; ⛔ never turned into a job.
  * A protocol with no by-name read cannot answer, and is not asked.
  */
 async function assertImportObjectExists(p: any, objectName: string, environmentId: string | undefined): Promise<void> {
