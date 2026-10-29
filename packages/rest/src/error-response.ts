@@ -20,8 +20,8 @@
  * What the file owns, in the order a thrown error meets it:
  *
  *   classification  {@link mapDataError} — the error → `{ status, body }` table,
- *                   with {@link declaredHttpStatus}, {@link isScriptFaultMessage}
- *                   and {@link missingRelationIsObject} as its judgements and
+ *                   with {@link declaredHttpStatus} and {@link isScriptFaultMessage}
+ *                   as its judgements and
  *                   {@link DATA_STORE_FAULT} / {@link UNCLASSIFIED_FAULT} as its
  *                   two sanitised 5xx terminals.
  *   resolution      {@link resolveErrorResponse} — the same answer WITHOUT

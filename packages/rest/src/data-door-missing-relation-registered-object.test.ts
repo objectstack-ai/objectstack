@@ -165,6 +165,13 @@ for (const cell of CELLS) {
         expect(await insert(OBJECT)).toEqual(await list(OBJECT));
       }, 60_000);
 
+      it('the update and delete doors answer the same', async () => {
+        const update = await call('PATCH', '/api/v1/data/:object/:id', { params: { object: OBJECT, id: 'rec_1' }, body: { title: 'second' } });
+        const remove = await call('DELETE', '/api/v1/data/:object/:id', { params: { object: OBJECT, id: 'rec_1' } });
+        expect(update).toEqual({ status: 500, code: 'DATABASE_ERROR' });
+        expect(remove).toEqual({ status: 500, code: 'DATABASE_ERROR' });
+      }, 60_000);
+
       it('control: an unregistered object is still 404 OBJECT_NOT_FOUND on both doors', async () => {
         expect(await insert(GHOST)).toEqual({ status: 404, code: 'OBJECT_NOT_FOUND' });
         expect(await list(GHOST)).toEqual({ status: 404, code: 'OBJECT_NOT_FOUND' });
