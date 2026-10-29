@@ -21,7 +21,6 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -104,21 +103,23 @@ function lastSentField(name: string): Record<string, unknown> | undefined {
     : (fields as Record<string, Record<string, unknown>> | undefined)?.[name];
 }
 
-/** Mount, add a field on the Form tab, and retype it; returns its API name and label. */
-async function addFieldAs(typeOption: RegExp): Promise<{ name: string; label: string }> {
+/**
+ * Mount and add the card's field the card's way: Form tab, Add field, Label
+ * "Child Count", Type Rollup, Create. Returns its API name and label.
+ */
+async function addRollup(): Promise<{ name: string; label: string }> {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
-  await addFieldFromFormToolbar();
+  await addFieldFromFormToolbar(undefined, { label: 'Child Count', type: /^Rollup$/ });
   await screen.findByText('Type', { selector: 'label' }, { timeout: 4000 });
   const name = (controlUnder('API name') as HTMLInputElement).value;
   const label = (controlUnder('Label') as HTMLInputElement).value;
   expect(name, 'the new field has no API name: the harness is dead').not.toBe('');
-  await userEvent.click(controlUnder('Type'));
-  await userEvent.click(await screen.findByRole('option', { name: typeOption }));
+  expect(label).toBe('Child Count');
   return { name, label };
 }
 
@@ -126,7 +127,7 @@ const heldLine = (clause: string) => tFormat('engine.studio.held.line', 'en', { 
 
 describe('Studio data page — a Rollup is held until it is set up (objectstack#27461)', () => {
   it('sends no save for the bare roll-up; names each missing input in turn; a count lets the save go', async () => {
-    const { name, label } = await addFieldAs(/^Rollup$/);
+    const { name, label } = await addRollup();
     await outlastDebounce();
 
     expect(puts, 'an unconfigured roll-up is not sent').toEqual([]);
@@ -157,7 +158,7 @@ describe('Studio data page — a Rollup is held until it is set up (objectstack#
 
   it('"Show me" on the line reopens the held roll-up once its inspector is closed', async () => {
     // The first case proves the roll-up is never sent; this one needs only the line.
-    const { name } = await addFieldAs(/^Rollup$/);
+    const { name } = await addRollup();
 
     const railHeader = screen.getByText(t('engine.studio.data.fieldProps', 'en')).closest('header') as HTMLElement;
     fireEvent.click(within(railHeader).getByRole('button', { name: t('engine.studio.close', 'en') }));
