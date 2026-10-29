@@ -798,15 +798,16 @@ const CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE = (member: string): string =>
     + `implement \`${member}\`, an optional member of \`IAutomationService\`. Nothing was read or changed.`;
 
 /**
- * [#27237] The service's own refusals — `400` / `404` / `409` / `503`, each
- * carrying an ADR-0112 standard code — answered as they were raised. Anything
- * else is not a refusal this door knows, and propagates to the transport's
- * error exit.
+ * [#27237] The service's own refusals — `400` / `403` / `404` / `409` / `503`,
+ * each carrying an ADR-0112 standard code — answered as they were raised. The
+ * `403` is the service's own walled refusal, which the gate above normally
+ * answers first. Anything else is not a refusal this door knows, and
+ * propagates to the transport's error exit.
  */
 function connectorCredentialRefusal(deps: DomainHandlerDeps, err: unknown): HttpDispatcherResult | undefined {
     const e = err as { status?: unknown; code?: unknown; message?: unknown } | null;
     if (!e || typeof e.code !== 'string' || typeof e.message !== 'string') return undefined;
-    if (e.status !== 400 && e.status !== 404 && e.status !== 409 && e.status !== 503) return undefined;
+    if (e.status !== 400 && e.status !== 403 && e.status !== 404 && e.status !== 409 && e.status !== 503) return undefined;
     return { handled: true, response: deps.error(e.message, e.status, { code: e.code }) };
 }
 

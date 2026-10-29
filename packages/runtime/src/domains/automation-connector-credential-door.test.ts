@@ -97,8 +97,8 @@ const get = (h: Harness, ctx: HttpProtocolContext, query?: unknown) =>
     h.dispatcher.handleAutomation('/connectors/credential-refs', 'GET', undefined, ctx, query);
 const put = (h: Harness, ctx: HttpProtocolContext, body: unknown, ref = REF, query?: unknown) =>
     h.dispatcher.handleAutomation(`/connectors/credential-refs/${encodeURIComponent(ref)}`, 'PUT', body, ctx, query);
-const del = (h: Harness, ctx: HttpProtocolContext, ref = REF) =>
-    h.dispatcher.handleAutomation(`/connectors/credential-refs/${encodeURIComponent(ref)}`, 'DELETE', undefined, ctx, undefined);
+const del = (h: Harness, ctx: HttpProtocolContext, ref = REF, query?: unknown) =>
+    h.dispatcher.handleAutomation(`/connectors/credential-refs/${encodeURIComponent(ref)}`, 'DELETE', undefined, ctx, query);
 
 describe('[#27237] connector credential door — who may reach it', () => {
     it('answers an anonymous caller 401 before anything else', async () => {
@@ -164,6 +164,11 @@ describe('[#27237] connector credential door — what it accepts', () => {
         const { response: putResponse } = await put(h, ADMIN(), { value: DUMMY_VALUE }, REF, { force: 'true' });
         expect(statusOf(putResponse)).toBe(400);
         expect(h.set).not.toHaveBeenCalled();
+        const { response: delResponse } = await del(h, ADMIN(), REF, { cascade: 'true' });
+        expect(statusOf(delResponse)).toBe(400);
+        expect(codeOf(delResponse)).toBe('VALIDATION_ERROR');
+        expect(messageOf(delResponse)).toContain('cascade');
+        expect(h.clear).not.toHaveBeenCalled();
     });
 
     it('PUT hands the decoded reference, the value and the caller to the service, and answers the entry without the value', async () => {
@@ -198,6 +203,7 @@ describe('[#27237] connector credential door — what it accepts', () => {
             Object.assign(new Error(message), { code, status });
         for (const [code, status] of [
             ['VALIDATION_ERROR', 400],
+            ['PERMISSION_DENIED', 403],
             ['RESOURCE_NOT_FOUND', 404],
             ['RESOURCE_CONFLICT', 409],
             ['SERVICE_UNAVAILABLE', 503],

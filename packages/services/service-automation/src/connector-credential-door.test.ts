@@ -17,7 +17,13 @@
  *    `source: env`;
  *  - a wrong value → the instance degraded and the row `rejected` (ruling on
  *    #27237, comment 6470087293): at materialization (the mcp shape) and on
- *    the first call answering 401 / 403 (the rest / openapi shape).
+ *    the first call answering 401 / 403 (the rest / openapi shape);
+ *  - the seat review's round (#27344): only a stored value holds its instance
+ *    (an environment or vault one retries on the backoff, and recovers),
+ *    `rejected` survives a re-materialization and a restart until an upstream
+ *    accepts the value, a value spelled as a secret handle is refused, door
+ *    writes serialize, the no-crypto refusal writes nothing, and a walled
+ *    posture leaves the store out of the chain.
  *
  * The values below are obvious dummies.
  */
@@ -39,7 +45,7 @@ import { AutomationServicePlugin, type CredentialResolver } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
 import { SysConnectorCredential } from './sys-connector-credential.object.js';
 import { SysFlowCredential } from './sys-flow-credential.object.js';
-import { CONNECTOR_CREDENTIAL_OBJECT } from './connector-credentials.js';
+import { CONNECTOR_CREDENTIAL_OBJECT, ConnectorCredentialStore } from './connector-credentials.js';
 
 const REF = 'DUMMY_BILLING_TOKEN_27237';
 const DUMMY_VALUE = 'dummy-value-aaaa-0001';
@@ -91,6 +97,8 @@ function fakeProvider() {
     const state = {
         materialized: [] as ConnectorProviderContext[],
         rejectAtMaterialization: false,
+        /** Answer `credentialVerified`, as mcp does when its handshake carried the credential. */
+        verifyAtMaterialization: false,
         callStatus: 200,
     };
     const tokenOf = (ctx: ConnectorProviderContext) => (ctx.auth?.type === 'bearer' ? ctx.auth.token : undefined);
@@ -117,6 +125,7 @@ function fakeProvider() {
                     ? { status: 200, ok: true, body: { invoices: [] } }
                     : { status: state.callStatus, ok: false, body: { message: `token ${tokenOf(ctx)} is not valid` } }),
             },
+            ...(state.verifyAtMaterialization ? { credentialVerified: true } : {}),
         };
     };
     return { factory, state, tokenOf };
@@ -149,7 +158,7 @@ function captureOutput(): { text: () => string } {
     return { text: () => chunks.join('\n') };
 }
 
-async function dataEngine(): Promise<ObjectQL> {
+async function dataEngine(opts: { crypto?: boolean } = {}): Promise<ObjectQL> {
     const ql = new ObjectQL();
     engines.push(ql);
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
@@ -160,13 +169,24 @@ async function dataEngine(): Promise<ObjectQL> {
     (ql as any).registry.registerObject(SysConnectorCredential as never, 'test');
     (ql as any).registry.registerObject(SysFlowCredential as never, 'test');
     await ql.syncSchemas();
-    ql.setCryptoProvider(fakeCrypto());
+    if (opts.crypto !== false) ql.setCryptoProvider(fakeCrypto());
     return ql;
 }
 
-async function boot(declared: unknown[], opts: { credentialResolver?: CredentialResolver } = {}) {
-    const ql = await dataEngine();
-    const provider = fakeProvider();
+async function boot(
+    declared: unknown[],
+    opts: {
+        credentialResolver?: CredentialResolver;
+        /** Reuse a data engine — a restart over the same database. */
+        ql?: ObjectQL;
+        crypto?: boolean;
+        /** Register a `tenancy` service with this posture. */
+        posture?: string;
+        provider?: ReturnType<typeof fakeProvider>;
+    } = {},
+) {
+    const ql = opts.ql ?? await dataEngine({ crypto: opts.crypto });
+    const provider = opts.provider ?? fakeProvider();
     const kernel = new LiteKernel({ logger: { level: 'debug', format: 'json' } } as never);
     kernels.push(kernel);
     kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory', credentialResolver: opts.credentialResolver ?? (() => undefined) }));
@@ -182,6 +202,7 @@ async function boot(declared: unknown[], opts: { credentialResolver?: Credential
             // engine under `data`, where the plugin's resolution finds it.
             ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
             ctx.registerService('data', ql);
+            if (opts.posture !== undefined) ctx.registerService('tenancy', { posture: opts.posture });
             ctx.getService('automation').registerConnectorProvider('fake', provider.factory);
         },
         async start() {},
@@ -195,14 +216,22 @@ async function boot(declared: unknown[], opts: { credentialResolver?: Credential
         await captured.trigger('metadata:reloaded');
         await flush();
     };
-    return { ql, engine, provider, call, reload };
+    return { ql, engine, provider, call, reload, kernel };
+}
+
+/** Wait until the listing entry for {@link REF} matches — an acceptance is recorded off the call's path. */
+async function listingSettles(engine: AutomationEngine, expected: Record<string, unknown>) {
+    await vi.waitFor(async () => {
+        expect((await engine.listConnectorCredentialRefs()).find((e) => e.ref === REF)).toMatchObject(expected);
+    });
+    return (await engine.listConnectorCredentialRefs()).find((e) => e.ref === REF)!;
 }
 
 const ADMIN = { userId: 'usr_admin_27237' } as never;
 
 describe('[#27237] a missing credential degrades its instance; setting it materializes it, no restart', () => {
     it('missing → degraded naming the reference; set → ready; clear → degraded again', async () => {
-        const { engine, provider, ql } = await boot([billing()]);
+        const { engine, provider, ql, call } = await boot([billing()]);
 
         // Missing: no arm of the chain answers — degraded, named, factory never asked.
         expect(provider.state.materialized).toHaveLength(0);
@@ -227,9 +256,14 @@ describe('[#27237] a missing credential degrades its instance; setting it materi
         expect(engine.getRegisteredConnectors()).toContain('billing');
         expect(provider.state.materialized).toHaveLength(1);
         expect(provider.tokenOf(provider.state.materialized[0])).toBe(DUMMY_VALUE);
-        expect(entry).toMatchObject({ ref: REF, status: 'set', source: 'object' });
+        expect(entry).toMatchObject({ ref: REF, status: 'set', source: 'object', updatedBy: 'usr_admin_27237' });
+        expect(entry.updatedAt).toBeDefined();
         expect(entry.connectors[0]).toMatchObject({ name: 'billing', state: 'ready' });
-        expect(entry.lastVerifiedAt).toBeDefined();
+        // Materializing sent nothing upstream (the rest shape), so nothing is verified yet…
+        expect(entry.lastVerifiedAt).toBeUndefined();
+        // …until a call the upstream accepts.
+        expect(await call()).toMatchObject({ status: 200 });
+        await vi.waitFor(async () => expect((await engine.listConnectorCredentialRefs())[0].lastVerifiedAt).toBeDefined());
 
         // Set again: a new revision re-materializes with the new value.
         await engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN });
@@ -382,4 +416,194 @@ describe('[#27237] a wrong value degrades the instance and marks the row rejecte
             }
         },
     );
+});
+
+describe('[#27237] seat review r1: only a stored value holds its instance', () => {
+    it('an environment value refused on a call retries on the backoff, says so, and recovers once accepted', async () => {
+        process.env[REF] = DUMMY_ENV_VALUE;
+        envKeys.push(REF);
+        const out = captureOutput();
+        const { engine, provider, call, reload } = await boot([billing()]);
+        expect(await call()).toMatchObject({ status: 200 });
+
+        provider.state.callStatus = 403;
+        expect(await call()).toMatchObject({ status: 403 });
+        const reason = engine.getConnectorDegradedReason('billing');
+        expect(reason).toContain('(HTTP 403) on a call');
+        expect(reason).toContain('The instance is retried with backoff.');
+        // The listing reports the refusal, though there is no row to mark.
+        const refused = await engine.listConnectorCredentialRefs();
+        expect(refused[0]).toMatchObject({ ref: REF, source: 'env', status: 'rejected', statusReason: reason, writable: false });
+        // On the backoff: the retry timer is armed for it (a held instance arms none).
+        expect(out.text()).toContain('1 degraded connector instance(s); next retry in 5000ms');
+
+        // The retry — the timer's own soft reconcile — re-materializes it.
+        provider.state.callStatus = 200;
+        const before = provider.state.materialized.length;
+        await reload();
+        expect(provider.state.materialized).toHaveLength(before + 1);
+        expect(engine.getConnectorDegradedReason('billing')).toBeUndefined();
+        // Still reported refused until an upstream accepts it…
+        expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ status: 'rejected' });
+        // …which the first accepted call does.
+        expect(await call()).toMatchObject({ status: 200 });
+        const recovered = await listingSettles(engine, { source: 'env', status: 'set' });
+        expect(recovered.statusReason).toBeUndefined();
+    });
+
+    it("a vault value refused at materialization retries, and a rotation the provider proves recovers it", async () => {
+        let vaultValue = 'dummy-vault-value-eeee-0005';
+        const vault = vi.fn(async (ref: string) => (ref === REF ? vaultValue : undefined));
+        const provider = fakeProvider();
+        provider.state.rejectAtMaterialization = true;
+        const { engine, reload } = await boot([billing()], { credentialResolver: vault, provider });
+        expect(engine.getConnectorDegradedReason('billing')).toContain('(HTTP 401)');
+        expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ source: 'vault', status: 'rejected' });
+
+        // Rotated in the vault, where this process cannot see it: the retry picks it up.
+        vaultValue = 'dummy-vault-value-ffff-0006';
+        provider.state.rejectAtMaterialization = false;
+        provider.state.verifyAtMaterialization = true;
+        await reload();
+        expect(provider.tokenOf(provider.state.materialized.at(-1)!)).toBe('dummy-vault-value-ffff-0006');
+        expect(engine.getConnectorDegradedReason('billing')).toBeUndefined();
+        // The provider proved it while materializing: no call needed.
+        expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ source: 'vault', status: 'set' });
+    });
+
+    it('a stored value refused on a call holds its instance; a restart lifts the hold, the row stays `rejected` until a call is accepted', async () => {
+        const first = await boot([billing()]);
+        await first.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+        const set = (await first.engine.listConnectorCredentialRefs())[0];
+        first.provider.state.callStatus = 401;
+        await first.call();
+        const reason = first.engine.getConnectorDegradedReason('billing');
+        expect(reason).toContain(`until credential '${REF}' is set again or the server restarts`);
+        const rejected = (await first.engine.listConnectorCredentialRefs())[0];
+        expect(rejected).toMatchObject({ status: 'rejected', source: 'object', statusReason: reason });
+        // Marking it moved neither who set it nor when.
+        expect(rejected.updatedAt).toBe(set.updatedAt);
+        expect(rejected.updatedBy).toBe('usr_admin_27237');
+
+        // Held: the reconcile a retry would run leaves it alone.
+        const attempts = first.provider.state.materialized.length;
+        await first.reload();
+        expect(first.provider.state.materialized).toHaveLength(attempts);
+        await first.kernel.shutdown();
+
+        // Restart over the same database: the instance materializes again (rest
+        // sends nothing while materializing), and the row is still `rejected`.
+        const second = await boot([billing()], { ql: first.ql });
+        expect(second.provider.state.materialized).toHaveLength(1);
+        expect(second.engine.getConnectorDegradedReason('billing')).toBeUndefined();
+        expect((await second.engine.listConnectorCredentialRefs())[0]).toMatchObject({ status: 'rejected', statusReason: reason });
+        // A reconcile that re-materializes it changes nothing either.
+        await second.reload();
+        expect((await second.engine.listConnectorCredentialRefs())[0]).toMatchObject({ status: 'rejected' });
+
+        // The upstream accepting the same value is what clears it.
+        expect(await second.call()).toMatchObject({ status: 200 });
+        const accepted = await listingSettles(second.engine, { status: 'set', source: 'object' });
+        expect(accepted.statusReason).toBeUndefined();
+        expect(accepted.lastVerifiedAt).toBeDefined();
+    });
+
+    it('a provider that proves the credential while materializing (mcp) returns a `rejected` row to `set` on restart', async () => {
+        const first = await boot([billing()]);
+        await first.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+        first.provider.state.callStatus = 401;
+        await first.call();
+        expect((await first.engine.listConnectorCredentialRefs())[0]).toMatchObject({ status: 'rejected' });
+        await first.kernel.shutdown();
+
+        const provider = fakeProvider();
+        provider.state.verifyAtMaterialization = true;
+        const second = await boot([billing()], { ql: first.ql, provider });
+        const entry = (await second.engine.listConnectorCredentialRefs())[0];
+        expect(entry).toMatchObject({ status: 'set', source: 'object' });
+        expect(entry.lastVerifiedAt).toBeDefined();
+    });
+});
+
+describe('[#27237] seat review r1: the door refuses what it must, and serializes what it writes', () => {
+    it("refuses a value spelled as a secret handle (400), writing nothing and not echoing it", async () => {
+        const { engine, ql } = await boot([billing()]);
+        const err = await engine.setConnectorCredential({ ref: REF, value: 'secret:sec_dummy_0007', context: ADMIN })
+            .then(() => undefined, (e: unknown) => e as Error & { status?: number; code?: string });
+        expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(err?.message).toContain("cannot start with 'secret:'");
+        expect(err?.message.includes('sec_dummy_0007')).toBe(false);
+        expect(await ql.find(CONNECTOR_CREDENTIAL_OBJECT, { context: SYSTEM } as never)).toHaveLength(0);
+    });
+
+    it('two concurrent PUTs serialize: the instance ends on the value the store ends on', async () => {
+        const { engine, provider, ql } = await boot([billing()]);
+        await Promise.all([
+            engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN }),
+            engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN }),
+        ]);
+        const rows = (await ql.find(CONNECTOR_CREDENTIAL_OBJECT, { context: SYSTEM } as never)) as Array<{ id: string; revision: number }>;
+        expect(rows).toHaveLength(1);
+        expect(Number(rows[0].revision)).toBe(2);
+        const stored = await (ql as any).resolveSecretField(CONNECTOR_CREDENTIAL_OBJECT, rows[0].id, 'value');
+        expect(stored).toBe(DUMMY_VALUE_2);
+        expect(provider.state.materialized.map(provider.tokenOf)).toEqual([DUMMY_VALUE, DUMMY_VALUE_2]);
+    });
+
+    it('two writers inserting the first row at once (two replicas): one stores it, the other answers 409', async () => {
+        const ql = await dataEngine();
+        const replicas = [new ConnectorCredentialStore(() => ql as never), new ConnectorCredentialStore(() => ql as never)];
+        const outcomes = await Promise.allSettled(
+            replicas.map((store, i) => store.set({ ref: REF, value: i === 0 ? DUMMY_VALUE : DUMMY_VALUE_2, connectorNames: ['billing'], packageIds: [] })),
+        );
+        expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+        const refused = outcomes.find((o): o is PromiseRejectedResult => o.status === 'rejected');
+        expect(refused?.reason).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+        for (const v of [DUMMY_VALUE, DUMMY_VALUE_2]) expect(String(refused?.reason?.message).includes(v)).toBe(false);
+        expect(await ql.find(CONNECTOR_CREDENTIAL_OBJECT, { context: SYSTEM } as never)).toHaveLength(1);
+    });
+
+    it('with no crypto provider registered: 503 SERVICE_UNAVAILABLE, no row written, the instance still degraded', async () => {
+        const { engine, ql } = await boot([billing()], { crypto: false });
+        const err = await engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN })
+            .then(() => undefined, (e: unknown) => e as Error);
+        expect(err).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(err?.message).toContain('needs a crypto provider');
+        expect(err?.message.includes(DUMMY_VALUE)).toBe(false);
+        expect(await ql.find(CONNECTOR_CREDENTIAL_OBJECT, { context: SYSTEM } as never)).toHaveLength(0);
+        expect(engine.getConnectorDegradedReason('billing')).toContain(`credential '${REF}' is not set`);
+    });
+});
+
+describe('[#27237] seat review r1: under a walled posture the store is not in the chain', () => {
+    it.each(['group', 'isolated'])('%s: a stored row is not read, and the door refuses to write, naming the posture', async (posture) => {
+        const single = await boot([billing()]);
+        await single.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+        await single.kernel.shutdown();
+
+        const walled = await boot([billing()], { ql: single.ql, posture });
+        // The row is there, and nothing resolves from it.
+        expect(walled.provider.state.materialized).toHaveLength(0);
+        expect(walled.engine.getConnectorDegradedReason('billing')).toContain(`credential '${REF}' is not set`);
+        const [entry] = await walled.engine.listConnectorCredentialRefs();
+        expect(entry).toMatchObject({ ref: REF, status: 'missing', source: null, writable: false });
+        for (const write of [
+            () => walled.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN }),
+            () => walled.engine.clearConnectorCredential({ ref: REF, context: ADMIN }),
+        ]) {
+            const err = await write().then(() => undefined, (e: unknown) => e as Error);
+            expect(err).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+            expect(err?.message).toContain(`'${posture}' tenancy posture`);
+        }
+        const rows = (await single.ql.find(CONNECTOR_CREDENTIAL_OBJECT, { context: SYSTEM } as never)) as Array<{ revision: number }>;
+        expect(rows.map((r) => Number(r.revision))).toEqual([1]);
+    });
+
+    it('an environment variable still resolves under a walled posture', async () => {
+        process.env[REF] = DUMMY_ENV_VALUE;
+        envKeys.push(REF);
+        const { engine, provider } = await boot([billing()], { posture: 'isolated' });
+        expect(provider.tokenOf(provider.state.materialized[0])).toBe(DUMMY_ENV_VALUE);
+        expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ source: 'env', status: 'set', writable: false });
+    });
 });

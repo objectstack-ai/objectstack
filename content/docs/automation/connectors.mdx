@@ -190,8 +190,9 @@ paginated tool list is followed through every page (`nextCursor`), up to 100
 pages; a server still paging after that fails discovery instead of yielding a
 truncated tool list. A server that is unreachable or failing degrades the
 instance, which is retried. A credential the server rejects (HTTP 401 / 403 on
-connect, handshake or `tools/list`) is a configuration fault instead: it fails
-the boot and is not retried — fix the credential and reload.
+connect, handshake or `tools/list`) is a configuration fault instead: the
+instance is degraded naming the refusal, as described under *A credential the
+upstream refuses* below.
 
 <Callout type="warn">
 **Declarative stdio transports are denied by default.** Materializing one
@@ -277,14 +278,19 @@ DELETE /api/v1/automation/connectors/credential-refs/BILLING_API_TOKEN
   stored one that nothing names any more. Each entry has a `status` (`set`,
   `missing` or `rejected`), a `source` (`env`, `object`, `vault` or `null`),
   whether this door can write it, and the instances naming it with their state.
-  It never includes a value.
+  A stored one also says when and by whom it was last set (`updatedAt`,
+  `updatedBy`) and when an upstream last accepted it (`lastVerifiedAt`). It
+  never includes a value.
 - **`PUT`** stores the value, then reconciles. Every instance naming the
   reference re-materializes with it **without a restart**, and the answer is
   the reference's entry after that. The route refuses, before writing anything:
   a reference no installed connector declares (`404`), one an environment
   variable already supplies (`409`, because the variable wins and a stored value
-  would never be read), and an empty value (`400`). With no crypto provider it
-  answers `503`, since a credential is only ever stored encrypted.
+  would never be read), an empty value, and a value starting with `secret:`
+  (`400`: the store would read it as a handle to another stored secret). With no
+  crypto provider it answers `503`, since a credential is only ever stored
+  encrypted. Writes on one server run one at a time, each with its reconcile, so
+  the instances always end on the value the store ends on.
 - **`DELETE`** removes the stored value. The instances naming the reference
   are torn down and registered degraded again.
 
@@ -294,18 +300,28 @@ lists the `credentialRefs` the package's connectors name, each with its status,
 plus a `credentialNote` naming the ones still to set.
 
 **A credential the upstream refuses** (HTTP `401` / `403`) degrades the
-instance, and a stored credential is marked `rejected` with the upstream's
-message, never the value. An `mcp` instance finds this out when it connects. A
-`rest` or `openapi` instance finds out on the first call answering `401` /
-`403`; that call returns its answer as usual, and the instance is degraded
-after it. A refused instance is not retried on a timer. Setting the credential
-again is what re-attempts it.
+instance, with a reason quoting the upstream's message, never the value. An
+`mcp` instance finds this out when it connects. A `rest` or `openapi` instance
+finds out on the first call answering `401` / `403`; that call returns its
+answer as usual, and the instance is degraded after it. What happens next
+depends on where the value came from:
+
+- **A value stored here** is marked `rejected`, and its instance is not
+  retried until the credential is set again, its declaration changes, or the
+  server restarts. The mark outlives a restart: it clears only when an upstream
+  accepts the value, either an `mcp` handshake that carries it or a `rest` /
+  `openapi` call answered `2xx`.
+- **A value from an environment variable or the host's resolver** can change
+  where this door cannot see it (a rotation, or a `403` rate limit that lifts),
+  so its instance is retried on the same 5s→5min backoff as an unreachable
+  upstream. The listing reports it `rejected` until an upstream accepts it.
 
 Credentials are **environment-level**: one value per reference for the whole
 environment, read by whichever instance names it. On a multi-organization
-environment (the `group` or `isolated` tenancy posture) the three routes refuse
-with a message naming the posture. There, a reference resolves from the
-environment variable or the host's resolver only.
+environment (the `group` or `isolated` tenancy posture) the store is not used
+at all. The three routes refuse with a message naming the posture, and a
+reference resolves from the environment variable or the host's resolver only,
+so a row stored before the posture changed is not read.
 
 The same resolver serves an `api` flow's start-node `config.secretRef`, the
 name of its inbound hook secret. That one goes through the injected resolver
@@ -385,7 +401,7 @@ retry):
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
 | `credentialRef` resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
-| The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded** and a stored credential is marked `rejected` — not retried until the credential changes |
+| The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |

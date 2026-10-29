@@ -977,7 +977,9 @@ export interface ConnectorSourcePullResult {
  *
  * The chain is env → the `sys_connector_credential` row an administrator set →
  * the host's injected resolver. An environment variable of the same name wins,
- * so such a reference reports `source: 'env'` and `writable: false`.
+ * so such a reference reports `source: 'env'` and `writable: false`. Under a
+ * walled tenancy posture (`group` / `isolated`) the stored arm is not read, and
+ * nothing is `writable`.
  */
 export interface ConnectorCredentialRef {
     /** The reference, exactly as an instance's `auth.credentialRef` names it. */
@@ -985,12 +987,17 @@ export interface ConnectorCredentialRef {
     /**
      * `set` — a source answers for it; `missing` — none does, and every
      * instance naming it is registered degraded; `rejected` — an upstream
-     * refused the stored value.
+     * refused the value `source` answers with, and none has accepted it since.
+     * A stored value stays `rejected` across a restart until an upstream
+     * accepts it or it is set again.
      */
     status: 'set' | 'missing' | 'rejected';
     /** Which arm of the chain answers: `env`, `object` (the stored row) or `vault` (the host's resolver); `null` when missing. */
     source: 'env' | 'object' | 'vault' | null;
-    /** Whether the credential door may write it — `false` while an environment variable of the same name supplies it. */
+    /**
+     * Whether the credential door may write it — `false` while an environment
+     * variable of the same name supplies it, and under a walled tenancy posture.
+     */
     writable: boolean;
     /** Whether an installed package still declares it. A stored row nothing declares is listed so it can be cleared. */
     declared: boolean;
@@ -1003,10 +1010,17 @@ export interface ConnectorCredentialRef {
     }>;
     /** The upstream's message when `status` is `rejected`. Never the value. */
     statusReason?: string;
-    /** When the stored row was last written, and by whom (its audit columns). */
+    /**
+     * When the stored value was last set through the credential door, and by
+     * whom. A status change (`rejected`, verified) moves neither.
+     */
     updatedAt?: string;
     updatedBy?: string;
-    /** When an instance last materialized with the stored value. */
+    /**
+     * When an upstream last accepted the stored value: a provider that proved
+     * it while materializing, or a call answered `2xx`. Cleared when the value
+     * is set again.
+     */
     lastVerifiedAt?: string;
 }
 
