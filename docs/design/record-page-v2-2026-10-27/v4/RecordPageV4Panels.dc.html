@@ -59,18 +59,17 @@ a{color:var(--primary);text-decoration:none}
 .tag{position:absolute;top:-9px;left:10px;font:10px/16px var(--mono);padding:0 5px;border-radius:4px;background:var(--fg);color:var(--bg)}
 
 .pnl{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;position:relative}
-.pnl .h{display:flex;align-items:center;gap:6px;height:34px;padding:0 10px 0 8px;font-size:12.5px;font-weight:600;cursor:pointer}
-.pnl .h .grip{width:12px;color:var(--muted-fg);opacity:0;font-size:12px}
-.pnl.hover .h .grip{opacity:1}
+.pnl .h{display:flex;align-items:center;gap:6px;height:34px;padding:0 8px 0 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+.pnl .h .grip{display:none;color:var(--muted-fg);font-size:12px;cursor:grab;padding:0 2px}
+.pnl.hover .h .grip{display:inline-flex}
 .pnl .h .act{display:none;gap:2px;margin-left:auto}
 .pnl.hover .h .act{display:inline-flex}
-.pnl .h .chev{margin-left:auto;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-fg);font-size:11px}
-.pnl.hover .h .chev{margin-left:0}
+.pnl .h .chev{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-fg);font-size:10px;margin-left:-2px}
+.pnl .h .cnt{margin-left:auto}
 .pnl.hover{border-color:#c7d2fe;box-shadow:0 0 0 2px var(--primary-soft)}
 .pnl .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:32px;padding:0 10px;border-top:1px solid var(--border);font-size:12.5px}
 .pnl .r a{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pnl.empty .h{color:var(--muted-fg);font-weight:500;cursor:default;height:30px}
-.pnl.tlp .h .chev{margin-left:0}
 .foot{display:flex;align-items:center;gap:10px;height:30px;font-size:11.5px;color:var(--muted-fg)}
 .foot a{color:var(--primary)}
 .seg{display:inline-flex;width:30px;height:30px;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:8px;color:var(--muted-fg);font-size:14px}
@@ -145,11 +144,11 @@ a{color:var(--primary);text-decoration:none}
 
         <div class="col" style="position:relative">
           <div class="coltitle">关联</div>
-          <div class="pnl hover"><div class="h"><span class="grip">⠿</span>任务 <span class="chip">2</span><span class="act"><button type="button" class="iconbtn" style="width:22px;height:22px" aria-label="新建">＋</button><button type="button" class="iconbtn" style="width:22px;height:22px" aria-label="在本页展开">⤢</button><button type="button" class="iconbtn" style="width:22px;height:22px" aria-label="更多">⋯</button></span><span class="chev">▾</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div><span class="cursor" style="right:-6px;top:10px">🖱</span><span class="ann" style="left:-8px;top:-18px">悬停：⠿ 抓手 + ＋ ⤢ ⋯；整行可拖，标题可点折叠</span></div>
-          <div class="pnl"><div class="h"><span class="grip">⠿</span>活动 <span class="chip">1</span><span class="chev">▾</span></div><div class="r"><a href="#">发现会议</a><span class="k">10月24日</span></div></div>
-          <div class="pnl"><div class="h"><span class="grip">⠿</span>营销活动 <span class="chip">1</span><span class="chev">▸</span></div><span class="ann" style="right:8px;top:-8px">已折叠：只剩标题行</span></div>
-          <div class="pnl"><div class="h"><span class="grip">⠿</span>报价单 <span class="chip">2</span><span class="chev">▾</span></div><div class="r"><a href="#">QTE-0002 Annual Renewal</a><span class="chip ok">已接受</span></div><div class="r"><a href="#">QTE-0001 Platform Upgrade</a><span class="chip">已过期</span></div></div>
-          <div class="pnl empty"><div class="h">还有 3 个空关联 · 商机 · 转化联系人 · 重复联系人 <span class="chev">展开</span></div><span class="ann" style="left:8px;top:-8px">0 条的面板折成一行（同详情的空分区）</span></div>
+          <div class="pnl hover"><div class="h">任务 <span class="chev">▾</span><span class="chip cnt">2</span><span class="act"><span class="grip">⠿</span><button type="button" class="iconbtn" style="width:22px;height:22px" aria-label="新建">＋</button><button type="button" class="iconbtn" style="width:22px;height:22px" aria-label="在本页展开">⤢</button><button type="button" class="iconbtn" style="width:22px;height:22px" aria-label="隐藏此面板" title="隐藏">⊘</button></span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div><span class="cursor" style="right:-6px;top:10px">🖱</span><span class="ann" style="left:-8px;top:-18px">折叠 ▾ 紧跟标题；悬停右端浮出 ⠿ ＋ ⤢ ⊘（无 ⋯ 菜单）；抓手聚焦后 ⌥↑/⌥↓ 键盘移动</span></div>
+          <div class="pnl"><div class="h">活动 <span class="chev">▾</span><span class="chip cnt">1</span></div><div class="r"><a href="#">发现会议</a><span class="k">10月24日</span></div></div>
+          <div class="pnl"><div class="h">营销活动 <span class="chev">▸</span><span class="chip cnt">1</span></div><span class="ann" style="right:8px;top:-8px">已折叠：只剩标题行</span></div>
+          <div class="pnl"><div class="h">报价单 <span class="chev">▾</span><span class="chip cnt">2</span></div><div class="r"><a href="#">QTE-0002 Annual Renewal</a><span class="chip ok">已接受</span></div><div class="r"><a href="#">QTE-0001 Platform Upgrade</a><span class="chip">已过期</span></div></div>
+          <div class="pnl empty"><div class="h">还有 3 个空关联 · 商机 · 转化联系人 · 重复联系人 </div><span class="ann" style="left:8px;top:-8px">0 条的面板折成一行（同详情的空分区）</span></div>
           <div style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;font-size:11.5px;color:var(--muted-fg);display:flex;flex-direction:column;gap:4px"><span>审批 · 无需审批</span><span>附件 · 0 <a href="#" style="margin-left:6px">上传</a></span></div>
           <div class="foot"><span>已隐藏 1 张 · <a href="#">显示</a></span><span>·</span><a href="#">恢复默认顺序</a></div>
         </div>
