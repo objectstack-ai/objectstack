@@ -39,10 +39,12 @@
  *   - **`size` and `width` are ONE decision**: `width` (deprecated) wins over a
  *     `size` beside it, a bucket name resolves through the size table, and
  *     `auto` lands on the calendar's default width.
- *   - **The resolved mode decides who owns the click** — and this is where the
- *     calendar differs from the board: an OVERLAY mode keeps the click even
- *     from a parent view's `onRowClick` / `onEventClick`, while any other mode
- *     hands it to them.
+ *   - **A parent view's `onRowClick` owns the click in every mode**, as on the
+ *     board (objectstack#27057): the drawer is the calendar's own answer for a
+ *     parent that routes no click. `onEventClick` beside it fires too. A
+ *     parent with `onEventClick` ALONE routes nothing, so the drawer still
+ *     opens and that handler is not called, while any other mode hands the
+ *     click to both.
  *
  * And `page`, pinned because the registration's description states it and a
  * description is a claim about this renderer (objectui#11293). These rows used
@@ -55,7 +57,7 @@
  * the record page. (A mode-less block did too until objectstack#26677 moved
  * the spec's default to `drawer`; it now opens the drawer.) The rows mount that host and
  * assert the call; the `drawer` row beside them is the lit control, and a
- * parent view's `onRowClick` still takes a non-overlay click before the host.
+ * parent view's `onRowClick` still takes the click before the host.
  * One row keeps the description's remaining claim: with NO host navigator
  * there is no record page to open, and the click opens nothing (the seam's
  * documented absent state, as the grid's link column renders a plain span).
@@ -250,16 +252,28 @@ describe('object-calendar `navigation` members decide the event click (objectui#
     expect(panelWidth()).toBe(withFloor(RECORD_OVERLAY_DEFAULT_WIDTH));
   });
 
-  it('an OVERLAY mode keeps the click from a parent view\'s handlers', async () => {
+  it('a parent view\'s `onRowClick` takes the click in the overlay mode too, and no drawer opens (objectstack#27057)', async () => {
+    // This row used to pin the reverse: the drawer kept the click from the
+    // parent. The console's parent opens the record in the one record page
+    // now, so the calendar's drawer is only for a parent that routes nothing.
     const onRowClick = vi.fn();
     const onEventClick = vi.fn();
     await clickEvent({ mode: 'drawer' }, { onRowClick, onEventClick });
+    await waitFor(() => expect(onRowClick).toHaveBeenCalledTimes(1));
+    expect(onRowClick.mock.calls[0][0]).toMatchObject({ id: '1' });
+    expect(onEventClick).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(dialog()).toBeNull();
+  });
+
+  it('…while a parent with `onEventClick` alone routes nothing: the drawer opens, and the handler is not called', async () => {
+    const onEventClick = vi.fn();
+    await clickEvent({ mode: 'drawer' }, { onEventClick });
     await waitFor(() => expect(dialog()).not.toBeNull());
-    expect(onRowClick).not.toHaveBeenCalled();
     expect(onEventClick).not.toHaveBeenCalled();
   });
 
-  it('…and any OTHER mode hands the click to them', async () => {
+  it('any OTHER mode hands the click to both handlers, as it did before', async () => {
     // The same parent, `page` instead of `drawer`: the hook calls `onRowClick`
     // with the record, and the calendar also fires `onEventClick`.
     const onRowClick = vi.fn();
