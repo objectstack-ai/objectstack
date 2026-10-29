@@ -516,3 +516,52 @@ When debugging the simulated browser environment (e.g., `apps/console` in mock m
   - **Action 1:** Do NOT rely solely on local workarounds (monkey-patching) in the app.
   - **Action 2:** Prompt the user to modify the source code in the official packages (if available in the workspace) or report the issue.
   - **Reasoning:** We prioritize fixing the core engine over patching individual apps.
+
+## Local dev and per-agent stacks
+
+Moved out of `ui/AGENTS.md`, which keeps a pointer here.
+
+### Local dev — console UI ↔ backend (read before debugging UI)
+
+- **启动前端**:仓根 `pnpm --filter @object-ui/console dev`(Vite,固定 **:5180**,见 `apps/console/vite.config.ts`)。console 编进去的 `@objectstack/spec`/`client` 就是本 workspace 的构建,不是 npm 上的发布版。
+- **后端默认连 `:3000`**:vite `/api` proxy → `DEV_PROXY_TARGET || http://localhost:3000`。**要测哪个后端就把它跑在 :3000**(仓根 `PORT=3000 pnpm dev:crm`,或 `PORT=3000 pnpm dev` = showcase)。经 `pnpm --filter @object-ui/console dev` 传 `DEV_PROXY_TARGET` env **不**可靠(不一定透传到 vite 子进程);要把 console 指向别的后端端口,`cd ui/apps/console` 后内联设 env 才灵(见下「每个 agent 独立测试栈」)。
+- 后端在它自己的端口上(单栈即 :3000)以 `/_console` 服务的是**已构建的** console(`packages/console/dist`,仓根),**不是** `ui/` 的 src;改 src 必须用上面的 :5180 dev 服务验证(或在仓根跑 `pnpm console:build` 重新构建 —— 慢)。
+- 路由用 app 的 **`name`**(如 `showcase_app`,不是 `showcase`);直接 URL 进对象可能落到 Setup「对象不存在」——先经启动台/应用切换进入该 app 设好 currentApp。
+- **清 localStorage 会登出**(session token 存 localStorage;首页应用磁贴也读 localStorage 缓存,跨会话会显示过期的 app 列表)。
+- better-auth 用 `localhost`(非 `127.0.0.1`)否则 Invalid origin。
+- 浏览器验证:优先用桌面 preview(`preview_*`,配置在 `ui/.claude/launch.json`,如其中的 `console`);chrome-devtools MCP 掉线时切 preview。
+
+### 每个 agent 独立测试栈(端口隔离,多 agent 并行的推荐做法)
+
+上面是**单栈**约定(后端 :3000 + 前端 :5180);多 agent 并行时端口会打架。要彻底隔离,每人起**自己端口**的一整套栈(后端 + console),互不干扰:
+
+1. **后端 —— `--fresh` 临时库 + 自选端口**,数据与端口都隔离、退出自动清(从仓根):
+   ```bash
+   # showcase(带 showcase_field_zoo / showcase_account 等):
+   cd examples/app-showcase
+   pnpm exec objectstack dev --seed-admin --fresh -p 4010
+   #  --fresh        临时 sqlite 库(os.tmpdir()/objectstack-dev-*),SIGINT/SIGTERM 自动删,绝不碰别人的 .objectstack/data/dev.db
+   #  -p <port>      监听端口(等价 OS_PORT / PORT;dev 模式端口被占会自动顺延)
+   #  --seed-admin   默认开;空库播种 admin@objectos.ai / admin123
+   # CRM:  cd examples/app-crm && pnpm exec objectstack dev --seed-admin --fresh -p <port>
+   # 要持久库(跨重启保留):去掉 --fresh,改用 --database "file:/tmp/agent-<port>.db"(或 OS_DATABASE_URL)
+   ```
+
+2. **Console —— 自选端口 + 指向你的后端**(从仓根):
+   ```bash
+   cd ui/apps/console
+   DEV_PROXY_TARGET=http://localhost:4010 pnpm exec vite --port 5190 --strictPort
+   #  必须 cd 进 ui/apps/console 让 env 直达 vite;用 `pnpm --filter … dev` 传 env 不可靠
+   #  --strictPort   端口被占直接报错,绝不静默顺延撞到别人的端口上
+   ```
+   自检:`curl 'http://localhost:5190/api/v1/data/showcase_account?$top=2'`(经 console 代理打到你的 :4010,应返回 Northwind/Contoso)。
+
+3. **Live E2E —— 全 env 参数化指向你的端口**(见 `playwright.live.config.ts` / `e2e/live/global-setup.ts`;在 `ui/` 里执行):
+   ```bash
+   LIVE_APP_URL=http://localhost:5190 LIVE_API_URL=http://localhost:4010 pnpm test:e2e:live
+   #  凭据用 LIVE_EMAIL / LIVE_PASSWORD 覆盖(默认 admin@objectos.ai / admin123)
+   ```
+
+4. **桌面 preview**:给 `ui/.claude/launch.json` 加一条你自己的 console 配置,仿现成的 `console-build-test`(`cd apps/console && DEV_PROXY_TARGET=http://localhost:<后端> pnpm dev --port <前端> --strictPort`)。
+
+**纪律**:端口自选空闲高位(用前 `lsof -i :PORT` 确认没人占);收工只按**自己记下的 PID** 收(根 `AGENTS.md` Multi-agent discipline 第 8 条),`--fresh` 临时库随进程退出自动清;**绝不动 :3000 / :5180**(通常是别人的单栈)。
