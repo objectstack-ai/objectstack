@@ -4720,6 +4720,7 @@ const ar = {
       detailLoading: 'جارٍ تحميل التفاصيل…',
       detailLoadFailed: 'تعذر تحميل تفاصيل التغيير:',
       detailNone: 'لم يتم اكتشاف اختلافات — المسودة مطابقة للنسخة المنشورة.',
+      fieldOrderChanged: 'تغيّر ترتيب الحقول',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'يتضمن تغييرات صاغها مساعد الذكاء الاصطناعي',
       draftedByMcpClient: 'يتضمن تغييرات صاغها عميل MCP «{{client}}»',

@@ -4542,6 +4542,7 @@ const ru = {
       detailLoading: 'Загрузка деталей…',
       detailLoadFailed: 'Не удалось загрузить детали изменения:',
       detailNone: 'Различий не обнаружено — черновик совпадает с опубликованной версией.',
+      fieldOrderChanged: 'Порядок полей изменён',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Включает изменения, подготовленные ИИ-копилотом',
       draftedByMcpClient: 'Включает изменения, подготовленные MCP-клиентом «{{client}}»',
