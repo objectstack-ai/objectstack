@@ -381,12 +381,19 @@ remote row does not carry — so every row reads as someone else's
 Serving an owner column the checks can read is the other way out; the reference test
 does not cover it, so pin it in your own test if you take it.
 
-Missing owner columns fail closed: the edit is refused, never allowed by mistake. So pick
-one of the two ways out on purpose. Either set `sharingModel` explicitly, or have your
-driver return the owner under the field name the checks read. On a plugin driver that
-mapping is the driver's own job: `external.columnMap` is applied by the built-in SQL
-drivers, not by the engine. A validation warning for an external object on an
-owner-keyed sharing model is tracked in
+Missing owner columns fail closed: the edit is refused, never allowed by mistake. Setting
+`sharingModel` is not enough by itself, because an explicit `private` is refused the
+same way. There are two ways out:
+
+- `sharingModel: 'public_read_write'` with a `beforeUpdate` hook that decides, as above;
+- a declared owner field that your driver returns under that field name. A built-in SQL
+  driver maps it through `external.columnMap`; on a plugin driver the mapping is your
+  driver's own job, because the engine does not apply `columnMap`.
+
+On `public_read_write`, a member's delete is still refused: the ownership floor keeps
+deletes by design. A delete passes only when your driver returns `created_by`, or when a
+policy or a share grants it. The validation warning for an external object whose owner
+is unmapped is tracked in
 [#27332](https://github.com/objectstack-ai/objectstack/issues/27332).
 </Callout>
 
