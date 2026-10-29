@@ -110,7 +110,7 @@ A `tar.gz`:
 ```
 <id>-<version>.osplugin
 ├── objectstack.plugin.json   # compiled manifest (below)
-├── dist/                     # pre-built ESM bundle (tsup); @objectstack/* externalized
+├── dist/                     # pre-built ESM bundle (esbuild → dist/index.mjs); @objectstack/* externalized
 ├── assets/ README LICENSE icon
 └── SIGNATURE                 # detached signature + publisher cert chain
 ```
@@ -161,7 +161,8 @@ client-scoped `permissions` (data read/write via SDK, network → CSP, navigatio
 os plugin build  →  os plugin sign  →  os plugin publish
 ```
 
-1. **build** — run `tsup` (externalize `@objectstack/*`); validate the manifest
+1. **build** — esbuild-bundle the entry to `dist/index.mjs` (externalize `@objectstack/*`,
+   inline every other dependency); validate the manifest
    (Zod + the new `permissions` schema); gate on protocol/engine compatibility;
    compute per-file `integrity`; emit `<id>-<version>.osplugin`.
 2. **sign** — sign with the publisher key (`PluginMetadata.signature`); may be
