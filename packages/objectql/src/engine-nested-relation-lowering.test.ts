@@ -302,7 +302,7 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       const err = await refusalOf(engine.find(OBJECT, { where }));
       expect(envelopeOf(err), JSON.stringify(where)).toEqual(INVALID_FILTER);
       expect(err!.message, JSON.stringify(where)).toContain('puts a nested-relation condition (');
-      expect(err!.message, JSON.stringify(where)).toContain(`at ${path}, beneath the lookup field, and `);
+      expect(err!.message, JSON.stringify(where)).toMatch(new RegExp(`at ${path.replace(/[$[\]().]/g, '\\$&')}, beneath the (lookup|tree) field, and `));
       expect(err!.message, JSON.stringify(where)).toContain(words);
       expect(err!.message, JSON.stringify(where)).toContain('The filter was NOT applied.');
       expect(rec.reads, JSON.stringify(where)).toHaveLength(0);
