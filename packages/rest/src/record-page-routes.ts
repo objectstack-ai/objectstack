@@ -61,7 +61,7 @@ import {
 } from '@objectstack/spec/api';
 import { isMultiValueField, parseFilterAST } from '@objectstack/spec/data';
 import { measureServerTiming } from '@objectstack/observability';
-import { sendOk } from '@objectstack/types';
+import { sendError, sendOk } from '@objectstack/types';
 import { recordNotFoundError } from '@objectstack/core';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { logUnexpectedRouteError, mapDataError, nestedRefusalEnvelope } from './error-response.js';
@@ -150,11 +150,8 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 const rawBody = req.body ?? {};
                 const parsed = (RecordPageRequestSchema as any).safeParse(rawBody);
                 if (!parsed.success) {
-                    res.status(400).json({
-                        error: 'Invalid record page request',
-                        code: 'VALIDATION_FAILED',
-                        fields: zodIssuesToFields(parsed.error?.issues, rawBody),
-                        object,
+                    sendError(res, 400, 'VALIDATION_FAILED', 'Invalid record page request', {
+                        details: { object, fields: zodIssuesToFields(parsed.error?.issues, rawBody) },
                     });
                     return;
                 }
@@ -187,11 +184,8 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     }
                 });
                 if (malformed.length > 0) {
-                    res.status(400).json({
-                        error: 'Invalid record page request',
-                        code: 'VALIDATION_FAILED',
-                        fields: malformed,
-                        object,
+                    sendError(res, 400, 'VALIDATION_FAILED', 'Invalid record page request', {
+                        details: { object, fields: malformed },
                     });
                     return;
                 }

@@ -283,8 +283,8 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         for (const field of ['title', 'owner', 'nope']) {
             const answer = await call({ related: [{ object: 'note', field: 'account', top: 1 }, { object: 'note', field, top: 1 }] });
             expect(answer.status, field).toBe(400);
-            expect(answer.body.code).toBe('VALIDATION_FAILED');
-            expect(answer.body.fields).toEqual([expect.objectContaining({ field: 'related.1.field', code: 'invalid_relationship' })]);
+            expect(answer.body.error.code).toBe('VALIDATION_FAILED');
+            expect(answer.body.error.details.fields).toEqual([expect.objectContaining({ field: 'related.1.field', code: 'invalid_relationship' })]);
         }
         expect(getData).not.toHaveBeenCalled();
         expect(findData).not.toHaveBeenCalled();
@@ -301,7 +301,7 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         ]) {
             const answer = await call(body);
             expect(answer.status, JSON.stringify(body)).toBe(400);
-            expect(answer.body.code).toBe('VALIDATION_FAILED');
+            expect(answer.body.error.code).toBe('VALIDATION_FAILED');
         }
         expect(getData).not.toHaveBeenCalled();
     });

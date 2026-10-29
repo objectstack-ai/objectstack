@@ -47,6 +47,7 @@ export const RECORD_PAGE_MAX_RELATED_SORT = 8;
 /** The record-grained operations a record page's header asks about. */
 export const RecordPageExplainOperationSchema = z.enum(['update', 'delete', 'transfer']);
 export type RecordPageExplainOperation = z.input<typeof RecordPageExplainOperationSchema>;
+export type RecordPageExplainOperationParsed = z.infer<typeof RecordPageExplainOperationSchema>;
 
 /** One related list a record page draws. */
 export const RecordPageRelatedRequestSchema = lazySchema(() => z.object({
@@ -70,6 +71,7 @@ export const RecordPageRelatedRequestSchema = lazySchema(() => z.object({
   ),
 }).strict());
 export type RecordPageRelatedRequest = z.input<typeof RecordPageRelatedRequestSchema>;
+export type RecordPageRelatedRequestParsed = z.infer<typeof RecordPageRelatedRequestSchema>;
 
 /** The request body of `POST /data/{object}/{id}/page`. */
 export const RecordPageRequestSchema = lazySchema(() => z.object({
@@ -91,6 +93,7 @@ export const RecordPageRequestSchema = lazySchema(() => z.object({
   ),
 }).strict());
 export type RecordPageRequest = z.input<typeof RecordPageRequestSchema>;
+export type RecordPageRequestParsed = z.infer<typeof RecordPageRequestSchema>;
 
 /** The refusal a replaced read answers: its code, status and message. */
 export const RecordPagePartRefusalSchema = lazySchema(() => z.object({
@@ -99,12 +102,14 @@ export const RecordPagePartRefusalSchema = lazySchema(() => z.object({
   message: z.string().describe('The message the replaced read answers.'),
 }));
 export type RecordPagePartRefusal = z.input<typeof RecordPagePartRefusalSchema>;
+export type RecordPagePartRefusalParsed = z.infer<typeof RecordPagePartRefusalSchema>;
 
 /** A part whose read refused, carried in place of that part's answer. */
 export const RecordPagePartErrorSchema = lazySchema(() => z.object({
   error: RecordPagePartRefusalSchema.describe('The refusal the replaced read answers, in place of this part\'s answer.'),
 }));
 export type RecordPagePartError = z.input<typeof RecordPagePartErrorSchema>;
+export type RecordPagePartErrorParsed = z.infer<typeof RecordPagePartErrorSchema>;
 
 /** One related list's answer, in the order the request named the lists. */
 export const RecordPageRelatedAnswerSchema = lazySchema(() => z.object({
@@ -119,6 +124,7 @@ export const RecordPageRelatedAnswerSchema = lazySchema(() => z.object({
   ),
 }));
 export type RecordPageRelatedAnswer = z.input<typeof RecordPageRelatedAnswerSchema>;
+export type RecordPageRelatedAnswerParsed = z.infer<typeof RecordPageRelatedAnswerSchema>;
 
 /** The approval part: the record's requests and its lock. */
 export const RecordPageApprovalsSchema = lazySchema(() => z.object({
@@ -130,6 +136,7 @@ export const RecordPageApprovalsSchema = lazySchema(() => z.object({
   ),
 }));
 export type RecordPageApprovals = z.input<typeof RecordPageApprovalsSchema>;
+export type RecordPageApprovalsParsed = z.infer<typeof RecordPageApprovalsSchema>;
 
 /** One requested operation's access decision, or the refusal of the explain read. */
 const RecordPageExplainAnswerSchema = lazySchema(() => z.union([ExplainDecisionSchema, RecordPagePartErrorSchema]));

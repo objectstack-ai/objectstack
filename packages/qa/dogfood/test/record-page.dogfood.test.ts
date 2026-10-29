@@ -147,7 +147,7 @@ describe('[#27627] the record page payload, as a non-admin member', () => {
   it('refuses an entry that is not a relationship to this record, and any query parameter', async () => {
     const wrong = await send(`/data/rp_account/${accountId}/page`, 'POST', { related: [{ object: 'rp_task', field: 'title', top: 1 }] });
     expect(wrong.status).toBe(400);
-    expect(wrong.body?.fields?.[0]).toMatchObject({ field: 'related.0.field', code: 'invalid_relationship' });
+    expect(wrong.body?.error?.details?.fields?.[0]).toMatchObject({ field: 'related.0.field', code: 'invalid_relationship' });
     const query = await send(`/data/rp_account/${accountId}/page?top=1`, 'POST', {});
     expect(query.status).toBe(400);
     expect(query.body?.error?.code).toBe('VALIDATION_ERROR');
