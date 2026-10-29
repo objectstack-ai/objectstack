@@ -213,6 +213,14 @@ assertion that every MATRIX entry `parse`s under `valueSchemaFor` — so the
 contract and the executable oracle cannot drift apart, and a contract change
 that would break the wire fails a test instead of shipping silently.
 
+> **Note 2026-10-28 (#27183; [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md)) — multi-currency keeps D1's currency value.**
+> ADR-0144 (ruling `6465431966` on #27119) puts a record's currency in a
+> sibling ISO 4217 code field that the amount names through `currencyField`,
+> never in the value. A `currency` value therefore stays a bare number, as
+> the "Reality wins" paragraph above decides. The `CurrencyValueSchema`
+> retirement that paragraph records belongs to #27182, whose own dated note
+> (PR #27233) goes under that paragraph.
+
 ### D2 — Typed action handlers: declared params become the enforced, typed handler input
 
 Action params are already fields-lite (`ActionParamSchema` mirrors `FieldType`,
