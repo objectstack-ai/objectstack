@@ -1467,6 +1467,7 @@ const fr = {
     datasetUnsupported: "Cette source de données ne prend pas en charge les requêtes de dataset.",
     widgetForbiddenTitle: "Accès refusé",
     widgetForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce widget.",
+    allWidgetsForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce tableau de bord.",
     details: "Détails",
     exportCsv: "Exporter en CSV",
     openInList: "Ouvrir dans la liste",

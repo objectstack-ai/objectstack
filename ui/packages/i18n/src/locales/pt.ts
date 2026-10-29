@@ -1466,6 +1466,7 @@ const pt = {
     datasetUnsupported: "Esta fonte de dados não oferece suporte a consultas de dataset.",
     widgetForbiddenTitle: "Sem acesso",
     widgetForbiddenMessage: "Você não tem permissão para ver os dados deste widget.",
+    allWidgetsForbiddenMessage: "Você não tem permissão para ver os dados deste painel.",
     details: "Detalhes",
     exportCsv: "Exportar CSV",
     openInList: "Abrir na lista",

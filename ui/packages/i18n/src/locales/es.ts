@@ -1471,6 +1471,7 @@ const es = {
     datasetUnsupported: "Esta fuente de datos no admite consultas de dataset.",
     widgetForbiddenTitle: "Sin acceso",
     widgetForbiddenMessage: "No tienes permiso para ver los datos de este widget.",
+    allWidgetsForbiddenMessage: "No tienes permiso para ver los datos de este panel.",
     details: "Detalles",
     exportCsv: "Exportar CSV",
     openInList: "Abrir en la lista",

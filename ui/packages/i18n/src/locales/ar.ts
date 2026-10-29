@@ -1612,6 +1612,7 @@ const ar = {
     datasetUnsupported: "مصدر البيانات هذا لا يدعم استعلامات مجموعات البيانات.",
     widgetForbiddenTitle: "لا تملك صلاحية الوصول",
     widgetForbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بهذه الأداة.",
+    allWidgetsForbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بلوحة التحكم هذه.",
     details: "التفاصيل",
     exportCsv: "تصدير CSV",
     openInList: "فتح في القائمة",
