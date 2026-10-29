@@ -8778,6 +8778,17 @@ export function AutomationsPillar({
     current && flowLoaded
       ? (() => {
           const defaultOff = t('engine.studio.auto.defaultOff', locale);
+          // objectstack#27356 — a read-only package's switch cannot be flipped,
+          // so it is not drawn like a live control: no green track and no
+          // hover, and a lock beside the word. The thumb and the word still
+          // say on or off, as the flow's status does.
+          const track = readOnly
+            ? flowEnabled
+              ? 'bg-muted-foreground/60'
+              : 'bg-muted-foreground/25'
+            : flowEnabled
+              ? 'bg-emerald-500'
+              : 'bg-muted-foreground/40';
           const toggle = (
             <button
               type="button"
@@ -8794,13 +8805,16 @@ export function AutomationsPillar({
                   : `${defaultOff}\n${flowEnabled ? t('engine.studio.auto.disableTitle', locale) : t('engine.studio.auto.enableTitle', locale)}`
               }
               className={
-                'inline-flex h-7 items-center gap-2 rounded-md px-1 text-[12px] text-foreground hover:bg-muted disabled:opacity-50' +
-                (readOnly ? ' disabled:pointer-events-none' : '')
+                'inline-flex h-7 items-center gap-2 rounded-md px-1 text-[12px] ' +
+                (readOnly
+                  ? 'text-muted-foreground disabled:pointer-events-none'
+                  : 'text-foreground hover:bg-muted disabled:opacity-50')
               }
             >
-              <span className={'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ' + (flowEnabled ? 'bg-emerald-500' : 'bg-muted-foreground/40')}>
+              <span className={'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ' + track}>
                 <span className={'inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ' + (flowEnabled ? 'translate-x-[18px]' : 'translate-x-0.5')} />
               </span>
+              {readOnly && <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />}
               {flowEnabled ? t('engine.studio.auto.enabled', locale) : t('engine.studio.auto.disabled', locale)}
             </button>
           );
