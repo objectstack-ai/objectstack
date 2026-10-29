@@ -1,4 +1,5 @@
 ---
+'@object-ui/core': patch
 '@object-ui/i18n': patch
 '@object-ui/fields': patch
 '@object-ui/components': patch
@@ -23,6 +24,7 @@ An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'c
 - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
 - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
 - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+- **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
 - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
 
 ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
