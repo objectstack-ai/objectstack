@@ -460,12 +460,29 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // the refusal below for why a hidden or conditionally visible
                 // entry is not judged here.
                 const requiredFields: string[] = [];
+                // [#27606] …and the `options` subset each field's entries offer:
+                // the union of every entry that lists `options`. An entry that
+                // lists none (or a bare-string entry) offers the object's full
+                // set, so it marks the field `null`, not narrowed, whatever
+                // another entry lists. See the refusal below.
+                const optionSubsets = new Map<string, Set<string> | null>();
                 for (const section of match.form?.sections ?? []) {
                     const sectionConditional = section?.visibleWhen != null;
                     for (const f of section?.fields ?? []) {
-                        if (typeof f === 'string') allowedFields.add(f);
-                        else if (f?.field) {
+                        if (typeof f === 'string') {
+                            allowedFields.add(f);
+                            optionSubsets.set(f, null);
+                        } else if (f?.field) {
                             allowedFields.add(f.field);
+                            const offered = Array.isArray(f.options) && f.options.length > 0 ? f.options : null;
+                            const sofar = optionSubsets.get(f.field);
+                            if (offered === null || sofar === null) {
+                                optionSubsets.set(f.field, null);
+                            } else {
+                                const subset = sofar ?? new Set<string>();
+                                for (const o of offered) if (o?.value !== undefined) subset.add(String(o.value));
+                                optionSubsets.set(f.field, subset);
+                            }
                             if (
                                 f.required === true
                                 && f.hidden !== true
@@ -616,20 +633,44 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 //   `400 VALIDATION_FAILED` with `fields[]`, so a submission with
                 //   both problems is told both at once. The field code is the
                 //   closed ADR-0114 catalog's `invalid_value`.
+                // [#27606] A value outside the `options` subset a form entry
+                // offers is refused, naming the field, before anything is
+                // written. `GET /forms/:slug` serves that subset; the engine
+                // judges a value against the OBJECT's options only, so this door
+                // stored a member the form never offered (a guest filing a
+                // `critical` case through a form that offers up to `high`).
+                //
+                // - Judged on what this door WRITES, with the same emptiness
+                //   rule as `required`: an empty or absent value is not judged.
+                // - A multi-valued value is judged element by element, the first
+                //   outside element named, as the engine judges the object's set.
+                // - The same envelope again, with the closed catalog's
+                //   `invalid_option`, worded by the catalog (`invalid_option`,
+                //   or `invalid_option_value` for an element). The allowed values
+                //   it names are the subset's only, which the form publishes.
+                // - A field no entry narrows keeps the object's full set, judged
+                //   by the engine as before.
                 // The declared fields this submission carries a value in: the
-                // only ones the file judgement can refuse, so a submission that
-                // carries none reads no object declarations for it.
-                const fileValued = [...allowedFields].filter((name) =>
+                // only ones the file and subset judgements can refuse, so a
+                // submission that carries none reads no object declarations for
+                // them.
+                const valued = [...allowedFields].filter((name) =>
                     Object.prototype.hasOwnProperty.call(filteredData, name)
                     && !isMissing(filteredData[name]));
-                if (judged.length > 0 || fileValued.length > 0) {
+                if (judged.length > 0 || valued.length > 0) {
                     const objectDef = (await this.readFormObjectDefinitions(p, environmentId))
                         .find((o: any) => o?.name === match.object);
                     const labelOf = (def: any, name: string): string => {
                         const declared = typeof def?.label === 'string' ? def.label.trim() : '';
                         return declared.length > 0 ? declared : name;
                     };
-                    const refused: Array<{ field: string; code: 'required' | 'invalid_value'; message: string; label: string }> = [];
+                    const refused: Array<{
+                        field: string;
+                        code: 'required' | 'invalid_value' | 'invalid_option';
+                        message: string;
+                        label: string;
+                        constraint?: Record<string, unknown>;
+                    }> = [];
                     for (const name of judged) {
                         const def = objectDef?.fields?.[name];
                         const value = Object.prototype.hasOwnProperty.call(filteredData, name)
@@ -647,7 +688,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                             label,
                         });
                     }
-                    for (const name of fileValued) {
+                    for (const name of valued) {
                         const def = objectDef?.fields?.[name];
                         if (!def || typeof def.type !== 'string' || !FILE_REFERENCE_TYPES.has(def.type)) continue;
                         if (isEmptyForRequired(def, filteredData[name])) continue;
@@ -658,6 +699,35 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                             message: `${label} cannot take a file here: an anonymous public-form submission carries no file. `
                                 + 'Leave it empty, or sign in and provide the file from your account.',
                             label,
+                        });
+                    }
+                    for (const name of valued) {
+                        const subset = optionSubsets.get(name);
+                        if (!subset) continue;
+                        const def = objectDef?.fields?.[name];
+                        const value = filteredData[name];
+                        const empty = def && typeof def.type === 'string'
+                            ? isEmptyForRequired(def, value)
+                            : isMissing(value);
+                        if (empty) continue;
+                        const elements = Array.isArray(value) ? value : [value];
+                        const outside = elements.findIndex((v) => !subset.has(String(v)));
+                        if (outside < 0) continue;
+                        const allowed = [...subset].join(', ');
+                        const label = labelOf(def, name);
+                        refused.push({
+                            field: name,
+                            code: 'invalid_option',
+                            message: Array.isArray(value)
+                                ? renderValidationMessage({
+                                    messageKey: 'invalid_option_value',
+                                    label,
+                                    field: name,
+                                    params: { allowed, value: String(elements[outside]) },
+                                })
+                                : renderValidationMessage({ messageKey: 'invalid_option', label, field: name, params: { allowed } }),
+                            label,
+                            constraint: { allowed },
                         });
                     }
                     if (refused.length > 0) {
