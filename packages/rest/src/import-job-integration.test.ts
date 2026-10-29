@@ -616,8 +616,13 @@ describe('async import job — a job whose every row failed ends failed', () => 
     expect(c._json).toMatchObject({ success: true });
 
     await waitForTerminal(slowCtx.progress, jobId);
-    // Let the worker's final patch land, then read the settled row.
-    await new Promise((r) => setTimeout(r, 50));
+    // The cancel route writes `cancelled` first; wait until the worker's own
+    // final patch has landed (it is the only write of `results`), then read the row.
+    for (let i = 0; i < 400; i++) {
+      const r = await callJob(slowCtx.results, jobId);
+      if ((r._json?.results ?? []).length === 3) break;
+      await new Promise((rr) => setTimeout(rr, 5));
+    }
     const after = await callJob(slowCtx.progress, jobId);
     expect(after._json.status).toBe('cancelled');
     expect(after._json).toMatchObject({ processed: 3, created: 0, updated: 0, skipped: 0, errors: 3 });
