@@ -1,5 +1,5 @@
 ---
-"@objectstack/skills": patch
+'@objectstack/skills': patch
 ---
 
 Clause-②: no
