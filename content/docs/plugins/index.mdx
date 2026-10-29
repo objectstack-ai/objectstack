@@ -312,24 +312,28 @@ const dbPlugin: PluginMetadata = {
 
 ObjectStack supports plugin security features:
 
-- **Signature Verification**: Cryptographic signatures for plugin integrity
+- **Signature Verification**: a plugin `os plugin install` installed is verified against the environment's trusted keys at install and again at every boot, before any of its code is imported.
 - **Permission Enforcement**: Fine-grained access control for plugin operations
+
+A `signature` field on a plugin object is not a verification by itself. The
+kernel's loader refuses a plugin that carries one unless the host that verified
+its artifact recorded that verdict against the object, so leave `signature`
+unset on a plugin you register yourself. A host that verifies artifacts of its
+own records the verdict before `kernel.use`:
+
+```typescript
+import { recordPluginArtifactVerdict } from '@objectstack/core';
+
+// After this host verified the artifact's bytes against a trusted key:
+recordPluginArtifactVerdict(plugin, { signature, keyId, fingerprint, artifactSha256 });
+await kernel.use(plugin); // refused without the verdict
+```
 
 Plugin configuration is the plugin's own concern: take it as a constructor or
 factory argument and parse it at your own seam (a Zod `schema.parse` in the
 factory, constructor or `init`). The kernel-side `configSchema` metadata field
 was retired under ADR-0049 — the kernel never received a plugin's config, so
 the field could not validate anything.
-
-```typescript
-const securePlugin: PluginMetadata = {
-  name: 'com.example.secure',
-  version: '1.0.0',
-  signature: 'ed25519:key-1:<base64url-signature>',
-
-  async init(ctx) { /* ... */ },
-};
-```
 
 ### Startup Timeout
 

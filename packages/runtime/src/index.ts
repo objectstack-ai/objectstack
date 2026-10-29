@@ -49,7 +49,6 @@ export {
   INSTALLED_SIGNATURE_FILE,
   INSTALLATIONS_LOCK_WAIT_MS,
   INSTALLATIONS_LOCK_STALE_MS,
-  INSTALLATIONS_LOCK_STEAL_STALE_MS,
   PluginInstallationsLockedError,
   pluginsHome,
   pluginInstallDir,

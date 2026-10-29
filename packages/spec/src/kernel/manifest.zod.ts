@@ -1018,9 +1018,10 @@ export const ManifestSchema = strictObject({
   /**
    * Trust / isolation tier the plugin DECLARES (ADR-0025 §3.6).
    * Unset implies a pure-metadata package (no executable code). An artifact
-   * `os plugin install` installs carries code, so on one an unset tier is an
-   * omission, not that declaration: the boot-time loader refuses it
-   * (`runtime_undeclared`, default-deny).
+   * `os plugin build` produces carries code, so on one an unset tier is an
+   * omission, not that declaration; the boot-time loader refuses an installed
+   * plugin with no tier either way (`runtime_undeclared`, default-deny), and
+   * one with no entry module too.
    *
    * ⚠️ Enforced at the cloud marketplace **publish gate** — an unverified
    * publisher requesting the `node` tier is hard-rejected (HTTP 422) and forced

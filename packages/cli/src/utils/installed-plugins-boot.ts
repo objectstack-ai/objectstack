@@ -53,6 +53,19 @@ interface BootKernel {
   hasPlugin(name: string): boolean;
 }
 
+/**
+ * What a throw says, whatever was thrown: a plugin's getter or `init` can throw
+ * anything, `undefined` and `null` included, and reading `.message` off that
+ * would throw in the catch meant to name it.
+ */
+function thrownMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return 'a value that cannot be printed';
+  }
+}
+
 export async function registerInstalledPlugins(input: {
   kernel: BootKernel;
   track(name: string): void;
@@ -81,7 +94,7 @@ export async function registerInstalledPlugins(input: {
       loaded: [],
       removed: [],
       disabled: [],
-      refused: [{ id: '*', version: '*', error: 'loader_failed', message: `the installed-plugin loader failed (${(error as Error).message}); no installed plugin was loaded.` }],
+      refused: [{ id: '*', version: '*', error: 'loader_failed', message: `the installed-plugin loader failed (${thrownMessage(error)}); no installed plugin was loaded.` }],
     };
   }
 
@@ -102,7 +115,7 @@ export async function registerInstalledPlugins(input: {
     try {
       name = String((plugin as { name?: unknown }).name ?? record.id);
     } catch (error) {
-      out.refused.push({ id: record.id, version: record.version, error: 'kernel_refused', message: `its plugin name cannot be read: ${(error as Error).message}` });
+      out.refused.push({ id: record.id, version: record.version, error: 'kernel_refused', message: `its plugin name cannot be read: ${thrownMessage(error)}` });
       continue;
     }
     if (input.kernel.hasPlugin(name)) {
@@ -121,7 +134,7 @@ export async function registerInstalledPlugins(input: {
         id: record.id,
         version: record.version,
         error: 'kernel_refused',
-        message: (error as Error).message,
+        message: thrownMessage(error),
       });
       continue;
     }

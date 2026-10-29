@@ -10,16 +10,19 @@
  * thread's own pid and thread while it holds nothing) is cleared by the next
  * writer, and another thread of this process holding it is live; a lock judged
  * stale and replaced by a live writer before it is cleared is left alone (the
- * two-writer steal race), and a steal lock a crashed writer left is cleared;
+ * two-writer steal race), and a steal lock a crashed writer left is cleared
+ * while a live writer's is kept, however long it has been held, and waited
+ * for without spinning; a lock path that is there and cannot be read (a
+ * directory, an unreadable file) is refused by name at once, never retried;
  * the lock is re-entrant and always released, and a release never removes a
  * lock that is no longer the holder's; two processes writing at once both land
  * every record; and another project's records keep their directories out of
  * an uninstall.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -27,7 +30,6 @@ import { threadId } from 'node:worker_threads';
 
 import {
   INSTALLATIONS_LOCK_STALE_MS,
-  INSTALLATIONS_LOCK_STEAL_STALE_MS,
   PluginInstallationsLockedError,
   installationsLockTestHooks,
   dropPluginInstallation,
@@ -46,6 +48,22 @@ import { loadDisabledPackageIds, packageStateFileName } from './package-state-st
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+/** A file read the test makes throw, by its path; every other call is the real one. */
+const fsFaults = vi.hoisted(() => ({ failRead: null as ((path: string) => string | null) | null }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    readFileSync: ((...args: Parameters<typeof actual.readFileSync>) => {
+      const code = fsFaults.failRead?.(String(args[0]));
+      if (code) throw Object.assign(new Error(`${code}: read refused by the test, '${String(args[0])}'`), { code });
+      return actual.readFileSync(...args);
+    }) as typeof actual.readFileSync,
+  };
+});
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 let home: string;
 const saved = { OS_HOME: process.env.OS_HOME };
 
@@ -55,6 +73,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  fsFaults.failRead = null;
+  installationsLockTestHooks.afterStaleJudged = undefined;
   if (saved.OS_HOME === undefined) delete process.env.OS_HOME;
   else process.env.OS_HOME = saved.OS_HOME;
   rmSync(home, { recursive: true, force: true });
@@ -96,7 +116,7 @@ describe('the installations lock', () => {
     writeFileSync(lock, JSON.stringify({ pid: process.ppid, at: '2026-10-29T00:00:00.000Z' }));
     const t0 = Date.now();
     expect(() => withPluginInstallationsLock('env_local', () => 'never', { waitMs: 300 }))
-      .toThrow(new RegExp(`locked by process ${process.ppid} .*remove ${lock.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+      .toThrow(new RegExp(`locked by process ${process.ppid} .*remove ${escapeRe(lock)}`));
     expect(Date.now() - t0).toBeGreaterThanOrEqual(300);
     // The holder's lock is left alone.
     expect(JSON.parse(readFileSync(lock, 'utf8')).pid).toBe(process.ppid);
@@ -170,15 +190,55 @@ describe('the installations lock', () => {
     expect(existsSync(`${lock}.steal`)).toBe(false);
   });
 
-  it('clears a steal lock a writer left when it died clearing a stale lock', () => {
+  it('clears a steal lock a writer left when it died clearing a stale lock, judged by its pid', () => {
     const lock = lockFile();
     writeFileSync(lock, JSON.stringify({ pid: deadPid(), at: 'then' }));
-    writeFileSync(`${lock}.steal`, JSON.stringify({ pid: deadPid(), at: 'then' }));
-    const then = new Date(Date.now() - INSTALLATIONS_LOCK_STEAL_STALE_MS - 5_000);
-    utimesSync(`${lock}.steal`, then, then);
+    // Fresh, so only its dead pid makes it stale.
+    writeFileSync(`${lock}.steal`, JSON.stringify({ pid: deadPid(), at: 'now' }));
     expect(withPluginInstallationsLock('env_local', () => 'ran', { waitMs: 1_000 })).toBe('ran');
     expect(existsSync(lock)).toBe(false);
     expect(existsSync(`${lock}.steal`)).toBe(false);
+  });
+
+  it('keeps a steal lock a live writer holds, however long it has held it, and waits for it without spinning', () => {
+    const lock = lockFile();
+    const stale = JSON.stringify({ pid: deadPid(), at: 'then' });
+    const clearing = JSON.stringify({ pid: process.ppid, token: 'slow-writer', at: 'then' });
+    writeFileSync(lock, stale);
+    writeFileSync(`${lock}.steal`, clearing);
+    // Held for a minute: age alone does not make a live writer's steal lock stale.
+    const then = new Date(Date.now() - 60_000);
+    utimesSync(`${lock}.steal`, then, then);
+    let judged = 0;
+    installationsLockTestHooks.afterStaleJudged = () => { judged += 1; };
+    const t0 = Date.now();
+    expect(() => withPluginInstallationsLock('env_local', () => 'never', { waitMs: 300 }))
+      .toThrow(new RegExp(`stale lock .*another writer was still clearing after 0\\.3s.*remove ${escapeRe(lock)} and ${escapeRe(lock)}\\.steal`));
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(300);
+    // A sleep between judgements, not a spin: about one per 50 ms.
+    expect(judged).toBeLessThan(20);
+    expect(readFileSync(lock, 'utf8')).toBe(stale);
+    expect(readFileSync(`${lock}.steal`, 'utf8')).toBe(clearing);
+  });
+
+  it.each([
+    ['a directory', (lock: string) => mkdirSync(lock), 'EISDIR'],
+    ['a file this user may not read', (lock: string) => {
+      writeFileSync(lock, JSON.stringify({ pid: process.ppid, at: 'now' }));
+      fsFaults.failRead = (path) => (path === lock ? 'EACCES' : null);
+    }, 'EACCES'],
+  ])('refuses a lock path that is there and cannot be read, naming it, at once and without retrying: %s', (_label, plant, code) => {
+    const lock = lockFile();
+    plant(lock);
+    let ran = false;
+    const t0 = Date.now();
+    expect(() => withPluginInstallationsLock('env_local', () => { ran = true; }, { waitMs: 5_000 }))
+      .toThrow(new RegExp(`installations lock ${escapeRe(lock)} cannot be read \\(${code}.*remove it`));
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    expect(ran).toBe(false);
+    fsFaults.failRead = null;
+    expect(existsSync(lock)).toBe(true);
+    expect(statSync(lock).isDirectory()).toBe(code === 'EISDIR');
   });
 
   it('never removes, on release, a lock that is no longer the holder\'s', () => {

@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: two boots of the real `os serve --no-server` (OS_MIGRATE_AND_EXIT=1), each over the installs it pins (the first over six, the second after one enable and one uninstall), and the build, installs and lifecycle commands run in process; CI reading 27.08 s (Test Core 5/8, job 123319866423, head af0b3888) x 1.25, rounded up
 
 /**
  * [#27123 slice 2] `os serve` loads what `os plugin install` installed

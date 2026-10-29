@@ -6,8 +6,12 @@
 
 feat(cli, runtime, core): `os serve` loads the plugins `os plugin install` installed, re-verifying each before any of its code is imported, and dispatches on the declared `runtime` tier; `os plugin disable | enable | uninstall` (#27123)
 
-Clause-②: no — no key, accepted value or export of `@objectstack/spec` changes; the loader, the commands and the new exports are platform code
+Clause-②: no (narrowing) — `@objectstack/core`'s `PluginLoader` (so every `kernel.use`) refuses a plugin object whose `signature` no host recorded a verdict for, where any well-formed signature passed. Nothing of `@objectstack/spec` changes; the rest (the boot loader, the commands, the new exports) widens
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (runtime-interface-only packages/core/src/plugin-loader.ts#PluginLoader) The one narrowing is a runtime check of a published runtime class: `PluginLoader` refuses a plugin object's `signature` that no host recorded a verdict for. No Zod schema, no spec declaration and no stored representation carries that field or the verdict, so there is nothing for the metadata migration to rewrite and no tombstone; what an out-of-repo host changes is its own code, as the Migration paragraph says. -->
+
+**BREAKING** accept-set narrowing at `kernel.use` (`@objectstack/core`): a plugin object carrying a `signature` is refused unless the host that verified its artifact recorded that verdict against the object.
 
 The second slice of ADR-0025's local install loop (§3.5 M1). Before this, an installed plugin was unpacked and recorded, and nothing loaded it.
 

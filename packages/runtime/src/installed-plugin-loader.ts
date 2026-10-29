@@ -59,12 +59,18 @@
  * them, so a host passes `resolveHostPackagesFrom` (a file URL of its own) and
  * a bare `@objectstack/*` specifier imported from inside a verified install
  * directory resolves as if that host file imported it: the same module
- * instances the host's kernel runs on. Any other bare specifier resolves as
- * Node resolves it from the install directory. The verified tree is what the
- * import reads first; a file the plugin imports later, lazily, is read from
- * disk when it is imported, after this check.
+ * instances the host's kernel runs on. A directory is matched by its real
+ * path too, which is the one Node names an importing module by, so an
+ * `OS_HOME` reached through a symbolic link (the macOS temp dir is one) is
+ * matched. Only a specifier that names a package under `@objectstack/` is
+ * redirected: one with an empty, `.` or `..` segment, a `%` or a backslash
+ * (which could climb out of `@objectstack/` to any file the host can resolve)
+ * is not. Any other bare specifier resolves as Node resolves it from the
+ * install directory. The verified tree is what the import reads first; a file
+ * the plugin imports later, lazily, is read from disk when it is imported,
+ * after this check.
  */
-import { existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync } from 'node:fs';
 import { register } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -245,7 +251,7 @@ function unexpectedDir(environmentId: string | undefined, record: PluginInstalla
   try {
     derived = pluginInstallDir(environmentId, record.id, record.version);
   } catch (error) {
-    derived = `none (${(error as Error).message})`;
+    derived = `none (${thrownMessage(error)})`;
   }
   return `its record names the directory ${JSON.stringify(record.dir)}, and the install directory for ${record.id}@${record.version} is ${derived}. Nothing was read from or removed under it. Install it again.`;
 }
@@ -270,7 +276,7 @@ function readKept(record: PluginInstallationRecord):
     }
     artifact = new Uint8Array(readFileSync(join(dir, INSTALLED_ARTIFACT_FILE)));
   } catch (error) {
-    return { ok: false, error: 'artifact_changed', message: `${join(dir, INSTALLED_ARTIFACT_FILE)} cannot be read (${(error as Error).message}).` };
+    return { ok: false, error: 'artifact_changed', message: `${join(dir, INSTALLED_ARTIFACT_FILE)} cannot be read (${thrownMessage(error)}).` };
   }
   const sha = sha256Hex(artifact);
   if (sha !== record.artifact?.sha256) {
@@ -346,7 +352,7 @@ async function checkRecord(
   try {
     files = readTarGz(artifact);
   } catch (error) {
-    return refuse('artifact_unreadable', `its kept artifact cannot be read: ${(error as Error).message}.`);
+    return refuse('artifact_unreadable', `its kept artifact cannot be read: ${thrownMessage(error)}.`);
   }
   const unsafe = files.find((f) => !safeEntryPath(f.path));
   if (unsafe) return refuse('artifact_unreadable', `its kept artifact holds the entry ${JSON.stringify(unsafe.path)}, which cannot sit in an install directory.`);
@@ -358,7 +364,7 @@ async function checkRecord(
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${MANIFEST_FILE} is not a JSON object`);
     manifest = parsed as Record<string, unknown>;
   } catch (error) {
-    return refuse('artifact_unreadable', `its kept artifact's manifest cannot be read: ${(error as Error).message}.`);
+    return refuse('artifact_unreadable', `its kept artifact's manifest cannot be read: ${thrownMessage(error)}.`);
   }
   if (manifest.id !== record.id || manifest.version !== record.version) {
     return refuse(
@@ -395,7 +401,7 @@ async function checkRecord(
 
 /** A check that threw on the install directory (unreadable, or changing while it was read). */
 function unreadableInstall(record: PluginInstallationRecord, error: unknown): string {
-  return `reading its install directory ${record.dir} failed (${(error as Error).message}), so it could not be verified and is not loaded.`;
+  return `reading its install directory ${record.dir} failed (${thrownMessage(error)}), so it could not be verified and is not loaded.`;
 }
 
 /**
@@ -410,7 +416,7 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
   try {
     records = loadPluginInstallations(input.environmentId);
   } catch (error) {
-    out.refused.push({ id: '*', version: '*', error: 'records_unreadable', message: (error as Error).message });
+    out.refused.push({ id: '*', version: '*', error: 'records_unreadable', message: thrownMessage(error) });
     return out;
   }
   if (records.length === 0) return out;
@@ -421,7 +427,7 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
   try {
     disabled = installedPluginDisabledIds(input.environmentId);
   } catch (error) {
-    disabledUnreadable = (error as Error).message;
+    disabledUnreadable = thrownMessage(error);
   }
   const pending: Array<{ record: PluginInstallationRecord; kept: { artifact: Uint8Array; signature: string | null; keyId: string | null } }> = [];
   for (const record of records) {
@@ -477,7 +483,7 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
     } catch (error) {
       // No key could be read, so no signed install is verified: each is
       // refused by name, and an unsigned one is still checked below.
-      const message = `this environment's trusted keys cannot be read: ${(error as Error).message}`;
+      const message = `this environment's trusted keys cannot be read: ${thrownMessage(error)}`;
       for (const { record, kept } of pending) {
         if (kept.keyId !== null) out.refused.push({ id: record.id, version: record.version, error: 'trusted_keys_unreadable', message });
       }
@@ -534,8 +540,12 @@ const HOST_PACKAGE_HOOKS = `
 let roots = [];
 let host = '';
 export async function initialize(data) { roots = data.roots; host = data.host; }
+function namesHostPackage(specifier) {
+  if (!specifier.startsWith('@objectstack/') || /[%\\\\]/.test(specifier)) return false;
+  return specifier.slice('@objectstack/'.length).split('/').every((s) => s !== '' && s !== '.' && s !== '..');
+}
 export async function resolve(specifier, context, next) {
-  if (specifier.startsWith('@objectstack/') && typeof context.parentURL === 'string'
+  if (namesHostPackage(specifier) && typeof context.parentURL === 'string'
     && roots.some((root) => context.parentURL.startsWith(root))) {
     return next(specifier, { ...context, parentURL: host });
   }
@@ -543,11 +553,33 @@ export async function resolve(specifier, context, next) {
 }
 `;
 
+/**
+ * What a throw says, whatever was thrown: a plugin's top-level code or getter
+ * can throw anything, `undefined` and `null` included, and reading `.message`
+ * off that would throw in the catch meant to name it.
+ */
+function thrownMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return 'a value that cannot be printed';
+  }
+}
+
+/** `dir`'s real path, or `dir` itself when it has none to read. */
+function realPathOr(dir: string): string {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return dir;
+  }
+}
+
 /** The (host, install directory) pairs this process already registered the hook for. */
 const HOST_RESOLUTION_REGISTERED = new Set<string>();
 
 function resolveHostPackagesFor(dirs: readonly string[], host: string): void {
-  const roots = dirs
+  const roots = [...new Set(dirs.flatMap((dir) => [dir, realPathOr(dir)]))]
     .map((dir) => `${pathToFileURL(dir).href}/`)
     .filter((root) => !HOST_RESOLUTION_REGISTERED.has(`${host} ${root}`));
   if (roots.length === 0) return;
@@ -642,7 +674,7 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
         id: record.id,
         version: record.version,
         error: 'uninstall_failed',
-        message: `finishing its uninstall failed (${(error as Error).message}). Nothing of it was loaded; if its record is still marked, the next boot tries again.`,
+        message: `finishing its uninstall failed (${thrownMessage(error)}). Nothing of it was loaded; if its record is still marked, the next boot tries again.`,
       });
       continue;
     }
@@ -676,7 +708,7 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
         wrapBundle: input.wrapBundle,
       });
     } catch (error) {
-      out.refused.push({ id: record.id, version: record.version, error: 'import_failed', message: `importing ${item.entry} failed: ${(error as Error).message}` });
+      out.refused.push({ id: record.id, version: record.version, error: 'import_failed', message: `importing ${item.entry} failed: ${thrownMessage(error)}` });
       continue;
     }
     // The module's top-level code has run from here on. Reading what it
@@ -685,7 +717,7 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
     try {
       refusal = inspectImported(record, item, plugin);
     } catch (error) {
-      refusal = { id: record.id, version: record.version, error: 'not_a_plugin', message: `reading what ${item.entry} exports threw: ${(error as Error).message}` };
+      refusal = { id: record.id, version: record.version, error: 'not_a_plugin', message: `reading what ${item.entry} exports threw: ${thrownMessage(error)}` };
     }
     if (refusal) {
       out.refused.push(refusal);

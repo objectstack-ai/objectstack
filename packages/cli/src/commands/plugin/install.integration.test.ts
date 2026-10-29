@@ -31,12 +31,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { generateEd25519KeyPair, signPayload } from '@objectstack/core';
+import { MAX_UNPACKED_ARTIFACT_BYTES, generateEd25519KeyPair, signPayload } from '@objectstack/core';
 import { loadPluginInstallations, pluginInstallDir, pluginInstallationsFile, readPublisherPublicKey } from '@objectstack/runtime';
 import { isExitSignal } from '../../utils/format.js';
 import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from '../../utils/osplugin.js';
@@ -276,6 +276,17 @@ describe('os plugin install (ADR-0025 §3.5 M1)', () => {
     mkdirSync(path);
     const result = await run(PluginInstall, [path, '--trust-unsigned', ...db(), '--json']);
     expect(result.payload, result.stdout.slice(-400)).toMatchObject({ error: 'artifact_unreadable' });
+    expect(result.exitCode).toBe(1);
+    expect(existsSync(join(home, 'plugins'))).toBe(false);
+  }, CASE_TIMEOUT_MS);
+
+  it('[slice 2] refuses, unread, an artifact file larger than any artifact may unpack to', async () => {
+    const path = join(project, 'too-large.osplugin');
+    writeFileSync(path, '');
+    truncateSync(path, MAX_UNPACKED_ARTIFACT_BYTES + 1); // sparse: no bytes are written
+    const result = await run(PluginInstall, [path, '--trust-unsigned', ...db(), '--json']);
+    expect(result.payload, result.stdout.slice(-400)).toMatchObject({ error: 'artifact_unreadable' });
+    expect(result.payload.message).toContain(`it is ${MAX_UNPACKED_ARTIFACT_BYTES + 1} bytes, more than the ${MAX_UNPACKED_ARTIFACT_BYTES}`);
     expect(result.exitCode).toBe(1);
     expect(existsSync(join(home, 'plugins'))).toBe(false);
   }, CASE_TIMEOUT_MS);

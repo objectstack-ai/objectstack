@@ -52,7 +52,13 @@ export interface PluginMetadata extends Plugin {
     // config-validation surface is a fresh decision for the day the ADR-0025
     // distribution layer lands.
 
-    /** Plugin signature for security verification */
+    /**
+     * The detached signature its artifact verified under. Not a verification
+     * by itself: the loader refuses a plugin carrying one unless the host that
+     * verified the artifact recorded that verdict against this object
+     * (`recordPluginArtifactVerdict`). Leave it unset on a plugin you register
+     * yourself.
+     */
     signature?: string;
     
     /** Plugin health check function */

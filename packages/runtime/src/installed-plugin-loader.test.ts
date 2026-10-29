@@ -11,17 +11,22 @@
  * host verdict the kernel's loader reads; each change is refused by its own
  * name and nothing of that plugin is imported; a disabled install is skipped;
  * an uninstall removes the directory unless another project still records it;
- * and only `runtime: 'node'` is ever imported.
+ * and only `runtime: 'node'` is ever imported. A throw on one installation
+ * refuses that one by name, whatever was thrown. In a real Node process, a
+ * bare `@objectstack/*` import resolves to the host's package, also through a
+ * symbolic link, and a specifier that climbs out of `@objectstack/` does not.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { createPublicKey } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
-import { generateEd25519KeyPair, pluginArtifactVerdict, sha256Hex, signPayload } from '@objectstack/core';
+import { MAX_UNPACKED_ARTIFACT_BYTES, generateEd25519KeyPair, pluginArtifactVerdict, sha256Hex, signPayload } from '@objectstack/core';
 
 import { dispatchPluginRuntime, loadInstalledPlugins, verifyInstalledPlugins } from './installed-plugin-loader.js';
 import {
@@ -418,6 +423,8 @@ describe('what the import answers', () => {
     ['the plugin declares another signature', 'signature_conflict', 'export default { name: "x", init() {}, signature: "ed25519:other:AAAA" };\n'],
     ['the plugin object is frozen', 'signature_conflict', 'export default Object.freeze({ name: "x", init() {} });\n'],
     ['reading the export throws', 'not_a_plugin', 'export default { name: "x", init() {}, get signature() { throw new Error("getter"); } };\n'],
+    ['the import throws undefined', 'import_failed', 'throw undefined;\n'],
+    ['reading the export throws null', 'not_a_plugin', 'export default { name: "x", init() {}, get signature() { throw null; } };\n'],
   ])('%s → %s', async (_label, error, entry) => {
     install({ entry });
     const out = await load();
@@ -581,4 +588,105 @@ describe('a throw on one installation refuses it by name, and the boot goes on',
     // The next boot reads the fresh install and loads it.
     expect((await load()).loaded.map((l) => l.record.id).sort()).toEqual(['com.acme.gone', 'com.acme.signed']);
   });
+
+  it('a module whose top level throws undefined is refused by name, and the next plugin still loads', async () => {
+    install({ id: 'com.acme.throws', entry: 'throw undefined;\n' });
+    install({ id: 'com.acme.fine' });
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ id: 'com.acme.throws', error: 'import_failed' })]);
+    expect(out.refused[0].message).toMatch(/failed: undefined$/);
+    expect(out.loaded.map((l) => l.record.id)).toEqual(['com.acme.fine']);
+  });
+
+  it('an uninstall whose installations lock cannot be read → uninstall_failed naming it, at once; the next plugin still loads', async () => {
+    const r = install({ id: 'com.acme.gone' });
+    markPluginUninstall(ENV, r.id);
+    install({ id: 'com.acme.fine' });
+    const lock = `${pluginInstallationsFile(ENV)}.lock`;
+    writeFileSync(lock, JSON.stringify({ pid: process.ppid, thread: 0, token: 'unreadable', at: new Date().toISOString() }));
+    fsFaults.fail = (op, path) => (op === 'readFile' && path === lock ? 'EACCES' : null);
+    const t0 = Date.now();
+    const out = await load();
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect(out.refused).toEqual([expect.objectContaining({ id: r.id, error: 'uninstall_failed' })]);
+    expect(out.refused[0].message).toMatch(/installations lock .* cannot be read \(EACCES/);
+    expect(out.loaded.map((l) => l.record.id)).toEqual(['com.acme.fine']);
+    expect(existsSync(r.dir)).toBe(true);
+  });
+
+  it('a kept artifact larger than any artifact an install accepts → artifact_changed, and it is never read', async () => {
+    const r = install();
+    const kept = join(r.dir, INSTALLED_ARTIFACT_FILE);
+    truncateSync(kept, MAX_UNPACKED_ARTIFACT_BYTES + 1); // sparse: no bytes are written
+    let reads = 0;
+    fsFaults.fail = (op, path) => {
+      if (op === 'readFile' && path === kept) reads += 1;
+      return null;
+    };
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ id: r.id, error: 'artifact_changed' })]);
+    expect(out.refused[0].message).toContain('more than any artifact an install accepts');
+    expect(reads).toBe(0);
+    expect(out.imported).toEqual([]);
+  });
+});
+
+describe('what an installed plugin imports resolves to, in a real Node process', () => {
+  // `module.register`'s resolve hook acts on Node's own loader, which this test
+  // runner's module graph does not go through: a child process boots instead.
+  const subject = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'installed-plugin-loader.ts')).href;
+  // The host file: `@objectstack/core` and `zod` both resolve from this package.
+  const host = subject;
+  const script = [
+    'const [subject, home, host] = process.argv.slice(1);',
+    'process.env.OS_HOME = home;',
+    'const { loadInstalledPlugins } = await import(subject);',
+    'const out = await loadInstalledPlugins({ environmentId: "env_local", resolveKeys: async () => new Map(),',
+    '  wrapBundle: (bundle) => bundle, resolveHostPackagesFrom: host });',
+    'console.log(JSON.stringify({ loaded: out.loaded.map((l) => [l.record.id, l.plugin.seen]),',
+    '  refused: out.refused.map((r) => [r.id, r.error, r.message]) }));',
+  ].join('\n');
+
+  function bootInChild(osHome: string): { loaded: [string, unknown][]; refused: [string, string, string][] } {
+    const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, subject, osHome, host], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH ?? '', HOME: osHome, ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}) },
+      timeout: 90_000,
+    });
+    expect(child.status, child.stderr).toBe(0);
+    return JSON.parse(child.stdout.trim().split('\n').pop() as string);
+  }
+
+  it('a bare @objectstack/* import resolves to the host\'s package, also when OS_HOME is reached through a symbolic link', () => {
+    // Node names an importing module by its real path; the hook's roots must
+    // match it, not only the path the install directory was reached by.
+    const link = `${home}-link`;
+    symlinkSync(home, link);
+    try {
+      process.env.OS_HOME = link;
+      install({
+        id: 'com.acme.core-user',
+        signed: false,
+        entry: 'import { sha256Hex } from "@objectstack/core";\nexport default { name: "core-user", init() {}, seen: sha256Hex(new Uint8Array([1])).length };\n',
+      });
+      expect(bootInChild(link)).toEqual({ loaded: [['com.acme.core-user', 64]], refused: [] });
+    } finally {
+      process.env.OS_HOME = home;
+      rmSync(link);
+    }
+  }, 120_000);
+
+  it('a specifier that climbs out of @objectstack/ is not redirected to the host', () => {
+    // From the host, `@objectstack/../zod/package.json` is this package's
+    // `node_modules/zod/package.json`: redirected, it would load.
+    install({
+      id: 'com.acme.climber',
+      signed: false,
+      entry: 'import pkg from "@objectstack/../zod/package.json" with { type: "json" };\nexport default { name: "climber", init() {}, seen: pkg.name };\n',
+    });
+    const out = bootInChild(home);
+    expect(out.loaded).toEqual([]);
+    expect(out.refused).toEqual([['com.acme.climber', 'import_failed', expect.stringContaining('@objectstack/..')]]);
+  }, 120_000);
 });

@@ -66,8 +66,12 @@
  * bytes, which carry a per-acquisition token. A writer that finds the lock
  * replaced by a live one since its judgement leaves it and waits. A holder
  * removes the lock on release only while it is still its own. A steal lock a
- * crashed writer left is cleared the same way once it is older than
- * {@link INSTALLATIONS_LOCK_STEAL_STALE_MS}.
+ * crashed writer left is judged as the lock is (its pid, its age) and cleared
+ * the same way; a writer that finds a live one waits, as for the lock.
+ *
+ * A lock file that is there and cannot be read (a directory, or a file this
+ * user may not read) is never taken for none: the writer refuses, naming it,
+ * rather than trying again.
  *
  * Exported from the package index for the CLI, which writes it; the runtime's
  * boot-time loader is its reader.
@@ -97,9 +101,6 @@ export const INSTALLED_SIGNATURE_FILE = 'artifact.osplugin.sig';
 export const INSTALLATIONS_LOCK_WAIT_MS = 10_000;
 /** A lock older than this is stale whatever its pid answers. */
 export const INSTALLATIONS_LOCK_STALE_MS = 5 * 60_000;
-/** A steal lock older than this was left by a writer that died clearing a stale lock. */
-export const INSTALLATIONS_LOCK_STEAL_STALE_MS = 2_000;
-
 /**
  * Thrown by {@link withPluginInstallationsLock} when another live writer holds
  * the lock past the wait, so a caller can name that refusal apart from any
@@ -245,13 +246,21 @@ interface LockFile {
   raw: string;
 }
 
-/** The lock file at `path` now, or `null` when there is none (or it vanished while being read). */
+/**
+ * The lock file at `path` now, or `null` when there is none (or it vanished
+ * while being read). One that is there and cannot be read throws, naming it:
+ * taken for none, the writer would retry it forever.
+ */
 function readLockFile(path: string): (LockFile & { ageMs: number }) | null {
   try {
     const stat = statSync(path);
     return { ino: stat.ino, raw: readFileSync(path, 'utf8'), ageMs: Date.now() - stat.mtimeMs };
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error(
+      `The plugin installations lock ${path} cannot be read (${(error as Error).message}). `
+        + 'If no `os plugin` command is running, remove it.',
+    );
   }
 }
 
@@ -312,22 +321,25 @@ export const installationsLockTestHooks: { afterStaleJudged?: (lock: string) => 
 
 /**
  * Clear the lock judged stale, holding the steal lock so no other writer
- * clears at the same time, and only while it is still that file. A steal lock
- * held by another writer means it is clearing now: the caller tries again.
+ * clears at the same time, and only while it is still that file. Answers
+ * `false` when another writer holds the steal lock: it is clearing now, and
+ * the caller waits. A steal lock a dead writer left is cleared here, judged as
+ * the lock is, so a live writer slow inside its clear keeps it.
  */
-function clearStaleLock(lock: string, judged: LockFile): void {
+function clearStaleLock(lock: string, judged: LockFile): boolean {
   const steal = `${lock}.steal`;
   const mine = createLockFile(steal);
   if (!mine) {
     const left = readLockFile(steal);
-    if (left && left.ageMs > INSTALLATIONS_LOCK_STEAL_STALE_MS) removeIfUnchanged(steal, left);
-    return;
+    if (left && judgeLock(left).stale) removeIfUnchanged(steal, left);
+    return false;
   }
   try {
     removeIfUnchanged(lock, judged);
   } finally {
     removeIfUnchanged(steal, mine);
   }
+  return true;
 }
 
 /** Lock files this thread holds, and how deep: the lock is re-entrant within a thread. */
@@ -371,13 +383,15 @@ export function withPluginInstallationsLock<T>(
     const { stale, holder } = judgeLock(present);
     if (stale) {
       installationsLockTestHooks.afterStaleJudged?.(lock);
-      clearStaleLock(lock, present);
-      continue;
+      if (clearStaleLock(lock, present)) continue;
     }
     if (Date.now() >= deadline) {
       throw new PluginInstallationsLockedError(
-        `The plugin installations file ${file} is locked by ${holder}, still running after `
-          + `${waitMs / 1000}s. Let that command finish; if no \`os plugin\` command is running, remove ${lock}.`,
+        stale
+          ? `The plugin installations file ${file} has a stale lock (${holder}) that another writer was still `
+            + `clearing after ${waitMs / 1000}s. If no \`os plugin\` command is running, remove ${lock} and ${lock}.steal.`
+          : `The plugin installations file ${file} is locked by ${holder}, still running after `
+            + `${waitMs / 1000}s. Let that command finish; if no \`os plugin\` command is running, remove ${lock}.`,
       );
     }
     sleepSync(50);
@@ -387,7 +401,12 @@ export function withPluginInstallationsLock<T>(
     return fn();
   } finally {
     HELD.delete(lock);
-    removeIfUnchanged(lock, mine);
+    try {
+      removeIfUnchanged(lock, mine);
+    } catch {
+      // A lock this writer can no longer read may not be its own, so it is
+      // left; the next writer names it. What `fn` answered stands.
+    }
   }
 }
 
