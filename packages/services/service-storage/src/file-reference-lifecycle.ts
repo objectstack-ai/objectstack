@@ -9,7 +9,6 @@ import { validationFailure } from '@objectstack/types';
 import { callerContext } from './attachment-access-hooks.js';
 import {
   findReferenceableFile,
-  systemReadContext,
   unreadableFileMessage,
   type FileReferenceReadAuthorizer,
 } from './referenceable-file.js';
@@ -62,7 +61,7 @@ export type { FileReferenceReadAuthorizer } from './referenceable-file.js';
  * field, before the driver runs and before any file is copied: one
  * `400 VALIDATION_FAILED` with an ADR-0114 `invalid_value` entry per field,
  * naming the field and nothing about the file ({@link refuseUnreadableFile}).
- * An id the organization-scoped lookup cannot see ({@link systemReadContext})
+ * An id the organization-scoped lookup cannot see (`systemReadContext` in `referenceable-file.ts`)
  * gets the same answer, so the write door cannot tell "may not read" from
  * "does not exist". It replaces #25951's quiet answer, which kept the id as
  * written: that left a slot holding a file it does not own, the state
@@ -193,9 +192,6 @@ const SYSTEM_CTX = { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } as co
 function systemWriteContext(organizationId?: string | null): Record<string, unknown> {
   return typeof organizationId === 'string' && organizationId.length > 0
     ? { ...SYSTEM_CTX, tenantId: organizationId }
-    : { ...SYSTEM_CTX };
-}
-
     : { ...SYSTEM_CTX };
 }
 
