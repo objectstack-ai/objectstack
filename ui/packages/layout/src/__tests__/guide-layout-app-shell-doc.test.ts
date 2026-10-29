@@ -7,12 +7,12 @@
  */
 
 /**
- * `content/docs/guide/layout.md`'s AppShell material teaches only real props
+ * `content/docs/frontend/layout.mdx`'s AppShell material teaches only real props
  * (objectui#4827).
  *
  * This is the same phantom-key fact as objectui#4817 (`packages/layout/README.md`,
  * pinned by `readme-app-shell-example.test.ts`) and objectui#4808
- * (`content/docs/layout/app-shell.mdx`, pinned by `app-shell-docs-nav-example.test.ts`),
+ * (`content/docs/frontend/app-shell.mdx`, pinned by `app-shell-docs-nav-example.test.ts`),
  * on a THIRD teaching surface — and this one was the worst of the three, because
  * its carrier was JSON.
  *
@@ -86,7 +86,7 @@
  *
  * ## Scan surface — deliberately narrow
  *
- * This file judges `content/docs/guide/layout.md`'s APP-SHELL material only: the
+ * This file judges `content/docs/frontend/layout.mdx`'s APP-SHELL material only: the
  * `### Props` table, the `<AppShell …>` opening tags in its fences, and whether
  * any fence authors an `app-shell` JSON node. The same page's `page`,
  * `page-header` and `sidebar-nav` sections are NOT audited here and must not be
@@ -96,7 +96,7 @@
  * (The `page` section's Schema API block used to declare `headerClassName` /
  * `bodyClassName`; objectui#11318 removed them as unread.) `packages/layout/README.md`
  * belongs to `readme-app-shell-example.test.ts` (objectui#4817) and
- * `content/docs/layout/app-shell.mdx` to `app-shell-docs-nav-example.test.ts`
+ * `content/docs/frontend/app-shell.mdx` to `app-shell-docs-nav-example.test.ts`
  * (objectui#4793 / #4808); pinning the whole docs tree to source is
  * objectui#3786's problem, not this one.
  *
@@ -120,7 +120,7 @@ const mask: (source: string) => string = maskComments;
 
 /** Repo root — five levels up from `packages/layout/src/__tests__`. */
 const REPO_ROOT = resolve(__dirname, '../../../..');
-const GUIDE = readFileSync(join(REPO_ROOT, 'content', 'docs', 'guide', 'layout.md'), 'utf8');
+const GUIDE = readFileSync(join(REPO_ROOT, '..', 'content', 'docs', 'frontend', 'layout.mdx'), 'utf8');
 const APP_SHELL_SRC = readFileSync(
   join(REPO_ROOT, 'packages', 'layout', 'src', 'AppShell.tsx'),
   'utf8',
@@ -230,7 +230,7 @@ function interfaceProps(src: string, name: string): DeclaredProp[] {
 function documentedProps(): DeclaredProp[] {
   const start = GUIDE_LINES.indexOf('### Props');
   if (start === -1) {
-    throw new Error('content/docs/guide/layout.md no longer has a `### Props` heading');
+    throw new Error('content/docs/frontend/layout.mdx no longer has a `### Props` heading');
   }
   const props: DeclaredProp[] = [];
   for (let i = start + 1; i < GUIDE_LINES.length; i += 1) {
@@ -317,7 +317,7 @@ describe("the guide's AppShellProps table names exactly the real props (objectui
     expect(
       documentedProps().map(format),
       [
-        'The `### Props` table in content/docs/guide/layout.md and the interface in',
+        'The `### Props` table in content/docs/frontend/layout.mdx and the interface in',
         'packages/layout/src/AppShell.tsx disagree about which props exist. That table replaced',
         'a `Schema API` block which declared ten keys for a JSON `app-shell` node, seven of',
         'which the component has never had (objectui#4827) — and a JSON carrier has no',
@@ -367,7 +367,7 @@ describe("the guide's AppShell examples pass only props AppShellProps declares (
     const appShellFences = fences().filter((fence) => fence.body.includes('AppShell'));
     expect(
       appShellFences.length,
-      'no AppShell code fence found in content/docs/guide/layout.md at all',
+      'no AppShell code fence found in content/docs/frontend/layout.mdx at all',
     ).toBeGreaterThan(0);
 
     const used = [...new Set(appShellFences.flatMap((fence) => appShellTagProps(fence.body)))];
@@ -376,7 +376,7 @@ describe("the guide's AppShell examples pass only props AppShellProps declares (
     expect(
       used.filter((prop) => !declared.includes(prop)),
       [
-        'An `<AppShell>` example in content/docs/guide/layout.md passes a prop the component',
+        'An `<AppShell>` example in content/docs/frontend/layout.mdx passes a prop the component',
         'does not declare. `AppShell` destructures a fixed key list with NO rest element, so an',
         'undeclared prop is not "ignored with a warning" — the node is built and dropped, and',
         'the page promises UI that can never appear (objectui#4827).',
@@ -400,7 +400,7 @@ describe("the guide's AppShell examples pass only props AppShellProps declares (
     expect(
       used.has('navbar'),
       [
-        'No `<AppShell>` example in content/docs/guide/layout.md passes `navbar` any more.',
+        'No `<AppShell>` example in content/docs/frontend/layout.mdx passes `navbar` any more.',
         '`navbar` is the ONLY entry point for top-bar content; a page that stops showing it',
         'sends readers looking for the `header` key objectui#4827 was filed about, which has',
         'never existed on this component.',
@@ -415,9 +415,9 @@ describe('the guide authors no `app-shell` JSON node (objectui#4827)', () => {
     const offenders = fences().filter((fence) => /["']type["']\s*:\s*["']app-shell["']/.test(fence.body));
 
     expect(
-      offenders.map((fence) => `content/docs/guide/layout.md:${fence.line}`),
+      offenders.map((fence) => `content/docs/frontend/layout.mdx:${fence.line}`),
       [
-        'A fence in content/docs/guide/layout.md authors an `app-shell` node again',
+        'A fence in content/docs/frontend/layout.mdx authors an `app-shell` node again',
         '(objectui#4827). The key is not registered at all any more (objectui#4841), so the',
         'node resolves to nothing: the renderer replaces it with the red "Unknown component',
         'type: app-shell" panel (OBJUI-001) and sdui-parser reports `unknown-component`. It was',
@@ -468,7 +468,7 @@ describe("the source facts the guide's JSON section rests on (objectui#4827)", (
         stripped,
         [
           `SchemaRenderer no longer strips \`${key}\` out of a node before spreading its keys as`,
-          'props. content/docs/guide/layout.md states that a JSON `app-shell` node renders an',
+          'props. content/docs/frontend/layout.mdx states that a JSON `app-shell` node renders an',
           'EMPTY `<main>` for exactly that reason (objectui#4827); if the key now reaches the',
           'component, that paragraph is false and the page — not this assertion — is what has to',
           'change.',

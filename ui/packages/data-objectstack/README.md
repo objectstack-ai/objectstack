@@ -1056,7 +1056,7 @@ stay easy to tell apart from user-facing preferences (`theme`, `locale`).
 
 If the backend doesn't yet expose `sys_user_preference`, every call
 404s and the UI silently degrades to localStorage-only persistence. See
-[User-Scoped State Persistence](../../content/docs/guide/user-state-persistence.md)
+[A user's list state never writes the view](https://objectstack.ai/docs/ui/views#a-users-list-state-never-writes-the-view)
 for the full design.
 
 ### Key families
@@ -1193,7 +1193,7 @@ dataSource.invalidateCache('users');
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/guide/data-source)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/data-source)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/data-objectstack)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

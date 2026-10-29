@@ -43,7 +43,7 @@ import { fileURLToPath } from 'node:url';
  * `packages/components/src/renderers/feedback/empty.tsx:37`,
  * `actionSchema && typeof actionSchema === 'object'` -- drop the primitive
  * members on the floor, so the union is wrong for a node-slot position.
- * Where the union IS genuinely correct (`content/docs/guide/layout.md`),
+ * Where the union IS genuinely correct (`content/docs/frontend/layout.mdx`),
  * `SchemaNode` stays. Neither name is asserted absent here: only the two
  * spellings that name nothing real are.
  *
@@ -75,7 +75,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
  *   `domain:skills` seat. Adding it here would red this pin on `main` until
  *   that separate, human-merged PR lands.
  */
-const DOCS_ROOT = 'content/docs';
+// The SDK pages, which objectstack#27145 retired from this workspace's own
+// `content/docs` along with their site; they live on in the root docs tree.
+const DOCS_ROOT = '../content/docs/frontend';
 const DOC_EXTENSIONS = ['.md', '.mdx'];
 
 /**
@@ -90,7 +92,7 @@ const DOC_EXTENSIONS = ['.md', '.mdx'];
  */
 const ALLOWED: Record<string, string> = {};
 
-/** Every `.md` / `.mdx` under `content/docs`, plus each `packages/<name>/README.md`. */
+/** Every `.md` / `.mdx` under `DOCS_ROOT`, plus each `packages/<name>/README.md`. */
 function scanSurface(): string[] {
   const out: string[] = [];
 
@@ -140,13 +142,13 @@ describe('the documented name for "a component node" is `BaseSchema` (objectui#7
   it('control: the surface is populated and a must-hit word fires on it', () => {
     expect(surface.length).toBeGreaterThan(50);
     expect(surface).toContain('packages/types/README.md');
-    expect(surface).toContain('content/docs/api/schema-reference.md');
+    expect(surface).toContain('../content/docs/frontend/schema-rendering.mdx');
 
     const withBaseSchema = surface.filter((rel) => /\bBaseSchema\b/.test(read(rel)));
     expect(withBaseSchema.length).toBeGreaterThan(0);
 
     // The page that carries the definitional statement must be one of them.
-    expect(withBaseSchema).toContain('content/docs/api/schema-reference.md');
+    expect(withBaseSchema).toContain('../content/docs/frontend/schema-rendering.mdx');
   });
 
   it.each(BANNED)('no `$name` survives on the authored surface', ({ pattern, why }) => {

@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Standard UI component library for Object UI, built with Shadcn UI + Tailwind CSS",
-  "homepage": "https://www.objectui.org/docs/components",
+  "description": "Standard UI component library for ObjectUI, built with Shadcn UI + Tailwind CSS",
+  "homepage": "https://objectstack.ai/docs/frontend/renderers",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

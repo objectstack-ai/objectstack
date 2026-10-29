@@ -29,8 +29,8 @@ import {
 } from '@object-ui/react';
 import { isElementDataSourceConfig } from '@object-ui/core';
 import type { DataSource, QueryParams } from '@object-ui/types';
-import { Button, Empty, EmptyTitle, EmptyDescription, Spinner } from '@object-ui/components';
-import { AlertTriangle, FileText, Pencil, RotateCw } from 'lucide-react';
+import { Button, DataErrorState, Empty, EmptyTitle, EmptyDescription, Spinner } from '@object-ui/components';
+import { FileText, Pencil, RotateCw } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -268,30 +268,25 @@ function AppPageRecordRead({
   if (current.status === 'failed') {
     return (
       <div className="flex h-full items-center justify-center p-4">
-        <Empty data-testid="page-record-load-failed">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <AlertTriangle className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <EmptyTitle>
-            {t('empty.recordLoadFailed', { defaultValue: 'Couldn’t load this record' })}
-          </EmptyTitle>
-          <EmptyDescription>
-            {t('empty.recordLoadFailedDescription', {
-              defaultValue: 'Something went wrong while loading it. Check your connection and try again.',
-            })}
-          </EmptyDescription>
-          <div className="mt-4">
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="page-record-load-failed-retry"
-              onClick={() => setAttempt((n) => n + 1)}
-            >
-              <RotateCw className="mr-1.5 h-4 w-4" />
-              {t('common.retry', { defaultValue: 'Retry' })}
-            </Button>
-          </div>
-        </Empty>
+        {/* #25915 — the shared `DataErrorState` (`role="alert"` by
+            construction); Retry rides in `children` to keep its test id. */}
+        <DataErrorState
+          data-testid="page-record-load-failed"
+          title={t('empty.recordLoadFailed', { defaultValue: 'Couldn’t load this record' })}
+          message={t('empty.recordLoadFailedDescription', {
+            defaultValue: 'Something went wrong while loading it. Check your connection and try again.',
+          })}
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="page-record-load-failed-retry"
+            onClick={() => setAttempt((n) => n + 1)}
+          >
+            <RotateCw className="mr-1.5 h-4 w-4" />
+            {t('common.retry', { defaultValue: 'Retry' })}
+          </Button>
+        </DataErrorState>
       </div>
     );
   }

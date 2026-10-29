@@ -4,8 +4,8 @@
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
-  "description": "Internationalization (i18n) support for Object UI with 10+ language packs, RTL layout, and date/currency formatting.",
-  "homepage": "https://www.objectui.org/docs/packages/i18n",
+  "description": "Internationalization (i18n) support for ObjectUI with 10+ language packs, RTL layout, and date/currency formatting.",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

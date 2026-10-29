@@ -2,9 +2,9 @@
   "name": "@object-ui/runner",
   "private": true,
   "version": "18.1.0",
-  "description": "Universal Object UI Application Runner",
+  "description": "Universal ObjectUI Application Runner",
   "type": "module",
-  "homepage": "https://www.objectui.org/docs/utilities/runner",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

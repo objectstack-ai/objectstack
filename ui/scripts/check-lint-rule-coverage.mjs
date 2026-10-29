@@ -579,11 +579,8 @@ export const VACUOUS_GROUPS = [
       'code, and each is a handful of lines.',
     card: 'objectui#7908',
   },
-  {
-    glob: 'apps/site/next.config.mjs',
-    reason: "The docs site's Next config, same class as the PostCSS row above.",
-    card: 'objectui#7908',
-  },
+  // The docs site's `apps/site/next.config.mjs` row left with the site
+  // (objectstack#27145).
 ];
 
 /**

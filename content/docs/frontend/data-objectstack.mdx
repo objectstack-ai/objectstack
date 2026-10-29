@@ -112,6 +112,7 @@ implements `DataSource` — backed by an ObjectStack backend.
 
 **Config:**
 
+{/* doc-snippet: fragment — a SIGNATURE excerpt of the factory: a `function` declaration with no body and an `ObjectStackAdapter` return type this reference block does not import (measured: TS2391 x1, TS2304 x1). ⚠️ This gate never compiles a DECLARED block, so nothing here re-verifies that this excerpt still agrees with the shipped `packages/data-objectstack/dist/index.d.ts` — and this reason may not claim it does (objectui#7505). Read the shipped declaration when this page matters to you; it has drifted twice, once in the return type (objectui#7503) and once in a config member (objectui#7505) */}
 ```typescript
 function createObjectStackAdapter<T = unknown>(config: {
   /** ObjectStack server base URL */
@@ -252,6 +253,7 @@ A schema node's `dataSource` key is the spec's `ElementDataSource` (validated by
 `ElementDataSourceSchema` in `@objectstack/spec`) — plain JSON metadata, **not**
 the adapter object:
 
+{/* doc-snippet: fragment — a SHAPE excerpt restating `@objectstack/spec`'s own `ElementDataSource` as a bare interface, so its `filter` member names the spec's `ViewFilterRule` without importing it (measured: TS2304 x1); the type is exported from `@objectstack/spec/ui`. ⚠️ This gate never compiles a DECLARED block, so nothing here re-verifies this excerpt against `ElementDataSourceSchema` in the installed `@objectstack/spec` — and this reason may not claim it does (objectui#7505). The schema is the authority on which members are required and whether it is strict; read it there */}
 ```typescript
 interface ElementDataSource {
   /** Object to query (required) */
@@ -342,6 +344,7 @@ passed to `createObjectStackAdapter` in code. Sourcing those values from the
 environment is your bundler's business (`process.env.*` under Node or webpack,
 `import.meta.env.*` under Vite):
 
+{/* doc-snippet: fragment — `process` is a NODE global carried by the reader's own `@types/node`, which this gate's program does not load, and the paragraph above says so in words: sourcing config from the environment is the reader's bundler's business (measured: TS2591 x2) */}
 ```typescript
 import { createObjectStackAdapter } from '@object-ui/data-objectstack';
 

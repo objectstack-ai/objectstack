@@ -94,6 +94,15 @@
  * rewrites/redirects; the one rewrite, `/docs/:path*.mdx`, sits under the
  * stricter `/docs` branch above and never reaches the site-route branch.)
  *
+ * **objectstack#27145 moved both halves one level up.** The objectui.org site
+ * and this workspace's `content/docs` were retired. The SDK pages live in the
+ * monorepo's docs collection under `content/docs/frontend`, served by
+ * `apps/docs`, and the site's origin is `objectstack.ai`. The `docs` row scans
+ * those pages; the collection their links resolve against is the whole
+ * `content/docs` (`DOCS_COLLECTION`), and the router is `apps/docs/app`
+ * (`DOCS_SITE`). Where this header says `apps/site` or `content/docs`, read
+ * those two.
+ *
  * **Relative hrefs may not leave the collection.** `../../../packages/foo/
  * README.md` resolves on disk, so the pre-#3490 check passed it, but
  * `source.resolveHref` can only look inside the docs page index; `packages/**`
@@ -600,6 +609,17 @@ import { isEntrypoint } from './invoked-as.mjs';
 import { GithubSlugger } from './github-slug.mjs';
 
 const DOCS_ROUTE_PREFIX = '/docs';
+/**
+ * The fumadocs collection the `docs` row's pages belong to, and the Next app
+ * that serves it — both one level above this workspace (objectstack#27145).
+ * The `docs` row scans only the SDK pages (`content/docs/frontend`), but a
+ * relative or `/docs/...` link on them resolves against the WHOLE collection,
+ * which is what the site does: they link the rest of the docs freely.
+ */
+const DOCS_COLLECTION = '../content/docs';
+const DOCS_SITE = '../apps/docs';
+/** The site's locale segment, which it serves without for the default locale. */
+const DOCS_SITE_HIDDEN_SEGMENTS = new Set(['[lang]']);
 const MARKDOWN_LINK_RE = /\[[^\]]+\]\(([^)]+)\)/g;
 /** A fence line: optional indent, 3+ backticks or tildes, optional info string. */
 const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
@@ -617,13 +637,17 @@ const ROUTE_ENTRY_RE = /^(?:page|route)\.(?:js|jsx|ts|tsx|md|mdx)$/;
 const SELF_REPO_BLOB_RE = /^https:\/\/github\.com\/objectstack-ai\/objectui\/(?:blob|tree)\/main\/(.+)$/i;
 /**
  * This site's own origin — the second decidable scheme-bearing shape
- * (objectui#3603). Both host spellings are in use in this tree, and the site
- * serves the same routes under each. Anchored at both ends so a lookalike host
- * (`objectui.org.example.com`) cannot match; the captured group is the absolute
- * site path, which `routeExists()` then judges exactly as if it had been
- * written without the origin.
+ * (objectui#3603). Anchored at both ends so a lookalike host
+ * (`objectstack.ai.example.com`) cannot match; the captured group is the
+ * absolute site path, which `routeExists()` then judges exactly as if it had
+ * been written without the origin.
+ *
+ * objectstack#27145: the site is the ObjectStack docs site now. objectui.org is
+ * retired (it answers permanent redirects into this one), and every link this
+ * tree carried to it was rewritten to the page's home here, so this origin is
+ * the one whose routes a README link names.
  */
-const SITE_ORIGIN_RE = /^https?:\/\/(?:www\.)?objectui\.org(\/[^\s]*)?$/i;
+const SITE_ORIGIN_RE = /^https?:\/\/(?:www\.)?objectstack\.ai(\/[^\s]*)?$/i;
 /** Never markdown sources of ours, and huge — walking them wastes the scan. */
 const UNSCANNED_DIRS = new Set(['node_modules', 'dist', 'build', '.next', '.turbo', '.git']);
 /** Shared empty exclude set — a fresh `Set()` per call would work identically, this just avoids allocating one on every `walk()`/`collectFiles()` call that has no row-level `exclude`. */
@@ -641,7 +665,7 @@ const BOTH_FILTERS = 'A SCAN_ROOTS row may set `exclude` OR `collect`, never bot
  * The scan surfaces, and the link semantics each one actually has.
  *
  * `docs` — the fumadocs collection: an href names a site ROUTE, resolved
- *          through the page index and the `apps/site` router.
+ *          through the page index and the docs site's router (`DOCS_SITE`).
  * `disk` — files read on GitHub: an href names a PATH in this repository.
  *
  * The split is the point (objectui#3536). See the header for why applying the
@@ -666,7 +690,9 @@ const BOTH_FILTERS = 'A SCAN_ROOTS row may set `exclude` OR `collect`, never bot
  * They are opposite readings of one list, and a row may carry at most one.
  */
 export const SCAN_ROOTS = [
-  { path: 'content/docs', rule: 'docs' },
+  // The SDK pages, in the monorepo's docs collection since objectstack#27145
+  // retired this workspace's own (see `DOCS_COLLECTION` below).
+  { path: '../content/docs/frontend', rule: 'docs' },
   { path: 'examples', rule: 'disk' },
   { path: 'docs', rule: 'disk' },
   { path: 'packages/*/README.md', rule: 'disk' },
@@ -688,7 +714,7 @@ export const SCAN_ROOTS = [
   // The root-level markdown (objectui#4148). `README.md`, `CONTRIBUTING.md`,
   // `ROADMAP.md` and `QUICK_REFERENCE.md` had a row each until objectstack#26080
   // folded them into the repository root's documents, outside this tree; their
-  // examples moved to `content/docs/guide/quick-start.md`, under the first row.
+  // examples moved to the SDK quick-start page, under the first row.
   { path: 'AGENTS.md', rule: 'disk' },
   { path: 'CHANGELOG.md', rule: 'disk' },
   { path: 'CLAUDE.md', rule: 'disk' },
@@ -955,9 +981,17 @@ function classifySegment(name) {
  * whatever the router currently is. See the header for why this script reads
  * outside `content/docs` at all.
  *
+ * `hiddenSegments` names directories whose segment the site also serves
+ * WITHOUT: the docs site's `[lang]`, which its i18n config hides for the
+ * default locale (`hideLocale: 'default-locale'` in `apps/docs/lib/i18n.ts`),
+ * so `/` and `/en` are one page. Such a directory is walked twice, once as its
+ * segment and once as if it were a route group (objectstack#27145).
+ *
+ * @param {string} siteRoot
+ * @param {{ hiddenSegments?: ReadonlySet<string> }} [options]
  * @returns {{ routes: object[][], assets: Set<string> }}
  */
-export function collectSiteRoutes(siteRoot) {
+export function collectSiteRoutes(siteRoot, { hiddenSegments = new Set() } = {}) {
   const routes = [];
   const assets = new Set();
 
@@ -976,6 +1010,7 @@ export function collectSiteRoutes(siteRoot) {
       const segment = classifySegment(entry.name);
       if (segment.kind === 'skip') continue;
       walkApp(path.join(dir, entry.name), segment.kind === 'group' ? pattern : [...pattern, segment]);
+      if (hiddenSegments.has(entry.name) && segment.kind !== 'group') walkApp(path.join(dir, entry.name), pattern);
     }
   };
 
@@ -1280,7 +1315,7 @@ export function routeExists(href, { fromFile, docsRoot, site }) {
     if (!site) {
       throw new Error(
         `routeExists() needs a site route table to judge the absolute href "${href}". ` +
-          'Pass `site: collectSiteRoutes(<repo>/apps/site)`.',
+          'Pass `site: collectSiteRoutes(<repo>/../apps/docs)`.',
       );
     }
     return siteUrlExists(cleanHref, site);
@@ -1371,8 +1406,8 @@ function judgeHref(href, context) {
  */
 export function collectBrokenLinks(repoRoot) {
   const broken = [];
-  const docsRoot = path.join(repoRoot, 'content', 'docs');
-  const site = collectSiteRoutes(path.join(repoRoot, 'apps', 'site'));
+  const docsRoot = path.join(repoRoot, DOCS_COLLECTION);
+  const site = collectSiteRoutes(path.join(repoRoot, DOCS_SITE), { hiddenSegments: DOCS_SITE_HIDDEN_SEGMENTS });
   // One anchor set per (document, renderer) per scan, not per href: the
   // `**Related:**` lines this card came from point many links at one page.
   // Scoped to this call rather than the module, so a caller scanning two
@@ -1414,7 +1449,7 @@ const HINTS = {
     ' (`/docs/plugins/plugin-charts`); a `.md`/`.mdx` suffix 404s whatever is on disk.',
   'site-route':
     'Absolute non-`/docs` links must resolve to a real site URL — a route under' +
-    ' `apps/site/app` or a file under `apps/site/public`. There is no `/spec`,' +
+    ' `apps/docs/app` or a file under `apps/docs/public`. There is no `/spec`,' +
     ' `/protocol`, `/api/<pkg>` or `/examples` route: link the equivalent' +
     ' `/docs/...` page, or an absolute `https://github.com/...` URL.',
   'escapes-collection':
@@ -1437,11 +1472,11 @@ const HINTS = {
     ' file (`./packages/core`), or, if a github.com URL really was meant,' +
     ' write it in full with the scheme.',
   'site-absolute-url':
-    'A `https://www.objectui.org/...` URL is a route on this project OWN site,' +
+    'A `https://objectstack.ai/...` URL is a route on this project OWN site,' +
     ' so the origin is stripped and the rest is checked exactly like the' +
     ' equivalent absolute href — this one does not resolve. Fix the route, or' +
     ' drop the link if no such page exists. Inside content/docs prefer the' +
-    ' origin-less form (`/docs/guide/plugins`): it survives a domain change,' +
+    ' origin-less form (`/docs/frontend/plugins`): it survives a domain change,' +
     ' and both spellings are checked identically.',
   anchor:
     'The link resolves to the right DOCUMENT but names an `#anchor` that document' +

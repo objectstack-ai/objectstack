@@ -326,7 +326,9 @@ describe('check-doc-fence-languages: the scan surface is check-doc-snippet-types
   });
 
   it('…and that is a non-empty set, so the comparison is not vacuous', () => {
-    expect(fenceDocuments(ROOT).length).toBeGreaterThan(100);
+    // 100 until objectstack#27145 moved the SDK pages to the monorepo's
+    // `content/docs/frontend` as fewer, larger ones: 76 with the READMEs now.
+    expect(fenceDocuments(ROOT).length).toBeGreaterThan(60);
   });
 
   it('treats exactly the snippet gate’s fence languages as already-covered', () => {
@@ -365,9 +367,9 @@ describe('check-doc-fence-languages: the scan surface is check-doc-snippet-types
 
   it('the root README examples are really in this gate’s walk, on the quick-start page', () => {
     // Not implied by the equality above: the README's examples left the root
-    // pages for `content/docs/guide/quick-start.md`, and only the guide-tree walk
+    // pages for `content/docs/frontend/quick-start.mdx`, and only the guide-tree walk
     // can still reach them.
-    expect(fenceDocuments(ROOT)).toContain('content/docs/guide/quick-start.md');
+    expect(fenceDocuments(ROOT)).toContain('../content/docs/frontend/quick-start.mdx');
   });
 
   /**

@@ -12,7 +12,7 @@ import { Routes, Route, Navigate, matchRoutes, useNavigate, useLocation, usePara
 import { useState, useEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
-import { Empty, EmptyTitle, EmptyDescription, Button } from '@object-ui/components';
+import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
@@ -1868,21 +1868,22 @@ function RouteNotFound() {
  */
 function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
   const { t } = useObjectTranslation();
+  // #25915 — drawn by the shared `DataErrorState`, so the failure is
+  // `role="alert"` by construction. Retry is passed as `children` (not
+  // `onRetry`) so it keeps its own test id.
   return (
     <div className="flex h-full w-full items-center justify-center p-8">
-      <Empty data-testid="route-object-read-failed">
-        <EmptyTitle>{t('list.loadErrorTitle', { defaultValue: 'Couldn\u2019t load records' })}</EmptyTitle>
-        <EmptyDescription>
-          {t('list.loadErrorMessage', {
-            defaultValue: 'Something went wrong while loading this data. Check your connection and try again.',
-          })}
-        </EmptyDescription>
-        <div className="mt-4">
-          <Button onClick={onRetry} data-testid="route-object-read-failed-retry">
-            {t('common.retry', { defaultValue: 'Retry' })}
-          </Button>
-        </div>
-      </Empty>
+      <DataErrorState
+        data-testid="route-object-read-failed"
+        title={t('list.loadErrorTitle', { defaultValue: 'Couldn\u2019t load records' })}
+        message={t('list.loadErrorMessage', {
+          defaultValue: 'Something went wrong while loading this data. Check your connection and try again.',
+        })}
+      >
+        <Button onClick={onRetry} data-testid="route-object-read-failed-retry">
+          {t('common.retry', { defaultValue: 'Retry' })}
+        </Button>
+      </DataErrorState>
     </div>
   );
 }

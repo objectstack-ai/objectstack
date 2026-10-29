@@ -62,7 +62,7 @@ const SPAN_DEPRECATION_NOTICE =
   '  - For inline text emphasis: use "text" component with appropriate className\n' +
   '  This applies to JSON-authored nodes. In a kind:\'html\' page the tag is part of that tier\'s own\n' +
   '  vocabulary, is compiled straight through, and is not reported here.\n' +
-  'See documentation at https://www.objectui.org/docs/components for alternatives.';
+  'See documentation at https://objectstack.ai/docs/ui/components for alternatives.';
 
 // Index signature on the parameter annotation, not on the `forwardRef` type
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by

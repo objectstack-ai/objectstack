@@ -945,7 +945,7 @@ file system, …) per the protocol-agnostic architecture rule.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-dashboard)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-dashboard)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-dashboard)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

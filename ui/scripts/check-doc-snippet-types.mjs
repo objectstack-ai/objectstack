@@ -487,7 +487,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Documentation surfaces read by this gate. Kept identical in spirit to
  *  `check-doc-links.mjs`: the pages a reader lands on, plus every published
  *  package README (which ships to npm inside the package's `files`). */
-const DOCS_ROOT = 'content/docs';
+const DOCS_ROOT = '../content/docs/frontend';
 const PACKAGES_DIR = 'packages';
 
 /**
@@ -554,7 +554,7 @@ export function appDocsDirs(root) {
  * ⭐ objectstack#26080 emptied it. The root `README.md` was folded into the
  * repository's root README, which lives outside this tree, and its examples —
  * the flagship "Basic Usage" page, the four copy-paste schemas — moved to
- * `content/docs/guide/quick-start.md`, which the `DOCS_ROOT` walk already
+ * `content/docs/frontend/quick-start.mdx`, which the `DOCS_ROOT` walk already
  * reads: the same fences, judged on the guide leg instead. Re-pointing the
  * entry there would list that page twice. The array stays, with the guard over
  * it, so a page added at the root later joins the way objectui#7115's did.

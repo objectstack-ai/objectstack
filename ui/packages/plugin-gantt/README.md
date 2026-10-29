@@ -929,7 +929,7 @@ spelling.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-gantt)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-gantt)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-gantt)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
