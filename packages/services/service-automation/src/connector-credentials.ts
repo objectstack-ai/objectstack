@@ -16,6 +16,11 @@
  *   3. the resolver the host injected (`AutomationServicePluginOptions.credentialResolver`)
  *      — the enterprise vault arm, if one is wired.
  *
+ * Under a walled tenancy posture (`group` / `isolated`) the stored arm is not
+ * consulted at all (S1 on #27230): the plugin composes the chain without a
+ * store, so a reference resolves from the environment or the host's resolver
+ * only, as the credential door's refusal there says.
+ *
  * ⛔ A value leaves this module only as the return of {@link resolveConnectorCredential},
  * whose one caller hands it to a provider factory. Everything else here —
  * fingerprints, listings, the store's rows — carries the reference, a source,
@@ -68,6 +73,7 @@ export interface ConnectorCredentialRecord {
     connectorName?: string;
     packageId?: string;
     lastVerifiedAt?: string;
+    /** When the value was last set through the door, and by whom — not moved by a status change. */
     updatedAt?: string;
     updatedBy?: string;
 }
@@ -75,8 +81,25 @@ export interface ConnectorCredentialRecord {
 /** The columns a read asks for — `value` is never among them. */
 const RECORD_FIELDS = [
     'id', 'ref', 'revision', 'status', 'status_reason', 'connector_name', 'package_id',
-    'last_verified_at', 'updated_at', 'updated_by',
+    'last_verified_at', 'set_at', 'set_by',
 ];
+
+/**
+ * The prefix the data engine reads as a handle to a secret it already holds
+ * (ObjectQL's `SECRET_REF_PREFIX`): a `secret`-typed value spelled this way is
+ * stored as given, unencrypted, and dereferenced as another `sys_secret` row.
+ * The credential door refuses a value that starts with it.
+ */
+export const SECRET_HANDLE_PREFIX = 'secret:';
+
+/**
+ * A credential door refusal: an ADR-0112 standard-catalog `code` and its
+ * `status` on the thrown error, the shape the `/automation` domain answers a
+ * service rejection with. Its message names the reference, never a value.
+ */
+export function credentialDoorRefusal(message: string, code: string, status: number): Error {
+    return Object.assign(new Error(message), { code, status, statusCode: status });
+}
 
 /**
  * ADR-0112 pair for a credential the deployment cannot handle safely right now:
@@ -131,8 +154,8 @@ function toRecord(row: Record<string, unknown>): ConnectorCredentialRecord | und
         connectorName: optionalText(row.connector_name),
         packageId: optionalText(row.package_id),
         lastVerifiedAt: optionalText(row.last_verified_at),
-        updatedAt: optionalText(row.updated_at),
-        updatedBy: optionalText(row.updated_by),
+        updatedAt: optionalText(row.set_at),
+        updatedBy: optionalText(row.set_by),
     };
 }
 
@@ -222,6 +245,11 @@ export class ConnectorCredentialStore {
      * Store a value for `ref`, replacing what the row held and raising its
      * revision. The engine encrypts it; with no crypto provider the engine
      * refuses before anything is written, and so does this.
+     *
+     * Read-then-write: the plugin runs every door write on its reconcile
+     * queue, so two writes in one process never interleave. Two replicas
+     * inserting the first row for one reference at once meet the unique index
+     * on `ref`, and the loser answers `409`.
      */
     async set(args: {
         ref: string;
@@ -244,6 +272,9 @@ export class ConnectorCredentialStore {
             revision,
             status: 'set',
             status_reason: null,
+            last_verified_at: null,
+            set_at: new Date().toISOString(),
+            set_by: args.userId ?? null,
             connector_name: args.connectorNames.length > 0 ? args.connectorNames.join(', ') : null,
             package_id: args.packageIds.length > 0 ? args.packageIds.join(', ') : null,
         };
@@ -269,6 +300,14 @@ export class ConnectorCredentialStore {
                         + '(setCryptoProvider — LocalCryptoProvider in development, a KMS-backed provider in production) and set it again.',
                 );
             }
+            if ((err as { code?: unknown })?.code === 'DUPLICATE_RECORD') {
+                throw credentialDoorRefusal(
+                    `Credential '${args.ref}' was stored by another writer at the same moment. Nothing was written by this `
+                        + 'request; read the listing and set it again if it still needs this value.',
+                    'RESOURCE_CONFLICT',
+                    409,
+                );
+            }
             // Whatever else refused the write answers without the value it was handed.
             throw withoutCredentialThrown(err, args.value);
         }
@@ -287,11 +326,14 @@ export class ConnectorCredentialStore {
     }
 
     /**
-     * Record that an instance materialized with revision `revision`: the
-     * timestamp moves, and a `rejected` row whose same value now works returns
-     * to `set`. A row rewritten since (another revision) is left alone.
+     * Record that an upstream ACCEPTED revision `revision`: a provider that
+     * proved it at materialization (`credentialVerified`, the mcp provider), or
+     * a call its upstream answered `2xx`. The timestamp moves, and a `rejected`
+     * row whose same value now works returns to `set`. A materialization alone
+     * proves nothing (rest and openapi first send the value on a call), so it
+     * never calls this. A row rewritten since (another revision) is left alone.
      */
-    async markMaterialized(record: ConnectorCredentialRecord, at: Date = new Date()): Promise<void> {
+    async markVerified(record: ConnectorCredentialRecord, at: Date = new Date()): Promise<void> {
         const engine = this.resolveEngine();
         if (!engine) return;
         const current = await this.read(record.ref);
@@ -359,7 +401,8 @@ export function withoutCredentialThrown(err: unknown, secret: string | undefined
 export interface ConnectorCredentialChain {
     /** The environment arm. Defaults to {@link defaultEnvCredentialResolver}. */
     readonly env?: (ref: string) => string | undefined;
-    readonly store: ConnectorCredentialStore;
+    /** The stored arm. Absent under a walled tenancy posture, where it is not consulted. */
+    readonly store?: ConnectorCredentialStore;
     /** The host's injected resolver, if any — the vault arm. */
     readonly vault?: CredentialResolver;
 }
@@ -399,9 +442,11 @@ export function connectorCredentialFingerprint(
     rows: ReadonlyMap<string, ConnectorCredentialRecord> | undefined,
 ): string {
     if (envValue(chain, ref) !== undefined) return 'env';
-    if (rows === undefined) return 'unreadable';
-    const row = rows.get(ref);
-    if (row) return `object:${row.revision}`;
+    if (chain.store) {
+        if (rows === undefined) return 'unreadable';
+        const row = rows.get(ref);
+        if (row) return `object:${row.revision}`;
+    }
     return chain.vault ? 'vault' : 'missing';
 }
 
@@ -425,18 +470,20 @@ export async function resolveConnectorCredential(
 ): Promise<ConnectorCredentialResolution> {
     const fromEnv = envValue(chain, ref);
     if (fromEnv !== undefined) return { kind: 'resolved', source: 'env', value: fromEnv };
-    if (rows === undefined) {
-        return {
-            kind: 'unavailable',
-            reason: `the connector credential store could not be read, so credential '${ref}' cannot be resolved now; the instance retries on its own.`,
-        };
-    }
-    const record = rows.get(ref);
-    if (record) {
-        try {
-            return { kind: 'resolved', source: 'object', value: await chain.store.resolve(record), record };
-        } catch (err) {
-            return { kind: 'unavailable', reason: (err as Error).message };
+    if (chain.store) {
+        if (rows === undefined) {
+            return {
+                kind: 'unavailable',
+                reason: `the connector credential store could not be read, so credential '${ref}' cannot be resolved now; the instance retries on its own.`,
+            };
+        }
+        const record = rows.get(ref);
+        if (record) {
+            try {
+                return { kind: 'resolved', source: 'object', value: await chain.store.resolve(record), record };
+            } catch (err) {
+                return { kind: 'unavailable', reason: (err as Error).message };
+            }
         }
     }
     if (chain.vault) {
@@ -457,7 +504,7 @@ export async function probeConnectorCredential(
     rows: ReadonlyMap<string, ConnectorCredentialRecord>,
 ): Promise<{ source: ConnectorCredentialSource | null; status: 'set' | 'missing' | 'rejected'; record?: ConnectorCredentialRecord }> {
     if (envValue(chain, ref) !== undefined) return { source: 'env', status: 'set' };
-    const record = rows.get(ref);
+    const record = chain.store ? rows.get(ref) : undefined;
     if (record) return { source: 'object', status: record.status, record };
     if (chain.vault) {
         let present = false;
@@ -511,11 +558,35 @@ export function upstreamRefusalMessage(body: unknown, secret: string | undefined
     return flat.length > UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH ? `${flat.slice(0, UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH)}…` : flat;
 }
 
-/** The degraded reason for an instance whose upstream refused its credential on a call. */
-export function credentialRejectedOnCallReason(name: string, ref: string, status: number, upstream: string | undefined): string {
+/**
+ * The degraded reason for an instance whose upstream refused its credential
+ * on a call. `held`: the value is a stored one, so the instance waits for it
+ * to be set again (or a restart); otherwise (an environment variable, the
+ * host's resolver) it is retried on the backoff, since the value can change
+ * where this door cannot see it.
+ */
+export function credentialRejectedOnCallReason(
+    name: string,
+    ref: string,
+    status: number,
+    upstream: string | undefined,
+    held: boolean,
+): string {
     return (
         `connector '${name}' was refused by its upstream (HTTP ${status}) on a call: credential '${ref}' is missing, wrong ` +
-        `or not authorized${upstream ? ` (the upstream said: ${upstream})` : ''}. The instance stays degraded, without ` +
-        `retrying, until credential '${ref}' changes.`
+        `or not authorized${upstream ? ` (the upstream said: ${upstream})` : ''}. ` +
+        (held
+            ? `The instance stays degraded, without retrying, until credential '${ref}' is set again or the server restarts.`
+            : 'The instance is retried with backoff.')
     );
+}
+
+/**
+ * A `2xx` result of a connector call — the upstream accepted the credential.
+ * The rest and openapi providers answer `{ status, ok, body }`.
+ */
+export function isAcceptedCallResult(result: unknown): boolean {
+    if (typeof result !== 'object' || result === null) return false;
+    const status = (result as { status?: unknown }).status;
+    return typeof status === 'number' && status >= 200 && status < 300;
 }

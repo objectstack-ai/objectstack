@@ -27,13 +27,15 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Environment-level: a connector instance is environment-level (ADR-0097), so
  * its credential is too, and the store carries no organization column. Per
  * organization credentials on a shared environment are ruled not supported
- * (S1 on #27230); the routes that write this object refuse on a walled posture.
+ * (S1 on #27230): on a walled posture the routes that write this object refuse,
+ * and the resolver chain does not read it.
  *
- * Writers: the automation plugin's credential door (set, clear) and its
- * reconcile (`status`, `last_verified_at`), under a system context that
- * carries the caller's user id, so the audit columns record who changed which
- * reference and when. Readers: the same plugin — never the generic data door,
- * which is closed below.
+ * Writers: the automation plugin's credential door (set, clear), which stamps
+ * `set_at` / `set_by` and runs under a system context carrying the caller's
+ * user id, and its reconcile (`status`, `status_reason`, `last_verified_at`),
+ * which leaves `set_at` / `set_by` alone so the listing keeps saying when the
+ * value was set and by whom. Readers: the same plugin — never the generic data
+ * door, which is closed below.
  *
  * @namespace sys
  */
@@ -55,7 +57,7 @@ export const SysConnectorCredential = ObjectSchema.create({
     "Write-only store of declarative connector credentials, one encrypted row per `credentialRef` an administrator set. Read second in the resolver chain: an environment variable of the same name wins.",
   displayNameField: 'ref',
   nameField: 'ref', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  highlightFields: ['ref', 'status', 'connector_name', 'updated_at'],
+  highlightFields: ['ref', 'status', 'connector_name', 'set_at'],
 
   fields: {
     ref: Field.text({
@@ -102,7 +104,7 @@ export const SysConnectorCredential = ObjectSchema.create({
       required: true,
       defaultValue: 'set',
       description:
-        "`set` when a value is stored; `rejected` when an upstream refused it while an instance materialized. A reference no source answers for is `missing` in the listing and has no row.",
+        "`set` when a value is stored; `rejected` when an upstream refused it (an instance's materialization or call answered 401 / 403). Back to `set` only when the value is set again or an upstream accepts it. A reference no source answers for is `missing` in the listing and has no row.",
     }),
 
     status_reason: Field.textarea({
@@ -112,10 +114,23 @@ export const SysConnectorCredential = ObjectSchema.create({
     }),
 
     last_verified_at: Field.datetime({
-      label: 'Last Materialized At',
+      label: 'Last Verified At',
       readonly: true,
       description:
-        'When a connector instance last materialized with this value. A provider that contacts its upstream at materialization (mcp) proves the credential there; the others first use it on a dispatch.',
+        'When an upstream last accepted this value: a provider that proves the credential at materialization (mcp), or the first call answered 2xx after an instance materialized (rest, openapi). Cleared when the value is set again.',
+    }),
+
+    set_at: Field.datetime({
+      label: 'Set At',
+      readonly: true,
+      description: 'When the value was last set through the credential door. A status change does not move it.',
+    }),
+
+    set_by: Field.text({
+      label: 'Set By',
+      readonly: true,
+      maxLength: 255,
+      description: 'The user id that last set the value through the credential door.',
     }),
   },
 

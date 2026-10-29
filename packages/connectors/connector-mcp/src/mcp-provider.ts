@@ -205,8 +205,9 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * instead of aborting the whole app boot. The one exception past transport
  * validation is a **rejected credential**: an HTTP 401 / 403 during connect,
  * handshake or `tools/list` throws {@link ConnectorCredentialRejectedError} —
- * a configuration fault the materializer degrades the instance for, never
- * retried on a timer (see {@link credentialRejectionStatus}, #27237).
+ * a configuration fault the materializer degrades the instance for (see
+ * {@link credentialRejectionStatus}, #27237). A handshake that carried the
+ * instance's credential answers `credentialVerified`.
  */
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
@@ -248,14 +249,15 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
       // Thrown as `ConnectorCredentialRejectedError` (ruling on #27237,
       // comment 6470087293): the materializer degrades the instance naming the
       // refusal and marks a stored credential `rejected`, instead of failing
-      // boot — and, like the plain throw before it, does not retry it on a
-      // timer. The next attempt is the next change of the credential.
+      // boot. Whether it retries is the materializer's call, by where the
+      // credential came from: a stored or declared one waits for its next
+      // change, an environment or vault one retries with backoff.
       const status = await credentialRejectionStatus(err);
       if (status !== undefined) {
         throw new ConnectorCredentialRejectedError(
           `connector-mcp provider: connector '${ctx.name}' was refused by its MCP server (HTTP ${status}): the ` +
             `credential it sent (the instance auth, or providerConfig.transport.headers) is missing, wrong or not ` +
-            `authorized. This is a configuration fault and is not retried — fix the credential. ` +
+            `authorized. This is a configuration fault — fix the credential. ` +
             `${(err as Error).message}`,
           status,
           { cause: err },
@@ -268,6 +270,21 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         { cause: err },
       );
     }
-    return { def: bundle.def, handlers: bundle.handlers, close: bundle.close };
+    // [#27237] The handshake carried the instance's credential only over
+    // http, and only as a header (an api-key `paramName` is not sent): then
+    // the server's answer proved it.
+    const credentialVerified = transport.kind === 'http' && sendsInstanceAuth(ctx.auth);
+    return {
+      def: bundle.def,
+      handlers: bundle.handlers,
+      close: bundle.close,
+      ...(credentialVerified ? { credentialVerified } : {}),
+    };
   };
+}
+
+/** Whether {@link applyAuthToHeaders} puts the instance's credential on the http transport. */
+function sendsInstanceAuth(auth: ResolvedConnectorAuth | undefined): boolean {
+  if (!auth || auth.type === 'none') return false;
+  return !(auth.type === 'api-key' && auth.paramName);
 }

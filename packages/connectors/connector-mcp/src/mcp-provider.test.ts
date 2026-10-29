@@ -162,7 +162,7 @@ describe('mcp provider — a rejected credential is a configuration fault', () =
         expect((err as Error).message).toContain(
             `connector-mcp provider: connector 'github' was refused by its MCP server (HTTP ${status})`,
         );
-        expect((err as Error).message).toContain('is not retried');
+        expect((err as Error).message).toContain('This is a configuration fault — fix the credential.');
     });
 
     it('HTTP 401 on tools/list throws the marker too, and closes the client', async () => {

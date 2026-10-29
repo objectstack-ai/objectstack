@@ -157,7 +157,7 @@ describe('credential rejection — real Streamable-HTTP server', () => {
             expect((err as Error).message).toContain(
                 `connector-mcp provider: connector 'vendor' was refused by its MCP server (HTTP ${status})`,
             );
-            expect((err as Error).message).toContain('is not retried');
+            expect((err as Error).message).toContain('This is a configuration fault — fix the credential.');
             expect(server.requests).toEqual(['POST']);
         },
     );
