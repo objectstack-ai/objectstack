@@ -1,10 +1,10 @@
 # @object-ui/i18n
 
-Internationalization for Object UI — built-in locales, RTL support, and date/currency formatting.
+Internationalization for Object UI — 10 built-in locales, RTL support, and date/currency formatting.
 
 ## Features
 
-- 🌍 **Built-in Locales** - English, Chinese, Japanese, Korean, German, French, Spanish, Portuguese, Russian, Arabic
+- 🌍 **10 Built-in Locales** - English, Chinese, Japanese, Korean, German, French, Spanish, Portuguese, Russian, Arabic
 - 🔄 **RTL Support** - Automatic right-to-left layout for Arabic and other RTL languages
 - 📅 **Date Formatting** - Locale-aware date, datetime, and relative time formatting
 - 💰 **Currency & Number Formatting** - Locale-aware currency and number formatting
