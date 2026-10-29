@@ -584,7 +584,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'field',
     path: ROOT_PATH,
     key: 'relatedList',
-    why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'primary'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never promotes the list to its own tab (`'primary'`)",
+    why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'primary'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never places the list in the record's body (`'primary'`)",
   },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no

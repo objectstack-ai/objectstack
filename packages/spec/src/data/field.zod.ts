@@ -1734,17 +1734,20 @@ export const FieldSchema = lazySchema(() => {
    * Tri-state (ADR-0085 semantic-role style — a statement about the
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
-   *   - `true` / absent  → shown as a supporting list: a side card beside the
-   *                       record (under the tabbed page, the shared "Related"
-   *                       tab). There is no count-based auto-split.
+   *   - `true` / absent  → shown as a supporting list: a side card in the
+   *                       record's related column (under the tabbed page, the
+   *                       shared "Related" tab). There is no count-based
+   *                       auto-split.
    *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): drawn in
-   *                       the record's body — the details column, after the
-   *                       field sections — as a full-width table, not as a side
-   *                       card (under the tabbed page, its own tab). A field
-   *                       group's `relatedList` can place it among the field
-   *                       sections instead. `'primary'` no longer ORDERS lists:
-   *                       the parent's `ObjectSchema.relatedLists` does, among
-   *                       the body tables and among the side cards alike.
+   *                       the record's body — the details column, after its
+   *                       first field section — as a full-width table, not as
+   *                       a side card (under the tabbed page, inside the
+   *                       Details tab: a primary list gets no tab of its
+   *                       own). A field group's `relatedList` can place it
+   *                       among the field sections instead. `'primary'` no
+   *                       longer ORDERS lists: the parent's
+   *                       `ObjectSchema.relatedLists` does, among the body
+   *                       tables and among the side cards alike.
    *
    * Absent on a `master_detail` field that sets `inlineEdit`, the list is
    * `'primary'` by default: line items edited inside the parent's form are part
@@ -1762,7 +1765,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card beside the record (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after the field sections) as a full-width table (its own tab on the tabbed page). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card in the record\'s related column (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after its first field section) as a full-width table (inside the Details tab on the tabbed page, with no tab of its own). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
