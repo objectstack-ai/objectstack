@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>记录页 v4 · 子表放大态 · 头部压成一行，表格占满（不做 modal）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#ffffff}
+:root{--bg:#ffffff;--fg:#0f172a;--muted:#f1f5f9;--muted-fg:#64748b;--border:#e2e8f0;--sidebar:#fafafa;--primary-soft:#eef2ff;--primary-fg:#ffffff;--amber:#b45309;--amber-soft:#fef3c7;--green:#15803d;--green-soft:#dcfce7;--red:#b91c1c;--red-soft:#fee2e2;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+a{color:var(--primary);text-decoration:none}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:500}
+.btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:12.5px;font-weight:500;color:var(--fg)}
+.iconbtn{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:5px;background:var(--muted);color:var(--fg);font-size:11.5px;white-space:nowrap}
+.chip.soft{background:var(--primary-soft);color:var(--primary)}
+.chip.ok{background:var(--green-soft);color:var(--green)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.chip.bad{background:var(--red-soft);color:var(--red)}
+.k{font-family:var(--mono);font-size:11px;color:var(--muted-fg)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;font-size:13px;color:var(--fg)}
+.nav.on{background:var(--primary-soft);color:var(--primary);font-weight:500}
+.hl{display:flex;flex-direction:column;gap:3px;min-width:0}
+.hl .l{font-size:11px;color:var(--muted-fg)}
+.hl .v{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sect{display:flex;align-items:center;justify-content:space-between;height:34px;margin-top:6px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--border)}
+.sect .k{font-weight:400}
+.sect .cv{color:var(--muted-fg);font-size:11px;margin-right:8px}
+.grid{display:grid;gap:10px 16px;padding:10px 0 4px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}
+.fld{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fld .l{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-fg)}
+.fld .v{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage{display:flex;gap:4px;align-items:center}
+.stage span{flex:1;height:6px;border-radius:3px;background:var(--muted)}
+.stage span.done{background:var(--green)}
+.stage span.cur{background:var(--primary)}
+.col{display:flex;flex-direction:column;min-width:0}
+.coltitle{display:flex;align-items:center;justify-content:space-between;height:40px;font-size:13px;font-weight:600}
+.tl{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--border);font-size:12.5px}
+.tl .ic{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:12px;background:var(--muted);color:var(--muted-fg);flex:none;font-size:11px}
+.tl .m{font-size:11.5px;color:var(--muted-fg);margin-top:2px}
+.tl.sys{padding:6px 0;color:var(--muted-fg)}
+.tl.sys .ic{width:20px;height:20px;margin-left:2px;margin-right:2px;background:transparent}
+.rel{border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
+.rel .h{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;font-size:12.5px;font-weight:600}
+.rel .h .iconbtn{margin-left:auto;width:24px;height:24px}
+.rel .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:32px;padding:0 12px;border-top:1px solid var(--border);font-size:12.5px}
+.rel .r a{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rel .more{display:flex;align-items:center;height:30px;padding:0 12px;border-top:1px solid var(--border);font-size:12px}
+.rel.dash{border-style:dashed}
+.rel.dash .h{color:var(--muted-fg);font-weight:500}
+.tag{position:absolute;top:-9px;left:10px;font:10px/16px var(--mono);padding:0 5px;border-radius:4px;background:var(--fg);color:var(--bg)}
+
+.pnl{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;position:relative}
+.pnl .h{display:flex;align-items:center;gap:6px;height:34px;padding:0 8px 0 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+.pnl .h .grip{display:none;color:var(--muted-fg);font-size:12px;cursor:grab;padding:0 2px}
+.pnl.hover .h .grip{display:inline-flex}
+.pnl .h .act{display:none;gap:2px;margin-left:auto}
+.pnl.hover .h .act{display:inline-flex}
+.pnl .h .chev{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-fg);font-size:10px;margin-left:-2px}
+.pnl .h .cnt{margin-left:0}
+.pnl .h .act{margin-left:auto}
+.pnl.hover{border-color:#c7d2fe;box-shadow:0 0 0 2px var(--primary-soft)}
+.pnl .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:32px;padding:0 10px;border-top:1px solid var(--border);font-size:12.5px}
+.pnl .r a{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pnl.empty .h{color:var(--muted-fg);font-weight:500;cursor:default;height:30px}
+.foot{display:flex;align-items:center;gap:10px;height:30px;font-size:11.5px;color:var(--muted-fg)}
+.foot a{color:var(--primary)}
+.seg{display:inline-flex;width:30px;height:30px;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:8px;color:var(--muted-fg);font-size:14px}
+.seg.on{background:var(--primary-soft);color:var(--primary);border-color:#c7d2fe}
+.cursor{position:absolute;font-size:16px;line-height:1;pointer-events:none}
+.ann{position:absolute;font:10.5px/14px var(--mono);padding:2px 6px;border-radius:4px;background:#fde68a;color:#78350f;white-space:nowrap}
+</style>
+</helmet>
+<div style="width:100%;min-height:900px;display:grid;grid-template-rows:48px 1fr;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.45;--primary:{{accent}}">
+  <header style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:8px"><button type="button" class="iconbtn" aria-label="切换侧边栏">☰</button><span style="display:inline-flex;width:26px;height:26px;align-items:center;justify-content:center;border-radius:7px;background:var(--primary);color:#fff">◆</span><span style="color:var(--muted-fg)">/</span><button type="button" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px 0 6px;border-radius:8px;border:1px solid var(--border)"><span style="display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;border-radius:5px;background:#f97316;color:#fff;font-size:11px;font-weight:700">H</span><span style="font-weight:600">HotCRM</span></button><span class="chip" style="font-size:10px">预览版</span></div>
+    <button type="button" style="display:inline-flex;align-items:center;gap:8px;width:300px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:13px">🔍<span style="flex:1;text-align:left">搜索…</span><kbd class="k" style="padding:1px 5px;border:1px solid var(--border);border-radius:4px">⌘K</kbd></button>
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><button type="button" class="iconbtn" aria-label="通知">🔔</button><button type="button" class="iconbtn" aria-label="帮助">?</button><button type="button" aria-label="账户" style="display:inline-flex;width:28px;height:28px;margin-left:6px;align-items:center;justify-content:center;border-radius:14px;background:var(--primary);color:#fff;font-size:11px;font-weight:600">DA</button></div>
+  </header>
+
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:0">
+    <aside style="border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px">
+      <div class="nav">首页</div><div class="nav">销售主页</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">销售</div>
+      <div class="nav on">线索</div><div class="nav">客户</div><div class="nav">联系人</div><div class="nav">商机</div><div class="nav">报价</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">我的工作</div>
+      <div class="nav">我的任务</div><div class="nav">我的商机</div>
+    </aside>
+    <main style="min-width:0;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:10px;height:44px;padding:0 24px;border-bottom:1px solid var(--border);position:relative"><a href="#" style="color:var(--muted-fg);font-size:12px">‹ 返回</a><span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:12px;background:var(--primary-soft);color:var(--primary);font-size:10px;font-weight:600">MC</span><span style="font-weight:600">Mira Costa</span><span class="k">›</span><span style="font-weight:600">任务</span><span class="chip">2</span><span style="margin-left:auto;display:inline-flex;gap:6px;align-items:center"><button type="button" class="btn-outline">新建任务</button><button type="button" class="btn-outline">导出</button><button type="button" class="iconbtn" aria-label="更多">⋯</button><button type="button" class="iconbtn" aria-label="关闭放大 (Esc)">✕</button></span><span class="ann" style="right:24px;top:-8px">放大态：头部压成一行（‹ 返回 · 记录 · 子表 · 计数），要点条与阶段路径收起；?related=crm_task.lead_id，Esc / ‹ 回三栏</span></div>
+      <div style="padding:12px 24px 24px;display:flex;flex-direction:column;min-height:0;flex:1">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><button type="button" style="display:inline-flex;align-items:center;gap:8px;width:260px;height:30px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:12.5px">🔍 筛选任务…</button><span class="chip">全部 2</span><span class="chip">我的</span><span class="chip">逾期</span><span class="k" style="margin-left:auto">2 条 · 第 1 / 1 页</span></div>
+        <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;flex:1">
+          <div style="display:grid;grid-template-columns:28px 2fr 1fr 1fr 1fr 1fr 1fr 1fr;height:34px;align-items:center;padding:0 12px;background:var(--sidebar);font-size:11px;font-weight:600;color:var(--muted-fg);border-bottom:1px solid var(--border)"><span>☐</span><span>主题</span><span>状态</span><span>优先级</span><span>截止</span><span>负责人</span><span>关联</span><span>更新于</span></div>
+          <div style="display:grid;grid-template-columns:28px 2fr 1fr 1fr 1fr 1fr 1fr 1fr;height:40px;align-items:center;padding:0 12px;border-bottom:1px solid var(--border);font-size:12.5px"><span>☐</span><a href="#">跟进报价</a><span><span class="chip warn">进行中</span></span><span>高</span><span>明天</span><span style="color:var(--primary)">Dev Admin</span><span>线索 · Mira Costa</span><span class="k">今天 10:20</span></div>
+          <div style="display:grid;grid-template-columns:28px 2fr 1fr 1fr 1fr 1fr 1fr 1fr;height:40px;align-items:center;padding:0 12px;border-bottom:1px solid var(--border);font-size:12.5px"><span>☐</span><a href="#">发送案例资料</a><span><span class="chip">未开始</span></span><span>普通</span><span>10月30日</span><span style="color:var(--primary)">Dev Admin</span><span>线索 · Mira Costa</span><span class="k">昨天</span></div>
+          <div style="padding:14px 12px;color:var(--muted-fg);font-size:12px">全列、分页、排序、行内编辑（FK 允许时）——与子对象列表页同一张表；抽屉里同样占满抽屉主体。</div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4f46e5","options":["#4f46e5","#2563eb","#0f766e","#0f172a"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#4f46e5' };
+  }
+}
+</script>
+</body>
+</html>
