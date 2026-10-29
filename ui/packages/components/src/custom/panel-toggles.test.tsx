@@ -7,9 +7,10 @@
  */
 
 /**
- * objectstack#27052 — `PanelToggles`: a named group of icon toggles, each
- * announcing whether its panel is shown (`aria-pressed`), tinted when it is,
- * and naming its shortcut in the tooltip.
+ * objectstack#27052 / objectstack#27241 — `PanelToggles`: ONE named segmented
+ * control, each segment an icon and its label, announcing whether its panel
+ * is shown (`aria-pressed`), filled with the accent tint when it is, and
+ * naming its shortcut in the tooltip.
  */
 
 import * as React from 'react';
@@ -53,8 +54,21 @@ describe('PanelToggles (objectstack#27052)', () => {
     expect(timeline.getAttribute('aria-pressed')).toBe('true');
     expect(related.getAttribute('aria-pressed')).toBe('false');
     expect(timeline.getAttribute('aria-keyshortcuts')).toBe('Meta+Shift+.');
-    // The pressed state is tinted.
-    expect(timeline.className).toContain('aria-pressed:text-primary');
+    // The pressed state is the accent fill with foreground text; an off
+    // segment is muted text (objectstack#27241).
+    expect(timeline.className).toContain('aria-pressed:bg-accent');
+    expect(timeline.className).toContain('aria-pressed:text-accent-foreground');
+    expect(related.className).toContain('text-muted-foreground');
+  });
+
+  it('each segment draws its icon and its label as visible text (objectstack#27241)', () => {
+    render(<Host />);
+    const timeline = screen.getByRole('button', { name: 'Timeline' });
+    expect(timeline.textContent).toBe('Timeline');
+    expect(timeline.querySelector('[data-testid="icon"]')).not.toBeNull();
+    // One control: both segments in the one group.
+    const group = screen.getByRole('group', { name: 'Panels' });
+    expect(group.querySelectorAll('[data-panel-toggle]')).toHaveLength(2);
   });
 
   it('a click flips its own panel and no other', () => {

@@ -315,6 +315,18 @@ export interface EntryChangeDetail {
     labels: ReadonlyMap<string, string>;
   } | null;
   /**
+   * Node-level diff of a flow's `nodes` (objectstack#27356): each node is
+   * matched by its `id`, named by its `label` when it has one, and a changed
+   * node lists the properties that differ (`config` one level down, as
+   * `config.KEY`). Present only for a flow whose two bodies key every node by
+   * a string `id`; otherwise `nodes` stays a top-level key row.
+   */
+  nodes: {
+    added: FlowNodeRow[];
+    changed: Array<FlowNodeRow & { keys: string[] }>;
+    removed: FlowNodeRow[];
+  } | null;
+  /**
    * Top-level keys (other than `fields`) whose values differ, split the way the
    * `fields` diff is (objectui#11807): `added` has no published value, `removed`
    * has no draft value, `changed` has both. An absent key and a `null` one read
@@ -347,11 +359,89 @@ function valueEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** True when the detail lists nothing: no field row, no key row and no generated row. */
+/** One flow node in the drill-in: its `id`, and its `label` when it declares one. */
+export interface FlowNodeRow {
+  id: string;
+  label?: string;
+}
+
+/** True when the detail lists nothing: no field row, no node row, no key row and no generated row. */
 function isEmptyChangeDetail(detail: EntryChangeDetail): boolean {
-  const { fields, keys, generated } = detail;
+  const { fields, nodes, keys, generated } = detail;
   const fieldRows = fields ? fields.added.length + fields.changed.length + fields.removed.length : 0;
-  return fieldRows + keys.added.length + keys.changed.length + keys.removed.length + generated.length === 0;
+  const nodeRows = nodes ? nodes.added.length + nodes.changed.length + nodes.removed.length : 0;
+  return fieldRows + nodeRows + keys.added.length + keys.changed.length + keys.removed.length + generated.length === 0;
+}
+
+function isPlainBody(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A flow's `nodes` by `id`, or `null` when the value is not a list of nodes
+ * each keyed by a string `id` (the drill-in then compares `nodes` whole). An
+ * absent list is an empty one: a new flow adds every node.
+ */
+function flowNodesById(value: unknown): Map<string, Record<string, unknown>> | null {
+  if (value == null) return new Map();
+  if (!Array.isArray(value)) return null;
+  const out = new Map<string, Record<string, unknown>>();
+  for (const node of value) {
+    if (!isPlainBody(node) || typeof node.id !== 'string' || node.id === '' || out.has(node.id)) return null;
+    out.set(node.id, node);
+  }
+  return out;
+}
+
+function flowNodeRow(node: Record<string, unknown>): FlowNodeRow {
+  const label = typeof node.label === 'string' ? node.label.trim() : '';
+  return label === '' ? { id: node.id as string } : { id: node.id as string, label };
+}
+
+/**
+ * The properties that differ between two versions of one node: its top-level
+ * keys, with `config` read one level down (`config.fields`), since nearly
+ * every edit in the flow inspector lands there.
+ */
+function changedNodeKeys(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const k of [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()) {
+    if (valueEqual(before[k], after[k])) continue;
+    const b = before[k];
+    const a = after[k];
+    if (k === 'config' && (b == null || isPlainBody(b)) && (a == null || isPlainBody(a))) {
+      const bc = (b ?? {}) as Record<string, unknown>;
+      const ac = (a ?? {}) as Record<string, unknown>;
+      for (const ck of [...new Set([...Object.keys(bc), ...Object.keys(ac)])].sort()) {
+        if (!valueEqual(bc[ck], ac[ck])) out.push(`config.${ck}`);
+      }
+      continue;
+    }
+    out.push(k);
+  }
+  return out;
+}
+
+/**
+ * objectstack#27356 — the node rows of a flow's publish summary, or `null`
+ * when either side's `nodes` is not a list keyed by `id`. Nodes sort by id,
+ * as field rows sort by name.
+ */
+function diffFlowNodes(before: unknown, after: unknown): EntryChangeDetail['nodes'] {
+  const pub = flowNodesById(before);
+  const cur = flowNodesById(after);
+  if (!pub || !cur) return null;
+  const byId = (x: FlowNodeRow, y: FlowNodeRow) => x.id.localeCompare(y.id);
+  const added: FlowNodeRow[] = [];
+  const changed: Array<FlowNodeRow & { keys: string[] }> = [];
+  const removed: FlowNodeRow[] = [];
+  for (const [id, node] of cur) {
+    const was = pub.get(id);
+    if (!was) added.push(flowNodeRow(node));
+    else if (!valueEqual(was, node)) changed.push({ ...flowNodeRow(node), keys: changedNodeKeys(was, node) });
+  }
+  for (const [id, node] of pub) if (!cur.has(id)) removed.push(flowNodeRow(node));
+  return { added: added.sort(byId), changed: changed.sort(byId), removed: removed.sort(byId) };
 }
 
 /**
@@ -460,6 +550,7 @@ function fieldLabelOf(def: Record<string, unknown> | undefined): string | undefi
 export function computeChangeDetail(
   published: Record<string, unknown> | null,
   draft: Record<string, unknown> | null,
+  type?: string,
 ): EntryChangeDetail {
   const pub = withoutProtectionEnvelope(published ?? {});
   const cur = withoutProtectionEnvelope(draft ?? {});
@@ -506,6 +597,13 @@ export function computeChangeDetail(
   const isNew = published === null;
   const names = new Set([...Object.keys(pub), ...Object.keys(cur)]);
   names.delete('fields');
+  // objectstack#27356 — a flow names the nodes that changed, not "~ nodes".
+  // A reorder alone changes no node, so it keeps the key row.
+  let nodes: EntryChangeDetail['nodes'] = null;
+  if (type === 'flow') {
+    nodes = diffFlowNodes(pub.nodes, cur.nodes);
+    if (nodes && nodes.added.length + nodes.changed.length + nodes.removed.length > 0) names.delete('nodes');
+  }
   const keys: EntryChangeDetail['keys'] = { added: [], changed: [], removed: [] };
   const generatedKeys: EntryChangeDetail['generated'] = [];
   for (const k of [...names].sort()) {
@@ -521,7 +619,7 @@ export function computeChangeDetail(
     }
     keys[kind].push(k);
   }
-  return { fields, keys, generated: [...generatedFields, ...generatedKeys], isNew };
+  return { fields, nodes, keys, generated: [...generatedFields, ...generatedKeys], isNew };
 }
 
 /**
@@ -649,16 +747,18 @@ function FieldRow({
   name,
   label,
   children,
+  testId = 'draft-field-row',
 }: {
   kind: keyof typeof FIELD_ROW_MARK;
   name: string;
   label: string | undefined;
   children?: ReactNode;
+  testId?: string;
 }) {
   const lead = label !== undefined && label !== name ? label : undefined;
   return (
     <p
-      data-testid="draft-field-row"
+      data-testid={testId}
       className={`${lead === undefined ? 'font-mono ' : ''}text-xs ${FIELD_ROW_TONE[kind]}`}
     >
       {FIELD_ROW_MARK[kind]}{' '}
@@ -758,7 +858,7 @@ function EntryDetail({
         ]);
         if (cancelled) return;
         const draft = draftRead?.body ?? null;
-        const computed = computeChangeDetail(published, draft);
+        const computed = computeChangeDetail(published, draft, entry.type);
         setAgents(draftAgentSources(draftRead?.changes));
         setDetail(computed);
         // Only an object's added fields can be backfilled (objectui#12929).
@@ -812,7 +912,7 @@ function EntryDetail({
     );
   }
 
-  const { fields, keys, generated, isNew } = detail;
+  const { fields, nodes, keys, generated, isNew } = detail;
   const hasKeyRows = keys.added.length > 0 || keys.changed.length > 0 || keys.removed.length > 0;
   // objectstack#27176 — which AI tools drafted part of this item, one line each.
   const agentLines = agents.map((source) => (
@@ -886,6 +986,18 @@ function EntryDetail({
       ))}
       {fields?.removed.map((name) => (
         <FieldRow key={`-${name}`} kind="removed" name={name} label={fields.labels.get(name)} />
+      ))}
+      {/* objectstack#27356 — a flow's nodes, each by its label, in the field rows' shape. */}
+      {nodes?.added.map((n) => (
+        <FieldRow key={`n+${n.id}`} kind="added" name={n.id} label={n.label} testId="draft-node-row" />
+      ))}
+      {nodes?.changed.map((n) => (
+        <FieldRow key={`n~${n.id}`} kind="changed" name={n.id} label={n.label} testId="draft-node-row">
+          {n.keys.length > 0 && <span className="text-muted-foreground"> · {n.keys.join(', ')}</span>}
+        </FieldRow>
+      ))}
+      {nodes?.removed.map((n) => (
+        <FieldRow key={`n-${n.id}`} kind="removed" name={n.id} label={n.label} testId="draft-node-row" />
       ))}
       {hasKeyRows && (
         <p className="text-xs text-muted-foreground">

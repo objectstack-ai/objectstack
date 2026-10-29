@@ -337,18 +337,22 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       aggregations: [{ function: 'count', alias: 'all' }, { function: 'count', alias: 'n', filter: { owner: { region: 'NA' } } }],
     } as EngineAggregateOptions));
     expect(envelopeOf(perAggregation)).toEqual(INVALID_FILTER);
-    expect(perAggregation!.message).toContain("the nested-relation form, which the engine serves in 'where' and not in an aggregation's 'filter'");
+    // [#27337] The verdict says where the form is served; the reasoning after
+    // "NOT applied" names the position that does not serve it.
+    expect(perAggregation!.message).toContain("the nested-relation form, which the engine serves in 'where' only.");
+    expect(perAggregation!.message).toContain("The engine evaluates an aggregation's 'filter' itself");
     expect(perAggregation!.message).toContain('{ "owner": { "$in": [ID, …] } }');
     const multi = await refusalOf(engine.aggregate(OBJECT, {
       aggregations: [{ function: 'count', alias: 'all' }, { function: 'count', alias: 'n', filter: { owners: { region: 'NA' } } }],
     } as EngineAggregateOptions));
-    expect(multi!.message).toContain("Put the condition in 'where' instead: here the stored list of ids is compared as one value");
+    expect(multi!.message).toContain("Move the condition to 'where': here the stored list of ids is compared as one value");
     expect(multi!.message).not.toContain('$contains');
     const having = await refusalOf(engine.aggregate(OBJECT, {
       groupBy: ['owner'], aggregations: [{ function: 'count', alias: 'n' }], having: { owner: { region: 'NA' } },
     } as EngineAggregateOptions));
     expect(envelopeOf(having)).toEqual(INVALID_FILTER);
-    expect(having!.message).toContain("which the engine serves in 'where' and not in 'having'");
+    expect(having!.message).toContain("which the engine serves in 'where' only.");
+    expect(having!.message).toContain("The engine evaluates 'having' itself");
     expect(rec.reads).toHaveLength(0);
   });
 

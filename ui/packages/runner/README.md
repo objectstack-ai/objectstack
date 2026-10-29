@@ -88,7 +88,7 @@ In-app navigation carries the query string across, so `?api=…` stays in the ad
 bar and the URL you copy or reload reaches the same backend.
 
 Full details — route resolution order and error handling — are in the
-[Metadata Loading](https://www.objectui.org/docs/utilities/runner#metadata-loading)
+[Metadata Loading](https://objectstack.ai/docs/frontend)
 section of the docs.
 
 ## Configuration
@@ -168,11 +168,11 @@ that do configure it are:
 
 ## Documentation
 
-For detailed documentation, visit the [Object UI Documentation](https://www.objectui.org/docs/utilities/runner).
+For detailed documentation, visit the [Object UI Documentation](https://objectstack.ai/docs/frontend).
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/utilities/runner)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
 - 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)

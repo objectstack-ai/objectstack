@@ -85,9 +85,9 @@ const BOUND = Object.keys(shipped.components)
 
 /* ── What the binding supplies, read off the binding doc ───────────────────── */
 
-const BINDING_DOC = 'content/docs/guide/data-source.md';
+const BINDING_DOC = '../content/docs/ui/pages.mdx';
 
-const TABLE_HEADING = '### Which blocks consume it, and which keys each one honours';
+const TABLE_HEADING = '#### Which blocks consume it, and which keys each one honours';
 
 /**
  * The doc's "which keys each one honours" table, one row per block:

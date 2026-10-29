@@ -546,25 +546,25 @@ Sort field and direction pair
 | **objectName** | `string` | optional | Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead |
 | **recordId** | `string \| number` | optional | Record to load (edit/view modes) |
 | **mode** | `Enum<'create' \| 'edit' \| 'view'>` | optional | Form mode |
-| **formType** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional | Form presentation |
+| **formType** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'drawer' \| 'modal'>` | optional | The form's layout — 'simple', 'tabbed' or 'wizard' — or the container the block opens it in — 'drawer' or 'modal', which draw the form stacked ('contentLayout: tabbed' puts a modal's sections on tabs) |
 | **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | **columns** | `number` | optional | Number of field columns (multi-column forms), honoured under either `layout` |
 | **fields** | `string[]` | optional | Field names to draw, in order — bare names selecting from the object's fields and from `customFields`. A `{ name }` or `{ field }` object entry is refused: a per-form label or required override goes on a `sections[].fields` entry |
 | **customFields** | `{ name: string; label?: string; description?: string; type?: string; … }[]` | optional | Field definitions merged over the set generated from the object's metadata — each a closed inline field `{ name, label?, type?, required?, … }`: a member naming a field the object declares replaces that field's whole definition, any other is added after the generated fields. With no object behind the form, the members are its only fields |
-| **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional | Form sections — wizard steps, tab panes or stacked groups: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }`, or `{ group, columns?, pane? }` to inherit an object field group. Each `fields` entry is a field name, the form view's `{ field, … }` entry, or an inline form field `{ name, type, … }` |
+| **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional | Form sections — wizard steps, tab panes or stacked groups: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, fields }`, or `{ group, columns? }` to inherit an object field group. Each `fields` entry is a field name, the form view's `{ field, … }` entry, or an inline form field `{ name, type, … }` |
 | **title** | `string \| Record<string, string>` | optional | Form title |
 | **description** | `string \| Record<string, string>` | optional | Form description (rendered by the drawer/modal presentations) |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed) |
 | **allowSkip** | `boolean` | optional | Allow skipping steps (wizard) |
 | **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard) |
-| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split direction (split) |
-| **splitSize** | `number` | optional | Split panel size in percent (split) |
-| **splitResizable** | `boolean` | optional | Allow resizing the split (split) |
-| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer) |
-| **drawerWidth** | `string \| number` | optional | Drawer width (drawer) |
-| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal) |
-| **modalCloseButton** | `boolean` | optional | Show the modal close button (modal) |
+| **splitDirection** | `never` | optional | [REMOVED] `object-form` property `splitDirection` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it set the pane orientation of a `formType: 'split'` form, and `split` left the block in the same release, so no form draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **splitSize** | `never` | optional | [REMOVED] `object-form` property `splitSize` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it sized the primary pane of a `formType: 'split'` form, and `split` left the block in the same release, so no form draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **splitResizable** | `never` | optional | [REMOVED] `object-form` property `splitResizable` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it made the panes resizable of a `formType: 'split'` form, and `split` left the block in the same release, so no form draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Edge the block's drawer container opens from (formType 'drawer') |
+| **drawerWidth** | `string \| number` | optional | Width of the block's drawer container (formType 'drawer') |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Size bucket of the block's modal container (formType 'modal') |
+| **modalCloseButton** | `boolean` | optional | Show the close button of the block's modal container (formType 'modal') |
 | **contentLayout** | `Enum<'simple' \| 'tabbed'>` | optional | How the modal presentation lays out its sections (modal) — 'simple' stacks them (the default); 'tabbed' puts each section on its own tab once more than one section has a field to show |
 | **confirmOnDiscard** | `boolean` | optional | Confirm before discarding edits (drawer/modal) |
 | **submitText** | `string \| Record<string, string>` | optional | Submit button label |
@@ -640,7 +640,7 @@ Sort field and direction pair
 | **collapsed** | `boolean` | optional | Start the section closed (implies `collapsible`) |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the whole section, heading and fields, is drawn only when TRUE |
 | **columns** | `integer` | optional | Field-grid columns for this section (1-4), a number |
-| **pane** | `Enum<'primary' \| 'secondary'>` | optional | The split form's panel this section renders in; omitted → the first section 'primary', the others 'secondary' |
+| **pane** | `never` | optional | [REMOVED] Section property `pane` (on `object-form` and `object-master-detail-form` `sections[]`) was removed in @objectstack/spec 18.3.0 (ADR-0050) — it placed a section in one pane of an `object-form` `formType: 'split'` form, and `split` left that block in the same release, so no form draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the object's `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`) |
 | **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … } \| { name: string; label?: string; description?: string; type?: string; … })[]` | optional | The section's fields, in order — each a field name, the form view's `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members |
 
@@ -1151,7 +1151,7 @@ Sort field and direction pair
 | **recordId** | `string \| number` | optional | Parent record to load (edit mode) |
 | **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
 | **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half |
-| **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional | Parent form sections — the same section shape `object-form` takes: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }` or `{ group, columns?, pane? }` |
+| **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional | Parent form sections — the same section shape `object-form` takes: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, fields }` or `{ group, columns? }` |
 | **fields** | `string[]` | optional | Parent field names to draw, in order — bare names, as on `object-form`; a `{ name }` or `{ field }` object entry is refused |
 | **details** | `{ childObject: string; relationshipField?: string; columns?: object[]; formFields?: string[]; … }[]` | optional | Detail collections — each a strict entry (`{ childObject, title?, addLabel?, columns?, relationshipField?, … }`) whose `columns` are the inline grid columns a relationship field's `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted |
 | **title** | `string \| Record<string, string>` | optional | Form title |
@@ -1173,7 +1173,7 @@ Sort field and direction pair
 | **collapsed** | `boolean` | optional | Start the section closed (implies `collapsible`) |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the whole section, heading and fields, is drawn only when TRUE |
 | **columns** | `integer` | optional | Field-grid columns for this section (1-4), a number |
-| **pane** | `Enum<'primary' \| 'secondary'>` | optional | The split form's panel this section renders in; omitted → the first section 'primary', the others 'secondary' |
+| **pane** | `never` | optional | [REMOVED] Section property `pane` (on `object-form` and `object-master-detail-form` `sections[]`) was removed in @objectstack/spec 18.3.0 (ADR-0050) — it placed a section in one pane of an `object-form` `formType: 'split'` form, and `split` left that block in the same release, so no form draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the object's `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`) |
 | **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … } \| { name: string; label?: string; description?: string; type?: string; … })[]` | optional | The section's fields, in order — each a field name, the form view's `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members |
 
@@ -1221,6 +1221,7 @@ Sort field and direction pair
 | **trend** | `{ value: number; label?: string \| Record<string, string>; direction?: Enum<'up' \| 'down' \| 'neutral'> }` | optional | Static trend badge `{ value, label?, direction? }` — `value` painted as a percentage, `direction` up / down / neutral. A `compareTo`-derived trend replaces it |
 | **drillDown** | `{ enabled?: boolean; title?: string; target?: Enum<'drawer' \| 'dialog' \| 'navigate'>; columns?: string[]; … }` | optional | Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric's own `filter` — or draws the report `report` defines; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row |
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'> }` | optional | Period-over-period comparison `{ kind }` — `previousPeriod` or `previousYear`, shifting the date macros in the tile's own `filter`. `dimension` is refused: this tile never reads a dataset time dimension |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) or neutral (no good/bad colour). Colours the trend badge, computed (`compareTo`) or static (`trend`); undeclared keeps rise green, fall red |
 
 ### Nested Shape: `ObjectMetricProps.aggregate`
 

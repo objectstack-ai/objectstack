@@ -36,6 +36,10 @@ import {
 } from '@object-ui/core';
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
+import { RelatedArrangementScopeContext } from '../ArrangedRelatedTab';
+import { CollapsedRelatedCard, RelatedDefaultChangedHint, RelatedFootLine } from '../RelatedCardStack';
+import { RelatedCardChromeContext } from '../relatedListCompact';
+import { relatedCardId } from '../synth/relatedArrangement';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
 import { RelatedListStackSlot } from '../RelatedListEmptyFold';
@@ -870,6 +874,64 @@ const NoParentRecord: React.FC<{
  * "declared but not reached" shape in miniature.
  */
 export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps> = elementDataSourceBlock((props) => {
+  const { schema } = props;
+  const { language } = useObjectTranslation();
+  // objectstack#27055 — inside the tabbed tier's 关联 tab the reader's
+  // arrangement applies (`ArrangedRelatedTab`): a collapsed list draws as its
+  // title + count and reads no rows; every other list carries its chrome; the
+  // tab's last list closes it with the changed-default hint and the foot line
+  // (the hidden cards, 「恢复默认顺序」).
+  const scope = React.useContext(RelatedArrangementScopeContext);
+  const arrangedId =
+    scope && typeof schema?.objectName === 'string' && typeof schema?.relationshipField === 'string'
+      ? relatedCardId(schema.objectName, schema.relationshipField)
+      : null;
+  const chrome = scope && arrangedId ? scope.chromeOf(arrangedId) : null;
+  if (scope && arrangedId && chrome) {
+    const lines = scope.lastId === arrangedId && (
+      <>
+        {scope.defaultChanged && <RelatedDefaultChangedHint onRestore={scope.restoreDefault} />}
+        <RelatedFootLine
+          hiddenCount={scope.hiddenCount}
+          onShowHidden={scope.showHidden}
+          rearranged={scope.rearranged}
+          onRestoreDefault={scope.restoreDefaultArrangement}
+        />
+      </>
+    );
+    if (scope.isCollapsed(arrangedId)) {
+      // `arrangedId` is set only when the schema names both keys.
+      const block = schema!;
+      const node = {
+        type: 'record:related_list',
+        properties: {
+          objectName: block.objectName,
+          relationshipField: block.relationshipField,
+          title: pickLocalized(block.title, language) || block.objectName,
+          ...(block.filter ? { filter: block.filter } : {}),
+        },
+      };
+      return (
+        <>
+          <CollapsedRelatedCard node={node} chrome={chrome} onExpand={() => scope.expand(arrangedId)} />
+          {lines}
+        </>
+      );
+    }
+    return (
+      <>
+        <RelatedCardChromeContext.Provider value={chrome}>
+          <RecordRelatedListBound {...props} />
+        </RelatedCardChromeContext.Provider>
+        {lines}
+      </>
+    );
+  }
+  return <RecordRelatedListBound {...props} />;
+});
+
+/** The block bound to its parent record and its child rows — see above. */
+const RecordRelatedListBound: React.FC<RecordRelatedListRendererProps> = (props) => {
   const { schema, className, ...rest } = props;
   const parentBinding = schema?.parentDataSource;
   // objectui#12920 — the parent-read panel's title reads the bundle.
@@ -887,6 +949,6 @@ export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps>
       <RecordRelatedListChildRows {...props} />
     </ParentRecordBinding>
   );
-});
+};
 
 export default RecordRelatedListRenderer;

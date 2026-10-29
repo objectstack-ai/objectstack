@@ -36,7 +36,8 @@ import {
   X,
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
-import { EmptySectionsFold } from './EmptySectionsFold';
+import { EmptySectionsFold, EmptySectionsLine } from './EmptySectionsFold';
+import { useDefaultRecordPage } from './defaultRecordPage';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';
@@ -324,6 +325,9 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // approval band below is live, per-viewer workflow state, not document
   // content, so it does not print.
   const isPrintPage = usePrintPage() !== null;
+  // objectstack#27055 — the synthesized default record page folds its
+  // entirely empty sections into one line (`EmptySectionsLine`).
+  const onDefaultRecordPage = useDefaultRecordPage();
   const isInlineEditing = inline?.editing ?? false;
   const editedValues = inline?.draft ?? EMPTY_DRAFT;
   const autoFocusField = inline?.autoFocusField ?? null;
@@ -2093,21 +2097,31 @@ export const DetailView: React.FC<DetailViewProps> = ({
           {/* Sections */}
           {schema.sections && schema.sections.length > 0 && (
             <div className="space-y-3 sm:space-y-4">
-              {foldEmptySections(schema.sections.map((section, index) => (
-                <SectionBoundary key={index} section={section} index={index}>
-                  <DetailSection
-                    section={section}
+              {(() => {
+                const renderSectionAt = (section: NonNullable<typeof schema.sections>[number], index: number) => (
+                  <SectionBoundary key={index} section={section} index={index}>
+                    <DetailSection
+                      section={section}
+                      data={{ ...data, ...editedValues }}
+                      objectSchema={objectSchema}
+                      objectName={schema.objectName}
+                      isEditing={isInlineEditing}
+                      onFieldChange={handleInlineFieldChange}
+                      onEnterInlineEdit={inlineEdit ? handleEnterInlineEditField : undefined}
+                      autoFocusField={autoFocusField}
+                      dataSource={dataSource}
+                    />
+                  </SectionBoundary>
+                );
+                return onDefaultRecordPage && !schema.sectionGroups?.length ? (
+                  <EmptySectionsLine
+                    sections={schema.sections ?? []}
                     data={{ ...data, ...editedValues }}
-                    objectSchema={objectSchema}
-                    objectName={schema.objectName}
                     isEditing={isInlineEditing}
-                    onFieldChange={handleInlineFieldChange}
-                    onEnterInlineEdit={inlineEdit ? handleEnterInlineEditField : undefined}
-                    autoFocusField={autoFocusField}
-                    dataSource={dataSource}
+                    renderSection={renderSectionAt}
                   />
-                </SectionBoundary>
-              )))}
+                ) : foldEmptySections(schema.sections!.map(renderSectionAt));
+              })()}
             </div>
           )}
 

@@ -34,6 +34,8 @@
  *    `everyone`.
  *  - `dismissAudienceBindingSuggestion` records the "no" — on a pending row —
  *    or REVOKES an acceptance, which re-derives `everyone` without the set.
+ *  - `reopenAudienceBindingSuggestion` takes a "no" back: a dismissed or
+ *    revoked row returns to `pending`, and grants nothing until accepted.
  *
  * ## The record is the DEPLOYMENT's, owned by the Default Organization
  *
@@ -956,6 +958,35 @@ async function recordRow(ql: any, organizationId: string, id: string): Promise<a
   return row;
 }
 
+/**
+ * The catalog entry of the set `row` suggests, or the 409 naming why nothing
+ * is suggested any more: the catalog does not serve the set, another package
+ * declares it now (ADR-0086 D4), or it no longer declares `isDefault: true`.
+ * Asked before a row is accepted, and before a dismissed row is re-opened.
+ */
+async function requireStillSuggested(ql: any, row: any, verb: 'accept' | 're-open'): Promise<any> {
+  const entry = await securityCatalogReaderOf(ql)?.resolve('permission', row.permission_set_name);
+  if (!entry) {
+    throw new SuggestionStateError(
+      `Permission set '${row.permission_set_name}' is not served by the security catalog — is package ` +
+        `'${row.package_id}' still installed and enabled?`,
+    );
+  }
+  const owner = declaredOwnerOf(entry);
+  if (owner !== row.package_id) {
+    throw new SuggestionStateError(
+      `Permission set '${row.permission_set_name}' is declared by '${owner ?? 'no package'}', not the suggesting ` +
+        `package '${row.package_id}' — refusing to ${verb} it (ADR-0086 D4).`,
+    );
+  }
+  if (entry.definition.isDefault !== true) {
+    throw new SuggestionStateError(
+      `Permission set '${row.permission_set_name}' no longer declares isDefault: true — nothing is suggested.`,
+    );
+  }
+  return entry;
+}
+
 /** List suggestions, reconciling first so a package installed a moment ago is
  *  already visible. Requires the deployment authority. Refused, naming the
  *  option, when the host declared the acceptance under a wall: there is no
@@ -1015,25 +1046,7 @@ export async function confirmAudienceBindingSuggestion(
     );
   }
 
-  const entry = await securityCatalogReaderOf(ql)?.resolve('permission', row.permission_set_name);
-  if (!entry) {
-    throw new SuggestionStateError(
-      `Permission set '${row.permission_set_name}' is not served by the security catalog — is package ` +
-        `'${row.package_id}' still installed and enabled?`,
-    );
-  }
-  const owner = declaredOwnerOf(entry);
-  if (owner !== row.package_id) {
-    throw new SuggestionStateError(
-      `Permission set '${row.permission_set_name}' is declared by '${owner ?? 'no package'}', not the suggesting ` +
-        `package '${row.package_id}' — refusing to accept it (ADR-0086 D4).`,
-    );
-  }
-  if (entry.definition.isDefault !== true) {
-    throw new SuggestionStateError(
-      `Permission set '${row.permission_set_name}' no longer declares isDefault: true — nothing is suggested.`,
-    );
-  }
+  const entry = await requireStillSuggested(ql, row, 'accept');
   // [ADR-0090 D7] The definition-side high-risk gate — the same predicate, and
   // the same declared-capability context, the derivation asks again on every
   // re-derive (`readAcceptedEveryoneSets`), so an accepted set cannot carry a
@@ -1107,6 +1120,59 @@ export async function dismissAudienceBindingSuggestion(
 
   deps.logger?.info?.(`[security] audience-binding suggestion ${revoke ? 'revoked' : 'dismissed'} (ADR-0090 D5)`, {
     id: row.id, package: row.package_id, set: row.permission_set_name, by: callerCtx?.userId,
+  });
+  return { suggestion: await recordRow(ql, organizationId, row.id) };
+}
+
+/**
+ * Re-open a dismissed suggestion — a declined one, or a revoked acceptance —
+ * so the deployment can decide it again (#27149). The row goes back to
+ * `pending` exactly as the sync re-opens a row it sends back for a decision:
+ * `deployment_decision` false, `resolved_by` / `resolved_at` cleared — so it
+ * reads, and is reconciled, as a suggestion never answered.
+ *
+ * ⛔ Re-opening is not an acceptance. A pending row is not an input of the
+ * derivation ({@link readAcceptedEveryoneSets} reads accepted rows only), so
+ * nothing is re-derived here: a revoked set stays out of the `everyone`
+ * definition until {@link confirmAudienceBindingSuggestion} accepts it again,
+ * ADR-0090 D7's high-risk gate included.
+ *
+ * Refuses, before anything is written: a caller without the deployment
+ * authority (403); a walled deployment whose host declares the acceptance, or
+ * one with no organization to own the record (409, naming the option); a row
+ * that is not `dismissed` (409, naming its status); a row whose set is no
+ * longer suggested by its package (409) — re-opened, the next sync would prune
+ * it as a pending row with no declaration and the decision on record would be
+ * lost.
+ */
+export async function reopenAudienceBindingSuggestion(
+  deps: SuggestionDeps,
+  callerContext: any,
+  id: string,
+): Promise<{ suggestion: any }> {
+  const { ql } = deps;
+  assertDeploymentAuthority(deps, callerContext, 're-opening an audience-binding suggestion');
+  const organizationId = await requireRecordOwner(ql, deploymentOf(deps));
+
+  const row = await recordRow(ql, organizationId, id);
+  if (row.status !== 'dismissed') {
+    throw new SuggestionStateError(
+      `Audience-binding suggestion '${id}' is ${row.status}, not dismissed — only a dismissed or revoked ` +
+        `suggestion can be re-opened.`,
+    );
+  }
+  await requireStillSuggested(ql, row, 're-open');
+
+  await ql.update(SUGGESTION_OBJECT, {
+    id: row.id,
+    status: 'pending',
+    deployment_decision: false,
+    resolved_by: null,
+    resolved_at: null,
+  }, { context: scopedSystemCtx(organizationId) });
+
+  deps.logger?.info?.('[security] audience-binding suggestion re-opened — pending, nothing granted (ADR-0090 D5)', {
+    id: row.id, package: row.package_id, set: row.permission_set_name, by: callerContext?.userId,
   });
   return { suggestion: await recordRow(ql, organizationId, row.id) };
 }

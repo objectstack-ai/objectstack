@@ -48,10 +48,11 @@
  * places is single-sourced) they are written separately (objectui#6186):
  *
  *   `thresholds` — zero read sites repo-wide. This paragraph is the CANONICAL
- *     statement of that closure claim. `ui/content/docs/plugins/plugin-dashboard.mdx`
- *     used to assert it a second time in its own words; two copies of one
- *     closure claim drift apart independently and neither knows when the other
- *     stopped being true, so the page now POINTS here rather than restating it.
+ *     statement of that closure claim. The plugin-dashboard SDK page (now
+ *     `content/docs/frontend/plugins/plugin-dashboard.mdx`) used to assert it a
+ *     second time in its own words; two copies of one closure claim drift apart
+ *     independently and neither knows when the other stopped being true, so the
+ *     page no longer restates it.
  *     Single-sourcing is what makes this copy load-bearing, so it is DERIVED
  *     rather than trusted:
  *     `ui/scripts/__tests__/unconsumed-widget-option-claim-6186.test.ts` re-scans

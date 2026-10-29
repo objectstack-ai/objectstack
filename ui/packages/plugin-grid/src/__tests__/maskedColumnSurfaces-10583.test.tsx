@@ -37,6 +37,20 @@ import '@testing-library/jest-dom';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 import { ObjectGrid } from '../ObjectGrid';
+import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
+import { installExplainDouble } from './explainDouble';
+
+// objectstack#27365 — an editable grid asks the record-grained `update`
+// verdict for the rows on screen even with no kebab Edit wired. Answer it from
+// the double (every row permitted), never the network.
+beforeEach(() => {
+  __clearRecordCrudVerdictCache();
+  installExplainDouble();
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 registerAllFields();
 

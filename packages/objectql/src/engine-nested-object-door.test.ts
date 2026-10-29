@@ -157,7 +157,10 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
       const err = await refusalOf(engine.find(OBJECT, { where: { [field]: { a: 1 } } as FilterCondition }));
       expect(envelopeOf(err), field).toEqual(ENVELOPE);
       expect(err!.message, field).toContain(`at where.${field},`);
-      expect(err!.message, field).toContain(`as the value of the declared ${type} field '${field}'`);
+      // [#27337] The verdict names the column by its type (the head names the
+      // field); the reasoning after "NOT applied" names both.
+      expect(err!.message, field).toContain(`as the value of a ${type} field —`);
+      expect(err!.message, field).toContain(`the declared ${type} field '${field}' is matched whole`);
       expect(err!.message, field).toContain('whole-value match');
       expect(err!.message, field).toContain(`{ "${field}": { "$null": false } }`);
       expect(err!.message, field).not.toContain('$contains');

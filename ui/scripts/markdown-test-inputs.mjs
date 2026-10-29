@@ -178,6 +178,9 @@ import { stripComments } from './js-comment-mask.mjs';
 
 export const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 
+/** The monorepo's docs tree, which holds the ObjectUI pages (objectstack#27145). */
+const MONOREPO_DOCS = path.resolve(REPO_ROOT, '..', 'content', 'docs');
+
 /**
  * Where `deriveCandidates()` looks for tests.
  *
@@ -212,10 +215,11 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage',
 export const ADJUDICATED = new Map([
   // objectui#11605. `bindingDocRows()` parses the binding doc's "which keys each
   // one honours" table to learn what the `dataSource` binding supplies on each
-  // bound block -- so an edit to that table is an edit to this pin's input.
+  // bound block -- so an edit to that table is an edit to this pin's input. The
+  // table moved to the platform's page reference with objectstack#27145.
   [
     'apps/console/src/__tests__/objectname-binding-required-11605.test.ts',
-    { reads: ['content/docs/guide/data-source.md'] },
+    { reads: ['../content/docs/ui/pages.mdx'] },
   ],
   // objectui#11403. The console's SDUI manifest pin lists the files the
   // generator writes into a temp directory; no markdown in this tree is read.
@@ -225,11 +229,6 @@ export const ADJUDICATED = new Map([
       reads: [],
       walker: 'not-markdown: walks GENERATED output in a temp directory; its `sdui-blocks.md` literal names a file the generator writes, not one in this tree',
     },
-  ],
-  // objectui#11165. Evaluates the guide's "customize only the header" fence, so an edit to that page is an edit to this test's input.
-  [
-    'examples/schema-catalog/test/slotted-pages-header-example-11165.test.ts',
-    { reads: ['content/docs/guide/slotted-pages.md'] },
   ],
   // ADR-0060. The product-neutral renderer ratchet reads its CEILING -- the
   // product words, the frozen directories and namespaces, and the most its live
@@ -263,19 +262,12 @@ export const ADJUDICATED = new Map([
   [
     'packages/cli/src/__tests__/registered-types-validate-ratchet-10859.test.ts',
     {
-      reads: ['content/docs/guide/quick-start.md'],
-    },
-  ],
-  [
-    'packages/components/src/__tests__/div-guidance-names-box.test.tsx',
-    {
-      reads: ['content/docs/components/basic/div.mdx', 'content/docs/components/basic/span.mdx'],
-      walker: 'not-markdown: reads a directory of JSON schema fixtures',
+      reads: ['../content/docs/frontend/quick-start.mdx'],
     },
   ],
   [
     'packages/components/src/__tests__/guide-layout-page-buttons-7926.test.tsx',
-    { reads: ['content/docs/guide/layout.md'] },
+    { reads: ['../content/docs/frontend/layout.mdx'] },
   ],
   // objectui#11436, which subsumes objectui#11423's layout-guide pin. Parses
   // every fence of every page under `content/docs`, in any language, and renders
@@ -290,8 +282,8 @@ export const ADJUDICATED = new Map([
   [
     'packages/components/src/__tests__/page-node-headings-drawn-11436.test.tsx',
     {
-      reads: ['content/docs/**', 'packages/**'],
-      walker: 'markdown-tree: walks `content/docs` and parses every fence of every `.md`/`.mdx` under it, and walks `packages` for every `README.md` and parses its fences; its walk of `examples` collects JSON and script sources, not markdown',
+      reads: ['../content/docs/frontend/**', 'packages/**'],
+      walker: 'markdown-tree: walks `../content/docs/frontend` and parses every fence of every `.md`/`.mdx` under it, and walks `packages` for every `README.md` and parses its fences; its walk of `examples` collects JSON and script sources, not markdown',
     },
   ],
   // The four-leg render pin for objectui#8021. Leg A is READ OFF
@@ -301,7 +293,7 @@ export const ADJUDICATED = new Map([
   [
     'packages/components/src/__tests__/guide-schema-rendering-data-context-8021.test.tsx',
     {
-      reads: ['content/docs/guide/schema-rendering.md', 'packages/react/README.md'],
+      reads: ['../content/docs/frontend/schema-rendering.mdx', 'packages/react/README.md'],
     },
   ],
   // objectui#9569. This one reads a CHANGELOG as a CONTROL, not as a spec: the
@@ -318,7 +310,7 @@ export const ADJUDICATED = new Map([
   [
     'packages/components/src/__tests__/page-body-single-node-8310.test.tsx',
     {
-      reads: ['content/docs/guide/quick-start.md'],
+      reads: ['../content/docs/frontend/quick-start.mdx'],
     },
   ],
   [
@@ -378,23 +370,23 @@ export const ADJUDICATED = new Map([
     'packages/layout/src/__tests__/app-shell-branding-title-surfaces.test.ts',
     {
       reads: [
-        'content/docs/guide/layout.md',
-        'content/docs/layout/app-shell.mdx',
+        '../content/docs/frontend/layout.mdx',
+        '../content/docs/frontend/app-shell.mdx',
         'packages/layout/README.md',
       ],
     },
   ],
   [
     'packages/layout/src/__tests__/app-shell-docs-nav-example.test.ts',
-    { reads: ['content/docs/layout/app-shell.mdx'] },
+    { reads: ['../content/docs/frontend/app-shell.mdx'] },
   ],
   [
     'packages/layout/src/__tests__/guide-layout-app-shell-doc.test.ts',
-    { reads: ['content/docs/guide/layout.md'] },
+    { reads: ['../content/docs/frontend/layout.mdx'] },
   ],
   [
     'packages/layout/src/__tests__/guide-layout-sidebar-nav-doc.test.ts',
-    { reads: ['content/docs/guide/layout.md'] },
+    { reads: ['../content/docs/frontend/layout.mdx'] },
   ],
   [
     'packages/layout/src/__tests__/readme-app-shell-example.test.ts',
@@ -418,7 +410,7 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/plugin-detail/src/__tests__/guideCrudAppRenders.test.tsx',
-    { reads: ['content/docs/guide/building-crud-app.md'] },
+    { reads: ['../content/docs/frontend/building-crud-app.mdx'] },
   ],
   // The `reads` below is a MEASURED subset of a DERIVED population, which is
   // why it is one document rather than a tree. Two of this test's three pins
@@ -439,11 +431,11 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/plugin-detail/src/renderers/__tests__/docsActivityMapTranscription-7876.test.ts',
-    { reads: ['content/docs/plugins/plugin-detail.mdx'] },
+    { reads: ['../content/docs/frontend/plugins/plugin-detail.mdx'] },
   ],
   [
     'packages/plugin-form/src/__tests__/guideCrudAppRenders.test.tsx',
-    { reads: ['content/docs/guide/building-crud-app.md'] },
+    { reads: ['../content/docs/frontend/building-crud-app.mdx'] },
   ],
   [
     'packages/plugin-gantt/src/readme-navigation-example.test.ts',
@@ -451,11 +443,7 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/plugin-grid/src/__tests__/guideCrudAppRenders.test.tsx',
-    { reads: ['content/docs/guide/building-crud-app.md'] },
-  ],
-  [
-    'packages/plugin-markdown/src/toc-anchor-parity.test.tsx',
-    { reads: ['content/docs/utilities/runner.mdx'] },
+    { reads: ['../content/docs/frontend/building-crud-app.mdx'] },
   ],
   // objectui#11586. This reads a CHANGELOG as a CONTROL, the same shape as the
   // components entry above. The test asserts that the published sheet lacks a
@@ -471,50 +459,17 @@ export const ADJUDICATED = new Map([
   [
     'packages/types/src/__tests__/action-callback-retired-7068.test.ts',
     {
-      reads: ['content/docs/**'],
-      walker: 'markdown-tree: walks `content/docs` and refuses the retired callback shape in every `.md`/`.mdx` under it',
+      reads: ['../content/docs/frontend/**'],
+      walker: 'markdown-tree: walks `../content/docs/frontend` and refuses the retired callback shape in every `.md`/`.mdx` under it',
     },
-  ],
-  [
-    'packages/types/src/__tests__/alert-dialog-read-dialect-7104.test.ts',
-    { reads: ['content/docs/components/overlay/alert-dialog.mdx'] },
-  ],
-  [
-    'packages/types/src/__tests__/button-group-doc-surface-6347.test.ts',
-    { reads: ['content/docs/components/basic/button-group.mdx'] },
-  ],
-  [
-    'packages/types/src/__tests__/calendar-doc-key-set-8830.test.ts',
-    { reads: ['content/docs/plugins/plugin-calendar.mdx'] },
   ],
   [
     'packages/types/src/__tests__/calendar-flat-color-allday-8466.test.ts',
     { reads: ['packages/plugin-calendar/README.md'] },
   ],
-  // objectui#11521. Parses the `chartType` row of the page's `ChartSchema`
-  // table and holds its quoted values equal to the node's declared set -- so an
-  // edit to that page IS an edit to this test's input.
-  [
-    'packages/types/src/__tests__/chart-type-doc-row-11521.test.ts',
-    { reads: ['content/docs/api/schema-reference.md'] },
-  ],
   [
     'packages/types/src/__tests__/chat-message-avatar-keys-7295.test.ts',
-    { reads: ['content/docs/plugins/plugin-chatbot.mdx'] },
-  ],
-  [
-    'packages/types/src/__tests__/component-docs-disabled-inherited-7239.test.ts',
-    {
-      reads: ['content/docs/components/**'],
-      walker: 'markdown-tree: walks the component doc pages and reads every `.mdx` it finds',
-    },
-  ],
-  [
-    'packages/types/src/__tests__/component-docs-retired-handler-keys-7340.test.ts',
-    {
-      reads: ['content/docs/**'],
-      walker: 'markdown-tree: walks `content/docs` and collects handler rows from every `.md`/`.mdx` under it',
-    },
+    { reads: ['../content/docs/frontend/plugins/plugin-chatbot.mdx'] },
   ],
   // objectui#11117. `documentedBindings()` parses every json fence on these two
   // pages that binds a node through `dataSource`, and asserts each one parses on
@@ -522,11 +477,7 @@ export const ADJUDICATED = new Map([
   // input, so an edit to either page's binding fences is an edit to the test.
   [
     'packages/types/src/__tests__/element-data-source-objectname-waiver-11117.test.ts',
-    { reads: ['content/docs/utilities/data-objectstack.mdx', 'content/docs/guide/data-source.md'] },
-  ],
-  [
-    'packages/types/src/__tests__/filter-builder-mirror-6939.test.ts',
-    { reads: ['content/docs/components/complex/filter-builder.mdx'] },
+    { reads: ['../content/docs/frontend/data-objectstack.mdx', '../content/docs/frontend/data-source.mdx', '../content/docs/ui/pages.mdx'] },
   ],
   // objectui#10872 batch 4. `taughtActionButton()` extracts the first json fence
   // under the quick-start's "### Add Actions" heading -- the taught
@@ -543,7 +494,7 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/types/src/__tests__/held-public-block-arms-10872.test.ts',
-    { reads: ['content/docs/guide/quick-start.md'] },
+    { reads: ['../content/docs/frontend/quick-start.mdx'] },
   ],
   // objectui#6152 round 9 -- the corpus census of `object-calendar` containers.
   // It walks the authored trees, reads every markdown document in them that
@@ -560,90 +511,43 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/types/src/__tests__/object-calendar-record-source-7313.test.ts',
-    { reads: ['content/docs/plugins/plugin-calendar.mdx'] },
-  ],
-  [
-    'packages/types/src/__tests__/object-kanban-group-by-limit-7322.test.ts',
-    { reads: ['content/docs/plugins/plugin-kanban.mdx'] },
-  ],
-  // objectui#5157. Reads no markdown: the two document literals are PROVENANCE
-  // on the rows of its sweep fixture (every `map` block the pre-landing sweep
-  // found in authored metadata, copied into the test and parsed under the strict
-  // schema). The test imports no `fs` and opens neither page, so an edit to
-  // either one cannot move its verdict.
-  [
-    'packages/types/src/__tests__/object-map-config-strict-5157.test.ts',
-    {
-      reads: [],
-      notRead: ['content/docs/fields/location.mdx', 'content/docs/plugins/plugin-map.mdx'],
-    },
+    { reads: ['../content/docs/frontend/plugins/plugin-calendar.mdx'] },
   ],
   [
     'packages/types/src/__tests__/object-view-unmirrored-keys-7779.test.ts',
     {
       reads: [
-        'content/docs/api/schema-reference.md',
-        'content/docs/guide/building-crud-app.md',
-        'content/docs/plugins/plugin-view.mdx',
+        '../content/docs/frontend/building-crud-app.mdx',
+        '../content/docs/frontend/plugins/plugin-view.mdx',
         'packages/plugin-view/README.md',
       ],
     },
   ],
   [
-    'packages/types/src/__tests__/overlay-node-slot-doc-types-7082.test.ts',
-    {
-      reads: [
-        'content/docs/components/feedback/empty.mdx',
-        'content/docs/components/overlay/alert-dialog.mdx',
-        'content/docs/components/overlay/context-menu.mdx',
-        'content/docs/components/overlay/dropdown-menu.mdx',
-        'content/docs/components/overlay/hover-card.mdx',
-        'content/docs/components/overlay/sheet.mdx',
-      ],
-    },
-  ],
-  [
     'packages/types/src/__tests__/page-actions-refusal-7926.test.ts',
-    { reads: ['content/docs/guide/layout.md'] },
+    { reads: ['../content/docs/frontend/layout.mdx'] },
   ],
   [
     'packages/types/src/__tests__/page-body-arity-8310.test.ts',
-    { reads: ['content/docs/guide/quick-start.md'] },
+    { reads: ['../content/docs/frontend/quick-start.mdx'] },
   ],
   [
     'packages/types/src/__tests__/page-breadcrumbs-refusal-8871.test.ts',
-    { reads: ['content/docs/guide/layout.md'] },
+    { reads: ['../content/docs/frontend/layout.mdx'] },
   ],
   // objectui#11318. Runs every `type: "page"` JSON fence of the layout guide
   // through the tolerant and the strict face, and reads its Schema API block --
   // so an edit to that page IS an edit to this test's input.
   [
     'packages/types/src/__tests__/page-width-padding-refusal-11318.test.ts',
-    { reads: ['content/docs/guide/layout.md'] },
-  ],
-  // objectui#11321. Extracts the two `record:related_list` examples and the two
-  // `action:button` route examples and runs each through both faces and the
-  // spec -- so an edit to any of the three pages IS an edit to this test's input.
-  [
-    'packages/types/src/__tests__/public-block-doc-examples-bag-11321.test.ts',
-    {
-      reads: [
-        'content/docs/api/schema-reference.md',
-        'content/docs/guide/slotted-pages.md',
-        'packages/app-shell/README.md',
-      ],
-    },
+    { reads: ['../content/docs/frontend/layout.mdx'] },
   ],
   // objectui#8256. Reads the "Kanban Board" `json` fence -- the root README's,
   // in the quick-start guide since objectstack#26080 -- and runs it through
   // `safeValidateSchema`, so an edit to that page IS an edit to this test's input.
   [
     'packages/types/src/__tests__/readme-kanban-example-8256.test.ts',
-    { reads: ['content/docs/guide/quick-start.md'] },
-  ],
-  [
-    'packages/types/src/__tests__/schema-reference-named-list-view-keys-7923.test.ts',
-    { reads: ['content/docs/api/schema-reference.md'] },
+    { reads: ['../content/docs/frontend/quick-start.mdx'] },
   ],
   // objectui#11465. Extracts the `sidebar` literal of the types README's
   // "4. Composable" example and runs it through the strict and the tolerant
@@ -720,7 +624,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-control-bytes.test.ts',
     {
       reads: [],
-      notRead: ['content/docs/guide/deployment.md', 'packages/core/README.md'],
+      notRead: ['packages/core/README.md'],
     },
   ],
   [
@@ -735,14 +639,7 @@ export const ADJUDICATED = new Map([
       // exists to prevent (objectui#8857) was a pull request changing exactly
       // ONE package README, `packages/plugin-dashboard/README.md`, whose shard
       // reported success in ten seconds having run nothing.
-      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'packages/**'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-doc-example-ids.test.ts',
-    {
-      reads: ['content/docs/**'],
-      notRead: ['examples/README.md'],
+      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', '../content/docs/frontend/**', 'packages/**'],
     },
   ],
   [
@@ -751,7 +648,7 @@ export const ADJUDICATED = new Map([
       // `packages/**` for the same reason as the entry above: this census takes
       // `check:doc-types`' surface by IMPORT, so objectui#7896's fourth leg
       // reached it in the same change (objectui#8115).
-      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'packages/**'],
+      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', '../content/docs/frontend/**', 'packages/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -761,7 +658,7 @@ export const ADJUDICATED = new Map([
       // `packages/core/README.md` is a probe of the root `ci.yml` `ui` filter's
       // globs, not a read (objectstack#25712). The test's only directory walk was
       // of objectui's own `.github/workflows`, which it no longer reads.
-      reads: ['apps/console/docs/**', 'content/docs/**', 'docs/**'],
+      reads: ['apps/console/docs/**', '../content/docs/frontend/**', 'docs/**'],
       notRead: ['packages/core/README.md'],
     },
   ],
@@ -776,24 +673,14 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-links.test.ts',
     {
-      reads: ['./*', 'apps/**', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
+      reads: ['./*', 'apps/**', '../content/docs/frontend/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-types.test.ts',
     {
-      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', '../content/docs/frontend/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
       walker: 'markdown-tree',
-    },
-  ],
-  // Reads no markdown: its one markdown literal is a probe of the root `ci.yml`
-  // `ui` filter's globs, asserting a docs-only change still starts Lint UI
-  // (objectstack#25712).
-  [
-    'scripts/__tests__/check-docs-route-eager-closure.test.ts',
-    {
-      reads: [],
-      notRead: ['content/docs/guide/deployment.md'],
     },
   ],
   // Reads no markdown: the root-document literals are fixture INPUTS to a pure path classifier.
@@ -835,7 +722,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-shell-escape-residue.test.ts',
     {
-      reads: ['.claude/skills/**', 'AGENTS.md', 'CLAUDE.md', 'content/docs/**', 'skills/objectui/**'],
+      reads: ['.claude/skills/**', 'AGENTS.md', 'CLAUDE.md', '../content/docs/frontend/**', 'skills/objectui/**'],
     },
   ],
   [
@@ -847,7 +734,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/component-node-vocabulary-7434.test.ts',
     {
-      reads: ['content/docs/**', 'packages/**'],
+      reads: ['../content/docs/frontend/**', 'packages/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -862,7 +749,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/doc-version-claims.test.ts',
     {
-      reads: ['content/docs/**', 'packages/**', 'skills/objectui/**'],
+      reads: ['../content/docs/frontend/**', 'docs/rfcs/**', 'packages/**', 'skills/objectui/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -873,7 +760,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/dollar-dialect-alias-census.test.ts',
     {
-      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
+      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', '../content/docs/frontend/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
     },
   ],
   [
@@ -891,7 +778,7 @@ export const ADJUDICATED = new Map([
   // document in this tree.
   [
     'scripts/__tests__/markdown-fence-scan.test.ts',
-    { reads: ['content/docs/plugins/plugin-markdown.mdx'] },
+    { reads: ['../content/docs/frontend/plugins/plugin-markdown.mdx'] },
   ],
   // Reads no markdown: drives the decision step against fixture repositories it
   // writes in a temp directory, so every document literal here is a fixture path
@@ -918,7 +805,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/unconsumed-widget-option-claim-6186.test.ts',
     {
-      reads: ['content/docs/plugins/plugin-dashboard.mdx'],
+      reads: ['../content/docs/frontend/plugins/plugin-dashboard.mdx'],
     },
   ],
 ]);
@@ -1118,6 +1005,8 @@ export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS } = {}) 
     const source = stripComments(readFileSync(file, 'utf8'));
     const bases = [];
     for (let dir = path.dirname(file); dir.startsWith(root); dir = path.dirname(dir)) bases.push(dir);
+    // …and the monorepo root, for a test that names a docs page from there.
+    bases.push(path.dirname(root));
 
     const documents = new Set();
     for (const fragment of pathFragments(source)) {
@@ -1126,7 +1015,10 @@ export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS } = {}) 
       if (/^\.mdx?$/.test(fragment)) continue; // the bare extension
       for (const base of bases) {
         const resolved = path.resolve(base, fragment);
-        if (!resolved.startsWith(`${root}${path.sep}`)) continue;
+        // The one tree outside this root a test may read: the monorepo's docs,
+        // where the ObjectUI pages live since objectstack#27145. It is labelled
+        // `../content/docs/…`, relative to this root like every other entry.
+        if (!resolved.startsWith(`${root}${path.sep}`) && !resolved.startsWith(`${MONOREPO_DOCS}${path.sep}`)) continue;
         if (resolved.includes(`${path.sep}node_modules${path.sep}`)) continue;
         if (existsSync(resolved) && statSync(resolved).isFile()) {
           documents.add(path.relative(root, resolved));

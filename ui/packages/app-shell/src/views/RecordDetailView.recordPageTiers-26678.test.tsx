@@ -19,7 +19,8 @@
  *    the related column, and History is resident, so its read goes out at open.
  *  - 1100 px: two columns and the related toggle; the related lists are not
  *    mounted until the rail opens.
- *  - 900 px, and an embedded view at any width: the tab strip as before.
+ *  - 700 px (under the 760 px two-column floor, objectstack#27241), and an
+ *    embedded view at any width: the tab strip as before.
  *  - `?tab=` addresses the strip, so a column tier ignores it.
  */
 
@@ -218,8 +219,8 @@ describe('RecordDetailView — one record page at two widths (objectstack#26678)
     expect(column(container, 'related')!.textContent).toContain('Notes');
   });
 
-  it('900 px: the tab strip, as before; History waits for its tab', async () => {
-    const { container } = renderPage({ width: 900 });
+  it('700 px: the tab strip, as before; History waits for its tab', async () => {
+    const { container } = renderPage({ width: 700 });
     expect(await screen.findByRole('tablist', undefined, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /^Details/ })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /^Related/ })).toBeTruthy();
@@ -234,7 +235,7 @@ describe('RecordDetailView — one record page at two widths (objectstack#26678)
   });
 
   it('`?tab=` keeps working in the tabbed tier and is ignored in the column tiers', async () => {
-    const tabbed = renderPage({ width: 900, search: '?tab=related' });
+    const tabbed = renderPage({ width: 700, search: '?tab=related' });
     const relatedTab = await screen.findByRole('tab', { name: /^Related/ }, { timeout: 5000 });
     expect(relatedTab.getAttribute('aria-selected')).toBe('true');
     tabbed.unmount();

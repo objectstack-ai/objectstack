@@ -12,7 +12,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { generateUniqueId } from './utils';
 import { emitAiUsageRefresh } from './aiUsageEvents';
-import { uiMessagesToChatMessages } from './mapMessages';
+import { chartAnswerParts, uiMessagesToChatMessages } from './mapMessages';
 import { toRuntimeRole, toRuntimeTimestamp } from './chatMessageAdapter';
 import type { SeamChatMessage, SeamToolInvocation } from './chatMessageAdapter';
 
@@ -751,10 +751,10 @@ export function useObjectChat(options: UseObjectChatOptions = {}): UseObjectChat
           };
         }
         const normalized = normalizeMessages([msg])[0];
-        const parts: SdkChatMessage['parts'] = [];
-        if (normalized.content) {
-          parts.push({ type: 'text', text: normalized.content });
-        }
+        // objectstack#25908 — a hydrated answer's charts go back into the store
+        // as the `data-chart` parts the live stream gave, between the text runs
+        // they sat between, so `mapMessages` reads them at the same offsets.
+        const parts: SdkChatMessage['parts'] = chartAnswerParts(normalized.content, msg.charts);
         if (msg.reasoning) {
           parts.push({ type: 'reasoning', text: msg.reasoning });
         }

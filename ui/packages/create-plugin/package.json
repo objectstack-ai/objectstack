@@ -57,7 +57,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/guide/plugin-development",
+  "homepage": "https://objectstack.ai/docs/frontend/create-plugin",
   "publishConfig": {
     "access": "public"
   }

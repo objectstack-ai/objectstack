@@ -574,8 +574,10 @@ const PAGE_HEADER = {
     'sm:flex-row',
   ]),
   titleColumn: classBefore(containersSrc, CONTAINERS_FILE, '<RecordTitleChip', ['flex-col', 'min-w-0']),
-  // The tail as it renders when the host wires `refresh` (the console does).
-  tail: classAt(containersSrc, CONTAINERS_FILE, 'if (!refreshButton) return actions;', 1, ['shrink-0']),
+  // The tail is `PageHeaderActions`' toolbar — the one row whether or not the
+  // host wires `refresh`, which is the first item of its `⋯` menu since
+  // objectstack#27055 (no separate `⟳` button).
+  tail: classBefore(containersSrc, CONTAINERS_FILE, 'role="toolbar"', ['shrink-0']),
   chip: classByPattern(chipSrc, CHIP_FILE, /<div className=\{cn\('([^']+)', className\)\}>/, ['min-w-0']),
   chipRow: classBefore(chipSrc, CHIP_FILE, '{icon && (', ['flex-wrap']),
   // #1 after the anchor is the icon's own span; #2 is the h1, #3 the object label.
@@ -583,7 +585,7 @@ const PAGE_HEADER = {
   objectLabel: classAt(chipSrc, CHIP_FILE, '{icon && (', 3, ['shrink-0']),
 };
 
-/** The mobile tail: one inline action, the `⋯` trigger and the `⟳` chrome. */
+/** The mobile tail: one inline action (`mobileMaxVisible` 1) and the `⋯` trigger, which carries refresh. */
 const PAGE_HEADER_TAIL_BOX = 'h-9 w-12 shrink-0';
 
 const pageHeaderFixture = (title: string) =>
@@ -598,7 +600,7 @@ const pageHeaderFixture = (title: string) =>
           `<h1 class="${PAGE_HEADER.h1}">${title}</h1><span class="${PAGE_HEADER.objectLabel}">Case</span>`,
         ),
       ),
-    ) + box(PAGE_HEADER.tail, Array.from({ length: 3 }, () => box(PAGE_HEADER_TAIL_BOX)).join('')),
+    ) + box(PAGE_HEADER.tail, Array.from({ length: 2 }, () => box(PAGE_HEADER_TAIL_BOX)).join('')),
   );
 
 const PAGE_HEADER_CANDIDATES = [...Object.values(PAGE_HEADER), PAGE_HEADER_TAIL_BOX]

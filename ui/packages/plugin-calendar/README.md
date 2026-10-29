@@ -502,7 +502,7 @@ const schema: CalendarViewSchema = {
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-calendar)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-calendar)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-calendar)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

@@ -118,8 +118,9 @@ Do not put a credential in `headers` or `defaultHeaders`: both are stored in met
 
 ### `provider: 'openapi'` — one action per operation
 
-Config: **`spec`** (required) and **`baseUrl`** (optional — overrides the
-document's `servers[0].url`). The `spec` takes any of three forms:
+Config: **`spec`** (required), **`baseUrl`** (optional — overrides the
+document's `servers[0].url`) and **`include`** (optional operation allowlist —
+only the listed operations become actions). The `spec` takes any of three forms:
 
 - an **inline OpenAPI 3.x document object** — no I/O at boot, the most
   deterministic form;
@@ -148,10 +149,46 @@ Each operation becomes an action keyed by its `operationId` (or a
 `method_path` slug when the document omits one) — so `getInvoice` in the
 document is `actionId: 'getInvoice'` in your flow.
 
+`include` takes those same action keys and has the same allowlist meaning as
+the `mcp` provider's `include`: list the operations the instance should expose
+and every other operation stays out — the way to bring up a large API (hundreds
+or thousands of operations) as the handful of actions your flows call. An
+operation without an `operationId` is named by its generated `method_path` key
+(`delete /customers/{id}` → `delete_customers_id`); one that has an
+`operationId` is named only by it. An entry the document does not carry — a
+typo, or an operation the upstream renamed or removed — fails the boot with an
+error naming the entry and listing the document's keys; it is never ignored.
+
+```typescript
+providerConfig: {
+  spec: './specs/crm-openapi.json',
+  include: ['listCustomers', 'getCustomer', 'delete_customers_id'],
+},
+```
+
 The document must be **OpenAPI 3.x**. A Swagger 2.0 document — or one with no
 `openapi` version field — is refused at boot with an error naming the inline
 document, URL or file it came from: convert it to OpenAPI 3.x offline and point
 `spec` at the converted document. The runtime never converts.
+
+The ObjectStack repository carries that offline step as a script (it is not
+shipped in the npm package): `normalize-openapi` reads a file or URL, JSON or
+YAML, converts Swagger 2.0 to OpenAPI 3.0, bundles and inlines every `$ref`,
+makes `servers[0].url` absolute, writes one JSON document and prints its
+sha256 — and, given allow-patterns, the `include` list for the operations they
+match.
+
+```bash
+pnpm --filter @objectstack/connector-openapi normalize-openapi \
+  --in https://example.com/openapi.yaml --out ./specs/crm-openapi.json \
+  --include-pattern '^GET /v1/customers'
+```
+
+Inlining is bounded: a recursive schema, or one more than `--max-depth`
+(default 2) named schemas deep, becomes a typed stub whose description names
+the reference it replaced. A Swagger 2.0 operation whose empty `consumes` list
+would drop its request body is refused until `--empty-consumes <media type>`
+says which media type it accepts.
 
 ### `provider: 'mcp'` — one action per tool
 

@@ -32,7 +32,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import { PackageSchema } from '@objectstack/spec/marketplace';
-import { printHeader, printKV, printSuccess, printError, printStep, isExitSignal } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, printStep, printWarning, isExitSignal } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
 import { resolveCloudActiveEnvironmentId } from '../../utils/active-environment.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
@@ -257,6 +257,65 @@ async function tryLoadTemplateManifest(
 }
 
 /**
+ * Keys `objectstack.manifest.json` accepts that this command does NOT carry to
+ * the control plane. `tags`, `publisher`, `isStarter` and `visibility` are
+ * inherited from `CreatePackageRequestSchema`; `preview` is a scaffold-side
+ * extra (publish has no screenshot upload path).
+ *
+ * They are not sent because nothing in this repo shows the hosted
+ * `POST /cloud/packages` route writes them: the request schema declares them,
+ * but the read-side row stores `tags` as a string, and `publisher` is a trust
+ * tier that gates listing privileges, so a value self-declared in an author's
+ * file is a privilege claim only the control plane can judge. ⛔ Do not start
+ * sending them before {@link CATALOG_SEND_ISSUE} answers what the hosted side
+ * accepts. `visibility` is flag-only on purpose (see the `--visibility` flag).
+ *
+ * Dropping an authored key silently is the defect, so each one the file
+ * declares is named in a warning. The warning does not fail the publish: the
+ * bundled blank template ships `isStarter: true`, and refusing it would break
+ * every project scaffolded from it.
+ *
+ * Every `TemplateManifestSchema` key is classified in
+ * `test/package-publish-uncarried-manifest-keys.test.ts`, so a key the schema
+ * gains later goes red there until publish either sends it or lists it here.
+ */
+export const UNCARRIED_MANIFEST_KEYS = ['tags', 'publisher', 'isStarter', 'preview', 'visibility'] as const;
+
+/** Where carrying the catalog keys to the hosted control plane is tracked. */
+export const CATALOG_SEND_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/27348';
+
+/** The {@link UNCARRIED_MANIFEST_KEYS} that `manifest` declares, in list order. */
+export function uncarriedManifestKeys(manifest: Record<string, unknown>): string[] {
+  return UNCARRIED_MANIFEST_KEYS.filter((key) => manifest[key] !== undefined);
+}
+
+/**
+ * The warnings for the {@link uncarriedManifestKeys} a manifest declares: one
+ * for the catalog keys (declared, not yet carried by the hosted catalog) and
+ * one for `visibility` (carried by the flag instead). Empty when none.
+ */
+export function uncarriedManifestWarnings(manifest: Record<string, unknown>): string[] {
+  const declared = uncarriedManifestKeys(manifest);
+  const catalog = declared.filter((key) => key !== 'visibility');
+  const warnings: string[] = [];
+  if (catalog.length > 0) {
+    warnings.push(
+      `objectstack.manifest.json declares ${catalog.map((key) => `\`${key}\``).join(', ')}, which the `
+      + 'hosted catalog does not carry yet: `os package publish` does not send '
+      + (catalog.length === 1 ? 'it' : 'them')
+      + `, so the published package will not show ${catalog.length === 1 ? 'it' : 'them'}. See ${CATALOG_SEND_ISSUE}.`,
+    );
+  }
+  if (declared.includes('visibility')) {
+    warnings.push(
+      'objectstack.manifest.json declares `visibility`, which `os package publish` does not read from '
+      + 'the file. Pass --visibility to set it.',
+    );
+  }
+  return warnings;
+}
+
+/**
  * Read a string that is EITHER inlined markdown OR a path relative to
  * the template manifest directory. Treats short, single-line `.md` /
  * `.markdown` strings as paths and reads them; everything else is
@@ -450,6 +509,7 @@ export default class PackagePublish extends Command {
         printStep(`Loaded objectstack.manifest.json`);
       }
       const m = tplManifest?.data ?? {};
+      for (const warning of uncarriedManifestWarnings(m)) printWarning(warning);
       const baseDir = tplManifest?.baseDir ?? process.cwd();
 
       // One gate for both paths — the explicitly supplied id and the derived one

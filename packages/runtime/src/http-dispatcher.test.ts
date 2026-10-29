@@ -1160,6 +1160,7 @@ describe('HttpDispatcher', () => {
                 listAudienceBindingSuggestions: vi.fn().mockResolvedValue({ suggestions: [{ id: 's1', status: 'pending' }], synced: { created: 1 } }),
                 confirmAudienceBindingSuggestion: vi.fn().mockResolvedValue({ suggestion: { id: 's1', status: 'confirmed' }, bindingCreated: true }),
                 dismissAudienceBindingSuggestion: vi.fn().mockResolvedValue({ suggestion: { id: 's1', status: 'dismissed' } }),
+                reopenAudienceBindingSuggestion: vi.fn().mockResolvedValue({ suggestion: { id: 's1', status: 'pending' } }),
             });
 
             it('GET /suggested-bindings lists via the service with status/packageId filters', async () => {
@@ -1187,6 +1188,38 @@ describe('HttpDispatcher', () => {
                 const result = await d.handleSecurity('/suggested-bindings/s1/dismiss', 'POST', undefined, {}, ctx('u1'));
                 expect(result.handled).toBe(true);
                 expect(result.response?.body?.data?.suggestion?.status).toBe('dismissed');
+            });
+
+            // [#27149] Re-open: back to pending through the service, with the caller's context.
+            it('POST /suggested-bindings/:id/reopen re-opens via the service with the caller execution context', async () => {
+                const service = makeService();
+                const d = new HttpDispatcher(secKernel(service));
+                const result = await d.handleSecurity('/suggested-bindings/s1/reopen', 'POST', undefined, {}, ctx('u1'));
+                expect(result.handled).toBe(true);
+                expect(result.response?.status).toBe(200);
+                expect(result.response?.body?.data?.suggestion?.status).toBe('pending');
+                expect(service.reopenAudienceBindingSuggestion).toHaveBeenCalledWith({ userId: 'u1' }, 's1');
+                expect(service.confirmAudienceBindingSuggestion).not.toHaveBeenCalled();
+            });
+
+            it('POST /suggested-bindings/:id/reopen answers 501 when the service does not implement the optional door', async () => {
+                const { reopenAudienceBindingSuggestion: _absent, ...service } = makeService();
+                const d = new HttpDispatcher(secKernel(service));
+                const result = await d.handleSecurity('/suggested-bindings/s1/reopen', 'POST', undefined, {}, ctx('u1'));
+                expect(result.handled).toBe(true);
+                expect(result.response?.status).toBe(501);
+                expect(service.dismissAudienceBindingSuggestion).not.toHaveBeenCalled();
+            });
+
+            it('POST /suggested-bindings/:id/reopen maps a not-dismissed refusal onto 409', async () => {
+                const service = makeService();
+                service.reopenAudienceBindingSuggestion = vi.fn().mockRejectedValue(
+                    Object.assign(new Error("Audience-binding suggestion 's1' is pending, not dismissed"), { code: 'SUGGESTION_STATE', statusCode: 409 }),
+                );
+                const d = new HttpDispatcher(secKernel(service));
+                const result = await d.handleSecurity('/suggested-bindings/s1/reopen', 'POST', undefined, {}, ctx('u1'));
+                expect(result.response?.status).toBe(409);
+                expect(result.response?.body?.error?.code).toBe('SUGGESTION_STATE');
             });
 
             it('maps typed service errors onto their HTTP status (403/404/409)', async () => {

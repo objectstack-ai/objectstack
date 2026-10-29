@@ -313,16 +313,16 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   }
 
   // Honour the object's form view layout (objectstack-ai/objectstack#1890): wire the declared `type`
-  // (simple/tabbed/wizard/split) + `sections` through to ObjectForm, which
-  // already renders each variant. Page-level layouts only — `drawer`/`modal`
-  // are presentation/open-modes, not record-page layouts, so they fall back to
-  // `simple` here (see the form-layout-vs-presentation modelling note in objectstack-ai/objectstack#1890).
+  // (simple/tabbed/wizard) + `sections` through to ObjectForm, which renders
+  // each layout. Those three are the form view `type`'s whole vocabulary
+  // (ADR-0050); anything else — a stored row not yet converted — falls back
+  // to `simple` here.
   // The form view is the one the record flow selects (objectui#13099): a
   // create uses the object's `create` form view when it declares one, an edit
   // the default form view — the same selection the New/Edit modal makes.
   const formDef: any = selectRecordFormView(objectDef as any, mode) ?? {};
-  const pageFormType: 'simple' | 'tabbed' | 'wizard' | 'split' =
-    ['tabbed', 'wizard', 'split'].includes(formDef.type) ? formDef.type : 'simple';
+  const pageFormType: 'simple' | 'tabbed' | 'wizard' =
+    ['tabbed', 'wizard'].includes(formDef.type) ? formDef.type : 'simple';
   // Curated `sections` are wired through for EVERY layout family — a `simple`
   // form view's sections still carry the authored field selection, order,
   // grouping and per-field `visibleOn` predicates (#2212). Dropping them for
@@ -336,9 +336,6 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
         tabPosition: formDef.tabPosition,
         allowSkip: formDef.allowSkip,
         showStepIndicator: formDef.showStepIndicator,
-        splitDirection: formDef.splitDirection,
-        splitSize: formDef.splitSize,
-        splitResizable: formDef.splitResizable,
       }
     : {};
   // objectstack-ai/objectstack#26843 — the form view's `buttons`, `layout`

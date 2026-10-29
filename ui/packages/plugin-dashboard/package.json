@@ -3,7 +3,7 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Dashboard plugin for Object UI",
+  "description": "Dashboard plugin for ObjectUI",
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -76,7 +76,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-dashboard",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-dashboard",
   "publishConfig": {
     "access": "public"
   },

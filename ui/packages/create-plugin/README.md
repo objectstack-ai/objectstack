@@ -120,7 +120,7 @@ pnpm create @object-ui/plugin my-plugin --description "My awesome plugin" --auth
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/guide/plugin-development)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugin-development)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/create-plugin)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

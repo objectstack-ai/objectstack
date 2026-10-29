@@ -76,7 +76,7 @@
  *
  * A fourth leg, the root `README.md`, stood between 2 and 3 until
  * objectstack#26080 folded that README into the repository root and moved its
- * examples to `content/docs/guide/quick-start.md`, which leg 1 reads.
+ * examples to `content/docs/frontend/quick-start.mdx`, which leg 1 reads.
  *
  * Leg 3 is a governed, published surface whose fences belong to its owner
  * (objectui#12135), and it joined on that owner's ruling: the json/jsonc
@@ -248,7 +248,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // ── Configuration ────────────────────────────────────────────────────────────
 
 /** The content tree — the first leg of `SCAN_SURFACE`. */
-export const DOCS_ROOT = 'content/docs';
+export const DOCS_ROOT = '../content/docs/frontend';
 
 /** Page extensions collected under `DOCS_ROOT` — both, as the sibling gate collects. */
 export const DOC_EXTENSIONS = ['.mdx', '.md'];
@@ -257,12 +257,14 @@ export const DOC_EXTENSIONS = ['.mdx', '.md'];
 export const JSON_FENCE_LANGUAGES = new Set(['json', 'jsonc']);
 
 /**
- * The `content/docs` leg's anchor: a page that must contribute at least one
- * judged node document on every run — the page objectui#5229 was found on. If
- * it stops holding one (moved, renamed, or its fences rewritten away), name
- * another; ⛔ never delete the control.
+ * The docs leg's anchor: a page that must contribute at least one judged node
+ * document on every run. It was `content/docs/blocks/forms.mdx`, the page
+ * objectui#5229 was found on, until that page was retired with the objectui.org
+ * site; the SDK layout guide holds page documents on every revision. If it stops
+ * holding one (moved, renamed, or its fences rewritten away), name another; ⛔
+ * never delete the control.
  */
-export const ANCHOR_DOCUMENT = 'content/docs/blocks/forms.mdx';
+export const ANCHOR_DOCUMENT = '../content/docs/frontend/layout.mdx';
 
 /** The published skill bundle — the fourth leg of `SCAN_SURFACE` (objectui#12204). */
 export const SKILLS_ROOT = 'skills/objectui';
@@ -331,7 +333,7 @@ function pagesUnder(root, dir, extensions) {
  * holding a node document, name another page on the same leg; ⛔ never delete the
  * control. The root-pages leg and its `README.md` anchor left together when
  * objectstack#26080 emptied `ROOT_PAGES`: that README's node documents moved to
- * `content/docs/guide/quick-start.md`, on the first leg, so a leg with no page
+ * `content/docs/frontend/quick-start.mdx`, on the first leg, so a leg with no page
  * left had nothing for an anchor to name.
  * The skills leg (objectui#12204) walks `SKILLS_ROOT` the way the first leg
  * walks `DOCS_ROOT`, last, after the READMEs.

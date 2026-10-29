@@ -21,6 +21,7 @@ import '@object-ui/plugin-grid';
 
 If you are using a custom component, register it explicitly:
 
+{/* doc-snippet: fragment — `./MyCustomWidget` is the reader's own component module, so the import cannot resolve from this repository */}
 ```typescript
 import { ComponentRegistry } from '@object-ui/core';
 import { MyCustomWidget } from './MyCustomWidget';
@@ -112,6 +113,7 @@ Available context variables:
 
 Debug expressions by enabling debug mode in `SchemaRendererContext`:
 
+{/* doc-snippet: fragment — a bare `<SchemaRenderer />` tag shown for the `debug` prop alone; `schema` is the reader's own document */}
 ```tsx
 <SchemaRenderer schema={schema} debug={true} />
 ```

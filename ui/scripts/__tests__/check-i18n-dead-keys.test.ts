@@ -44,6 +44,45 @@ import { rootWorkflow, rootWorkflowFiles } from './helpers/root-ci';
  * evidence that the key is referenced.
  */
 
+/**
+ * objectstack#27423 — the whole-repository readings, each taken ONCE per file
+ * and shared by every case that reads the real tree.
+ *
+ * One `sweep()` of this repository costs seconds, and a case that ran its own
+ * inside its 15 s budget timed out on a loaded CI shard. So each `describe` that
+ * reads the real tree asks for these in its BODY, which runs at collection, and
+ * no test or hook timeout bounds collection (`ui/AGENTS.md`, 测试纪律: a
+ * `beforeAll` would sit under the narrower 10 s hook budget instead). The cases
+ * only read the values; their arrays and plain objects are frozen so a case
+ * that sorted or spliced one in place would throw rather than leak into the
+ * next case.
+ */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+function frozen<T>(value: T): T {
+  if (Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype) {
+    for (const member of Object.values(value as object)) {
+      if (member !== null && typeof member === 'object') frozen(member);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function once<T>(read: () => T): () => T {
+  let held: { value: T } | undefined;
+  return () => (held ??= { value: frozen(read()) }).value;
+}
+
+const realEnKeys = once(() => collectEnKeys(REPO_ROOT));
+
+const realTree = {
+  enKeys: realEnKeys,
+  gate: once(() => analyze(REPO_ROOT)),
+  indirect: once(() => collectIndirectTemplateHeads(REPO_ROOT, realEnKeys())),
+  sweep: once(() => sweep(REPO_ROOT)),
+};
+
 const tempRoots: string[] = [];
 
 /**
@@ -1677,8 +1716,11 @@ describe('the one-hop indirect template leg (objectui#8754)', () => {
       field: 'type',
     };
 
-    const packKeys = collectEnKeys(repoRoot);
-    const collected = collectIndirectTemplateHeads(repoRoot, packKeys);
+    // Read at collection, never inside a case (objectstack#27423).
+    const packKeys = realTree.enKeys();
+    const collected = realTree.indirect();
+    const result = realTree.sweep();
+    const gate = realTree.gate();
     const headsAtHopSite = [...collected.heads]
       .filter(([, sites]) => sites.some((site) => site.file === HOP_SITE))
       .map(([head]) => head)
@@ -1715,7 +1757,6 @@ describe('the one-hop indirect template leg (objectui#8754)', () => {
       // The end-to-end reading, and the one a reviewer can check against the
       // CLI: a key under a collected head must be neither CONFIRMED nor
       // NEEDS-REVIEW, because it is not a candidate at all.
-      const result = sweep(repoRoot);
       const reachable = [...packKeys.leaves].filter((key) => [...collected.heads.keys()].some((head) => key.startsWith(head)));
       expect(reachable.length, 'the heads hold no leaves — the cross-check would be vacuous').toBeGreaterThan(0);
       const stillCandidate = reachable.filter(
@@ -1730,7 +1771,6 @@ describe('the one-hop indirect template leg (objectui#8754)', () => {
       // `undeclared-dynamic-family`, a RED finding; objectui#7592 measured that
       // widening and objectui#7844 calls the registry entry a decision with its
       // own blast radius. This leg buys reachability and stops.
-      const gate = analyze(repoRoot);
       for (const head of collected.heads.keys()) {
         if (gate.dynamicHeads.has(head)) continue; // already a head by its own argument position
         expect(
@@ -2008,12 +2048,13 @@ export function Widget({ id }: { id: string }) {
   });
 
   describe('measured on THIS repository', () => {
-    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-    const result = sweep(repoRoot);
+    // Read at collection, never inside a case (objectstack#27423).
+    const result = realTree.sweep();
+    const gate = realTree.gate();
+    const indirect = realTree.indirect();
+    const packKeys = realTree.enKeys();
 
     it('reports one row per head the sweep actually applied — no head goes unreported', () => {
-      const gate = analyze(repoRoot);
-      const indirect = collectIndirectTemplateHeads(repoRoot, collectEnKeys(repoRoot));
       const applied = new Set([...gate.dynamicHeads, ...indirect.heads.keys()]);
       expect(applied.size, 'no heads at all — the whole cross-check would be vacuous').toBeGreaterThan(0);
       expect(result.appliedHeads.map((row) => row.head).sort()).toEqual([...applied].sort());
@@ -2024,7 +2065,7 @@ export function Widget({ id }: { id: string }) {
       // claim about it. A row whose keys were still candidates would be worse
       // than the silence it replaces.
       const candidates = new Set([...result.confirmed, ...result.needsReview.map((entry) => entry.key)]);
-      const leaves = [...collectEnKeys(repoRoot).leaves];
+      const leaves = [...packKeys.leaves];
       for (const row of result.appliedHeads) {
         const under = leaves.filter((key) => key.startsWith(row.head));
         expect(under.length, `${row.head} holds no leaves — its row would be vacuous`).toBe(row.leavesUnder);
@@ -2037,7 +2078,7 @@ export function Widget({ id }: { id: string }) {
       // collected head whatever its depth; the report says so and changes
       // nothing. `heldLive` summing to the keys held out of the tiers is the
       // arithmetic a reviewer can redo from the printed table.
-      const leaves = [...collectEnKeys(repoRoot).leaves];
+      const leaves = [...packKeys.leaves];
       const heldByAHead = leaves.filter((key) => result.appliedHeads.some((row) => key.startsWith(row.head)));
       const candidates = new Set([...result.confirmed, ...result.needsReview.map((entry) => entry.key)]);
       expect(heldByAHead.some((key) => candidates.has(key))).toBe(false);
@@ -2051,7 +2092,7 @@ export function Widget({ id }: { id: string }) {
       // decision and this test is where it gets re-argued.
       const rootOnly = result.appliedHeads.filter((row) => row.ownSegments < 2);
       expect(rootOnly.length, 'no namespace-wide head on the tree — the pin has nothing to hold').toBeGreaterThan(0);
-      const leaves = [...collectEnKeys(repoRoot).leaves];
+      const leaves = [...packKeys.leaves];
       const candidates = new Set([...result.confirmed, ...result.needsReview.map((entry) => entry.key)]);
       for (const row of rootOnly) {
         const under = leaves.filter((key) => key.startsWith(row.head));

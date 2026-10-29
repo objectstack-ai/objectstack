@@ -64,6 +64,12 @@
  * assert containment, which a longer bullet still satisfies. The one
  * pre-existing case that does redden is the `toEqual` on span's DECLARATION, so
  * the notice half of that sweep is covered here and nowhere else.
+ *
+ * ⛔ Three surfaces now, not four. objectstack#27145 retired the ObjectUI docs
+ * site and `content/docs/components/basic/{div,span}.mdx` with it; `div` and
+ * `span` are one row each on `content/docs/frontend/renderers.mdx`, which
+ * carries no migration callout. The mdx legs below went with the pages; the
+ * notice, the declaration and the catalog category are still held together.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -88,8 +94,6 @@ import '../renderers';
  */
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../../../..');
-const DIV_MDX_PATH = path.join(REPO_ROOT, 'content/docs/components/basic/div.mdx');
-const SPAN_MDX_PATH = path.join(REPO_ROOT, 'content/docs/components/basic/span.mdx');
 const CATALOG_DIR = path.join(
   REPO_ROOT,
   'examples/schema-catalog/src/schemas/components-basic-div',
@@ -194,14 +198,7 @@ function catalogRootTypes(): string[] {
   });
 }
 
-/** The replacement types the mdx callout offers: its `<code>` runs, in the list. */
-function mdxOfferedTypeNames(mdx: string): Set<string> {
-  const list = mdx.match(/<ul[^>]*>([\s\S]*?)<\/ul>/);
-  if (!list) throw new Error('div.mdx no longer opens with the deprecation callout list');
-  return new Set([...list[1].matchAll(/<code>([^<]+)<\/code>/g)].map((m) => m[1]));
-}
-
-describe('div deprecation guidance — true, and agreed across four surfaces (#6877)', () => {
+describe('div deprecation guidance — true, and agreed across its surfaces (#6877)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -250,47 +247,39 @@ describe('div deprecation guidance — true, and agreed across four surfaces (#6
     expect([...offeredTypeNames(plainWrapperBullets[0])].sort()).toEqual(dropIn);
   });
 
-  it('states the same alternatives on all four surfaces', () => {
+  it('states the same alternatives on every surface', () => {
     const notice = offeredTypeNames(bulletLines(noticeFor('div')).join('\n'));
     const declared = offeredTypeNames(declaredReplacement('div'));
-    const mdx = mdxOfferedTypeNames(readFileSync(DIV_MDX_PATH, 'utf8'));
 
     // Controls: nothing below compares two empty sets.
     expect(notice.size).toBeGreaterThan(0);
     expect(declared.size).toBeGreaterThan(0);
-    expect(mdx.size).toBeGreaterThan(0);
 
     // Set equality both ways, not containment: drift has no preferred
     // direction. This is the pin that reddens when the plausible wrong fix
     // updates one surface and leaves the others behind.
     expect([...declared].sort()).toEqual([...notice].sort());
-    expect([...mdx].sort()).toEqual([...notice].sort());
 
-    // The catalog category is the fourth surface. It DOCUMENTS the deprecated
+    // The catalog category is the third surface. It DOCUMENTS the deprecated
     // type, so `div` itself is expected among its root types — that exemption
     // is the one `examples/schema-catalog/test/deprecated-component-types.test.ts`
     // grants and checks for non-vacuity. Everything else it demonstrates must
-    // be a replacement the other three surfaces actually offer…
+    // be a replacement the other surfaces actually offer…
     const fixtures = catalogRootTypes();
     const demonstrated = [...new Set(fixtures.filter((type) => type !== 'div'))].sort();
     expect(demonstrated.length).toBeGreaterThan(0);
     expect(demonstrated.filter((type) => !notice.has(type))).toEqual([]);
 
-    // …and the one mechanical swap has to be among them, reachable from the
-    // migration guide. A guide that teaches `box` while the corpus only
-    // exemplifies the non-drop-in conversions is the same defect one surface
-    // over.
+    // …and the one mechanical swap has to be among them. A notice that teaches
+    // `box` while the corpus only exemplifies the non-drop-in conversions is
+    // the same defect one surface over.
     expect(demonstrated).toContain('box');
-    expect(readFileSync(DIV_MDX_PATH, 'utf8')).toContain(
-      'components-basic-div/use-box-instead',
-    );
     expect(fixtures.length).toBe(readdirSync(CATALOG_DIR).filter((n) => n.endsWith('.json')).length);
   });
 
   it('no surface still carries the falsified recommendations', () => {
     const notice = noticeFor('div');
     const declared = declaredReplacement('div');
-    const mdx = readFileSync(DIV_MDX_PATH, 'utf8');
 
     // The two sentences objectui#6877 retired. Both offered a NON-drop-in
     // replacement for the plain-wrapper case, which is the falsehood; keeping
@@ -299,7 +288,6 @@ describe('div deprecation guidance — true, and agreed across four surfaces (#6
     for (const [surface, text] of [
       ['notice', notice],
       ['declaration', declared],
-      ['div.mdx', mdx],
     ] as const) {
       expect(text, `${surface} still recommends "semantic layout components"`).not.toContain(
         'semantic layout components',
@@ -314,7 +302,6 @@ describe('div deprecation guidance — true, and agreed across four surfaces (#6
     // would satisfy every one of them.
     expect(notice).toContain('deprecated');
     expect(declared).toContain('"box"');
-    expect(mdx).toContain('Migration Guide');
   });
 
   it('leaves `span` alone — a separate judgement, not swept in', () => {
@@ -322,7 +309,6 @@ describe('div deprecation guidance — true, and agreed across four surfaces (#6
     // story changed, so span's guidance must be untouched by this edit.
     const notice = noticeFor('span');
     const declared = declaredReplacement('span');
-    const mdx = readFileSync(SPAN_MDX_PATH, 'utf8');
 
     const offered = offeredTypeNames(bulletLines(notice).join('\n'));
     // Control first: span's guidance was really read, and really offers
@@ -331,6 +317,5 @@ describe('div deprecation guidance — true, and agreed across four surfaces (#6
 
     expect(offered.has('box')).toBe(false);
     expect(declared).not.toContain('box');
-    expect(mdx).not.toContain('<code>box</code>');
   });
 });

@@ -98,7 +98,7 @@ const REPO_ROOT = join(HERE, '..', '..', '..', '..');
 // The README's "Basic Usage" example lives in the quick-start guide since
 // objectstack#26080 folded the tree's root README into the repository root's;
 // `README` below names that page, and every assertion still reads the same fence.
-const README = readFileSync(join(REPO_ROOT, 'content/docs/guide/quick-start.md'), 'utf8');
+const README = readFileSync(join(REPO_ROOT, '../content/docs/frontend/quick-start.mdx'), 'utf8');
 
 /* -------------------------------------------------------------------------- */
 /* Leg 1 — compile-time, compiled by `tsc -p packages/types/tsconfig.test.json` */

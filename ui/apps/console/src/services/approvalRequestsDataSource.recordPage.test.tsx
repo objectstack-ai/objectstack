@@ -93,7 +93,7 @@ const host = {
 
 const EN: I18nConfig = { defaultLanguage: 'en', detectBrowserLanguage: false };
 
-function openRequestPage() {
+function openRequestPage(search = '') {
   const ds = createApprovalRequestsDataSource({
     host: host as unknown as DataSource,
     scope: { kind: 'awaiting_me', approverIds: ['u1'] },
@@ -107,7 +107,7 @@ function openRequestPage() {
   } as never;
   render(
     <I18nProvider config={EN} persistLanguage={false}>
-      <MemoryRouter initialEntries={[`/apps/demo/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`]}>
+      <MemoryRouter initialEntries={[`/apps/demo/${APPROVAL_REQUEST_OBJECT}/record/${REQ}${search}`]}>
         <MetadataCtx.Provider value={metadata}>
           <RecordDetailView
             dataSource={ds as never}
@@ -158,7 +158,9 @@ describe('the record page over the routed approvals source (objectui#12032)', ()
 
   it('control: a found request renders, read once from the get route with no query', async () => {
     answer = 'ok';
-    openRequestPage();
+    // Opened on the Timeline tab: the synthesized page's feed is a tab since
+    // #27055 (no footer), and its reads are the side reads this pins.
+    openRequestPage('?tab=timeline');
     expect((await screen.findAllByText('invoice_approval', undefined, { timeout: 5000 })).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.queryByTestId('record-load-failed')).toBeNull());
     expect(new Set(getReads)).toEqual(new Set([`/api/v1/approvals/requests/${REQ}`]));

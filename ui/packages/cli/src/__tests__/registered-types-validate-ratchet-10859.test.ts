@@ -725,7 +725,7 @@ describe('registered NAMESPACED component types refused at `type` — a ratchet 
 
 /** Rooted on this file, never on `process.cwd()`. */
 const HERE = dirname(fileURLToPath(import.meta.url));
-const QUICK_START = join(HERE, '..', '..', '..', '..', 'content', 'docs', 'guide', 'quick-start.md');
+const QUICK_START = join(HERE, '..', '..', '..', '..', '..', 'content', 'docs', 'frontend', 'quick-start.mdx');
 
 /** See `validate-root-path-line.test.ts` — the escape byte is never spelled. */
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');

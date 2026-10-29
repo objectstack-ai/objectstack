@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Chart components plugin for Object UI, powered by Recharts",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-charts",
+  "description": "Chart components plugin for ObjectUI, powered by Recharts",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-charts",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

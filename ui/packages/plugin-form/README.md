@@ -44,7 +44,7 @@ are the schema types those calls claim, read off the calls themselves in
 
 | Namespaced type | Bare-name fallback | Component behind it |
 |---|---|---|
-| `plugin-form:object-form` | `object-form` | `ObjectForm` — metadata-driven form over one record |
+| `plugin-form:object-form` | `object-form` | `ObjectForm` — metadata-driven form over one record; with `formType: 'drawer'` or `'modal'` the block wraps it in that container (see [Where an `object-form` block opens](#where-an-object-form-block-opens)) |
 | `view:form` | none | the same renderer under the view protocol |
 | `plugin-form:embeddable-form` | `embeddable-form` | `EmbeddableForm` — standalone public form |
 | `plugin-form:object-master-detail-form` | `object-master-detail-form` | `MasterDetailForm` — parent + child line items in one submit |
@@ -76,7 +76,6 @@ import {
   ObjectForm,
   TabbedForm,
   WizardForm,
-  SplitForm,
   DrawerForm,
   ModalForm,
   EmbeddableForm,
@@ -115,8 +114,6 @@ import type {
   FormSectionConfig,
   WizardFormProps,
   WizardFormSchema,
-  SplitFormProps,
-  SplitFormSchema,
   DrawerFormProps,
   DrawerFormSchema,
   ModalFormProps,
@@ -299,8 +296,7 @@ the form looks validated while validating nothing.
 A create form has no persisted record, so its opening values come from the
 object schema's declared defaults: a field's `defaultValue`, or the option its
 option list marks `default: true`. Every object-form container
-(`ObjectForm`, `ModalForm`, `DrawerForm`, `TabbedForm`, `SplitForm`,
-`WizardForm`) resolves them the same way, through `schemaDefaults`:
+(`ObjectForm`, `ModalForm`, `DrawerForm`, `TabbedForm`, `WizardForm`) resolves them the same way, through `schemaDefaults`:
 
 | Declared | Create form opens with | Why |
 |---|---|---|
@@ -529,8 +525,8 @@ A sectioned form renders as ONE grid, and two keys decide its shape:
 
 The view's `columns` wins; without it the grid takes the widest section's
 density, and without either it is single-column. Every sectioned host resolves it
-the same way — `ObjectForm` (simple), `ModalForm`, `TabbedForm`, `SplitForm`,
-`WizardForm` — so one piece of metadata lays out identically wherever it is
+the same way — `ObjectForm` (simple), `ModalForm`, `TabbedForm`, `WizardForm` —
+so one piece of metadata lays out identically wherever it is
 rendered. (`WizardForm` has no widest-section fallback: its steps never share a
 viewport, so each step keeps its own authored width.)
 
@@ -740,12 +736,23 @@ divider.
 - Fields no pane claims render above the panel group rather than disappearing.
 - Needs at least two panes; ignored when the form uses `children` or `fieldTabs`.
 
-`SplitForm` is built on this. Each section declares its panel via `pane:
-'primary' | 'secondary'` (spec `FormSection.pane`) — explicit per-section
-placement, so reordering sections never silently moves them across the divider.
-When omitted, the legacy positional rule applies: the first section becomes the
-primary pane, the rest stack in the secondary one behind inline section headers.
-(The spec rejects `pane` on non-split form types at parse.)
+No `object-form` layout draws panes any more: `formType: 'split'`, the
+`SplitForm` renderer built on this, and the section `pane` key were removed
+together (ADR-0050, objectstack#27159). `fieldPanes` stays a `form` key for a
+host that composes panes itself.
+
+### Where an `object-form` block opens
+
+An `object-form`'s `formType` is the form's layout — `simple` (the default),
+`tabbed` or `wizard` — or, on the block, the container the block opens it in:
+`drawer` or `modal` (ADR-0050 Decision 4). `ObjectForm` only lays the form out;
+the block renderer is the caller that supplies the container, so a `drawer` or
+`modal` block mounts `ObjectFormContainer`, which hands the node to
+`DrawerForm` or `ModalForm` with its `drawerSide` / `drawerWidth` or
+`modalSize` / `modalCloseButton`. A host that renders `<ObjectForm>` directly
+gets the inline form whatever its `formType` says, and opens its own drawer or
+dialog around it — the console's New and Edit dialogs mount `ModalForm`
+themselves.
 
 ## Examples
 
@@ -958,7 +965,7 @@ with no adapter to fetch it and no host seam to hand the values to — **refuses
 the submit with `DataSource is required for form submission (inline mode not
 configured)`. The error reaches `schema.onError` and is rethrown.
 
-This is uniform across all six renderers (`simple`, `tabbed`, `wizard`, `split`,
+This is uniform across all five renderers (`simple`, `tabbed`, `wizard`,
 `drawer`, `modal`). It used to be uniform in the other direction: the five
 variant renderers answered an adapter-less submit by calling `onSuccess` and
 returning, which reported a save that never happened and, through
@@ -971,7 +978,7 @@ said it owns the write is never bypassed for want of an adapter it never needed.
 An `object-form` in `mode: 'edit'` with a `recordId` reads the record with
 `dataSource.findOne`, and its save writes **only the fields that differ from
 that read** (objectui#10156). Every layout does this: the simple form and the
-`tabbed`, `wizard`, `split`, `modal` and `drawer` variants (objectui#10563). So
+`tabbed`, `wizard`, `modal` and `drawer` variants (objectui#10563). So
 does a simple form whose mobile `stepper` option shows it one step at a time
 through the wizard, and the parent operation of a master-detail form, whose
 header is a simple or a `tabbed` form. A master-detail child row already worked
@@ -998,7 +1005,7 @@ server's effective API operations deny (objectui#10612). While that lock holds,
 every layout shows one notice above the fields that names the object, by its
 translated label, and the missing permission (`form.noPermissionToCreate` or
 `form.noPermissionToEdit`, objectui#11000); a field locked on its own shows none.
-The submit button of the simple, `tabbed`, `split`, `modal` and `drawer` layouts
+The submit button of the simple, `tabbed`, `modal` and `drawer` layouts
 stays on screen and the lock does not disable it; the server's write guard is
 what refuses the save.
 A `wizard` disables Next and its final submit button, and its step indicator does
@@ -1229,7 +1236,7 @@ The plugin includes these field components:
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-form)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-form)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-form)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

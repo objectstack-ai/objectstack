@@ -27,7 +27,6 @@ import type {
   EngineDeleteOptions,
   EngineAggregateOptions,
   EngineCountOptions,
-  DataEngineRequest,
 } from '@objectstack/spec/data';
 
 export interface IDataEngine {
@@ -47,9 +46,6 @@ export interface IDataEngine {
   vectorFind?(objectName: string, vector: number[], options?: {
     where?: any; limit?: number; fields?: string[]; threshold?: number;
   }): Promise<any[]>;
-
-  // Batch Operations (optional, transactional)
-  batch?(requests: DataEngineRequest[], options?: { transaction?: boolean }): Promise<any[]>;
 
   // Raw Command Escape Hatch (optional)
   execute?(command: any, options?: Record<string, any>): Promise<any>;
@@ -470,8 +466,8 @@ declares one; none carries a `readonly` policy of its own any more — see
 <Callout type="warn">
 `WriteObservabilityOptions` is a **TS-contract-level, in-process-only** bag —
 all three members. It is deliberately not part of the serializable Zod options schemas:
-a function is unrepresentable in JSON Schema and cannot cross the RPC (Virtual
-Data Engine) boundary, so remote callers never receive these events; and putting
+a function is unrepresentable in JSON Schema and cannot be serialized, so remote
+callers (REST, the client SDK) never receive these events; and putting
 `strictReadonlyWrites` in the serializable bag would let any client toggle
 write-refusal on a security-adjacent path (#5126 ruling). A remote caller can set
 none of the three, and for the strips it gets NEITHER behaviour: its write is
@@ -569,17 +565,12 @@ const results = await engine.vectorFind?.('document', embeddingVector, {
 });
 ```
 
-### batch (Transactional)
+### Several writes, atomically
 
-Execute multiple operations in a single transaction:
-
-```typescript
-const results = await engine.batch?.([
-  { method: 'insert', object: 'project', data: { name: 'Website Redesign', status: 'active' } },
-  { method: 'insert', object: 'task', data: { title: 'Design mockups', status: 'open' } },
-  { method: 'insert', object: 'task', data: { title: 'Implement frontend', status: 'open' } },
-], { transaction: true });
-```
+There is no `batch` member: it was never implemented by any engine and was retired
+(ADR-0119 D3). In process, wrap the writes in `IObjectQLEngine.transaction(cb)`;
+for a batch over one object use the metadata protocol's `batchData` with
+`options.atomic: true`; over the wire, `POST {basePath}/batch`.
 
 ### execute (Raw Command)
 
@@ -624,7 +615,7 @@ detection locate drivers.
 <Callout type="warn">
 **Deprecated Parameter Names**
 
-The following legacy parameter names are accepted by the RPC layer for backward compatibility but should **not** be used in new code. The protocol normalizer resolves conflicts with canonical names taking precedence.
+The following legacy parameter names are accepted on the wire (the protocol normalizer) for backward compatibility but should **not** be used in new code. The protocol normalizer resolves conflicts with canonical names taking precedence.
 
 | Legacy (Deprecated) | Canonical | Notes |
 |:---------------------|:----------|:------|

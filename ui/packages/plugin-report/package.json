@@ -56,7 +56,7 @@
     "vite-plugin-dts": "^5.1.2",
     "vitest": "^4.1.10"
   },
-  "description": "Report plugin for Object UI — schema-driven pivot tables, grouped aggregations and printable report layouts",
+  "description": "Report plugin for ObjectUI — schema-driven pivot tables, grouped aggregations and printable report layouts",
   "keywords": [
     "objectui",
     "sdui",
@@ -80,7 +80,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-report",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins",
   "publishConfig": {
     "access": "public"
   }

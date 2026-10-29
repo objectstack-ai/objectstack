@@ -63,12 +63,14 @@ const FIELD_RECEIVERS = new Set(['field', 'override', 'def']);
 /**
  * The section copy sites per file, as of this card. A site added or removed is
  * a deliberate edit here; the scan below is what re-derives the numbers.
+ * objectstack#27159: `ObjectForm` dropped its split arm (5 → 2) and its drawer
+ * and modal arms moved, verbatim, into `ObjectFormContainer` (2).
  */
 const EXPECTED_SECTION_SITES: Record<string, number> = {
-  'packages/plugin-form/src/ObjectForm.tsx': 5,
+  'packages/plugin-form/src/ObjectForm.tsx': 2,
+  'packages/plugin-form/src/ObjectFormContainer.tsx': 2,
   'packages/plugin-form/src/ModalForm.tsx': 4,
   'packages/plugin-form/src/DrawerForm.tsx': 2,
-  'packages/plugin-form/src/SplitForm.tsx': 1,
   'packages/plugin-form/src/TabbedForm.tsx': 3,
   'apps/console/src/components/FormPage.tsx': 1,
 };

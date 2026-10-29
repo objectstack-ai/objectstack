@@ -165,11 +165,13 @@ afterEach(() => {
 });
 
 describe('record page: the favorites entry is in the overflow, ahead of Share (objectui#12427)', () => {
-  it('the overflow leads with Add to favorites, then Share', async () => {
+  it('the overflow leads with Add to favorites, then Share — after the Refresh that heads it', async () => {
     await mountRecordPage();
     const items = await openOverflow();
-    expect(items.indexOf('Add to favorites')).toBe(0);
-    expect(items.indexOf('Share')).toBe(1);
+    // objectstack#27055: the host's Refresh is the ⋯'s first item.
+    expect(items.indexOf('Refresh')).toBe(0);
+    expect(items.indexOf('Add to favorites')).toBe(1);
+    expect(items.indexOf('Share')).toBe(2);
   });
 
   it('the record header draws no star, so the overflow entry is the one favorites control', async () => {
@@ -202,9 +204,9 @@ describe('record page: the favorites entry is in the overflow, ahead of Share (o
     ]);
 
     // The header re-derives its system actions on the next render, so the
-    // overflow's first entry now offers the way back.
+    // overflow's first action entry (after Refresh) now offers the way back.
     await waitFor(() =>
-      expect((screen.getAllByRole('menuitem')[0].textContent ?? '').trim()).toBe('Remove from favorites'),
+      expect((screen.getAllByRole('menuitem')[1].textContent ?? '').trim()).toBe('Remove from favorites'),
     );
   });
 });

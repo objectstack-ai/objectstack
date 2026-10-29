@@ -1,0 +1,126 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ * The record page v3 timeline: ONE stream (objectstack#27055, Target 3).
+ *
+ * Three sources, one stream: the discussion (`sys_comment`, `enable.feeds`),
+ * the activity (`sys_activity`, `enable.activities`) — both already merged by
+ * the host's `DiscussionContext` — and the field changes (`sys_audit_log`,
+ * `trackHistory`), which the host hands over through
+ * {@link RecordFieldChangesContext}. This module is the pure part: the audit
+ * rows as feed items, the merge (newest first, an update counted once), and
+ * the four filter chips 全部 / 活动 / 讨论 / 变更.
+ */
+
+import * as React from 'react';
+import type { FeedItem } from '@object-ui/types';
+
+/**
+ * The record's field changes as feed items, from the host's audit read —
+ * `null` while the host has none to give (no `trackHistory`, an authored
+ * page, a read not made). Read by the timeline stream on the default record
+ * page only.
+ */
+export const RecordFieldChangesContext = React.createContext<FeedItem[] | null>(null);
+
+/** One audit-log entry as the host enriches it (`RecordDetailView`'s history read). */
+export interface AuditEntryLike {
+  id?: string | number;
+  created_at?: string | number | Date;
+  action?: string;
+  user_name?: string | null;
+  user_avatar?: string | null;
+  summary?: string | null;
+  changes?: Array<{ field: string; label?: string; from?: unknown; to?: unknown }>;
+}
+
+const displayOf = (value: unknown): string | undefined =>
+  value === null || value === undefined || value === '' ? undefined : String(value);
+
+/**
+ * Audit entries as `field_change` feed items. Only an entry that changed a
+ * field becomes one: the record's creation is the activity stream's own
+ * `created` row, so it is not said twice.
+ */
+export function auditEntriesToFeedItems(
+  entries: readonly AuditEntryLike[] | null | undefined,
+  labels: { unknownUser: string },
+): FeedItem[] {
+  const out: FeedItem[] = [];
+  for (const entry of entries ?? []) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    if (changes.length === 0) continue;
+    const at = entry.created_at instanceof Date ? entry.created_at.toISOString() : entry.created_at;
+    out.push({
+      id: `audit:${entry.id ?? out.length}`,
+      type: 'field_change',
+      actor: entry.user_name || labels.unknownUser,
+      ...(entry.user_avatar ? { actorAvatarUrl: entry.user_avatar } : {}),
+      body: entry.summary ?? '',
+      createdAt: at == null ? '' : String(at),
+      fieldChanges: changes.map((change) => ({
+        field: change.field,
+        fieldLabel: change.label ?? change.field,
+        oldValue: change.from,
+        newValue: change.to,
+        ...(displayOf(change.from) !== undefined ? { oldDisplayValue: displayOf(change.from) } : {}),
+        ...(displayOf(change.to) !== undefined ? { newDisplayValue: displayOf(change.to) } : {}),
+      })),
+      source: 'sys_audit_log',
+    } as FeedItem);
+  }
+  return out;
+}
+
+const timeOf = (item: FeedItem): number => {
+  const t = Date.parse(item.createdAt);
+  return Number.isFinite(t) ? t : 0;
+};
+
+/**
+ * The one stream: the host's discussion + activity items and the field
+ * changes, newest first. With field changes present, the activity stream's
+ * own `updated` rows step aside — the audit entry says the same update with
+ * its before and after values, and an update is counted once.
+ */
+export function mergeTimelineStream(
+  feed: readonly FeedItem[] | null | undefined,
+  fieldChanges: readonly FeedItem[] | null | undefined,
+): FeedItem[] {
+  const changes = fieldChanges ?? [];
+  const base = (feed ?? []).filter(
+    (item) => !(changes.length > 0 && (item as { activityType?: string }).activityType === 'updated'),
+  );
+  return [...base, ...changes]
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => timeOf(b.item) - timeOf(a.item) || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+/** The stream's filter chips: 全部 / 活动 / 讨论 / 变更. */
+export type TimelineStreamFilter = 'all' | 'activity' | 'discussion' | 'changes';
+
+export const TIMELINE_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['all', 'activity', 'discussion', 'changes'];
+
+/** Whether an item is a system entry — drawn as one compact muted line. */
+export function isSystemStreamEntry(item: FeedItem): boolean {
+  return item.type === 'field_change' || item.type === 'system';
+}
+
+/** The items a chip shows: discussion = comments; changes = field changes; activity = the rest. */
+export function filterTimelineStream(items: readonly FeedItem[], filter: TimelineStreamFilter): FeedItem[] {
+  switch (filter) {
+    case 'discussion':
+      return items.filter((item) => item.type === 'comment');
+    case 'changes':
+      return items.filter((item) => item.type === 'field_change');
+    case 'activity':
+      return items.filter((item) => item.type !== 'comment' && item.type !== 'field_change');
+    default:
+      return [...items];
+  }
+}

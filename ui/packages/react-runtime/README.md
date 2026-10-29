@@ -16,7 +16,7 @@ lazy-load it behind a capability flag.
 >
 > For untrusted authors use **`kind:'html'`** instead: constrained JSX, parsed
 > into a schema tree and never executed. See
-> [React pages](../../content/docs/guide/react-pages.md).
+> [React pages](https://objectstack.ai/docs/ui/react-pages).
 
 ## Installation
 
@@ -171,7 +171,7 @@ generateElement(code, scope)     // transpile + eval → ReactElement | null (th
 
 ## Related
 
-- [React pages guide](../../content/docs/guide/react-pages.md) — authoring
+- [React pages guide](https://objectstack.ai/docs/ui/react-pages) — authoring
   `kind:'react'` pages, the injected block scope, and the capability gate.
 - `@objectstack/sdui-parser` — the `kind:'html'` tier: parse, never execute.
 

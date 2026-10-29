@@ -29,10 +29,11 @@
  * A diagnostic that fires everywhere is as useless as one that fires nowhere, and
  * far more annoying. The measured split on `origin/main` is:
  *
- *   - `split` / `drawer` / `modal` — `ObjectForm` rebuilds each section key by key
- *     and each of those three maps COPIES `visibleWhen` (#6111), so the predicate
- *     reaches a renderer. Warning on them would be a false alarm about a working
- *     feature.
+ *   - `drawer` / `modal` — the `object-form` block's container
+ *     (`ObjectFormContainer`) rebuilds each section key by key and both maps
+ *     COPY `visibleWhen` (#6111), so the predicate reaches a renderer. Warning
+ *     on them would be a false alarm about a working feature. (`split` did the
+ *     same until it retired with ADR-0050.)
  *   - flat / `simple` — carries the predicate on the `section-divider`
  *     pseudo-field. Also works.
  *   - `tabbed` (`TabbedForm`) — WAS inert, and is no longer: the tabbed map now
@@ -60,7 +61,9 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import React from 'react';
 import { PredicateScopeProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { sectionPredicateUnsupportedWarning } from '../sectionPredicateDiagnostic';
 
 registerAllFields();
@@ -121,7 +124,7 @@ const renderObjectForm = async (
 ) => {
   const view = render(
     <PredicateScopeProvider scope={scope as any}>
-      <ObjectForm
+      <ObjectFormContainer
         schema={{
           type: 'object-form',
           objectName: 'crm_case',
@@ -162,7 +165,7 @@ describe('#6237 — the ONE still-inert arm REPORTS instead of dropping the pred
     // a layout they may not want for a reason that no longer exists.
     await renderObjectForm(DENIED, { formType: 'wizard' });
     await waitFor(() => expect(diagnosticCalls().length).toBe(1));
-    expect(diagnosticCalls()[0]).toContain("`formType: 'tabbed' | 'modal' | 'drawer' | 'split'`");
+    expect(diagnosticCalls()[0]).toContain("`formType: 'tabbed' | 'modal' | 'drawer'`");
   });
 
   it('the report does not depend on the VERDICT — an admitting predicate is just as inert', async () => {
@@ -190,11 +193,10 @@ describe('#6237 — the boundary: arms that HONOUR the predicate stay silent', (
   // feature #6111 / #6619 already landed.
   const honouring: Array<[string, Record<string, unknown>]> = [
     ['simple (flat, section-divider pseudo-field)', { formType: 'simple' }],
-    ['modal (ObjectForm modal map copies it)', { formType: 'modal', open: true }],
+    ['modal (the block container\'s modal map copies it)', { formType: 'modal', open: true }],
     ['modal + contentLayout tabbed (#6619 FormFieldTab.visibleWhen)',
       { formType: 'modal', open: true, contentLayout: 'tabbed' }],
-    ['drawer (ObjectForm drawer map copies it)', { formType: 'drawer', open: true }],
-    ['split (ObjectForm split map copies it)', { formType: 'split' }],
+    ['drawer (the block container\'s drawer map copies it)', { formType: 'drawer', open: true }],
     // The row this card moved. `tabbed` honours the key through the very same
     // renderer machinery the `modal + contentLayout: tabbed` row above uses —
     // `ObjectForm`'s tabbed map copies the predicate, `TabbedForm` copies it
@@ -229,7 +231,7 @@ describe('#6237 — the report is once per mount, not once per render', () => {
     // bury the console it is trying to speak into.
     view.rerender(
       <PredicateScopeProvider scope={DENIED as any}>
-        <ObjectForm
+        <ObjectFormContainer
           schema={{
             type: 'object-form',
             objectName: 'crm_case',
@@ -286,7 +288,7 @@ describe('#6237 — the message is single-sourced, and its remedy stays true', (
     // somewhere the key does nothing. The honouring rows above test the arms;
     // this tests the SENTENCE that recommends them.
     const message = sectionPredicateUnsupportedWarning('wizard', 'pay');
-    for (const honoured of ['tabbed', 'modal', 'drawer', 'split']) {
+    for (const honoured of ['tabbed', 'modal', 'drawer']) {
       expect(message).toContain(honoured);
     }
     // ...and never recommends the arm it is complaining about.
