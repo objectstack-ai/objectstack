@@ -37,6 +37,9 @@ interface Row { [k: string]: unknown }
 function makeFakeEngine() {
   const rows = new Map<string, Row>();
   const historyRows: Row[] = [];
+  // [#27539] The context each WRITE verb was handed, in call order — what the
+  // engine turns into the hook's `session` / `provenance`.
+  const writes: Array<{ verb: string; table: string; context: Record<string, unknown> | undefined }> = [];
 
   const keyOf = (w: Record<string, unknown>) =>
     `${String(w.type)}|${String(w.name)}|${String(w.organization_id ?? 'null')}|${String(w.state ?? 'active')}`;
@@ -60,6 +63,7 @@ function makeFakeEngine() {
   return {
     rows,
     historyRows,
+    writes,
     async find(table: string, opts: { where: Record<string, unknown> }) {
       if (table === 'sys_metadata_history') return historyRows.filter((h) => matchesHistory(h, opts.where));
       return Array.from(rows.values()).filter((r) => {
@@ -74,7 +78,8 @@ function makeFakeEngine() {
       if (table === 'sys_metadata_history') return historyRows.find((h) => matchesHistory(h, opts.where)) ?? null;
       return findRow(opts.where)?.row ?? null;
     },
-    async insert(table: string, data: Record<string, unknown>) {
+    async insert(table: string, data: Record<string, unknown>, opts?: { context?: Record<string, unknown> }) {
+      writes.push({ verb: 'insert', table, context: opts?.context });
       if (table === 'sys_metadata_history') {
         const h: Row = { ...data };
         if (!h.id) h.id = `h_${historyRows.length + 1}`;
@@ -86,15 +91,17 @@ function makeFakeEngine() {
       rows.set(k, row);
       return { id: row.id as string };
     },
-    async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+    async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown>; context?: Record<string, unknown> }) {
       assertEngineUpdateDispatch(data, opts);
+      writes.push({ verb: 'update', table: _t, context: opts.context });
       const found = findRow(opts.where);
       if (!found) throw new Error('not found');
       rows.set(found.key, { ...found.row, ...data });
       return { id: found.row.id as string };
     },
-    async delete(_t: string, opts: { where: Record<string, unknown> }) {
+    async delete(_t: string, opts: { where: Record<string, unknown>; context?: Record<string, unknown> }) {
       assertEngineDeleteDispatch(opts);
+      writes.push({ verb: 'delete', table: _t, context: opts.context });
       const found = findRow(opts.where);
       if (!found) return { deleted: 0 };
       rows.delete(found.key);
@@ -258,5 +265,57 @@ describe('#23033 — the sys_metadata row records who created it and who last ch
     await repo.put(ref, view('draft'), { parentVersion: null, actor: 'usr_carol', state: 'draft' });
     const drafts = await repo.listDrafts({ type: 'view' });
     expect(drafts.map((d) => [d.name, d.updatedBy])).toEqual([['case_grid', 'usr_carol']]);
+  });
+});
+
+/**
+ * [#27539, ADR-0073 D3] The save's actor reaches the AUDIT row too. Every
+ * `sys_metadata` write runs under `isSystem` (the door already authorized it),
+ * so the engine's hook carries no `session.userId`, and the audit writer's only
+ * other channel for `sys_audit_log.user_id` is `provenance.attributedUserId`,
+ * which the engine copies from `ExecutionContext.attributedUserId`. So the
+ * repository hands every write verb of `put` and `delete` the actor on that
+ * key, and never as `userId` (that would make every caller-gating hook read
+ * the actor as the caller).
+ *
+ * This fake records the context it is handed, so these pins prove the
+ * repository HANDS the engine the attribution. That the engine copies it into
+ * `provenance` and the audit writer reads it into `user_id` / `actor` is the
+ * engine's and the writer's own contract, measured end to end on the PR.
+ */
+describe('#27539 — put and delete credit the actor to the audit writer through attributedUserId', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let repo: SysMetadataRepository;
+  const ref = { org: 'system', type: 'view' as const, name: 'case_grid' };
+  const contexts = () => engine.writes.map((w) => [w.verb, w.table, w.context?.isSystem, w.context?.attributedUserId, w.context?.userId]);
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    repo = new SysMetadataRepository({ engine });
+  });
+
+  it('create, update and delete with an actor credit that actor on every write, as the system', async () => {
+    const first = await repo.put(ref, view('A'), { parentVersion: null, actor: 'usr_alice' });
+    const second = await repo.put(ref, view('B'), { parentVersion: first.version, actor: 'usr_bob' });
+    await repo.delete(ref, { parentVersion: second.version, actor: 'usr_carol' });
+    expect(contexts()).toEqual([
+      ['insert', 'sys_metadata', true, 'usr_alice', undefined],
+      ['insert', 'sys_metadata_history', true, 'usr_alice', undefined],
+      ['update', 'sys_metadata', true, 'usr_bob', undefined],
+      ['insert', 'sys_metadata_history', true, 'usr_bob', undefined],
+      ['delete', 'sys_metadata', true, 'usr_carol', undefined],
+      ['insert', 'sys_metadata_history', true, 'usr_carol', undefined],
+    ]);
+  });
+
+  it('CONTROL: with no actor the writes carry no attributedUserId key at all — unattributed, as before', async () => {
+    const first = await repo.put(ref, view('A'), { parentVersion: null, actor: null });
+    const second = await repo.put(ref, view('B'), { parentVersion: first.version });
+    await repo.delete(ref, { parentVersion: second.version, actor: null });
+    expect(engine.writes).toHaveLength(6);
+    for (const w of engine.writes) {
+      expect(w.context?.isSystem).toBe(true);
+      expect(w.context !== undefined && 'attributedUserId' in w.context).toBe(false);
+    }
   });
 });
