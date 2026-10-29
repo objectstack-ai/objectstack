@@ -1,13 +1,13 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/rest': patch
-'@objectstack/client': patch
+'@objectstack/spec': minor
+'@objectstack/rest': minor
+'@objectstack/client': minor
 ---
 
 feat(rest): `POST /api/v1/data/{object}/{id}/page` answers everything a record page asks when it opens, in one request (#27627)
 
 Clause-②: yes (widening: a new route and its request and response shapes; no existing route, key or answer changes)
-Metadata-protocol: none
+Metadata-protocol: added
 
 A record page used to open in two or three stages of requests: the record, the approval list, the access verdicts and each related list's definition first, then the approval lock and one count probe per related list. The new route answers all of it from one request:
 

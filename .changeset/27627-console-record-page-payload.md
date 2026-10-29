@@ -1,14 +1,14 @@
 ---
-'@object-ui/types': patch
-'@object-ui/data-objectstack': patch
-'@object-ui/components': patch
-'@object-ui/plugin-detail': patch
+'@object-ui/types': minor
+'@object-ui/data-objectstack': minor
+'@object-ui/components': minor
+'@object-ui/plugin-detail': minor
 ---
 
 feat(console): a record page opens from one request, and a stepper's neighbours are asked ahead (#27627)
 
 Clause-②: yes (widening: optional `DataSource.getRecordPage` / `prefetchRecordPage`, new exports; no existing contract changes)
-Metadata-protocol: none
+Metadata-protocol: added
 
 The record page (full page, split pane and drawer) asks `DataSource.getRecordPage` once when it opens, before any of its readers runs, and hands each part of the answer to the reader that used to ask for it:
 
