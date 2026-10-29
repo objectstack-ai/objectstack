@@ -4,6 +4,13 @@ import { ANALYTICS_CUBE_NAME_REQUIRED, AnalyticsQueryRequestSchema } from '@obje
 import { fieldsFromZodIssues, validationFailure, VALIDATION_FAILED_STATUS } from '@objectstack/types';
 
 /**
+ * The schema's `cube` member, resolved on the first refusal and kept: reading
+ * it at module load would resolve the lazy request schema for every importer
+ * of the service, which is the allocation `lazySchema` exists to defer.
+ */
+let cubeMember: typeof AnalyticsQueryRequestSchema.shape.cube | undefined;
+
+/**
  * The ONE refusal for an analytics query that names no cube — `cube` absent or
  * the empty string — thrown by `AnalyticsService.query` (through `queryIn`) and
  * `AnalyticsService.generateSql` before any other gate runs.
@@ -48,13 +55,6 @@ import { fieldsFromZodIssues, validationFailure, VALIDATION_FAILED_STATUS } from
  * carries, and the engine's cube resolution answers it `CUBE_NOT_FOUND` / 404.
  * Refusing it would be a second rule beside the schema's `.min(1)`.
  */
-/**
- * The schema's `cube` member, resolved on the first refusal and kept: reading
- * it at module load would resolve the lazy request schema for every importer
- * of the service, which is the allocation `lazySchema` exists to defer.
- */
-let cubeMember: typeof AnalyticsQueryRequestSchema.shape.cube | undefined;
-
 export function cubeNameRequiredError(cube: unknown): Error & { code: string; status: number } {
   cubeMember ??= AnalyticsQueryRequestSchema.shape.cube;
   const verdict = cubeMember.safeParse(cube);
