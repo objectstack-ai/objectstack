@@ -295,9 +295,24 @@ export type {
   DriverHealth,
   DatasourceUnavailableInfo,
   DatasourceUnavailableKind,
+  DatasourceUnavailableReason,
   PrimaryDatasourceVerdict,
   PrimaryDatasourceUnresolvedReason,
 } from './driver-connect-errors.js';
+// [#27277] The engine's floor over a plugin driver on an external datasource
+// (ADR-0015 Tier A): the in-memory reading of a driver query it applies, and
+// the two 422 refusals it raises (registered in ERROR_CODE_LEDGER).
+export { applyDriverQueryInMemory } from './driver-query-in-memory.js';
+export type { DriverQueryInMemory, DriverQueryInMemoryOptions } from './driver-query-in-memory.js';
+export {
+  ExternalWriteRefusedError,
+  ExternalRowCapExceededError,
+  EXTERNAL_WRITE_REFUSED_CODE,
+  EXTERNAL_ROW_CAP_EXCEEDED_CODE,
+  EXTERNAL_ROW_CAP,
+} from './external-driver-errors.js';
+export type { ExternalWriteOperation } from './external-driver-errors.js';
+export { needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';
 export type { InsertManyRowOutcome } from './engine.js';
 // [#5696] Thrown by `transaction(cb, base, { require: true })` when the
 // datasource cannot give a real transaction. Exported so a caller that fails
