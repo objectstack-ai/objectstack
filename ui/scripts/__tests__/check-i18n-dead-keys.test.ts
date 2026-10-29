@@ -74,10 +74,12 @@ function once<T>(read: () => T): () => T {
   return () => (held ??= { value: frozen(read()) }).value;
 }
 
+const realEnKeys = once(() => collectEnKeys(REPO_ROOT));
+
 const realTree = {
-  enKeys: once(() => collectEnKeys(REPO_ROOT)),
+  enKeys: realEnKeys,
   gate: once(() => analyze(REPO_ROOT)),
-  indirect: once(() => collectIndirectTemplateHeads(REPO_ROOT, realTree.enKeys())),
+  indirect: once(() => collectIndirectTemplateHeads(REPO_ROOT, realEnKeys())),
   sweep: once(() => sweep(REPO_ROOT)),
 };
 
