@@ -6,8 +6,9 @@
  *
  * The signature is DETACHED and computed over the exact artifact bytes that
  * will be uploaded — the same bytes the cloud control plane verifies at
- * publish time (`verifyPublisherSignature`) and the runtime re-verifies at
- * materialize time. It is emitted as `ed25519:<keyId>:<base64url>` and
+ * publish time (`verifyPublisherSignature`) and `os plugin install` verifies
+ * against the host's trusted keys before it materializes anything (ADR-0025
+ * §3.5 M1). It is emitted as `ed25519:<keyId>:<base64url>` and
  * written to a `<artifact>.sig` sidecar (and printed), to be passed as the
  * `signature` field when publishing. The artifact itself is NOT modified, so
  * signing is idempotent and the signed bytes are exactly the built bytes.
