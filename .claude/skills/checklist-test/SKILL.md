@@ -111,7 +111,7 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
 - **花费行。** 波次锚卡的派发记录与每个 runner 终报带各卡报告时的花费(`get_session` 的
   `external_metadata.usage.cost_usd`),供下一波校准。
 - **QA 运行不是车道卡。** runner(子代理或云卡)由发起本轮的会话直接派,⛔ 不走车道认领
-  与座位贴;pm-dispatch 管写入门(§4)、安全修复派卡与 PR 持有(Guardrails)。
+  与座位贴;pm-dispatch 管写入门(§4)、安全修复派发与 PR 持有(Guardrails)。
 - **没有子代理工具时,顺序跑 —— 并在运行记录里声明这一轮是顺序执行的。** 规则与它
   的论证住在 `checklist-author` 技能(维护者所定,一处成文);⛔ 不留第二份拷贝。
 - 忠实执行每项的 `steps`,按各自声明的 `oracle` 判定每条 `acceptance` 与 `negative`
@@ -135,10 +135,10 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 助,随运行环境一起丢弃。持久报告需要的是**复现规则,不是图片**。
 
 一轮的每次 GitHub 写入与 issue / PR 处理(抽取、查重、收口)只走 pm-dispatch 写入门:仓根直调
-`scripts/pm/issue-create.mjs`、`post-stamped.mjs`、`close-cards.mjs`,批量先
-`write-pace.mjs --announce-batch N`,云容器内自走 fleet relay;⛔ 永不 MCP `issue_write`(锁 1 已拒)或裸
-`curl`。写入门被本会话权限拦下 ⛔ 不绕行:待发文本落文件,路径交派发会话,由它读过照序
-经同一写入门补发;安全复现 ⛔ 不落文件 —— 写入未落地即未收口。记录这样写:
+`scripts/pm/issue-create.mjs`、`post-stamped.mjs`、`close-cards.mjs`,批量先 `write-pace.mjs --announce-batch N`,云
+容器自走 fleet relay;⛔ 永不 MCP `issue_write`(锁 1 已拒)或裸 `curl`。写入门被本会话权限拦下
+⛔ 不绕行:待发文本落盘,路径与正文随终报或会话间消息交派发会话,由它照序经原写入门
+补发;其中 ⛔ 无安全复现 —— 写入未落地即未收口。记录这样写:
 
 - **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:唯一
   形状、严格解析、分数**强制**;语法与退役写法见 RUNNER.md「The record title」。
@@ -184,9 +184,9 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 | **过期规格** | 两边都按各自的声明行事,条款钉的是已被裁决改掉的旧形状 | 立 re-point 卡:把条款重新指向现行规格,引裁决 |
 | **配对无效** | 该项与这个 subject / fixture 根本不成立(错配的 revision、不适用的环境) | 记 `blocked` 说明,⛔ 不立卡 |
 
-四选一是**穷尽的**:落不进任何一格的 `fail` 说明你还没判完 —— ⛔ 永不把它留成一条无
-处
-置的红行。
+除安全发现外,四选一是**穷尽的**:落不进任何一格的 `fail` 说明你还没判完 —— ⛔ 永不把
+它留成一条无处置的红行。安全发现那一行本身即处置:⛔ 不立卡、不写 `Extracted:` 行,修复
+由派发它的 PM 会话派(Guardrails)。
 
 与 §4「清单准确性发现归波次锚卡」的分界,是**有没有一条 `fail` 要清**:由 `fail` 判出
 的断言缺陷 / 过期规格各自立卡(那条红行得有人负责变绿),运行中顺带看到的清单准确性问
@@ -246,10 +246,10 @@ QA-source: #运行记录号 · area.item · 条款
 - **每个产品问题同一轮经 §4 立 issue。** `fail` 条款与条款外探测同样,⛔ 不只留在运行记
   录或聊天;安全发现按下一条。
 - **安全发现不立卡,复现不上 GitHub**(安全发现 = 认证 / 授权漏洞,或复现即利用配方的发
-  现):连只写 detail withheld 的卡也 ⛔ 不立,也不在锚卡、跟踪卡提它。运行记录只留一行
-  `area.item · 条款 · security finding — detail withheld, reported to PM`,算已完成判定、标题计
-  `FAIL`;复现经会话间消息私下报给**派发它的 PM 会话**,由它经 pm-dispatch 派修复:席内 `os-dev`
-  子代理、`xhigh`,复现只进派发令,PR、提交与 changeset 只写加固;要定契约的交维护者。
+  现):⛔ 不立任何卡,锚卡、跟踪卡不提;复现经会话间消息私报给**派发它的 PM 会话**(无此
+  通道则留本会话,终报报 blocked),由它经 pm-dispatch 派修复:席内 `os-dev` 子代理、`xhigh`,复现只
+  进派发令,PR、提交与 changeset 只写加固;要定契约的交维护者。运行记录只留一行
+  `area.item · 条款 · security finding — detail withheld, reported to PM`,算已完成判定、标题计 `FAIL`。
 - **runner 只测试。** 记录、缺陷卡、评论与 issue / PR 的每步处理都走 §4 写入门;⛔ 不派
   `os-dev`,⛔ 不驱动 PR:一轮产出的每个 PR 归派发的 PM 会话复核、欠时契约复审、翻 ready 与
   落地。⚠ 这两条与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边都不是对另一边的优先

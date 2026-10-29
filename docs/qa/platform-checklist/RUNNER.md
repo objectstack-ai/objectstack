@@ -86,8 +86,10 @@ selector handed you has a verdict; planned ids are listed, not chased.
      reproduction appears nowhere on GitHub: not the run issue, not a card, not a comment,
      not a PR. The run record carries one row,
      `area.item · clause · security finding — detail withheld, reported to PM`; that row
-     **is a completed verdict**, and the title counts it as a `FAIL`. The runner reports the reproduction **privately** to the session
-     that dispatched it, in a session-to-session message, and keeps it nowhere else. **That
+     **is a completed verdict**, and the title counts it as a `FAIL`. The runner reports the
+     reproduction **privately** to the session that dispatched it, in a session-to-session
+     message, and keeps it nowhere else; a runner with no such channel keeps it in its own
+     session and reports the hand-off as blocked, without the reproduction. **That
      dispatching PM session** decides the fix and dispatches it through `pm-dispatch`: an
      in-seat `os-dev` subagent at `xhigh` whose dispatch prompt alone carries the
      reproduction, and whose PR, commit and changeset describe a hardening without the
@@ -99,9 +101,11 @@ selector handed you has a verdict; planned ids are listed, not chased.
      a PR: the dispatching PM session owns every PR the run produces, through review,
      contract review where it is owed, readiness and landing. When the runner's own
      permission check refuses a write door, it does not route around it: it stages the
-     writes in a file, reports the path and hands off to the dispatching session, which
-     reads them and posts them through the same doors in the staged order. ⛔ A staged file
-     never carries a security reproduction; that travels by message only. (Maintainer
+     writes in a file and hands off to the dispatching session with the path **and the
+     staged text itself**, in its final report or by session-to-session message, because
+     the dispatching session cannot read a file in a cloud runner's container. That session
+     posts them through the same doors in the staged order. ⛔ The staged text never carries
+     a security reproduction; that travels only in the private report. (Maintainer
      disclosure ruling, 2026-08-18, recorded on #9387; fix-dispatch ruling, 2026-10-27,
      recorded on #25807; no-card, runner-only-tests and PM-dispatches-the-fix rulings,
      2026-10-29, recorded on #27377; the `checklist-test` skill states the same guardrail in
