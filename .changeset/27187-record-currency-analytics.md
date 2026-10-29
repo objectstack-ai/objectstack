@@ -18,6 +18,6 @@ Two compile-time refusals, `DATASET_INVALID` / 400, on the record mode alone, so
 - a measure `currency` over a record-mode amount, whose currency is per row;
 - a derived measure that combines a record-mode amount with an operand in another currency (another code field, a `fixed` code, an explicit code or the tenant's), for every op. A count operand is not compared, so an amount-per-invoice ratio still compiles.
 
-The same two shapes over `fixed` fields only are not judged.
+The same two shapes over `fixed` fields only are not judged here; ADR-0144 open item 12 refuses them on a card of its own after this release.
 
 ⛔ Not released alone: this ships in the same release as the record currency mode, its write refusals and the per-row display.

@@ -269,7 +269,7 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
       expectRefused([{ name: 'total_usd', aggregate: 'sum', field: 'amount', currency: 'USD' }], 'total_usd');
     });
 
-    it('CONTROL: a measure currency over a fixed field is not judged, whatever its code (an ADR-0144 open item)', () => {
+    it('CONTROL: a measure currency over a fixed field is not judged, whatever its code (ADR-0144 open item 12, its own card after R1)', () => {
       expect(compileRefusal([{ name: 'eur_as_jpy', aggregate: 'sum', field: 'amt_eur', currency: 'JPY' }])).toBeUndefined();
       expect(compileRefusal([{ name: 'eur', aggregate: 'sum', field: 'amt_eur', currency: 'EUR' }])).toBeUndefined();
     });
@@ -299,7 +299,7 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
       );
     });
 
-    it('CONTROL: a derived measure over two different fixed codes is not judged (an ADR-0144 open item)', () => {
+    it('CONTROL: a derived measure over two different fixed codes is not judged (ADR-0144 open item 12, its own card after R1)', () => {
       expect(compileRefusal([...base, { name: 'mixed', derived: { op: 'sum', of: ['usd', 'eur'] } }])).toBeUndefined();
     });
 

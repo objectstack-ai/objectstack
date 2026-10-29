@@ -19,11 +19,12 @@
  *    explicit measure code or the tenant's. Non-monetary operands (a `count`)
  *    are not compared, so an amount per invoice stays legal.
  *
- * ⛔ Not judged: the same two shapes over `fixed` / `dynamic` fields only — a
+ * ⛔ Not judged here: the same two shapes over `fixed` fields only — a
  * measure `currency` contradicting a `fixed` field, a derived measure over two
- * different `fixed` codes. Refusing those would narrow what compiles today,
- * which neither ruling #27119 nor ADR-0144 decides; it is an ADR-0144 open item
- * for the maintainer.
+ * different `fixed` codes. Refusing those narrows what compiles today, so
+ * ADR-0144 open item 12 was ruled (6486427200 on #8345) to refuse them on a
+ * card of its own after R1. A measure `currency` over a `dynamic` field stays
+ * legal under either.
  *
  * ## The resolved currency, at compile
  *

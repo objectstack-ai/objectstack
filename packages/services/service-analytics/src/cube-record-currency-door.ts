@@ -51,8 +51,8 @@
  * `INVALID_FIELD` / 400 through `invalidMemberError` (ADR-0112), with the
  * column and its object attached, as the #21044 door attaches them: a verdict
  * about one member the request named. The words carry the prescription:
- * group by the code field. A consolidated total over the stored home-currency
- * amount is ADR-0144 D5's, which ships with the write-time projection.
+ * group by the code field. A consolidated total aggregates the stored home
+ * field instead (ADR-0144 D6), which the write-time projection (D5) fills.
  */
 
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
