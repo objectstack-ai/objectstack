@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>抽屉 v4 · 有界侧窥 · 720 封顶 · 不压暗 · 列表可点换记录 · ⤢ 原地铺满</title>
+<title>抽屉 v4 · 有界侧窥 · 默认 720、可拖到 60vw · 不压暗 · 列表可点换记录 · ⤢ 原地铺满</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -96,7 +96,7 @@ tr.hov td{background:var(--sidebar)}
       <div style="margin-top:auto;height:36px;display:flex;align-items:center;padding:0 20px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">21 条记录</div>
     </section>
 
-    <aside style="position:absolute;top:0;right:0;bottom:0;width:720px;display:grid;grid-template-rows:auto auto auto 1fr;background:var(--bg);border-left:1px solid var(--border);box-shadow:-12px 0 32px rgba(15,23,42,.14)">
+    <aside style="position:absolute;top:0;right:0;bottom:0;width:720px;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border);box-shadow:-12px 0 32px rgba(15,23,42,.14)">
       <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 8px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">
         <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;padding-left:4px"><span style="color:var(--fg)">联系人</span><span class="k">3 / 21</span></span>
         <span style="display:inline-flex;gap:2px"><button type="button" class="iconbtn" aria-label="上一条 · K" style="width:24px;height:24px">↑</button><button type="button" class="iconbtn" aria-label="下一条 · J" style="width:24px;height:24px">↓</button><button type="button" class="iconbtn" aria-label="铺满（原地）" title="铺满 · ⌘⇧↵" style="width:24px;height:24px;margin:0 4px">⤢</button><button type="button" class="iconbtn" aria-label="关闭" style="width:24px;height:24px">✕</button></span>
@@ -112,7 +112,6 @@ tr.hov td{background:var(--sidebar)}
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border)"><span class="tab on">详情</span><span class="tab">关联 <span class="chip" style="height:16px;padding:0 5px">3</span></span><span class="tab">时间线 <span class="chip" style="height:16px;padding:0 5px">12</span></span></div>
       <div style="overflow:auto;padding:4px 16px 16px;position:relative">
         
         <div class="sect">基本信息</div>
@@ -120,9 +119,11 @@ tr.hov td{background:var(--sidebar)}
         <div class="sect" style="margin-top:8px">地址 <span class="k">显示 2 个空字段</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">城市</span><span class="v">San Francisco</span></div><div class="fld"><span class="l">国家</span><span class="v">US</span></div></div>
         <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">创建于 10月20日 · 更新于 今天 · Dev Admin · <span class="k">C-1001</span></div>
+<div style="height:34px;display:flex;align-items:center;margin-top:10px;font-size:12.5px;font-weight:600;color:var(--muted-fg);position:relative">动态与关联 <span class="k" style="margin-left:8px;font-weight:400">右列按原顺序接在详情下面</span><span class="ann" style="right:0;top:-2px">720 &lt; 760 ⇒ 单列堆叠，不是页签</span></div>
+<div class="pnl"><div class="h">动态 <span class="chip">12</span><span class="chev">▾</span></div><div class="r" style="height:36px"><span style="flex:1;height:26px;border:1px solid var(--border);border-radius:6px;padding:0 8px;display:flex;align-items:center;color:var(--muted-fg)">写一条备注…</span></div><div class="r"><span>Dev Admin 记录了通话</span><span class="k">2 小时前</span></div><div class="r"><span>阶段 → 已联系</span><span class="k">昨天</span></div><div class="r"><span>邮件：报价已发送</span><span class="k">10月27日</span></div><div class="r"><a href="#">查看全部 12 条 →</a></div></div><div class="pnl"><div class="h">任务 <span class="chip">2</span><span class="chev">▾</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div><div class="pnl"><div class="h">商机 <span class="chip">1</span><span class="chev">▾</span></div><div class="r"><a href="#">Acme 年度续约</a><span class="chip ok">¥120,000</span></div></div><div class="pnl empty"><div class="h">还有 3 个空关联 · 案例 · 报价 · 合同 · <a href="#" style="font-weight:400">展开</a></div></div>
 
-        <div style="margin-top:14px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">抽屉 = 有界侧窥：`size:'auto'` 封顶 md 720（不再按字段数撑到 960 / 1200），拖拽上限 60vw；没有压暗遮罩，左边的列表照常可读可点；点另一行 = 换记录；⤢ 原地铺满，URL 仍是 ?recordId=；「在整页打开」只在列表行 ↗ 与头部 ⋯ 里。</div>
-        <span class="ann" style="right:12px;top:-6px">720 &lt; 760 ⇒ 页签层（#27524 第 8 项）</span>
+        <div style="margin-top:14px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">抽屉 = 有界侧窥：默认 720（`size:'auto'` 不再按字段数撑到 960 / 1200），可拖到 60vw、按对象记忆，再宽就按 ⤢；窄层 = 单列堆叠（详情 → 动态 → 关联面板，即右列整体接在详情下面），页签层退役；没有压暗遮罩，左边的列表照常可读可点；点另一行 = 换记录；⤢ 原地铺满，URL 仍是 ?recordId=；「在整页打开」只在列表行 ↗ 与头部 ⋯ 里。</div>
+        
       </div>
     </aside>
 
