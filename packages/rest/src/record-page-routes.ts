@@ -255,6 +255,12 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     const security = await this.resolveSecurityService(environmentId, req);
                     for (const operation of new Set(body.explain ?? [])) {
                         try {
+                            // `POST /security/explain` answers only an
+                            // identified caller; so does this part.
+                            if (!context?.userId) {
+                                out[operation] = { error: { code: 'UNAUTHORIZED', status: 401, message: 'The access-explanation endpoint requires an authenticated caller.' } };
+                                continue;
+                            }
                             if (typeof security?.explain !== 'function') {
                                 out[operation] = { error: { code: 'NOT_IMPLEMENTED', status: 501, message: 'Access explanation is not available on this deployment.' } };
                                 continue;
