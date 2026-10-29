@@ -3287,6 +3287,7 @@ const zh = {
       detailLoading: '正在加载详情…',
       detailLoadFailed: '无法加载变更详情：',
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
+      fieldOrderChanged: '字段顺序已变更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: '包含由 AI 副驾起草的更改',
       draftedByMcpClient: '包含由 MCP 客户端「{{client}}」起草的更改',

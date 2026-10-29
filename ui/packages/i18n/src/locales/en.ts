@@ -3801,6 +3801,7 @@ const en = {
       detailLoading: 'Loading detail…',
       detailLoadFailed: 'Could not load change detail:',
       detailNone: 'No differences detected — the draft matches the published version.',
+      fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Includes changes drafted by the AI copilot',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
