@@ -3962,7 +3962,7 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
   it('`user`: an id no account carries warns as the graph types do, and adds no slot', async () => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
-    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown'), CTX);
+    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown') as any, CTX) as any;
 
     expect(req.pending_approvers).not.toContain('u_unknown');
     expect(req.pending_approvers).not.toContain('user:u_unknown');
@@ -3974,7 +3974,7 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
   it('stays quiet for a `user` an account carries', async () => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
-    const req = await svc.openNodeRequest(approverInput('user', 'u9'), CTX);
+    const req = await svc.openNodeRequest(approverInput('user', 'u9') as any, CTX) as any;
 
     expect(req.pending_approvers).toEqual(['u9']);
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
@@ -3988,7 +3988,7 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
       return find(object, options);
     };
     const { svc, warnings } = svcWithWarnings(engine);
-    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown'), CTX);
+    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown') as any, CTX) as any;
 
     expect(req.pending_approvers).toEqual(['u_unknown']);
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
