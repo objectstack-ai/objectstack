@@ -5764,6 +5764,11 @@ export class RestServer {
      * 501 when no provider is wired so deployments without email
      * configured fail cleanly.
      *
+     * The caller must hold `manage_platform_settings`; `sentBy` is always the
+     * authenticated caller and `from` is bounded to the configured sender —
+     * each refused `403 PERMISSION_DENIED` otherwise (`email-routes.ts`
+     * header, "Who may send, and as whom").
+     *
      * Request body:
      *   {
      *     to: "a@b.com" | ["a@b.com", { name, address }],
