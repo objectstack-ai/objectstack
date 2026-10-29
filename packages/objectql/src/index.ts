@@ -485,6 +485,21 @@ export type {
     SummaryBackfillLogger,
     SummaryBackfillOptions,
 } from './summary-backfill.js';
+// [ADR-0144, ruling 6492000994] The explicit code backfill behind
+// `os migrate record-currency-codes`: rows stored before an amount switched to
+// `currencyMode: 'record'`. Same split as the roll-up backfill above.
+export {
+    backfillRecordCurrencyCodes,
+    formatRecordCurrencyBackfillReport,
+    recordCurrencyBackfillComplete,
+} from './record-currency-backfill.js';
+export type {
+    RecordCurrencyBackfillReport,
+    RecordCurrencyBackfillFailure,
+    RecordCurrencyBackfillEngine,
+    RecordCurrencyBackfillLogger,
+    RecordCurrencyBackfillOptions,
+} from './record-currency-backfill.js';
 export { summaryEmptySetValue, summaryNullIsBackfillable, aggregateSummaryValue } from './summary-aggregate.js';
 export type { SummaryDescriptor, SummaryAggregateEngine } from './summary-aggregate.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
