@@ -213,7 +213,14 @@ function PendingApprovers({ request }: { request: ApprovalRequestLite }) {
             {chip.label}
             {chip.detail && <span className="ml-1 text-muted-foreground">· {chip.detail}</span>}
             {chip.group && <span className="ml-1 text-muted-foreground">· {chip.group}</span>}
-            {chip.count > 1 && <span className="ml-1 text-muted-foreground">×{chip.count}</span>}
+            {chip.count > 1 && (
+              <span className="ml-1 text-muted-foreground">
+                · {String(t('approvalsInbox.approverSlots', {
+                  defaultValue: 'holds {{count}} approver slot(s)',
+                  count: chip.count,
+                }))}
+              </span>
+            )}
           </Badge>
         ))}
       </div>

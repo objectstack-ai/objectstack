@@ -4951,6 +4951,11 @@ const en = {
     progressEligible: '{{count}} eligible approver(s)',
     progressEligible_one: '{{count}} eligible approver',
     progressEligible_other: '{{count}} eligible approvers',
+    // The chip beside an approver who holds several of the step's slots; the
+    // eligible-approver count beside the tally counts that person once.
+    approverSlots: 'holds {{count}} approver slot(s)',
+    approverSlots_one: 'holds {{count}} approver slot',
+    approverSlots_other: 'holds {{count}} approver slots',
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
