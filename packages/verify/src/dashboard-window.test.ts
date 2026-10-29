@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 100 — spawns the real producer once per single-cause fixture: four in-process boots of the real stack (the fixture app, the drop and zero negative-control apps, the day-turn app), each running the family's proofs once on a frozen clock; slowest CI reading 73.29 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up; read before this file paid its first boot at module scope
 //
 // The dashboard date-window family — what it reads from the metadata, what it
 // proves on a real stack, and the controls that keep its green honest:
@@ -32,12 +33,18 @@ import { defineStack } from '@objectstack/spec';
 import { DATE_RANGE_PRESETS } from '@objectstack/spec/data';
 
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 import {
   deriveDashboardWindowCases,
   runDashboardWindowProofs,
   formatDashboardWindowReport,
   type DashboardWindowReport,
 } from './dashboard-window.js';
+
+// The boot's first load, paid during collection rather than in the first
+// case's clock (see `boot-warm-up.testkit.ts`). The first boot below uses the
+// default options.
+await warmUpBoot();
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;

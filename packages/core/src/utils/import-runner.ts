@@ -5,7 +5,7 @@ import { coerceRow, type CoerceContext, type RefResolver, type RefMatch } from '
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
-  canServeApiOperation, isVirtualSearchField, resolveDisplayField,
+  canServeApiOperation, isMultiValueField, isVirtualSearchField, resolveDisplayField, STRUCTURED_JSON_TYPES,
   type DisplayNameObjectMeta, type DroppedFieldsEvent, type EnableLike, type SearchFieldMeta,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -686,6 +686,59 @@ const yieldToEventLoop = (): Promise<void> =>
     else setTimeout(resolve, 0);
   });
 
+/**
+ * [#27465] The refusal of a match key naming a field that holds a list or a
+ * structured value, or `undefined` when every named field can be a key.
+ *
+ * A match key is an equality per field, and such a field has no one value to
+ * compare: a `multiple: true` lookup cell coerces to an id ARRAY, which the
+ * SQL driver refuses to bind for an implicit `$eq`, so every row of the import
+ * failed on a raw driver message; and exact array or object equality would be
+ * order- and serialization-sensitive even where a backend could evaluate it.
+ * The population is the one stored as a JSON column, asked of the spec, never
+ * re-spelled: `isMultiValueField` (a multi-capable type flagged `multiple:
+ * true`, or an inherently multi option type: `multiselect`, `checkboxes`,
+ * `tags`) and `STRUCTURED_JSON_TYPES` (`json`, `address`, `location`, …). A
+ * single-value file field is a scalar id and stays a legal key. A name the
+ * map does not carry is judged by nobody, as cell coercion passes it through.
+ *
+ * One rule, two callers: the import door refuses the request with it
+ * (`prepareImportRequest`, `400 INVALID_REQUEST`) before any row, and
+ * {@link runImport} fails every row with it for a caller that reaches the
+ * runner without that door (the connector pull writes a mapping's
+ * `upsertKey` straight through), before any row is read or written.
+ * `keyedBy` names what the caller read the key from.
+ */
+export function multiValueMatchKeyRefusal(
+  matchFields: string[] | string[][],
+  metaMap: ReadonlyMap<string, ExportFieldMeta>,
+  keyedBy = 'matchFields',
+): { fields: string[]; message: string } | undefined {
+  const fields: string[] = [];
+  const named: string[] = [];
+  for (const f of new Set<string>((matchFields as Array<string | string[]>).flat())) {
+    const meta = metaMap.get(f);
+    if (typeof meta?.type !== 'string') continue;
+    const multiple = meta.multiple === true;
+    if (STRUCTURED_JSON_TYPES.has(meta.type)) {
+      named.push(`"${f}" (${meta.type})`);
+    } else if (isMultiValueField({ type: meta.type, multiple })) {
+      named.push(`"${f}" (${meta.type}${multiple ? ', multiple: true' : ''})`);
+    } else {
+      continue;
+    }
+    fields.push(f);
+  }
+  if (fields.length === 0) return undefined;
+  const one = fields.length === 1;
+  return {
+    fields,
+    message: `${keyedBy} names ${named.join(', ')}, which ${one ? 'holds' : 'hold'} a list or a structured value, `
+      + `so ${one ? 'it' : 'they'} cannot identify a record: a match key compares one value per field. `
+      + 'Match on single-value fields (a code, a name, an email) instead.',
+  };
+}
+
 export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   const {
     p, objectName, environmentId, context, rows, metaMap, translate: messageTranslator,
@@ -1343,6 +1396,21 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   };
 
   return (async () => {
+    // [#27465] A key naming a multi-value or structured field can match no
+    // row, so every row fails with the refusal, before any row is coerced,
+    // read or written. The import door refuses such a request before it gets
+    // here; this answers the callers that reach the runner without it.
+    const refusedKey = writeMode === 'insert' ? undefined : multiValueMatchKeyRefusal(matchFields, metaMap);
+    if (refusedKey) {
+      for (let i = 0; i < rows.length; i++) {
+        results[i] = {
+          row: i + 1, ok: false, action: 'failed', field: refusedKey.fields[0], code: 'VALIDATION_ERROR', error: refusedKey.message,
+        };
+      }
+      errCount = rows.length;
+      if (onProgress) await onProgress(snapshot(rows.length));
+      return { ...snapshot(rows.length), ok: okCount, results, cancelled, ...(collectUndo ? { undoLog } : {}) };
+    }
     const sharingKey = await rowsSharingKey();
     for (let i = 0; i < rows.length; i++) {
       const rowNo = i + 1;
