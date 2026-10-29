@@ -32,19 +32,19 @@ import { withFieldCarrier } from '../withFieldCarrier';
 import { DatePickerField, DateTimePickerField } from '../widgets/date-picker/DatePickerField';
 
 beforeAll(() => {
-  ComponentRegistry.register('date', withFieldCarrier(DatePickerField) as any, {
+  ComponentRegistry.register('date', withFieldCarrier(DatePickerField), {
     namespace: 'field',
     skipFallback: true,
   });
-  ComponentRegistry.register('datetime', withFieldCarrier(DateTimePickerField) as any, {
+  ComponentRegistry.register('datetime', withFieldCarrier(DateTimePickerField), {
     namespace: 'field',
     skipFallback: true,
   });
 }, 60000);
 
 beforeEach(() => {
-  if (!(Element.prototype as any).scrollIntoView) {
-    (Element.prototype as any).scrollIntoView = () => {};
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => {};
   }
 });
 
@@ -91,7 +91,7 @@ const dueRow = () => document.querySelector('[data-field="due"]') as HTMLElement
 
 /** Press Create and wait for the refusal to land: the form scrolls to its first invalid field. */
 async function submitAndSeeRefusal() {
-  const scroll = vi.spyOn(Element.prototype as any, 'scrollIntoView');
+  const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
   fireEvent.click(screen.getByRole('button', { name: /create/i }));
   await waitFor(() => expect(scroll).toHaveBeenCalled());
 }

@@ -26,7 +26,12 @@ import '../../../renderers';
 
 const MESSAGE = 'Not saved: "13/45/2026" is not a date.';
 
-function ReportingProbe(props: any) {
+type ProbeProps = {
+  field?: { name?: string };
+  onInvalidInputChange?: (message: string | null) => void;
+};
+
+function ReportingProbe(props: ProbeProps) {
   return (
     <div data-testid={`probe-${props.field?.name}`} data-has-key={'onInvalidInputChange' in props ? 'yes' : 'no'}>
       <button type="button" onClick={() => props.onInvalidInputChange?.(MESSAGE)}>
@@ -46,8 +51,8 @@ beforeAll(() => {
 }, 30000);
 
 beforeEach(() => {
-  if (!(Element.prototype as any).scrollIntoView) {
-    (Element.prototype as any).scrollIntoView = () => {};
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => {};
   }
 });
 
@@ -83,7 +88,7 @@ describe('form renderer — unparseable widget input is a field error (objectsta
     fireEvent.click(within(dueRow(), 'report'));
     await waitFor(() => expect(dueRow().textContent).toContain(MESSAGE));
 
-    const scroll = vi.spyOn(Element.prototype as any, 'scrollIntoView');
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
     fireEvent.click(screen.getByRole('button', { name: /create/i }));
     await waitFor(() => expect(scroll).toHaveBeenCalled());
     expect(onSubmit).not.toHaveBeenCalled();
