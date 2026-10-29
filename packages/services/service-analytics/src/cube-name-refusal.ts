@@ -28,18 +28,22 @@ import { validationFailure, VALIDATION_FAILED_STATUS } from '@objectstack/types'
  * sentence is `ANALYTICS_CUBE_NAME_REQUIRED`, imported from the schema that
  * refuses the same input at the door: one rule, one wording, two readers.
  *
- * The `fields[]` entry carries the ADR-0114 catalog code the door would have
- * produced for the same input — `required` for an absent `cube`, `min_length`
- * for the empty string (Zod's `too_small` on a string, mapped by
- * `zodIssuesToFields`) — so a UI anchoring per-field errors sees one vocabulary
- * whichever side refused.
+ * The `fields[]` entry carries the ADR-0114 catalog code the door produces
+ * for the same input — `required` for an absent `cube` (the door hands the
+ * body to `fieldsFromZodIssues`, so the D3 split reports a missing key as
+ * `required`), `min_length` for the empty string (Zod's `too_small` on a
+ * string, mapped by `zodIssuesToFields`) — so a UI anchoring per-field errors
+ * sees one vocabulary whichever side refused. `analytics-empty-cube-refusal.test.ts`
+ * (runtime) pins the door's half, `analytics-service.test.ts` this one.
  *
  * ⛔ A whitespace-only name is NOT refused here: it is a name, one no cube
  * carries, and the engine's cube resolution answers it `CUBE_NOT_FOUND` / 404.
  * Refusing it would be a second rule beside the schema's `.min(1)`.
  */
-export function cubeNameRequiredError(cube: string | undefined): Error & { code: string; status: number } {
-  const code: FieldErrorCode = cube === undefined ? 'required' : 'min_length';
+export function cubeNameRequiredError(cube: unknown): Error & { code: string; status: number } {
+  // Only a string can be too short; anything else that `!queryInput.cube`
+  // let through (`undefined`, or a `null` from an untyped caller) is absent.
+  const code: FieldErrorCode = typeof cube === 'string' ? 'min_length' : 'required';
   const err = validationFailure(ANALYTICS_CUBE_NAME_REQUIRED, [
     { field: 'cube', code, message: ANALYTICS_CUBE_NAME_REQUIRED },
   ]) as Error & { code: string; status: number };

@@ -109,18 +109,20 @@ describe.each<Door>(['/analytics/query', '/analytics/sql'])('%s — an empty cub
         expect(parsed.success, JSON.stringify(parsed.success ? null : parsed.error.issues)).toBe(true);
     });
 
-    it('a missing cube keeps the 400 VALIDATION_FAILED it already had, at the `cube` field', async () => {
+    it('a missing cube keeps the 400 VALIDATION_FAILED it already had, now with the `required` field code', async () => {
         const { res, calls } = await post(door, { measures: ['x.count'] });
 
         expect(res.statusCode).toBe(400);
         expect(res.body.error.httpStatus).toBe(400);
         expect(res.body.error.code).toBe('VALIDATION_FAILED');
         expect(res.body.error.details.fields).toHaveLength(1);
-        // The field code for an ABSENT key is the door's pre-existing answer
-        // (no input is handed to the mapper there), not this change's subject:
-        // what is pinned is the field and the envelope, and that the empty-name
-        // sentence is not borrowed for the missing case.
-        expect(res.body.error.details.fields[0]).toMatchObject({ field: 'cube' });
+        // `required`, the ADR-0114 D3 code for an ABSENT key — the door hands
+        // the body to the mapper now; it used to answer Zod's `invalid_type`
+        // for the same body. The same code the engine's in-process guard
+        // answers (service-analytics `cube-name-refusal.ts`), so one condition
+        // reads one code on both sides. The empty-name sentence is not
+        // borrowed for the missing case.
+        expect(res.body.error.details.fields[0]).toMatchObject({ field: 'cube', code: 'required' });
         expect(res.body.error.details.fields[0].message).not.toBe(ANALYTICS_CUBE_NAME_REQUIRED);
         expect(serviceCalls(calls)).toEqual([]);
     });
