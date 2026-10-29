@@ -2660,6 +2660,9 @@ const pt = {
       invitationPreviewTitle: "{{inviter}} convidou você para participar de {{organization}}",
       invitationPreviewTitleNoInviter: "Você foi convidado para participar de {{organization}}",
       invitationPreviewDescription: "Use o e-mail para o qual o convite foi enviado ({{email}}).",
+      invitationGoneTitle: "Este link de convite não é mais válido",
+      invitationGoneDescription: "Ele pode ter expirado, já ter sido usado ou ter sido retirado. Peça a quem convidou você para enviar um novo convite.",
+      invitationGoneSignIn: "Ir para o login",
       showPasswordText: "Mostrar senha",
       hidePasswordText: "Ocultar senha",
       footer: {
@@ -2693,6 +2696,8 @@ const pt = {
         userExists: "Já existe uma conta com esse e-mail. Tente fazer login.",
         selfRegistrationClosed: "O cadastro por conta própria não está aberto neste sistema. Peça um convite a um administrador.",
         emailDomainNotAllowed: "O domínio deste e-mail não tem permissão para se cadastrar aqui. Use o e-mail da sua organização ou peça um convite a um administrador.",
+        invitationSentTo: "Este convite foi enviado para {{email}}. Cadastre-se com esse endereço para aceitá-lo.",
+        invitationAddressOnly: "Este convite só pode ser aceito com o endereço para o qual foi enviado. Cadastre-se com esse endereço.",
       },
       verifyInbox: {
         title: "Verifique sua caixa de entrada",

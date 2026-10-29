@@ -171,6 +171,13 @@ function asAuthInvitation(raw: unknown, method: string): AuthInvitation {
  * treats a rejection as "no preview" and keeps its generic copy, so a wrong
  * shape never reaches the screen as a half-filled sentence.
  */
+/**
+ * The `error.code` of the invitation-preview door's one not-found body
+ * (`INVITATION_PREVIEW_NOT_FOUND` in objectstack `plugin-auth`
+ * `invitation-preview.ts`). A 404 without it did not come from the door.
+ */
+const INVITATION_PREVIEW_NOT_FOUND_CODE = 'RESOURCE_NOT_FOUND';
+
 function asAuthInvitationPreview(raw: unknown): AuthInvitationPreview {
   const body = raw as { success?: unknown; data?: Record<string, unknown> } | null | undefined;
   const data = body?.success === true ? body.data : undefined;
@@ -1088,16 +1095,24 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // objectstack's own signed-out read (#26473): better-auth's
       // `get-invitation` above answers 401 without a session. The server
       // gives one uniform 404 for an unknown, expired, accepted, rejected or
-      // cancelled id, which is an answer ("no preview"), not a failure.
+      // cancelled id (ADR-0138 D2), which is an answer — "this invitation is
+      // no longer valid" — not a failure.
       const url = `${origin}${basePath}/organization/invitation-preview?id=${encodeURIComponent(invitationId)}`;
       const response = await bearerFetch(url, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
-      if (response.status === 404) return null;
       const body = (await response.json().catch(() => null)) as
         | { error?: { code?: string; message?: string } }
         | null;
+      // #27509 — only the door's own not-found body (`RESOURCE_NOT_FOUND`) is
+      // that answer. A server without the route answers 404 too, from
+      // better-auth's router with an empty body: that is "the read did not
+      // happen", and it rejects below like any other failure, so a page never
+      // tells a valid invitation's holder that their link is dead.
+      if (response.status === 404 && body?.error?.code === INVITATION_PREVIEW_NOT_FOUND_CODE) {
+        return null;
+      }
       if (!response.ok) {
         const err = new Error(
           body?.error?.message ?? `Invitation preview failed with status ${response.status}`,

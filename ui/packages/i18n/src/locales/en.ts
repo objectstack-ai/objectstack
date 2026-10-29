@@ -3119,6 +3119,11 @@ const en = {
       invitationPreviewTitle: '{{inviter}} invited you to join {{organization}}',
       invitationPreviewTitleNoInviter: 'You are invited to join {{organization}}',
       invitationPreviewDescription: 'Use the email address the invitation was sent to ({{email}}).',
+      // #27509 — the card for an invitation link the server no longer knows:
+      // the server's one not-found answer cannot say why, so neither does this.
+      invitationGoneTitle: 'This invitation link is no longer valid',
+      invitationGoneDescription: 'It may have expired, been used, or been withdrawn. Ask the person who invited you to send a new invitation.',
+      invitationGoneSignIn: 'Go to sign in',
       showPasswordText: 'Show password',
       hidePasswordText: 'Hide password',
       footer: {
@@ -3162,6 +3167,10 @@ const en = {
         userExists: 'An account with this email already exists. Try signing in instead.',
         selfRegistrationClosed: 'Self-registration is not open on this system. Ask an administrator for an invitation.',
         emailDomainNotAllowed: "This email's domain is not allowed to register here. Use your organization email, or ask an administrator for an invitation.",
+        // #27509 — `selfRegistrationClosed` for a visitor holding an invitation
+        // link; `{{email}}` is the MASKED address the preview returns.
+        invitationSentTo: 'This invitation was sent to {{email}}. Register with that address to accept it.',
+        invitationAddressOnly: 'This invitation can only be accepted with the address it was sent to. Register with that address.',
       },
       verifyInbox: {
         title: 'Check your inbox',

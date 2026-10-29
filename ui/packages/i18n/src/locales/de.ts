@@ -2606,6 +2606,9 @@ const de = {
       invitationPreviewTitle: "{{inviter}} hat Sie eingeladen, {{organization}} beizutreten",
       invitationPreviewTitleNoInviter: "Sie sind eingeladen, {{organization}} beizutreten",
       invitationPreviewDescription: "Verwenden Sie die E-Mail-Adresse, an die die Einladung gesendet wurde ({{email}}).",
+      invitationGoneTitle: "Dieser Einladungslink ist nicht mehr gültig",
+      invitationGoneDescription: "Die Einladung ist möglicherweise abgelaufen, wurde bereits verwendet oder zurückgezogen. Bitten Sie die Person, die Sie eingeladen hat, eine neue Einladung zu senden.",
+      invitationGoneSignIn: "Zur Anmeldung",
       showPasswordText: "Passwort anzeigen",
       hidePasswordText: "Passwort verbergen",
       footer: {
@@ -2639,6 +2642,8 @@ const de = {
         userExists: "Ein Konto mit dieser E-Mail existiert bereits. Versuchen Sie sich anzumelden.",
         selfRegistrationClosed: "Die Selbstregistrierung ist in diesem System nicht möglich. Bitten Sie einen Administrator um eine Einladung.",
         emailDomainNotAllowed: "Die Domain dieser E-Mail-Adresse ist für die Registrierung hier nicht zugelassen. Verwenden Sie die E-Mail-Adresse Ihrer Organisation oder bitten Sie einen Administrator um eine Einladung.",
+        invitationSentTo: "Diese Einladung wurde an {{email}} gesendet. Registrieren Sie sich mit dieser Adresse, um sie anzunehmen.",
+        invitationAddressOnly: "Diese Einladung kann nur mit der Adresse angenommen werden, an die sie gesendet wurde. Registrieren Sie sich mit dieser Adresse.",
       },
       verifyInbox: {
         title: "Überprüfen Sie Ihren Posteingang",
