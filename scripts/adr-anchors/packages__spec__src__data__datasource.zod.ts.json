@@ -1,0 +1,5 @@
+{
+  "file": "packages/spec/src/data/datasource.zod.ts",
+  "adrs": ["ADR-0015", "ADR-0143"],
+  "invariant": "ADR-0015 amendment D7: `external.connector` and `external.credentialsRef` are two exclusive credential channels — never a precedence that leaves one written and ignored. `connector` lends an ADR-0143 connector-instance credential (an HTTP credential), so it is refused beside a bound `credentialsRef`, on a built-in database driver and on a managed datasource."
+}

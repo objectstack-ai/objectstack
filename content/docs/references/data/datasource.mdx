@@ -75,7 +75,7 @@ const result = DatasourceSchema.parse(data);
 | **allowWrites** | `boolean` | optional (default: `false`) | Global write gate. Individual objects must also opt in via object.external.writable. |
 | **validation** | `{ onMismatch?: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot?: boolean; checkIntervalMs?: number }` | optional (default: `{"onMismatch":"fail","checkOnBoot":true}`) | Boot/drift validation policy |
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry. |
-| **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — static, `oauth2`, `app-credential` and `signed` kinds alike, resolved the way the connector resolves it. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
+| **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — whichever kind the instance's `auth` declares (`bearer`, `api-key` or `basic`; ADR-0143 D2 adds the grant-bearing kinds), resolved the way the connector resolves it. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
 | **queryTimeoutMs** | `number` | optional (default: `30000`) | Hard cap on per-query execution time. |
 
 
@@ -117,7 +117,7 @@ External datasource settings: federation policy (schemaMode != "managed") plus t
 | **allowWrites** | `boolean` | optional (default: `false`) | Global write gate. Individual objects must also opt in via object.external.writable. |
 | **validation** | `{ onMismatch?: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot?: boolean; checkIntervalMs?: number }` | optional (default: `{"onMismatch":"fail","checkOnBoot":true}`) | Boot/drift validation policy |
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry. |
-| **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — static, `oauth2`, `app-credential` and `signed` kinds alike, resolved the way the connector resolves it. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
+| **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — whichever kind the instance's `auth` declares (`bearer`, `api-key` or `basic`; ADR-0143 D2 adds the grant-bearing kinds), resolved the way the connector resolves it. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
 | **queryTimeoutMs** | `number` | optional (default: `30000`) | Hard cap on per-query execution time. |
 
 ### Nested Shape: `ExternalDatasourceSettings.validation`
