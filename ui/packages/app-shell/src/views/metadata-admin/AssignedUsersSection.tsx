@@ -339,7 +339,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
   const memberOrganization = membershipOrganization(activeOrganizationId, metadataStore.objects);
   /** `sys_user` as the registry serves it, for the picker's column read rule. */
   const userSchema = ((metadataStore.objects ?? []).find((o) => (o as { name?: unknown } | null)?.name === 'sys_user') ??
-    null) as SchemaLike | null;
+    null) as Record<string, unknown> | null;
 
   const load = React.useCallback(async () => {
     setLoading(true);
