@@ -55,6 +55,8 @@ import { RestServer } from './rest-server.js';
 const LIST = '/api/v1/security/suggested-bindings';
 const CONFIRM = '/api/v1/security/suggested-bindings/:id/confirm';
 const DISMISS = '/api/v1/security/suggested-bindings/:id/dismiss';
+// [#27149] The fourth route of the family — it answers the same envelope.
+const REOPEN = '/api/v1/security/suggested-bindings/:id/reopen';
 
 function mockServer() {
     return {
@@ -136,6 +138,7 @@ function boot(service?: any) {
         list: (query: Record<string, unknown> = {}) => drive('GET', LIST, { query }),
         confirm: () => drive('POST', CONFIRM),
         dismiss: () => drive('POST', DISMISS),
+        reopen: () => drive('POST', REOPEN),
     };
 }
 
@@ -148,6 +151,7 @@ function healthyService() {
         }),
         confirmAudienceBindingSuggestion: vi.fn().mockResolvedValue({ suggestion: SUGGESTIONS[0] }),
         dismissAudienceBindingSuggestion: vi.fn().mockResolvedValue({ suggestion: SUGGESTIONS[0] }),
+        reopenAudienceBindingSuggestion: vi.fn().mockResolvedValue({ suggestion: SUGGESTIONS[0] }),
     };
 }
 
@@ -157,6 +161,7 @@ function throwingService(err: unknown) {
         listAudienceBindingSuggestions: vi.fn().mockRejectedValue(err),
         confirmAudienceBindingSuggestion: vi.fn().mockRejectedValue(err),
         dismissAudienceBindingSuggestion: vi.fn().mockRejectedValue(err),
+        reopenAudienceBindingSuggestion: vi.fn().mockRejectedValue(err),
     };
 }
 
@@ -212,6 +217,19 @@ describe('#7981 — arm 1: the service is not registered (was `{ code, message }
         expectNestedEnvelope(await boot().dismiss(), 501, 'NOT_IMPLEMENTED');
     });
 
+    it('POST reopen → 501 NOT_IMPLEMENTED', async () => {
+        expectNestedEnvelope(await boot().reopen(), 501, 'NOT_IMPLEMENTED');
+    });
+
+    it('[#27149] a service without the OPTIONAL reopen member → 501 naming the door; nothing else is called', async () => {
+        const { reopenAudienceBindingSuggestion: _absent, ...withoutReopen } = healthyService();
+        const answer = await boot(withoutReopen).reopen();
+        expectNestedEnvelope(answer, 501, 'NOT_IMPLEMENTED');
+        expect(answer.body.error.message).toMatch(/does not implement re-opening/);
+        expect(withoutReopen.dismissAudienceBindingSuggestion).not.toHaveBeenCalled();
+        expect(withoutReopen.confirmAudienceBindingSuggestion).not.toHaveBeenCalled();
+    });
+
     it('a registered service missing the surface is the same refusal, not a 500', async () => {
         // `resolveService` duck-types `listAudienceBindingSuggestions`; a
         // deployment whose security service predates this surface takes the
@@ -244,6 +262,14 @@ describe('#7981 — arm 2: a typed service error (was `{ code, error: "<string>"
         );
     });
 
+    it.each(CASES)('reopen rejects %s → %s at the nested position', async (msg, code, status) => {
+        expectNestedEnvelope(
+            await boot(throwingService(typedError(msg, code, status))).reopen(),
+            status,
+            code,
+        );
+    });
+
     it.each(CASES)('list rejects %s → %s at the nested position', async (msg, code, status) => {
         expectNestedEnvelope(
             await boot(throwingService(typedError(msg, code, status))).list(),
@@ -263,6 +289,9 @@ describe('#7981 — arm 2: a typed service error (was `{ code, error: "<string>"
             .toBe('SUGGESTION_LIST_FAILED');
         expect((await boot(throwingService(err)).dismiss()).body?.error?.code)
             .toBe('SUGGESTION_DISMISS_FAILED');
+        // [#27149] No family code is registered for re-open: the standard 500 code.
+        expect((await boot(throwingService(err)).reopen()).body?.error?.code)
+            .toBe('INTERNAL_ERROR');
     });
 
     it('the 500 arm still caps the message at 500 characters', async () => {
@@ -304,9 +333,11 @@ describe('#7981 — the three arms answer ONE shape', () => {
             { label: '501 list', answer: await boot().list() },
             { label: '501 confirm', answer: await boot().confirm() },
             { label: '501 dismiss', answer: await boot().dismiss() },
+            { label: '501 reopen', answer: await boot().reopen() },
             { label: 'typed 403 list', answer: await boot(throwingService(denied)).list() },
             { label: 'typed 403 confirm', answer: await boot(throwingService(denied)).confirm() },
             { label: 'typed 403 dismiss', answer: await boot(throwingService(denied)).dismiss() },
+            { label: 'typed 403 reopen', answer: await boot(throwingService(denied)).reopen() },
             { label: 'untyped 500 list', answer: await boot(throwingService(new Error('boom'))).list() },
             { label: 'validation 400', answer: await boot(healthyService()).list({ status: 'garbage' }) },
             {
@@ -365,14 +396,27 @@ describe('#7981 — the success paths are untouched', () => {
         expect(answer.body).not.toHaveProperty('error');
     });
 
-    it('confirm and dismiss still answer 200 with `{ data }`', async () => {
+    it('confirm, dismiss and reopen answer 200 with `{ data }`', async () => {
         for (const answer of [
             await boot(healthyService()).confirm(),
             await boot(healthyService()).dismiss(),
+            await boot(healthyService()).reopen(),
         ]) {
             expect(answer.status).toBe(200);
             expect(answer.body?.data?.suggestion).toEqual(SUGGESTIONS[0]);
             expect(answer.body).not.toHaveProperty('error');
         }
+    });
+});
+
+describe('[#27149] reopen hands the caller context and the id to the service — and only to reopen', () => {
+    it('calls reopenAudienceBindingSuggestion once with the id; confirm is never called', async () => {
+        const service = healthyService();
+        const answer = await boot(service).reopen();
+        expect(answer.status).toBe(200);
+        expect(service.reopenAudienceBindingSuggestion).toHaveBeenCalledTimes(1);
+        expect(service.reopenAudienceBindingSuggestion.mock.calls[0][1]).toBe('s1');
+        expect(service.confirmAudienceBindingSuggestion).not.toHaveBeenCalled();
+        expect(service.dismissAudienceBindingSuggestion).not.toHaveBeenCalled();
     });
 });

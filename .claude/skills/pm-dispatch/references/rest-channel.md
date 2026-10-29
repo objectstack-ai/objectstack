@@ -46,6 +46,7 @@
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
 - ✓ 请审 `POST .../pulls/{n}/requested_reviewers`(Tier H 归中继 op)· 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:中继 op `pr_update_branch`(`pull` + 40 位 `expected_head_sha`),真合并提交。
+- 挂子卡走中继 op `sub_issue_add`/`sub_issue_remove`(`issue` 父号,`sub_issue` 子号),回读父列表。
 - ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
 - ✓ 启动 run 走 op `workflow_dispatch`:解锁物是白名单 run 才启;入表只经 workflow 自己的 PR。
 - F = `[{"op":"workflow_dispatch","workflow":"release.yml","ref":"main","inputs":{"refresh_version_pr":true}}]`。
@@ -65,7 +66,6 @@
 ## 第三桶 —— git 零配额等价物
 
 - 分支存在性、队列分支、判落地、squash 验证四条的拼写与边界住 `platform-readings.md`。
-- 本表只指路,⛔ 不在两处各存一份;先问 git,再问 REST。
 
 ## 队列路由的读法
 

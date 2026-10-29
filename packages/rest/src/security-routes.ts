@@ -551,4 +551,33 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
         },
         metadata: { summary: 'Dismiss a suggested audience binding, or revoke an accepted one', tags: ['security'] },
     });
+
+    // REOPEN — takes a dismissal (a decline or a revoke) back: the row is
+    // pending again and grants nothing until confirmed (#27149). The member is
+    // OPTIONAL on `ISecurityService`, so a service without it is a 501 naming
+    // the door, never a call into `undefined`. Its 500 terminal is the
+    // standard `INTERNAL_ERROR`: no family code is registered for it.
+    this.routeManager.register({
+        method: 'POST',
+        path: `${dataPath}/security/suggested-bindings/:id/reopen`,
+        handler: async (req: any, res: any) => {
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                const svc = await resolveService(environmentId);
+                if (!svc) return respond501(res);
+                if (typeof svc.reopenAudienceBindingSuggestion !== 'function') {
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        "This deployment's security service does not implement re-opening a dismissed " +
+                            'audience-binding suggestion, so the dismissal stands.',
+                    );
+                }
+                const result = await svc.reopenAudienceBindingSuggestion(context ?? {}, String(req.params.id));
+                res.json({ data: result });
+            } catch (err: any) { handleError(err, res, 'INTERNAL_ERROR'); }
+        },
+        metadata: { summary: 'Re-open a dismissed or revoked suggested audience binding (pending again; nothing granted until accepted)', tags: ['security'] },
+    });
 }

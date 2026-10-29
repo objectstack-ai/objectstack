@@ -116,4 +116,14 @@ describe('client.security.suggestedBindings', () => {
             'http://localhost:3000/api/v1/security/suggested-bindings/sug_2/dismiss',
         );
     });
+
+    it('reopen POSTs to the id-scoped subroute, encoding the id', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { suggestion: { id: 'sug/3', status: 'pending' } } });
+        const result = await client.security.suggestedBindings.reopen('sug/3');
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/security/suggested-bindings/sug%2F3/reopen',
+        );
+        expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+        expect(result).toEqual({ suggestion: { id: 'sug/3', status: 'pending' } });
+    });
 });
