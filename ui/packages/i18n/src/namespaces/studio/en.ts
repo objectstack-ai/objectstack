@@ -3333,6 +3333,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.saved': 'Saved {count} object draft(s).',
   'engine.studio.owd.unsaved': 'Unsaved',
   'engine.studio.owd.byParent': 'By parent → {master}',
+  'engine.studio.owd.cbpPrereqTitle': 'Make the relationship required?',
+  'engine.studio.owd.cbpPrereqDesc':
+    'Controlled by parent needs exactly one required master-detail field. Saving {object} this way makes this relationship required, which the server flags as a change to confirm:',
+  'engine.studio.owd.cbpPrereqConfirm': 'Make required and save',
   'engine.studio.owd.byParentNoMaster': 'By parent — no master: the object needs exactly one required master-detail field',
   'engine.studio.owd.masterTip':
     'Controlled by parent — record visibility is inherited from the master record.',

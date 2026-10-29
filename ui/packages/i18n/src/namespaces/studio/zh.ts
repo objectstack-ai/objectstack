@@ -2970,6 +2970,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.owd.saved': '已保存 {count} 个对象草稿。',
   'engine.studio.owd.unsaved': '未保存',
   'engine.studio.owd.byParent': '受父级控制 → {master}',
+  'engine.studio.owd.cbpPrereqTitle': '将该关系设为必填？',
+  'engine.studio.owd.cbpPrereqDesc':
+    '受父级控制需要恰好一个必填的主从字段。以此方式保存 {object} 会把下面的关系设为必填，服务器将其标记为需要确认的变更：',
+  'engine.studio.owd.cbpPrereqConfirm': '设为必填并保存',
   'engine.studio.owd.byParentNoMaster': '受父级控制 —— 没有主记录:该对象需要恰好一个必填的主从字段',
   'engine.studio.owd.masterTip':
     '受父级控制 —— 记录可见性继承自主记录。',
