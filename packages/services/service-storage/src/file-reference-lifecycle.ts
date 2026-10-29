@@ -7,6 +7,13 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isEmptyForRequired } from '@objectstack/core';
 import { validationFailure } from '@objectstack/types';
 import { callerContext } from './attachment-access-hooks.js';
+import {
+  findReferenceableFile,
+  unreadableFileMessage,
+  type FileReferenceReadAuthorizer,
+} from './referenceable-file.js';
+
+export type { FileReferenceReadAuthorizer } from './referenceable-file.js';
 
 /**
  * Field-reference file ownership (ADR-0104 D3 wave 2).
@@ -54,7 +61,7 @@ import { callerContext } from './attachment-access-hooks.js';
  * field, before the driver runs and before any file is copied: one
  * `400 VALIDATION_FAILED` with an ADR-0114 `invalid_value` entry per field,
  * naming the field and nothing about the file ({@link refuseUnreadableFile}).
- * An id the organization-scoped lookup cannot see ({@link systemReadContext})
+ * An id the organization-scoped lookup cannot see (`systemReadContext` in `referenceable-file.ts`)
  * gets the same answer, so the write door cannot tell "may not read" from
  * "does not exist". It replaces #25951's quiet answer, which kept the id as
  * written: that left a slot holding a file it does not own, the state
@@ -189,33 +196,6 @@ function systemWriteContext(organizationId?: string | null): Record<string, unkn
 }
 
 /**
- * The bookkeeping context for LOOKING UP a file a record's field references,
- * carrying the acting organization when the triggering write had one.
- *
- * A write references a file only as its own organization can reach it. The
- * lookup that decides whether a referenced id is a file this platform manages
- * — and so whether it is claimed, copied and held to its field's declaration —
- * goes through the same channel {@link systemWriteContext} opens for the copy:
- * the organization travels as `tenantId`, and the driver's tenant term (the
- * wall's verdict for the posture in force, ADR-0131 D8) decides which rows the
- * lookup can see. ⛔ No organization comparison is written here: whether this
- * object has a tenant column, what a row with no organization means and
- * whether the posture walls at all (`single` does not) are the platform's
- * answers, for the same reason the copy is never stamped on the payload.
- *
- * A file the lookup cannot see is, for a write with no caller to judge, an id
- * the platform does not manage: the value is kept as written and nothing is
- * claimed or copied. [#26043] For a write with a caller, it is refused exactly
- * as a file the caller may not read ({@link findReferenceableFile}).
- * No organization ⇒ the key is absent and the lookup reads as it did before.
- */
-function systemReadContext(organizationId?: string | null): Record<string, unknown> {
-  return typeof organizationId === 'string' && organizationId.length > 0
-    ? { ...SYSTEM_CTX, tenantId: organizationId }
-    : { ...SYSTEM_CTX };
-}
-
-/**
  * The organization the write that triggered this hook is acting in, or `null`.
  *
  * `HookContext.session.organizationId` is the blessed developer-facing name
@@ -232,23 +212,6 @@ function actingOrganizationOf(ctx: any): string | null {
   const org = ctx?.session?.organizationId;
   return typeof org === 'string' && org.length > 0 ? org : null;
 }
-
-/**
- * [#25692] "May the caller of this record write read this file?" — the
- * download door's verdict on the file's bytes, asked of the write's caller.
- *
- * Supplied by the storage plugin, which binds it to the door's own judgement
- * (`storage-service-plugin.ts`), and never decided in this module: one file,
- * one access rule, so the bytes, the metadata and a reference to them are
- * judged by one predicate. `true` admits; `false` refuses. A throw is not a
- * verdict — the plugin's binding lets only an authorization-store outage
- * through, and it propagates, so an unreadable store fails the write rather
- * than reading as either answer.
- */
-export type FileReferenceReadAuthorizer = (
-  file: Record<string, unknown>,
-  context: ExecutionContext,
-) => Promise<boolean>;
 
 /**
  * The caller to ask {@link FileReferenceReadAuthorizer} about, or `null` when
@@ -300,34 +263,6 @@ function claimingCallerOf(ctx: any, fileId: string, caller: ExecutionContext | n
   return key && mintedCopies.get(key)?.has(fileId) ? null : caller;
 }
 
-/**
- * The `sys_file` row a field's id token names, as THIS write may reference it.
- * Both halves of the claim path — copy-on-claim before the write, the claim
- * after it — ask through here, so they cannot disagree about which file a
- * write may take.
- *
- *  1. The row as the acting organization reaches it ({@link systemReadContext}).
- *  2. [#25692] Then, when the plugin bound a read verdict and the write has a
- *     caller, whether that caller may read it.
- *
- * [#26043] When a caller is asked about, a file it may not read and an id the
- * lookup cannot see are one answer, `'refused'`, which copy-on-claim refuses
- * at the field. With no caller to ask, an id the lookup cannot see is `null`:
- * an id the platform does not manage, kept as written.
- */
-async function findReferenceableFile(
-  engine: FileReferenceEngine,
-  fileId: string,
-  organizationId: string | null,
-  caller: ExecutionContext | null,
-  authorizeRead: FileReferenceReadAuthorizer | undefined,
-): Promise<Record<string, unknown> | 'refused' | null> {
-  const row = await engine.findOne('sys_file', { where: { id: fileId }, context: systemReadContext(organizationId) });
-  if (!caller || !authorizeRead) return row ?? null;
-  if (!row) return 'refused';
-  return (await authorizeRead(row, caller)) ? row : 'refused';
-}
-
 /** One field a file-field judgement refuses: the ADR-0114 entry the form door's envelope carries. */
 interface FileFieldRefusal {
   field: string;
@@ -362,8 +297,7 @@ function refuseUnreadableFile(engine: FileReferenceEngine, object: string, field
   return {
     field,
     code: 'invalid_value',
-    message: `${label} cannot reference this file: it is not a file you can open. `
-      + 'Choose a file you can open, or upload it again.',
+    message: unreadableFileMessage(label),
     label,
   };
 }

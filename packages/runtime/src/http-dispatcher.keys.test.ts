@@ -45,6 +45,8 @@ function ctx(overrides: any = {}) {
     response: {},
     environmentId: undefined,
     executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] },
+    // A signed-in caller: the credential the dispatcher's identity step records.
+    admission: { credential: 'session' as const, authGate: undefined },
     ...overrides,
   };
 }
@@ -237,6 +239,7 @@ const orgCtx = (tenantId?: string) => ({
   response: {},
   environmentId: undefined,
   executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [], tenantId },
+  admission: { credential: 'session' as const, authGate: undefined },
 });
 
 /**

@@ -3332,11 +3332,12 @@ export function StudioNavItemInspector({
   const visibleShown = typed ? typed.text : (heldVisible ?? '');
   const visibleHeldBack = !!typed && typed.errors > 0 && typed.text !== heldVisible;
   // Whether the entry names a target for its type yet (a group and a
-  // separator name none, and are never unbound).
+  // separator name none, and are never unbound). A `report` entry is never
+  // unbound: with no `reportName` it opens the app's report index
+  // (objectstack#27525).
   const unbound =
     (kind === 'page' && !str(node.pageName)) ||
     (kind === 'dashboard' && !str(node.dashboardName)) ||
-    (kind === 'report' && !str(node.reportName)) ||
     (kind === 'url' && !str(node.url)) ||
     (kind === 'component' && !str(node.componentRef)) ||
     (kind === 'action' && !str(actionDef?.actionName)) ||
@@ -3502,6 +3503,15 @@ export function StudioNavItemInspector({
           options={optionsOf(targets.rows)}
           loading={targets.loading}
           onPick={(v) => setTarget(NAV_TARGET_KEY[kind], v)}
+          // objectstack#27525 — a `report` entry with no `reportName` is the
+          // app's report index: its empty face says so, and picking it
+          // removes the key.
+          {...(kind === 'report'
+            ? {
+                emptyLabel: t('engine.inspector.appNav.reportIndex', locale),
+                hint: str(node.reportName) ? undefined : t('engine.inspector.appNav.reportIndexHint', locale),
+              }
+            : {})}
           locale={locale}
         />
       )}
@@ -3904,6 +3914,7 @@ function NavTargetSelect({
   loading,
   onPick,
   hint,
+  emptyLabel,
   locale,
 }: {
   label: string;
@@ -3912,6 +3923,8 @@ function NavTargetSelect({
   loading: boolean;
   onPick: (value: string) => void;
   hint?: string;
+  /** The face of the empty value, where an absent target means something; else "Choose…". */
+  emptyLabel?: string;
   locale: string;
 }): React.ReactElement {
   const id = React.useId();
@@ -3924,7 +3937,7 @@ function NavTargetSelect({
       <StudioPicker
         id={id}
         value={value}
-        options={[{ value: '', label: t('engine.inspector.appNav.choose', locale) }, ...shown]}
+        options={[{ value: '', label: emptyLabel ?? t('engine.inspector.appNav.choose', locale) }, ...shown]}
         onPick={onPick}
         className={PICKER_XS}
       />

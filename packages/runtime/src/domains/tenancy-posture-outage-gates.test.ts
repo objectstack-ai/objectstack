@@ -236,6 +236,8 @@ const orgLessCaller = (environmentId?: string): HttpProtocolContext => ({
         permissions: [],
         tenantId: undefined,
     },
+    // A signed-in caller: the credential the dispatcher's identity step records.
+    admission: { credential: 'session', authGate: undefined },
 } as unknown as HttpProtocolContext);
 
 /**

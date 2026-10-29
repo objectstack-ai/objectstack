@@ -4441,6 +4441,7 @@ const pt = {
       detailLoading: 'Carregando detalhes…',
       detailLoadFailed: 'Não foi possível carregar os detalhes da alteração:',
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
+      fieldOrderChanged: 'Ordem dos campos alterada',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Inclui alterações rascunhadas pelo copiloto de IA',
       draftedByMcpClient: 'Inclui alterações rascunhadas pelo cliente MCP “{{client}}”',

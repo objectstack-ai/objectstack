@@ -569,6 +569,15 @@ export { resolveFieldCurrency };
 export { formatCurrency };
 
 /**
+ * `formatNumberFieldValue` lives in `./widgets/number-format.ts` and is
+ * re-exported here so a face outside this package that renders a `number`
+ * field's stored value (the record History tab's change list) makes the same
+ * call `NumberCellRenderer` and `NumberField`'s read-only branch make, rather
+ * than a formatter of its own.
+ */
+export { formatNumberFieldValue };
+
+/**
  * Format currency value in compact form for mobile display.
  * E.g., $150,000 → $150K, $1,200,000 → $1.2M
  * When `currency` is undefined, returns a compact number without symbol.

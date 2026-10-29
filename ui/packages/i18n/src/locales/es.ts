@@ -4446,6 +4446,7 @@ const es = {
       detailLoading: 'Cargando detalles…',
       detailLoadFailed: 'No se pudieron cargar los detalles del cambio:',
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
+      fieldOrderChanged: 'Orden de los campos cambiado',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Incluye cambios redactados por el copiloto de IA',
       draftedByMcpClient: 'Incluye cambios redactados por el cliente MCP «{{client}}»',
