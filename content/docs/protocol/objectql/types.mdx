@@ -27,9 +27,10 @@ revenue:
   label: Annual Revenue
   precision: 18
   # Automatically knows:
-  # - Store a bare number, no per-record currency code: it shows in the
-  #   tenant default currency (plain if none is set) or one fixed on the
-  #   field, at that currency's ISO 4217 decimal places
+  # - Store a bare number, never a currency code beside it: it shows in
+  #   the tenant default currency (plain if none is set), one fixed on the
+  #   field, or each record's code in a declared sibling field, at that
+  #   currency's ISO 4217 decimal places
   # - UI shows currency symbol
   # - Validate numeric precision
   # - Format for display ($1,234.56)
@@ -288,9 +289,11 @@ quantity:
 ---
 
 #### `currency`
-Money amount, stored as a bare number. The currency is field configuration,
-never stored per value: `defaultCurrency` under `currencyMode: fixed`, or the
-tenant default currency under `dynamic`, the default.
+Money amount, stored as a bare number. The currency is never stored in the
+value: `defaultCurrency` under `currencyMode: fixed`, the tenant default
+currency under `dynamic`, the default, or under `record` each record's ISO 4217
+code in the sibling `text` field `currencyField` names
+([Currency fields](/docs/data-modeling/currency)).
 
 ```yaml
 annual_revenue:
@@ -299,6 +302,16 @@ annual_revenue:
   currencyConfig:
     currencyMode: fixed
     defaultCurrency: USD   # the field's currency under fixed
+
+# record mode: each row's currency is its own currency_code value
+currency_code:
+  type: text
+  valueDomain: iso_4217_currency
+amount:
+  type: currency
+  currencyConfig:
+    currencyMode: record
+    currencyField: currency_code
 ```
 
 **Storage:** a **bare number** — the same value shape as `number`.
@@ -309,19 +322,23 @@ annual_revenue:
 
 <Callout type="warn">
 A currency value is **not** a `{ value, currency }` object. The currency *code*
-is field configuration, never stored per value: under `currencyMode: fixed` it is
+is never stored in the value: under `currencyMode: fixed` it is
 `currencyConfig.defaultCurrency` (the field's one currency, as `fixed` pins it);
 under `dynamic`, the default, it is the tenant default currency (the
 `localization.currency` setting) and `defaultCurrency` is not the displayed
-currency. The old per-value object shape (`CurrencyValueSchema`) was
+currency; under `record` it is the value of the record's own code field, an
+ordinary `text` column the author declares and points at with `currencyField`. The old per-value object shape (`CurrencyValueSchema`) was
 never consumed by the validator, the driver, or import coercion and has
 been removed from the spec.
 </Callout>
 
 **Features:**
-- `currencyMode: fixed | dynamic` and a `defaultCurrency` code on the field
-- Codes are validated by **length only** (3 characters), so ISO 4217 (`USD`,
-  `EUR`, `CNY`) and non-ISO codes (`BTC`, `ETH`) both pass
+- `currencyMode: dynamic | fixed | record`; a `defaultCurrency` code on the
+  field under `fixed`, a `currencyField` pointer under `record`
+- A `defaultCurrency` code is validated by **length only** (3 characters), so
+  ISO 4217 (`USD`, `EUR`, `CNY`) and non-ISO codes (`BTC`, `ETH`) both pass. A
+  record's code is judged by its field's `valueDomain: iso_4217_currency`, so
+  only ISO 4217 codes pass there
 - No decimal-places setting: an amount's decimal places are its currency's
   ISO 4217 minor unit. The field-level `precision` is the amount's **total**
   digit count (a DECIMAL(18,2) amount declares `precision: 18`), refused on
@@ -330,7 +347,8 @@ been removed from the spec.
 **Database mapping:**
 - SQL driver: the same **exact decimal** column as `number`
   (`NUMERIC(65,30)` / `DECIMAL(65,30)`; `float` on SQLite) — one column, no
-  companion currency column and no JSON blob. Money is the member where the
+  companion currency column the platform adds and no JSON blob (a `record`-mode
+  amount's code field is a column the author declares). Money is the member where the
   binary32 `REAL` this replaced lost a correctness question rather than a
   display one: `1234567.89` read back `1234567.9` from a `REAL` column.
   ⚠️ The column is **not** a blanket `DECIMAL(18,2)`: the platform's own CLDR
