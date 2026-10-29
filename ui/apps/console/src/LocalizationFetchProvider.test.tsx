@@ -16,8 +16,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { LOCALE_SEED_STORAGE_KEY, LOCALE_STORAGE_KEY, useLocalization } from '@object-ui/i18n';
-import { formatDateTime, setDisplayTimeZone } from '@object-ui/core';
+import { act } from 'react';
+import { LOCALE_SEED_STORAGE_KEY, LOCALE_STORAGE_KEY, useDisplayLocale, useLocalization } from '@object-ui/i18n';
+import { formatDate, formatDateTime, setDisplayTimeZone } from '@object-ui/core';
+import { notifyDataChanged } from '@object-ui/react';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
 // Not on the `@object-ui/auth` barrel; the vitest alias maps that barrel to
 // `packages/auth/src`, so this deep path is the SAME module instance the
@@ -25,6 +27,13 @@ import { LocalizationFetchProvider } from './LocalizationFetchProvider';
 import { SessionUserScope } from '../../../packages/auth/src/ActiveOrganizationStorage';
 
 const ENDPOINT = '/api/v1/auth/me/localization';
+
+/** The signed-in user, swapped per test; `null` = signed out (the default). */
+let authUser: { id: string } | null = null;
+vi.mock('@object-ui/auth', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useAuth: () => ({ user: authUser }),
+}));
 
 const ok = (body: unknown) => ({
   ok: true,
@@ -253,6 +262,95 @@ describe('LocalizationFetchProvider', () => {
       );
       await new Promise((r) => setTimeout(r, 20));
       expect(screen.getByTestId('zone')).toHaveTextContent('∅|Sep 2, 2026, 03:00 AM');
+    });
+  });
+
+  // objectstack#27498 — the language switch writes `sys_user.locale` AFTER it
+  // remounts this provider, so the remount's read can answer the old language.
+  describe('re-reads after a write to the signed-in user\'s own row', () => {
+    const fetchMock = () => globalThis.fetch as never as ReturnType<typeof vi.fn>;
+
+    /** The date face a grid cell paints, with the locale `useDisplayLocale` hands it. */
+    function DisplayProbe() {
+      const locale = useDisplayLocale();
+      return (
+        <span data-testid="display">
+          {`${locale}|${formatDate('2026-10-11', undefined, { locale, alwaysShowYear: true })}`}
+        </span>
+      );
+    }
+
+    function renderDisplayProbe() {
+      return render(
+        <LocalizationFetchProvider endpoint={ENDPOINT}>
+          <DisplayProbe />
+        </LocalizationFetchProvider>,
+      );
+    }
+
+    const write = (recordId: string) =>
+      act(() => { notifyDataChanged({ objectName: 'sys_user', recordId }); });
+
+    afterEach(() => { authUser = null; });
+
+    it('a read that lost the race with the language write is replaced after the write', async () => {
+      authUser = { id: 'u1' };
+      fetchMock()
+        .mockResolvedValueOnce(ok({ authenticated: true, currency: null, locale: 'en-US', timezone: 'UTC' }))
+        .mockResolvedValueOnce(ok({ authenticated: true, currency: null, locale: 'zh-CN', timezone: 'UTC' }));
+
+      renderDisplayProbe();
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('en-US|Oct 11, 2026'));
+
+      write('u1');
+
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
+      expect(fetchMock()).toHaveBeenCalledTimes(2);
+    });
+
+    it('the re-read does not join a request still in flight from before the write', async () => {
+      authUser = { id: 'u1' };
+      let answerStale: (v: unknown) => void = () => {};
+      fetchMock()
+        .mockImplementationOnce(() => new Promise((resolve) => { answerStale = resolve; }))
+        .mockResolvedValueOnce(ok({ authenticated: true, currency: null, locale: 'zh-CN', timezone: 'UTC' }));
+
+      renderDisplayProbe();
+      await waitFor(() => expect(fetchMock()).toHaveBeenCalledTimes(1));
+
+      write('u1');
+
+      // A second request went out of its own, and its answer is the one that lands.
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
+      expect(fetchMock()).toHaveBeenCalledTimes(2);
+      // The request that left before the write settles late and is dropped.
+      await act(async () => {
+        answerStale(ok({ authenticated: true, currency: null, locale: 'en-US', timezone: 'UTC' }));
+      });
+      expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日');
+    });
+
+    it('a write to another user\'s row reads nothing again', async () => {
+      authUser = { id: 'u1' };
+      fetchMock().mockResolvedValue(ok({ authenticated: true, currency: null, locale: 'en-US', timezone: 'UTC' }));
+
+      renderDisplayProbe();
+      await waitFor(() => expect(fetchMock()).toHaveBeenCalledTimes(1));
+
+      write('u2');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(fetchMock()).toHaveBeenCalledTimes(1);
+    });
+
+    it('signed out, a sys_user write reads nothing again', async () => {
+      fetchMock().mockResolvedValue(ok({ authenticated: false }));
+
+      renderDisplayProbe();
+      await waitFor(() => expect(fetchMock()).toHaveBeenCalledTimes(1));
+
+      write('u1');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(fetchMock()).toHaveBeenCalledTimes(1);
     });
   });
 });
