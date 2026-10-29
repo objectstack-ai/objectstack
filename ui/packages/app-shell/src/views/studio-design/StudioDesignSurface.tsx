@@ -261,6 +261,7 @@ import {
   objectSaveRefusal,
   plainRefusal,
   publishRefusal,
+  reportHeldEdit,
   type PublishFailure,
   type StudioHeld,
   type StudioRefusal,
@@ -4835,11 +4836,16 @@ export function InterfacesPillar({
   // objectstack#27459 — so is an item just added to one of the dashboard's
   // own list properties (Global Filters, the header's Actions), asked of the
   // spec's dashboard schema, until its required inputs are filled in.
+  // objectstack#27785 — a report likewise: an item just added to Order or a
+  // joined report's Blocks, or a chart whose type is picked before its axes,
+  // asked of the spec's report schema (`reportHeldEdit`).
   const leafType = current?.type;
-  const leafIncomplete = React.useMemo(
-    () => (ifDirty && leafType === 'dashboard' ? dashboardHeldEdit(draft, locale) : null),
-    [ifDirty, leafType, draft, locale],
-  );
+  const leafIncomplete = React.useMemo(() => {
+    if (!ifDirty) return null;
+    if (leafType === 'dashboard') return dashboardHeldEdit(draft, locale);
+    if (leafType === 'report') return reportHeldEdit(draft, locale);
+    return null;
+  }, [ifDirty, leafType, draft, locale]);
   const { loaded: draftLoaded } = useDraftAutoSave({
     // objectui#11232 — the leaf `doSave` addresses, `type:name`.
     target: leafKey,
