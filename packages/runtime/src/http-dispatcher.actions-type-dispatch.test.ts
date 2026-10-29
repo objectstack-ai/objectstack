@@ -399,9 +399,11 @@ describe('REST /actions — client-side action types (#3915)', () => {
         // `/api/v1/auth/` targets receive the caller's organization scope, as
         // the console's api handler sends it.
         expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({ name: 'Core' }));
-        expect(res.response.status).toBe(200);
+        const answer = res.response;
+        if (!answer) throw new Error('the door answered without a response envelope');
+        expect(answer.status).toBe(200);
         // The target's own envelope is unwrapped once: `data` is its `data`.
-        expect(res.response.body.data).toEqual({ id: 'team_1' });
+        expect(answer.body.data).toEqual({ id: 'team_1' });
     });
 
     it('answers 503 (not a 4xx "call it yourself") for a same-origin `type: api` action when the kernel has no HTTP server to forward through, and still names the target', async () => {
@@ -417,10 +419,12 @@ describe('REST /actions — client-side action types (#3915)', () => {
 
         const res = await dispatcher.handleActions('/sys_team/create_team', 'POST', {}, ctxFor());
 
-        expect(res.response.status).toBe(503);
-        expect(res.response.body.error.message).toContain('/api/v1/auth/organization/create-team');
-        expect(res.response.body.error.message).toContain('getRawApp');
-        expect(res.response.body.error.message).not.toMatch(/not found/i);
+        const answer = res.response;
+        if (!answer) throw new Error('the door answered without a response envelope');
+        expect(answer.status).toBe(503);
+        expect(answer.body.error.message).toContain('/api/v1/auth/organization/create-team');
+        expect(answer.body.error.message).toContain('getRawApp');
+        expect(answer.body.error.message).not.toMatch(/not found/i);
         expect(executeAction).not.toHaveBeenCalled();
     });
 });
