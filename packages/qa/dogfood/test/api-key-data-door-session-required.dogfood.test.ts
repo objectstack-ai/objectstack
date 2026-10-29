@@ -94,7 +94,7 @@ describe('sys_api_key on the data door: changing a key requires a signed-in sess
 
   // ── refused for a request an API key authenticated ───────────────────────
 
-  it('refuses restoring a sibling key the owner revoked from the list — 403 PERMISSION_DENIED, key stays revoked', async () => {
+  it('refuses `revoked: false` on a revoked key — 403 PERMISSION_DENIED, row unchanged', async () => {
     const caller = await mintKey('dd-caller-restore');
     const sibling = await mintKey('dd-sibling-revoked');
     const off = await stack.apiAs(memberToken, 'PATCH', `/data/sys_api_key/${sibling.id}`, { revoked: true });
@@ -109,7 +109,7 @@ describe('sys_api_key on the data door: changing a key requires a signed-in sess
     expect(await keyAuthenticates(sibling.raw)).toBe(false);
   });
 
-  it('refuses revoking a live sibling key — 403 PERMISSION_DENIED, key still authenticates', async () => {
+  it('refuses `revoked: true` on another key — 403 PERMISSION_DENIED, row unchanged', async () => {
     const caller = await mintKey('dd-caller-revoke');
     const sibling = await mintKey('dd-sibling-live');
     expect(await keyAuthenticates(sibling.raw)).toBe(true);
@@ -122,7 +122,7 @@ describe('sys_api_key on the data door: changing a key requires a signed-in sess
     expect(await keyAuthenticates(sibling.raw)).toBe(true);
   });
 
-  it('refuses the key revoking itself too — 403 PERMISSION_DENIED, key still authenticates', async () => {
+  it('refuses `revoked: true` on the calling key — 403 PERMISSION_DENIED, row unchanged', async () => {
     const caller = await mintKey('dd-caller-self');
     await expectRefused(
       await asKey(caller.raw, 'PATCH', `/data/sys_api_key/${caller.id}`, { revoked: true }),
@@ -132,7 +132,7 @@ describe('sys_api_key on the data door: changing a key requires a signed-in sess
     expect(await keyAuthenticates(caller.raw)).toBe(true);
   });
 
-  it('refuses a rename — 403 PERMISSION_DENIED, name unchanged', async () => {
+  it('refuses a `name` change — 403 PERMISSION_DENIED, row unchanged', async () => {
     const caller = await mintKey('dd-caller-rename');
     const sibling = await mintKey('dd-sibling-name');
     await expectRefused(
