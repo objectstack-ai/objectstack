@@ -81,11 +81,13 @@ import { applyHaving } from './having-filter.js';
 import { findTextOperatorOverNonTextField } from './text-operator-declared-type-door.js';
 
 /**
- * The credential-column guard (ADR-0100, `credential-evaluation-guard.ts`)
- * refuses a non-system caller's predicate on a `password` / `secret` column
- * before this door is reached. This door's verdict does not depend on the
+ * This door runs first, inside `lowerWhereFilterArray`. The credential-column
+ * guard (ADR-0100, `credential-evaluation-guard.ts`) runs after it and answers
+ * the rows this door passes: it refuses a non-system caller's predicate on a
+ * `password` / `secret` column. This door's verdict does not depend on the
  * caller, so the cells over those two types are driven as a SYSTEM caller —
- * the one caller the guard serves — and the door is still the thing measured.
+ * the one caller the guard serves — so a cell this door passes still reaches
+ * the driver, and the door is still the thing measured.
  */
 const CREDENTIAL_COLUMN_TYPES: ReadonlySet<string> = new Set(['password', 'secret']);
 const readAs = (declaredType: string, where: EngineQueryOptions['where']): EngineQueryOptions =>
