@@ -164,14 +164,14 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     id: 'webhook-materialization',
     label: 'Webhook materialization',
     summary:
-      'a stack/connector-authored webhook is materialized into a dispatchable sys_webhook row on boot (#3461/#3489) — the authored value crosses manifest-decomposition → the ObjectQL registry (type `webhook`) → the bridge → engine.insert, and the bridge was first gated BEHIND the realtime/messaging dispatch guard, silently materializing nothing on a realtime-less boot despite green unit tests.',
+      'a webhook declared in a stack\'s top-level `webhooks:` collection is dispatched from the metadata registry and writes no sys_webhook row (ADR-0131 D2; the boot seeder of #3461/#3489 is retired) — the authored value crosses manifest-decomposition → the ObjectQL registry (type `webhook`) → the `declaredWebhooks` reader the plugin binds on the data engine alone → the dispatcher, which delivers a matching record event with `object`→`object_name` applied. The proof boots WITHOUT realtime because the first bridge was gated BEHIND the realtime/messaging dispatch guard and silently bound nothing on a realtime-less boot despite green unit tests.',
     proofId: 'webhook-materialization',
     proofRef: 'packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts#webhook-materialization',
     bound: true,
     // spec `object` → runtime `object_name` is the representative remap for the
     // whole authoring→dispatcher pipeline: its `live` status is only true
-    // because the materializer runs (engine-only, independent of realtime), and
-    // the proof boots WITHOUT realtime to pin exactly that.
+    // because the declared-webhook reader is bound (engine-only, independent of
+    // realtime), and the proof boots WITHOUT realtime to pin exactly that.
     ledgerBindings: [{ type: 'webhook', path: 'object' }],
   },
   {
