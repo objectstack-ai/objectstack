@@ -121,15 +121,13 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   /**
    * Navigate back to the most relevant location.
-   * Back when a page of this console is behind this one, so users return to
-   * the exact list/view they came from (filters, scroll). react-router keys
-   * the entry it started on `'default'` and every entry it navigated to with
-   * a generated key (the rule `FormPage`'s cancel uses). ⛔ Not
-   * `window.history.length`: it counts the tab's entries from BEFORE the
-   * console loaded, so a pasted or deep-linked URL went Back out of the app
-   * and the save toast was lost with the unloaded document
-   * (objectstack-ai/objectstack#27454). Without one, the record detail (edit)
-   * or list (create), inside the app.
+   * Back when a page of this console is behind this one (react-router keys
+   * the entry it started on `'default'`, as `FormPage`'s cancel reads it), so
+   * users return to the exact list/view they came from. ⛔ Not
+   * `window.history.length`: it counts the tab's entries from before the
+   * console loaded, so a pasted URL went Back out of the app and lost the save
+   * toast (objectstack-ai/objectstack#27454). Otherwise the record detail
+   * (edit) or list (create), inside the app.
    */
   const hasInAppHistory = location.key !== 'default';
   const goBack = useCallback(() => {
