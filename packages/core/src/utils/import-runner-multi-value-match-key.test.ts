@@ -47,7 +47,6 @@ function makeProtocol() {
     createData: vi.fn(async () => ({ id: 'new' })),
     createManyData: vi.fn(async (args: { records: any[] }) => ({ records: args.records.map((r, i) => ({ id: `n${i}`, ...r })) })),
     updateData: vi.fn(async () => ({ id: 'upd' })),
-    validateData: vi.fn(async () => ({ valid: true, results: [] })),
   };
 }
 
