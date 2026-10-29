@@ -105,8 +105,8 @@ export interface AnalyticsResult {
          * and a measure-level `currency` over it is refused at compile. A
          * `sum` / `avg` / `min` / `max` over such an amount is refused unless
          * the query groups by its code field, so every grouped answer carries
-         * this column. A column left without that dimension (a `count` over
-         * the amount) carries neither key.
+         * this column. A `count` / `count_distinct` over the amount reads no
+         * amount and carries neither key, grouped or not.
          *
          * Present only on a measure column of a `queryDataset` answer, its
          * `__compare` column included; absent on dimension columns, on

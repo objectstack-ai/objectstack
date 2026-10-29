@@ -81,7 +81,7 @@ import { measureResultType } from './measure-result-type.js';
 // `ensureCube`, ahead of both strategies, as the dataset door refuses it at
 // compile.
 import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
-import { assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
+import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
@@ -2725,6 +2725,10 @@ export class AnalyticsService implements IAnalyticsService {
             // carries the same `internal` fields the published ones do.
             this.assertNoInternalFieldsQueried(q, compiled.cube, previewScope);
             await this.assertFieldsReadable(q, compiled.cube, previewScope, context);
+            // [ADR-0144 D6] …and the record-currency door, which the published
+            // path meets in `ensureCube`: a draft preview must not serve the
+            // sum across currencies that the published dataset refuses.
+            this.assertRecordCurrencyGrouped(q, compiled.cube);
             return evaluateAnalyticsQueryOverRows(
               q,
               compiled.cube,
@@ -3180,14 +3184,16 @@ export class AnalyticsService implements IAnalyticsService {
         // currency is that row's value of it. Read off the dataset and the
         // declaration like every key here, never off the rows. The cube door
         // has already refused an amount aggregate that drops the grouping; a
-        // column left without the dimension (a `count` over the amount) gets
-        // neither key, rather than a label that is wrong for every other row.
+        // column left without the dimension gets neither key, rather than a
+        // label that is wrong for every other row. A `count` over the amount
+        // reads no amount, so it gets neither key either, grouped or not.
         const fc = f as { currency?: string; currencyField?: string };
         const mc = m as { currency?: string };
         const meta = m.field ? this.sourceFieldMeta?.(dataset.object, m.field) : undefined;
         if (meta?.currencyField !== undefined) {
-          const codeColumn = this.selectedDimensions(dataset, selection)
-            .find((d) => d.field === meta.currencyField)?.name;
+          const codeColumn = AMOUNT_AGGREGATES.has(m.aggregate ?? '')
+            ? this.selectedDimensions(dataset, selection).find((d) => d.field === meta.currencyField)?.name
+            : undefined;
           if (fc.currencyField == null && codeColumn !== undefined) fc.currencyField = codeColumn;
         } else if (fc.currency == null) {
           const monetary = !!mc.currency || meta?.type === 'currency';
@@ -3511,6 +3517,10 @@ export class AnalyticsService implements IAnalyticsService {
       // [#21044] …and a measure's aggregate must be one the aggregate ×
       // field-type table accepts for its column's declared type.
       this.assertMeasureFieldTypes(query, cube);
+      // [ADR-0144 D6] …and an amount aggregate over a record-currency field
+      // must group by its code field: this ad-hoc exit is the one
+      // `ObjectStackDataSource.aggregate()` reaches (`${field}_${fn}`).
+      this.assertRecordCurrencyGrouped(query, cube);
       // [#5669] …and the `where`'s, third and last of the three request keys that
       // carry a field name. Its members are read from the filter TREE, not from
       // `cube.dimensions` — which on this path was minted from this very query,

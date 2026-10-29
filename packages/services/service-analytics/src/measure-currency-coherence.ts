@@ -9,7 +9,10 @@
  *
  * 1. **A measure `currency` over a record-mode amount.** Its currency is per
  *    row (ADR-0144 D2), so any one code contradicts it, and the column's chain
- *    would let the measure's code win (`enrichResultColumns`).
+ *    would let the measure's code win (`enrichResultColumns`). That holds for
+ *    a derived measure whose resolved currency is the record mode too (a sum
+ *    of record-mode amounts over one code field): its column carries no
+ *    per-row pointer, so the one code would label every row.
  * 2. **A derived measure that combines a record-mode amount with an operand in
  *    another currency.** `computeDerived` adds, subtracts, multiplies and
  *    divides bare numbers, so such a value is not a number in any currency
@@ -93,22 +96,7 @@ export function assertMeasureCurrenciesCoherent(
   const fieldOf = (m: DatasetMeasure): DeclaredCurrency | undefined =>
     m.field && !m.field.includes('.') ? declaredCurrency?.(dataset.object, m.field) : undefined;
 
-  // Guard 1 — a measure `currency` over a record-mode amount.
-  for (const m of dataset.measures) {
-    if (m.derived || m.duration || !m.currency || !m.field) continue;
-    const field = fieldOf(m);
-    if (field?.currencyField !== undefined) {
-      throw datasetInvalidError(
-        `[dataset-compiler] dataset "${dataset.name}" measure "${m.name}" declares currency "${m.currency}" `
-        + `over field "${m.field}", a record-currency amount of object "${dataset.object}" whose currency is `
-        + `each record's "${field.currencyField}". One code cannot label amounts in several currencies: `
-        + `delete the measure's \`currency\`, and select the dimension over "${field.currencyField}" so each `
-        + 'row carries its own.',
-      );
-    }
-  }
-
-  // Guard 2 — a derived measure combining a record-mode amount with another currency.
+  // Each measure's resolved currency (module header), which both guards read.
   const memo = new Map<string, Resolved | undefined>();
   const resolving = new Set<string>();
   const resolvedOf = (m: DatasetMeasure): Resolved | undefined => {
@@ -140,6 +128,30 @@ export function assertMeasureCurrenciesCoherent(
       return resolved ? [{ name, resolved }] : [];
     });
 
+  // Guard 1 — a measure `currency` over a record-mode amount, aggregated or derived.
+  for (const m of dataset.measures) {
+    if (m.duration || !m.currency) continue;
+    const field = m.derived ? undefined : fieldOf(m);
+    if (field?.currencyField !== undefined) {
+      throw datasetInvalidError(
+        `[dataset-compiler] dataset "${dataset.name}" measure "${m.name}" declares currency "${m.currency}" `
+        + `over field "${m.field}", a record-currency amount of object "${dataset.object}" whose currency is `
+        + `each record's "${field.currencyField}". One code cannot label amounts in several currencies: `
+        + `delete the measure's \`currency\`, and select the dimension over "${field.currencyField}" so each `
+        + 'row carries its own.',
+      );
+    }
+    const resolved = m.derived ? resolvedOf(m) : undefined;
+    if (resolved?.kind === 'record') {
+      throw datasetInvalidError(
+        `[dataset-compiler] dataset "${dataset.name}" derived measure "${m.name}" declares currency `
+        + `"${m.currency}" over amounts in ${currencyWords(resolved)}. One code cannot label amounts in several `
+        + "currencies: delete the measure's `currency`.",
+      );
+    }
+  }
+
+  // Guard 2 — a derived measure combining a record-mode amount with another currency.
   for (const m of dataset.measures) {
     if (!m.derived) continue;
     const operands = monetaryOperands(m);

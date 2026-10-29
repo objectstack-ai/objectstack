@@ -76,6 +76,7 @@ const DATASET = DatasetSchema.parse({
     { name: 'total', aggregate: 'sum', field: 'amount' },
     { name: 'largest', aggregate: 'max', field: 'amount' },
     { name: 'invoices', aggregate: 'count' },
+    { name: 'priced_invoices', aggregate: 'count', field: 'amount' },
     { name: 'usd_total', aggregate: 'sum', field: 'amt_usd' },
   ],
 });
@@ -161,7 +162,7 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
       it('grouped by the code field: per-group totals are right, and the column names the per-row currency', async () => {
         const result = await services[face]!.queryDataset(
           DATASET,
-          { dimensions: ['currency'], measures: ['total', 'largest', 'invoices', 'usd_total'] },
+          { dimensions: ['currency'], measures: ['total', 'largest', 'invoices', 'priced_invoices', 'usd_total'] },
           CTX,
         );
         const byCode = Object.fromEntries(
@@ -177,6 +178,9 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
         expect(column(result, 'usd_total')?.currencyField).toBeUndefined();
         expect(column(result, 'invoices')?.currency).toBeUndefined();
         expect(column(result, 'invoices')?.currencyField).toBeUndefined();
+        // …a count whose `field` is the amount reads no amount either.
+        expect(column(result, 'priced_invoices')?.currency).toBeUndefined();
+        expect(column(result, 'priced_invoices')?.currencyField).toBeUndefined();
       });
 
       it('grouped by the code field and another dimension, with a totals grouping that keeps the code: served', async () => {
@@ -227,6 +231,27 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
         expect(err.status).toBe(400);
         expect(err.member).toBe('total');
       });
+
+      it('the inferred cube (no registered dataset, the `${field}_${fn}` members) refuses the ungrouped amount and serves it grouped', async () => {
+        const before = { ...reads };
+        const err = await refusalOf(services[face]!.query({ cube: OBJECT, measures: ['amount_sum'] } as never, CTX));
+        expect(err.code, err.message).toBe('INVALID_FIELD');
+        expect(err.status).toBe(400);
+        expect(err.member).toBe('amount_sum');
+        expect(err.field).toBe('amount');
+        expect(err.object).toBe(OBJECT);
+        expect(reads.rawSql - before.rawSql).toBe(0);
+        expect(reads.aggregate - before.aggregate).toBe(0);
+
+        const grouped = await services[face]!.query(
+          { cube: OBJECT, measures: ['amount_sum'], dimensions: ['currency_code'] } as never,
+          CTX,
+        );
+        const byCode = Object.fromEntries(
+          (grouped.rows as Array<Record<string, unknown>>).map((r) => [r.currency_code, Number(r.amount_sum)]),
+        );
+        expect(byCode).toEqual({ USD: 150, EUR: 100 });
+      });
     });
   }
 
@@ -239,6 +264,17 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
     );
     expect(column(result, 'total')?.currencyField).toBe('currency');
     expect(column(result, 'total')?.currency).toBeUndefined();
+  });
+
+  it('the draft-preview path refuses the ungrouped amount aggregate the published path refuses', async () => {
+    const err = await refusalOf(
+      services.objectql!.queryDataset(DATASET, { measures: ['largest'] }, CTX, { previewDrafts: true }),
+    );
+    expect(err.code, err.message).toBe('INVALID_FIELD');
+    expect(err.status).toBe(400);
+    expect(err.member).toBe('largest');
+    expect(err.field).toBe('amount');
+    expect(err.object).toBe(OBJECT);
   });
 
   describe('compile-time guards on measure currencies', () => {
@@ -267,6 +303,16 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
 
     it('a measure currency over a record-currency amount is refused', () => {
       expectRefused([{ name: 'total_usd', aggregate: 'sum', field: 'amount', currency: 'USD' }], 'total_usd');
+    });
+
+    it('a measure currency on a derived measure whose currency is the record mode is refused', () => {
+      expectRefused(
+        [
+          { name: 'total', aggregate: 'sum', field: 'amount' },
+          { name: 'total_twice_usd', derived: { op: 'sum', of: ['total', 'total'] }, currency: 'USD' },
+        ],
+        'total_twice_usd',
+      );
     });
 
     it('CONTROL: a measure currency over a fixed field is not judged, whatever its code (ADR-0144 open item 12, its own card after R1)', () => {

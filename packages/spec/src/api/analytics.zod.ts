@@ -108,7 +108,8 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
         '[ADR-0144 D2] The PER-ROW currency of a measure column over a `currencyMode: \'record\'` '
         + 'amount: the `name` of the dimension column in this answer that groups by the amount\'s '
         + 'code field, whose value in each row is that row\'s ISO 4217 code. `currency` is absent '
-        + 'when this is present. Only on a `queryDataset` measure column.',
+        + 'when this is present. Only on a `queryDataset` measure column that takes the `sum`, '
+        + '`avg`, `min` or `max` of such an amount; never on a `count`.',
       ),
       percentScale: z.enum(['fraction', 'whole']).optional().describe(
         'The column\'s percent SCALE, when it is a percentage: `fraction` for a '

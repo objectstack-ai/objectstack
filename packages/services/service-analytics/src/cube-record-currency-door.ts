@@ -19,9 +19,12 @@
  *
  * ## Where it stands
  *
- * In `AnalyticsService.ensureCube`, on every path out of it, right after the
- * #21044 measure × field-type door (`cube-measure-field-type-door.ts`): ahead
- * of both strategies, for `query()` and `generateSql()` alike. A dataset
+ * In `AnalyticsService.ensureCube`, on every path out of it (the inferred,
+ * augmented and declared cubes), right after the #21044 measure × field-type
+ * door (`cube-measure-field-type-door.ts`): ahead of both strategies, for
+ * `query()` and `generateSql()` alike. The ADR-0037 draft-preview branch of
+ * `queryDataset` evaluates in memory and never reaches `ensureCube`, so its
+ * per-query gate calls the same judgment. A dataset
  * selection reaches it through `DatasetExecutor`, so its primary grid, every
  * `totals` grouping (the grand total `[]` included) and the `compareTo` pass
  * are judged one by one: a grouping that drops the code is a sum across
@@ -60,7 +63,7 @@ import type { MeasureColumn } from './cube-measure-field-type-door.js';
 import { invalidMemberError } from './dataset-refusal.js';
 
 /** The aggregates that read the amount itself (ADR-0144 open item 10). */
-const AMOUNT_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg', 'min', 'max']);
+export const AMOUNT_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg', 'min', 'max']);
 
 /**
  * Refuse the first `measures` entry of `query` that aggregates a record-mode
