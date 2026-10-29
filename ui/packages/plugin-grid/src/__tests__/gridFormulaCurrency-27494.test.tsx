@@ -143,7 +143,7 @@ const PATHS: Array<[string, Record<string, unknown>]> = [
 ];
 
 describe('a returnType currency formula reads as money on the grid cell (objectstack#27494)', () => {
-  it.each(PATHS)('%s: the currency formula reads $90,000.00 beside the currency field', async (_path, schemaExtra) => {
+  it.each(PATHS)('%s: the currency formula reads as money beside the currency field', async (_path, schemaExtra) => {
     const { container } = await renderGrid(schemaExtra);
     const cells = cellTexts(container);
     expect(cells, `cells: ${JSON.stringify(cells)}`).toContain('$150,000.00');
@@ -173,7 +173,7 @@ describe('the reference the configured paths now match (objectstack#27494)', () 
   // The auto-generated columns hand the cell the WHOLE field def and build no
   // bag, so they read the declared face on the base tree. GREEN there by
   // design: it names the face the three configured paths disagreed with.
-  it('auto-generated columns: the currency formula reads $90,000.00', async () => {
+  it('auto-generated columns: the currency formula reads as money', async () => {
     const { container } = await renderGrid({});
     const cells = cellTexts(container);
     expect(cells).toContain('$90,000.00');
