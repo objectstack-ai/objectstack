@@ -3,15 +3,17 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 // ADR-0069 — the authentication-policy gate's ONE decision, asked by the
 // redeliver door on the session it already reads (see `serveRedeliver`).
-import { evaluateAuthGate } from '@objectstack/core';
+import { evaluateAuthGate, type RequestAuthService } from '@objectstack/core';
 import type {
     AuthSessionApi,
     IDataEngine,
     II18nService,
     IMetadataService,
     IRealtimeService,
+    ISecurityService,
     IWebhookService,
 } from '@objectstack/spec/contracts';
+import { judgeRedeliverEntitlement } from './redeliver-entitlement.js';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
@@ -569,7 +571,7 @@ export class WebhookOutboxPlugin implements Plugin {
                     + 'pressing redeliver may send a delivery that can no longer be authenticated '
                     + '(an unsigned send, which webhook delivery otherwise never makes). The POST '
                     + '/api/v1/webhooks/redeliver endpoint is reachable by any '
-                    + 'authenticated user; the webhooks service is not registered. Fix: upgrade '
+                    + 'caller entitled to administer webhooks; the webhooks service is not registered. Fix: upgrade '
                     + '@objectstack/service-messaging to a build that implements registerRedeliverGuard.',
             );
             return false;
@@ -626,7 +628,10 @@ export class WebhookOutboxPlugin implements Plugin {
     /**
      * The redeliver door: `POST /api/v1/webhooks/redeliver`. Delegates to
      * `messaging.redeliverHttp(deliveryId, …)`. Auth is the better-auth session
-     * cookie — every authenticated user counts.
+     * cookie, and a signed-in caller must also be entitled to ADMINISTER
+     * WEBHOOKS ({@link judgeRedeliverEntitlement}, `redeliver-entitlement.ts`):
+     * asked right after authentication and before the body is read, so an
+     * unentitled caller is answered `403` before any row-specific detail.
      *
      * [#22756] ONE body, two faces. The self-hosted mount
      * ({@link registerAdminRoutes}) hands it the Hono context; the `webhooks`
@@ -677,6 +682,24 @@ export class WebhookOutboxPlugin implements Plugin {
                 { success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to redeliver webhook deliveries.' } },
                 401,
             );
+        }
+        // [ADR-0124 D1] Entitlement, server-side, before the body is read and
+        // before any row is looked up: every refusal from here is about the
+        // caller, never about a delivery.
+        const activeOrgForGate = session?.session?.activeOrganizationId;
+        const refusal = await judgeRedeliverEntitlement({
+            headers: c.req.raw.headers,
+            ql: this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']),
+            authService: this.tryGetService<RequestAuthService>(ctx, ['auth']),
+            security: this.tryGetService<Pick<ISecurityService, 'explain'>>(ctx, ['security']),
+            userId,
+            activeOrganizationId: typeof activeOrgForGate === 'string' && activeOrgForGate.length > 0
+                ? activeOrgForGate
+                : undefined,
+            logError: (message, err) => ctx.logger.error?.(message, err as Error),
+        });
+        if (refusal) {
+            return c.json({ success: false, error: { code: refusal.code, message: refusal.message } }, refusal.status);
         }
         let body: any;
         try {
