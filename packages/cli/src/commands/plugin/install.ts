@@ -5,24 +5,29 @@
  * install it into this environment (ADR-0025 §3.5 steps 4–6, M1: the local T0
  * loop, first-party / self-signed plugins only).
  *
- *   1. Read the archive and its compiled `objectstack.plugin.json`; refuse an
- *      entry that could land outside the install directory.
- *   2. Re-verify every file against the manifest's `integrity` map; refuse a
+ *   1. Verify the detached signature (`<artifact>.sig`, from `os plugin sign`)
+ *      over the whole artifact, BEFORE anything is inflated: a signature
+ *      covers the compressed bytes, so nothing an untrusted key produced
+ *      reaches gunzip. Its key id is resolved in this environment's trusted
+ *      keys (`sys_trusted_key`, through the READ-ONLY one-shot boot of
+ *      `../../utils/plugin-trust-read.ts`, the read `os serve`'s boot-time
+ *      loader makes too), and the raw bytes are verified with that key by
+ *      `verifyPublisherSignature`. Refused by name: no signature, a malformed
+ *      one, a key id this environment does not trust, a revoked key id, and a
+ *      signature that does not match the bytes.
+ *   2. Read the archive (the inflate bounded, `MAX_UNPACKED_ARTIFACT_BYTES`)
+ *      and its compiled `objectstack.plugin.json`; refuse an entry that could
+ *      land outside the install directory.
+ *   3. Re-verify every file against the manifest's `integrity` map; refuse a
  *      digest mismatch, a declared file that is missing, or a file the map
  *      does not declare.
- *   3. Verify the detached signature (`<artifact>.sig`, from `os plugin sign`)
- *      over the whole artifact. Its key id is resolved in this environment's
- *      trusted keys (`sys_trusted_key`, through a READ-ONLY one-shot boot of
- *      the environment's database), and the bytes are verified with that key by
- *      `verifyPluginArtifact`. Refused by name: no signature, a malformed one,
- *      a key id this environment does not trust, a revoked key id, and a
- *      signature that does not match the bytes.
- *   4. Before anything is written, read this project's installation records
- *      (refusing a file it cannot read, which a write would clobber) and
- *      refuse an install directory that already holds other bytes no record
- *      of this project owns: two projects sharing one `OS_HOME` and one
- *      environment id share the directory, and one must not overwrite the
- *      other's install.
+ *   4. Holding the installations lock from here to the record, so a second
+ *      install of this project cannot interleave, read this project's
+ *      installation records (refusing a file it cannot read, which a write
+ *      would clobber) and refuse an install directory that already holds
+ *      other bytes no record of this project owns: two projects sharing one
+ *      `OS_HOME` and one environment id share the directory, and one must
+ *      not overwrite the other's install.
  *   5. Materialize to `<OS_HOME>/plugins/<env>/<id>/<version>/`, keeping the
  *      original artifact and its signature beside the unpacked files.
  *   6. Record the installation — key id and fingerprint included — in the
@@ -33,6 +38,12 @@
  * malformed or failing signature, or one whose key id is unknown or revoked,
  * is refused with or without it. There is no "unsigned with a warning" arm
  * without the flag.
+ *
+ * The next `os serve` (or `os dev` / `os start`) loads the install through the
+ * boot-time loader (`@objectstack/runtime`'s `installed-plugin-loader.ts`),
+ * which re-verifies the kept artifact first. Only `runtime: 'node'` is
+ * dispatched in M1: an artifact declaring `sandbox` or `worker` installs, with
+ * a warning, and is refused by name at boot until M3 routes those tiers.
  *
  * Writes no database row in any mode. M1 is first-party / self-signed only and
  * is listed on no marketplace surface: a T0 plugin is author code in the host
@@ -47,21 +58,18 @@ import {
   formatIntegrityViolation,
   parseSignature,
   verifyIntegrity,
-  verifyPluginArtifact,
+  verifyPublisherSignature,
 } from '@objectstack/core';
 import {
-  DEFAULT_PLUGIN_ENVIRONMENT_ID,
-  TRUSTED_KEY_OBJECT,
   loadPluginInstallations,
   pluginInstallDir,
+  dispatchPluginRuntime,
   recordPluginInstallation,
-  resolveTrustedKey,
+  withPluginInstallationsLock,
   type PluginInstallationRecord,
-  type TrustedKeyResolution,
 } from '@objectstack/runtime';
 import {
   emitJson,
-  isExitSignal,
   printError,
   printHeader,
   printKV,
@@ -70,15 +78,14 @@ import {
   printWarningToStderr,
 } from '../../utils/format.js';
 import { MANIFEST_FILENAME, SIGNATURE_FILENAME, readTarGz, sha256Hex, type ArchiveFile } from '../../utils/osplugin.js';
-import { bootSchemaStack } from '../../utils/schema-migrate.js';
-import { absentTableReads } from '../../utils/absent-table-reads.js';
-import { NO_TRUST_STORE_ENGINE, trustStoreEngine, trustStorePlugins } from '../../utils/plugin-trust-store.js';
+import { readTrustedKeys } from '../../utils/plugin-trust-read.js';
 import {
   INSTALLED_ARTIFACT_FILE,
   INSTALLED_SIGNATURE_FILE,
   archiveEntryProblems,
   installedArtifactSha,
   materializePlugin,
+  pluginEnvironmentId,
 } from '../../utils/plugin-install.js';
 
 /** One refusal: a machine-readable name and the sentence an operator reads. */
@@ -132,17 +139,127 @@ export default class PluginInstall extends Command {
       this.exit(1);
     };
 
-    // 1. The archive and its manifest. ─────────────────────────────────
+    // 1. The signature, against this environment's trusted keys — over the
+    //    raw bytes, before anything is inflated. ─────────────────────────
     const artifactPath = resolvePath(process.cwd(), args.artifact);
     if (!existsSync(artifactPath)) {
       await refuse({ error: 'artifact_not_found', message: `Artifact not found: ${args.artifact}` });
       return;
     }
     let bytes: Uint8Array;
-    let files: ArchiveFile[];
     try {
       if (!statSync(artifactPath).isFile()) throw new Error('not a regular file');
       bytes = new Uint8Array(await readFile(artifactPath));
+    } catch (error) {
+      await refuse({
+        error: 'artifact_unreadable',
+        message: `${args.artifact} is not a readable .osplugin (gzipped tar): ${(error as Error).message}`,
+      });
+      return;
+    }
+
+    const sigPath = resolvePath(process.cwd(), flags.sig ?? `${args.artifact}.sig`);
+    let signature: string | null = null;
+    if (existsSync(sigPath)) {
+      // A signature that is there but cannot be read is refused, never taken
+      // for an absent one: --trust-unsigned must not install around it.
+      try {
+        if (!statSync(sigPath).isFile()) throw new Error('not a regular file');
+        signature = (await readFile(sigPath, 'utf-8')).trim();
+      } catch (error) {
+        await refuse({
+          error: 'signature_unreadable',
+          message: `Cannot read the signature ${sigPath}: ${(error as Error).message}. Nothing was installed.`,
+        });
+        return;
+      }
+    } else if (flags.sig) {
+      await refuse({ error: 'signature_not_found', message: `Signature not found: ${flags.sig}` });
+      return;
+    }
+
+    let trusted: { keyId: string; fingerprint: string } | null = null;
+    if (signature === null) {
+      if (!flags['trust-unsigned']) {
+        await refuse({
+          error: 'signature_missing',
+          message:
+            `${args.artifact} carries no signature (no ${flags.sig ?? `${args.artifact}.sig`}), so it was not installed. `
+            + 'Sign it with `os plugin sign --key PATH.key.pem --key-id ID` and trust that key with '
+            + '`os plugin trust add PATH.pub.pem --key-id ID`, or pass --trust-unsigned to install it unsigned (dev only).',
+        });
+        return;
+      }
+    } else {
+      const parsed = parseSignature(signature);
+      if (!parsed) {
+        await refuse({
+          error: 'signature_malformed',
+          message: `The signature in ${sigPath} is malformed (expected the \`ed25519:KEYID:SIG\` that \`os plugin sign\` writes); nothing was installed.`,
+        });
+        return;
+      }
+      if (flags['trust-unsigned'] && !json) {
+        printStep('--trust-unsigned has no effect here: the artifact carries a signature, and a present signature is always verified.');
+      }
+
+      const read = await readTrustedKeys([parsed.keyId], { databaseUrl: flags['database-url'], json });
+      if (!read.ok) {
+        await refuse({ error: read.error, message: read.message });
+        return;
+      }
+      const resolved = read.keys.get(parsed.keyId) ?? { verdict: 'unknown' as const };
+      if (resolved.verdict === 'unknown') {
+        await refuse({
+          error: 'signature_key_untrusted',
+          message:
+            `The artifact is signed with key id '${parsed.keyId}', which this environment does not trust; nothing was installed. `
+            + `Trust the publisher's public key first: \`os plugin trust add PUB.pem --key-id ${parsed.keyId}\`.`,
+        });
+        return;
+      }
+      if (resolved.verdict === 'revoked') {
+        await refuse({
+          error: 'signature_key_revoked',
+          message: `The artifact is signed with key id '${parsed.keyId}', which was revoked in this environment (${resolved.row.fingerprint}); nothing was installed.`,
+        });
+        return;
+      }
+      if (resolved.verdict === 'invalid') {
+        await refuse({
+          error: 'trusted_key_invalid',
+          message: `The trusted key '${parsed.keyId}' cannot verify anything: ${resolved.message}. Nothing was installed.`,
+        });
+        return;
+      }
+      const publicKey = resolved.publicKey;
+      let verdict;
+      try {
+        // The publisher chain only: M1 is local, and no marketplace
+        // counter-signature exists for a self-signed artifact.
+        verdict = await verifyPublisherSignature(
+          { artifact: bytes, signature },
+          (keyId) => (keyId === parsed.keyId ? publicKey : null),
+        );
+      } catch (error) {
+        await refuse({ error: 'signature_verification_failed', message: `Signature verification failed: ${(error as Error).message}` });
+        return;
+      }
+      if (!verdict.ok || !verdict.verified) {
+        await refuse({
+          error: 'signature_invalid',
+          message:
+            `The signature does not verify against the trusted key '${parsed.keyId}' (${verdict.reason ?? 'not verified'}): `
+            + 'these are not the bytes that key signed. Nothing was installed.',
+        });
+        return;
+      }
+      trusted = { keyId: parsed.keyId, fingerprint: resolved.row.fingerprint };
+    }
+
+    // 2. The archive and its manifest. ─────────────────────────────────
+    let files: ArchiveFile[];
+    try {
       files = readTarGz(bytes);
     } catch (error) {
       await refuse({
@@ -177,7 +294,7 @@ export default class PluginInstall extends Command {
       await refuse({ error: 'manifest_incomplete', message: 'The artifact manifest is missing `id` or `version`. Rebuild it with `os plugin build`.' });
       return;
     }
-    const environmentId = process.env.OS_ENVIRONMENT_ID?.trim() || DEFAULT_PLUGIN_ENVIRONMENT_ID;
+    const environmentId = pluginEnvironmentId();
     let installDir: string;
     try {
       installDir = pluginInstallDir(environmentId, id, version);
@@ -186,8 +303,14 @@ export default class PluginInstall extends Command {
       return;
     }
     if (!json) printStep(`${id}@${version} (${(bytes.byteLength / 1024).toFixed(1)} KB, runtime: ${manifest.runtime ?? 'unset'})`);
+    if (signature === null) {
+      printWarningToStderr(
+        `--trust-unsigned: installing ${id}@${version} WITHOUT a signature. Nothing proves who built these bytes; `
+          + 'the installation record keeps this override, and every boot that loads it says so. Dev use only.',
+      );
+    }
 
-    // 2. Per-file integrity, re-verified at unpack (ADR-0025 §3.2). ─────
+    // 3. Per-file integrity, re-verified at unpack (ADR-0025 §3.2). ─────
     const declaredIntegrity = manifest.integrity;
     if (
       declaredIntegrity !== undefined && declaredIntegrity !== null
@@ -213,173 +336,100 @@ export default class PluginInstall extends Command {
       return;
     }
 
-    // 3. The signature, against this environment's trusted keys. ────────
-    const sigPath = resolvePath(process.cwd(), flags.sig ?? `${args.artifact}.sig`);
-    let signature: string | null = null;
-    if (existsSync(sigPath)) {
-      // A signature that is there but cannot be read is refused, never taken
-      // for an absent one: --trust-unsigned must not install around it.
-      try {
-        if (!statSync(sigPath).isFile()) throw new Error('not a regular file');
-        signature = (await readFile(sigPath, 'utf-8')).trim();
-      } catch (error) {
-        await refuse({
-          error: 'signature_unreadable',
-          message: `Cannot read the signature ${sigPath}: ${(error as Error).message}. Nothing was installed.`,
-        });
-        return;
-      }
-    } else if (flags.sig) {
-      await refuse({ error: 'signature_not_found', message: `Signature not found: ${flags.sig}` });
-      return;
-    }
-
-    let trusted: { keyId: string; fingerprint: string } | null = null;
-    if (signature === null) {
-      if (!flags['trust-unsigned']) {
-        await refuse({
-          error: 'signature_missing',
-          message:
-            `${args.artifact} carries no signature (no ${flags.sig ?? `${args.artifact}.sig`}), so it was not installed. `
-            + 'Sign it with `os plugin sign --key PATH.key.pem --key-id ID` and trust that key with '
-            + '`os plugin trust add PATH.pub.pem --key-id ID`, or pass --trust-unsigned to install it unsigned (dev only).',
-        });
-        return;
-      }
-      printWarningToStderr(
-        `--trust-unsigned: installing ${id}@${version} WITHOUT a signature. Nothing proves who built these bytes; `
-          + 'the installation record keeps this override. Dev use only.',
-      );
-    } else {
-      const parsed = parseSignature(signature);
-      if (!parsed) {
-        await refuse({
-          error: 'signature_malformed',
-          message: `The signature in ${sigPath} is malformed (expected the \`ed25519:KEYID:SIG\` that \`os plugin sign\` writes); nothing was installed.`,
-        });
-        return;
-      }
-      if (flags['trust-unsigned'] && !json) {
-        printStep('--trust-unsigned has no effect here: the artifact carries a signature, and a present signature is always verified.');
-      }
-
-      const resolved = await this.resolveKey(parsed.keyId, flags['database-url'], json);
-      if ('error' in resolved) {
-        await refuse(resolved);
-        return;
-      }
-      if (resolved.verdict === 'unknown') {
-        await refuse({
-          error: 'signature_key_untrusted',
-          message:
-            `The artifact is signed with key id '${parsed.keyId}', which this environment does not trust; nothing was installed. `
-            + `Trust the publisher's public key first: \`os plugin trust add PUB.pem --key-id ${parsed.keyId}\`.`,
-        });
-        return;
-      }
-      if (resolved.verdict === 'revoked') {
-        await refuse({
-          error: 'signature_key_revoked',
-          message: `The artifact is signed with key id '${parsed.keyId}', which was revoked in this environment (${resolved.row.fingerprint}); nothing was installed.`,
-        });
-        return;
-      }
-      if (resolved.verdict === 'invalid') {
-        await refuse({
-          error: 'trusted_key_invalid',
-          message: `The trusted key '${parsed.keyId}' cannot verify anything: ${resolved.message}. Nothing was installed.`,
-        });
-        return;
-      }
-      const publicKey = resolved.publicKey;
-      let verdict;
-      try {
-        verdict = await verifyPluginArtifact(
-          { artifact: bytes, version: { package_id: id, version, signature } },
-          {
-            getPublisherPublicKey: (keyId) => (keyId === parsed.keyId ? publicKey : null),
-            // M1 is local: no marketplace counter-signature exists for a self-signed artifact.
-            requirePlatform: false,
-          },
-        );
-      } catch (error) {
-        await refuse({ error: 'signature_verification_failed', message: `Signature verification failed: ${(error as Error).message}` });
-        return;
-      }
-      if (!verdict.ok || !verdict.publisherVerified) {
-        await refuse({
-          error: 'signature_invalid',
-          message:
-            `The signature does not verify against the trusted key '${parsed.keyId}' (${verdict.reason ?? 'not verified'}): `
-            + 'these are not the bytes that key signed. Nothing was installed.',
-        });
-        return;
-      }
-      trusted = { keyId: parsed.keyId, fingerprint: resolved.row.fingerprint };
-    }
-
-    // 4. Before anything is written. ──────────────────────────────────
-    let installations: PluginInstallationRecord[];
-    try {
-      installations = loadPluginInstallations(environmentId);
-    } catch (error) {
-      await refuse({ error: 'record_unreadable', message: `${(error as Error).message} Nothing was installed.` });
-      return;
-    }
+    // 4. Before anything is written. 5. Materialize. 6. Record. ─────────
+    // Under the installations lock throughout, so the check that the install
+    // directory is this project's to write and the record that follows the
+    // write cannot interleave with another install of this project.
     const artifactSha = sha256Hex(bytes);
-    const presentSha = installedArtifactSha(installDir);
-    if (
-      presentSha !== undefined
-      && presentSha !== artifactSha
-      && !installations.some((r) => r.id === id && r.dir === installDir && r.artifact?.sha256 === presentSha)
-    ) {
-      await refuse({
-        error: 'install_dir_taken',
-        message:
-          `${installDir} already holds ${id}@${version} `
-          + (presentSha === null ? `with no readable ${INSTALLED_ARTIFACT_FILE}` : `built from other bytes (artifact sha256 ${presentSha})`)
-          + ', and no installation of this project put it there: another project sharing this OS_HOME and environment did, '
-          + 'or something else wrote it. Nothing was installed. Give this project its own environment (OS_ENVIRONMENT_ID) '
-          + 'or home (OS_HOME), or publish the change under a new version.',
-      });
-      return;
-    }
-
-    // 5. Materialize. 6. Record. ───────────────────────────────────────
-    let replaced: boolean;
-    try {
-      ({ replaced } = materializePlugin({ dir: installDir, files, artifact: bytes, signature }));
-    } catch (error) {
-      await refuse({ error: 'materialize_failed', message: `Cannot write ${installDir}: ${(error as Error).message}` });
-      return;
-    }
     const permissions = manifest.permissions;
-    const record: PluginInstallationRecord = {
-      id,
-      version,
-      versionId: `${id}@${version}`,
-      runtime: typeof manifest.runtime === 'string' ? manifest.runtime : null,
-      status: 'installed',
-      grantedPermissions: permissions && typeof permissions === 'object' && !Array.isArray(permissions) ? permissions : null,
-      dir: installDir,
-      artifact: { file: INSTALLED_ARTIFACT_FILE, sha256: artifactSha },
-      signatureFile: signature === null ? null : INSTALLED_SIGNATURE_FILE,
-      signature: trusted,
-      trustUnsigned: signature === null,
-      installedAt: new Date().toISOString(),
-    };
+    let outcome: { refusal: Refusal } | { record: PluginInstallationRecord; replaced: boolean };
     try {
-      recordPluginInstallation(environmentId, record);
-    } catch (error) {
-      await refuse({
-        error: 'record_failed',
-        message: `${installDir} was written, but the installation was not recorded: ${(error as Error).message}`,
+      outcome = withPluginInstallationsLock(environmentId, () => {
+        let installations: PluginInstallationRecord[];
+        try {
+          installations = loadPluginInstallations(environmentId);
+        } catch (error) {
+          return { refusal: { error: 'record_unreadable', message: `${(error as Error).message} Nothing was installed.` } };
+        }
+        const presentSha = installedArtifactSha(installDir);
+        if (
+          presentSha !== undefined
+          && presentSha !== artifactSha
+          && !installations.some((r) => r.id === id && r.dir === installDir && r.artifact?.sha256 === presentSha)
+        ) {
+          return {
+            refusal: {
+              error: 'install_dir_taken',
+              message:
+                `${installDir} already holds ${id}@${version} `
+                + (presentSha === null ? `with no readable ${INSTALLED_ARTIFACT_FILE}` : `built from other bytes (artifact sha256 ${presentSha})`)
+                + ', and no installation of this project put it there: another project sharing this OS_HOME and environment did, '
+                + 'or something else wrote it. Nothing was installed. Give this project its own environment (OS_ENVIRONMENT_ID) '
+                + 'or home (OS_HOME), or publish the change under a new version.',
+            },
+          };
+        }
+
+        let replaced: boolean;
+        try {
+          ({ replaced } = materializePlugin({ dir: installDir, files, artifact: bytes, signature }));
+        } catch (error) {
+          return { refusal: { error: 'materialize_failed', message: `Cannot write ${installDir}: ${(error as Error).message}` } };
+        }
+        const record: PluginInstallationRecord = {
+          id,
+          version,
+          versionId: `${id}@${version}`,
+          runtime: typeof manifest.runtime === 'string' ? manifest.runtime : null,
+          status: 'installed',
+          grantedPermissions: permissions && typeof permissions === 'object' && !Array.isArray(permissions) ? permissions : null,
+          dir: installDir,
+          artifact: { file: INSTALLED_ARTIFACT_FILE, sha256: artifactSha },
+          signatureFile: signature === null ? null : INSTALLED_SIGNATURE_FILE,
+          signature: trusted,
+          trustUnsigned: signature === null,
+          installedAt: new Date().toISOString(),
+        };
+        try {
+          recordPluginInstallation(environmentId, record);
+        } catch (error) {
+          return {
+            refusal: {
+              error: 'record_failed',
+              message: `${installDir} was written, but the installation was not recorded: ${(error as Error).message}`,
+            },
+          };
+        }
+        return { record, replaced };
       });
+    } catch (error) {
+      // The lock itself: another live writer held it past the wait.
+      outcome = { refusal: { error: 'installations_locked', message: `${(error as Error).message} Nothing was installed.` } };
+    }
+    if ('refusal' in outcome) {
+      await refuse(outcome.refusal);
       return;
+    }
+    const { record, replaced } = outcome;
+    // ADR-0025 §3.6: only `node` is dispatched in M1.
+    const tier = dispatchPluginRuntime(record.runtime ?? undefined);
+    if (!tier.ok) {
+      printWarningToStderr(
+        `${id}@${version} is installed, and the next boot will refuse to load it (${tier.error}): ${tier.message}`,
+      );
     }
 
     if (json) {
-      await emitJson({ installed: record, replaced, integrity: { checked: integrity.checked, skipped: integrity.skipped } }, 0, { compact: true });
+      await emitJson(
+        {
+          installed: record,
+          replaced,
+          integrity: { checked: integrity.checked, skipped: integrity.skipped },
+          boot: tier.ok ? { loads: true } : { loads: false, error: tier.error },
+        },
+        0,
+        { compact: true },
+      );
       return;
     }
     printSuccess(`Installed ${id}@${version}${replaced ? ' (replaced the copy installed before)' : ''}`);
@@ -392,48 +442,10 @@ export default class PluginInstall extends Command {
         : `${integrity.checked} file(s) verified against the manifest digests`,
     );
     printKV('  Signature', trusted ? `verified with trusted key '${trusted.keyId}' (${trusted.fingerprint})` : 'NONE — installed under --trust-unsigned');
-    printStep('`os serve` does not load installed plugins yet: the boot-time loader is the next step of this install loop.');
-  }
-
-  /**
-   * Resolve `keyId` in the environment's `sys_trusted_key` through the
-   * READ-ONLY one-shot boot. A table the boot measured absent has never
-   * trusted a key, so the key is unknown there.
-   */
-  private async resolveKey(
-    keyId: string,
-    databaseUrl: string | undefined,
-    json: boolean,
-  ): Promise<TrustedKeyResolution | Refusal> {
-    let stack;
-    try {
-      stack = await bootSchemaStack({
-        jsonOutput: json,
-        databaseUrl,
-        extraPlugins: await trustStorePlugins(false),
-        deferSchemaDdl: true,
-        readOnlyProbe: true,
-      });
-    } catch (error) {
-      return { error: 'boot_failed', message: error instanceof Error ? error.message : String(error) };
-    }
-    try {
-      const engine = trustStoreEngine(stack);
-      if (!engine) return { error: 'no_engine', message: NO_TRUST_STORE_ENGINE };
-      const reads = absentTableReads(stack);
-      if (reads.absent(TRUSTED_KEY_OBJECT)) {
-        reads.notice(json);
-        return { verdict: 'unknown' };
-      }
-      return await resolveTrustedKey(engine, keyId);
-    } catch (error) {
-      if (isExitSignal(error)) throw error;
-      return {
-        error: 'trusted_keys_unreadable',
-        message: `Cannot read this environment's trusted keys: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    } finally {
-      await stack.shutdown();
-    }
+    printStep(
+      tier.ok
+        ? 'The next `os serve` (or `os dev` / `os start`) re-verifies the kept artifact and loads it.'
+        : 'The next `os serve` refuses to load it until its tier is dispatched (ADR-0025 M3).',
+    );
   }
 }

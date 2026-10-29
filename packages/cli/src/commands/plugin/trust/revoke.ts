@@ -7,8 +7,9 @@
  * Flips the `sys_trusted_key` row's `status` to `revoked` through a one-shot
  * boot of the environment's database, with the audit CRUD mirror armed so the
  * act leaves a `sys_audit_log` row. The row is kept: from then on
- * `os plugin install` refuses an artifact signed under `ID` by name, and
- * `os plugin trust add` refuses to trust any key under `ID` again.
+ * `os plugin install` refuses an artifact signed under `ID` by name, the next
+ * boot refuses to load a plugin installed under it, and `os plugin trust add`
+ * refuses to trust any key under `ID` again.
  *
  * Operator-only: there is no HTTP surface, and the store's API is read-only.
  */
@@ -75,7 +76,7 @@ export default class PluginTrustRevoke extends Command {
       }
       printKV('  Fingerprint', result.row.fingerprint);
       printKV('  Database', stack.dbLabel);
-      printInfo('`os plugin install` refuses artifacts signed under this key id from now on.');
+      printInfo('`os plugin install` refuses artifacts signed under this key id from now on, and the next boot refuses to load any installed under it.');
     } catch (error) {
       if (isExitSignal(error)) throw error;
       printError(error instanceof Error ? error.message : String(error));
