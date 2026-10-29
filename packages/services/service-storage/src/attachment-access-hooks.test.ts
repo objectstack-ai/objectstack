@@ -69,14 +69,21 @@ function install(opts: {
   /** Parents the CALLER can read through the engine, keyed `object/id`. */
   readable?: string[];
   messageTranslator?: () => ((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined;
+  /** `sys_file` rows the engine serves; with `authorizeFileRead`, the file half of the gate is installed too. */
+  files?: Array<Record<string, unknown>>;
+  authorizeFileRead?: (file: Record<string, unknown>, context: any) => Promise<boolean>;
 }) {
-  const hooks = new Map<string, (ctx: any) => Promise<void>>();
+  // Every handler per event, in registration order — the engine's own order
+  // for same-priority hooks; each event's runner below awaits them in turn.
+  const hooks = new Map<string, Array<(ctx: any) => Promise<void>>>();
+  const fileReads: any[] = [];
   const parentReads: Array<{ object: string; options: any }> = [];
   const parentFind = readableParentFind(opts.readable ?? [], parentReads);
-  const engine: AttachmentLifecycleEngine = {
+  const engine: AttachmentLifecycleEngine & { getObject: (name: string) => unknown } = {
     registerHook: (event, handler) => {
-      hooks.set(event, handler as any);
+      hooks.set(event, [...(hooks.get(event) ?? []), handler as any]);
     },
+    getObject: (name) => (name === 'sys_attachment' ? { fields: { file_id: { label: 'File' } } } : undefined),
     find: async (object, options: any) => {
       if (object !== 'sys_attachment') return parentFind(object, options);
       const rows = (opts.attachments ?? []).filter((r) =>
@@ -85,18 +92,28 @@ function install(opts: {
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     findOne: async (_object, options: any) =>
-      { assertEngineFindOnePredicate(_object, options); return (opts.attachments ?? []).find((r) =>
+      { assertEngineFindOnePredicate(_object, options);
+        if (_object === 'sys_file') {
+          fileReads.push(options);
+          return (opts.files ?? []).find((f) => f.id === options.where.id) ?? null;
+        }
+        return (opts.attachments ?? []).find((r) =>
         Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       ) ?? null; },
     update: async () => ({}),
   };
   const sharing = asTriState(opts.sharing);
   installAttachmentAccessHooks(engine, () => sharing, silentLogger(), opts.messageTranslator, () => opts.security);
+  if (opts.authorizeFileRead) installAttachmentFileReferenceGate(engine, opts.authorizeFileRead);
+  const run = (event: string) => async (ctx: any) => {
+    for (const handler of hooks.get(event) ?? []) await handler(ctx);
+  };
   return {
-    beforeInsert: hooks.get('beforeInsert')!,
-    beforeUpdate: hooks.get('beforeUpdate')!,
-    beforeDelete: hooks.get('beforeDelete')!,
+    beforeInsert: run('beforeInsert'),
+    beforeUpdate: run('beforeUpdate'),
+    beforeDelete: run('beforeDelete'),
     parentReads,
+    fileReads,
   };
 }
 
@@ -1885,53 +1902,22 @@ describe('attachment access — the file a row names must be one the caller may 
   const ROW = { id: 'a1', parent_object: 'task', parent_id: 't1', file_id: 'f-own', uploaded_by: 'u1' };
 
   /**
-   * The gate with a bound file-read verdict: `openable` lists the file ids the
-   * caller may open; `fileReads` records every `sys_file` lookup the gate made.
+   * The gate with the file half installed: `openable` lists the file ids the
+   * caller may open. `bound: false` installs the access hooks alone.
    */
   function installWithFiles(opts: { openable: string[]; bound?: boolean; canEditParent?: boolean }) {
-    // Every handler per event, in registration order — the engine's own order
-    // for same-priority hooks.
-    const hooks = new Map<string, Array<(ctx: any) => Promise<void>>>();
-    const files = [OWN_FILE, OTHER_FILE];
-    const fileReads: any[] = [];
     const authorizeFileRead = vi.fn(async (file: Record<string, unknown>, context: any) => {
       expect(context.userId).toBe('u1');
       return opts.openable.includes(String(file.id));
     });
-    const engine: AttachmentLifecycleEngine & { getObject: (name: string) => unknown } = {
-      registerHook: (event, handler) => {
-        hooks.set(event, [...(hooks.get(event) ?? []), handler as any]);
-      },
-      getObject: (name) => (name === 'sys_attachment' ? { fields: { file_id: { label: 'File' } } } : undefined),
-      find: async () => [],
-      findOne: async (object, options: any) => {
-        assertEngineFindOnePredicate(object, options);
-        if (object === 'sys_file') {
-          fileReads.push(options);
-          return files.find((f) => f.id === options.where.id) ?? null;
-        }
-        return object === 'sys_attachment' && options.where.id === ROW.id ? { ...ROW } : null;
-      },
-      update: async () => ({}),
-    };
-    const canEdit = opts.canEditParent ?? true;
-    installAttachmentAccessHooks(
-      engine,
-      () => ({ checkEdit: async () => (canEdit ? ('allow' as const) : ('deny' as const)) }),
-      silentLogger(),
-      undefined,
-      () => null,
-    );
-    if (opts.bound !== false) installAttachmentFileReferenceGate(engine, authorizeFileRead);
-    const chain = (event: string) => async (ctx: any) => {
-      for (const handler of hooks.get(event) ?? []) await handler(ctx);
-    };
-    return {
-      beforeInsert: chain('beforeInsert'),
-      beforeUpdate: chain('beforeUpdate'),
-      authorizeFileRead,
-      fileReads,
-    };
+    const gate = install({
+      attachments: [ROW],
+      files: [OWN_FILE, OTHER_FILE],
+      sharing: { canEdit: async () => opts.canEditParent ?? true },
+      security: null,
+      authorizeFileRead: opts.bound === false ? undefined : authorizeFileRead,
+    });
+    return { ...gate, authorizeFileRead };
   }
 
   const attach = (fileId: unknown, session: Record<string, unknown> = { userId: 'u1', organizationId: 'org-1' }) => ({
