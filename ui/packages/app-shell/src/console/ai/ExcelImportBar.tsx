@@ -72,7 +72,8 @@ function normalizeFields(schema: any): WizardField[] {
       type: (def?.type ?? 'text') as string,
       required: !!def?.required,
       options: def?.options,
-      multiple: def?.multiple === true,
+      // A field holding a list is never offered as a match key (#27567).
+      ...(def?.multiple === true ? { multiple: true } : {}),
     }))
     .filter((f) => f.name && !NON_WRITABLE_TYPES.includes(f.type));
 }
