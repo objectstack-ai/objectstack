@@ -7,6 +7,8 @@ fix(service-storage): the chunk upload door refuses a `chunkIndex` the upload di
 Clause-②: no (narrowing)
 Metadata-protocol: none
 
+<!-- adr-0087: not-required (no-migration-prescription) A REST request value is refused at the presigned upload door (a negative size): no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and the refusal reuses the existing 400 INVALID_REQUEST envelope. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+
 Narrowed: a negative `size`, which the spec number (`GetPresignedUrlRequestSchema.size`, a bare `z.number()`) admits, is now refused `400` at the presigned door.
 
 - **Chunk door** (`PUT /api/v1/storage/upload/chunked/:uploadId/chunk/:chunkIndex`). **Before:** the index was read with `parseInt`, so `0.5` was read as `0`, `-1` reached the storage backend as part number 0 and answered `500 INTERNAL`, and an index at or past the upload's `totalChunks` was stored, counted in the progress, and then made `POST .../complete` answer `409` for good, since no door removes a stored chunk. **Now:** the index must be a whole number (decimal digits only) in `[0, totalChunks)`; anything else answers `400 INVALID_REQUEST` naming the valid range, with `details: { chunkIndex, totalChunks }`. Nothing is stored and the progress is unchanged, so the upload can still be completed. The check runs after the resume-token check, so a caller without the token still gets `403 INVALID_RESUME_TOKEN` first.
