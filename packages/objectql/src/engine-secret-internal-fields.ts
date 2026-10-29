@@ -22,6 +22,12 @@
  * handle once a write that did not land, or a committed one that moved the
  * column off it, has left it unreferenced.
  *
+ * [#27582] And one on the value already spelled as a ref: a non-system write
+ * may only seal a new value or keep its own record's ref. `encryptSecretFields`
+ * takes the write's own stored rows ({@link StoredRowsReader}) and refuses any
+ * other ref with {@link SecretRefWriteError}; the system principal keeps the
+ * pass-through.
+ *
  * ## How the moved bodies reach the class
  *
  * The shape #23050 set for `rest-server.ts` (its `data-action-routes.ts`
@@ -105,6 +111,53 @@ export interface SecretHandleSlot {
   readonly handleId: string;
 }
 
+/**
+ * [#27582] The rows a write's own record(s) hold in storage now, read for one
+ * question: is a ref on a non-system payload the value that record's column
+ * already holds? Each call site says what its own rows are — none for an
+ * insert (a new record holds no ref of its own), the pre-image for a by-id
+ * update, the matched rows for a predicate update — and the reader is called
+ * only when a non-system payload carries a ref, so every other write reads
+ * nothing more than it did.
+ */
+export type StoredRowsReader = () => Promise<readonly (Record<string, unknown> | null | undefined)[] | null>;
+
+/**
+ * [#27582] The ADR-0112 pair carried by the refusal of a ref that is not the
+ * record's own. `VALIDATION_ERROR` / 400 is the standard-catalog member the
+ * sibling credential refusals use (`EMPTY_CREDENTIAL_REFUSAL_CODE`): the
+ * payload is wrong and the caller can fix it, so no ledger registration is
+ * needed.
+ */
+export const SECRET_REF_WRITE_REFUSAL_CODE = 'VALIDATION_ERROR';
+export const SECRET_REF_WRITE_REFUSAL_STATUS = 400;
+
+/**
+ * [#27582] Refusal of a `secret:` ref on a non-system write that is not the
+ * value the record's own column already holds. Fail closed, with one answer:
+ * the message names the column and never the ref, and nothing about the handle
+ * the ref names is looked up, so the answer is the same whatever it names.
+ */
+export class SecretRefWriteError extends Error {
+  readonly code = SECRET_REF_WRITE_REFUSAL_CODE;
+  readonly status = SECRET_REF_WRITE_REFUSAL_STATUS;
+  /** The same number under ADR-0112 D5's spelling, as `EmptyCredentialWriteError` carries it. */
+  readonly httpStatus = SECRET_REF_WRITE_REFUSAL_STATUS;
+  readonly object: string;
+  readonly field: string;
+  constructor(object: string, field: string) {
+    super(
+      `Stored-reference value refused for secret field "${object}.${field}": a value that starts with "secret:" `
+        + 'is read as a reference to a credential already stored, not as a credential, and a write may only keep '
+        + 'the reference this record already holds. To set the secret, send its value; to clear it, write null; '
+        + 'to leave it unchanged, omit the field. Nothing was written.',
+    );
+    this.name = 'SecretRefWriteError';
+    this.object = object;
+    this.field = field;
+  }
+}
+
 /** The body of `ObjectQL#encryptSecretFields`; the method's docblock there is its contract. */
 export async function encryptSecretFields(
   this: Pick<SecretInternalFieldsHost, '_registry' | 'cryptoProvider' | 'getDriver'>,
@@ -112,10 +165,12 @@ export async function encryptSecretFields(
   row: Record<string, unknown>,
   context: ExecutionContext | undefined,
   driverOptions: unknown,
+  storedRows: StoredRowsReader,
 ): Promise<PendingSecretRow[]> {
   const pending: PendingSecretRow[] = [];
   if (!row || typeof row !== 'object') return pending;
   const schema = this._registry.getObject(object);
+  let ownRows: readonly (Record<string, unknown> | null | undefined)[] | undefined;
 
   // Echoed-mask drop for every field the read path masks (secret + generic
   // password). The read path returns SECRET_MASK; a client that PATCHes it
@@ -140,7 +195,22 @@ export async function encryptSecretFields(
     // on the payload, so it must not depend on whether a CryptoProvider or
     // sys_secret store happens to be wired.
     if (value === '') throw new EmptyCredentialWriteError(object, field, 'secret');
-    if (isSecretRef(value)) continue; // already encrypted ref
+    if (isSecretRef(value)) {
+      // The system principal's ref passes through as it always has: a system
+      // writer may copy a ref on purpose (seed replay, migration).
+      if (context?.isSystem === true) continue;
+      // [#27582] A non-system write may only seal a new value or keep its own
+      // record's ref: every row this write lands on must already hold exactly
+      // this value in this column. A write with no own row (an insert, a
+      // predicate that matches nothing) has nothing to keep. Kept, the key is
+      // dropped, as the echoed mask is: the column is not rewritten at all, so
+      // the verdict cannot go stale before the statement runs.
+      ownRows ??= (await storedRows()) ?? [];
+      const keepsOwn = ownRows.length > 0 && ownRows.every((own) => own?.[field] === value);
+      if (!keepsOwn) throw new SecretRefWriteError(object, field);
+      delete row[field];
+      continue;
+    }
 
     if (!this.cryptoProvider) {
       throw new Error(
