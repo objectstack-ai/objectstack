@@ -298,6 +298,8 @@ import {
 } from './export-format.js';
 // [#23050 slice 1] The data-action routes' body moved to its own module — see its header.
 import { registerDataActionEndpoints, type DataActionRouteHost } from './data-action-routes.js';
+// [#27627] The record page payload route — see its module header.
+import { registerRecordPageEndpoints, type RecordPageRouteHost } from './record-page-routes.js';
 // [#23050 slice 2] The batch routes' body moved to its own module — see its header.
 import { registerBatchEndpoints, type BatchRouteHost } from './batch-routes.js';
 // [#23050 slice 3] The approval routes' body moved to its own module — see its header.
@@ -4846,6 +4848,9 @@ export class RestServer {
             // deeper `:id/clone`, `:id/shares` paths), so it cannot shadow any
             // CRUD literal.
             this.registerDataActionEndpoints(bp);
+            // [#27627] `POST /data/:object/:id/page` — a deeper literal under
+            // `:id`, like `:id/clone`, so it shadows no CRUD route either way.
+            this.registerRecordPageEndpoints(bp);
             if (this.config.api.enableCrud) {
                 this.registerCrudEndpoints(bp);
             }
@@ -5591,6 +5596,32 @@ export class RestServer {
             answerImportTemplate: (...a) => this.answerImportTemplate(...a),
         };
         registerDataActionEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#27627] `POST {basePath}/data/:object/:id/page` — the record page
+     * payload: the record, its related lists' counts and first rows, its field
+     * projection, access verdicts and approval state in one request, each part
+     * the answer of the read it replaces (`record-page-routes.ts`).
+     */
+    private registerRecordPageEndpoints(basePath: string): void {
+        const readApprovalsServiceProvider = () => this.approvalsServiceProvider;
+        const host: RecordPageRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
+            loadObjectItem: (p, environmentId, name) => {
+                const listSource = this.metaListSource(p, environmentId);
+                const getObjectItem = this.objectItemReader(p, environmentId);
+                return metaReadGate.loadObjectItem(getObjectItem ? { ...listSource, getObjectItem } : listSource, name);
+            },
+        };
+        registerRecordPageEndpoints.call(host, basePath);
     }
 
     /**

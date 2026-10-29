@@ -5,6 +5,8 @@ import {
   BatchUpdateRequest,
   BatchUpdateResponse,
   GetRecordFieldAccessResponse,
+  RecordPageRequest,
+  RecordPageResponse,
   UpdateManyRequest,
   DeleteManyRequest,
   BatchOptions,
@@ -7430,6 +7432,26 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#27627] The record page payload — `POST /data/:object/:id/page`,
+     * declared by `RecordPageRequestSchema` / `RecordPageResponseSchema`
+     * (`@objectstack/spec/api`): the record, the count and first rows of each
+     * related list `request.related` names, and — when asked — the record's
+     * field projection, its record-grained access decisions and its approval
+     * state, in one round trip. Each part is the answer of the read it replaces
+     * for the same caller; a part whose read refused carries `error` instead.
+     * A record that is absent or that the caller cannot read rejects with the
+     * record read's 404.
+     */
+    recordPage: async (object: string, id: string, request: RecordPageRequest = {}): Promise<RecordPageResponse> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/page`,
+            { method: 'POST', body: JSON.stringify(request) },
+        );
+        return this.unwrapResponse<RecordPageResponse>(res);
+    },
+
+    /**
      * Streaming export (M10.9): CSV / JSON / XLSX file download. Returns the
      * raw `Response` — the body is a file stream (`Content-Disposition`
      * attachment), not a JSON envelope; call `.blob()` / `.text()` yourself.
@@ -8368,6 +8390,8 @@ export type {
   GetObjectPermissionsResponse,
   GetEffectivePermissionsResponse,
   GetRecordFieldAccessResponse,
+  RecordPageRequest,
+  RecordPageResponse,
   RealtimeConnectRequest,
   RealtimeConnectResponse,
   RealtimeSubscribeRequest,
