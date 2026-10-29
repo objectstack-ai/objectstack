@@ -526,7 +526,7 @@ describe('stdio data bridge: a sys_api_key write is refused 403 PERMISSION_DENIE
   it('refuses update on the shipped declaration, and never asks the engine', async () => {
     const { bridge, engine } = makeBridge(SHIPPED);
     await expectCredentialRefusal(() => bridge.update('sys_api_key', 'k1', { revoked: false }));
-    expect(engine.findOne).not.toHaveBeenCalled();
+    expect(engine.find).not.toHaveBeenCalled();
     expect(engine.update).not.toHaveBeenCalled();
   });
 
@@ -536,7 +536,7 @@ describe('stdio data bridge: a sys_api_key write is refused 403 PERMISSION_DENIE
     await expectCredentialRefusal(() => bridge.update('sys_api_key', 'k1', { revoked: true }));
     await expectCredentialRefusal(() => bridge.remove('sys_api_key', 'k1'));
     expect(engine.insert).not.toHaveBeenCalled();
-    expect(engine.findOne).not.toHaveBeenCalled();
+    expect(engine.find).not.toHaveBeenCalled();
     expect(engine.update).not.toHaveBeenCalled();
     expect(engine.delete).not.toHaveBeenCalled();
   });
@@ -554,10 +554,12 @@ describe('stdio data bridge: a sys_api_key write is refused 403 PERMISSION_DENIE
 
   it('serves reads of sys_api_key', async () => {
     const { bridge, engine } = makeBridge(SHIPPED);
-    await bridge.query('sys_api_key', { limit: 5 });
-    await bridge.get('sys_api_key', 'r1');
-    expect(engine.find).toHaveBeenCalledTimes(1);
-    expect(engine.findOne).toHaveBeenCalledTimes(1);
+    const listed: any = await bridge.query('sys_api_key', { limit: 5 });
+    const one: any = await bridge.get('sys_api_key', 'r1');
+    expect(listed.records).toHaveLength(1);
+    expect(one?.id).toBe('r1');
+    // Both reads reach the engine (the by-id read goes through `find` too).
+    expect(engine.find).toHaveBeenCalledTimes(2);
   });
 
   it('serves a write to another object', async () => {
