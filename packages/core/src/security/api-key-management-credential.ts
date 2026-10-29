@@ -20,7 +20,10 @@
  * `ExecutionContext` envelope does not carry it, so an ObjectQL hook cannot
  * ask it. Each door asks this function at its per-object gate, the one every
  * data route on that door passes: the runtime dispatcher's
- * `refuseUnexposedDataAction` and `RestServer.enforceApiAccess`.
+ * `refuseUnexposedDataAction`, `RestServer.enforceApiAccess` (and per op on
+ * its cross-object batch), and the stdio MCP transport's write arms
+ * (`@objectstack/mcp` `stdio-data-bridge.ts`), whose principal an API key
+ * admits by construction (ADR-0101).
  *
  * ## The rule
  *

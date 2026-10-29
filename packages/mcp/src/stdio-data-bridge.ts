@@ -121,6 +121,10 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 // and `@objectstack/core` is the lowest package that carries the factory, so
 // there is no reason to add a second import path to the same function.
 import { recordNotFoundError } from '@objectstack/core';
+// Managing API keys is a signed-in-session act: the one rule every data door
+// asks beside its exposure gate (`RestServer.enforceApiAccess`, the runtime
+// dispatcher's `refuseUnexposedDataAction`), asked here by the write arms.
+import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
@@ -853,6 +857,25 @@ export function serveStoredMetadataRows(
 }
 
 /**
+ * The API-key management rule on this transport: a write to `sys_api_key` is
+ * refused `403 PERMISSION_DENIED` (`apiKeyManagementCredentialRefusal`,
+ * `@objectstack/core`, whose docblock carries the rule), thrown as the error
+ * the tool layer renders, like the exposure refusals beside it.
+ *
+ * The credential is `'api_key'` by construction: this transport admits its
+ * principal from `OS_MCP_STDIO_API_KEY` and from nothing else (ADR-0101,
+ * `resolveStdioExecutionContext` in `plugin.ts`), and the envelope carries no
+ * credential to read. A system context skips it, as the exposure gate does.
+ * Asked after the exposure gate, so an operation the object does not expose
+ * keeps its `405`, and before the engine is asked anything.
+ */
+function enforceApiKeyManagementCredential(object: string, action: string, context: ExecutionContext): void {
+  if (context?.isSystem) return;
+  const refusal = apiKeyManagementCredentialRefusal({ object, operation: action, credential: 'api_key' });
+  if (refusal) throw refusal;
+}
+
+/**
  * Build the stdio transport's principal-bound data bridge.
  *
  * `aggregate` is attached only when the engine implements it, so a partial
@@ -965,6 +988,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async create(object, data) {
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.create, context);
+      enforceApiKeyManagementCredential(object, GATED_ACTIONS.create, context);
       const written = (await engine.insert(object, data, { context })) as
         | Record<string, unknown>
         | undefined;
@@ -988,6 +1012,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // miss is an observable difference, so gating second would answer "that
       // id names no row" for an object the author declared unexposed.
       await enforceApiExposure(reads, object, GATED_ACTIONS.update, context);
+      enforceApiKeyManagementCredential(object, GATED_ACTIONS.update, context);
       const existing = await findById(engine, object, id, context);
       // The "this id names no row" refusal, raised BEFORE the write is
       // attempted — a write path that answered success for an id that matched
@@ -1018,6 +1043,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const context = await resolvePrincipal();
       // Gated before the probe, for the reason `update` states.
       await enforceApiExposure(reads, object, GATED_ACTIONS.remove, context);
+      enforceApiKeyManagementCredential(object, GATED_ACTIONS.remove, context);
       const existing = await findById(engine, object, id, context);
       // Same shared envelope as `update`, above.
       if (!existing) throw recordNotFoundError(object, id);
