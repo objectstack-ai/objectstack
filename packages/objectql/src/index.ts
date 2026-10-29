@@ -441,7 +441,7 @@ export { evaluateFormulaField } from './engine.js';
 // [#16260] The constant is batteries-only while `ValidationError` is ALSO on the
 // lean `./core` entry, matching every existing `*_CODE` in this package; that
 // asymmetry is #16260's question, deliberately not decided here.
-export { ValidationError, validateRecord, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
+export { ValidationError, validateRecord, validateInsertValues, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
 // [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
 // off-shape value. Exported because the fresh-datastore attestation
