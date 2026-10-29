@@ -214,13 +214,13 @@ function isAuthored(value: unknown): boolean {
  * reason the boundary below is a THROW rather than a fallthrough. #13483 added
  * the fifth status to the ledger vocabulary — `live-elsewhere`: dead HERE by
  * measurement, genuinely enforced in a sibling repo (a key with zero local
- * dispatch whose only enforcer is a gate in another repository — a publish
- * gate, a closed runtime's check — named by the ledger row's `evidence`;
- * no shipped row holds the verdict today, and the ledger README keeps the
- * historical worked example) — without teaching this function about it.
- * Falling into `dead` would have said "Remove it" about a key whose
- * enforcement is real and remote, i.e. exactly the most wrong sentence
- * available: deleting it tears out a live gate's input. Such a row is not
+ * dispatch whose only enforcer is a gate in another repository, a marketplace
+ * publish gate for instance, named by the ledger row's `evidence`) — without
+ * teaching this function about it. No shipped row holds the verdict today;
+ * the ledger README keeps the historical worked example. Falling into `dead`
+ * would have said "Remove it" about a key whose enforcement is real and
+ * remote, i.e. exactly the most wrong sentence available: deleting it tears
+ * out a live gate's input. Such a row is not
  * deletable, so `live-elsewhere` gets its own branch and its own rule id, and
  * its default hint points the author at the ledger row's `evidence` — the
  * enforcer's address — rather than at a delete key.
@@ -295,7 +295,7 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
       rule: LIVENESS_LIVE_ELSEWHERE_PROPERTY,
       defaultHint:
         'Keep it — nothing reads it when the stack loads here, but a sibling repo enforces it ' +
-        "(a publish gate or a closed runtime's own check); see the ledger row's " +
+        "(a marketplace publish gate, for instance); see the ledger row's " +
         'evidence for the enforcer.',
     };
   }
