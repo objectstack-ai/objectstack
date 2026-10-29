@@ -79,7 +79,7 @@ function labelsOf(container: HTMLElement) {
 }
 
 /** The y-axis tick texts, so a label can be read against its own axis. */
-function yTicksOf(container: HTMLElement, axis = '.recharts-yAxis') {
+function yTicksOf(container: HTMLElement, axis = '.recharts-yAxis-tick-labels') {
   return [...container.querySelectorAll(`${axis} .recharts-cartesian-axis-tick-value`)].map((t) =>
     (t.textContent ?? '').trim(),
   );
