@@ -2651,10 +2651,13 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.object).toBe('ghost');
   });
 
-  it('emits the identical envelope whether the gate or the driver detected it', () => {
+  it('[#27702] the driver\'s missing table is not this verdict: the gate is its one source', () => {
+    // No unregistered name reaches a driver, so a missing table behind a
+    // name is a registered object's missing storage — a store fault.
     const fromGate = mapDataError(objectNotFound('ghost'), 'ghost');
     const fromDriver = mapDataError(sqliteError('no such table: ghost'), 'ghost');
-    expect(fromGate).toEqual(fromDriver);
+    expect(fromGate.status).toBe(404);
+    expect(fromDriver).toEqual({ status: 500, body: { error: 'Internal data error', code: 'DATABASE_ERROR' } });
   });
 
   it('names the object from the error itself when the caller passes none', () => {
