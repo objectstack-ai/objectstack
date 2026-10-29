@@ -476,7 +476,7 @@ describe('async import job — an unregistered object is refused before a job ex
     expect(ctx.create && ctx.dataCreate).toBeTruthy();
   });
 
-  const jobRows = async () => (await ctx.engine.find('sys_import_job', {}, { isSystem: true } as any)) as any[];
+  const jobRows = async () => ctx.engine.find('sys_import_job', { where: {} });
   const call = (route: any, object: string, body: any) => {
     const res = makeRes();
     return route.handler({ params: { object }, body } as any, res).then(() => res);
