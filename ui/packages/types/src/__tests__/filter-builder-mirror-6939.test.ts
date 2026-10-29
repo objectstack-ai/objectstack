@@ -46,7 +46,7 @@
  *
  *   - **`select` is retained.** The ruling's six-member list inherits the
  *     finding card's description of `select` as "extra". It is not: it has its
- *     own operator bucket (`selectLikeTypes`, `custom/filter-builder.tsx:935`,
+ *     own operator bucket (`selectLikeTypes` in `custom/filter-builder.tsx`,
  *     read by `operatorsForFieldType` and `isOptionDrivenValueControl`) and
  *     draws the option-driven Select instead of a text box. Dropping it would
  *     refuse a spelling this mirror accepts TODAY and the renderer draws
@@ -90,7 +90,7 @@
  * green; its control, Leg D — the same member added to BOTH code faces — did
  * redden, so the file was live and the hole was directional.
  *
- * The fix is that the population is now TAKEN from the doc (`documentedTypes()`)
+ * The fix then was that the population was TAKEN from the doc (`documentedTypes()`)
  * instead of copied beside it, so `the accept set is EXACTLY the published doc`
  * compares the enum against the authority rather than against a copy of it and
  * fails in both directions. A doc-seeded pin has its own failure mode — a reader
@@ -98,9 +98,8 @@
  * every reader THROWS on absence and `the doc reader has a floor` drives that,
  * with the doc's own two-member `logic` union as the positive control.
  *
- * ⛔ If this pin reddens because the DOC widened: the mirror follows, as its own
- * reviewable change. ⛔ Never narrow the doc to match the mirror — under
- * decision batch #88 a contract does not retract what it published to authors.
+ * (The doc reader and its floor went with the doc; see objectstack#27145 and
+ * objectstack#27369 below for where the authority lives now.)
  *
  * ## The FOURTH divergence, and how it was settled
  *
@@ -136,19 +135,30 @@
  * the control that says so. The mirror-side pins of the ruling itself live in
  * `filter-operator-protocol-set-9559.test.ts`.
  *
- * ## objectstack#27145 — the published doc is retired, so its union is FROZEN here
+ * ## objectstack#27145 / objectstack#27369 — the authority is `FILTER_FIELD_TYPES`
  *
  * The authority the pins above read, `content/docs/components/complex/filter-builder.mdx`,
- * left the tree with the ObjectUI docs site. Its successor,
- * `content/docs/frontend/renderers.mdx`, lists `filter-builder` as one table
- * row and declares no `FilterField`. With nothing left to read, the doc's last
- * `type?:` union is restated below as `LAST_PUBLISHED_TYPES`, in the doc's
- * order, and the set-equality pin compares the mirror against it in both
- * directions. That is the hand-kept list objectui#8774 removed, back for want
- * of a source: ⛔ widening or narrowing it is a vocabulary change, made as its
- * own reviewable edit beside the mirror and the interface. The doc reader, its
- * floor, the `published doc` reading and the objectui#9073 reader fixtures went
- * with the page they read.
+ * left the tree with the ObjectUI docs site, and objectstack#27145 froze its
+ * last `type?:` union in this file as a hand-kept copy. objectstack#27369
+ * replaced that copy with a SINGLE declaration: `FILTER_FIELD_TYPES` and its
+ * four behaviour buckets in `../filter-field-types.ts`. `FilterFieldSchema.type`
+ * builds its enum from it, `FilterField['type']` is typed from it, and
+ * `custom/filter-builder.tsx` takes its buckets from it — so the three faces
+ * share one list and cannot drift apart, which is the class objectui#6939,
+ * #7562 and #8774 each repaired by hand. The accepted set did not move: the
+ * same fourteen, `type` optional, `text` when absent.
+ *
+ * What a single source cannot guarantee by itself is pinned instead:
+ *
+ *   - **every member has a renderer branch** — the ruling's precondition. That
+ *     is a render measurement, so it lives in the render half
+ *     (`examples/schema-catalog/test/filter-builder-mirror-6939.test.tsx`,
+ *     `every member of FILTER_FIELD_TYPES draws a branch of its own`): a
+ *     member added to the list with no bucket reddens there.
+ *   - **every member is a spec `FieldType`**, except the members named in
+ *     `SPEC_FIELD_TYPE_EXEMPTIONS` below, each with its reason. A member that
+ *     is neither reddens here.
+ */
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -158,22 +168,29 @@ import { dirname, join } from 'node:path';
 import { FilterBuilderSchema, FilterFieldSchema, FilterGroupSchema } from '../zod/complex.zod';
 import { safeValidateSchema } from '../zod/index.zod';
 import type { FilterField as TsFilterField, FilterGroup as TsFilterGroup } from '../complex';
+import { FieldType as SpecFieldTypeEnum } from '@objectstack/spec/data';
+import {
+  FILTER_FIELD_TYPES,
+  FILTER_LOOKUP_LIKE_TYPES,
+  FILTER_NUMBER_LIKE_TYPES,
+  FILTER_SELECT_LIKE_TYPES,
+  type FilterFieldType,
+} from '../filter-field-types';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
 const CATALOG = join(REPO_ROOT, 'examples/schema-catalog/src/schemas/components-complex-filter-builder');
 const READER = 'packages/components/src/custom/filter-builder.tsx';
 /**
- * The `type?:` union the retired published doc declared, in its order
- * (objectstack#27145 froze it here; see the header).
+ * Members of `FILTER_FIELD_TYPES` that are NOT a spec `FieldType`, each with the
+ * reason it is accepted anyway. ⛔ Exempting is the only way past the spec
+ * check — never drop a member to green it, because the accepted set must not
+ * narrow (objectstack#27369).
  */
-const LAST_PUBLISHED_TYPES = [
-  'text', 'number', 'currency', 'percent', 'rating',
-  'date', 'datetime', 'time',
-  'boolean',
-  'select', 'status',
-  'lookup', 'master_detail', 'user',
-] as const;
+const SPEC_FIELD_TYPE_EXEMPTIONS: Readonly<Partial<Record<FilterFieldType, string>>> = {
+  status: 'accepted since objectui#7562 and drawn by the select-like bucket; the spec models '
+    + 'a status column as a `select` field, and dropping it would narrow the accepted set',
+};
 
 /** The four entries `node packages/cli/dist/cli.js check` counts for this row. */
 const CENSUS = ['empty-filter-builder', 'product-search', 'user-filters', 'with-conditions'] as const;
@@ -238,15 +255,10 @@ type Equal<A, B> =
 function expectType<T extends true>(_: T = true as T): void { /* compile-time only */ }
 
 // The TS twin moved WITH the mirror. These fail to compile if either face
-// drifts back, which is the half a runtime assertion cannot cover.
+// drifts back, which is the half a runtime assertion cannot cover. `type` is
+// the shared list's member type (objectstack#27369), not a restated union.
 expectType<Equal<TsFilterField['value'], string>>();
-expectType<Equal<TsFilterField['type'],
-  | 'text' | 'number' | 'currency' | 'percent' | 'rating'
-  | 'date' | 'datetime' | 'time'
-  | 'boolean'
-  | 'select' | 'status'
-  | 'lookup' | 'master_detail' | 'user'
-  | undefined>>();
+expectType<Equal<TsFilterField['type'], FilterFieldType | undefined>>();
 // `type` is OPTIONAL, not merely `… | undefined`: an entry that OMITS the key
 // must be assignable, which only this annotation proves — the same distinction
 // the group `id` needs three lines down (objectui#7562, item 2).
@@ -296,61 +308,25 @@ describe('objectui#6939 — the field key is `value`', () => {
 const RULED = ['text', 'number', 'boolean', 'date', 'datetime', 'time'] as const;
 
 /**
- * The seven the published doc declares that this mirror refused until
- * objectui#7562 — each with its own named bucket in
- * `custom/filter-builder.tsx` and its own value control, which is exactly why
- * the ruling let them in rather than cutting them out of the doc.
+ * The seven the published doc declared that this mirror refused until
+ * objectui#7562 — each with its own behaviour bucket and its own value
+ * control, which is exactly why the ruling let them in rather than cutting
+ * them out of the doc.
  *
- * Paired with the bucket that CARRIES each one, so "it draws" is asserted
- * against the renderer source rather than restated as prose. The buckets are
- * literal `const` arrays, so a rename or a deletion in the component turns
- * this red instead of leaving the mirror declaring a key nothing draws.
+ * Paired with the shared bucket that CARRIES each one (objectstack#27369: the
+ * buckets live in `filter-field-types.ts` and the renderer takes them from
+ * there), so a member moved out of its bucket turns this red instead of
+ * leaving the mirror declaring a key nothing draws.
  */
-const DOC_ONLY_TYPES: ReadonlyArray<readonly [string, string]> = [
-  ['currency', 'const numberLikeTypes = ["number", "currency", "percent", "rating"]'],
-  ['percent', 'const numberLikeTypes = ["number", "currency", "percent", "rating"]'],
-  ['rating', 'const numberLikeTypes = ["number", "currency", "percent", "rating"]'],
-  ['status', 'const selectLikeTypes = ["select", "status"]'],
-  ['lookup', 'const lookupLikeTypes = ["lookup", "master_detail", "user"]'],
-  ['master_detail', 'const lookupLikeTypes = ["lookup", "master_detail", "user"]'],
-  ['user', 'const lookupLikeTypes = ["lookup", "master_detail", "user"]'],
+const BUCKETED_TYPES: ReadonlyArray<readonly [string, string, readonly string[]]> = [
+  ['currency', 'FILTER_NUMBER_LIKE_TYPES', FILTER_NUMBER_LIKE_TYPES],
+  ['percent', 'FILTER_NUMBER_LIKE_TYPES', FILTER_NUMBER_LIKE_TYPES],
+  ['rating', 'FILTER_NUMBER_LIKE_TYPES', FILTER_NUMBER_LIKE_TYPES],
+  ['status', 'FILTER_SELECT_LIKE_TYPES', FILTER_SELECT_LIKE_TYPES],
+  ['lookup', 'FILTER_LOOKUP_LIKE_TYPES', FILTER_LOOKUP_LIKE_TYPES],
+  ['master_detail', 'FILTER_LOOKUP_LIKE_TYPES', FILTER_LOOKUP_LIKE_TYPES],
+  ['user', 'FILTER_LOOKUP_LIKE_TYPES', FILTER_LOOKUP_LIKE_TYPES],
 ];
-
-/** The seven spellings above, for the places that only need the names. */
-const UNRULED_LIVE_TYPES = DOC_ONLY_TYPES.map(([type]) => type);
-
-/**
- * The accept set. objectui#8774 TOOK it from the authority rather than copying
- * it; objectstack#27145 retired the authority, so it is the frozen copy again.
- *
- * This used to be a hand-kept `DOCUMENTED_FOURTEEN` constant sitting beside the
- * pin. A population maintained here can only ever confirm the mirror it was
- * copied from, which is precisely the blindness objectui#7562 turned out to be:
- * the doc had moved, both code faces agreed with each other, and no instrument
- * said so. Measured before it was changed — the ceiling reviewer's ablation
- * Leg E added a fifteenth member to the DOC alone and every pin in this file
- * stayed green.
- */
-function documentedTypes(): string[] {
-  return [...LAST_PUBLISHED_TYPES];
-}
-
-/**
- * The "the mirror widened past the authority" verdict, as a function and a
- * sentence rather than an expression buried in one assertion (objectui#9073).
- *
- * It is lifted out because a controlled input has to be pushed through THE SAME
- * comparison and THE SAME sentence the pin renders — a copy of either could
- * drift away from the thing it is there to vouch for, and this diagnosis is
- * exactly the one that was observed to fire falsely.
- */
-const WIDENED_MESSAGE =
-  'this mirror accepts `type` members the last published doc never offered — the mirror widened ' +
-  'past the authority.';
-
-function widenedPastTheDoc(documented: string[]): string[] {
-  return mirrorTypeMembers().filter((t) => !documented.includes(t));
-}
 
 /** The enum this mirror actually declares, behind `.optional()`. */
 function mirrorTypeMembers(): string[] {
@@ -372,7 +348,8 @@ describe('objectui#6939 — the type vocabulary', () => {
     // this is the assertion that flips, together with the enum.
     expect(FilterFieldSchema.safeParse({ value: 'a', label: 'A', type: 'select' }).success).toBe(true);
     const src = readFileSync(join(REPO_ROOT, READER), 'utf8');
-    expect(src).toContain('const selectLikeTypes = ["select", "status"]');
+    expect(FILTER_SELECT_LIKE_TYPES).toContain('select');
+    expect(src).toContain('const selectLikeTypes: readonly string[] = FILTER_SELECT_LIKE_TYPES');
   });
 
   it('REFUSES `string` — the phantom the enum used to carry', () => {
@@ -382,21 +359,16 @@ describe('objectui#6939 — the type vocabulary', () => {
     expect(FilterFieldSchema.safeParse({ value: 'a', label: 'A', type: 'string' }).success).toBe(false);
   });
 
-  it.each(DOC_ONLY_TYPES)(
-    'accepts `%s`, and the renderer draws it — the bucket that carries it is `%s`',
-    (type, bucket) => {
-      // objectui#7562, items 1+2. This assertion is the INVERSE of the one it
-      // replaced (`still refuses the live-but-unruled spelling …`): the ruling
-      // made the published doc the authority, so a member the doc offers and
-      // the renderer draws is a member this mirror accepts.
-      //
-      // The two halves are asserted together on purpose. Accepting a spelling
-      // is only correct while the renderer still has a branch for it, and the
-      // ruling's precondition is exactly that pairing — "⛔ never a key
-      // declared that nothing draws". So the accept and the branch that earns
-      // it redden as one.
+  it.each(BUCKETED_TYPES)(
+    'accepts `%s`, and the renderer draws it from the shared bucket `%s`',
+    (type, bucketName, bucket) => {
+      // objectui#7562, items 1+2: a member the authority offers and the
+      // renderer draws is a member this mirror accepts. The accept and the
+      // branch that earns it are asserted together — "⛔ never a key declared
+      // that nothing draws" — so they redden as one.
       expect(FilterFieldSchema.safeParse({ value: 'a', label: 'A', type }).success).toBe(true);
-      expect(readFileSync(join(REPO_ROOT, READER), 'utf8')).toContain(bucket);
+      expect(bucket).toContain(type);
+      expect(readFileSync(join(REPO_ROOT, READER), 'utf8')).toContain(`= ${bucketName}`);
     },
   );
 
@@ -436,51 +408,42 @@ describe('objectui#6939 — the type vocabulary', () => {
     expect(FilterFieldSchema.safeParse({ value: 'a', label: 'A', type: undefined }).success).toBe(true);
   });
 
-  it('the accept set is EXACTLY the published doc, member for member', () => {
-    // The set equality, not fourteen individual accepts: an enum that had
-    // gained a fifteenth member the doc never published would pass every
-    // per-member assertion above and fail only here.
-    //
-    // objectui#8774 — the expectation is now READ FROM the doc rather than
-    // copied into a constant beside it, which is what makes this fail in BOTH
-    // directions instead of one:
-    //
-    //   - the MIRROR grows a member the doc never published → the mirror
-    //     widened past the authority;
-    //   - the DOC grows a fifteenth member the mirror does not implement →
-    //     the divergence objectui#7562 WAS, in the direction that recreates it.
-    //
-    // The second one is the whole card: while this compared against a
-    // hard-coded list, a member added to the mdx reddened nothing here.
-    const declared = mirrorTypeMembers();
-    const documented = documentedTypes();
-    expect(
-      documented.filter((t) => !declared.includes(t)),
-      // ⚠️ This message used to say "a LATER ruling", which is wrong about the
-      // example it cites and was corrected in objectui#9073: objectui#4814
-      // retired `owner` on 2026-08-16/17, and batch #88 is 2026-09-02 — so the
-      // retirement PREDATES the batch it was offered as an exception to. The
-      // exception does not depend on the order anyway: a spelling ANY ruling
-      // has retired does not come back through the doc.
-      `the last published doc offered \`type\` members this mirror refuses. Under decision ` +
-        `batch #88 the doc was the authority and the MIRROR follows — widen ` +
-        `FilterFieldSchema.type and FilterField['type'] to match, as its own reviewable ` +
-        `change. ⛔ Do NOT narrow LAST_PUBLISHED_TYPES to match the mirror.`,
-    ).toEqual([]);
-    expect(widenedPastTheDoc(documented), WIDENED_MESSAGE).toEqual([]);
-    expect([...declared].sort()).toEqual([...documented].sort());
-  });
-
-  it('every member the published doc offers, the mirror ACCEPTS', () => {
-    // The behavioural half of the equality above: `.options` is introspection
-    // of the enum, this is a parse. Seeded from the doc, so a member added to
-    // the mdx is asserted on the day it is added rather than on the day
-    // somebody remembers to copy it into a list in this file.
-    for (const type of documentedTypes()) {
+  it('the accept set is EXACTLY `FILTER_FIELD_TYPES`, member for member', () => {
+    // objectstack#27369: the enum is built from the shared list, so this is
+    // the pin that reddens if the mirror ever goes back to restating it — a
+    // fifteenth member written into the enum alone, or one left out.
+    expect([...mirrorTypeMembers()].sort()).toEqual([...FILTER_FIELD_TYPES].sort());
+    for (const type of FILTER_FIELD_TYPES) {
       expect(
         FilterFieldSchema.safeParse({ value: 'a', label: 'A', type }).success,
-        `the last published doc offered \`type: '${type}'\`, which this mirror refuses`,
+        `FILTER_FIELD_TYPES carries \`type: '${type}'\`, which this mirror refuses`,
       ).toBe(true);
+    }
+  });
+
+  it('every member is a spec `FieldType`, or a named exemption', () => {
+    // The authority for what a field type IS lives in `@objectstack/spec`;
+    // this list may only use its words, plus the exemptions declared (with
+    // their reasons) in `SPEC_FIELD_TYPE_EXEMPTIONS`.
+    const spec = new Set<string>(SpecFieldTypeEnum.options);
+    expect(spec.size).toBeGreaterThan(40);
+    const outside = FILTER_FIELD_TYPES.filter((t) => !spec.has(t) && !(t in SPEC_FIELD_TYPE_EXEMPTIONS));
+    expect(
+      outside,
+      'these filter-builder types are not spec `FieldType` members. Use the spec\'s spelling, or — '
+        + 'only when the renderer must keep the word — add it to SPEC_FIELD_TYPE_EXEMPTIONS with its '
+        + 'reason. ⛔ Never drop a member to green this: the accepted set must not narrow.',
+    ).toEqual([]);
+  });
+
+  it('every exemption is live: a list member, and still outside the spec', () => {
+    // An exemption the spec has since adopted, or for a member that has left
+    // the list, would excuse nothing and hide the next one.
+    const spec = new Set<string>(SpecFieldTypeEnum.options);
+    for (const [type, reason] of Object.entries(SPEC_FIELD_TYPE_EXEMPTIONS)) {
+      expect((FILTER_FIELD_TYPES as readonly string[]).includes(type), `${type} is not in FILTER_FIELD_TYPES`).toBe(true);
+      expect(spec.has(type), `${type} is a spec FieldType now — delete its exemption`).toBe(false);
+      expect(reason).toBeTruthy();
     }
   });
 
