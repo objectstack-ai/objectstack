@@ -85,7 +85,17 @@
  * `columnMap` arm to carry.
  */
 
-import { isOwnerAnchorUnprovable } from '@objectstack/spec/data';
+import { isOwnerAnchorUnprovable, platformProvisionsStorage } from '@objectstack/spec/data';
+
+/**
+ * Is `schema` a federated (ADR-0015 `external`) object binding a remote table?
+ * The platform provisions no storage for one, so nothing it injects is real.
+ * The spec's `platformProvisionsStorage` is the one spelling of that predicate
+ * (#7865's convergence map), so this reads it rather than restating it.
+ */
+export function isFederatedObject(schema: unknown): boolean {
+  return !platformProvisionsStorage(schema);
+}
 
 /**
  * Does this object's `owner_id` exist only in the registry — i.e. is it the
