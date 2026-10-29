@@ -369,6 +369,7 @@ import { isFederatedObject, isFederatedUnprovisionedInjectedColumn } from './fed
 // [#27277] The correctness floor over a plugin driver on an external datasource.
 import {
   createExternalDriverFloor,
+  externalPredicateWriteRefusal,
   isExternalDriverFloor,
   needsExternalDriverFloor,
   unwrapExternalDriverFloor,
@@ -16402,6 +16403,9 @@ export class ObjectQL implements IObjectQLEngine {
            // boundary's status passthrough — decorated; the #5748/#11009
            // family stays a plain Error, byte-identical to before.
            if (dispatch.kind === 'reject') throw engineUpdateDispatchRejectError(dispatch);
+           // [#27277] A floored plugin driver offers no `updateMany` on purpose:
+           // say so, rather than ask for the `multi` this caller already passed.
+           if (isExternalDriverFloor(driver)) throw externalPredicateWriteRefusal(driver.name, object, 'update');
            throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
        }
 
@@ -19914,7 +19918,10 @@ export class ObjectQL implements IObjectQLEngine {
         // refusal names the dropped `where` keys; the classic shape keeps
         // `ENGINE_DELETE_REJECT_MESSAGE`; the fallback arm is a `multi`
         // verdict against a driver with no `deleteMany`.
-        throw new Error(dispatch.kind === 'reject' ? dispatch.message : ENGINE_DELETE_REJECT_MESSAGE);
+        if (dispatch.kind === 'reject') throw new Error(dispatch.message);
+        // [#27277] See update()'s twin: a floored plugin driver offers no `deleteMany`.
+        if (isExternalDriverFloor(driver)) throw externalPredicateWriteRefusal(driver.name, object, 'delete');
+        throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
       }
 
       // [#6966] See update()'s twin — same rule, same single binding point.

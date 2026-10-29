@@ -103,6 +103,21 @@ const WRITE_METHODS: ReadonlySet<string> = new Set<ExternalWriteOperation>([
  */
 const HIDDEN: ReadonlySet<PropertyKey> = new Set(['aggregate', 'updateMany', 'deleteMany']);
 
+/**
+ * The refusal of a multi-row predicate update / delete on a floored datasource,
+ * where the floored driver offers no `updateMany` / `deleteMany` ({@link HIDDEN}).
+ * A plain `Error`, as the engine's generic no-predicate-write refusal it stands
+ * in for (that one tells the caller to pass `options.multi=true`, which this
+ * caller already did).
+ */
+export function externalPredicateWriteRefusal(datasource: string, object: string, verb: 'update' | 'delete'): Error {
+  return new Error(
+    `Datasource '${datasource}' is served by a plugin driver; the engine does not run a multi-row predicate `
+    + `${verb} on '${object}' there, because it cannot re-check which rows the driver's where selects. `
+    + `Read the matching ids, then ${verb} each record by id.`,
+  );
+}
+
 /** floored driver → the driver behind it */
 const innerOf = new WeakMap<object, IDataDriver>();
 /** driver → its floored driver, so wrapping one driver twice answers one instance */

@@ -329,10 +329,13 @@ describe('[#27277] predicate writes are not offered: every write reaches the dri
     const { engine, writes } = predicateDouble();
     const err = await engine.update('tree_node', { label: 'x' }, { where: { kind: 'leaf' }, multi: true })
       .then(() => undefined, (e) => e);
-    // The engine's generic refusal for a `multi` verdict on a driver with no
-    // predicate write — the floored instance offers none.
+    // A named refusal with its prescription, not the generic "requires an ID
+    // or options.multi=true" this caller already satisfied.
     expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain('options.multi=true');
+    expect(err.message).toContain("Datasource 'tree' is served by a plugin driver");
+    expect(err.message).toContain('multi-row predicate update');
+    expect(err.message).toContain('update each record by id');
+    expect(err.message).not.toContain('options.multi=true');
     expect(writes).toEqual([]);
   });
 
@@ -340,10 +343,13 @@ describe('[#27277] predicate writes are not offered: every write reaches the dri
     const { engine, writes } = predicateDouble();
     const err = await engine.delete('tree_node', { where: { kind: 'leaf' }, multi: true })
       .then(() => undefined, (e) => e);
-    // The engine's generic refusal for a `multi` verdict on a driver with no
-    // predicate write — the floored instance offers none.
+    // A named refusal with its prescription, not the generic "requires an ID
+    // or options.multi=true" this caller already satisfied.
     expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain('options.multi=true');
+    expect(err.message).toContain("Datasource 'tree' is served by a plugin driver");
+    expect(err.message).toContain('multi-row predicate delete');
+    expect(err.message).toContain('delete each record by id');
+    expect(err.message).not.toContain('options.multi=true');
     expect(writes).toEqual([]);
   });
 });
