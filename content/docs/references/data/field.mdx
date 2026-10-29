@@ -28,8 +28,9 @@ const result = CurrencyConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way. |
-| **defaultCurrency** | `string` | optional | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency. |
+| **currencyMode** | `Enum<'dynamic' \| 'fixed' \| 'record'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1). |
+| **defaultCurrency** | `string` | optional | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own. |
+| **currencyField** | `string` | optional | `record` mode only, and required there: the name of the field on the same object that holds each record's currency — a `text` field declaring `valueDomain: 'iso_4217_currency'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty. |
 
 
 ---
@@ -89,7 +90,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
-| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed'>; defaultCurrency?: string }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
+| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
 | **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
 | **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
 | **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
@@ -236,8 +237,9 @@ const result = CurrencyConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way. |
-| **defaultCurrency** | `string` | optional | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency. |
+| **currencyMode** | `Enum<'dynamic' \| 'fixed' \| 'record'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1). |
+| **defaultCurrency** | `string` | optional | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own. |
+| **currencyField** | `string` | optional | `record` mode only, and required there: the name of the field on the same object that holds each record's currency — a `text` field declaring `valueDomain: 'iso_4217_currency'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty. |
 
 ### Nested Shape: `Field.conditionalFormatting[number]`
 

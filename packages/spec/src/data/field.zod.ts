@@ -535,6 +535,50 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
 };
 
 /**
+ * [ADR-0144 D2] `currencyMode: 'record'` ⇔ `currencyField`, and no
+ * `defaultCurrency` beside it. A `record`-mode amount has no currency until a
+ * pointer names the sibling code field; a pointer under `dynamic` / `fixed` is
+ * read by nothing, and neither is a `defaultCurrency` under `record` — each is
+ * the declared-but-inert shape ADR-0078 keeps out. `record` is new, so no
+ * stored row carries the second one (unlike `dynamic`, whose inert code is
+ * tolerated for the rows #27157 left behind). One located issue per inert or
+ * missing key; what the pointer NAMES is the object's to judge (object.zod.ts).
+ */
+function refuseRecordModeKeyMismatch(
+  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (config.currencyMode === 'record' && config.defaultCurrency !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultCurrency'],
+      message:
+        `\`defaultCurrency\` is not read under \`currencyMode: 'record'\`, where each record names its own currency in `
+        + 'the field `currencyField` names: delete `defaultCurrency`, or use `currencyMode: \'fixed\'` if the field has '
+        + 'one currency.',
+    });
+  }
+  if (config.currencyMode === 'record' && config.currencyField === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['currencyField'],
+      message:
+        '`currencyMode: \'record\'` needs `currencyField`: name the field on this object that holds each '
+        + 'record\'s ISO 4217 code — a `text` field with `valueDomain: \'iso_4217_currency\'`, conventionally '
+        + '`currency_code` — or use `currencyMode: \'fixed\'` (one currency) or `\'dynamic\'` (the tenant default).',
+    });
+  } else if (config.currencyMode !== 'record' && config.currencyField !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['currencyField'],
+      message:
+        `\`currencyField\` is read only under \`currencyMode: 'record'\`, and this config is \`${config.currencyMode}\`: `
+        + 'set `currencyMode: \'record\'` if each record carries its own currency, or delete `currencyField`.',
+    });
+  }
+}
+
+/**
  * The refusal a `fixed` currency config without a code meets (#27157, ruling
  * 6464202770 on #27119, Q2 = X). Until this ruling the schema filled the code
  * in with `'CNY'`, so the field silently became a yuan field.
@@ -547,7 +591,7 @@ const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
 
 /** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
 function refuseFixedCurrencyWithoutCode(
-  config: { currencyMode: 'dynamic' | 'fixed'; defaultCurrency?: string },
+  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string },
   ctx: z.RefinementCtx,
 ): void {
   if (config.currencyMode === 'fixed' && config.defaultCurrency === undefined) {
@@ -590,14 +634,22 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   aliases: { mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
   guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
-  currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way.'),
-  defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency.'),
+  currencyMode: z.enum(['dynamic', 'fixed', 'record']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1).'),
+  defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own.'),
+  // ADR-0144 D2 — the pointer of a `record`-mode amount. Optional at the key
+  // level and never empty; `refuseRecordModeKeyMismatch` below makes it
+  // required under `record` and refuses it under the other two modes, and the
+  // object's `superRefine` (`refuseDishonestRecordCurrencyField`,
+  // object.zod.ts) checks what it names, because only the object holds the
+  // sibling field map.
+  currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty.'),
   // #19992 — no `.overwrite()` here any more: the #7918 ISO 4217 contradiction
   // check and the #11423 default-materializing `.overwrite()` both existed only
   // for the removed `precision` key (see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE
-  // above). #27157 — the one refinement left is `fixed` ⇒ a code, below; parse
-  // output is `{ currencyMode }` plus the `defaultCurrency` the author wrote.
-}).superRefine(refuseFixedCurrencyWithoutCode));
+  // above). #27157 — `fixed` ⇒ a code; ADR-0144 D2 — `record` ⇔ a pointer and
+  // no code, both below. Parse output is `{ currencyMode }` plus the `defaultCurrency` and
+  // `currencyField` the author wrote.
+}).superRefine(refuseFixedCurrencyWithoutCode).superRefine(refuseRecordModeKeyMismatch));
 
 /**
  * Address Schema — structured address for the `address` field type.
