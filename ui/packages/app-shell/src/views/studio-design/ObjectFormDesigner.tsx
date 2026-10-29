@@ -53,6 +53,7 @@ import {
 import { useSafeFieldLabel } from '@object-ui/i18n';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
+import { injectedSystemColumnDefs, isInjectedColumnDefinition } from '@objectstack/spec/data';
 import { formDndAccessibility, type FormDndLookups, type FormDndSlot } from './formDndAnnouncements.js';
 import { AddFieldPopover } from './AddFieldPopover.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
@@ -193,15 +194,17 @@ function placeIn(layout: Record<string, string[]>, id: string): LayoutPlace | nu
 }
 
 /**
- * Where a drop of `activeId` on `overId` lands, read off the same container
- * map `onDragEnd` reads and with the same arithmetic, so the place the live
- * region announces is the place the drop commits (objectui#11802). `null`
- * where `onDragEnd` returns without moving anything. The handler is the rule;
- * this restates it for the announcements, and the pins in
- * `ObjectFormDesigner.dndAnnouncements-11802.test.tsx` compare the two on
- * every drop they make.
+ * The container map a drop of `activeId` on `overId` leaves, before the
+ * platform's pins are applied ({@link settlePinned}). `null` where the drop
+ * moves nothing because either id is in no container; `layout` itself where
+ * the field stays in place, which `onDragEnd` still commits (an earlier
+ * `onDragOver` may have carried it across groups).
  */
-function dropPlaceIn(layout: Record<string, string[]>, activeId: string, overId: string): LayoutPlace | null {
+function dropLayout(
+  layout: Record<string, string[]>,
+  activeId: string,
+  overId: string,
+): Record<string, string[]> | null {
   const inContainer = (id: string): string | undefined =>
     id.startsWith('g:') && id in layout ? id : Object.keys(layout).find((k) => layout[k].includes(id));
   const from = inContainer(activeId);
@@ -211,12 +214,61 @@ function dropPlaceIn(layout: Record<string, string[]>, activeId: string, overId:
     const list = layout[from];
     const oldIndex = list.indexOf(activeId);
     const newIndex = overId.startsWith('g:') ? list.length - 1 : list.indexOf(overId);
-    // `onDragEnd` keeps the field where it is when either index is missing.
-    return { container: from, index: newIndex < 0 ? oldIndex : newIndex, total: list.length };
+    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return layout;
+    return { ...layout, [from]: arrayMove(list, oldIndex, newIndex) };
   }
   const toItems = layout[to];
   const overIndex = overId.startsWith('g:') ? toItems.length : toItems.indexOf(overId);
-  return { container: to, index: overIndex < 0 ? toItems.length : overIndex, total: toItems.length + 1 };
+  const insertAt = overIndex < 0 ? toItems.length : overIndex;
+  return {
+    ...layout,
+    [from]: layout[from].filter((i) => i !== activeId),
+    [to]: [...toItems.slice(0, insertAt), activeId, ...toItems.slice(insertAt)],
+  };
+}
+
+/**
+ * objectstack#27516 — the ungrouped bucket with the platform's pinned fields
+ * first. A field whose definition, once the commit drops its `group`, is
+ * byte-for-byte the column the platform injects (`isInjectedColumnDefinition`
+ * over `injectedSystemColumnDefs`, `@objectstack/spec/data`) is not the
+ * author's: the draft write strips it (`stripInjectedSystemColumns`) and every
+ * `/meta` read puts it back AHEAD of the declared fields
+ * (`applyInjectedSystemColumns`, `@objectstack/metadata-core`). So a card left
+ * above it — `owner_id` is the one the canvas shows — sat there until a reload
+ * moved it back under Owner. The canvas places those fields where the read
+ * will: first in the bucket, in the order `pinRank` gives them. A pinned field
+ * dragged into a declared group carries a `group` and is the author's from
+ * then on, so only the ungrouped bucket is settled. Returns `layout` itself
+ * when nothing moves.
+ */
+function settlePinned(
+  layout: Record<string, string[]>,
+  pinRank: ReadonlyMap<string, number>,
+): Record<string, string[]> {
+  const bucket = layout[cid(UNGROUPED)];
+  if (!bucket || pinRank.size === 0) return layout;
+  const pinned = bucket.filter((id) => pinRank.has(id)).sort((a, b) => pinRank.get(a)! - pinRank.get(b)!);
+  const settled = [...pinned, ...bucket.filter((id) => !pinRank.has(id))];
+  return settled.every((id, i) => id === bucket[i]) ? layout : { ...layout, [cid(UNGROUPED)]: settled };
+}
+
+/**
+ * Where a drop of `activeId` on `overId` lands: {@link dropLayout}, settled the
+ * way `onDragEnd` settles it, so the place the live region announces is the
+ * place the drop commits (objectui#11802), a field the platform moves back
+ * included. `null` where `onDragEnd` returns without moving anything. The pins
+ * in `ObjectFormDesigner.dndAnnouncements-11802.test.tsx` compare the two on
+ * every drop they make.
+ */
+function dropPlaceIn(
+  layout: Record<string, string[]>,
+  activeId: string,
+  overId: string,
+  pinRank: ReadonlyMap<string, number>,
+): LayoutPlace | null {
+  const next = dropLayout(layout, activeId, overId);
+  return next && placeIn(settlePinned(next, pinRank), activeId);
 }
 
 export interface ObjectFormDesignerProps {
@@ -665,6 +717,21 @@ export function ObjectFormDesigner({
     return m;
   }, [groups, locale, objectName, sectionLabel]);
 
+  // objectstack#27516 — the shown fields the platform pins first in the
+  // ungrouped bucket (see `settlePinned`), each by its place in the injection.
+  const pinRank = React.useMemo(() => {
+    const injected = injectedSystemColumnDefs(draft);
+    const order = Object.keys(injected);
+    const rank = new Map<string, number>();
+    for (const e of view.entries) {
+      if (isKeptOffLayout(e, systemFieldNames) || !Object.prototype.hasOwnProperty.call(injected, e.name)) continue;
+      const ungrouped = { ...e.def };
+      delete ungrouped.group;
+      if (isInjectedColumnDefinition(ungrouped, injected[e.name])) rank.set(fid(e.name), order.indexOf(e.name));
+    }
+    return rank;
+  }, [draft, view.entries, systemFieldNames]);
+
   // Derive container → ordered field ids from the draft (editable fields only;
   // system/audit fields are preserved on write but never shown in the layout).
   const derived = React.useMemo(() => {
@@ -676,8 +743,8 @@ export function ObjectFormDesigner({
       const target = g && map[cid(g)] ? cid(g) : cid(UNGROUPED);
       map[target].push(fid(e.name));
     }
-    return map;
-  }, [view.entries, containerOrder, systemFieldNames]);
+    return settlePinned(map, pinRank);
+  }, [view.entries, containerOrder, systemFieldNames, pinRank]);
 
   const [items, setItems] = React.useState<Record<string, string[]>>(derived);
   const [activeId, setActiveId] = React.useState<string | null>(null);
@@ -713,11 +780,11 @@ export function ObjectFormDesigner({
         return entry ? fieldLabelOf(entry) : unFid(id);
       },
       slotOf: (id) => slot(placeIn(items, id)),
-      dropSlot: (id, overId) => slot(dropPlaceIn(items, id, overId)),
+      dropSlot: (id, overId) => slot(dropPlaceIn(items, id, overId, pinRank)),
       committedSlotOf: (id) => slot(placeIn(derived, id)),
     };
     return formDndAccessibility(locale, lookups);
-  }, [locale, items, derived, labelOf, entryByName, fieldLabelOf]);
+  }, [locale, items, derived, labelOf, entryByName, fieldLabelOf, pinRank]);
 
   // Where a keyboard drag's arrow keys have taken the field (objectui#11898),
   // `null` from each keyboard pick-up until its first step. Held twice: the
@@ -797,33 +864,10 @@ export function ObjectFormDesigner({
     const activeIdStr = String(e.active.id);
     const overId = e.over ? String(e.over.id) : null;
     if (!overId) return;
-    const prev = itemsRef.current;
-    const inContainer = (id: string): string | undefined =>
-      id.startsWith('g:') && id in prev ? id : Object.keys(prev).find((k) => prev[k].includes(id));
-    const from = inContainer(activeIdStr);
-    const to = inContainer(overId);
-    if (!from || !to) return;
-    let next: Record<string, string[]>;
-    if (from === to) {
-      const list = prev[from];
-      const oldIndex = list.indexOf(activeIdStr);
-      const newIndex = overId.startsWith('g:') ? list.length - 1 : list.indexOf(overId);
-      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) {
-        commit(prev);
-        return;
-      }
-      next = { ...prev, [from]: arrayMove(list, oldIndex, newIndex) };
-    } else {
-      const fromItems = prev[from].filter((i) => i !== activeIdStr);
-      const toItems = prev[to];
-      const overIndex = overId.startsWith('g:') ? toItems.length : toItems.indexOf(overId);
-      const insertAt = overIndex < 0 ? toItems.length : overIndex;
-      next = {
-        ...prev,
-        [from]: fromItems,
-        [to]: [...toItems.slice(0, insertAt), activeIdStr, ...toItems.slice(insertAt)],
-      };
-    }
+    const dropped = dropLayout(itemsRef.current, activeIdStr, overId);
+    if (!dropped) return;
+    // objectstack#27516 — never above a field the next read puts back first.
+    const next = settlePinned(dropped, pinRank);
     setItems(next);
     commit(next);
   };
