@@ -125,8 +125,10 @@ describe('an ordering comparison on a field compiles behind a null guard (object
   it('the guarded text reopens as the one row it compiles from', () => {
     const { container } = render(<Harness initial={GUARDED} />);
     expect(rawEditor(container)).toBeNull();
+    // One row: its subject and operator, and no join (two rows would read the
+    // guard as an "is not empty" row of its own).
+    expect(comboboxes(container)).toHaveLength(2);
     expect((screen.getByPlaceholderText('value') as HTMLInputElement).value).toBe('40');
-    expect(screen.getAllByPlaceholderText('value')).toHaveLength(1);
     expect(committed()).toBe(GUARDED);
   });
 
