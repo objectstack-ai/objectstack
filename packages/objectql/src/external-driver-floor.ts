@@ -2,7 +2,7 @@
 
 /**
  * [#27277] The engine's correctness floor over a plugin driver on an external
- * datasource (ADR-0015 Tier A, epic #27261 P1).
+ * datasource (epic #27261 Tier A, P1; ruling 6487532394 on #27277).
  *
  * ## Which drivers
  *
