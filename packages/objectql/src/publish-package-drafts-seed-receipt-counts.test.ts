@@ -82,7 +82,8 @@ function makeMemoryDriver() {
         async connect() {}, async disconnect() {}, async checkHealth() { return true; },
         async execute() { return null; },
         async find(object: string, ast: any) {
-            return Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            const rows = Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
         },
         async findOne(object: string, ast: any) {
             for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
@@ -159,7 +160,7 @@ async function stage(
 
 /** The seeded object's rows, read at the engine. */
 async function rowsAtEngine(engine: ObjectQL): Promise<string[]> {
-    const rows = await engine.find(ITEM, { context: { isSystem: true } } as any);
+    const rows = await engine.find(ITEM, { context: { isSystem: true } });
     return (rows as Array<{ name?: string }>).map((r) => String(r.name)).sort();
 }
 
@@ -207,7 +208,7 @@ describe('publish-drafts seedApplied counts what was written', () => {
 
         const res: any = await p.publishPackageDrafts({ packageId: PKG });
 
-        const rows = await engine.find(ITEM, { context: { isSystem: true } } as any) as Array<{ name: string; label?: string }>;
+        const rows = await engine.find(ITEM, { context: { isSystem: true } }) as Array<{ name: string; label?: string }>;
         expect(rows.map((r) => `${r.name}:${r.label}`).sort()).toEqual(['R1:one', 'R2:two']);
         expect(res.seedApplied.success).toBe(false);
         expect(res.seedApplied.updated).toBe(2);
