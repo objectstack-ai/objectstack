@@ -7,7 +7,7 @@
  */
 
 import * as React from 'react';
-import { RelatedCountStore, useRelatedCountVersion, type CountScopeFilter } from '@object-ui/components';
+import { RelatedCountStore, useRelatedCountVersion } from '@object-ui/components';
 import { resolveFilterPlaceholders, type FieldContainerLike, type FilterTokenScope } from '@object-ui/core';
 import { useFilterScope } from '@object-ui/react';
 import { relatedCardId, type RelatedCardId } from './synth/relatedArrangement';
@@ -34,6 +34,9 @@ import { relatedCardId, type RelatedCardId } from './synth/relatedArrangement';
  * read it today, and a later face (a panel stack folding its empty panels)
  * reads the same answer.
  */
+
+/** A list's declared scope, as the count store keys it. */
+type CountScopeFilter = Record<string, any> | any[];
 
 /** One related list to count: a `record:related_list` node's relationship and declared scope. */
 export interface RelatedCountTarget {

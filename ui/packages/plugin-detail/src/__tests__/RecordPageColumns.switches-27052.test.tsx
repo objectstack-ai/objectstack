@@ -71,6 +71,13 @@ describe('RecordPageColumns — the column switches (objectstack#27052)', () => 
     const folded = related.querySelector('[data-record-folded-timeline]')!;
     expect(folded).not.toBeNull();
     expect(folded.getAttribute('aria-label')).toBe('Activity');
+    // Closed until opened, and its blocks are not mounted while closed, so the
+    // feed reads nothing before the reader asks for it (objectstack#27056).
+    const toggle = folded.querySelector('[data-record-folded-timeline-toggle]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(nodesIn(folded)).toEqual([]);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(nodesIn(folded)).toEqual(['record:activity']);
     // Lists first, the folded card after them; the meta line closes the
     // details column (objectstack#27055).
