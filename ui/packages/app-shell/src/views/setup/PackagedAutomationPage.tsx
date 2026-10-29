@@ -68,9 +68,13 @@
  * (the author may want the flag set for a deployment that does arm it) and the
  * badge reads "Not running here", the words Studio's rail uses for the same
  * state, instead of an "On" an admin takes for "running". `activationReading`
- * in `packagedFlows.ts` is that rule. After a toggle the runtime states are
- * read again, because the toggle's answer carries the flag alone and the flip
- * can move what the engine armed — this row's trigger, or a caller of it.
+ * in `packagedFlows.ts` is that rule. Such a row's switch also draws a muted
+ * on-track, and a `deployment_policy` row reads "On, but this deployment does
+ * not run scheduled work" in place of the badge (objectstack#27378): the
+ * platform's sentence names an operator switch the admin cannot reach from
+ * the browser, so it stays behind Details. After a toggle the runtime states
+ * are read again, because the toggle's answer carries the flag alone and the
+ * flip can move what the engine armed — this row's trigger, or a caller of it.
  *
  * ## Server refusals reach the operator VERBATIM
  *
@@ -161,6 +165,14 @@ import { PageHeader } from '../../layout/PageHeader.js';
 
 const JSON_HEADERS = { Accept: 'application/json' } as const;
 
+/**
+ * The checked track of a switch whose flag is on while the flow does not run
+ * (objectstack#27378). The same muted fill Studio's Automations pillar draws
+ * for an on switch it cannot flip; `cn()` in `Switch` lets it replace the
+ * primitive's `data-[state=checked]:bg-primary`.
+ */
+const NOT_RUNNING_TRACK = 'data-[state=checked]:bg-muted-foreground/60';
+
 async function readJson(res: Response): Promise<unknown> {
   return res.json().catch(() => null);
 }
@@ -247,8 +259,9 @@ type ToggleOutcome = { ok: true; enabled: boolean } | { ok: false; message: stri
  * it", and a deployment-policy row and a real binding failure arrive in the
  * same `enabled: true, bound: false` shape. The structured field beside
  * `reason` that could name which of the two a row is now rides the wire
- * (`unboundCause`, objectstack#23842); this page reads it for PRESENCE only —
- * the Activation badge's "not running" — and still names no cause.
+ * (`unboundCause`, objectstack#23842). The Activation cell reads it — its
+ * presence for "not running", and `deployment_policy` for a plain line saying
+ * what that policy is (objectstack#27378) — and this chip still names no cause.
  *
  * The disclosure shows the sentence verbatim and whole — not truncated, not
  * reworded, not restyled by what it says — muted, and not as an alert. A
@@ -666,23 +679,44 @@ export function PackagedAutomationPage() {
                           defaultValue: 'Activation for {{label}}',
                           label: row.label,
                         })}
+                        // The flag is on but the flow does not run, so the
+                        // on-track is muted rather than primary
+                        // (objectstack#27378): a green track reads as
+                        // "running". Only the colour moves — the thumb,
+                        // `aria-checked` and the toggle stay the flag's.
+                        className={reading === 'not-running' ? NOT_RUNNING_TRACK : undefined}
                       />
                       {/* Whether the flow RUNS, beside the switch that holds
                           its flag (objectui#13159). "Not running here" is
                           outlined, not destructive: a deployment policy is not
                           a defect, and the Details chip carries the platform's
-                          sentence for why. */}
-                      <Badge
-                        data-testid="packaged-flow-activation"
-                        data-reading={reading}
-                        variant={reading === 'on' ? 'default' : reading === 'not-running' ? 'outline' : 'secondary'}
-                      >
-                        {reading === 'on'
-                          ? t('packagedAutomation.on', { defaultValue: 'On' })
-                          : reading === 'not-running'
-                            ? t('packagedAutomation.notRunning', { defaultValue: 'Not running here' })
-                            : t('packagedAutomation.off', { defaultValue: 'Off' })}
-                      </Badge>
+                          sentence for why. A deployment-policy row says what
+                          that policy is in plain words instead, as a muted
+                          line that wraps in the cell (objectstack#27378): a
+                          badge is a one-line pill. */}
+                      {reading === 'not-running' && row.unboundCause === 'deployment_policy' ? (
+                        <span
+                          data-testid="packaged-flow-activation"
+                          data-reading={reading}
+                          className="text-xs leading-4 text-muted-foreground"
+                        >
+                          {t('packagedAutomation.notRunningDeploymentPolicy', {
+                            defaultValue: 'On, but this deployment does not run scheduled work',
+                          })}
+                        </span>
+                      ) : (
+                        <Badge
+                          data-testid="packaged-flow-activation"
+                          data-reading={reading}
+                          variant={reading === 'on' ? 'default' : reading === 'not-running' ? 'outline' : 'secondary'}
+                        >
+                          {reading === 'on'
+                            ? t('packagedAutomation.on', { defaultValue: 'On' })
+                            : reading === 'not-running'
+                              ? t('packagedAutomation.notRunning', { defaultValue: 'Not running here' })
+                              : t('packagedAutomation.off', { defaultValue: 'Off' })}
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="align-top text-right">
