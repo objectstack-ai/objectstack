@@ -59,7 +59,7 @@ import { findReferenceableFile, unreadableFileMessage, type FileReferenceReadAut
  *    can read the parent, but may not edit it, receives.
  *  - Both write verbs: the `file_id` a row names must be a file the caller
  *    may open — on insert, and on an update that changes it. See "The file
- *    an attachment names" below.
+ *    an attachment names" below ({@link installAttachmentFileReferenceGate}).
  *  - beforeDelete: the caller must be the uploader OR hold edit on the
  *    parent record (see "Parent EDIT" below). Fail-closed 403
  *    `ATTACHMENT_DELETE_DENIED`; a
@@ -130,10 +130,10 @@ import { findReferenceableFile, unreadableFileMessage, type FileReferenceReadAut
  * A file the caller may not open, and an id that names no file the acting
  * organization reaches, get one answer: the file-field door's `400
  * VALIDATION_FAILED`, one ADR-0114 `invalid_value` entry for `file_id`, naming
- * nothing about the file. Asked after the parent rule, so a caller the parent
- * rule refuses keeps that refusal. Not asked where no verdict is bound (a
- * kernel that composes no download gate serves every file, and so every file
- * may be referenced).
+ * nothing about the file. Installed by {@link installAttachmentFileReferenceGate}
+ * right after the gates above, so it runs after them on each verb and a caller
+ * the parent or row rule refuses keeps that refusal. A kernel that composes no
+ * download gate serves every file, and so every file may be referenced there.
  *
  * System-context operations (engine self-writes, seeds, lifecycle sweeps)
  * bypass all three gates, as do context-less programmatic calls on bare
@@ -522,11 +522,7 @@ async function sharingAndMasterAdmit(
  * asked on a record-sharing abstention instead; absent too, a
  * `controlled_by_parent` parent meets no master check here, exactly as its own
  * update meets none.
- *
- * `authorizeFileRead` is the download door's verdict on one file for one
- * caller — the same binding the file-reference lifecycle receives — asked of
- * the file a row's `file_id` names (see "The file an attachment names" in the
- * module header). Absent, that question is not asked.
+
  */
 export function installAttachmentAccessHooks(
   engine: AttachmentLifecycleEngine,
@@ -534,7 +530,6 @@ export function installAttachmentAccessHooks(
   logger: AttachmentLifecycleLogger,
   messageTranslator?: () => ValidationMessageTranslator | undefined,
   getSecurity?: () => AttachmentSecurityLike | null | undefined,
-  authorizeFileRead?: FileReferenceReadAuthorizer,
 ): void {
   /**
    * [#22466] What a refused attach does about its file. Created HERE, at
@@ -565,29 +560,6 @@ export function installAttachmentAccessHooks(
     mayEditAttachmentParent({ getSharing, getSecurity, logger }, object, recordId, callerCtx, limb, () =>
       ctx.api.object(object).findOne({ where: { id: recordId } }),
     );
-
-  /**
-   * Refuse a `file_id` the caller may not open — see "The file an attachment
-   * names" in the module header. A value that is no id at all (absent, `null`,
-   * empty, not a scalar) names no file to judge, and is left to validation.
-   */
-  const assertMayReferenceFile = async (ctx: any, fileId: unknown): Promise<void> => {
-    if (!authorizeFileRead) return;
-    if (typeof fileId !== 'string' && typeof fileId !== 'number') return;
-    if (fileId === '') return;
-    const org = ctx?.session?.organizationId;
-    const found = await findReferenceableFile(
-      engine,
-      String(fileId),
-      typeof org === 'string' && org.length > 0 ? org : null,
-      callerContext(ctx),
-      authorizeFileRead,
-    );
-    if (found !== 'refused') return;
-    const label = fileIdLabelOf(engine);
-    const message = unreadableFileMessage(label);
-    throw validationFailure(message, [{ field: 'file_id', code: 'invalid_value', message, label }]);
-  };
 
   /** Resolve every sys_attachment row a write matches, under SYSTEM context
    * — the caller may legitimately be unable to READ rows they are allowed to
@@ -748,9 +720,6 @@ export function installAttachmentAccessHooks(
           parentObject,
         );
       }
-
-      // The file this row links must be one the caller may open.
-      await assertMayReferenceFile(ctx, data.file_id);
     },
     { object: 'sys_attachment', packageId: PACKAGE_ID },
   );
@@ -790,14 +759,6 @@ export function installAttachmentAccessHooks(
       // Mirrors the comment kit's thread re-point rule (#4630).
       const data: any = ctx?.input?.data;
       if (!data || typeof data !== 'object') return;
-
-      // Re-pointing `file_id` links a different file to the parent: the new
-      // file must be one the caller may open, as on insert. Asked once — the
-      // payload names one file for every matched row — and only when some row
-      // actually changes file.
-      if (data.file_id !== undefined && rows.some((row) => String(row.file_id ?? '') !== String(data.file_id ?? ''))) {
-        await assertMayReferenceFile(ctx, data.file_id);
-      }
 
       if (data.parent_object === undefined && data.parent_id === undefined) return;
 
@@ -880,6 +841,85 @@ export function installAttachmentAccessHooks(
     // standard catalog code — the same both-verbs pairing the derived
     // comment kit ships.
     { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },
+  );
+}
+
+/**
+ * Install the file half of the `sys_attachment` write gate: the `file_id` a
+ * row names must be a file the caller may open — on insert, and on an update
+ * that changes it. See "The file an attachment names" in the module header.
+ *
+ * `authorizeFileRead` is the download door's verdict on one file for one
+ * caller, the same binding the file-reference lifecycle receives. Installed
+ * AFTER {@link installAttachmentAccessHooks} (the engine runs same-priority
+ * hooks in registration order), so the parent and row rules answer first.
+ * System-context and context-less writes are not judged, as at every gate in
+ * this module.
+ */
+export function installAttachmentFileReferenceGate(
+  engine: AttachmentLifecycleEngine,
+  authorizeFileRead: FileReferenceReadAuthorizer,
+): void {
+  /**
+   * Refuse a `file_id` the caller may not open. A value that is no id at all
+   * (absent, `null`, empty, not a scalar) names no file to judge, and is left
+   * to validation.
+   */
+  const assertMayReferenceFile = async (ctx: any, fileId: unknown): Promise<void> => {
+    if (typeof fileId !== 'string' && typeof fileId !== 'number') return;
+    if (fileId === '') return;
+    const org = ctx?.session?.organizationId;
+    const found = await findReferenceableFile(
+      engine,
+      String(fileId),
+      typeof org === 'string' && org.length > 0 ? org : null,
+      callerContext(ctx),
+      authorizeFileRead,
+    );
+    if (found !== 'refused') return;
+    const label = fileIdLabelOf(engine);
+    const message = unreadableFileMessage(label);
+    throw validationFailure(message, [{ field: 'file_id', code: 'invalid_value', message, label }]);
+  };
+
+  engine.registerHook(
+    'beforeInsert',
+    async (ctx: any) => {
+      if (ctx?.session?.isSystem) return;
+      if (!ctx?.session) return; // context-less programmatic call (bare kernel)
+      const data: any = ctx?.input?.data;
+      if (!data || typeof data !== 'object') return;
+      await assertMayReferenceFile(ctx, data.file_id);
+    },
+    { object: 'sys_attachment', packageId: PACKAGE_ID },
+  );
+
+  engine.registerHook(
+    'beforeUpdate',
+    async (ctx: any) => {
+      if (ctx?.session?.isSystem) return;
+      if (!ctx?.session) return; // context-less programmatic call (bare kernel)
+      const data: any = ctx?.input?.data;
+      if (!data || typeof data !== 'object' || data.file_id === undefined) return;
+      // Asked once — the payload names one file for every matched row — and
+      // only when a matched row actually changes file. The per-row dispatch
+      // binds `input.id`; a call naming no id is judged outright (the unscoped
+      // shape is refused by the row rule before this hook runs).
+      const ids = asIdList(ctx?.input?.id);
+      if (ids) {
+        let changes = false;
+        for (const id of ids) {
+          const row = await engine.findOne('sys_attachment', { where: { id }, context: { ...SYSTEM_CTX } });
+          if (row && String(row.file_id ?? '') !== String(data.file_id ?? '')) {
+            changes = true;
+            break;
+          }
+        }
+        if (!changes) return;
+      }
+      await assertMayReferenceFile(ctx, data.file_id);
+    },
+    { object: 'sys_attachment', packageId: PACKAGE_ID },
   );
 }
 

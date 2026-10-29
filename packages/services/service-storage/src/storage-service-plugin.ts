@@ -64,7 +64,11 @@ import type { FileReadVerdict, StorageGatedSessionReader, StorageUploadSession }
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks, type FileReferenceEngine } from './file-reference-lifecycle.js';
 import type { FileReferenceReadAuthorizer } from './referenceable-file.js';
-import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
+import {
+  installAttachmentAccessHooks,
+  installAttachmentFileReferenceGate,
+  installAttachmentReadVisibility,
+} from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
 import { FieldFileService } from './field-file-service.js';
@@ -522,9 +526,10 @@ export class StorageServicePlugin implements Plugin {
               return null;
             }
           },
-          // The file a row's `file_id` names must be one the caller may open.
-          authorizeFileReference,
         );
+        // The file a `sys_attachment` row names must be one its caller may
+        // open — installed after the gates above, so they answer first.
+        installAttachmentFileReferenceGate(engine as any, authorizeFileReference);
         // [#21729] The gate's parent-editor DELETE limb, made reachable: the
         // alternate match that stops the platform's `created_by` delete floor
         // answering for `sys_attachment` before the gate above runs. Contributed

@@ -7,6 +7,7 @@ import type { ControlledByParentWriteOutcome, ExplainAccessRequest } from '@obje
 import type { ExplainDecision } from '@objectstack/spec/security';
 import {
   installAttachmentAccessHooks,
+  installAttachmentFileReferenceGate,
   mayEditAttachmentParent,
   type AttachmentSecurityLike,
   type AttachmentSharingLike,
@@ -1888,7 +1889,9 @@ describe('attachment access — the file a row names must be one the caller may 
    * caller may open; `fileReads` records every `sys_file` lookup the gate made.
    */
   function installWithFiles(opts: { openable: string[]; bound?: boolean; canEditParent?: boolean }) {
-    const hooks = new Map<string, (ctx: any) => Promise<void>>();
+    // Every handler per event, in registration order — the engine's own order
+    // for same-priority hooks.
+    const hooks = new Map<string, Array<(ctx: any) => Promise<void>>>();
     const files = [OWN_FILE, OTHER_FILE];
     const fileReads: any[] = [];
     const authorizeFileRead = vi.fn(async (file: Record<string, unknown>, context: any) => {
@@ -1897,7 +1900,7 @@ describe('attachment access — the file a row names must be one the caller may 
     });
     const engine: AttachmentLifecycleEngine & { getObject: (name: string) => unknown } = {
       registerHook: (event, handler) => {
-        hooks.set(event, handler as any);
+        hooks.set(event, [...(hooks.get(event) ?? []), handler as any]);
       },
       getObject: (name) => (name === 'sys_attachment' ? { fields: { file_id: { label: 'File' } } } : undefined),
       find: async () => [],
@@ -1918,11 +1921,14 @@ describe('attachment access — the file a row names must be one the caller may 
       silentLogger(),
       undefined,
       () => null,
-      opts.bound === false ? undefined : authorizeFileRead,
     );
+    if (opts.bound !== false) installAttachmentFileReferenceGate(engine, authorizeFileRead);
+    const chain = (event: string) => async (ctx: any) => {
+      for (const handler of hooks.get(event) ?? []) await handler(ctx);
+    };
     return {
-      beforeInsert: hooks.get('beforeInsert')!,
-      beforeUpdate: hooks.get('beforeUpdate')!,
+      beforeInsert: chain('beforeInsert'),
+      beforeUpdate: chain('beforeUpdate'),
       authorizeFileRead,
       fileReads,
     };
@@ -1989,7 +1995,7 @@ describe('attachment access — the file a row names must be one the caller may 
     expect(authorizeFileRead).not.toHaveBeenCalled();
   });
 
-  it('with no file-read verdict bound, the file is not judged', async () => {
+  it('without the file gate installed, the file is not judged', async () => {
     const { beforeInsert, fileReads } = installWithFiles({ openable: [], bound: false });
     await expect(beforeInsert(attach('f-other'))).resolves.toBeUndefined();
     expect(fileReads).toHaveLength(0);
