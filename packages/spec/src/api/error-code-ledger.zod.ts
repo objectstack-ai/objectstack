@@ -830,7 +830,8 @@ export const ERROR_CODE_LEDGER = {
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
     // [#27277] The engine's floor over a plugin driver on an external
-    // datasource (ADR-0015 Tier A, `external-driver-floor.ts`). Both are 422
+    // datasource (epic #27261 Tier A, ruling 6487532394 on #27277;
+    // `external-driver-floor.ts`). Both are 422
     // with their status declared on the thrown error (the
     // `driver-connect-errors.ts` pattern), and neither is an ADR-0015 gate
     // refusal: `EXTERNAL_WRITE_FORBIDDEN` (403, `@objectstack/spec/shared`)
@@ -847,6 +848,15 @@ export const ERROR_CODE_LEDGER = {
     // driver returns, so it refuses rather than answer over a set it only
     // partly holds. The message prescribes narrowing the filter or mirroring
     // the data with DataSync.
+    //
+    // Deliberately NOT the standard `MAX_RECORDS_EXCEEDED` (400, `errors.zod.ts`:
+    // a caller-side limit, the request asked for more than a request may
+    // carry). This is a 422 on a VALID query that the remote's size makes
+    // unservable: the request is well-formed and its limit is fine, the
+    // matching set is what cannot be held, and the remedy is the data's
+    // shape (narrow the filter, mirror the data) rather than the request's
+    // form. Ruling 6487532394 on #27277 chose the code and the status;
+    // `standardSynonymOf` deliberately maps neither of these two rows.
     'EXTERNAL_ROW_CAP_EXCEEDED',
     // [#15823] an `afterFind` handler REPLACED `ctx.result` with something that
     // is not an array, breaking `find()`'s declared `Promise<any[]>`. It was the
