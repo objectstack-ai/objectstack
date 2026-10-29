@@ -102,7 +102,8 @@ function formatValue(value: unknown, locale: string, t: Translate, depth = 0): s
  * authored label and colour from `field.options`; `CurrencyCellRenderer`
  * resolves its code with `resolveFieldCurrency` from the field's
  * `currencyConfig` and the tenant default the localization context holds
- * (none on this page). Neither fetches. ⛔ Never add `LookupCellRenderer` or
+ * (none on this page) — and, for a `record`-mode amount, from the record's own
+ * code field, which it reads off `dependentValues` (the shared record itself). Neither fetches. ⛔ Never add `LookupCellRenderer` or
  * `UserCellRenderer`: both read the referenced record through the data source,
  * which an anonymous visitor cannot.
  */
@@ -146,7 +147,13 @@ export function SharedRecordFields({ record, fields }: SharedRecordFieldsProps) 
           <dt className="text-xs font-medium text-muted-foreground">{field?.label || humanizeLabel(key)}</dt>
           <dd className="min-w-0 whitespace-pre-wrap break-words text-sm text-foreground">
             {Renderer ? (
-              <Renderer value={record[key]} field={{ name: key, ...field } as unknown as FieldMetadata} />
+              <Renderer
+                value={record[key]}
+                field={{ name: key, ...field } as unknown as FieldMetadata}
+                // The shared record: a record-mode amount reads its currency
+                // from the code field beside it (ADR-0144 D2).
+                dependentValues={record}
+              />
             ) : (
               formatValue(record[key], locale, t)
             )}

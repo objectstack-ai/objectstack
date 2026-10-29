@@ -382,6 +382,14 @@ const fr = {
       postalCode: "Code postal",
       country: "Pays",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Sélectionner une devise',
+      search: 'Rechercher une devise…',
+      noResults: 'Aucune devise trouvée',
+      available: 'Disponibles',
+      all: 'Toutes les devises (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Désactivé",
       completed: "Terminé",
@@ -3819,6 +3827,13 @@ const fr = {
       countSeedData: "données d’exemple",
       extendTarget: "Ajout à l’app existante : {{app}}",
       awaitingConfirm: "En attente de confirmation",
+      iterateOrNew: {
+        question: "Ce plan recoupe « {{app}} », une app que vous avez déjà. Continuer à l’améliorer, ou créer une app distincte ?",
+        questionUnnamed: "Ce plan recoupe une app que vous avez déjà. Continuer à améliorer cette app, ou en créer une distincte ?",
+        extend: "Continuer à améliorer « {{app}} »",
+        buildNew: "Créer une app distincte",
+        replyHint: "Répondez pour indiquer votre choix.",
+      },
       objectsAndFields: "Objets et champs",
       views: "Vues",
       suggestedField: "suggéré",
@@ -4229,6 +4244,7 @@ const fr = {
     progressBar: 'Avancement de la décision',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'Le panneau de décision d\'approbation ne fonctionne que sur les pages de demande d\'approbation.',
+    snapshotAsSubmitted: 'Tel que soumis',
     attachmentChip: 'Pièce jointe',
     attachmentOpenFailed: "Impossible d'ouvrir la pièce jointe — veuillez réessayer",
     approveOneTitle: 'Approuver « {{title}} » ?',
@@ -4543,6 +4559,8 @@ const fr = {
     },
   },
   filterBuilder: {
+    currency: 'Devise',
+    currencyNeedsAnd: "Un montant en devise n'est comparé dans la devise choisie que lorsque toutes les conditions doivent être remplies (ET).",
     where: "Où",
     and: "ET",
     or: "OU",

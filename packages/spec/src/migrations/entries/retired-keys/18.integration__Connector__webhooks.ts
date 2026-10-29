@@ -5,10 +5,11 @@
 // A connector's NESTED webhook array is not the collection anything delivers:
 // the stack decomposition registers a `connectors:` entry WHOLE, so a webhook
 // nested in it never becomes a `webhook` metadata item, and
-// `@objectstack/plugin-webhooks` materializes `sys_webhook` rows only from those
-// items (the top-level `webhooks:` collection). Measured on `origin/main`: zero
-// reads of a connector's own `webhooks` outside `packages/spec`, while
-// `stack.webhooks` — the lit control, same scan — is read five times; the one
+// `@objectstack/plugin-webhooks` reads declared webhooks only from those items
+// (the top-level `webhooks:` collection), from the metadata registry, and
+// writes no `sys_webhook` row for them (ADR-0131 D2). Measured on
+// `origin/main`: zero reads of a connector's own `webhooks` outside
+// `packages/spec`, while `stack.webhooks` — the lit control, same scan — is read five times; the one
 // test that authors a nested array
 // (`declared-webhooks.connector-nested.test.ts`, renamed from the retired
 // seeder's `bootstrap-declared-webhooks.connector-nested.test.ts`) exists to pin that it

@@ -388,6 +388,14 @@ const ru = {
       postalCode: "Почтовый индекс",
       country: "Страна",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Выберите валюту',
+      search: 'Поиск валюты…',
+      noResults: 'Валюта не найдена',
+      available: 'Доступные',
+      all: 'Все валюты (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Выкл.",
       completed: "Выполнено",
@@ -3908,6 +3916,13 @@ const ru = {
       countSeedData: "демоданные",
       extendTarget: "Добавление в существующее приложение: {{app}}",
       awaitingConfirm: "Ожидает подтверждения",
+      iterateOrNew: {
+        question: "Это пересекается с «{{app}}» — приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
+        questionUnnamed: "Это пересекается с приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
+        extend: "Продолжить улучшать «{{app}}»",
+        buildNew: "Создать отдельное приложение",
+        replyHint: "Ответьте, какой вариант выбрать.",
+      },
       objectsAndFields: "Объекты и поля",
       views: "Представления",
       suggestedField: "предложено",
@@ -4327,6 +4342,7 @@ const ru = {
     progressBar: 'Ход решения',
     declaredActions: 'Действия',
     decisionPanelOffRequestPage: 'Панель решения по согласованию работает только на страницах запросов на согласование.',
+    snapshotAsSubmitted: 'На момент подачи',
     attachmentChip: 'Вложение',
     attachmentOpenFailed: 'Не удалось открыть вложение — попробуйте ещё раз',
     approveOneTitle: 'Согласовать «{{title}}»?',
@@ -4667,6 +4683,8 @@ const ru = {
     },
   },
   filterBuilder: {
+    currency: 'Валюта',
+    currencyNeedsAnd: 'Денежная сумма сравнивается в выбранной валюте, только когда должны выполняться все условия (И).',
     where: "Где",
     and: "И",
     or: "ИЛИ",

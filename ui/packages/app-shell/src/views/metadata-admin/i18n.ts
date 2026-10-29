@@ -3,7 +3,7 @@
 /**
  * Metadata admin i18n bundle (Phase 3f).
  *
- * Lightweight static label table for the 27 built-in metadata types,
+ * Lightweight static label table for the built-in metadata types,
  * plus a tiny `t()` helper for engine UI strings.
  *
  * Why not i18next? The engine already consumes `label` from the
@@ -732,7 +732,7 @@ const ENUM_FIELD_TO_META: Record<string, keyof typeof FLOW_META_ZH> = {
  * Localized label for a raw JSON-Schema enum option in the metadata SchemaForm
  * (e.g. the flow `type` picker: `autolaunched` → 自动启动). Keyed by field name
  * so it's unambiguous; English (and any value not translated) shows the raw
- * value, so unknown enums across the 27 metadata types are never hidden. Reuses
+ * value, so unknown enums across the metadata types are never hidden. Reuses
  * {@link FLOW_META_ZH} for type/status/runAs, plus an `engine.enum.<field>.<value>`
  * strings-table extension point for anything else.
  */

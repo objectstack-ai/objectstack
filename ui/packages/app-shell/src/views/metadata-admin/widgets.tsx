@@ -79,6 +79,13 @@ export interface ObjectFieldOption {
   name: string;
   label?: string;
   type?: string;
+  /**
+   * The field's declared choices, `{ value, label }` (the spec's
+   * `SelectOption`). Read by the `filter-builder` widget alone: the runtime
+   * `FilterBuilder` draws an option picker for a picklist column only when the
+   * column carries them (objectstack#27515). Absent when none are declared.
+   */
+  options?: Array<{ value: string; label: string }>;
 }
 
 /** One entry of the source object's view catalog (`view-ref`). */
@@ -2750,7 +2757,7 @@ function groupOfStoredRules(rules: FilterRuleLite[]) {
 export function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
   value?: FilterRuleLite[];
   onChange: (rules: FilterRuleLite[]) => void;
-  fields: Array<{ name: string; label?: string; type?: string }>;
+  fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }> }>;
   readOnly?: boolean;
   /**
    * Why `fields` is empty, when the reason is that the catalog failed to load
@@ -2799,7 +2806,17 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
     const held = foldFilterGroupToSpecRules(draft);
     if (!held.ok || JSON.stringify(held.rules) !== rulesKey) setDraft(groupOfStoredRules(rules));
   }
-  const fbFields = fields.map((f) => ({ value: f.name, label: f.label || f.name, type: f.type }));
+  // `options` travel with the column (objectstack#27515): the builder draws a
+  // picklist column's value as a picker over them and stores the option's
+  // `value` — the runtime list filter's control, not a second editor. Without
+  // them a picklist column got a free-text box, and the label an author typed
+  // there matched no record.
+  const fbFields = fields.map((f) => ({
+    value: f.name,
+    label: f.label || f.name,
+    type: f.type,
+    ...(f.options ? { options: f.options } : {}),
+  }));
   const summary = rules.length
     ? rules.map((r) => `${fields.find((f) => f.name === r.field)?.label || r.field}`).filter(Boolean).join(', ')
     : '';

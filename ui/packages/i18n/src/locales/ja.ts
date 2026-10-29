@@ -379,6 +379,14 @@ const ja = {
       postalCode: "郵便番号",
       country: "国",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '通貨を選択',
+      search: '通貨を検索…',
+      noResults: '通貨が見つかりません',
+      available: '利用可能',
+      all: 'すべての通貨（ISO 4217）',
+    },
     boolean: {
       offBadge: "{{label}} — オフ",
       completed: "完了",
@@ -3749,6 +3757,13 @@ const ja = {
       countSeedData: "サンプルデータ",
       extendTarget: "既存のアプリに追加：{{app}}",
       awaitingConfirm: "確認待ち",
+      iterateOrNew: {
+        question: "このプランは既存のアプリ「{{app}}」と重なっています。このアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
+        questionUnnamed: "このプランは既存のアプリと重なっています。そのアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
+        extend: "「{{app}}」を引き続き改善",
+        buildNew: "別のアプリを作成",
+        replyHint: "どちらにするか返信してください。",
+      },
       objectsAndFields: "オブジェクトとフィールド",
       views: "ビュー",
       suggestedField: "追加提案",
@@ -4150,6 +4165,7 @@ const ja = {
     progressBar: '承認の進捗',
     declaredActions: 'アクション',
     decisionPanelOffRequestPage: '承認の決定パネルは承認リクエストのページでのみ機能します。',
+    snapshotAsSubmitted: '申請時の内容',
     attachmentChip: '添付ファイル',
     attachmentOpenFailed: '添付ファイルを開けませんでした。もう一度お試しください',
     approveOneTitle: '「{{title}}」を承認しますか？',
@@ -4438,6 +4454,8 @@ const ja = {
     },
   },
   filterBuilder: {
+    currency: '通貨',
+    currencyNeedsAnd: '通貨金額は、すべての条件を満たす必要がある場合（AND）にのみ、選択した通貨で比較されます。',
     where: "条件",
     and: "かつ",
     or: "または",

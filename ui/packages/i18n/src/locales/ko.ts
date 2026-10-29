@@ -379,6 +379,14 @@ const ko = {
       postalCode: "우편번호",
       country: "국가",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '통화 선택',
+      search: '통화 검색…',
+      noResults: '통화를 찾을 수 없음',
+      available: '사용 가능',
+      all: '모든 통화 (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — 꺼짐",
       completed: "완료됨",
@@ -3746,6 +3754,13 @@ const ko = {
       countSeedData: "샘플 데이터",
       extendTarget: "기존 앱에 추가: {{app}}",
       awaitingConfirm: "확인 대기 중",
+      iterateOrNew: {
+        question: "이 계획은 이미 있는 앱 “{{app}}”과(와) 겹칩니다. 이 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
+        questionUnnamed: "이 계획은 이미 있는 앱과 겹칩니다. 그 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
+        extend: "“{{app}}” 계속 개선",
+        buildNew: "별도의 앱 만들기",
+        replyHint: "어느 쪽인지 회신해 주세요.",
+      },
       objectsAndFields: "개체 및 필드",
       views: "뷰",
       suggestedField: "추가 제안",
@@ -4147,6 +4162,7 @@ const ko = {
     progressBar: '결정 진행 상황',
     declaredActions: '작업',
     decisionPanelOffRequestPage: '승인 결정 패널은 승인 요청 페이지에서만 작동합니다.',
+    snapshotAsSubmitted: '제출 당시 내용',
     attachmentChip: '첨부 파일',
     attachmentOpenFailed: '첨부 파일을 열 수 없습니다. 다시 시도해 주세요',
     approveOneTitle: '"{{title}}"을(를) 승인할까요?',
@@ -4435,6 +4451,8 @@ const ko = {
     },
   },
   filterBuilder: {
+    currency: '통화',
+    currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
     where: "조건",
     and: "그리고",
     or: "또는",

@@ -379,6 +379,14 @@ const de = {
       postalCode: "Postleitzahl",
       country: "Land",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Währung auswählen',
+      search: 'Währung suchen…',
+      noResults: 'Keine Währung gefunden',
+      available: 'Verfügbar',
+      all: 'Alle Währungen (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Aus",
       completed: "Abgeschlossen",
@@ -3747,6 +3755,13 @@ const de = {
       countSeedData: "Beispieldaten",
       extendTarget: "Wird zur bestehenden App hinzugefügt: {{app}}",
       awaitingConfirm: "Wartet auf Bestätigung",
+      iterateOrNew: {
+        question: "Das überschneidet sich mit „{{app}}“, einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
+        questionUnnamed: "Das überschneidet sich mit einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
+        extend: "„{{app}}“ weiter verbessern",
+        buildNew: "Separate App erstellen",
+        replyHint: "Antworten Sie, welche Option Sie wählen.",
+      },
       objectsAndFields: "Objekte und Felder",
       views: "Ansichten",
       suggestedField: "ergänzt",
@@ -4148,6 +4163,7 @@ const de = {
     progressBar: 'Entscheidungsfortschritt',
     declaredActions: 'Aktionen',
     decisionPanelOffRequestPage: 'Der Entscheidungsbereich für Genehmigungen funktioniert nur auf Seiten von Genehmigungsanfragen.',
+    snapshotAsSubmitted: 'Wie eingereicht',
     attachmentChip: 'Anhang',
     attachmentOpenFailed: 'Anhang konnte nicht geöffnet werden – bitte erneut versuchen',
     approveOneTitle: '„{{title}}“ genehmigen?',
@@ -4436,6 +4452,8 @@ const de = {
     },
   },
   filterBuilder: {
+    currency: 'Währung',
+    currencyNeedsAnd: 'Ein Währungsbetrag wird nur dann in der gewählten Währung verglichen, wenn alle Bedingungen zutreffen müssen (UND).',
     where: "Wo",
     and: "UND",
     or: "ODER",

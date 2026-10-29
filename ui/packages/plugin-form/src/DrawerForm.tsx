@@ -37,7 +37,7 @@ import {
 import { Loader2 } from 'lucide-react';
 
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
-import { createSafeTranslation } from '@object-ui/i18n';
+import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { MasterDetailForm } from './MasterDetailForm';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { buildFlatFields } from './flatFields';
@@ -98,6 +98,8 @@ const useDiscardTranslation = createSafeTranslation(
     'form.create': 'Create',
     'form.update': 'Update',
     'common.cancel': 'Cancel',
+    // The footer's declared Reset button (objectstack#27247).
+    'common.reset': 'Reset',
     'form.errorLoading': 'Error loading form',
     'publicForm.loading': 'Loading form…',
   },
@@ -185,6 +187,8 @@ export interface DrawerFormSchema {
   submitText?: string;
   showCancel?: boolean;
   cancelText?: string;
+  /** The Reset button in the footer: restores the opening values, no save (objectstack#27247). */
+  showReset?: boolean;
   initialValues?: Record<string, any>;
   initialData?: Record<string, any>;
   readOnly?: boolean;
@@ -253,6 +257,9 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   const { fieldLabel, sectionLabel } = useSafeFieldLabel();
   const perms = usePermissions();
   const { userId: currentUserId } = perms;
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   const { t } = useDiscardTranslation();
   // Upload-in-flight gate (objectui#10166): Save is refused, disabled and
   // EXPLAINED while a file/image widget below is still uploading.
@@ -405,7 +412,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
         // Declared static defaults are this form's opening values (#4047) —
         // see `schemaDefaults` for the create-only boundary and for why
         // runtime defaults are left to the server.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);
@@ -736,6 +743,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   });
   const showSubmit = schema.showSubmit !== false && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const showCancel = schema.showCancel !== false;
+  const showReset = schema.showReset === true && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const submitLabel = schema.submitText || (schema.mode === 'create' ? t('form.create') : t('form.update'));
   const cancelLabel = schema.cancelText || t('common.cancel');
 
@@ -1011,7 +1019,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
         {/* Sticky footer — own action buttons. Cancel calls the discard guard
             directly (no form.reset), so unsaved input survives "Keep editing".
             Suppressed for the master-detail path, which owns its own action bar. */}
-        {!error && !loading && !(subforms?.length && schema.mode !== 'view') && (showSubmit || showCancel) && (
+        {!error && !loading && !(subforms?.length && schema.mode !== 'view') && (showSubmit || showCancel || showReset) && (
           <div className="shrink-0 border-t px-4 py-3 bg-background" data-testid="drawer-form-footer">
             {/* The REASON the Save below is disabled (objectui#10166). */}
             <UploadInFlightNotice gate={uploadGate} />
@@ -1025,6 +1033,20 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
                   className="w-full sm:w-auto"
                 >
                   {cancelLabel}
+                </Button>
+              )}
+              {/* The declared Reset button (objectstack#27247). It lives out
+                  here, outside the <form>, so it names the form by `id` and
+                  the form's own `reset` handler restores the opening values. */}
+              {showReset && (
+                <Button
+                  type="reset"
+                  form={formId}
+                  variant="outline"
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto"
+                >
+                  {t('common.reset')}
                 </Button>
               )}
               {showSubmit && (

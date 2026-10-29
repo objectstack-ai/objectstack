@@ -25,10 +25,31 @@
  * `MePermissionsProvider` but not its policy: that one is fail-closed and holds
  * its loading state across the waits, this one keeps rendering throughout and
  * simply fills the value in if and when an attempt succeeds.
+ *
+ * ## Read again after the signed-in user's own row changes (objectstack#27498)
+ *
+ * The answer's `locale` is the caller's language: their own `sys_user.locale`
+ * when set, else the request's `Accept-Language`, else the deployment default.
+ * `useDisplayLocale` ranks it above the active UI language, so every date and
+ * number renderer formats with whatever this provider last read. The language
+ * switch changes the UI language first and writes the column second
+ * (`useLanguageSelection`), and the switch remounts this provider through the
+ * console shell's `key={language}`. The remount's read can reach the server
+ * before the column write commits; it then answers the OLD language (on a user
+ * with no column yet, the browser's `Accept-Language`), and nothing read again,
+ * so under 中文 the grid's date cells said `Oct 11` until a full page load.
+ *
+ * So the read re-runs on every mutation of the signed-in user's `sys_user` row
+ * that reaches the data-invalidation bus, which every adapter write does
+ * (`useMutationInvalidationBridge`): the language switch's own write, and the
+ * profile page's. That re-read starts after the write has settled, and it does
+ * not join a request still in flight from before it (the shared in-flight
+ * registry would hand back the stale answer), so it is the one that lands.
  */
 import { useEffect, useState } from 'react';
 import { LocalizationProvider, cacheLanguageSeed, type LocalizationValue } from '@object-ui/i18n';
-import { getSessionOwnerChangeCount } from '@object-ui/auth';
+import { getSessionOwnerChangeCount, useAuth } from '@object-ui/auth';
+import { useDataInvalidation } from '@object-ui/react';
 import {
   HttpFetchError,
   backoffMs,
@@ -62,9 +83,17 @@ export function LocalizationFetchProvider({
   children: React.ReactNode;
 }) {
   const [value, setValue] = useState<LocalizationValue>({});
+  const { user } = useAuth();
+  const userId = user?.id ? String(user.id) : undefined;
+  // Bumps on every write to the signed-in user's own row (objectstack#27498).
+  const userRowWrites = useDataInvalidation(userId ? 'sys_user' : undefined, userId);
 
   useEffect(() => {
     let cancelled = false;
+    // A re-read must not join a request that left before the write it answers
+    // to: `sharedGetJson` opts a request with a signal out of sharing. The
+    // boot read keeps sharing with `seedTenantLanguage()` (objectui#5544).
+    const reread = userRowWrites > 0 ? new AbortController() : undefined;
 
     void (async () => {
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -85,6 +114,7 @@ export function LocalizationFetchProvider({
           const json = await sharedGetJson<MeLocalizationResponse>(endpoint, {
             credentials: 'include',
             headers: { Accept: 'application/json' },
+            signal: reread?.signal,
           });
           // Refresh the UI-language seed cache (objectui#4035) — the
           // "revalidate" half of stale-while-revalidate. This boot has already
@@ -116,6 +146,8 @@ export function LocalizationFetchProvider({
           });
           return;
         } catch (err) {
+          // Superseded by a later read (or unmounted): its abort is no failure.
+          if (cancelled) return;
           // A real answer about this caller (401/403/404/500) will not change on
           // a retry, and neither will the last attempt — either way, stop and
           // leave the empty value. Cosmetic: renderers show plain numbers.
@@ -130,8 +162,9 @@ export function LocalizationFetchProvider({
 
     return () => {
       cancelled = true;
+      reread?.abort();
     };
-  }, [endpoint]);
+  }, [endpoint, userRowWrites]);
 
   return <LocalizationProvider value={value}>{children}</LocalizationProvider>;
 }

@@ -397,6 +397,14 @@ const ar = {
       postalCode: "الرمز البريدي",
       country: "الدولة",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'اختر عملة',
+      search: 'ابحث عن عملة…',
+      noResults: 'لم يتم العثور على عملة',
+      available: 'المتاحة',
+      all: 'كل العملات (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — إيقاف",
       completed: "مكتمل",
@@ -4048,6 +4056,13 @@ const ar = {
       countSeedData: "بيانات تجريبية",
       extendTarget: "إضافة إلى التطبيق الحالي: {{app}}",
       awaitingConfirm: "بانتظار التأكيد",
+      iterateOrNew: {
+        question: "يتداخل هذا مع «{{app}}»، وهو تطبيق لديك بالفعل. هل تريد مواصلة تحسينه أم إنشاء تطبيق منفصل؟",
+        questionUnnamed: "يتداخل هذا مع تطبيق لديك بالفعل. هل تريد مواصلة تحسين ذلك التطبيق أم إنشاء تطبيق منفصل؟",
+        extend: "مواصلة تحسين «{{app}}»",
+        buildNew: "إنشاء تطبيق منفصل",
+        replyHint: "أجب لتحديد اختيارك.",
+      },
       objectsAndFields: "الكائنات والحقول",
       views: "طرق العرض",
       suggestedField: "مقترح",
@@ -4485,6 +4500,7 @@ const ar = {
     progressBar: 'تقدم القرار',
     declaredActions: 'الإجراءات',
     decisionPanelOffRequestPage: 'لوحة قرار الموافقة تعمل فقط في صفحات طلبات الموافقة.',
+    snapshotAsSubmitted: 'كما قُدِّم',
     attachmentChip: 'مرفق',
     attachmentOpenFailed: 'تعذّر فتح المرفق — يرجى المحاولة مرة أخرى',
     approveOneTitle: 'الموافقة على "{{title}}"؟',
@@ -4877,6 +4893,8 @@ const ar = {
     },
   },
   filterBuilder: {
+    currency: 'العملة',
+    currencyNeedsAnd: 'لا تُقارن المبالغ بالعملة المختارة إلا عندما يجب تحقق كل الشروط (AND).',
     where: "حيث",
     and: "و",
     or: "أو",

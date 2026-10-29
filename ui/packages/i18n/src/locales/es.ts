@@ -387,6 +387,14 @@ const es = {
       postalCode: "Código postal",
       country: "País",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Seleccionar moneda',
+      search: 'Buscar moneda…',
+      noResults: 'No se encontró ninguna moneda',
+      available: 'Disponibles',
+      all: 'Todas las monedas (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Desactivado",
       completed: "Completado",
@@ -3823,6 +3831,13 @@ const es = {
       countSeedData: "datos de ejemplo",
       extendTarget: "Se añade a la app existente: {{app}}",
       awaitingConfirm: "Pendiente de confirmación",
+      iterateOrNew: {
+        question: "Esto se solapa con «{{app}}», una app que ya tiene. ¿Seguir mejorándola o crear una app independiente?",
+        questionUnnamed: "Esto se solapa con una app que ya tiene. ¿Seguir mejorando esa app o crear una independiente?",
+        extend: "Seguir mejorando «{{app}}»",
+        buildNew: "Crear una app independiente",
+        replyHint: "Responda para indicar cuál prefiere.",
+      },
       objectsAndFields: "Objetos y campos",
       views: "Vistas",
       suggestedField: "sugerido",
@@ -4233,6 +4248,7 @@ const es = {
     progressBar: 'Progreso de la decisión',
     declaredActions: 'Acciones',
     decisionPanelOffRequestPage: 'El panel de decisión de aprobación solo funciona en las páginas de solicitudes de aprobación.',
+    snapshotAsSubmitted: 'Tal como se envió',
     attachmentChip: 'Adjunto',
     attachmentOpenFailed: 'No se pudo abrir el archivo adjunto: inténtalo de nuevo',
     approveOneTitle: '¿Aprobar «{{title}}»?',
@@ -4547,6 +4563,8 @@ const es = {
     },
   },
   filterBuilder: {
+    currency: 'Moneda',
+    currencyNeedsAnd: 'Un importe en moneda solo se compara en la moneda elegida cuando deben cumplirse todas las condiciones (Y).',
     where: "Donde",
     and: "Y",
     or: "O",

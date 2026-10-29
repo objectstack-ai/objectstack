@@ -148,7 +148,7 @@ export const RecordDetailDrawer: React.FC<DashboardRecordDetailDrawerProps> = ({
         // mask, never the value, and so for good after a failed read.
         node: objectTypesPending
           ? <MaskedCellRenderer value={record[key]} />
-          : renderFieldValue(record[key], fieldMeta, tenantCurrency, displayLocale),
+          : renderFieldValue(record[key], fieldMeta, tenantCurrency, displayLocale, record),
         numeric: !objectTypesPending && isNumericFieldMeta(fieldMeta),
       };
     });

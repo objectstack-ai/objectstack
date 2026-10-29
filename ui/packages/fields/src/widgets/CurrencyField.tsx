@@ -7,12 +7,15 @@ import { resolveFieldCurrency, currencySymbol } from '../currency.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatCurrency, currencyDisplayWidth } from './number-format.js';
 
-export function CurrencyField({ value, onChange, field, readonly, error, className, ...props }: FieldWidgetComponentProps<number>) {
+export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, ...props }: FieldWidgetComponentProps<number>) {
   const currencyField = field as any;
   // Shared precedence: field currency → currencyConfig → tenant default (ADR-0053).
+  // A `record`-mode amount (ADR-0144 D2) reads the code its record holds —
+  // `dependentValues` is the live form record, so picking a code in the
+  // sibling select moves this box's symbol and decimals with it.
   const { currency: tenantCurrency } = useLocalization();
   const locale = useDisplayLocale();
-  const currency: string | undefined = resolveFieldCurrency(currencyField, tenantCurrency);
+  const currency: string | undefined = resolveFieldCurrency(currencyField, tenantCurrency, dependentValues);
   // A currency's decimal places are the CURRENCY's, not a field setting — the
   // maintainer ruling recorded on objectstack-ai/objectstack#19910 (batch #218
   // item 2), executed here by objectui#10276. The width is the ISO 4217

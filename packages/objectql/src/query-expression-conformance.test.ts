@@ -1783,14 +1783,17 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         for (const r of rows) expect(Object.keys(r).sort()).toEqual(['title']);
     });
 
-    it('[#7589 GUARD] a projection of ONLY unknown plain columns still falls back to every field', async () => {
-        // The `SELECT *` fallback itself, pinned as KEPT for the plain case:
-        // this is the documented tolerance the ruling preserves, not a defect
-        // this card missed. (The DOTTED route into this same fallback is what
-        // was closed above.)
-        const rows: any[] = await engine.find('showcase_task', { fields: ['no_such_field'] });
-        expect(rows).toHaveLength(5);
-        expect(Object.keys(rows[0])).toEqual(expect.arrayContaining(['id', 'title', 'status']));
+    it('[#27165] a projection of ONLY unknown plain columns is an empty projection, refused', async () => {
+        // The `SELECT *` fallback this guard pinned as KEPT is closed by its
+        // own ruling (#27165 triage): a projection the tolerance empties is an
+        // empty projection, refused as `fields: []` is (#27008), never read as
+        // every column. The tolerance itself stays for a mixed projection
+        // (the guard above).
+        const err: any = await engine
+            .find('showcase_task', { fields: ['no_such_field'] })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(err.message).toMatch(/names no field in 'fields': got \["no_such_field"\]/);
     });
 
     it('[#7589 GUARD] `engine.findOne` keeps the same plain tolerance', async () => {

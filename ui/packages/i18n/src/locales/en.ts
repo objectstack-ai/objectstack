@@ -360,6 +360,14 @@ const en = {
     },
   },
   fields: {
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Select currency',
+      search: 'Search currency…',
+      noResults: 'No currency found',
+      available: 'Available',
+      all: 'All currencies (ISO 4217)',
+    },
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Open {{name}}',
@@ -2512,6 +2520,8 @@ const en = {
       planApproveDefaultsMessage:
         'Build it with your best assumptions; use sensible defaults for the open questions.',
       planAnswerMessage: 'For "{{question}}", go with: {{option}}.',
+      planExtendExistingMessage: 'Keep improving "{{app}}" instead of building a new app.',
+      planBuildNewAppMessage: 'Build a separate, new app.',
       changesTitle: 'Confirm changes',
       changesConfirmed: 'Confirmed',
       changesConfirm: 'Confirm',
@@ -4508,6 +4518,13 @@ const en = {
       countSeedData: 'sample data',
       extendTarget: 'Adding to existing app: {{app}}',
       awaitingConfirm: 'Awaiting confirmation',
+      iterateOrNew: {
+        question: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
+        questionUnnamed: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
+        extend: 'Keep improving "{{app}}"',
+        buildNew: 'Build a separate app',
+        replyHint: 'Reply to say which.',
+      },
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
@@ -4927,6 +4944,7 @@ const en = {
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    snapshotAsSubmitted: 'As submitted',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',
@@ -5081,6 +5099,8 @@ const en = {
     daysAgo_other: '{{count}}d ago',
   },
   filterBuilder: {
+    currency: 'Currency',
+    currencyNeedsAnd: 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
     where: 'Where',
     and: 'AND',
     or: 'OR',
