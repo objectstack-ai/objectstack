@@ -21287,8 +21287,9 @@ export class ObjectStackProtocolImplementation implements
         // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
         // holds: refused 400 before the authoring gate and every write. See {@link datasourceCredentialsRefSaveRefusal}.
         {
+            const repo = this.getOverlayRepo();
             const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
-                repo: this.getOverlayRepo(), type: singularType, name: request.name, item: request.item,
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: request.item,
                 mode, packageId: request.packageId, source: request.source,
             });
             if (credentialsRefRefusal) throw credentialsRefRefusal;

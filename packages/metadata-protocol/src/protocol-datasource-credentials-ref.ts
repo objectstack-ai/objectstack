@@ -59,7 +59,8 @@ function namedCredentialsRef(body: unknown): unknown {
  * See the module header for the rule, the row it reads and who passes.
  */
 export async function datasourceCredentialsRefSaveRefusal(args: {
-    repo: SysMetadataRepository;
+    /** The repository's write-address read — the one store access this judge makes; it writes nothing. */
+    headAt: SysMetadataRepository['headAt'];
     /** Singular type name. */
     type: string;
     name: string;
@@ -75,10 +76,10 @@ export async function datasourceCredentialsRefSaveRefusal(args: {
     const ref = { type: args.type, name: args.name, org: 'env' } as Parameters<SysMetadataRepository['headAt']>[0];
     const state: 'active' | 'draft' = args.mode === 'draft' ? 'draft' : 'active';
     const member = itemDiscriminator(args.type, args.item);
-    const target = await args.repo.headAt(ref, { state, packageId: args.packageId ?? null, member });
+    const target = await args.headAt(ref, { state, packageId: args.packageId ?? null, member });
     let head = target.head;
     if (!head && state === 'draft') {
-        head = (await args.repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
+        head = (await args.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
     }
     const own = namedCredentialsRef(head?.body);
     if (typeof own === 'string' && own === named) return undefined;
