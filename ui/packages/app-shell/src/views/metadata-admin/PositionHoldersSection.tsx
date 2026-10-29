@@ -87,6 +87,17 @@ const personLabel = (u: any): string =>
   u?.full_name || u?.name || u?.display_name || u?.email || String(u?.id ?? '');
 
 /**
+ * objectstack#27410 — the picker shows what a holder row shows: the person's
+ * name and, beside it, their email, so two people of one name can be told
+ * apart before either is granted the position. `name` is the field `sys_user`
+ * declares as its `nameField`, and `email` is its login identity. The picker
+ * draws only the columns the caller may read (`RecordPickerDialog`'s own read
+ * rule), so for a caller who may not read `email` the name column stands alone.
+ */
+const PICKER_NAME_FIELD = 'name';
+const PICKER_EMAIL_FIELD = 'email';
+
+/**
  * The server's own sentence out of a refused call, or `''` when it gave none.
  * Read through `@object-ui/react`'s shared reader, the one place the adapters'
  * error shapes are told apart (AGENTS #1), as `AssignedUsersSection` reads it:
@@ -107,6 +118,8 @@ function useCopy() {
             empty: '还没有人持有此岗位。',
             loading: '加载中…',
             pickTitle: '选择要分配此岗位的组织成员',
+            nameColumn: '姓名',
+            emailColumn: '邮箱',
             noMembers: '本组织还没有可分配的成员。',
             membersFailed: '无法读取本组织的成员。',
             removeTitle: (who: string) => `将 ${who} 从此岗位移除？`,
@@ -124,6 +137,8 @@ function useCopy() {
             empty: 'Nobody holds this position yet.',
             loading: 'Loading…',
             pickTitle: 'Select organization members to assign this position to',
+            nameColumn: 'Name',
+            emailColumn: 'Email',
             noMembers: 'This organization has no members to assign yet.',
             membersFailed: 'Could not read the members of this organization.',
             removeTitle: (who: string) => `Remove ${who} from this position?`,
@@ -197,6 +212,12 @@ export function PositionHoldersSection({ name }: PositionHoldersSectionProps): R
   const canAdd = resolveAffordance('relatedNew', holdingSource).allowed;
   const canRemove = resolveAffordance('relatedRowDelete', holdingSource).allowed;
   const memberOrganization = membershipOrganization(activeOrganizationId, objects);
+  /**
+   * `sys_user` as the registry serves it, read from the metadata this section
+   * already holds: the picker's name column resolves each person's title by it.
+   */
+  const userSchema = ((objects ?? []).find((o) => (o as { name?: unknown } | null)?.name === 'sys_user') ??
+    null) as Record<string, unknown> | null;
 
   const load = React.useCallback(async () => {
     if (!adapter) return;
@@ -392,6 +413,11 @@ export function PositionHoldersSection({ name }: PositionHoldersSectionProps): R
           multiple
           dataSource={adapter}
           objectName="sys_user"
+          objectSchema={userSchema}
+          columns={[
+            { field: PICKER_NAME_FIELD, label: c.nameColumn },
+            { field: PICKER_EMAIL_FIELD, label: c.emailColumn },
+          ]}
           title={c.pickTitle}
           baseFilter={memberFilter}
           onSelect={() => {}}
