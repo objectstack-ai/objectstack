@@ -4355,6 +4355,7 @@ const zh = {
     progressBar: '决策进度',
     declaredActions: '操作',
     decisionPanelOffRequestPage: '审批决策面板仅在审批请求页面上可用。',
+    snapshotAsSubmitted: '提交时的内容',
     attachmentChip: '附件',
     attachmentOpenFailed: '无法打开附件，请重试',
     approveOneTitle: '通过“{{title}}”？',

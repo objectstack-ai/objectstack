@@ -48,6 +48,22 @@
  * refused read), nothing is drawn: without the declarations there is no
  * declared label, no face and no `hidden` to honour.
  *
+ * ## Labelled as the submitted values (objectstack#27502)
+ *
+ * The snapshot is the record as it was SUBMITTED, kept at rest as the
+ * request's evidence of what was submitted and served redacted per reader
+ * (objectstack#10749, ruling record 5377367175, Option B). It is not the
+ * record's current state: after a decision the record's own status moves on
+ * while the snapshot's stays. So the summary is a section headed "As
+ * submitted" (`approvalsInbox.snapshotAsSubmitted`, in the muted label style
+ * of the panel's "Waiting on"), its accessible name, and a snapshot value
+ * never reads as the record's current one beside the page's highlights, which
+ * read the request row (ruling record 6499914328 on objectstack#27502). The
+ * heading names the source, not a status, so a pending request carries it
+ * too; a summary that draws nothing draws no heading. The record's current
+ * values are the Details tab's pointer card's to show, a live read of the
+ * target that the reader may be refused; this face reads no record.
+ *
  * ## Cost
  *
  * A row with no snapshot asks for nothing. Otherwise the definition is
@@ -72,7 +88,7 @@ import { isDeadlineSettled, withoutDeniedFields } from '@object-ui/core';
 import { getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
 import { useSafeFieldLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
-import { useMetadataItem, usePredicateScope } from '@object-ui/react';
+import { useMetadataItem, useObjectTranslation, usePredicateScope } from '@object-ui/react';
 import type { FieldMetadata } from '@object-ui/types';
 import { distinctLabels, planSnapshotSummary, type FieldDef } from './snapshotSummaryPlan.js';
 
@@ -151,6 +167,8 @@ function DeclaredSummary({ target, fields, shown, display }: {
   const summed = planSnapshotSummary(shown, fields, display).summed;
   const child = useMetadataItem('object', summed);
   const { fieldLabel } = useSafeFieldLabel();
+  const { t } = useObjectTranslation();
+  const headingId = React.useId();
   if (summed !== null && child.loading) return null;
 
   // An unreadable definition leaves every `sum` an ordinary row.
@@ -172,7 +190,10 @@ function DeclaredSummary({ target, fields, shown, display }: {
     );
 
   return (
-    <div className="space-y-3" data-testid="record-snapshot-summary">
+    <section className="space-y-3" aria-labelledby={headingId} data-testid="record-snapshot-summary">
+      <div id={headingId} className="text-[11px] text-muted-foreground mb-1" data-summary-heading>
+        {String(t('approvalsInbox.snapshotAsSubmitted', { defaultValue: 'As submitted' }))}
+      </div>
       {plan.lead && (
         <div data-summary-lead={plan.lead}>
           <div className="text-[11px] text-muted-foreground">{labelOf.get(plan.lead)}</div>
@@ -191,6 +212,6 @@ function DeclaredSummary({ target, fields, shown, display }: {
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
