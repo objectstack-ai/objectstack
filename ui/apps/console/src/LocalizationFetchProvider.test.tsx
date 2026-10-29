@@ -20,6 +20,9 @@ import { act } from 'react';
 import { LOCALE_SEED_STORAGE_KEY, LOCALE_STORAGE_KEY, useDisplayLocale, useLocalization } from '@object-ui/i18n';
 import { formatDate, formatDateTime, setDisplayTimeZone } from '@object-ui/core';
 import { notifyDataChanged } from '@object-ui/react';
+// Test-only and off the `@object-ui/types` barrel; the vitest alias makes this
+// the same module instance the provider's `sharedGetJson` uses.
+import { resetInflightGetsForTesting } from '../../../packages/types/src/http-inflight';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
 // Not on the `@object-ui/auth` barrel; the vitest alias maps that barrel to
 // `packages/auth/src`, so this deep path is the SAME module instance the
@@ -291,7 +294,9 @@ describe('LocalizationFetchProvider', () => {
     const write = (recordId: string) =>
       act(() => { notifyDataChanged({ objectName: 'sys_user', recordId }); });
 
-    afterEach(() => { authUser = null; });
+    // A request a failing case left pending would otherwise be joined by the
+    // next case's boot read through the shared in-flight registry.
+    afterEach(() => { authUser = null; resetInflightGetsForTesting(); });
 
     it('a read that lost the race with the language write is replaced after the write', async () => {
       authUser = { id: 'u1' };
