@@ -784,6 +784,12 @@ export const ERROR_CODE_LEDGER = {
     // the one the transaction was opened on (`CrossDatasourceTransactionWriteError`,
     // `transaction-errors.ts`). Same #8087-gate family as above.
     'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE',
+    // [ADR-0144 D8 rule 4, Open item 9] A write would store a `record`-mode
+    // currency amount beside a blank currency code — a number in no currency.
+    // 400; the driver is never asked to write the row (`RecordCurrencyCodeRequiredError`,
+    // `validation/record-currency-code.ts`); `field` names the code field to
+    // fill. The server never fills a currency in.
+    'ERR_CURRENCY_CODE_REQUIRED',
     'ERR_DATASOURCE_UNAVAILABLE',
     'ERR_DRIVER_CONNECT',
     // [#8846] a `before*` hook moved or cleared the id the engine resolved a
