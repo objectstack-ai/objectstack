@@ -1132,14 +1132,20 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     ? q.search.trim()
                     : undefined;
                 // ADR-0061 override for which fields the term scans. Only meaningful
-                // alongside `search`; ignored on its own, exactly as in findData.
+                // alongside `search`; ignored on its own.
+                //
+                // [#27484] A value naming no field (`searchFields=`, `=,`) is
+                // kept as the empty list rather than read as absent, so
+                // `findData`'s search-fields gate refuses it exactly as on the
+                // list door. Read as absent, the export scanned the object's
+                // default search fields: a file of rows the caller's narrowing
+                // excluded.
                 let searchFields: string[] | undefined;
-                if (typeof q.searchFields === 'string' && q.searchFields.length > 0) {
+                if (typeof q.searchFields === 'string') {
                     searchFields = q.searchFields.split(',').map((s: string) => s.trim()).filter(Boolean);
                 } else if (Array.isArray(q.searchFields)) {
                     searchFields = q.searchFields.filter((s: any) => typeof s === 'string' && s.length > 0);
                 }
-                if (searchFields && searchFields.length === 0) searchFields = undefined;
 
                 let orderby: any = undefined;
                 if (typeof q.orderby === 'string' && q.orderby.length > 0) {

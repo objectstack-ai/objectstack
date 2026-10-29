@@ -4640,9 +4640,11 @@ function pageWindowValue(value: unknown, param: string): number {
 /**
  * A refused query value as the refusal quotes it: JSON, so a blank or
  * whitespace-only value is visible, and bounded, so a long one cannot bury
- * the sentence around it.
+ * the sentence around it. [#27484] Exported for the search-fields gate
+ * (`protocol-query-validation.ts`), which refuses an empty override in the
+ * projection's words.
  */
-function quotedQueryValue(value: unknown): string {
+export function quotedQueryValue(value: unknown): string {
     // `String` for a number: `JSON.stringify(Infinity)` is `null`.
     const shown = typeof value === 'number' ? String(value) : JSON.stringify(value) ?? String(value);
     return shown.length > 64 ? `${shown.slice(0, 64)}…` : shown;
