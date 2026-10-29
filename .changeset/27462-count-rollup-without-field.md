@@ -1,14 +1,14 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/objectql': patch
-'@object-ui/app-shell': patch
-'@object-ui/i18n': patch
+'@objectstack/spec': minor
+'@objectstack/objectql': minor
+'@object-ui/app-shell': minor
+'@object-ui/i18n': minor
 ---
 
 fix(spec): a count roll-up saves without `summaryOperations.field`
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 The description of `summaryOperations.field` always said it is ignored for `count`, yet the schema required it for every function, so a count roll-up with no child field was refused (`422 INVALID_METADATA` at `fields.<name>.summaryOperations.field`, "expected string") and Studio's author had to pick an arbitrary child field to save one. The schema now follows its own description:
 
