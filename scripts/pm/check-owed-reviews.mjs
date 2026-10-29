@@ -41,12 +41,16 @@
  *              `unreadable`.
  *   claim      the `Contract-review-claim:` lines: `live` (who holds the head,
  *              the lane winning a tie), `lapsed`, `none`.
- *   hold       the newest `Contract-review-hold:` line, as `contractReviewHold`
- *              reads it: `live` (it names the current head: trigger (b) does not
- *              fire, and its age is printed), `stale` (the head moved: cleared),
- *              `absent`, `unreadable` (it holds nothing). A live hold at
- *              `CONTRACT_REVIEW_HOLD_LIST_HOURS` or older on a WAIT row is LISTED,
- *              for the triage round record — the age is a reading, never a lapse.
+ *   hold       the `Contract-review-hold:` lines, as `contractReviewHold` reads
+ *              them, per head: `live` (a readable hold names the current head:
+ *              trigger (b) does not fire, and its age is printed), `stale` (the
+ *              head moved past every readable hold: cleared), `absent`,
+ *              `unreadable` (every hold line is unreadable: it holds nothing). An
+ *              unreadable line beside a live or stale reading voids nothing and is
+ *              PRINTED on the row by comment id, so the gap is never silent. A live
+ *              hold at `CONTRACT_REVIEW_HOLD_LIST_HOURS` or older on a WAIT row is
+ *              LISTED, for the triage round record — the age is a reading, never a
+ *              lapse.
  *   lane seat  the lane of the PR's card (`domain:*`) against the open seat
  *              posts: `seated`, `stood-down`, `absent`, `unknown`.
  *   status     `TAKE` (owed, nobody on it, a trigger holds), `WAIT` (owed,
@@ -81,6 +85,7 @@ import { parseSeat } from './fleet-roster.mjs';
 import { ghApi, readAllPages } from './gh-pages.mjs';
 import {
   CONTRACT_REVIEW_HOLD_LIST_HOURS,
+  CONTRACT_REVIEW_HOLD_TEMPLATE,
   REVIEWED_BY_LINE,
   contractReviewClaims,
   contractReviewHandoff,
@@ -278,6 +283,7 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
       holds: hold.state === 'live' ? roundWaited : null,
       listed,
       gaps: hold.gaps ?? [],
+      unreadable: hold.unreadable ?? [],
     },
     lane: lane.lane,
     laneSeat: lane.seat,
@@ -329,13 +335,21 @@ function holdAge(hold) {
   return hold.ageMinutes === null ? 'age unknown' : `${Math.floor(hold.ageMinutes / 60)} h old`;
 }
 
-/** The hold part of a row: who holds, since when, until what, and the (b) it holds. Pure. */
+/**
+ * The hold part of a row: who holds, since when, until what, and the (b) it holds — and, beside a live
+ * or stale reading, every hold line that could not be read, by comment id: it voided nothing, and
+ * it is printed so the gap is seen. Pure.
+ */
 function holdText(hold) {
+  const unread = hold.unreadable ?? [];
+  const gap = hold.state !== 'unreadable' && unread.length > 0
+    ? ` ⚠️ ${unread.length} unreadable hold line(s) (${unread.map((u) => u.id ?? '?').join(', ')})`
+    : '';
   if (hold.state === 'live') {
     const holds = hold.holds === null ? '' : `, holds ${hold.holds}`;
-    return `live ${hold.session} (${hold.id}, ${holdAge(hold)}${holds}) until ${hold.until}`;
+    return `live ${hold.session} (${hold.id}, ${holdAge(hold)}${holds}) until ${hold.until}${gap}`;
   }
-  if (hold.state === 'stale' || hold.state === 'unreadable') return `${hold.state}${hold.id === null ? '' : ` (${hold.id})`}`;
+  if (hold.state === 'stale' || hold.state === 'unreadable') return `${hold.state}${hold.id === null ? '' : ` (${hold.id})`}${gap}`;
   return hold.state;
 }
 
@@ -463,7 +477,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
   'the report: one line per owing PR, TAKE first, exit 0': 5,
-  'the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT': 13,
+  'the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT': 14,
 });
 const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
@@ -622,6 +636,10 @@ export function selfTest() {
   t('⭐ (a) still fires under a live hold — the label or a hand-off on this head is the holding lane ending its hold ⇒ TAKE', row({ headCommittedAt: ripe, labels: [{ name: WAITING_LABEL }], comments: [holdRow(HEAD, heldAt)] }).trigger === '(a) label' && row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt), handoff(HEAD, '2026-10-28T12:40:00Z')] }).trigger === '(a) hand-off');
   t('(c) still fires under a live hold — a lane seat that is gone holds nothing', row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt)] }, [{ lane: 'domain:ui', status: 'paused' }]).trigger === '(c) lane seat stood-down');
   t('⛔ an unreadable hold holds nothing ⇒ (b) fires, and the row names the hold comment as unreadable', (() => { const r = row({ headCommittedAt: ripe, comments: [{ id: 7701, created_at: heldAt, body: 'Contract-review-hold: soon' }] }); return r.hold.state === 'unreadable' && r.status === 'TAKE' && renderRow(r).includes('hold unreadable (7701)'); })());
+  // A later comment quoting the template line at a line start (a round record, a seat note, a review) is unreadable.
+  const quotedTemplate = { id: 7701, created_at: '2026-10-28T12:40:00Z', body: `triage#1 · os-zhuang · ${TRIAGE}\n\nRound record: lanes hold a head with\n- \`${CONTRACT_REVIEW_HOLD_TEMPLATE}\`` };
+  const voided = row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt), quotedTemplate] });
+  t('⭐ an unreadable hold line NEWER than a live hold on this head voids nothing — the row stays WAIT under the live hold and PRINTS the unreadable line by comment id; the control (no such line) is WAIT with no mark', voided.status === 'WAIT' && voided.trigger === 'none yet' && voided.hold.state === 'live' && voided.hold.id === 6472451890 && voided.hold.holds === '(b) waited 61 min' && voided.hold.unreadable.length === 1 && voided.hold.unreadable[0].id === 7701 && renderRow(voided).includes('until the last sibling PR merges ⚠️ 1 unreadable hold line(s) (7701)') && held.status === 'WAIT' && held.hold.unreadable.length === 0 && !renderRow(held).includes('unreadable'), renderRow(voided));
   t('a hold changes neither a live claim (HELD) nor a record on this head (DONE)', row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt), claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`)] }).status === 'HELD' && row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt), recordRow(HEAD)] }).status === 'DONE');
   const aged = row({ headCommittedAt: '2026-10-27T08:00:00Z', comments: [holdRow(HEAD, '2026-10-27T13:00:00Z')] });
   t('⭐ at 24 hours the hold reads overdue and STILL holds — the row stays WAIT, no fifth status — and the row is LISTED for the round record', aged.status === 'WAIT' && aged.hold.state === 'live' && aged.hold.overdue === true && aged.hold.listed === true && renderRow(aged).includes('⏳ HOLD 24 h old — list it in the triage round record'), renderRow(aged));
@@ -654,7 +672,7 @@ export function selfTest() {
       + 'the Clause-② line and the label, drafts included; the record on this head, an earlier head, none, unjudged; '
       + 'the (a) / (b) / (c) triggers; claims holding and lapsing, the lane winning a tie; the two live drafts as TAKE; '
       + 'every read through one reader with failures as gaps; the report, exit 0; a lane\'s live hold holding (b) alone, '
-      + 'cleared by a new head, listed at 24 hours and still WAIT).',
+      + 'cleared by a new head, an unreadable hold line voiding nothing and printed, listed at 24 hours and still WAIT).',
   );
   selfTestReachedVerdict = true;
   return 0;
