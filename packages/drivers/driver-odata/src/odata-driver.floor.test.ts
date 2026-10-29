@@ -40,15 +40,15 @@ const PERSON = {
   },
 };
 
-function boot(exchanges: Exchange[]) {
+async function boot(exchanges: Exchange[]) {
   const service = recordedService([METADATA_EXCHANGE, ...exchanges]);
   const driver = new ODataDriver(parseODataDriverConfig({ name: DATASOURCE, serviceRoot: SERVICE_ROOT }), { fetch: service.fetch });
-  // What the engine's boot binding pass does for every external object.
-  driver.registerExternalObject(PERSON);
   const engine = new ObjectQL();
   engine.registerDriver(driver);
   engine.registerDatasourceDef(DEF);
   engine.registerApp({ id: 'trippin_pkg', name: 'TripPin', objects: [PERSON] } as never);
+  // The engine's DDL-free binding pass: it hands the driver each external object (`registerExternalObject`).
+  await engine.syncSchemas();
   return { engine, requests: service.requests };
 }
 
@@ -64,7 +64,7 @@ describe('driver-odata behind the engine floor', () => {
 
   it('applies in memory what it does not push down: the service is asked the wider question', async () => {
     // `$like` has no `$filter` spelling, so only `startswith` reaches the service, which answers two rows.
-    const { engine, requests } = boot([
+    const { engine, requests } = await boot([
       {
         url: "People?$filter=startswith(LastName,'W')&$orderby=UserName asc&$top=1001",
         body: page([PEOPLE[0], WHITE]),
@@ -79,7 +79,7 @@ describe('driver-odata behind the engine floor', () => {
   });
 
   it('counts through the floor\'s read, not the service\'s $count', async () => {
-    const { engine, requests } = boot([
+    const { engine, requests } = await boot([
       { url: "People?$filter=startswith(LastName,'W')&$orderby=UserName asc&$top=1001", body: page([PEOPLE[0], WHITE]) },
     ]);
     expect(await engine.count(OBJECT, { where: { last_name: { $startsWith: 'W' } }, context: { isSystem: true } } as never)).toBe(2);
@@ -87,7 +87,7 @@ describe('driver-odata behind the engine floor', () => {
   });
 
   it('a read the service refuses with 400 is INVALID_QUERY / 400 carrying the service\'s reason', async () => {
-    const { engine } = boot([
+    const { engine } = await boot([
       {
         url: "People?$filter=FirstName eq 'x'&$orderby=UserName asc&$top=1001",
         status: 400,
@@ -103,7 +103,7 @@ describe('driver-odata behind the engine floor', () => {
   });
 
   it('a write the service refuses with a 4xx is EXTERNAL_WRITE_REFUSED / 422 carrying the service\'s reason', async () => {
-    const { engine } = boot([
+    const { engine } = await boot([
       {
         method: 'POST',
         url: 'People',
@@ -120,7 +120,7 @@ describe('driver-odata behind the engine floor', () => {
   });
 
   it('a service failure is ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld', async () => {
-    const { engine } = boot([
+    const { engine } = await boot([
       { url: 'People?$orderby=UserName asc&$top=1001', status: 503, body: { error: { code: 'ServiceUnavailable', message: 'backend sap-prod-07 is down' } } },
     ]);
     const err = await engine.find(OBJECT, { context: { isSystem: true } } as never).then(() => undefined, (e: unknown) => e);
