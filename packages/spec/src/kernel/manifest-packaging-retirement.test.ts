@@ -253,6 +253,8 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     'packages/spec/src/shared/retired-key-removal-version.pin.test.ts',
     // The build door's own pin authors it to assert `os plugin build` refuses it.
     'packages/cli/test/plugin-build-bundled-only.test.ts',
+    // The D3 entry's `surface` names the value it retires.
+    'packages/spec/src/migrations/entries/semantic/18.manifest-packaging-manifest-deps-retired.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement manifests on purpose.

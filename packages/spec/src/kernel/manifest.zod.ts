@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { PROTOCOL_MAJOR } from './protocol-version';
 import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { formatSuggestion } from '../shared/suggestions.zod';
 import { SeedSchema } from '../data/seed.zod';
@@ -223,14 +223,44 @@ export const PluginRuntimeSchema = z
 
 export type PluginRuntime = z.input<typeof PluginRuntimeSchema>;
 
+// `packaging: 'manifest-deps'` — the retired member's prescription
+// (`enumWithRetiredValues`, `../shared/retired-key.ts`). Declared with `//` on
+// purpose: an enum's error map consumes it, it is no documented surface.
+//
+// ADR-0025 v2 §3.3 (maintainer decision Q6, 2026-10-28): the strategy existed
+// on the build side only — `os plugin build` left the `package.json`
+// dependencies out of the bundle and packed `package.json` + `pnpm-lock.yaml`
+// for an install-time resolution nothing ever ran — so `bundled` is the one
+// strategy and the build forks are gone. The ADR-0087 D2 conversion
+// `manifest-packaging-manifest-deps-removed` (`conversions/registry.ts`)
+// strips the value from existing stack sources and stored artifacts, which
+// lands them on `bundled`, the build's only behaviour.
+const PACKAGING_RETIRED = {
+  'manifest-deps':
+    "`packaging: 'manifest-deps'` was removed in @objectstack/spec 18.3.0 (ADR-0025 v2 §3.3, ADR-0049 "
+    + 'enforce-or-remove) — nothing ever installed the dependencies it left out of the bundle, so a plugin '
+    + 'built with it could not load them. Delete the key: `bundled` is the default and the only strategy, '
+    + 'and `os plugin build` inlines every dependency except the host-provided `@objectstack/*` packages. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for the stack manifest case; `--write` '
+    + 'applies the ones it can prove, and an `objectstack.plugin.json` is not a source it reads: delete the '
+    + 'key there by hand.',
+} as const;
+
 /**
- * Dependency packaging strategy (ADR-0025 §3.3):
- * - `bundled`      — deps pre-bundled into the artifact, no install-time npm
- * - `manifest-deps`— deps resolved at install (`pnpm install`, opt-in)
+ * Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled` — every
+ * dependency except the host-provided `@objectstack/*` packages is inlined
+ * into `dist/index.mjs`, so install is unpack + verify with no npm or
+ * toolchain at install time, and a native (`.node`) addon is refused by
+ * `os plugin build`. It is the one strategy and the default, so the key is
+ * optional and an absent one means the same. The former `manifest-deps`
+ * member was retired (#27123) and is refused at parse with its prescription.
  */
-export const PluginPackagingSchema = z
-  .enum(['bundled', 'manifest-deps'])
-  .describe('Dependency packaging strategy (ADR-0025 §3.3)');
+export const PluginPackagingSchema = enumWithRetiredValues(['bundled'], PACKAGING_RETIRED)
+  .describe(
+    'Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled` is the only one and the default — every '
+    + 'dependency except the host-provided `@objectstack/*` packages is inlined into the artifact, and '
+    + '`os plugin build` refuses a native (`.node`) addon',
+  );
 
 export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
 
@@ -1039,10 +1069,15 @@ export const ManifestSchema = strictObject({
     ),
 
   /**
-   * Dependency packaging strategy for code-bearing plugins (ADR-0025 §3.3).
+   * Dependency packaging strategy for code-bearing plugins (ADR-0025 v2 §3.3).
+   * `bundled` is the only strategy and the default, so omitting the key means
+   * the same; see {@link PluginPackagingSchema}.
    */
   packaging: PluginPackagingSchema.optional()
-    .describe('Dependency packaging strategy (ADR-0025 §3.3)'),
+    .describe(
+      'Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key '
+      + 'or write `bundled`',
+    ),
 
   /**
    * Entry module of a code-bearing plugin, relative to the plugin root
