@@ -642,6 +642,22 @@ describe('the object door judges related-list names against the live universe (#
     expect(gateWith(cleanObject({ fieldGroups: groups }), withBodyFk).errors).toEqual([]);
   });
 
+  // [#27478] The other half of the same verdict: a write of the CHILD that
+  // turns a body table a stored group places into a side card is refused too
+  // (the finding is new on the stored parent). Rewriting the child while it
+  // stays a body table publishes.
+  it('REFUSES a child write that makes a placed body table a side card; keeping it primary publishes', () => {
+    const parent = cleanObject({ fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'leave_task' }] });
+    const gateChild = (child: unknown) =>
+      runRuntimeAuthoringRules({ type: 'object', item: child, context: { objects: [parent, withBodyFk] } });
+    const refused = gateChild(childWith({ request_id: { type: 'lookup', reference: 'leave_request', relatedList: true } }));
+    expect(refused.errors.map((e) => [e.rule, e.path])).toEqual([
+      ['related-list-group-not-body', 'objects.leave_request.fieldGroups[0].relatedList'],
+    ]);
+    expect(gateChild(childWith({ request_id: { type: 'lookup', reference: 'leave_request', relatedList: 'primary' }, note: { type: 'text' } })).errors)
+      .toEqual([]);
+  });
+
   it('REFUSES a child that exists nowhere: with no closure in force the context is the whole collection', () => {
     const result = gateWith(cleanObject({ relatedLists: ['leave_ghost'] }), withFk);
     expect(result.errors.map((e) => e.rule)).toEqual(['related-list-ref-unknown']);
