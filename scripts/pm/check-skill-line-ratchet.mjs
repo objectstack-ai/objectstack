@@ -1559,7 +1559,12 @@ export const CEILINGS = new Map([
   // maintainer's 「以上应该写入你的 checklist skills」, recorded verbatim with the
   // rulings it orders in comment 6433562861 — +8 measured lines (write doors,
   // file-every-defect, auth/authz fix dispatch, QA run is not a lane card).
-  ['.claude/skills/checklist-test/SKILL.md', 246],
+  // 246 → 256: the ruling of record on #27377 — the maintainer's four
+  // standing-regression options and 「这些都应该写到 checklist skills 中」, recorded
+  // verbatim in comment 6501246005 — +10 measured lines: 14 ruled (the
+  // `touched:<sha>` selector row, retest trigger 4, §6 standing regression)
+  // less 4 repaid by rejoining §5 wraps that had broken mid-word.
+  ['.claude/skills/checklist-test/SKILL.md', 256],
   ['.claude/skills/checklist-author/SKILL.md', 62],
   // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
   ['.claude/skills/dogfood-verification/SKILL.md', 140],

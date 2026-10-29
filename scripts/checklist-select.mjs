@@ -20,6 +20,8 @@
 //   since:vN                every item introduced in release vN (prefix match: since:v16 ⊇ v16.0)
 //   file:<path>             ★ items whose `source[]` cites this framework file (or its
 //                           basename / containing dir) — "test whatever covers this file"
+//   touched:<sha>           items whose `source[]` paths or `automated.ref` files changed
+//                           in <sha>..HEAD — "test whatever the last N commits moved"
 //   all                     every active item
 //
 // Prefix-less conveniences (paste a filename/path, no prefix to remember):
@@ -40,7 +42,31 @@
 //
 // Output: a table (id · priority · surface · blocked?) to stderr for humans, and — with
 // --json — a machine list to stdout for the runner to fan out over.
+//
+// ## `touched:<sha>` — what counts as "cites a changed file"
+//
+// The changed set is `git diff --no-renames --name-only <sha> HEAD`: the two trees,
+// so a depth-1 fetch of <sha> is enough, and a rename lists its OLD path too (an item
+// still citing the old path is exactly the item the rename touched). An item is
+// touched when a path it cites is in that set, read the same way every time:
+//
+//   - every path-shaped token of each `source[]` entry and of `automated.ref`, cut at
+//     the anchor (`bar.ts#symbol` → `bar.ts`) and at the prose that follows it;
+//     `dir/{a,b}.ts` brace lists are expanded first;
+//   - a cited path matches a changed path that holds it as a whole run of segments:
+//     the same path; any path under it (a directory source matches by prefix); or a
+//     longer path ending in it (`__tests__/x.test.ts` written after the directory it
+//     sits in, or an `e2e/live/…` path from the retired objectui repo, now under
+//     `ui/`). Always on a `/` boundary — `packages/foo` never matches `packages/foobar`;
+//   - a bare file name (no `/`, a source-file extension) matches by basename, the way
+//     refs name a sibling of the test file named before it.
+//
+// Issue references, ADR ids and prose cite no path and match nothing. A citation no
+// tracked file holds any more (a file deleted or moved) matches only a change to that
+// old path; the CLI counts such citations and says so, so a quiet answer is never read
+// as "nothing moved".
 
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -96,6 +122,15 @@ export function selectItems(selector, items, coverage = { metadataKinds: {} }, o
   if (key === 'priority') return active.filter((it) => it.priority === val);
   if (key === 'surface') return active.filter((it) => it.surface === val);
   if (key === 'since') return active.filter((it) => it.since === val || (it.since || '').startsWith(`${val}.`));
+  if (key === 'touched') {
+    // The diff is I/O and lives in the CLI; this resolver stays pure. Asked to
+    // resolve `touched:` with no changed set, it refuses rather than answering
+    // "nothing touched" — an empty set and a missing one must not read alike.
+    if (!Array.isArray(opts.changedPaths)) {
+      throw new TypeError(`selectItems: '${selector}' needs opts.changedPaths (the files changed in ${val}..HEAD)`);
+    }
+    return active.filter((it) => isTouched(it, opts.changedPaths));
+  }
   if (key === 'file') {
     const p = val.replace(/^\.?\//, '');
     const base = basename(p);
@@ -146,8 +181,64 @@ export function selectItems(selector, items, coverage = { metadataKinds: {} }, o
  * environment cannot run today, and hiding it is a fixture problem. A planned
  * item has nothing to run at all.
  */
-export function selectPlanned(selector, items, coverage = { metadataKinds: {} }) {
-  return selectItems(selector, items, coverage, { status: 'planned' });
+export function selectPlanned(selector, items, coverage = { metadataKinds: {} }, opts = {}) {
+  return selectItems(selector, items, coverage, { ...opts, status: 'planned' });
+}
+
+/** A file name a bare citation may use: a source, config or doc extension. */
+const CITED_FILE_EXT = /\.(?:[cm]?[jt]sx?|jsonc?|mdx?|ya?ml|sql|css|html|sh)$/;
+
+/**
+ * The paths an item cites, read off `source[]` and `automated.ref` by the rules in
+ * the header's `touched:` section. Pure.
+ *
+ * @param {object} item
+ * @returns {{paths: string[], basenames: string[]}} paths carry a `/`; basenames do not
+ */
+export function citedPaths(item) {
+  const texts = [...(item.source || []), item.automated?.ref || ''];
+  const paths = new Set();
+  const basenames = new Set();
+  for (const text of texts) {
+    // `dir/{a,b}.ts` → `dir/a.ts dir/b.ts`; a brace group holding a space is prose, not a list.
+    const expanded = String(text).replace(
+      /([A-Za-z0-9_@./-]*)\{([A-Za-z0-9_@./-]+(?:,[A-Za-z0-9_@./-]+)+)\}([A-Za-z0-9_@./-]*)/g,
+      (_, pre, list, post) => list.split(',').map((x) => `${pre}${x}${post}`).join(' '),
+    );
+    for (const raw of expanded.match(/[A-Za-z0-9_@.][A-Za-z0-9_@./-]*/g) || []) {
+      const token = raw.replace(/^\.\//, '').replace(/[./]+$/, '');
+      if (token.includes('/')) {
+        if (!token.includes('//')) paths.add(token);
+      } else if (CITED_FILE_EXT.test(token)) {
+        basenames.add(token);
+      }
+    }
+  }
+  return { paths: [...paths], basenames: [...basenames] };
+}
+
+/**
+ * Whether `path` holds `cited` as a whole run of its `/`-separated segments. Pure.
+ *
+ * @param {string} path a repo-relative file path
+ * @param {string} cited a cited path (no leading or trailing `/`)
+ * @returns {boolean}
+ */
+export function holdsSegments(path, cited) {
+  return `/${path}/`.includes(`/${cited}/`);
+}
+
+/**
+ * Whether any path the item cites is among `changed` (repo-relative paths), by
+ * the header's `touched:` rules. Pure.
+ *
+ * @param {object} item
+ * @param {string[]} changed
+ * @returns {boolean}
+ */
+export function isTouched(item, changed) {
+  const { paths, basenames } = citedPaths(item);
+  return changed.some((c) => paths.some((p) => holdsSegments(c, p)) || basenames.includes(basename(c)));
 }
 
 function isBlocked(it) {
@@ -186,8 +277,10 @@ function isBlocked(it) {
 // runnable pool to prove a planned item is in NONE of them, and against the
 // planned pool to prove it is still reachable — the two halves of "skipped by
 // every selector, reported as `planned`".
+// 31 → 45: the `touched:<sha>` selector — each matching rule driven from its own
+// side, the refusal without a changed set, and the planned pool kept apart.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'checklist-select self-test': 31,
+  'checklist-select self-test': 45,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -276,6 +369,37 @@ function selfTest() {
   eq(plannedIds('packages/foo/baz.ts'), ['b.promised'], 'the prefix-less path form keeps the pool it was asked about');
   eq(plannedIds('area:a'), [], 'an area with no planned items reports none — the pool is not a fallback');
   eq(plannedIds('b.gone'), [], 'retired is not planned — two different absences, not one');
+  // ── touched:<sha> — items citing a file changed in <sha>..HEAD ───────────
+  // The changed set arrives as data (the CLI owns the git diff), so every rule
+  // of the header's `touched:` section is driven here, each from its own side.
+  const TFIX = [
+    { id: 't.exact', status: 'active', priority: 'P1', surface: 'api', source: ['packages/x/src/a.ts'] },
+    { id: 't.anchor', status: 'active', priority: 'P1', surface: 'api', source: ['packages/x/src/b.ts#makeB (the B door, #123)'] },
+    { id: 't.dir', status: 'active', priority: 'P1', surface: 'api', source: ['packages/x/src/dir/ (every file under it)'] },
+    { id: 't.ref', status: 'active', priority: 'P1', surface: 'api', source: ['#3358'], automated: { kind: 'test', ref: 'packages/qa/t/one.test.ts + two.dogfood.test.ts, all in-process' } },
+    { id: 't.brace', status: 'active', priority: 'P1', surface: 'api', source: ['packages/y/src/{left,right}.tsx'] },
+    { id: 't.prose', status: 'active', priority: 'P1', surface: 'api', source: ['ADR-0087 D2', '#5519/#5569'] },
+    { id: 't.blocked', status: 'active', priority: 'P1', surface: 'api', source: ['packages/x/src/a.ts'], blocked: { by: 'fixture', ref: '#1' } },
+    { id: 't.planned', status: 'planned', priority: 'P1', surface: 'api', source: ['packages/x/src/a.ts'] },
+    { id: 't.retired', status: 'retired', priority: 'P1', surface: 'api', source: ['packages/x/src/a.ts'], retiredReason: 'x' },
+  ];
+  const touched = (changed) => selectItems('touched:abc1234', TFIX, COV, { changedPaths: changed }).map((i) => i.id).sort();
+  eq(touched(['packages/x/src/a.ts']), ['t.blocked', 't.exact'], 'touched: an exact source path — runnable pool only (blocked rides along for the CLI to hide)');
+  eq(touched(['packages/x/src/b.ts']), ['t.anchor'], 'touched: the #symbol anchor and its prose are stripped before comparing');
+  eq(touched(['packages/x/src/dir/deep/c.ts']), ['t.dir'], 'touched: a directory source matches by prefix');
+  eq(touched(['packages/x/src/dirt.ts']), [], 'touched: the prefix holds on a / boundary — dirt.ts is not under dir');
+  eq(touched(['ui/packages/x/src/a.ts']), ['t.blocked', 't.exact'], 'touched: a cited path matches at the end of a longer one (objectui-rooted, now under ui/)');
+  eq(touched(['packages/xx/src/a.ts']), [], 'touched: the trailing match holds on a / boundary too');
+  eq(touched(['packages/qa/t/one.test.ts']), ['t.ref'], 'touched: an automated.ref path counts');
+  eq(touched(['packages/qa/dogfood/two.dogfood.test.ts']), ['t.ref'], 'touched: a bare ref file name matches by basename');
+  eq(touched(['packages/y/src/left.tsx']), ['t.brace'], 'touched: a {a,b} brace list is expanded — its FIRST member too, which no basename reaches');
+  eq(touched(['docs/adr/0087-x.md', '3358', '5519']), [], 'touched: issue refs and ADR ids cite no path');
+  eq(touched([]), [], 'touched: an empty changed set selects nothing');
+  eq(selectPlanned('touched:abc1234', TFIX, COV, { changedPaths: ['packages/x/src/a.ts'] }).map((i) => i.id), ['t.planned'], 'touched: a planned item is reported from its own pool, never run');
+  let refused = null;
+  try { selectItems('touched:abc1234', TFIX, COV); } catch (e) { refused = e; }
+  eq(refused instanceof TypeError, true, 'touched: no changed set is a refusal, never an empty answer');
+  eq(citedPaths(TFIX[1]).paths, ['packages/x/src/b.ts'], 'citedPaths: the anchor is cut off the path');
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -337,7 +461,7 @@ function main() {
 
   if (!selector) {
     console.error('usage: node scripts/checklist-select.mjs <selector> [--json] [--include-blocked]');
-    console.error('       selectors: <id> | area:<a> | capability:<k> | priority:P0 | surface:api | since:vN | file:<path> | all');
+    console.error('       selectors: <id> | area:<a> | capability:<k> | priority:P0 | surface:api | since:vN | file:<path> | touched:<sha> | all');
     process.exit(2);
   }
   if (!existsSync(AREAS_DIR)) {
@@ -347,10 +471,12 @@ function main() {
 
   const items = loadItems();
   const coverage = existsSync(COVERAGE) ? JSON.parse(readFileSync(COVERAGE, 'utf8')) : { metadataKinds: {} };
-  let matched = selectItems(selector, items, coverage);
+  const touchedSha = selector.startsWith('touched:') ? selector.slice('touched:'.length) : null;
+  const opts = touchedSha === null ? {} : { changedPaths: changedSince(touchedSha) };
+  let matched = selectItems(selector, items, coverage, opts);
   const droppedBlocked = includeBlocked ? [] : matched.filter(isBlocked);
   if (!includeBlocked) matched = matched.filter((it) => !isBlocked(it));
-  const planned = selectPlanned(selector, items, coverage);
+  const planned = selectPlanned(selector, items, coverage, opts);
 
   if (json) {
     process.stdout.write(JSON.stringify(matched.map((it) => ({ id: it.id, priority: it.priority, surface: it.surface, since: it.since, revision: it.revision })), null, 2) + '\n');
@@ -374,6 +500,7 @@ function main() {
       console.error(`    ${it.priority}  ${String(it.surface ?? '-').padEnd(8)}  ${it.id}${it.since ? `  → target ${it.since}` : ''}`);
     }
   }
+  if (touchedSha !== null) reportMovedCitations(items);
   if (matched.length === 0) {
     // A selector that matched ONLY planned items is answered, not refused: the
     // ledger has something to say about it and said it above. "Nothing matched"
@@ -382,9 +509,62 @@ function main() {
       console.error('\n  (nothing to run: every match is planned — report them as `planned` and stop)');
       return;
     }
+    // The same for a quiet window: no cited file moved is an answer about the
+    // window, not a broken selector.
+    if (touchedSha !== null) {
+      console.error(`  (nothing to run: no runnable item cites a file changed in ${touchedSha}..HEAD)`);
+      return;
+    }
     console.error('  (nothing matched — check the selector; try `all` or `area:<name>`)');
     process.exit(1);
   }
+}
+
+/** The files changed between <sha> and HEAD, or exit 2 naming the fetch that fixes it. */
+function changedSince(sha) {
+  if (!/^[0-9a-f]{4,40}$/i.test(sha)) {
+    console.error(`checklist-select: touched:${sha} — not a commit sha (4 to 40 hex characters)`);
+    process.exit(2);
+  }
+  const git = (args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    git(['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
+  } catch {
+    console.error(
+      `checklist-select: touched:${sha} — that commit is not in this clone (a shallow clone holds only recent history).\n`
+        + '  The diff needs only its tree, so fetch it and re-run:\n'
+        + '    git fetch --depth=1 origin <its full 40-character sha>\n'
+        + '  or, from a short sha, git fetch --shallow-since=<a date at or before it> origin main',
+    );
+    process.exit(2);
+  }
+  const changed = git(['diff', '--no-renames', '--name-only', sha, 'HEAD']).split('\n').filter(Boolean);
+  console.error(`touched:${sha} — ${changed.length} file(s) changed in ${sha}..HEAD`);
+  return changed;
+}
+
+/**
+ * Say how many cited file paths no longer exist at HEAD. Such a citation matches
+ * only a change to its OLD path, so a quiet `touched:` answer could hide work
+ * under the new one — the count keeps that blind side in view.
+ */
+function reportMovedCitations(items) {
+  const tracked = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    .split('\n').filter(Boolean);
+  const held = (p) => existsSync(join(ROOT, p)) || tracked.some((t) => holdsSegments(t, p));
+  const absent = new Set();
+  let citing = 0;
+  for (const it of items.filter((i) => i.status === 'active')) {
+    const gone = citedPaths(it).paths.filter((p) => CITED_FILE_EXT.test(p) && !held(p));
+    if (gone.length) citing += 1;
+    for (const p of gone) absent.add(p);
+  }
+  if (absent.size === 0) return;
+  const sample = [...absent].sort().slice(0, 3).join(', ');
+  console.error(
+    `\n  note: ${citing} active item(s) cite ${absent.size} file path(s) no tracked file holds (e.g. ${sample}) —\n`
+      + '  a change under such a file\'s new path is invisible to touched:.',
+  );
 }
 
 // The dispatch runs only when node ran THIS file. Imported for `selectItems`
