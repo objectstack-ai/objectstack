@@ -4,13 +4,13 @@
  * `os package publish` names every `objectstack.manifest.json` key it does not
  * send, instead of dropping it silently.
  *
- * `TemplateManifestSchema` inherits `tags`, `publisher`, `isStarter` and
- * `visibility` from `CreatePackageRequestSchema`, so an author (or an AI agent)
- * writes them and the file validates — but publish never carried them, and
- * the catalog simply showed none of it. These cases pin the warning, pin that
- * it does not fail the publish (the blank template ships `isStarter: true`),
- * and classify every schema key so a key added later cannot be dropped
- * silently again.
+ * `TemplateManifestSchema` accepts `tags`, `publisher`, `isStarter`, `preview`
+ * and `visibility`, so an author (or an AI agent) writes them and the file
+ * validates — but publish never carried them, and the catalog simply showed
+ * none of it. Carrying them waits on what the hosted side accepts
+ * (`CATALOG_SEND_ISSUE`). These cases pin the warning, pin that it does not
+ * fail the publish (the blank template ships `isStarter: true`), and classify
+ * every schema key so a key added later cannot be dropped silently again.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -18,7 +18,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TemplateManifestSchema } from '@objectstack/spec/marketplace';
-import PackagePublish, { UNCARRIED_MANIFEST_KEYS, uncarriedManifestKeys } from '../src/commands/package/publish.js';
+import PackagePublish, {
+  CATALOG_SEND_ISSUE,
+  UNCARRIED_MANIFEST_KEYS,
+  uncarriedManifestKeys,
+} from '../src/commands/package/publish.js';
 
 type Call = { url: string; body: any };
 
@@ -44,7 +48,7 @@ const SENT = [
   'homepageUrl', 'license', 'translations', 'readmePath',
 ] as const;
 /** Scaffold-time extras: read by `create-objectstack` or docs, never a publish key. */
-const SCAFFOLD_ONLY = ['name', 'specVersion', 'namespace', 'skills', 'preview', 'scaffold'] as const;
+const SCAFFOLD_ONLY = ['name', 'specVersion', 'namespace', 'skills', 'scaffold'] as const;
 
 describe('os package publish — manifest keys it does not send', () => {
   let dir = '';
@@ -82,7 +86,7 @@ describe('os package publish — manifest keys it does not send', () => {
     return lines;
   }
 
-  it('names each declared key it does not send, and still publishes', async () => {
+  it('names each declared catalog key it does not send, points at the tracking issue, and still publishes', async () => {
     const path = await projectWith({
       name: 'acme-crm',
       specVersion: '^18.0.0',
@@ -90,6 +94,7 @@ describe('os package publish — manifest keys it does not send', () => {
       tags: ['crm', 'sales'],
       publisher: 'community',
       isStarter: true,
+      preview: { screenshots: ['shot.png'] },
     });
     const calls = stubCloud();
     const log = captureLog();
@@ -97,17 +102,19 @@ describe('os package publish — manifest keys it does not send', () => {
     await PackagePublish.run([path]);
 
     expect(calls).toHaveLength(2);
-    const warning = log.find((line) => line.includes('does not send to the control plane'));
-    expect(warning).toBeDefined();
-    for (const key of ['tags', 'publisher', 'isStarter']) expect(warning).toContain(`\`${key}\``);
-    expect(warning).not.toContain('`visibility`');
+    const warnings = log.filter((line) => line.includes('objectstack.manifest.json declares'));
+    expect(warnings).toHaveLength(1);
+    for (const key of ['tags', 'publisher', 'isStarter', 'preview']) expect(warnings[0]).toContain(`\`${key}\``);
+    expect(warnings[0]).toContain('hosted catalog does not carry yet');
+    expect(warnings[0]).toContain(CATALOG_SEND_ISSUE);
+    expect(warnings[0]).not.toContain('`visibility`');
     // Not sent under either spelling — the warning describes the wire.
-    for (const key of ['tags', 'publisher', 'isStarter', 'is_starter']) {
+    for (const key of ['tags', 'publisher', 'isStarter', 'is_starter', 'preview']) {
       expect(key in calls[0].body).toBe(false);
     }
   });
 
-  it('names `visibility` with the flag that does carry it', async () => {
+  it('names `visibility` separately, with the flag that does carry it', async () => {
     const path = await projectWith({ name: 'acme-crm', specVersion: '^18.0.0', visibility: 'marketplace' });
     const calls = stubCloud();
     const log = captureLog();
@@ -115,9 +122,12 @@ describe('os package publish — manifest keys it does not send', () => {
     await PackagePublish.run([path]);
 
     expect('visibility' in calls[0].body).toBe(false);
-    const warning = log.find((line) => line.includes('does not send to the control plane'));
-    expect(warning).toContain('`visibility`');
-    expect(warning).toContain('--visibility');
+    const warnings = log.filter((line) => line.includes('objectstack.manifest.json declares'));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('`visibility`');
+    expect(warnings[0]).toContain('--visibility');
+    // `visibility` is not waiting on the hosted catalog: the flag carries it today.
+    expect(warnings[0]).not.toContain(CATALOG_SEND_ISSUE);
   });
 
   it('stays quiet when the manifest declares none of them', async () => {
@@ -127,7 +137,7 @@ describe('os package publish — manifest keys it does not send', () => {
 
     await PackagePublish.run([path]);
 
-    expect(log.some((line) => line.includes('does not send to the control plane'))).toBe(false);
+    expect(log.some((line) => line.includes('objectstack.manifest.json declares'))).toBe(false);
   });
 });
 
@@ -143,7 +153,7 @@ describe('every TemplateManifestSchema key is sent, warned about, or scaffold-on
   it('warns only about keys the schema accepts', () => {
     // A warned key the schema rejects would never reach publish; the list
     // would then be naming a key no valid file can carry.
-    const fixture = { name: 'acme-crm', specVersion: '^18.0.0', displayName: 'Acme CRM', tags: ['crm'], publisher: 'community', isStarter: true, visibility: 'org' };
+    const fixture = { name: 'acme-crm', specVersion: '^18.0.0', displayName: 'Acme CRM', tags: ['crm'], publisher: 'community', isStarter: true, preview: { demoUrl: 'https://demo.example.com' }, visibility: 'org' };
     expect(TemplateManifestSchema.safeParse(fixture).success).toBe(true);
     expect(uncarriedManifestKeys(fixture)).toEqual([...UNCARRIED_MANIFEST_KEYS]);
   });
