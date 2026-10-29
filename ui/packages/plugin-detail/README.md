@@ -803,7 +803,7 @@ viewport:
 
 | Container width | Layout |
 |---|---|
-| 1280 px and up | Three resident columns: details · timeline (the discussion composer on top, then Activity and History) · related (each related list as a card, Approvals, Attachments, the provenance footer) |
+| 1280 px and up | Three resident columns: details · timeline (one stream: the composer on top, then the discussion, the activity and, with `enable.trackHistory`, the field changes, filtered by All / Activity / Discussion / Changes) · related (each related list as a card, Approvals, Attachments, the provenance footer) |
 | 1024 – 1279 px | Details · timeline; the related column folds into a rail opened from a **Related (N)** toggle above the columns |
 | below 1024 px, or embedded (drawer / split pane) | The tab strip, exactly as before |
 
