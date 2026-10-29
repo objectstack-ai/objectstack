@@ -48,6 +48,11 @@
  * over the four new members, which resolved to `any` through the index
  * signature. The PR body carries the counts from that run.
  *
+ * ⛔ The docs-page legs are gone. objectstack#27145 retired the ObjectUI docs
+ * site and `content/docs/components/overlay/alert-dialog.mdx` with it; the
+ * renderer is one row on `content/docs/frontend/renderers.mdx`, which carries
+ * no interface fence. The declaration, mirror, renderer and fixture legs stay.
+ *
  * ## What this file left OPEN, and what has since closed it
  *
  * - RESOLVED, and re-derived rather than deleted: `cancelLabel` /
@@ -104,7 +109,6 @@ const read = (relative: string): string => readFileSync(join(REPO_ROOT, relative
 
 const RENDERER = 'packages/components/src/renderers/overlay/alert-dialog.tsx';
 const DECLARATION = 'packages/types/src/overlay.ts';
-const DOC = 'content/docs/components/overlay/alert-dialog.mdx';
 const FIXTURE_DIR = 'examples/schema-catalog/src/schemas/components-overlay-alert-dialog';
 const FIXTURES = ['basic-alert-dialog', 'confirmation-dialog', 'custom-actions', 'destructive-action'] as const;
 
@@ -244,18 +248,6 @@ export type _ForcingSubjectLabel = Expect<Equal<CommentProjectionForcingSubject[
 interface Member {
   readonly optional: boolean;
   readonly typeText: string;
-}
-
-/**
- * The page's one `ts` fence. objectui#5867 batch 8 re-fenced it from
- * `plaintext`, so `check-doc-snippet-types` now compiles it; the page declares
- * its own interface, so that compile does not judge the member rows against the
- * shipped schema. This file still does.
- */
-function schemaFence(doc: string): string {
-  const fences = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((match) => match[1]);
-  if (fences.length !== 1) throw new Error(`expected exactly one ts fence in ${DOC}, found ${fences.length}`);
-  return fences[0];
 }
 
 function interfaceBody(source: string, opener: string): string {
@@ -435,49 +427,6 @@ describe('the trio is RETIRED — the objectui#7104 pin re-derived onto the othe
     expect(members(declaredInterface()).get('cancelText')?.typeText).toBe('string');
     expect(members(declaredInterface()).get('actionText')?.typeText).toBe('string');
     expect(AlertDialogZod.safeParse({ ...AUTHORED, cancelText: 'Keep it' }).success).toBe(true);
-  });
-});
-
-describe('the docs page publishes the read dialect (objectui#7104)', () => {
-  const rows = () => members(interfaceBody(schemaFence(read(DOC)), 'interface AlertDialogSchema {'));
-
-  it.each([
-    ['content', 'SchemaNode | SchemaNode[]'],
-    ['cancelText', 'string'],
-    ['actionText', 'string'],
-    ['actionVariant', "'default' | 'destructive'"],
-  ])('row `%s` is published as `%s`, optional — the declaration\'s own spelling', (key, typeText) => {
-    expect(rows().get(key)).toEqual({ optional: true, typeText });
-  });
-
-  it.each(['content', 'cancelText', 'actionText', 'actionVariant'])(
-    'and the page says what the DECLARATION says for `%s` — neither face can drift alone',
-    (key) => {
-      // The row texts above are literals, so on their own they pin the page to a
-      // string rather than to the type. This leg is the other half: the same row
-      // read off `packages/types/src/overlay.ts`.
-      expect(rows().get(key)).toEqual(members(declaredInterface()).get(key));
-    },
-  );
-
-  it('the phantom `actions` row is gone — no surface ever carried it', () => {
-    expect(rows().has('actions')).toBe(false);
-    expect(read(DOC)).not.toMatch(/^\s*actions\?:/m);
-  });
-
-  it('`onAction` is not published as an authorable row — a runtime slot has no JSON spelling', () => {
-    expect(rows().has('onAction')).toBe(false);
-  });
-
-  it('the page does not teach the declared-but-unread trio either', () => {
-    for (const key of RETIRED_DECLARED) expect(rows().has(key), key).toBe(false);
-  });
-
-  it('control: the rows both faces always agreed on are still there', () => {
-    expect(rows().get('type')?.typeText).toBe("'alert-dialog'");
-    // `trigger` widened to the union on both faces with objectui#7081; the row
-    // still says what the declaration says.
-    expect(rows().get('trigger')?.typeText).toBe('SchemaNode | SchemaNode[]');
   });
 });
 

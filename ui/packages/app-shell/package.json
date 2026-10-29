@@ -44,7 +44,7 @@
   ],
   "license": "MIT",
   "description": "Minimal application shell for ObjectUI - framework-agnostic rendering engine",
-  "homepage": "https://www.objectui.org/docs/layout/app-shell",
+  "homepage": "https://objectstack.ai/docs/frontend/app-shell",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

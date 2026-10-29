@@ -80,6 +80,19 @@ The components are on the package's export surface — `ObjectForm`,
 (`TabbedFormSchema`, `WizardFormSchema`, `ModalFormSchema`, …). There is no
 aggregate map among them.
 
+### Where an `object-form` block opens
+
+An `object-form`'s `formType` is the form's layout — `simple` (the default),
+`tabbed` or `wizard` — or, on the block, the container the block opens it in:
+`drawer` or `modal` (ADR-0050). `ObjectForm` only lays the form out; the block
+renderer is the caller that supplies the container, handing the node to
+`DrawerForm` (with `drawerSide` / `drawerWidth`) or `ModalForm` (with
+`modalSize` / `modalCloseButton`). A host that renders `<ObjectForm>` directly,
+or registers it under a key of its own as above, gets the inline form and opens
+its own drawer or dialog around it. The `split` form type and its `SplitForm`
+renderer were removed (ADR-0050): use `tabbed`, or an
+`object-master-detail-form` block to edit child records beside the parent.
+
 ## What an edit save writes
 
 Which fields an edit save sends, and which fields and line-item actions a caller is offered, is the same in the SDK and the Console. It is documented under [What an edit save writes](/docs/ui/forms#what-an-edit-save-writes).

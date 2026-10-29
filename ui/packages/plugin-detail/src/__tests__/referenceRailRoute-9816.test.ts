@@ -27,18 +27,13 @@
  * - **The retired route** is prose. It is asserted ABSENT over the raw text of
  *   every file in this package, comments included — a comment carrier is
  *   exactly the carrier that bit three times.
- * - **The live route** is a read in code. It is asserted PRESENT over the
- *   source with whole-line comments STRIPPED, because this very file's subject
- *   is a docblock that spells `showReferenceRail` out: over the raw text the
- *   assertion would pass off the prose while the read it claims to find was
- *   gone. That shape was measured inside objectui#7181's repair — green before
- *   the ablation and green after it, invisible to the assertion's own result —
- *   and `scripts/__tests__/body-dialect-census.test.ts` carries the `readCode`
- *   helper this one follows.
- *
- * Each direction was ablated: restoring the retired parenthetical reddens the
- * absence pins, and deleting the live read reddens the presence pin while the
- * absence pins stay green (that green being the trap, made visible).
+ * - **The synthesizer's own route** (`showReferenceRail` and its siblings)
+ *   was deleted by objectstack#27055. It is asserted ABSENT over the source
+ *   with whole-line comments STRIPPED, because the synthesizer keeps a note
+ *   naming the deleted hints: over the raw text the assertion would fail on
+ *   the note while the code was clean, and a stripper that silently kept the
+ *   note would hide nothing. `scripts/__tests__/body-dialect-census.test.ts`
+ *   carries the `readCode` helper this one follows.
  *
  * ## Boundary, stated rather than implied
  *
@@ -153,8 +148,8 @@ describe('objectui#9816 — the retired `detail.`-scoped rail route stays out of
     expect(RETIRED_ROUTE.test('(per object via `detail.showReferenceRail`)')).toBe(true);
     expect(RETIRED_ROUTE.test('`detail.hideReferenceRail`')).toBe(true);
     expect(RETIRED_ROUTE.test('`detail.hideRelatedTab`')).toBe(true);
-    // The LIVE option must never be caught by it — a pattern that did would
-    // demand the deletion of the read this card exists to point at.
+    // The synthesizer's own (now deleted) option spelling is a different
+    // pattern, pinned absent by the case below on the code side.
     expect(RETIRED_ROUTE.test('options.showReferenceRail === true &&')).toBe(false);
     // Nor this package's i18n keys, which are `detail.`-scoped for an
     // unrelated reason (`useDetailTranslation`).
@@ -162,45 +157,30 @@ describe('objectui#9816 — the retired `detail.`-scoped rail route stays out of
   });
 });
 
-/** The docblock immediately above a member, re-derived rather than transcribed. */
-function docblockAbove(source: string, member: string): string {
-  const at = source.indexOf(`\n  ${member}`);
-  expect(at, `member \`${member}\` not found — the docblock reader has nothing to read`).toBeGreaterThan(-1);
-  const before = source.slice(0, at);
-  const opens = before.lastIndexOf('/**');
-  expect(opens, `no docblock above \`${member}\``).toBeGreaterThan(-1);
-  const block = before.slice(opens);
-  expect(block.trimEnd().endsWith('*/'), `the block above \`${member}\` is not a closed docblock`).toBe(true);
-  return block;
-}
-
-describe('objectui#9816 — the `showReferenceRail` docblock, where the comment IS the subject', () => {
-  it('names the ruling that removed the object-definition route, and no route it removed', () => {
-    const block = docblockAbove(sourceOf(SUBJECT), 'showReferenceRail?: boolean;');
-    // Landing proof: a block this reader failed to find would satisfy the two
-    // assertions below by describing nothing.
-    expect(block, 'the extracted block is not the Reference Rail docblock').toContain('Reference Rail');
-
-    expect(
-      RETIRED_ROUTE.test(block),
-      'the docblock teaches a `detail.`-scoped route again — ADR-0085 removed the read',
-    ).toBe(false);
-    expect(block, 'the docblock no longer says what removed the objectDef route').toContain('ADR-0085');
+/**
+ * objectstack#27055 (ADR-0085) deleted the synthesizer's own rail route too:
+ * `showReferenceRail` / `hideReferenceRail` / `hideRelatedTab` and the
+ * `rightRail` slot are gone from `BuildPageOptions`, so the rail's ONE route
+ * is now an authored `record:reference_rail` node in an assigned page. The
+ * code side of the synthesizer must therefore read no rail hint and emit no
+ * rail node; the note that names the deleted hints is a comment, which is
+ * why the assertion runs over the code side and the discriminator proves the
+ * stripper removes that note.
+ */
+describe('objectstack#27055 — the synthesizer has no rail route of its own', () => {
+  it('no code in the synthesizer reads a rail hint or emits a rail node', () => {
+    const code = codeOf(SUBJECT);
+    expect(code, 'the synthesizer reads a deleted rail hint again').not.toContain('showReferenceRail');
+    expect(code, 'the synthesizer reads a deleted rail hint again').not.toContain('hideReferenceRail');
+    expect(code, 'the synthesizer emits a reference rail again').not.toContain("'record:reference_rail'");
+    expect(code, 'the synthesizer takes the deleted `rightRail` slot again').not.toContain('rightRail');
   });
 
-  it('the LIVE route is a read in code, not a sentence about one', () => {
-    // Asserted over the code side on purpose — see this file's header.
-    expect(
-      codeOf(SUBJECT),
-      'nothing reads `options.showReferenceRail` — the docblock now describes a route of its own',
-    ).toContain('options.showReferenceRail');
-  });
-
-  it('DISCRIMINATOR — the comment stripper really removes the docblock this file is about', () => {
-    // Without this, the case above could be reading the very prose it exists to
-    // check, and would survive the read being deleted.
+  it('DISCRIMINATOR — the comment stripper really removes the note naming the deleted hints', () => {
+    // Without this, the case above could pass because the stripper kept the
+    // note and the note happened not to spell a hint the way it asserts.
     const raw = sourceOf(SUBJECT);
-    expect(raw).toContain('Opt in to the Reference Rail');
-    expect(codeOf(SUBJECT)).not.toContain('Opt in to the Reference Rail');
+    expect(raw).toContain('`showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`');
+    expect(codeOf(SUBJECT)).not.toContain('`showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`');
   });
 });

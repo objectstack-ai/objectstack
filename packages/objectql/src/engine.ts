@@ -597,8 +597,8 @@ export const HOOK_EVENT_DISPATCH_VOCABULARY = {
  *
  * `where` is the slot every method folds; `limit` additionally applies to the
  * find-shaped bags, which declare `top` (OData) as its alias. The other four
- * pairs in the table are RPC/wire spellings folded at parse by
- * `RpcQueryOptionsSchema` / the protocol normalizer — their values need shape
+ * pairs in the table are wire spellings folded at parse by
+ * `QueryWithTransportSchema` / the protocol normalizer — their values need shape
  * lowering (`sort` records, `populate` lists) that belongs to those layers, so
  * the engine deliberately does not fold them.
  */

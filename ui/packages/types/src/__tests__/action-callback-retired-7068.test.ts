@@ -291,7 +291,9 @@ describe('comparison pin — `@objectstack/spec` ActionSchema refuses the same c
 /* ── the docs no longer teach the shape ─────────────────────────────────── */
 
 describe('no docs fence authors the retired callback shape any more (objectui#7068)', () => {
-  const DOCS = resolve(ROOT, 'content/docs');
+  // The ObjectUI pages live under the monorepo's `content/docs/frontend` since
+  // objectstack#27145 retired the package's own docs tree.
+  const DOCS = resolve(ROOT, '../content/docs/frontend');
   const walk = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const p = join(dir, name);
@@ -299,13 +301,14 @@ describe('no docs fence authors the retired callback shape any more (objectui#70
     });
   const CALLBACK_SHAPE = /\bon(Success|Failure):\s*\{\s*(\r?\n\s*)?type\s*:/;
 
-  it('no `onSuccess: { type: … }` / `onFailure: { type: … }` under content/docs — the three fences and the fragment are gone', () => {
+  it('no `onSuccess: { type: … }` / `onFailure: { type: … }` under content/docs/frontend — the three fences and the fragment are gone', () => {
     const offenders = walk(DOCS).filter((f) => CALLBACK_SHAPE.test(readFileSync(f, 'utf8'))).map((f) => relative(ROOT, f));
     expect(offenders).toEqual([]);
   });
 
   it('the scan can see the corpus and the pattern can match (non-vacuity)', () => {
-    expect(walk(DOCS).length).toBeGreaterThan(100);
+    // 34 pages on the tree objectstack#27145 measured.
+    expect(walk(DOCS).length).toBeGreaterThan(25);
     expect(CALLBACK_SHAPE.test("onSuccess: {\n    type: 'toast',")).toBe(true);
     expect(CALLBACK_SHAPE.test('onSuccess: { navigate: "/done" }')).toBe(false);
   });

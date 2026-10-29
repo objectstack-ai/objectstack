@@ -42,7 +42,7 @@ export class ConsolePlugin {
   readonly metadata = {
     author: 'ObjectUI Team',
     license: 'MIT',
-    homepage: 'https://www.objectui.org',
+    homepage: 'https://objectstack.ai/docs/frontend',
     repository: 'https://github.com/objectstack-ai/objectui',
     capabilities: [
       'ui-rendering',

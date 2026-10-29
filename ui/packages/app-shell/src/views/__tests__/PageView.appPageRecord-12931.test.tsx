@@ -337,4 +337,25 @@ describe('objectui#12931 — the controls', () => {
     expect(shown('New environment')).toBe(true);
     expect(shown('Production')).toBe(true);
   });
+
+  it('#25915 — the failed read is announced (role="alert"); Retry re-reads; the loaded row renders no alert', async () => {
+    let fail = true;
+    const ds = mount(envPage(), async () => {
+      if (fail) throw new Error('upstream exploded');
+      return { data: [{ id: 'o1', plan: 'team', env_count: 2 }] };
+    });
+    await settle();
+    const failed = screen.getByTestId('page-record-load-failed');
+    expect(failed).toHaveAttribute('role', 'alert');
+    expect(failed).toContainElement(screen.getByTestId('page-record-load-failed-retry'));
+
+    fail = false;
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('page-record-load-failed-retry'));
+    });
+    await settle();
+    expect(orgReads(ds), 'Retry is one more read of the same row').toHaveLength(2);
+    expect(shown('New environment')).toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });

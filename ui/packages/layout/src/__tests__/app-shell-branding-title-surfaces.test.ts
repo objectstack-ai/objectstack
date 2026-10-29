@@ -20,11 +20,11 @@
  * finished string in). So the word "suffix" was backwards, and three sibling
  * teaching surfaces already had it right:
  *
- *   - `content/docs/layout/app-shell.mdx` — "assigned to `document.title` as
+ *   - `content/docs/frontend/app-shell.mdx` — "assigned to `document.title` as
  *     given. It is the whole title, not a suffix: …"
  *   - `packages/layout/README.md`, `#### AppShellProps` table — "`title` sets
  *     `document.title`"
- *   - `content/docs/guide/layout.md`, `### Props` table — same clause
+ *   - `content/docs/frontend/layout.mdx`, `### Props` table — same clause
  *
  * The JSDoc matters more than a README line: it ships in `dist/index.d.ts` and is
  * the ONLY description a consumer reads on editor hover. Following it produces a
@@ -51,7 +51,7 @@
  * 4. **The surfaces agree.** The disease on this card was one behaviour with
  *    several descriptions and one of them reversed; a FOURTH wording would be
  *    the same defect again. So the JSDoc must be, after whitespace
- *    normalization, the SAME text as the `content/docs/layout/app-shell.mdx`
+ *    normalization, the SAME text as the `content/docs/frontend/app-shell.mdx`
  *    bullet it was copied from, and the two props-table cells (README, guide)
  *    must carry the same `title` clause as each other. The wording is read off
  *    the sibling files on every run — nothing is hand-copied into this test, so
@@ -87,7 +87,7 @@
  * ## Scan surface
  *
  * `packages/layout/src/AppShell.tsx`, `packages/layout/README.md`,
- * `content/docs/guide/layout.md`, `content/docs/layout/app-shell.mdx` — and
+ * `content/docs/frontend/layout.mdx`, `content/docs/frontend/app-shell.mdx` — and
  * within each, only the description of `AppShellBranding.title` (plus, for #5,
  * the doc comments of the interface's other fields). The `<AppShell …>`
  * examples and the props-table KEYS on those pages belong to
@@ -106,8 +106,8 @@ const REPO_ROOT = resolve(PKG_DIR, '../..');
 
 const APP_SHELL_SRC = readFileSync(join(PKG_DIR, 'src', 'AppShell.tsx'), 'utf8');
 const README = readFileSync(join(PKG_DIR, 'README.md'), 'utf8');
-const GUIDE = readFileSync(join(REPO_ROOT, 'content', 'docs', 'guide', 'layout.md'), 'utf8');
-const MDX = readFileSync(join(REPO_ROOT, 'content', 'docs', 'layout', 'app-shell.mdx'), 'utf8');
+const GUIDE = readFileSync(join(REPO_ROOT, '..', 'content', 'docs', 'frontend', 'layout.mdx'), 'utf8');
+const MDX = readFileSync(join(REPO_ROOT, '..', 'content', 'docs', 'frontend', 'app-shell.mdx'), 'utf8');
 
 // ---------------------------------------------------------------------------
 // Readers
@@ -166,13 +166,13 @@ function fieldDoc(interfaceName: string, key: string): string | null {
 
 /**
  * The `title` bullet of the `AppShellBranding` prose on
- * `content/docs/layout/app-shell.mdx`, with its `- \`title\` — ` lead removed
+ * `content/docs/frontend/app-shell.mdx`, with its `- \`title\` — ` lead removed
  * and whitespace normalized. The bullet runs until the next list item or a
  * blank line.
  */
 function mdxTitleBullet(): string {
   const match = /^- `title` — ([\s\S]*?)(?=\n- |\n\n)/m.exec(MDX);
-  if (!match) throw new Error('the `- `title` — …` bullet is gone from content/docs/layout/app-shell.mdx');
+  if (!match) throw new Error('the `- `title` — …` bullet is gone from content/docs/frontend/app-shell.mdx');
   return normalize(match[1]);
 }
 
@@ -236,7 +236,7 @@ describe('`AppShellBranding.title` JSDoc (objectui#6872)', () => {
       [
         '`AppShellBranding.title` JSDoc does not describe what useAppShellBranding does.',
         `The code assigns \`document.title = title\` wholesale; the comment reads: ${JSON.stringify(doc)}`,
-        'Copy the wording from content/docs/layout/app-shell.mdx — do not invent another phrasing.',
+        'Copy the wording from content/docs/frontend/app-shell.mdx — do not invent another phrasing.',
       ].join('\n'),
     ).toBe(true);
   });
@@ -260,14 +260,14 @@ describe('`AppShellBranding.title` JSDoc (objectui#6872)', () => {
 // ---------------------------------------------------------------------------
 
 describe('every surface describes `AppShellBranding.title` the same way (objectui#6872)', () => {
-  it('the JSDoc is the `content/docs/layout/app-shell.mdx` bullet, verbatim modulo whitespace and sentence case', () => {
+  it('the JSDoc is the `../content/docs/frontend/app-shell.mdx` bullet, verbatim modulo whitespace and sentence case', () => {
     const doc = fieldDoc('AppShellBranding', 'title');
     const bullet = mdxTitleBullet();
     expect(
       doc === null ? null : normalizeSentenceStart(doc),
       [
         'The `AppShellBranding.title` JSDoc and the `title` bullet under `branding` on',
-        'content/docs/layout/app-shell.mdx have drifted apart. objectui#6872 exists because one',
+        'content/docs/frontend/app-shell.mdx have drifted apart. objectui#6872 exists because one',
         'behaviour had several descriptions and one of them was reversed; keep ONE wording and',
         'change both together.',
       ].join('\n'),
@@ -282,9 +282,9 @@ describe('every surface describes `AppShellBranding.title` the same way (objectu
 
   it('the README and guide props tables carry the same `title` clause, and it names `document.title`', () => {
     const readmeRow = brandingRow(README, 'packages/layout/README.md');
-    const guideRow = brandingRow(GUIDE, 'content/docs/guide/layout.md');
+    const guideRow = brandingRow(GUIDE, '../content/docs/frontend/layout.mdx');
     const readmeClause = titleClause(readmeRow, 'packages/layout/README.md');
-    const guideClause = titleClause(guideRow, 'content/docs/guide/layout.md');
+    const guideClause = titleClause(guideRow, '../content/docs/frontend/layout.mdx');
     expect(readmeClause).toBe(guideClause);
     expect(readmeClause).toMatch(/^`title` sets `document\.title`$/);
     expect(onlyNegatedSuffix(readmeRow)).toBe(true);

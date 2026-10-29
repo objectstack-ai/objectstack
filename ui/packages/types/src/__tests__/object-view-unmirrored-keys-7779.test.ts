@@ -167,7 +167,7 @@ const REGISTRATION = 'packages/plugin-view/src/index.tsx';
 const MIRROR = 'packages/types/src/zod/objectql.zod.ts';
 const DECLARATION = 'packages/types/src/objectql.ts';
 const README = 'packages/plugin-view/README.md';
-const DOC = 'content/docs/plugins/plugin-view.mdx';
+const DOC = '../content/docs/frontend/plugins/plugin-view.mdx';
 
 const SPEC_REFERENCED = ['navigation', 'searchableFields', 'filterableFields'] as const;
 const SIBLING_REFERENCED = ['allowCreateView', 'viewActions'] as const;
@@ -1379,11 +1379,13 @@ describe('objectui#7779 — the zod mirror REFUSES `viewTabBar` by name', () => 
 /* ── `listViews`: the measurement that keeps it in the ledger ─────────────── */
 
 /**
- * The pages that author named list views (objectui#8255): three on an
+ * The pages that author named list views (objectui#8255): two on an
  * `object-view` node, plus the CRUD guide's object definition, whose
- * `listViews` the spec types with the same `ObjectListViewSchema` value.
+ * `listViews` the spec types with the same `ObjectListViewSchema` value. The
+ * fourth, `content/docs/api/schema-reference.md`, was removed as a duplicate
+ * when the ObjectUI docs moved into the monorepo (objectstack#27145).
  */
-const NAMED_VIEW_DOCS = [README, DOC, 'content/docs/api/schema-reference.md', 'content/docs/guide/building-crud-app.md'] as const;
+const NAMED_VIEW_DOCS = [README, DOC, '../content/docs/frontend/building-crud-app.mdx'] as const;
 
 /** A literal expression's value. Anything else THROWS, so a reading is never silently partial. */
 function literalValue(node: ts.Expression, where: string): unknown {
@@ -1477,7 +1479,7 @@ describe('objectui#7779 → objectui#7928 — `listViews` was ledgered on the fa
     expect(SpecObjectListViewSchema.safeParse({ label: 'Directory', columns: ['name', 'email'] }).success).toBe(true);
   });
 
-  it('the docs now teach the spec shape — every named view the four pages author parses under `ObjectListViewSchema` (objectui#8255, off disk)', () => {
+  it('the docs now teach the spec shape — every named view the three pages author parses under `ObjectListViewSchema` (objectui#8255, off disk)', () => {
     // The predicate, and the SAME function the positive control below runs.
     const refused = (entries: ReadonlyArray<{ where: string; view: unknown }>): string[] =>
       entries.filter((e) => !SpecObjectListViewSchema.safeParse(e.view).success).map((e) => e.where);

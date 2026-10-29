@@ -20,7 +20,7 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
  * fire on it is a CLOSURE CLAIM: nothing in this repository reads a
  * `thresholds` key. That claim used to be written TWICE — once in the census
  * header and once, in its own words, on
- * `content/docs/plugins/plugin-dashboard.mdx`. Two copies of one closure claim
+ * the plugin-dashboard SDK page. Two copies of one closure claim
  * drift apart independently, and neither copy knows when the other stops being
  * true.
  *
@@ -30,10 +30,16 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
  * backed by a gate that re-derives it. A claim written in two places is
  * single-sourced — one copy states it, the other points.
  *
- * So: the census header is now the CANONICAL statement, the page points at it,
+ * So: the census header is now the CANONICAL statement, the page no longer
+ * restates it,
  * and single-sourcing is exactly what makes the surviving copy load-bearing.
  * This file is the other half of the ruling — it re-derives the claim from
  * source on every test run instead of trusting the paragraph that states it.
+ *
+ * objectstack#27145: the page moved to `content/docs/frontend/plugins/` with the
+ * SDK docs fold, which dropped its pointer along with the `options` section
+ * (widget `options` are documented with dashboard metadata now). Claim 2 below
+ * keeps the half that still has a subject: the page does not restate the claim.
  *
  * ⛔ Why not a `toContain` pin on the prose. That is the defect objectui#6186
  * filed one level up: a test asserting a sentence is PRESENT cannot assert the
@@ -112,7 +118,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const monorepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 const CENSUS_MODULE = 'packages/sdui-parser/src/dashboard-widget-options.ts';
-const DASHBOARD_PAGE = 'content/docs/plugins/plugin-dashboard.mdx';
+const DASHBOARD_PAGE = 'content/docs/frontend/plugins/plugin-dashboard.mdx';
 
 /**
  * Comment- and literal-blanked source — the repo's ONE answer to
@@ -275,8 +281,8 @@ describe('objectui#6186 claim 2 — the claim itself, re-derived from source', (
   });
 });
 
-describe('objectui#6186 claim 2 — the claim is single-sourced, and the pointer resolves', () => {
-  const page = fs.readFileSync(path.join(repoRoot, DASHBOARD_PAGE), 'utf8');
+describe('objectui#6186 claim 2 — the claim is single-sourced', () => {
+  const page = fs.readFileSync(path.join(monorepoRoot, DASHBOARD_PAGE), 'utf8');
   const census = fs.readFileSync(path.join(monorepoRoot, CENSUS_MODULE), 'utf8');
 
   /**
@@ -288,26 +294,24 @@ describe('objectui#6186 claim 2 — the claim is single-sourced, and the pointer
   const prose = (source: string) => source.replace(/^\s*\*\s?/gm, '').replace(/\s+/g, ' ');
 
   it('the canonical copy is the census header, and it still states the claim', () => {
-    // Referential integrity, not a sentence pin: the page below points AT this
-    // file, so the claim vanishing from it would leave the pointer aimed at
-    // nothing while every test stayed green.
+    // The one copy left: the claim vanishing from it would leave the warning
+    // firing on a basis no text states, while every test stayed green.
     expect(prose(census)).toContain('CANONICAL statement of that closure claim');
     expect(prose(census)).toContain('zero read sites repo-wide');
   });
 
-  it('the page points at the canonical copy instead of restating it', () => {
+  it('the page does not restate the claim', () => {
     // The ruling: a claim written in two places is single-sourced — one copy
     // states it, the other points. What must not come back is a SECOND
     // independent wording of the closure claim on the page, which is what
     // objectui#6186 filed: the two copies drift apart and neither knows.
-    expect(page).toContain(CENSUS_MODULE);
+    expect(page).toContain('plugin-dashboard');
     expect(page, 'the page is restating the closure claim in its own words again').not.toMatch(
       /no renderer in this repository reads/i,
     );
   });
 
-  it('the pointer names a file that really exists', () => {
-    // A path in prose is a claim too. This one is cheap to re-derive, so it is.
+  it('the canonical copy is a file that really exists', () => {
     expect(fs.existsSync(path.join(monorepoRoot, CENSUS_MODULE))).toBe(true);
   });
 });

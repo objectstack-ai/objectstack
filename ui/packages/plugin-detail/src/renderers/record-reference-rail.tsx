@@ -310,11 +310,11 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
 
   const [states, setStates] = React.useState<Record<string, EntryState>>({});
 
-  // PERF: gate the rail's per-entry queries on visibility. The rail lives in
-  // an aside region that is `hidden xl:flex` (see buildDefaultPageSchema), so
-  // on sub-`xl` viewports (the common laptop width) it is `display:none` and
-  // the IntersectionObserver never reports intersection → zero queries on
-  // record open. On `xl`+ it fetches once the rail scrolls near the viewport.
+  // PERF: gate the rail's per-entry queries on visibility. An authored page
+  // places the rail in an aside region, which may be hidden on narrow
+  // viewports; then it is `display:none` and the IntersectionObserver never
+  // reports intersection → zero queries on record open. Where it is drawn it
+  // fetches once the rail scrolls near the viewport.
   // Without this, every related collection was fetched eagerly on mount,
   // which (together with RecordDetailView's preload, now removed for this
   // layout) produced ~50 concurrent requests that head-of-line-blocked one

@@ -310,8 +310,8 @@ Replace `id: z.any()` with `z.union([z.string(), z.number()])`:
 
 | File | Fields |
 |---|---|
-| `data/data-engine.zod.ts` L200 | `DataEngineUpdateRequestSchema.id` |
-| `data/data-engine.zod.ts` L207 | `DataEngineDeleteRequestSchema.id` |
+| ~~`data/data-engine.zod.ts` L200~~ | ~~`DataEngineUpdateRequestSchema.id`~~ (retired with the Virtual ObjectQL request protocol, #27028) |
+| ~~`data/data-engine.zod.ts` L207~~ | ~~`DataEngineDeleteRequestSchema.id`~~ (retired with the Virtual ObjectQL request protocol, #27028) |
 
 ### 3.3 Fix critical `z.any()` hotspots (per-file)
 

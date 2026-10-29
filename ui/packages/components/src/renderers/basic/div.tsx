@@ -123,7 +123,7 @@ const DIV_DEPRECATION_NOTICE =
   '  - Move any `body` content into `children` first: `body` is the child-list spelling objectui#6771 retired, so validation refuses it by name, and neither this component nor any replacement above draws it.\n' +
   '  This applies to JSON-authored nodes and to kind:\'html\' pages alike: an html page refuses the\n' +
   '  tag when it compiles, naming the same replacement.\n' +
-  'See documentation at https://www.objectui.org/docs/components for alternatives.';
+  'See documentation at https://objectstack.ai/docs/ui/components for alternatives.';
 
 // Index signature on the parameter annotation, not on the `forwardRef` type
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by

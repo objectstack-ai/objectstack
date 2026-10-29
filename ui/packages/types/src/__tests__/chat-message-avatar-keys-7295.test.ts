@@ -32,7 +32,7 @@
  *      REFUSED it: an author annotating `ChatbotSchema.messages` got
  *      `TS2353: 'avatarFallback' does not exist in type 'ChatMessage'` on a
  *      value that renders (five of them on
- *      `content/docs/plugins/plugin-chatbot.mdx`, which is why PR #7294 left
+ *      `content/docs/frontend/plugins/plugin-chatbot.mdx`, which is why PR #7294 left
  *      three example blocks unannotated).
  *   2. `ChatMessageSchema` is a plain `z.object` with no catchall — STRIP mode,
  *      not `.passthrough()`. An authored `avatar` parsed green through
@@ -68,7 +68,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
 const READER = 'packages/plugin-chatbot/src/index.tsx';
 const SEAM = 'packages/plugin-chatbot/src/chatMessageAdapter.ts';
-const DOC = 'content/docs/plugins/plugin-chatbot.mdx';
+const DOC = '../content/docs/frontend/plugins/plugin-chatbot.mdx';
 
 const KEYS = ['avatar', 'avatarFallback'] as const;
 type Key = (typeof KEYS)[number];
