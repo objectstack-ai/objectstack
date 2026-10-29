@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { SeedLoaderService } from '@objectstack/metadata-protocol';
 import { judgeSeedRecordValues } from '../src/utils/seed-record-values.js';
 
@@ -10,8 +10,8 @@ import { judgeSeedRecordValues } from '../src/utils/seed-record-values.js';
  * [#27259] One judge, two moments: every seed row `os validate` refuses on a
  * value, a real seed load refuses with the same sentence, and every row it
  * passes, the load writes. The load here is the platform's own: the
- * `SeedLoaderService` writing through an `ObjectQL` engine on the memory
- * driver, as `os dev` seeds an app.
+ * `SeedLoaderService` writing through an `ObjectQL` engine on a SQLite
+ * `:memory:` database, as `os dev` seeds an app.
  */
 
 const PROJECT = {
@@ -44,17 +44,18 @@ afterEach(async () => {
 });
 
 async function seedLoad(): Promise<{ written: string[]; refused: Map<number, string> }> {
-  const driver = new InMemoryDriver();
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   engine = new ObjectQL();
   engine.registerDriver(driver as never, true);
   await engine.init();
   engine.registry.registerObject(structuredClone(PROJECT) as never);
+  await driver.initObjects([engine.registry.getObject('proj_project') as never]);
   const silent = { info() {}, debug() {}, warn() {}, error() {} };
   const metadata = { getObject: async () => PROJECT, listObjects: async () => [PROJECT] };
   const loader = new SeedLoaderService(engine as never, metadata as never, silent as never);
   const result = await loader.load({
     seeds: [{ object: 'proj_project', externalId: 'name', mode: 'insert', env: ['prod', 'dev', 'test'], records: structuredClone(RECORDS) }],
-    config: { dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'insert', batchSize: 1, transaction: false },
+    config: { dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'insert', batchSize: 1, transaction: false, organizationId: 'org_parity' },
   } as never);
   const refused = new Map<number, string>();
   for (const e of result.errors as Array<{ recordIndex?: number; message: string }>) {

@@ -519,6 +519,11 @@ const READS: Readonly<Record<string, ReadRow>> = {
     reads: 'top-level',
     why: 'a presence probe only: `declaredCapabilities` answers `[]` rather than `null` for a stack whose top level declares an empty `requires`, so the printed line says it replaces that key. The tokens come from `stackDeclaredCapabilities` (#22288).',
   },
+  'utils/seed-record-values.ts :: stack': {
+    reads: 'resolved',
+    evidence: [{ code: 'const ql = stackEngine(authoringRuleUnionStack(stack));' }],
+    why: '`stackEngine` is called once, with the stack folded: every package\'s objects, picklists and picklist extensions reach the registry the seed values are judged against (#27259). The datasets themselves are read where they sit by `datasetsOf`. Pinned on a package body in `seed-record-values.test.ts`.',
+  },
   'utils/sdui-manifest.ts :: stack': {
     reads: 'resolved',
     evidence: [
