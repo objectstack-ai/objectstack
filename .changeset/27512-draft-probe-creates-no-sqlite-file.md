@@ -11,4 +11,4 @@ Metadata-protocol: none
 
 - **What the probe answers now.** A draft whose database file does not exist is refused: the probe answers `ok: false` with an error that names the file and says it does not exist. Nothing is created: neither the file nor its directory.
 - **What still works.** A draft naming an existing database file, or `:memory:`, probes as before. Saving a datasource still creates its file on connect, as do the boot restore and every hot pool: only the probe asks for an existing file.
-- **For host factories.** `DatasourceConnectionSpec` gains an optional `fileMustExist`, which the draft probe sets. The default factory refuses a missing file-backed target with an error carrying `code: 'ENOENT'` and the `filename`, before it constructs a driver. A host factory that does not read the flag builds as before.
+- **Whichever factory builds.** The check is the probe's own and runs before the driver factory is asked for anything, so it holds for a host-registered factory too. Nothing a host or an author can write changes: no exported type or function signature moves.

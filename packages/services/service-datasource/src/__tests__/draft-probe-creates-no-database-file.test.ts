@@ -1,11 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
-import type { IDatasourceAdminService } from '../contracts/index.js';
+import type { IDatasourceAdminService, IDatasourceDriverFactory } from '../contracts/index.js';
 import { DatasourceAdminServicePlugin } from '../datasource-admin-plugin.js';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
@@ -32,7 +32,7 @@ import '@objectstack/driver-sql';
 const authService = createSessionAuthService();
 const grantsEngine = createGrantsEngine();
 
-async function mountDoor() {
+async function mountDoor(driverFactory: IDatasourceDriverFactory = createDefaultDatasourceDriverFactory()) {
   let admin: IDatasourceAdminService | undefined;
   const ctx: any = {
     getService: (name: string) => {
@@ -45,7 +45,7 @@ async function mountDoor() {
     trigger: async () => {},
     logger: { warn() {}, info() {} },
   };
-  await new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }).init(ctx);
+  await new DatasourceAdminServicePlugin({ driverFactory }).init(ctx);
 
   const server = new HonoHttpServer(0);
   registerDatasourceAdminRoutes(
@@ -146,26 +146,40 @@ describe('POST /api/v1/datasources/test — a draft probe leaves no database fil
   });
 });
 
-describe('createDefaultDatasourceDriverFactory — `fileMustExist` (#27512)', () => {
-  it('refuses a missing file-backed SQLite target with code ENOENT and creates nothing', async () => {
-    const factory = createDefaultDatasourceDriverFactory();
+describe('the judgement is the probe\'s, whichever factory builds (#27512)', () => {
+  it('a host factory is never asked to build a draft whose file is missing', async () => {
+    const create = vi.fn(async () => ({ connect: async () => {}, ping: async () => {} }));
+    const probe = await mountDoor({ supports: () => true, create });
     const file = join(root, 'missing/dir/probe.db');
+
     for (const { driver, config } of FILE_BACKED) {
-      const err = await Promise.resolve(factory.create({ driver, config: config(file), fileMustExist: true })).then(
-        () => undefined,
-        (e: unknown) => e,
-      );
-      expect(err, driver).toBeInstanceOf(Error);
-      expect((err as { code?: unknown }).code, driver).toBe('ENOENT');
-      expect((err as { filename?: unknown }).filename, driver).toBe(file);
+      const res = await probe({ name: 'draft', driver, config: config(file) });
+      const body = (await res.json()) as { data: { result: { ok: boolean; error?: string } } };
+      expect(res.status, driver).toBe(200);
+      expect(body.data.result.ok, driver).toBe(false);
     }
+    expect(create).not.toHaveBeenCalled();
     expect(readdirSync(root)).toEqual([]);
   });
 
-  // Control: without the probe intent the factory still opens as a writing
-  // boot does — Save, the boot restore and every hot pool keep creating the
-  // file, which is the behaviour a datasource that is being SAVED is owed.
-  it('control: without it, a sqlite target is still created on connect', async () => {
+  it('a path that can be neither opened nor created is refused too, and nothing is written', async () => {
+    const probe = await mountDoor();
+    writeFileSync(join(root, 'blocker'), 'a regular file');
+    const file = join(root, 'blocker/probe.db');
+
+    const res = await probe({ name: 'draft', driver: 'sqlite', config: { filename: file } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { result: { ok: boolean; error?: string } } };
+    expect(body.data.result.ok).toBe(false);
+    expect(body.data.result.error).toContain(file);
+    expect(readdirSync(root)).toEqual(['blocker']);
+  });
+
+  // Control: the default factory is untouched — Save, the boot restore and
+  // every hot pool build through it and still create the file on connect,
+  // which is what a datasource that is being SAVED is owed.
+  it('control: the default factory still creates a sqlite target on connect', async () => {
     const factory = createDefaultDatasourceDriverFactory();
     const file = join(root, 'created.db');
     const handle = await factory.create({ driver: 'sqlite', config: { filename: file } });
