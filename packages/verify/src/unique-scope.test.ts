@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 80 — spawns the real producer once per single-cause fixture: eight in-process boots of the real stack over six fixtures (single-posture, walled, the within control and the indexes[] attribution control that each plant then re-open one database file, the across control, the attribution control), each running the family's proofs once; slowest CI reading 61.38 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up; read before this file paid its first boot at module scope
 //
 // The unique-scope family — what it reads from the metadata, what it proves on
 // a real stack, and the controls that keep its green honest:
