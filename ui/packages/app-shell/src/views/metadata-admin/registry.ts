@@ -4,7 +4,7 @@
  * MetadataResourceRegistry — per-type overrides for the generic metadata
  * admin engine (Phase 3c).
  *
- * The engine drives all 27 metadata types from a single ListPage /
+ * The engine drives every metadata type from a single ListPage /
  * EditPage / HistoryPage shell. By default everything is rendered via
  * a JSONSchema-driven AutoForm (using the rich `/meta/types` registry
  * row's `schema` field). Specialised editors (ObjectManager,

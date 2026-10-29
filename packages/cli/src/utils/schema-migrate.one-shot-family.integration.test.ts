@@ -305,18 +305,6 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate value-shapes', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate value-shapes --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
-  'commands/plugin/install.ts': {
-    run: invoke(PluginInstall),
-    // The fixture artifact is signed under a key id the database does not
-    // trust, so the run reads the trusted-key store and refuses by name. The
-    // boot is what this case is about.
-    noWrite: [{
-      label: 'plugin install (key not trusted)',
-      argv: ['@FIXTURE@/com.example.osf-plugin-1.0.0.osplugin', '--database-url', '@DB@', '--json'],
-    }],
-    write: [],
-    note: 'it writes no database row in any mode: it only reads the trusted-key store, and an install lands under OS_HOME',
-  },
   'commands/plugin/trust/add.ts': {
     run: invoke(PluginTrustAdd),
     noWrite: [],
@@ -358,6 +346,22 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'storage orphans', argv: ['--database-url', '@DB@', '--json'] }],
     write: [],
     note: 'report-only: it has no writing mode',
+  },
+  // [#27123] The trusted-key read `os plugin install` and `os serve`'s
+  // boot-time loader share: a utility, so its boot runs through the command
+  // that reaches it from oclif. (`os serve` reaches it too, before its own
+  // kernel bootstraps; a served boot is not a one-shot.)
+  'utils/plugin-trust-read.ts': {
+    run: invoke(PluginInstall),
+    // The fixture artifact is signed under a key id the database does not
+    // trust, so the run reads the trusted-key store and refuses by name. The
+    // boot is what this case is about.
+    noWrite: [{
+      label: 'plugin install (key not trusted)',
+      argv: ['@FIXTURE@/com.example.osf-plugin-1.0.0.osplugin', '--database-url', '@DB@', '--json'],
+    }],
+    write: [],
+    note: 'it writes no database row in any mode: it only reads the trusted-key store, and an install lands under OS_HOME',
   },
 };
 
@@ -630,11 +634,12 @@ describe('[#21391] the bootSchemaStack family is the table above', () => {
 
 describe('[#27123] the plugin install case reaches its boot, not an earlier refusal', () => {
   it('the fixture artifact passes every check before the store read, and the store read refuses its key', async () => {
-    const caller = CALLERS['commands/plugin/install.ts'];
+    const caller = CALLERS['utils/plugin-trust-read.ts'];
     const c = prepareCase(caller.noWrite[0].argv);
     const result = await runJson(caller.run, c.argv);
-    // An unreadable artifact, a bad manifest or integrity map would refuse
-    // before the boot and leave the no-write cases above holding vacuously.
+    // A missing or malformed signature would refuse before the boot and
+    // leave the no-write cases above holding vacuously. (The signature is
+    // verified before the archive is read, so the archive no longer can.)
     expect(result.payload, JSON.stringify(result.payload).slice(0, 400)).toMatchObject({ error: 'signature_key_untrusted' });
     expect(result.exitCode).toBe(1);
   }, CASE_TIMEOUT_MS);

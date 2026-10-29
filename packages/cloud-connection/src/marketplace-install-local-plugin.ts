@@ -111,7 +111,10 @@
  *            serving them at once too (#24070), then runs the uninstall
  *            cleanups domain plugins registered with the protocol (#21490) —
  *            the package's permission sets and their grants go with it — and
- *            reports each outcome as `cleanups`, a refused withdrawal included.
+ *            last announces the withdrawal as `metadata:reloaded`, so the
+ *            automation engine withdraws the package's flows and unbinds their
+ *            triggers at once (#27395); it reports each outcome as `cleanups`,
+ *            a refused withdrawal or a re-sync that did not run included.
  *
  * Persistence layout:
  *   <cwd>/.objectstack/installed-packages/<safe-manifest-id>.json
@@ -214,7 +217,9 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import type { AuthSessionApi, IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type {
+    AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
+} from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
     UninstallCleanupOutcome,
@@ -302,6 +307,13 @@ const REGISTRY_WITHDRAWAL = 'registry.uninstallPackage';
  * verb that withdraws it, as the one above is named for the registry's.
  */
 const OBJECT_COPY_WITHDRAWAL = 'metadata.unregister';
+
+/**
+ * [#27395] The outcome name this door reports when the running kernel was not
+ * told of the withdrawal — named for the event it announces, the re-sync the
+ * automation engine withdraws an uninstalled package's flows on.
+ */
+const KERNEL_RESYNC = 'metadata:reloaded';
 
 /**
  * [#8976] The capability every MUTATING install-local route demands.
@@ -734,6 +746,38 @@ interface InstallPrincipal {
  * held key is served again the moment its owner remediates (ruling C′ item
  * 4). `null` when the principal is not held.
  */
+/**
+ * [#27237] One connector credential an installed package names, as the install
+ * answer reports it. `status` is the automation service's (`set` / `missing` /
+ * `rejected`), or `unknown` when it could not be read. Never a value.
+ */
+export interface InstalledCredentialRef {
+    ref: string;
+    connectors: string[];
+    status: ConnectorCredentialRef['status'] | 'unknown';
+    source: ConnectorCredentialRef['source'];
+}
+
+/**
+ * [#27237] The install answer's sentence for the credentials not set yet.
+ * `door: false` when the credential door cannot store any of them — the
+ * automation service's listing says none is `writable`, as under the `group` /
+ * `isolated` postures, where the door refuses — so the sentence does not send
+ * an administrator to a route that will refuse.
+ */
+export function installedCredentialNote(refs: readonly string[], opts: { door?: boolean } = {}): string {
+    const list = refs.map((r) => `'${r}'`).join(', ');
+    return (
+        `Connector credential${refs.length === 1 ? '' : 's'} ${list} ${refs.length === 1 ? 'needs' : 'need'} an `
+        + "administrator — not set, refused by the upstream, or unreadable now (each entry's `status` says which). The "
+        + 'connector instances naming them are installed degraded and materialize once each is set: '
+        + (opts.door === false
+            ? "as a server environment variable of the same name, or in the host's credential resolver. This environment "
+                + 'does not store connector credentials through the credential door.'
+            : 'PUT /api/v1/automation/connectors/credential-refs/:ref, or a server environment variable of the same name.')
+    );
+}
+
 function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null {
     if (!principal.authGate) return null;
     const { code, message } = principal.authGate;
@@ -1954,6 +1998,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //    would fire on every seeded row, which no boot does.
         await this.announceHotInstall(ctx, manifestId);
 
+        // 7. [#27237] Which connector credentials the package names, and which
+        //    are not set yet — after the re-sync above, so the listing reads
+        //    what the reconcile it triggered saw.
+        const described = await this.describeInstalledCredentialRefs(ctx, converted);
+        const credentialRefs = described?.entries;
+        const unsetRefs = (credentialRefs ?? []).filter((r) => r.status !== 'set').map((r) => r.ref);
+        // The door is named only when it can store one of them: a listing that
+        // says none is writable (a walled posture) gets the other places.
+        const door = described?.writable === undefined || unsetRefs.some((r) => described.writable!.has(r));
+
         return c.json({
             success: true,
             data: {
@@ -1969,6 +2023,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // ONLY there: omitted, not nulled, on a hot-loaded install, so
                 // the success answer's key set is unchanged.
                 ...(hotLoadError !== undefined ? { hotLoadError } : {}),
+                // [#27237] Omitted, not emptied, for a package whose connectors
+                // name no credential, so that answer's key set is unchanged.
+                ...(credentialRefs !== undefined ? { credentialRefs } : {}),
+                ...(unsetRefs.length > 0 ? { credentialNote: installedCredentialNote(unsetRefs, { door }) } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
@@ -2291,13 +2349,28 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             ...(copies ? [copies] : []),
             ...await this.runUninstallCleanups(ctx, manifestId, admission.userId, declared),
         ];
-        const withdrawals = (withdrawal ? 1 : 0) + (copies ? 1 : 0);
+        // [#27395] LAST — after the registry withdrawal and the cleanups, never
+        // before, for the window described above — announce the withdrawal as
+        // `metadata:reloaded`, the re-sync the install's hot load announces, so
+        // the consumers that hold what they read from a package re-read it now
+        // that it is gone. ⛔ Nothing here withdraws a flow or unbinds a trigger
+        // itself: the uninstall drives the one teardown a reload drives. Not
+        // when the registry refused: the package is still registered, so a
+        // re-sync would only read it back.
+        const resync = withdrawal ? undefined : await this.announceUninstall(ctx, manifestId);
+        if (resync) cleanups.push(resync);
+        const withdrawals = (withdrawal ? 1 : 0) + (copies ? 1 : 0) + (resync ? 1 : 0);
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
             + (withdrawal
                 ? 'the running kernel did NOT withdraw it, so it stays loaded until the next restart; '
-                : copies
-                    ? 'withdrawn from the running kernel\'s registry, but the metadata service kept copies of its objects until the next restart; '
+                : copies || resync
+                    ? 'withdrawn from the running kernel\'s registry, but '
+                        + [
+                            ...(copies ? ['the metadata service kept copies of its objects'] : []),
+                            ...(resync ? ['the automation engine can still hold its flows'] : []),
+                        ].join(' and ')
+                        + ' until the next restart; '
                     : 'withdrawn from the running kernel; ')
             + `${cleanups.length - withdrawals} uninstall cleanup(s) ran)`,
         );
@@ -2308,11 +2381,79 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 cleanups,
                 note: withdrawal
                     ? 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The running kernel did not withdraw the package, so it stays loaded until the next restart; that is the `registry.uninstallPackage` entry in `cleanups`.'
-                    : copies
-                        ? 'Cached manifest removed, the package withdrawn from the running kernel\'s registry, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The metadata service kept copies of the package\'s objects, so the object listing and reads keep serving them until the next restart; that is the `metadata.unregister` entry in `cleanups`.'
+                    : copies || resync
+                        ? 'Cached manifest removed, the package withdrawn from the running kernel\'s registry, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.'
+                            + (copies
+                                ? ' The metadata service kept copies of the package\'s objects, so the object listing and reads keep serving them until the next restart; that is the `metadata.unregister` entry in `cleanups`.'
+                                : '')
+                            + (resync
+                                ? ' The running kernel\'s re-sync did not run, so the automation engine can still hold the package\'s flows — triggerable by name, their triggers armed — until the next restart; that is the `metadata:reloaded` entry in `cleanups`.'
+                                : '')
                         : 'Cached manifest removed, the package withdrawn from the running kernel, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.',
             },
         }, 200);
+    };
+
+    /**
+     * [#27395] Announce an uninstall this door just completed to the running
+     * kernel as `metadata:reloaded` — the re-sync signal
+     * {@link announceHotInstall} announces for an install, with the same
+     * payload — so every consumer that holds what it read from a package
+     * re-reads a kernel that no longer has it:
+     *
+     *   - `service-automation` re-syncs its flows from the protocol
+     *     (`resyncFlowsFromProtocol`) and withdraws each flow it armed that the
+     *     protocol's view no longer lists — the uninstalled package's, which
+     *     the registry withdrawal took out of that view — and `withdrawFlow`
+     *     unbinds each one's record or schedule trigger in the same step.
+     *
+     * Before this, the door withdrew the package from the registry and the
+     * engine never heard of it: `GET /meta/flow/NAME` answered 404 while
+     * `GET /automation/NAME` still answered `active`, and the trigger door, a
+     * record write or a schedule still ran the uninstalled package's flow
+     * until an unrelated reload — a view publish, another package's install —
+     * cleared it. ⛔ No engine-side list of the package's flows is kept or
+     * withdrawn here: a second teardown is how the two would drift.
+     *
+     * Never throws: the uninstall has already happened. Two answers:
+     *   - `undefined` — announced, and every subscriber returned;
+     *   - one failed outcome named {@link KERNEL_RESYNC}, when the context
+     *     cannot announce or a subscriber threw. It rides on `cleanups`, the
+     *     way a refused registry withdrawal does, and the operator log says
+     *     what it costs and the remedy; the cause is logged, never put on the
+     *     wire. A FUNCTIONAL degradation, so `warn` — the level the install's
+     *     announce failure uses.
+     */
+    private announceUninstall = async (
+        ctx: PluginContext,
+        manifestId: string,
+    ): Promise<UninstallCleanupOutcome | undefined> => {
+        const failed: UninstallCleanupOutcome = {
+            name: KERNEL_RESYNC,
+            success: false,
+            removed: 0,
+            error: 'the running kernel did not re-sync — the automation engine can still hold the package\'s flows until the next restart',
+        };
+        const cost = 'its flows can stay registered in the automation engine — triggerable by name, their record and '
+            + 'schedule triggers still armed — until the runtime restarts. The outcome is on the response (`cleanups`). '
+            + 'Remedy: restart the runtime — the ledger entry is already gone, so the restart does not bring the package back.';
+        if (typeof ctx.trigger !== 'function') {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but this kernel context cannot announce `
+                + `metadata:reloaded — ${cost}`,
+            );
+            return failed;
+        }
+        try {
+            await ctx.trigger('metadata:reloaded', { changed: [`app/${manifestId}`] });
+            return undefined;
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but the metadata:reloaded re-sync FAILED `
+                + `(${err?.message ?? err}) — ${cost}`,
+            );
+            return failed;
+        }
     };
 
     /**
@@ -3462,6 +3603,61 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             );
         }
         return { jobs: collectJobs ? collectJobs(manifest) : [], hooks: collectHooks ? collectHooks(manifest) : [] };
+    };
+
+    /**
+     * [#27237] The connector credentials an installed package's declarative
+     * connectors name (`connectors[].auth.credentialRef`, ruling A on #27230),
+     * each with its status and source as the automation service's credential
+     * listing answers them — never a value. `undefined` when no connector of
+     * the package names one.
+     *
+     * A reference that is not set does not refuse the install: the instance
+     * naming it installs degraded and materializes when an administrator sets
+     * it (`PUT /api/v1/automation/connectors/credential-refs/:ref`). With no
+     * automation service, or one that cannot list, the status is `unknown`.
+     * `writable` is the references the credential door can store, as the
+     * listing says; `undefined` when there is no listing to say it.
+     */
+    private describeInstalledCredentialRefs = async (
+        ctx: PluginContext,
+        converted: unknown,
+    ): Promise<{ entries: InstalledCredentialRef[]; writable?: ReadonlySet<string> } | undefined> => {
+        const connectors = (converted as { connectors?: unknown } | null)?.connectors;
+        const declared = new Map<string, string[]>();
+        for (const raw of Array.isArray(connectors) ? connectors : []) {
+            const entry = raw as { name?: unknown; provider?: unknown; auth?: { credentialRef?: unknown } } | null;
+            if (typeof entry?.name !== 'string' || typeof entry.provider !== 'string') continue;
+            const ref = entry.auth?.credentialRef;
+            if (typeof ref !== 'string' || ref.length === 0) continue;
+            declared.set(ref, [...(declared.get(ref) ?? []), entry.name]);
+        }
+        if (declared.size === 0) return undefined;
+        let listing: Map<string, ConnectorCredentialRef> | undefined;
+        try {
+            const automation = ctx.getService<Pick<IAutomationService, 'listConnectorCredentialRefs'>>('automation');
+            if (typeof automation?.listConnectorCredentialRefs === 'function') {
+                listing = new Map((await automation.listConnectorCredentialRefs()).map((e) => [e.ref, e]));
+            }
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] the connector credential listing could not be read, so the install answer reports `
+                + `each credential the package names as status 'unknown'. Cause: ${err?.message ?? err}`,
+            );
+        }
+        const entries = [...declared.keys()].sort().map((ref): InstalledCredentialRef => {
+            const known = listing?.get(ref);
+            return {
+                ref,
+                connectors: declared.get(ref)!,
+                status: listing === undefined ? 'unknown' : (known?.status ?? 'missing'),
+                source: known?.source ?? null,
+            };
+        });
+        const writable = listing === undefined
+            ? undefined
+            : new Set([...declared.keys()].filter((ref) => listing!.get(ref)?.writable !== false));
+        return { entries, ...(writable ? { writable } : {}) };
     };
 
     /**

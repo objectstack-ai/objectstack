@@ -93,6 +93,13 @@ const PRODUCERS: Readonly<Record<string, number>> = {
   // The package door's save refusal, moved out of `protocol.ts` whole on the
   // same terms.
   'protocol-packaged-base-refusal.ts': 1,
+  // [#25467 cut 33] The named-base rule and the app package-id key, the `/meta`
+  // mint door's refusal, the MetadataService 503 and the overlay-index DDL
+  // probe, moved out of `protocol.ts` whole on the same terms.
+  'protocol-package-scope.ts': 2,
+  'protocol-unmintable-meta-type.ts': 1,
+  'protocol-loud-degradations.ts': 1,
+  'protocol-overlay-index.ts': 1,
   'sys-metadata-repository.ts': 5,
   'runtime-authoring-gate.ts': 1,
 };

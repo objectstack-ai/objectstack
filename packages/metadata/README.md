@@ -192,18 +192,11 @@ through `LRUCache.stats()` for `metrics` endpoints.
 
 ## Metadata Types
 
-The platform supports **26 built-in metadata types** across 6 protocol domains:
-
-| Domain       | Types                                                                       |
-|:-------------|:----------------------------------------------------------------------------|
-| **Data**     | `object`, `field`, `datasource`, `validation`                               |
-| **UI**       | `view`, `app`, `dashboard`, `report`, `action`, `theme`                     |
-| **Automation** | `flow`, `workflow`, `trigger`, `schedule`                                 |
-| **System**   | `manifest`, `translation`, `api`, `permission_set`, `role`, `profile`       |
-| **Security** | `permission_set`, `role`                                                    |
-| **AI**       | `agent`, `rag_pipeline`, `model`, `prompt`, `tool`                          |
-
-Each type has a defined `loadOrder` (dependencies load before dependents), file patterns (e.g. `**/*.object.{ts,json,yaml}`), and overlay support flag.
+The built-in metadata types are declared once, in `DEFAULT_METADATA_TYPE_REGISTRY`
+([`packages/spec/src/kernel/metadata-plugin.zod.ts`](../spec/src/kernel/metadata-plugin.zod.ts)):
+one row per type carrying its protocol `domain`, its `loadOrder` (dependencies load before
+dependents), its `filePatterns` and its overlay flags. `MetadataTypeSchema` in the same file
+is the closed list of type names. Read the registry; this README keeps no copy of it.
 
 ## Spec Protocol References
 

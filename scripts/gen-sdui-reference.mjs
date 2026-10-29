@@ -63,6 +63,24 @@ import { isEntrypoint } from './invoked-as.mjs';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST_PATH = 'sdui.manifest.json';
 const OUT_DIR = 'content/docs/ui/components';
+
+/**
+ * The repo-root file this generator reads, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * The derivation reads SOURCE TEXT, and `MANIFEST_PATH` above is a literal with
+ * no separator, which `hintCovers` refuses as too generic. `OUT_DIR` was always
+ * visible and the manifest was not, so a diff that changed only the manifest
+ * never derived `pnpm check:sdui-reference` -- the one diff this gate exists to
+ * catch, since a regenerated manifest beside a stale reference reds it in CI.
+ *
+ * The `/**` suffix is the repo-root-file spelling of the idiom (the same one
+ * `scripts/check-sdui-manifest.mjs` declares for this file): a bare
+ * single-segment literal builds no hint, and the collapse reduces this one back
+ * to the single file it names and to nothing else. The self-test holds it equal
+ * to `MANIFEST_PATH`, so a moved read reds there instead of leaving the
+ * declaration describing the old file.
+ */
+const ROOT_FILE_WATCH_HINTS = ['sdui.manifest.json/**'];
 const URL_BASE = '/docs/ui/components';
 const COMMAND = 'node scripts/gen-sdui-reference.mjs';
 
@@ -655,6 +673,23 @@ function selfTest() {
     } else {
       console.log(`  ✓ ${c.label}`);
     }
+  }
+
+  // ── The dispatch-gates population declaration ──────────────────────────
+  // Outside the cases table on purpose: each row there is a declared battery
+  // about the rendering, and this asserts what the derivation can see.
+  const declFail = (message) => {
+    console.error(`✗ self-test: ${message}`);
+    failed += 1;
+  };
+  const declaredReads = ROOT_FILE_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  if (declaredReads.length !== 1 || declaredReads[0] !== MANIFEST_PATH) {
+    declFail(`ROOT_FILE_WATCH_HINTS declares ${JSON.stringify(declaredReads)}, not the manifest this script reads `
+      + `(${MANIFEST_PATH}) — an undeclared read is how a manifest-only diff stopped deriving this gate.`);
+  }
+  if (!ROOT_FILE_WATCH_HINTS.filter((h) => !h.replace(/\/\*+$/, '').includes('/')).every((h) => h.endsWith('/**'))) {
+    declFail('a repo-ROOT file is declared without the subtree suffix — a bare single-segment literal is '
+      + 'refused by hintCovers as too generic, so it would contribute no hint at all.');
   }
 
   const floorFailure = (message) => {

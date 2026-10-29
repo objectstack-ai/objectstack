@@ -856,7 +856,7 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
     expect(dangling.errors).toHaveLength(1);
   });
 
-  it('ALL FIVE error ids are reachable at the door — the class the 2026-08-15 ruling accepted', () => {
+  it('ALL SIX error ids are reachable at the door — the class the 2026-08-15 ruling accepted', () => {
     // `surfaces` is per-rule, so the flip enforces the rule's whole error set,
     // not just `widget-dataset-unknown`. The ruling accepted the class as one
     // coherent "this board cannot render" set — this test makes that
@@ -897,6 +897,14 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
         dashboard([cleanWidget()], { dateRange: { field: 'close_date' } }),
         ['dashboard-filter-field-unknown'],
       ],
+      [
+        // [#27445] The sixth id joins through the same per-rule `surfaces`: a
+        // binding key the runtime never reads leaves the widget counting rows
+        // the author scoped out, so it is refused at the door with the five.
+        'filterBindings key naming no declared dashboard filter',
+        dashboard([cleanWidget({ filterBindings: { no_such_filter: false } })]),
+        ['dashboard-filter-binding-unknown'],
+      ],
     ];
 
     const seen = new Set<string>();
@@ -909,9 +917,10 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
       for (const e of errors) seen.add(e.rule);
     }
 
-    // Non-vacuous, and the ruling's whole accept-set as #15463 left it:
-    // exactly the five. `chart-field-unknown` is deliberately absent.
+    // Non-vacuous, and the ruling's whole accept-set as #15463 left it plus
+    // #27445's id: exactly the six. `chart-field-unknown` is deliberately absent.
     expect([...seen].sort()).toEqual([
+      'dashboard-filter-binding-unknown',
       'dashboard-filter-field-unknown',
       'widget-dataset-unknown',
       'widget-dimension-unknown',
@@ -919,6 +928,18 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
       'widget-measure-unknown',
     ]);
     expect(seen.has('chart-field-unknown')).toBe(false);
+  });
+
+  it('[#27445] a binding to a DECLARED filter passes the door; a misspelled key is refused at its path', () => {
+    const declared = { globalFilters: [{ name: 'region', field: 'region', type: 'select' }] };
+    const ok = gateDashboard(dashboard([cleanWidget({ filterBindings: { region: false } })], declared));
+    expect(ok.errors, JSON.stringify(ok.errors)).toEqual([]);
+
+    const typo = gateDashboard(dashboard([cleanWidget({ filterBindings: { regoin: false } })], declared));
+    expect(typo.errors.map((e) => e.rule)).toEqual(['dashboard-filter-binding-unknown']);
+    expect(typo.errors[0].path).toBe('dashboards[0].widgets[0].filterBindings.regoin');
+    expect(typo.errors[0].message).toContain('(declared: region)');
+    expect(typo.errors[0].hint).toContain('Did you mean "region"?');
   });
 
   it('the demoted `chart-field-unknown` still RUNS at the door — on the advisory channel (#15463)', () => {

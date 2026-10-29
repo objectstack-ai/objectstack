@@ -36,6 +36,16 @@
  * the bare foreign key when a sub-read throws, so the refusal would reach the
  * caller as a silently unexpanded field. Judged here, before the parent read,
  * it reaches the caller as a refusal.
+ *
+ * ## A projection emptied by the unknown-column tolerance
+ *
+ * [#27165] `find` / `findOne` drop a requested plain column the object does not
+ * have (the #7589 tolerance). When that leaves nothing, the projection is
+ * empty, and it gets this same refusal, naming what was asked for. Before, the
+ * engine fell back to every column there, so `fields: ['nope']` answered wider
+ * than any named projection. A mix of known and unknown columns keeps the
+ * tolerance. An `expand` entry needs no judgement of its own here: its
+ * sub-read always names `id`, which is never dropped.
  */
 
 import { EngineQueryOptionsSchema } from '@objectstack/spec/data';
@@ -48,9 +58,17 @@ function projectionNamesNoField(): string | undefined {
   return declaredRefusal;
 }
 
-function refuseEmptyProjection(object: string, operation: 'find' | 'findOne', param: string): never {
+function refuseEmptyProjection(
+  object: string,
+  operation: 'find' | 'findOne',
+  param: string,
+  requested: readonly unknown[] = [],
+): never {
+  const dropped = requested.length > 0
+    ? `, and none of them is a field of '${object}' (an unknown column is dropped from a projection)`
+    : '';
   const err: any = new Error(
-    `ObjectQL.${operation}('${object}') names no field in ${param}: got []. The query was not run: `
+    `ObjectQL.${operation}('${object}') names no field in ${param}: got ${JSON.stringify(requested)}${dropped}. The query was not run: `
     + 'an empty projection was read as no projection, which answers every column. '
     + `${projectionNamesNoField()}, or leave the projection out to read every column.`,
   );
@@ -92,4 +110,17 @@ export function assertProjectionNamesAField(
   if (!query) return;
   if (Array.isArray(query.fields) && query.fields.length === 0) refuseEmptyProjection(object, operation, "'fields'");
   assertExpandProjections(object, operation, query.expand, '');
+}
+
+/**
+ * [#27165] Refuse a projection the unknown-column tolerance emptied: every
+ * entry of `requested` named a column `object` does not have. Same refusal as
+ * `fields: []`, naming what was asked for.
+ */
+export function refuseProjectionOfUnknownColumns(
+  object: string,
+  operation: 'find' | 'findOne',
+  requested: readonly unknown[],
+): never {
+  return refuseEmptyProjection(object, operation, "'fields'", requested);
 }

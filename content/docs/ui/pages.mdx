@@ -180,17 +180,21 @@ replacement.
 ### The synthesized default
 
 A record page needs no authoring. With no page assigned, the Console synthesizes one from
-the object: a header, the highlights strip, a tab strip and the discussion panel. The strip
-is **Details**, then one tab per relationship whose child field declares
-`relatedList: 'primary'`, then a shared **Related** tab for the other related lists, then
-**History**; an object with `enable: { files: true }` also gets an **Attachments** tab with a
-count badge. Promoting a child table to its own tab is therefore a one-word change on the
-relationship field, not a page-authoring task, and `relatedList: false` leaves a child off
-the page.
+the object: a header, the highlights strip and a tab strip of **Details**, **Timeline** and
+**Related**, plus **Approvals** when the record has approval requests. A relationship whose
+child field declares `relatedList: 'primary'` is part of the record's body: its list is a
+full-width table inside **Details**, after the first field section, with no tab of its own.
+The other related lists are cards in the shared **Related** tab, which an object with
+`enable: { files: true }` closes with its attachments. **Timeline** is one stream: the
+discussion composer on top, then the discussion, the activity and, with
+`enable: { trackHistory: true }`, the record's field changes, filtered by All / Activity /
+Discussion / Changes; there is no separate History tab. Moving a child table into the
+record's body is therefore a one-word change on the relationship field, not a
+page-authoring task, and `relatedList: false` leaves a child off the page.
 
 The Console lays the page out by the width of the surface it occupies (the drawer, the
 split pane or the full page), never by the viewport. From 1280 px the tabs become three
-columns: details, a timeline (the discussion composer, then Activity and History) and the
+columns: details, the timeline stream and the
 related lists as cards with Approvals, Attachments and the created/updated line. From
 1024 px the related column folds into a rail behind a **Related (N)** toggle. Below that, and
 always in a drawer or split pane, the tab strip is drawn. `?tab=` selects a tab in the strip.
