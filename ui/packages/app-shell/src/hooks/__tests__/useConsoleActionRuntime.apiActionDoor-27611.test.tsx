@@ -184,6 +184,7 @@ describe('objectstack#27611 — a declared same-origin api click goes through th
 
     const out = await click(result, { ...BAN, params: { banReason: 'spam', _rowRecord: ROW } });
 
+    expect(sent().url.endsWith(`${DOOR}sys_user/ban_user`)).toBe(true);
     expect(out).toEqual({ success: true, data: { user: { id: 'u_target', banned: true } }, reload: true });
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
@@ -298,6 +299,7 @@ describe('objectstack#27611 — what the door answers once objectstack#27738 lan
     const { result } = mount('sys_environment');
 
     expect(await click(result, { ...CREATE_ENV, params: { displayName: 'x' } })).toEqual({ success: false });
+    expect(sent().url.endsWith(`${DOOR}sys_environment/create_environment`)).toBe(true);
     render(<>{result.current.dialogs}</>);
     expect(await screen.findByText(/You are using 3 of 3 development environments/)).toBeTruthy();
   });
