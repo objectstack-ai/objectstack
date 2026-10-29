@@ -46,18 +46,20 @@
  * ## Who may send, and as whom (ADR-0124: the server is the authority)
  *
  * The door hands a caller's message to the deployment's own mail transport,
- * so an authenticated session is not enough on its own. Three bounds sit
+ * so an authenticated session is not enough on its own. Four bounds sit
  * between the auth floor and the send, every one of them answered before the
  * service is called:
  *
  *  1. CAPABILITY — the caller must hold {@link EMAIL_SEND_CAPABILITY}. It is
  *     `manage_platform_settings`, the capability that already governs the
- *     mail surface: the mail settings page (sender address, transport) and
- *     the `sys_email` log are both gated on it. Reused rather than invented,
- *     so this door cannot admit a different set of callers than the surface
- *     that configures and audits the same transport. Checked BEFORE the
- *     provider lookup, so a refused caller does not learn from a `501`
- *     whether this deployment wired mail. The held set is read from the
+ *     mail surface: the `mail` settings namespace (sender address, transport)
+ *     reads and writes on it, `sys_identity_email` requires it for the whole
+ *     row, and `sys_email` requires it for its two body columns (`body_text`,
+ *     `body_html`; the rest of a `sys_email` row is not gated on it). Reused
+ *     rather than invented, so this door cannot admit a different set of
+ *     callers than the surface that configures the same transport. Checked
+ *     BEFORE the provider lookup, so a refused caller does not learn from a
+ *     `501` whether this deployment wired mail. The held set is read from the
  *     resolved context's `systemPermissions`, the platform's one capability
  *     resolution; no `isSystem` arm, since `isSystem` is never resolved
  *     from inbound HTTP.
@@ -71,12 +73,32 @@
  *     reaches the transport. A service that cannot report its sender, or a
  *     deployment with none configured, refuses a caller `from` (unknown is
  *     not permission). Custom `headers` may not set the sender either
- *     ({@link SENDER_HEADER_NAMES}).
+ *     ({@link SENDER_HEADER_NAMES}), and the door accepts them in one shape
+ *     only: the contract's `Record<string, string>`, a plain object whose
+ *     every key is a header field name and whose every value is a single-line
+ *     string ({@link headersRefusal}). Any other shape is refused, so the
+ *     reserved-name check reads each header exactly as a transport will.
+ *  4. TENANT — the message's mail-log row belongs to the caller's active
+ *     organization: the `tenantId` the identity resolver vetted onto the
+ *     execution context (`meta-item-read-gate.ts`, "The caller's
+ *     organization", says why that and not the session's stored claim). The
+ *     door stamps it as `organizationId`, which the service stamps verbatim
+ *     onto `sys_email.organization_id`. A body naming any other organization,
+ *     or naming one when the caller has no active organization, is refused.
+ *     `identityMail` is refused too: identity mail (verification, password
+ *     reset, invitations) is sent by the server itself, and its log,
+ *     `sys_identity_email`, is not a destination an HTTP caller chooses. A
+ *     body restating the door's own answer (`identityMail: false`) is
+ *     admitted, and the forwarded message never carries the caller's value.
  *
  * Every refusal is `403 PERMISSION_DENIED` in the nested ADR-0112 envelope —
  * the standard-catalog code for the status, the spelling `enforceAuth` above
  * it answers in. Server-internal senders (flows, notifications, auth mail)
  * call `IEmailService.send` directly and never pass through this door.
+ *
+ * `replyTo` is NOT bounded. The contract (`SendEmailInput.replyTo`) declares
+ * it a caller-supplied address for the Reply-To header and makes no sender
+ * claim of it, so no configured value exists to bound it to.
  */
 
 import type { EmailAddress } from '@objectstack/spec/contracts';
@@ -95,6 +117,46 @@ export const EMAIL_SEND_CAPABILITY = 'manage_platform_settings';
  * module header reserves to the configured sender.
  */
 export const SENDER_HEADER_NAMES: ReadonlySet<string> = new Set(['from', 'sender', 'return-path']);
+
+/**
+ * A header field name: one or more printable US-ASCII characters other than
+ * the colon (RFC 5322 §2.2). Whitespace, control characters and non-ASCII
+ * characters are not part of any field name.
+ */
+const HEADER_FIELD_NAME = /^[\x21-\x39\x3b-\x7e]+$/;
+
+/** A plain object — an object literal or a JSON-parsed object, never an array or a class instance. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Why a caller's `headers` cannot be forwarded, or `undefined` when it can
+ * (module header, bound 3). Absent is fine. Otherwise it must be the
+ * contract's `Record<string, string>` exactly: a plain object, each key a
+ * header field name, each value a string with no line break, and no key one
+ * of {@link SENDER_HEADER_NAMES}.
+ */
+function headersRefusal(headers: unknown): string | undefined {
+    if (headers === undefined) return undefined;
+    if (!isPlainObject(headers)) {
+        return 'Custom `headers` must be an object mapping each header name to a string value.';
+    }
+    for (const [name, value] of Object.entries(headers)) {
+        if (!HEADER_FIELD_NAME.test(name)) {
+            return 'Custom `headers` must be keyed by header field names: printable ASCII with no space, control character or colon.';
+        }
+        if (typeof value !== 'string' || /[\r\n]/.test(value)) {
+            return `Custom header \`${name}\` must have a single-line string value.`;
+        }
+        if (SENDER_HEADER_NAMES.has(name.toLowerCase())) {
+            return `Custom header \`${name}\` cannot be set: the sender is the deployment's configured sender.`;
+        }
+    }
+    return undefined;
+}
 
 /**
  * The bare address an {@link EmailAddress} names, lower-cased for comparison —
@@ -208,13 +270,10 @@ export function registerEmailEndpoints(this: EmailRouteHost, basePath: string): 
                 }
 
                 // Bound 3 (module header): the sender is the configured one.
-                const headers = body.headers;
-                if (headers && typeof headers === 'object') {
-                    const named = Object.keys(headers).find((k) => SENDER_HEADER_NAMES.has(k.trim().toLowerCase()));
-                    if (named !== undefined) {
-                        refuse(res, `Custom header \`${named}\` cannot be set: the sender is the deployment's configured sender.`);
-                        return;
-                    }
+                const headersRefused = headersRefusal(body.headers);
+                if (headersRefused !== undefined) {
+                    refuse(res, headersRefused);
+                    return;
                 }
                 let from: EmailAddress | undefined;
                 if (body.from !== undefined) {
@@ -234,9 +293,31 @@ export function registerEmailEndpoints(this: EmailRouteHost, basePath: string): 
                     from = configured;
                 }
 
+                // Bound 4 (module header): the row belongs to the caller's
+                // active organization, and identity mail is the server's.
+                const tenantId: unknown = (context as any).tenantId;
+                const organizationId = typeof tenantId === 'string' && tenantId.length > 0 ? tenantId : undefined;
+                if (body.organizationId !== undefined && body.organizationId !== organizationId) {
+                    refuse(
+                        res,
+                        organizationId
+                            ? '`organizationId` is the caller\'s active organization; a send cannot be recorded under another organization.'
+                            : '`organizationId` cannot be set: the caller has no active organization. Omit it.',
+                    );
+                    return;
+                }
+                if (body.identityMail !== undefined && body.identityMail !== false) {
+                    refuse(res, '`identityMail` cannot be set through this door: identity mail is sent by the server itself. Omit it.');
+                    return;
+                }
+
+                const message = { ...body };
+                delete message.organizationId;
+                delete message.identityMail;
                 const input = {
-                    ...body,
+                    ...message,
                     sentBy: userId,
+                    ...(organizationId !== undefined ? { organizationId } : {}),
                     ...(from !== undefined ? { from } : {}),
                 };
 

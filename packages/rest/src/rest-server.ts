@@ -5765,8 +5765,10 @@ export class RestServer {
      * configured fail cleanly.
      *
      * The caller must hold `manage_platform_settings`; `sentBy` is always the
-     * authenticated caller and `from` is bounded to the configured sender —
-     * each refused `403 PERMISSION_DENIED` otherwise (`email-routes.ts`
+     * authenticated caller, `from` is bounded to the configured sender,
+     * `headers` must be a plain string-valued map, `organizationId` is the
+     * caller's active organization and `identityMail` is not the caller's to
+     * set — each refused `403 PERMISSION_DENIED` otherwise (`email-routes.ts`
      * header, "Who may send, and as whom").
      *
      * Request body:

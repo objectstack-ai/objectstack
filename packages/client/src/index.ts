@@ -2493,10 +2493,15 @@ export class ObjectStackClient {
      * three so failures carry their diagnostic body.
      *
      * The caller must hold `manage_platform_settings`. `sentBy` is always the
-     * authenticated user, and the sender is the deployment's configured
-     * sender. Omit `from` and `sentBy`: a `from` naming another address, a
-     * `sentBy` naming another user, or a custom `From` / `Sender` /
-     * `Return-Path` header is refused `403 PERMISSION_DENIED`.
+     * authenticated user, the sender is the deployment's configured sender,
+     * and the message is recorded under the caller's active organization.
+     * Omit `from`, `sentBy`, `organizationId` and `identityMail`: a `from`
+     * naming another address, a `sentBy` naming another user, an
+     * `organizationId` naming another organization, any `identityMail` other
+     * than `false`, and a custom `From` / `Sender` / `Return-Path` header are
+     * each refused `403 PERMISSION_DENIED`. `headers`, when sent, is a plain
+     * object mapping header names to single-line string values; any other
+     * shape is refused the same way.
      */
     send: async (message: {
         to: string | Array<string | { name?: string; address: string }>;

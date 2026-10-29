@@ -140,9 +140,20 @@ describe('SmtpTransport — send', () => {
       subject: 'S',
       text: 'T',
       html: '<p>H</p>',
-      headers: { 'X-Trace': '42' },
+      headers: [{ key: 'X-Trace', value: '42' }],
       attachments: [{ filename: 'a.txt', content: 'body', contentType: 'text/plain', cid: 'cid1' }],
     });
+  });
+
+  it('hands nodemailer the headers map as an explicit list, one name/value entry per key, in order', async () => {
+    await new SmtpTransport({ host: 'smtp.x' }).send({
+      ...MSG,
+      headers: { 'X-Trace': '42', 'X-Campaign': 'q4' },
+    });
+    expect(nm.sendMail.mock.calls[0][0].headers).toEqual([
+      { key: 'X-Trace', value: '42' },
+      { key: 'X-Campaign', value: 'q4' },
+    ]);
   });
 
   it('surfaces the SMTP server error verbatim (authentication failure is LOUD)', async () => {

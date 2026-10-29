@@ -1,9 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `POST /api/v1/email/send` — the send door's three bounds (`email-routes.ts`
+ * `POST /api/v1/email/send` — the send door's four bounds (`email-routes.ts`
  * header, "Who may send, and as whom"): the capability, the `sentBy`
- * attribution, and the configured sender.
+ * attribution, the configured sender (with the one `headers` shape the door
+ * accepts), and the caller's organization (with identity mail kept
+ * server-side).
  *
  * Driven through the real `HonoHttpServer` transport the CLI mounts, so every
  * status, envelope and parsed body below is the wire's, not a mock's. The
@@ -22,6 +24,8 @@ import { EMAIL_SEND_CAPABILITY } from './email-routes';
 const CONFIGURED: EmailAddress = { name: 'Acme Mail', address: 'no-reply@acme.example' };
 const ADMIN = { userId: 'usr_admin', systemPermissions: ['setup.access', EMAIL_SEND_CAPABILITY] };
 const MEMBER = { userId: 'usr_member', systemPermissions: ['setup.access'] };
+/** The admin acting inside an active organization (the vetted `tenantId`). */
+const ORG_ADMIN = { ...ADMIN, tenantId: 'org_acme' };
 const MESSAGE = { to: 'someone@example.org', subject: 'Hello', text: 'body' };
 
 interface Boot {
@@ -238,5 +242,118 @@ describe('POST /api/v1/email/send — the sender is the configured sender', () =
 
     expect(out.status).toBe(200);
     expect(send.mock.calls[0][0].headers).toEqual({ 'X-Campaign': 'q4' });
+  });
+});
+
+describe('POST /api/v1/email/send — `headers` is accepted as a plain string-valued map only', () => {
+  // Each shape below carries no reserved header name at all: the door refuses
+  // it for its SHAPE, because only the contract's `Record<string, string>` is
+  // read by the reserved-name check exactly as a transport reads it.
+  it.each([
+    ['a list of entries', [{ key: 'X-Campaign', value: 'q4' }]],
+    ['a map with an object value', { 'X-Campaign': { value: 'q4' } }],
+    ['a map with a number value', { 'X-Priority': 1 }],
+    ['a map with a multi-line value', { 'X-Campaign': 'q4\r\nX-Other: 1' }],
+    ['a map keyed by a name with a space', { 'X Campaign': 'q4' }],
+    ['a map keyed by a name with a colon', { 'X-Campaign:': 'q4' }],
+    ['a map keyed by a non-ASCII name', { 'X-Campaña': 'q4' }],
+    ['null', null],
+    ['a string', 'X-Campaign: q4'],
+  ])('%s is refused 403 PERMISSION_DENIED, and nothing is sent', async (_label, headers) => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post({ ...MESSAGE, headers });
+
+    expect(out.status).toBe(403);
+    expect(out.body.error.code).toBe('PERMISSION_DENIED');
+    expect(out.body.error.message).toContain('headers');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('an empty map and a well-formed map are admitted, forwarded as sent', async () => {
+    const empty = emailDouble();
+    const none = await boot({ service: empty.service, ctx: ADMIN }).post({ ...MESSAGE, headers: {} });
+    expect(none.status).toBe(200);
+    expect(empty.send.mock.calls[0][0].headers).toEqual({});
+
+    const listed = emailDouble();
+    const headers = { 'X-Campaign': 'q4', 'List-Unsubscribe': '<mailto:unsub@acme.example>' };
+    const ok = await boot({ service: listed.service, ctx: ADMIN }).post({ ...MESSAGE, headers });
+    expect(ok.status).toBe(200);
+    expect(listed.send.mock.calls[0][0].headers).toEqual(headers);
+  });
+});
+
+describe('POST /api/v1/email/send — the row belongs to the caller\'s organization', () => {
+  it('a caller in an active organization sends with that organization stamped', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ORG_ADMIN });
+    const out = await post(MESSAGE);
+
+    expect(out.status).toBe(200);
+    expect(send.mock.calls[0][0].organizationId).toBe(ORG_ADMIN.tenantId);
+  });
+
+  it('a body restating the caller\'s organization is admitted, stamped with it', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ORG_ADMIN });
+    const out = await post({ ...MESSAGE, organizationId: ORG_ADMIN.tenantId });
+
+    expect(out.status).toBe(200);
+    expect(send.mock.calls[0][0].organizationId).toBe(ORG_ADMIN.tenantId);
+  });
+
+  it('a body naming another organization is refused 403, and nothing is sent', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ORG_ADMIN });
+    const out = await post({ ...MESSAGE, organizationId: 'org_other' });
+
+    expect(out.status).toBe(403);
+    expect(out.body.error.code).toBe('PERMISSION_DENIED');
+    expect(out.body.error.message).toContain('organizationId');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a caller with no active organization may not name one: refused 403, and nothing is sent', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post({ ...MESSAGE, organizationId: 'org_acme' });
+
+    expect(out.status).toBe(403);
+    expect(out.body.error.code).toBe('PERMISSION_DENIED');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a caller with no active organization sends with none forwarded', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post(MESSAGE);
+
+    expect(out.status).toBe(200);
+    expect('organizationId' in send.mock.calls[0][0]).toBe(false);
+  });
+});
+
+describe('POST /api/v1/email/send — identity mail is not sent through this door', () => {
+  it.each([true, 'true', 1])('`identityMail: %s` is refused 403, and nothing is sent', async (identityMail) => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post({ ...MESSAGE, identityMail });
+
+    expect(out.status).toBe(403);
+    expect(out.body.error.code).toBe('PERMISSION_DENIED');
+    expect(out.body.error.message).toContain('identityMail');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('`identityMail: false` restates the door\'s answer: admitted, and the forwarded message carries no `identityMail`', async () => {
+    const { service, send } = emailDouble();
+    const { post } = boot({ service, ctx: ORG_ADMIN });
+    const out = await post({ ...MESSAGE, identityMail: false });
+
+    expect(out.status).toBe(200);
+    const input = send.mock.calls[0][0];
+    expect('identityMail' in input).toBe(false);
+    expect(input.organizationId).toBe(ORG_ADMIN.tenantId);
   });
 });
