@@ -254,11 +254,13 @@ describe('ListView — speculative view bindings are FLS-gated (objectui#7216)',
     expect(select).toContain('subject');
   });
 
-  // ── PIN 7: the `options.<view>` spelling is the same path ───────────────
-  it('gates the nested `options.kanban` spelling too', async () => {
+  // ── PIN 7: the kanban block is the same path ────────────────────────────
+  // (It pinned the nested `options.kanban` spelling until objectstack#25923
+  // retired the bag; the object page relays the block at the top level now.)
+  it('gates the `kanban` block\'s lane and card fields too', async () => {
     const select = await selectFor({
       columns: COLUMNS,
-      options: { kanban: { groupByField: 'industry', columns: ['salary'] } },
+      kanban: { groupByField: 'industry', columns: ['salary'] },
     });
     expect(select).not.toContain('industry');
     expect(

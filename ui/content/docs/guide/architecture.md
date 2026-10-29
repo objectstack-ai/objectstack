@@ -107,7 +107,6 @@ Development tools and integration utilities:
 - `@object-ui/create-plugin` - Interactive plugin scaffolder
 - `@object-ui/runner` - Universal runtime for testing and demos
 - `@object-ui/data-objectstack` - ObjectStack data backend adapter
-- `vscode-extension` - VS Code extension for schema development
 
 [Learn more about utilities →](/docs/utilities)
 

@@ -28,7 +28,6 @@
     "data/Cube",
     "data/CubeJoin",
     "data/CurrencyConfig",
-    "data/CurrencyValue",
     "data/DataEngineAggregateOptions",
     "data/DataEngineCountOptions",
     "data/DataEngineDeleteOptions",

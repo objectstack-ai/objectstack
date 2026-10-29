@@ -34,6 +34,14 @@
  * wholesale. The DIRECTION is unanimous across all seven; only the granularity
  * differs, and `map` follows the five that merge — which are also the five that
  * flatten config into props the way the map branch does.
+ *
+ * objectstack#25923 retired the bag. A stored `options.map` is folded onto the
+ * view's `map` block by the server before the row is served (the spec's D2
+ * conversion `list-view-options-bag-folded`, top-level value winning per key,
+ * which is the merge above moved upstream), and `ListView` reads the block
+ * alone. The precedence cases below now pin that the bag reaches nothing here;
+ * the per-key merge is pinned where it runs, on the served row
+ * (`app-shell`'s `ObjectView.storedRowParity-10380.test.tsx`).
  */
 
 import React from 'react';
@@ -130,7 +138,7 @@ describe('ListView forwards the view-level `map` block to plugin-map (objectui#5
     expect(Object.prototype.hasOwnProperty.call(schema, 'map')).toBe(false);
   });
 
-  describe('precedence — view-level block over `options.map`, per key', () => {
+  describe('precedence — the view-level block is the one source (objectstack#25923)', () => {
     it('lets the view-level block win on a key both declare', async () => {
       const schema = await mapSchemaFor({
         options: { map: { locationField: 'geo', titleField: 'bag_title' } },
@@ -140,28 +148,29 @@ describe('ListView forwards the view-level `map` block to plugin-map (objectui#5
       expect(schema.titleField).toBe('spec_title');
     });
 
-    it('keeps a key only the legacy bag declares — it is a merge, not a replacement', async () => {
-      // The arm that separates the five merging siblings from the two that use
-      // `||`. Under whole-block replacement `locationField` would be gone here
-      // and the map would render no markers at all.
+    it('RETIRED: a key only the legacy bag declares is not read — the per-key merge is the server fold\'s now', async () => {
+      // This arm pinned the merge (`locationField` kept from the bag). The bag
+      // is folded onto `map` before a stored row is served, so a bag that still
+      // reaches `ListView` was never stored and binds nothing.
       const schema = await mapSchemaFor({
         options: { map: { locationField: 'geo', titleField: 'bag_title' } },
         map: { titleField: 'spec_title' },
       });
 
-      expect(schema.locationField).toBe('geo');
+      expect(schema.locationField).toBeUndefined();
+      expect(schema.titleField).toBe('spec_title');
     });
   });
 
   describe('controls', () => {
-    it('CONTROL: `options.map` alone still works, unchanged', async () => {
+    it('RETIRED (objectstack#25923): `options.map` alone binds nothing, as if no map config were declared', async () => {
       const schema = await mapSchemaFor({
         options: { map: { latitudeField: 'lat', longitudeField: 'lng', titleField: 'bag_title' } },
       });
 
-      expect(schema.latitudeField).toBe('lat');
-      expect(schema.longitudeField).toBe('lng');
-      expect(schema.titleField).toBe('bag_title');
+      expect(Object.prototype.hasOwnProperty.call(schema, 'latitudeField')).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(schema, 'longitudeField')).toBe(false);
+      expect(schema.titleField).not.toBe('bag_title');
     });
 
     it('CONTROL: with no map config at all, NOTHING is emitted — not even a binding', async () => {
@@ -253,13 +262,13 @@ describe('ListView offers `map` in the switcher from the view-level block (objec
     expect(queryViewOption('Map')).toBeTruthy();
   });
 
-  it('CONTROL: `options.map` alone still resolves the capability', () => {
+  it('RETIRED (objectstack#25923): `options.map` alone no longer resolves the capability', () => {
     renderSwitcher({
       appearance: { allowedVisualizations: ['grid', 'map'] },
       options: { map: { locationField: 'geo' } },
     });
 
-    expect(queryViewOption('Map')).toBeTruthy();
+    expect(queryViewOption('Map')).toBeNull();
   });
 
   it('CONTROL: no binding anywhere leaves `map` unresolvable', () => {
@@ -268,14 +277,24 @@ describe('ListView offers `map` in the switcher from the view-level block (objec
     expect(queryViewOption('Map')).toBeNull();
   });
 
-  it('resolves a binding SPLIT across the two sources, the way it will render', () => {
-    // The gate asks the merged config, so a split lat/lng pair is judged the
-    // same way the render seam resolves it. Asking `options.map` alone said
-    // "not resolvable" while the seam would have rendered it fine.
+  it('judges a binding SPLIT across the block and a bag the way it will render: the bag half is not read (objectstack#25923)', () => {
+    // The gate and the render seam ask the same config, the `map` block. A
+    // stored split is folded into one block by the server before it is served;
+    // one that still reaches here is half a binding, and the seam would render
+    // no markers, so the gate does not offer the map.
     renderSwitcher({
       appearance: { allowedVisualizations: ['grid', 'map'] },
       options: { map: { latitudeField: 'lat' } },
       map: { longitudeField: 'lng' },
+    });
+
+    expect(queryViewOption('Map')).toBeNull();
+  });
+
+  it('CONTROL: the same split pair in the one block resolves the capability', () => {
+    renderSwitcher({
+      appearance: { allowedVisualizations: ['grid', 'map'] },
+      map: { latitudeField: 'lat', longitudeField: 'lng' },
     });
 
     expect(queryViewOption('Map')).toBeTruthy();

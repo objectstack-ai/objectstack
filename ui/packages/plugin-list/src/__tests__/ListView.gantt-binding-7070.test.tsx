@@ -207,15 +207,17 @@ describe('ListView gantt branch — only ever restates a DECLARED binding (objec
     expect(props.progressField).toBe('pct');
   });
 
-  it('CONTROL: the legacy `options.gantt` nesting carries the pair verbatim too (objectui#7499)', async () => {
-    // Both nestings are authoring faces here, and the floors used to read both
-    // legs. Deleting them must not cost the `options.gantt` leg its pass-through.
+  it('RETIRED (objectstack#25923): the legacy `options.gantt` nesting carries neither key of the pair', async () => {
+    // Both nestings were authoring faces here until the bag was retired; a
+    // stored bag is folded onto `gantt` by the server before the row is served,
+    // so `ListView` reads the block alone. The block's pass-through is the
+    // CONTROL above.
     const props = await ganttProps({
       ...BASE,
       options: { gantt: { ...AXIS, progressField: 'percent_done', dependenciesField: 'depends_on' } },
     });
-    expect(props.progressField).toBe('percent_done');
-    expect(props.dependenciesField).toBe('depends_on');
+    expect(props.progressField).toBeUndefined();
+    expect(props.dependenciesField).toBeUndefined();
   });
 
   it('CONTROL: forwards the spec-canonical `gantt` block unchanged', async () => {
@@ -228,12 +230,13 @@ describe('ListView gantt branch — only ever restates a DECLARED binding (objec
     expect(props.titleField).toBe('name');
   });
 
-  it('CONTROL: forwards the legacy `options.gantt` nesting unchanged', async () => {
-    // The nesting app-shell's object page emits. A correctly configured view
-    // renders exactly as it did before this card.
+  it('CONTROL: forwards the block app-shell\'s object page relays unchanged', async () => {
+    // The block that page emits: under the legacy `options.gantt` nesting until
+    // objectstack#25923 retired the bag, at the top level since. A correctly
+    // configured view renders exactly as it did before this card.
     const props = await ganttProps({
       ...BASE,
-      options: { gantt: { startDateField: 'start_date', endDateField: 'end_date', colorField: 'status' } },
+      gantt: { startDateField: 'start_date', endDateField: 'end_date', colorField: 'status' },
     });
     expect(props.startDateField).toBe('start_date');
     expect(props.endDateField).toBe('end_date');
@@ -285,30 +288,32 @@ describe('ListView capability gate — the Gantt toggle follows the binding (obj
     await waitFor(() => expect(queryViewOption('Gantt')).toBeInTheDocument());
   });
 
-  it('CONTROL: offers Gantt for the legacy `options.gantt` nesting too', async () => {
-    // The shape the object page emits for a view that DID declare a gantt block
-    // — the half of the gate that must keep working after the fabrication left.
+  it('RETIRED (objectstack#25923): does NOT offer Gantt for a binding left in the legacy `options.gantt` nesting', async () => {
+    // This was a CONTROL (the gate read the bag). The bag is retired, so the
+    // gate reads the block alone; the CONTROL above is the live spelling.
     await mountSwitcher({
       ...GRID,
+      appearance: { allowedVisualizations: ['grid', 'gantt'] },
       options: { gantt: { startDateField: 'start_date', endDateField: 'end_date' } },
     });
-    await waitFor(() => expect(queryViewOption('Gantt')).toBeInTheDocument());
+    expect(queryViewOption('Gantt')).not.toBeInTheDocument();
   });
 
-  it('does NOT offer Gantt for the exact bag the fixed object page now emits', async () => {
+  it('does NOT offer Gantt for the exact block the fixed object page now emits', async () => {
     // ⭐ THE SECOND PREMISE, measured rather than assumed. #7070 asked whether
     // ADR-0047's gate drops the Gantt toggle "for free" once the fabrication is
     // gone, the way it did for calendar. The gate reads
     // `schema.gantt?.startDateField || schema.options?.gantt?.startDateField`,
     // and the fabrication it used to read came from the OBJECT PAGE, which put
     // `options.gantt.startDateField: 'start_date'` on every view in the product.
-    // `{ gantt: { titleField: 'name' } }` is precisely what `ganttViewOptions`
-    // now emits for a view that declared nothing — a bag that still EXISTS but
-    // carries no axis. The answer is yes: no second mechanism was needed.
+    // `{ titleField: 'name' }` is precisely what `ganttViewOptions` now emits
+    // for a view that declared nothing — a block that still EXISTS but carries
+    // no axis (the page relays it at the top level since objectstack#25923).
+    // The answer is yes: no second mechanism was needed.
     await mountSwitcher({
       ...GRID,
       appearance: { allowedVisualizations: ['grid', 'gantt'] },
-      options: { gantt: { titleField: 'name' } },
+      gantt: { titleField: 'name' },
     });
     expect(queryViewOption('Gantt')).not.toBeInTheDocument();
   });

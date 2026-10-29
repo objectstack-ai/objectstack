@@ -5,13 +5,11 @@ import {
   FieldType,
   SelectOptionSchema,
   CurrencyConfigSchema,
-  CurrencyValueSchema,
   Field,
   BOUNDED_STRING_FIELD_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
   type SelectOption,
   type CurrencyConfig,
-  type CurrencyValue,
 } from './field.zod';
 import { ObjectSchema } from './object.zod';
 import { MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, isMultiValueField } from './field-value.zod';
@@ -130,46 +128,6 @@ describe('CurrencyConfigSchema', () => {
     invalidCodes.forEach(code => {
       expect(() => CurrencyConfigSchema.parse({ defaultCurrency: code })).toThrow();
     });
-  });
-});
-
-describe('CurrencyValueSchema', () => {
-  it('should accept valid currency value', () => {
-    const validValue: CurrencyValue = {
-      value: 1000.50,
-      currency: 'USD',
-    };
-
-    expect(() => CurrencyValueSchema.parse(validValue)).not.toThrow();
-  });
-
-  it('should accept zero value', () => {
-    const zeroValue: CurrencyValue = {
-      value: 0,
-      currency: 'CNY',
-    };
-
-    expect(() => CurrencyValueSchema.parse(zeroValue)).not.toThrow();
-  });
-
-  it('should accept negative values', () => {
-    const negativeValue: CurrencyValue = {
-      value: -500.00,
-      currency: 'EUR',
-    };
-
-    expect(() => CurrencyValueSchema.parse(negativeValue)).not.toThrow();
-  });
-
-  it('should reject invalid currency codes', () => {
-    expect(() => CurrencyValueSchema.parse({ value: 100, currency: 'US' })).toThrow();
-    expect(() => CurrencyValueSchema.parse({ value: 100, currency: 'USDD' })).toThrow();
-  });
-
-  it('should reject missing required fields', () => {
-    expect(() => CurrencyValueSchema.parse({ value: 100 })).toThrow();
-    expect(() => CurrencyValueSchema.parse({ currency: 'USD' })).toThrow();
-    expect(() => CurrencyValueSchema.parse({})).toThrow();
   });
 });
 

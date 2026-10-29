@@ -51,8 +51,6 @@
     "CubeSchema": "data/Cube",
     "CurrencyConfig": "data/CurrencyConfig",
     "CurrencyConfigSchema": "data/CurrencyConfig",
-    "CurrencyValue": "data/CurrencyValue",
-    "CurrencyValueSchema": "data/CurrencyValue",
     "DataEngineAggregateOptions": "data/DataEngineAggregateOptions",
     "DataEngineAggregateOptionsSchema": "data/DataEngineAggregateOptions",
     "DataEngineCountOptions": "data/DataEngineCountOptions",

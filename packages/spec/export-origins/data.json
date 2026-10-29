@@ -140,8 +140,6 @@
     "CurrencyConfig": "src/data/field.zod.ts#CurrencyConfig (type)",
     "CurrencyConfigParsed": "src/data/field.zod.ts#CurrencyConfigParsed (type)",
     "CurrencyConfigSchema": "src/data/field.zod.ts#CurrencyConfigSchema (const)",
-    "CurrencyValue": "src/data/field.zod.ts#CurrencyValue (type)",
-    "CurrencyValueSchema": "src/data/field.zod.ts#CurrencyValueSchema (const)",
     "CustomPersistenceConfig": "src/data/driver/memory.zod.ts#CustomPersistenceConfig (type)",
     "CustomPersistenceConfigSchema": "src/data/driver/memory.zod.ts#CustomPersistenceConfigSchema (const)",
     "DATABASE_DRIVER_SELECTION_ALIASES": "src/data/driver/config-registry.zod.ts#DATABASE_DRIVER_SELECTION_ALIASES (const)",

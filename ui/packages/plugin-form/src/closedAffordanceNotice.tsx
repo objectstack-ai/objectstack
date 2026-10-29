@@ -36,6 +36,12 @@ import type { ClosedFormAffordance } from './fieldWriteGate';
  * caller may read but not edit, a `readonly` field) never shows it: the form's
  * affordance is open there.
  *
+ * On an edit form whose own record refuses the update (objectstack#27138) the
+ * sentence names the record, not the object: the caller may edit other
+ * records of it. `record` is the server's row verdict (sharing, ownership,
+ * row-level security); `approval` a pending approval that locks the record,
+ * said with the record page's own lock sentence.
+ *
  * `role="status"`, the package's pattern for a form state (`UploadInFlightNotice`):
  * nothing has failed, and an assertive live region would interrupt a
  * screen-reader user as the form opens.
@@ -46,6 +52,8 @@ const useClosedAffordanceTranslation = createSafeTranslation(
     // compares this table against them. What a provider-less host renders.
     'form.noPermissionToCreate': "You don't have permission to create {{object}} records. The fields are read-only.",
     'form.noPermissionToEdit': "You don't have permission to edit {{object}} records. The fields are read-only.",
+    'form.noPermissionToEditRecord': "You don't have permission to edit this record. The fields are read-only.",
+    'detail.lockedTooltip': 'This record has a pending approval request; editing is locked',
   },
   'form.noPermissionToCreate',
 );
@@ -76,9 +84,13 @@ export function ClosedAffordanceNotice({
   const object =
     'objectLabel' in labels ? labels.objectLabel({ name: objectName, label: declared }) : declared;
   const message =
-    affordance === 'edit'
-      ? t('form.noPermissionToEdit', { object })
-      : t('form.noPermissionToCreate', { object });
+    affordance === 'record'
+      ? t('form.noPermissionToEditRecord')
+      : affordance === 'approval'
+        ? t('detail.lockedTooltip')
+        : affordance === 'edit'
+          ? t('form.noPermissionToEdit', { object })
+          : t('form.noPermissionToCreate', { object });
 
   return (
     <p

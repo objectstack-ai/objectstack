@@ -143,8 +143,6 @@
     "CurrencyConfig (type)",
     "CurrencyConfigParsed (type)",
     "CurrencyConfigSchema (const)",
-    "CurrencyValue (type)",
-    "CurrencyValueSchema (const)",
     "CustomPersistenceConfig (type)",
     "CustomPersistenceConfigSchema (const)",
     "DATABASE_DRIVER_SELECTION_ALIASES (const)",

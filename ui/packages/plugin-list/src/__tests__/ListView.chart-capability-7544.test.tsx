@@ -128,7 +128,7 @@ describe('the capability gate resolves `chart` from a declared chart block (obje
     expect(chartOffered({ chart: { categoryField: 'status', valueField: 'hours' } })).toBe(false);
   });
 
-  it('does NOT offer Chart for the retired axes in the `options.chart` bag either (objectui#6152 round 15)', () => {
+  it('does NOT offer Chart for the retired axes in the `options.chart` bag either (objectui#6152 round 15; the bag itself is unread since objectstack#25923)', () => {
     expect(chartOffered({ options: { chart: { xAxisField: 'status', yAxisFields: ['hours'], aggregation: 'sum' } } })).toBe(false);
   });
 
@@ -143,14 +143,16 @@ describe('the capability gate resolves `chart` from a declared chart block (obje
     expect(chartOffered({ chart: { yAxisFields: ['hours'] } })).toBe(false);
   });
 
-  it('CONTROL: the legacy `options.chart` bag resolves the capability too', () => {
-    expect(chartOffered({ options: { chart: { dataset: 'ds', values: ['n'] } } })).toBe(true);
+  it('RETIRED (objectstack#25923): a complete chart block left in the legacy `options.chart` bag resolves nothing', () => {
+    // This was the bag's CONTROL (it resolved the capability). The bag is
+    // retired and folded onto `chart` by the server before a stored row is
+    // served, so the gate, like the render branch, reads the block alone.
+    expect(chartOffered({ options: { chart: { dataset: 'ds', values: ['n'] } } })).toBe(false);
   });
 
-  it('CONTROL: the view-level block wins over the bag, as the render branch resolves it', () => {
-    // Whole-block replacement (`schema.chart || schema.options.chart`) is the
-    // render branch's existing precedence for `chart` and `tree`; the gate
-    // inherits it rather than inventing a merge.
+  it('CONTROL: the view-level block resolves the capability with a bag beside it, as the render branch resolves it', () => {
+    // The render branch reads `schema.chart` only; the gate asks the same
+    // resolver rather than inventing a second source.
     expect(chartOffered({ chart: { dataset: 'ds', values: ['n'] }, options: { chart: {} } })).toBe(true);
   });
 

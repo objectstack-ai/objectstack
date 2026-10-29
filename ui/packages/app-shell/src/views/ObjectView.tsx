@@ -96,14 +96,14 @@ export {
 
 // objectstack#25992 slice 2: the view-options family and `dispatchViewPatches`
 // moved to `./objectViewOptions.ts`; every name exported here before stays
-// exported from here.
+// exported from here, except `storedLegacyOptions`, retired with the `options`
+// bag it read (#25923).
 export {
     timelineViewOptions,
     calendarViewOptions,
     ganttViewOptions,
     galleryViewOptions,
     kanbanViewOptions,
-    storedLegacyOptions,
     dispatchViewPatches,
 } from './objectViewOptions.js';
 

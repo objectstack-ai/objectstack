@@ -173,7 +173,7 @@ describe('ListView → ObjectTimeline: an undeclared axis reaches the refusal (o
     expect(refusal()!.textContent ?? '').toContain('timeline.startDateField');
   });
 
-  it('…and from the legacy `options` bag (objectui#6152 round 14)', async () => {
+  it('…and from the legacy `options` bag (objectui#6152 round 14; the bag itself is read by nothing since objectstack#25923)', async () => {
     await mountListView({ ...LIST_BASE, options: { timeline: { dateField: 'start_date' } } });
     await waitFor(() => expect(refusal()).not.toBeNull());
     expect(canvas()).toBeNull();
@@ -183,7 +183,9 @@ describe('ListView → ObjectTimeline: an undeclared axis reaches the refusal (o
     // objectui#3129: a calendar binding is a legitimate timeline axis in this
     // product. This is the shape most at risk from a fix aimed at "declared
     // timeline config only".
-    await mountListView({ ...LIST_BASE, options: { calendar: { startDateField: 'start_date' } } });
+    // (The view's own `calendar` block; it rode the retired `options` bag until
+    // objectstack#25923.)
+    await mountListView({ ...LIST_BASE, calendar: { startDateField: 'start_date' } });
     await waitFor(() => expect(canvas()).not.toBeNull());
     expect(refusal()).toBeNull();
   });

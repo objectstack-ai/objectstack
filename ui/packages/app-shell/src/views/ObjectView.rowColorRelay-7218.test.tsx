@@ -223,11 +223,11 @@ async function relayed(objects: any[]): Promise<any> {
       </MemoryRouter>
     </ExpressionProvider>,
   );
-  // `options` is built unconditionally by the same object literal as the rung
+  // `kanban` is built unconditionally by the same object literal as the rung
   // under test, so its arrival is the signal that the relay actually ran —
   // waiting on `rowColor` itself would hang rather than fail on a regression.
   await waitFor(() => {
-    expect(captured?.options).toBeTruthy();
+    expect(captured?.kanban).toBeTruthy();
   });
   return captured;
 }
