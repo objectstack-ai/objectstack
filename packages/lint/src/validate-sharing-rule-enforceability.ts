@@ -385,7 +385,7 @@ function crossClassFinding(
  * deliberately does NOT model is the part of the runtime verdict that is not in
  * the metadata — see the `## What this rule deliberately does NOT do` section.
  */
-function effectiveSharingModelOf(obj: AnyRec): 'private' | 'read' | 'public' {
+export function effectiveSharingModelOf(obj: AnyRec): 'private' | 'read' | 'public' {
   const m = obj.sharingModel;
   if (m === 'private') return 'private';
   if (m === 'public_read') return 'read';
