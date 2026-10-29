@@ -480,14 +480,6 @@ export function formatMeasure(
 }
 
 /**
- * Format a non-measure (dimension / label) value — the server already resolves
- * dimension display labels, so this only tidies numbers and nulls.
- *
- * `locale` follows {@link formatMeasure}: optional, last, and omitting it
- * reproduces the previous machine-locale output byte for byte. Integers stay
- * verbatim here for the same measured reason as there.
- */
-/**
  * The currency one measure CELL displays in.
  *
  * A column the answer marks with `currencyField` — a grouped answer over a
@@ -513,6 +505,14 @@ export function measureCellCurrency(
   return typeof code === 'string' && code !== '' ? code : undefined;
 }
 
+/**
+ * Format a non-measure (dimension / label) value — the server already resolves
+ * dimension display labels, so this only tidies numbers and nulls.
+ *
+ * `locale` follows {@link formatMeasure}: optional, last, and omitting it
+ * reproduces the previous machine-locale output byte for byte. Integers stay
+ * verbatim here for the same measured reason as there.
+ */
 export function formatDimensionValue(v: unknown, locale?: string): string {
   if (v == null) return '—';
   if (typeof v === 'number') {
