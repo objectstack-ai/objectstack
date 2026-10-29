@@ -3012,6 +3012,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11910 — a dashboard widget held until it is bound; `input` is the
   // widget inspector's own label for it (Dataset, Values (measures)).
   'engine.studio.held.widgetNeedsInput': '{input} on the widget “{widget}” needs a value',
+  // objectstack#27464 — a navigation rename typed but not committed yet.
+  'engine.studio.held.navRename': 'the rename of the navigation item “{item}” is not finished',
   // objectstack#27485 — a field CEL expression the inspector judged broken, held after it closes.
   'engine.studio.held.celInvalid': 'an expression on the field “{field}” has an error to fix',
   // objectstack#27629 — the same hold for a validation rule, an action, and an item in the metadata editor.
