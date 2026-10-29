@@ -157,9 +157,8 @@ describe('the build panel under a zh console (objectui#7388)', () => {
   });
 
   // The safe shape the card's boundary asks for, on the OTHER unknown-value
-  // fallback this panel has: an artifact type no pack names renders the
-  // neutral "Other" heading (objectstack#27419), never its raw type, and it
-  // must never render a raw i18n key.
+  // fallback this panel has: a type no pack names renders the neutral "Other"
+  // heading (objectstack#27419), never its raw type, and never a raw i18n key.
   it('an unknown artifact type renders the Other heading, not its type or a key', () => {
     renderIn('zh', panel('structure', { items: [{ type: 'flow', name: 'onboarding' }] }));
     expect(screen.getByText('其他')).toBeInTheDocument();
