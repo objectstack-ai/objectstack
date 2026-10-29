@@ -206,7 +206,7 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
 
     for (const op of collectOperations(document)) {
         if (include && !include(toInfo(op))) continue;
-        const key = uniqueKey(op.operationId ?? slug(`${op.method}_${op.path}`), seenKeys);
+        const key = uniqueKey(operationActionKey(op), seenKeys);
 
         actions.push({
             key,
@@ -266,6 +266,18 @@ function collectOperations(doc: OpenApiDocument): Op[] {
         }
     }
     return ops;
+}
+
+/**
+ * The action key an operation generates: its `operationId`, else the
+ * `method_path` slug (`get /pets/{id}` → `get_pets_id`). The one derivation of
+ * that key — the generator keys its actions with it (before the collision
+ * suffix {@link uniqueKey} adds), and the declarative `openapi` provider's
+ * `providerConfig.include` matches its entries against it, so an allowlist
+ * entry and the action it admits can never be spelled two ways.
+ */
+export function operationActionKey(op: Pick<OperationInfo, 'operationId' | 'method' | 'path'>): string {
+    return op.operationId ?? slug(`${op.method}_${op.path}`);
 }
 
 function toInfo(op: Op): OperationInfo {

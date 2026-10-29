@@ -4,8 +4,11 @@
 // `provider: 'openapi'` connector instance from a spec document + resolved auth.
 
 import { describe, it, expect } from 'vitest';
+import { LiteKernel } from '@objectstack/core';
 import type { ConnectorProviderContext } from '@objectstack/spec/integration';
 import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
+import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
+import { ConnectorOpenApiPlugin } from './connector-openapi-plugin.js';
 import { createOpenApiProviderFactory, OPENAPI_PROVIDER_KEY } from './openapi-provider.js';
 
 const petstore = {
@@ -320,5 +323,145 @@ describe('openapi provider — refuses a document that is not OpenAPI 3.x', () =
             const { def } = await factory(ctx({ providerConfig: { spec: { ...petstore, openapi } } }));
             expect(def.actions?.map((a) => a.key), openapi).toEqual(['listPets']);
         }
+    });
+});
+
+// ── providerConfig.include — a declarative operation allowlist ─────────────
+//
+// The same allowlist meaning as the mcp provider's `include`: only the listed
+// operations become actions. An entry is an operation's action key — its
+// operationId, or the generated method_path key when it has none — and an
+// entry naming an operation the document does not carry is a plain (fatal)
+// configuration fault at materialization, never ignored.
+
+describe('openapi provider — providerConfig.include', () => {
+    const crm = {
+        openapi: '3.0.3',
+        info: { title: 'CRM', version: '1.0.0' },
+        servers: [{ url: 'https://crm.example.com' }],
+        paths: {
+            '/customers': {
+                get: { operationId: 'listCustomers', responses: { '200': { description: 'ok' } } },
+                post: { operationId: 'createCustomer', responses: { '201': { description: 'created' } } },
+            },
+            '/customers/{id}': {
+                // No operationId: the action key is the generated method_path slug.
+                delete: { responses: { '204': { description: 'gone' } } },
+            },
+        },
+    };
+
+    async function refusal(result: unknown): Promise<Error> {
+        const err = await Promise.resolve(result).then(
+            () => { throw new Error('expected rejection'); },
+            (e: unknown) => e,
+        );
+        expect(err).toBeInstanceOf(Error);
+        expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        return err as Error;
+    }
+
+    it('without include, every operation is an action (control)', async () => {
+        const { def } = await createOpenApiProviderFactory()(ctx({ providerConfig: { spec: crm } }));
+        expect(def.actions?.map((a) => a.key)).toEqual(['listCustomers', 'createCustomer', 'delete_customers_id']);
+    });
+
+    it("include: ['listCustomers'] exposes exactly that action", async () => {
+        const { def, handlers } = await createOpenApiProviderFactory()(
+            ctx({ providerConfig: { spec: crm, include: ['listCustomers'] } }),
+        );
+        expect(def.actions?.map((a) => a.key)).toEqual(['listCustomers']);
+        expect(Object.keys(handlers)).toEqual(['listCustomers']);
+    });
+
+    it('names an operation without an operationId by its generated method_path key', async () => {
+        const { def } = await createOpenApiProviderFactory()(
+            ctx({ providerConfig: { spec: crm, include: ['delete_customers_id', 'createCustomer'] } }),
+        );
+        // Document order, not include order — the allowlist filters, it does not reorder.
+        expect(def.actions?.map((a) => a.key)).toEqual(['createCustomer', 'delete_customers_id']);
+    });
+
+    it("include: ['nope'] refuses at materialization, naming the entry and the document's keys", async () => {
+        const err = await refusal(
+            createOpenApiProviderFactory()(ctx({ providerConfig: { spec: crm, include: ['listCustomers', 'nope'] } })),
+        );
+        expect(err.message).toContain("connector 'pets' providerConfig.include names 'nope', which the OpenAPI document does not carry");
+        expect(err.message).toContain("'listCustomers', 'createCustomer', 'delete_customers_id'");
+        expect(err.message).not.toContain("'listCustomers', which");
+    });
+
+    it('an operation that has an operationId is not named by its method_path key', async () => {
+        const err = await refusal(
+            createOpenApiProviderFactory()(ctx({ providerConfig: { spec: crm, include: ['get_customers'] } })),
+        );
+        expect(err.message).toContain("names 'get_customers', which the OpenAPI document does not carry");
+    });
+
+    it('refuses an include that is not an array of non-empty strings, before the document is fetched', async () => {
+        let fetched = 0;
+        const fetchImpl = (async () => {
+            fetched++;
+            return { ok: true, status: 200, json: async () => crm } as unknown as Response;
+        }) as unknown as typeof fetch;
+        const factory = createOpenApiProviderFactory({ fetchImpl });
+        for (const include of ['listCustomers', ['listCustomers', 7], [''], { listCustomers: true }, null]) {
+            const err = await refusal(factory(ctx({ providerConfig: { spec: 'https://crm.example.com/openapi.json', include } })));
+            expect(err.message, JSON.stringify(include)).toContain("connector 'pets' providerConfig.include must be an array of operation keys");
+        }
+        expect(fetched).toBe(0);
+    });
+
+    it('an empty include admits no operation, as an empty mcp include admits no tool', async () => {
+        const { def } = await createOpenApiProviderFactory()(ctx({ providerConfig: { spec: crm, include: [] } }));
+        expect(def.actions).toEqual([]);
+    });
+
+    describe('through a real boot (AutomationServicePlugin + ConnectorOpenApiPlugin)', () => {
+        async function boot(include: unknown) {
+            const declared = [
+                { name: 'crm_api', label: 'CRM API', type: 'api', provider: 'openapi', providerConfig: { spec: crm, include } },
+            ];
+            const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+            kernel.use(new AutomationServicePlugin());
+            kernel.use({
+                name: 'test.connector-metadata',
+                type: 'standard',
+                version: '1.0.0',
+                dependencies: ['com.objectstack.service-automation'],
+                async init(c: { registerService(name: string, service: unknown): void }) {
+                    c.registerService('objectql', {
+                        registry: { listItems: (type: string) => (type === 'connector' ? declared : []) },
+                    });
+                },
+                async start() {},
+            } as never);
+            kernel.use(new ConnectorOpenApiPlugin());
+            return kernel;
+        }
+
+        it('a declared include reaches GET /connectors as exactly the listed action', async () => {
+            const kernel = await boot(['listCustomers']);
+            try {
+                await kernel.bootstrap();
+                const engine = kernel.getService<AutomationEngine>('automation');
+                const crmApi = engine.getConnectorDescriptors().find((d) => d.name === 'crm_api');
+                expect(crmApi?.state).toBe('ready');
+                expect(crmApi?.actions.map((a) => a.key)).toEqual(['listCustomers']);
+            } finally {
+                await kernel.shutdown().catch(() => {});
+            }
+        });
+
+        it('an unknown include entry fails the boot instead of degrading', async () => {
+            const kernel = await boot(['nope']);
+            try {
+                await expect(kernel.bootstrap()).rejects.toThrow(/providerConfig\.include names 'nope'/);
+                const engine = kernel.getService<AutomationEngine>('automation');
+                expect(engine.getConnectorDegradedReason('crm_api')).toBeUndefined();
+            } finally {
+                await kernel.shutdown().catch(() => {});
+            }
+        });
     });
 });
