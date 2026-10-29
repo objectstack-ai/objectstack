@@ -18,4 +18,4 @@ Metadata-protocol: none
 - **The runner.** A caller that reaches `runImport` without the door (the connector pull, which writes a mapping's `upsertKey` straight through) gets every row failed with `VALIDATION_ERROR` and the same message, naming the field, before any row is coerced, read or written. `multiValueMatchKeyRefusal(matchFields, metaMap)` is the one rule both use, exported from `@objectstack/core`.
 - **Unchanged.** An insert import matches nothing, so a `matchFields` it carries is not judged. Writing a multi-value field as an ordinary column of an update or upsert keyed on scalar fields works as before.
 
-**The remedy.** Match on single-value fields (a code, a name, an email). A key that named such a field never matched a row, so no working import changes behaviour.
+**The remedy.** Match on single-value fields (a code, a name, an email). Measured through the SQL driver, a key naming any of these kinds already failed every row (the array kinds on the engine's implicit-equality refusal, a `json` field on a filter-token refusal), so an import that worked there before works the same now.
