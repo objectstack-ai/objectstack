@@ -526,7 +526,9 @@ export class PluginLoader {
         // This check reads that verdict. A plugin carrying a signature no host
         // verified is REFUSED: a signature string a module declares for itself
         // proves nothing, and passing it as well-formed would let it read as
-        // signed. A malformed one is refused by name first.
+        // signed. A malformed one is refused by name first. It is a check on
+        // what a plugin object carries, not a boundary against code already
+        // running in this process, which can record a verdict itself.
         const parsed = parseSignature(plugin.signature);
         if (!parsed) {
             throw new Error(
@@ -538,7 +540,7 @@ export class PluginLoader {
             throw new Error(
                 `Plugin ${plugin.name} carries a signature (keyId=${parsed.keyId}) that no host verified against its artifact. ` +
                 'A signature is verified over the .osplugin bytes when the plugin is installed and again at boot ' +
-                '(`os plugin install`, then the boot-time loader); a plugin object cannot vouch for itself.',
+                '(`os plugin install`, then the boot-time loader); a `signature` field alone does not make a plugin signed.',
             );
         }
         this.logger.debug(

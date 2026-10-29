@@ -216,9 +216,9 @@ export const PluginRuntimeSchema = z
   .describe(
     'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
     + 'marketplace publish gate (an unverified publisher requesting `node` is rejected with '
-    + 'HTTP 422 and forced to manual review) and at boot for a locally installed plugin: only '
-    + '`node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until '
-    + 'they are routed (ADR-0025 M3), never run in process instead',
+    + 'HTTP 422 and forced to manual review) and at boot for a plugin `os plugin install` '
+    + 'installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are '
+    + 'refused until they are routed (ADR-0025 M3), never run in process instead',
   );
 
 export type PluginRuntime = z.input<typeof PluginRuntimeSchema>;
@@ -1017,21 +1017,24 @@ export const ManifestSchema = strictObject({
 
   /**
    * Trust / isolation tier the plugin DECLARES (ADR-0025 §3.6).
-   * Unset implies a pure-metadata package (no executable code).
+   * Unset implies a pure-metadata package (no executable code). An artifact
+   * `os plugin install` installs carries code, so on one an unset tier is an
+   * omission, not that declaration: the boot-time loader refuses it
+   * (`runtime_undeclared`, default-deny).
    *
    * ⚠️ Enforced at the cloud marketplace **publish gate** — an unverified
    * publisher requesting the `node` tier is hard-rejected (HTTP 422) and forced
-   * to manual review — and **at boot for a locally installed plugin**: only
-   * `node` is loaded (in process, not isolated); `sandbox` and `worker` are
-   * refused until ADR-0025 M3 routes them. See {@link PluginRuntimeSchema} for
-   * the full split.
+   * to manual review — and **at boot for a plugin `os plugin install`
+   * installed**: only `node` is loaded (in process, not isolated); `sandbox`
+   * and `worker` are refused until ADR-0025 M3 routes them. See
+   * {@link PluginRuntimeSchema} for the full split.
    */
   runtime: PluginRuntimeSchema.optional()
     .describe(
       'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
       + 'marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual '
-      + 'review) and at boot for a locally installed plugin: only `node` is loaded (in process, '
-      + 'not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them',
+      + 'review) and at boot for a plugin `os plugin install` installed: only `node` is loaded '
+      + '(in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them',
     ),
 
   /**

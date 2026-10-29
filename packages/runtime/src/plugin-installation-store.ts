@@ -49,24 +49,36 @@
  * to {@link INSTALLATIONS_LOCK_WAIT_MS}, and then refuses, naming the holder.
  *
  * A lock a crashed process left behind is cleared by the next writer, never by
- * hand in the ordinary case: the lock is stale, and is removed, when its pid
- * is no longer a live process on this host, or when it is older than
+ * hand in the ordinary case. The lock is stale when its pid is no longer a
+ * live process on this host, or when it is older than
  * {@link INSTALLATIONS_LOCK_STALE_MS} (a write takes milliseconds, so an older
  * lock is a pid the operating system reused), or when it names this process's
- * own pid while this process does not hold it (a dead process that had the pid
- * before), or when it cannot be parsed and is older than a second (a writer
- * that died between creating it and writing its pid). Only when none of these
- * holds does the refusal ask the operator to remove the lock file, by its
- * path.
+ * own pid and thread while this thread does not hold it (a dead process that
+ * had the pid before; another thread of this process holding it is live), or
+ * when it cannot be parsed and is older than a second (a writer that died
+ * between creating it and writing its pid). Only when none of these holds does
+ * the refusal ask the operator to remove the lock file, by its path.
+ *
+ * Clearing a stale lock is itself serialized, so two writers that judged the
+ * same lock stale cannot both proceed: a writer clears it only while holding
+ * `<file>.lock.steal` (created `wx`, held for a few system calls), and only if
+ * the lock file is still the very file it judged — the same inode and the same
+ * bytes, which carry a per-acquisition token. A writer that finds the lock
+ * replaced by a live one since its judgement leaves it and waits. A holder
+ * removes the lock on release only while it is still its own. A steal lock a
+ * crashed writer left is cleared the same way once it is older than
+ * {@link INSTALLATIONS_LOCK_STEAL_STALE_MS}.
  *
  * Exported from the package index for the CLI, which writes it; the runtime's
  * boot-time loader is its reader.
  */
+import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { threadId } from 'node:worker_threads';
 
 import { makeDirectorySync } from './make-directory.js';
-import { loadDisabledPackageIds, packageStateFileName, setPackageDisabled } from './package-state-store.js';
+import { loadDisabledPackageIdsStrict, packageStateFileName, setPackageDisabled } from './package-state-store.js';
 import { resolveObjectStackHome } from './standalone-stack.js';
 
 /** The environment id `os serve` stamps when `OS_ENVIRONMENT_ID` is unset. */
@@ -85,6 +97,21 @@ export const INSTALLED_SIGNATURE_FILE = 'artifact.osplugin.sig';
 export const INSTALLATIONS_LOCK_WAIT_MS = 10_000;
 /** A lock older than this is stale whatever its pid answers. */
 export const INSTALLATIONS_LOCK_STALE_MS = 5 * 60_000;
+/** A steal lock older than this was left by a writer that died clearing a stale lock. */
+export const INSTALLATIONS_LOCK_STEAL_STALE_MS = 2_000;
+
+/**
+ * Thrown by {@link withPluginInstallationsLock} when another live writer holds
+ * the lock past the wait, so a caller can name that refusal apart from any
+ * other failure (`instanceof`; the `os plugin` commands report it as
+ * `installations_locked` in their own refusal vocabulary).
+ */
+export class PluginInstallationsLockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PluginInstallationsLockedError';
+  }
+}
 
 /** One installed plugin version, as `os plugin install` recorded it. */
 export interface PluginInstallationRecord {
@@ -212,37 +239,107 @@ function processAlive(pid: number): boolean {
   }
 }
 
-/** The holder a lock file names, and whether the lock is stale (see the module header). */
-function readLock(lock: string): { stale: boolean; holder: string } {
-  let ageMs: number;
+/** A lock file as read: its inode and bytes, which name it exactly (the bytes carry a per-acquisition token). */
+interface LockFile {
+  ino: number;
+  raw: string;
+}
+
+/** The lock file at `path` now, or `null` when there is none (or it vanished while being read). */
+function readLockFile(path: string): (LockFile & { ageMs: number }) | null {
   try {
-    ageMs = Date.now() - statSync(lock).mtimeMs;
+    const stat = statSync(path);
+    return { ino: stat.ino, raw: readFileSync(path, 'utf8'), ageMs: Date.now() - stat.mtimeMs };
   } catch {
-    return { stale: false, holder: 'a writer that has just released it' };
+    return null;
   }
-  let held: { pid?: unknown; at?: unknown } | null = null;
+}
+
+/** Remove `path` only while it is still `expected`; answers whether it did. */
+function removeIfUnchanged(path: string, expected: LockFile): boolean {
+  const now = readLockFile(path);
+  if (!now || now.ino !== expected.ino || now.raw !== expected.raw) return false;
+  rmSync(path, { force: true });
+  return true;
+}
+
+/** Create `path` exclusively holding a fresh stamp; `null` when it already exists. */
+function createLockFile(path: string): LockFile | null {
+  let fd: number;
   try {
-    held = JSON.parse(readFileSync(lock, 'utf8')) as { pid?: unknown; at?: unknown };
+    fd = openSync(path, 'wx');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null;
+    throw error;
+  }
+  const raw = JSON.stringify({ pid: process.pid, thread: threadId, token: randomUUID(), at: new Date().toISOString() });
+  try {
+    writeSync(fd, raw);
+  } finally {
+    closeSync(fd);
+  }
+  return { ino: statSync(path).ino, raw };
+}
+
+/** The holder a lock file names, and whether it is stale (see the module header). */
+function judgeLock(file: LockFile & { ageMs: number }): { stale: boolean; holder: string } {
+  let held: { pid?: unknown; thread?: unknown; at?: unknown } | null = null;
+  try {
+    held = JSON.parse(file.raw) as { pid?: unknown; thread?: unknown; at?: unknown };
   } catch {
     held = null;
   }
-  if (!held || typeof held.pid !== 'number') return { stale: ageMs > 1_000, holder: 'a writer that has not yet written its pid' };
-  const holder = `process ${held.pid} (since ${String(held.at)})`;
-  // This process does not hold it (that is answered before a lock file is
-  // read), so a lock naming this pid was left by a dead process that had it.
-  if (held.pid === process.pid) return { stale: true, holder };
-  return { stale: !processAlive(held.pid) || ageMs > INSTALLATIONS_LOCK_STALE_MS, holder };
+  if (!held || typeof held.pid !== 'number') return { stale: file.ageMs > 1_000, holder: 'a writer that has not yet written its pid' };
+  const thread = typeof held.thread === 'number' ? held.thread : 0;
+  const holder = `process ${held.pid}${thread === 0 ? '' : ` thread ${thread}`} (since ${String(held.at)})`;
+  if (file.ageMs > INSTALLATIONS_LOCK_STALE_MS) return { stale: true, holder };
+  if (held.pid === process.pid) {
+    // This thread does not hold it (that is answered before a lock file is
+    // read), so a lock naming this thread was left by a dead process that had
+    // the pid; one naming another thread of this process is that thread's.
+    return { stale: thread === threadId, holder };
+  }
+  return { stale: !processAlive(held.pid), holder };
 }
 
-/** Lock files this process holds, and how deep: the lock is re-entrant within a process. */
+/**
+ * Seams for the lock's tests: `afterStaleJudged` runs between a writer judging
+ * the lock stale and clearing it, the window two writers could once both pass;
+ * `waitMs` replaces the default wait, so a test sees a timeout without waiting
+ * it out. Not exported from the package index.
+ */
+export const installationsLockTestHooks: { afterStaleJudged?: (lock: string) => void; waitMs?: number } = {};
+
+/**
+ * Clear the lock judged stale, holding the steal lock so no other writer
+ * clears at the same time, and only while it is still that file. A steal lock
+ * held by another writer means it is clearing now: the caller tries again.
+ */
+function clearStaleLock(lock: string, judged: LockFile): void {
+  const steal = `${lock}.steal`;
+  const mine = createLockFile(steal);
+  if (!mine) {
+    const left = readLockFile(steal);
+    if (left && left.ageMs > INSTALLATIONS_LOCK_STEAL_STALE_MS) removeIfUnchanged(steal, left);
+    return;
+  }
+  try {
+    removeIfUnchanged(lock, judged);
+  } finally {
+    removeIfUnchanged(steal, mine);
+  }
+}
+
+/** Lock files this thread holds, and how deep: the lock is re-entrant within a thread. */
 const HELD = new Map<string, number>();
 
 /**
  * Run `fn` holding this project's installations lock for `environmentId`, and
- * release the lock whatever `fn` does. Throws, naming the holder and the lock
- * file, when another live writer holds it past {@link INSTALLATIONS_LOCK_WAIT_MS}.
+ * release the lock whatever `fn` does. Throws {@link PluginInstallationsLockedError},
+ * naming the holder and the lock file, when another live writer holds it past
+ * {@link INSTALLATIONS_LOCK_WAIT_MS}.
  *
- * Re-entrant within a process, so a caller can hold it across its own checks
+ * Re-entrant within a thread, so a caller can hold it across its own checks
  * and the write that follows them (`os plugin install` does) while the write
  * takes it again.
  */
@@ -263,30 +360,22 @@ export function withPluginInstallationsLock<T>(
     }
   }
   makeDirectorySync(dirname(file));
-  const waitMs = options.waitMs ?? INSTALLATIONS_LOCK_WAIT_MS;
+  const waitMs = options.waitMs ?? installationsLockTestHooks.waitMs ?? INSTALLATIONS_LOCK_WAIT_MS;
   const deadline = Date.now() + waitMs;
+  let mine: LockFile | null = null;
   for (;;) {
-    let fd: number | undefined;
-    try {
-      fd = openSync(lock, 'wx');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    if (fd !== undefined) {
-      try {
-        writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-      } finally {
-        closeSync(fd);
-      }
-      break;
-    }
-    const { stale, holder } = readLock(lock);
+    mine = createLockFile(lock);
+    if (mine) break;
+    const present = readLockFile(lock);
+    if (!present) continue; // released between the two calls
+    const { stale, holder } = judgeLock(present);
     if (stale) {
-      rmSync(lock, { force: true });
+      installationsLockTestHooks.afterStaleJudged?.(lock);
+      clearStaleLock(lock, present);
       continue;
     }
     if (Date.now() >= deadline) {
-      throw new Error(
+      throw new PluginInstallationsLockedError(
         `The plugin installations file ${file} is locked by ${holder}, still running after `
           + `${waitMs / 1000}s. Let that command finish; if no \`os plugin\` command is running, remove ${lock}.`,
       );
@@ -298,7 +387,7 @@ export function withPluginInstallationsLock<T>(
     return fn();
   } finally {
     HELD.delete(lock);
-    rmSync(lock, { force: true });
+    removeIfUnchanged(lock, mine);
   }
 }
 
@@ -386,12 +475,19 @@ export function otherProjectsInstallationDirs(environmentId?: string): Set<strin
  * The installed plugin ids disabled in this environment and project
  * (`os plugin disable`). Kept in the package disable-state store, keyed by the
  * plugin environment id ({@link DEFAULT_PLUGIN_ENVIRONMENT_ID} when unset).
+ * Throws, naming the file, when that file is there and cannot be read: an
+ * unreadable disable is not taken for none.
  */
 export function installedPluginDisabledIds(environmentId?: string): Set<string> {
-  return loadDisabledPackageIds(environmentSegment(environmentId));
+  return loadDisabledPackageIdsStrict(environmentSegment(environmentId));
 }
 
-/** Disable or enable the installed plugin `id`; it takes effect at the next boot. */
+/**
+ * Disable or enable the installed plugin `id`; it takes effect at the next
+ * boot. Throws, writing nothing, when the disable-state file cannot be read,
+ * so the write never replaces the disables it could not read.
+ */
 export function setInstalledPluginDisabled(environmentId: string | undefined, id: string, disabled: boolean): void {
+  loadDisabledPackageIdsStrict(environmentSegment(environmentId));
   setPackageDisabled(environmentSegment(environmentId), id, disabled);
 }

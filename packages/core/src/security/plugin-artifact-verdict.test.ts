@@ -123,3 +123,60 @@ describe('readTarGz bounds the inflate', () => {
     expect(() => readTarGz(new Uint8Array(Buffer.from('not gzip')))).toThrow(/incorrect header check|Z_DATA_ERROR/);
   });
 });
+
+/** One ustar header plus its padded data, with the fields a test varies. */
+function entryOf(
+  name: string,
+  data: Uint8Array,
+  options: { typeflag?: string; prefix?: string; magic?: string; size?: number } = {},
+): Buffer {
+  const h = Buffer.alloc(512, 0);
+  h.write(name, 0, 100, 'utf8');
+  h.write((options.size ?? data.byteLength).toString(8).padStart(11, '0') + '\0', 124, 12, 'ascii');
+  if (options.typeflag !== undefined) h.write(options.typeflag, 156, 1, 'ascii');
+  h.write(options.magic ?? 'ustar\0', 257, 6, 'ascii');
+  if (options.prefix !== undefined) h.write(options.prefix, 345, 155, 'utf8');
+  const pad = (512 - (data.byteLength % 512)) % 512;
+  return Buffer.concat([h, Buffer.from(data), Buffer.alloc(pad)]);
+}
+
+describe('readTar reads regular files only', () => {
+  const end = Buffer.alloc(1024);
+  const body = new Uint8Array(Buffer.from('export {};\n'));
+
+  it('joins a POSIX prefix onto the name, skips a directory entry, and answers views', () => {
+    const tar = new Uint8Array(Buffer.concat([
+      entryOf('dist', new Uint8Array(0), { typeflag: '5' }),
+      entryOf('index.mjs', body, { typeflag: '0', prefix: 'dist' }),
+      end,
+    ]));
+    const files = readTar(tar);
+    expect(files.map((f) => f.path)).toEqual(['dist/index.mjs']);
+    expect(Buffer.from(files[0].data).toString('utf8')).toBe('export {};\n');
+    // A view into the buffer read, not a copy of it.
+    expect(files[0].data.buffer).toBe(tar.buffer);
+  });
+
+  it('ignores the prefix bytes of a GNU-format header', () => {
+    const tar = new Uint8Array(Buffer.concat([entryOf('a.txt', body, { typeflag: '0', magic: 'ustar ', prefix: 'junk' }), end]));
+    expect(readTar(tar).map((f) => f.path)).toEqual(['a.txt']);
+  });
+
+  it.each([
+    ['a symbolic link', '2'],
+    ['a hard link', '1'],
+    ['a pax extended header', 'x'],
+    ['a GNU long-name header', 'L'],
+  ])('throws, naming the entry, on %s', (_kind, typeflag) => {
+    const tar = new Uint8Array(Buffer.concat([entryOf('dist/index.mjs', body, { typeflag }), end]));
+    expect(() => readTar(tar)).toThrow(`the archive entry "dist/index.mjs" is not a regular file or directory (typeflag "${typeflag}")`);
+  });
+
+  it('throws on an entry the buffer cuts short, and on a size it cannot read', () => {
+    const short = new Uint8Array(entryOf('big.bin', body, { typeflag: '0', size: 4096 }));
+    expect(() => readTar(short)).toThrow('the archive entry "big.bin" is cut short: it declares 4096 bytes, and 512 follow');
+    const bad = Buffer.concat([entryOf('a.txt', body, { typeflag: '0' }), end]);
+    bad.write('zz\0', 124, 3, 'ascii');
+    expect(() => readTar(new Uint8Array(bad))).toThrow('the archive entry "a.txt" has no readable size');
+  });
+});

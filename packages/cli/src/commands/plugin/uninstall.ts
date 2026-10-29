@@ -13,7 +13,7 @@
  */
 
 import { Args, Command, Flags } from '@oclif/core';
-import { markPluginUninstall } from '@objectstack/runtime';
+import { PluginInstallationsLockedError, markPluginUninstall } from '@objectstack/runtime';
 import { emitJson, printError, printHeader, printInfo, printKV, printSuccess } from '../../utils/format.js';
 import { findPluginInstallation, pluginEnvironmentId } from '../../utils/plugin-install.js';
 
@@ -52,12 +52,22 @@ export default class PluginUninstall extends Command {
     const changed = found.record.status !== 'uninstall-pending';
     let record = found.record;
     if (changed) {
+      let marked: typeof record | undefined;
       try {
-        record = markPluginUninstall(environmentId, args.id) ?? record;
+        marked = markPluginUninstall(environmentId, args.id);
       } catch (error) {
-        await refuse('installations_locked', `${(error as Error).message} Nothing was changed.`);
+        await refuse(
+          error instanceof PluginInstallationsLockedError ? 'installations_locked' : 'uninstall_failed',
+          `${(error as Error).message} Nothing was changed.`,
+        );
         return;
       }
+      // Gone under the lock: another command removed it after it was found.
+      if (!marked) {
+        await refuse('plugin_not_installed', `${args.id} is not installed in the environment '${environmentId}' any more: it was removed while this command ran. Nothing was changed.`);
+        return;
+      }
+      record = marked;
     }
     if (json) {
       await emitJson({ id: args.id, version: record.version, environmentId, status: record.status, dir: record.dir, changed }, 0, { compact: true });

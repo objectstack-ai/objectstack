@@ -14,6 +14,13 @@
  *
  * Kept in a module-private `WeakMap`, so the verdict follows the object, adds
  * no property to it, and goes with it.
+ *
+ * What this stops is a `signature` FIELD reading as verified. It is not a
+ * boundary against code already running in the host's process:
+ * {@link recordPluginArtifactVerdict} is a public export, and in-process code
+ * (a `node`-tier plugin's, which the host trusted by importing it) can call
+ * it. The tiers that do not run in process are where that boundary is
+ * (ADR-0025 §3.6).
  */
 
 /** One host verification of an installed plugin's artifact. */

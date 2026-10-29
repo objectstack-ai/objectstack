@@ -17,6 +17,14 @@
  * `os plugin uninstall com.acme.loads`: the enabled one's `init` runs and the
  * uninstalled one's does not.
  *
+ * A sixth, `com.acme.built`, is what `os plugin build` produces from a source
+ * tree: its bundle leaves `@objectstack/*` external, so its import of
+ * `@objectstack/core` must resolve to the host's packages from an install
+ * directory under OS_HOME, where no `node_modules` holds them. Its `init`
+ * writes the artifact sha256 of the verdict the host recorded for it, read
+ * through that import: it matches the record only when the plugin got the
+ * host's own `@objectstack/core` module, not a copy.
+ *
  * Each plugin's `init` writes a marker file, so "it ran" and "nothing of it
  * ran" are read off the disk, not off the log. The controls: both boots exit 0
  * and print the migrate path's completion line, so a boot that never reached
@@ -25,7 +33,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +41,7 @@ import { generateEd25519KeyPair, signPayload } from '@objectstack/core';
 import { loadPluginInstallations, pluginInstallDir } from '@objectstack/runtime';
 import { isExitSignal } from '../src/utils/format.js';
 import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from '../src/utils/osplugin.js';
+import PluginBuild from '../src/commands/plugin/build.js';
 import PluginInstall from '../src/commands/plugin/install.js';
 import PluginDisable from '../src/commands/plugin/disable.js';
 import PluginEnable from '../src/commands/plugin/enable.js';
@@ -127,6 +136,45 @@ function signedArtifact(id: string, runtime = 'node'): string {
   return path;
 }
 
+const BUILT = 'com.acme.built';
+
+/**
+ * Build {@link BUILT} with `os plugin build` from a TypeScript source that
+ * imports `@objectstack/core`, then sign it: the artifact a publisher ships.
+ */
+async function builtArtifact(): Promise<string> {
+  const src = join(root, 'built-src');
+  mkdirSync(join(src, 'src'), { recursive: true });
+  writeFileSync(join(src, MANIFEST_FILENAME), JSON.stringify({
+    id: BUILT,
+    name: 'Built',
+    version: '1.0.0',
+    type: 'plugin',
+    runtime: 'node',
+    packaging: 'bundled',
+    main: 'src/index.ts',
+  }));
+  writeFileSync(join(src, 'src', 'index.ts'), [
+    "import { writeFileSync } from 'node:fs';",
+    "import { pluginArtifactVerdict } from '@objectstack/core';",
+    '',
+    'const plugin = {',
+    `  name: ${JSON.stringify(BUILT)},`,
+    "  version: '1.0.0',",
+    '  init(): void {',
+    `    writeFileSync(${JSON.stringify(marker(BUILT))}, JSON.stringify({ sha256: pluginArtifactVerdict(plugin)?.artifactSha256 ?? null }));`,
+    '  },',
+    '};',
+    'export default plugin;',
+    '',
+  ].join('\n'));
+  const path = join(root, `${BUILT}.osplugin`);
+  const built = await run(PluginBuild, [src, '--out', path]);
+  expect(built.exitCode, built.stderr.slice(-600)).toBe(0);
+  writeFileSync(`${path}.sig`, signPayload(new Uint8Array(readFileSync(path)), publisher.privateKeyPem, KEY_ID));
+  return path;
+}
+
 interface Boot {
   code: number | null;
   output: string;
@@ -165,6 +213,8 @@ let second: Boot;
 let ranAfterFirst: string[];
 let ranInSecond: string[];
 const ran = () => IDS.filter((id) => existsSync(marker(id)));
+/** What {@link BUILT}'s `init` wrote in the first boot, or `null` when it did not run. */
+let builtAfterFirst: { sha256: string | null } | null;
 
 beforeAll(async () => {
   for (const key of ENV_KEYS) {
@@ -196,12 +246,15 @@ beforeAll(async () => {
     const installed = await run(PluginInstall, [signedArtifact(id, runtime), ...db, '--json']);
     expect(installed.exitCode, `${id}: ${installed.stdout.slice(-400)}`).toBe(0);
   }
+  const builtInstall = await run(PluginInstall, [await builtArtifact(), ...db, '--json']);
+  expect(builtInstall.exitCode, builtInstall.stdout.slice(-400)).toBe(0);
   writeFileSync(join(pluginInstallDir('env_local', 'com.acme.tampered', '1.0.0'), 'dist', 'index.mjs'), 'export default { name: "evil", init() {} };\n');
   expect((await run(PluginDisable, ['com.acme.disabled', '--json'])).exitCode).toBe(0);
   expect((await run(PluginUninstall, ['com.acme.removed', '--json'])).exitCode).toBe(0);
 
   first = await boot();
   ranAfterFirst = ran();
+  builtAfterFirst = existsSync(marker(BUILT)) ? JSON.parse(readFileSync(marker(BUILT), 'utf8')) : null;
 
   expect((await run(PluginEnable, ['com.acme.disabled', '--json'])).exitCode).toBe(0);
   expect((await run(PluginUninstall, ['com.acme.loads', '--json'])).exitCode).toBe(0);
@@ -257,9 +310,37 @@ describe('[#27123] os serve loads installed plugins, verified, by tier', () => {
     expect(existsSync(pluginInstallDir('env_local', 'com.acme.loads', '1.0.0'))).toBe(false);
     expect(ranInSecond).not.toContain('com.acme.loads');
     expect(loadPluginInstallations('env_local').map((r) => r.id).sort()).toEqual([
+      BUILT,
       'com.acme.disabled',
       'com.acme.sandboxed',
       'com.acme.tampered',
     ]);
+  });
+
+  it('loads what `os plugin build` produced: its `@objectstack/core` import is the host\'s own module', () => {
+    expect(first.output).not.toMatch(/Refused installed plugin com\.acme\.built/);
+    const record = loadPluginInstallations('env_local').find((r) => r.id === BUILT);
+    expect(record?.artifact.sha256).toMatch(/^[0-9a-f]{64}$/);
+    // Read through the plugin's own import: the verdict the host's loader
+    // recorded, so the module is the host's, not a second copy.
+    expect(builtAfterFirst).toEqual({ sha256: record?.artifact.sha256 });
+  });
+
+  // Last, because it leaves the disable-state file unreadable: an unreadable
+  // disable is not taken for none, so the commands refuse it and write
+  // nothing (the boot's side, `disabled_state_unreadable`, is in the runtime's
+  // loader tests).
+  it('disable and enable refuse a disable-state file they cannot read, and write nothing over it', async () => {
+    const dir = join(home, 'package-state');
+    const files = readdirSync(dir);
+    expect(files).toHaveLength(1);
+    const file = join(dir, files[0]);
+    writeFileSync(file, '{ "disabled": ["com.acme.disabled"');
+    for (const command of [PluginDisable, PluginEnable]) {
+      const refused = await run(command, ['com.acme.sandboxed', '--json']);
+      expect(refused.exitCode).toBe(1);
+      expect(refused.payload).toEqual({ error: 'disable_state_failed', message: expect.stringContaining('cannot be read') });
+    }
+    expect(readFileSync(file, 'utf8')).toBe('{ "disabled": ["com.acme.disabled"');
   });
 });

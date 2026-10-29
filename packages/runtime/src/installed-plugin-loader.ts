@@ -8,7 +8,9 @@
  * installation records ({@link loadPluginInstallations}) and hands each one
  * through {@link verifyInstalledPlugins}. A plugin is imported only when every
  * check below passes, in this order; the first that fails refuses that plugin
- * by name and nothing of it runs:
+ * by name and nothing of it is imported. A check that throws (a file it cannot
+ * read, one that vanished mid-walk, an unreadable disable-state file) refuses
+ * that plugin by name too: one installation never fails the whole boot.
  *
  *  0. **The record names its own directory.** `dir` must be the one the
  *     store derives for the record's environment, id and version
@@ -22,8 +24,10 @@
  *  3. **The signature, over the raw kept bytes, before anything is inflated.**
  *     The detached `artifact.osplugin.sig` names a key id; it must be the
  *     record's, the key must be `active` in `sys_trusted_key` with the
- *     fingerprint the record kept, and `verifyPluginArtifact` must verify it.
- *     So a key revoked since install refuses the plugin at its next boot. An
+ *     fingerprint the record kept, and `verifyPluginArtifact` must verify it
+ *     over the bytes. The signature covers the bytes only; what ties them to
+ *     the record's id and version is check 4's manifest comparison. So a key
+ *     revoked since install refuses the plugin at its next boot. An
  *     install admitted unsigned under `--trust-unsigned` loads with a warning
  *     on every boot.
  *  4. **The tree is the artifact.** The artifact is read back (bounded,
@@ -38,15 +42,35 @@
  *
  * {@link loadInstalledPlugins} runs the same checks, finishes uninstalls
  * (`os plugin uninstall` marks a record; the directory goes here, at the next
- * boot, unless another project's record still names it), and imports what
- * passed. Registering the plugins is the caller's: it `kernel.use`s each, so
- * dependency ordering and health checks are the kernel's `PluginLoader`'s.
+ * boot, under the installations lock and only while the record is still the
+ * marked one, unless another project's record still names it), and imports
+ * what passed. Registering the plugins is the caller's: it `kernel.use`s each,
+ * so dependency ordering and health checks are the kernel's `PluginLoader`'s.
+ *
+ * The refusals that come AFTER the import (`import_failed`, `not_a_plugin`,
+ * `signature_conflict`, and the host's `plugin_name_taken` / `kernel_refused`)
+ * are made once the entry module's top-level code has run: the plugin is not
+ * registered, but its module was evaluated.
+ *
+ * ## What the import resolves
+ *
+ * `os plugin build` leaves `@objectstack/*` external: the host provides them.
+ * The install directory sits under `OS_HOME`, where no `node_modules` holds
+ * them, so a host passes `resolveHostPackagesFrom` (a file URL of its own) and
+ * a bare `@objectstack/*` specifier imported from inside a verified install
+ * directory resolves as if that host file imported it: the same module
+ * instances the host's kernel runs on. Any other bare specifier resolves as
+ * Node resolves it from the install directory. The verified tree is what the
+ * import reads first; a file the plugin imports later, lazily, is read from
+ * disk when it is imported, after this check.
  */
-import { existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync } from 'node:fs';
+import { register } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
+  MAX_UNPACKED_ARTIFACT_BYTES,
   materializeStackPlugin,
   parseSignature,
   readTarGz,
@@ -64,6 +88,7 @@ import {
   loadPluginInstallations,
   otherProjectsInstallationDirs,
   pluginInstallDir,
+  withPluginInstallationsLock,
   type PluginInstallationRecord,
 } from './plugin-installation-store.js';
 import type { TrustedKeyResolution } from './plugin-trusted-keys.js';
@@ -76,6 +101,10 @@ const DEFAULT_ENTRY = 'dist/index.mjs';
 /** Why an installed plugin did not load. */
 export type InstalledPluginRefusalCode =
   | 'records_unreadable'
+  | 'disabled_state_unreadable'
+  | 'install_unreadable'
+  | 'uninstall_failed'
+  | 'record_changed'
   | 'install_dir_unexpected'
   | 'install_dir_missing'
   | 'artifact_changed'
@@ -100,7 +129,8 @@ export type InstalledPluginRefusalCode =
   | 'signature_conflict'
   // Raised by the host that registers what loaded (`os serve`):
   | 'plugin_name_taken'
-  | 'kernel_refused';
+  | 'kernel_refused'
+  | 'loader_failed';
 
 export interface InstalledPluginRefusal {
   id: string;
@@ -230,6 +260,14 @@ function readKept(record: PluginInstallationRecord):
   }
   let artifact: Uint8Array;
   try {
+    const size = statSync(join(dir, INSTALLED_ARTIFACT_FILE)).size;
+    if (size > MAX_UNPACKED_ARTIFACT_BYTES) {
+      return {
+        ok: false,
+        error: 'artifact_changed',
+        message: `${join(dir, INSTALLED_ARTIFACT_FILE)} is ${size} bytes, more than any artifact an install accepts (${MAX_UNPACKED_ARTIFACT_BYTES}); it was not read.`,
+      };
+    }
     artifact = new Uint8Array(readFileSync(join(dir, INSTALLED_ARTIFACT_FILE)));
   } catch (error) {
     return { ok: false, error: 'artifact_changed', message: `${join(dir, INSTALLED_ARTIFACT_FILE)} cannot be read (${(error as Error).message}).` };
@@ -355,6 +393,11 @@ async function checkRecord(
   return { ok: true, value: { record, entry: join(record.dir, ...main.split('/')), signature } };
 }
 
+/** A check that threw on the install directory (unreadable, or changing while it was read). */
+function unreadableInstall(record: PluginInstallationRecord, error: unknown): string {
+  return `reading its install directory ${record.dir} failed (${(error as Error).message}), so it could not be verified and is not loaded.`;
+}
+
 /**
  * Every check of this module's header, for every installation this project
  * recorded in `environmentId`; imports nothing and changes nothing. An
@@ -371,9 +414,21 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
     return out;
   }
   if (records.length === 0) return out;
-  const disabled = installedPluginDisabledIds(input.environmentId);
+  // An unreadable disable-state file leaves "is it disabled?" unanswered, so
+  // nothing that could be disabled is loaded: each is refused by name.
+  let disabled = new Set<string>();
+  let disabledUnreadable: string | null = null;
+  try {
+    disabled = installedPluginDisabledIds(input.environmentId);
+  } catch (error) {
+    disabledUnreadable = (error as Error).message;
+  }
   const pending: Array<{ record: PluginInstallationRecord; kept: { artifact: Uint8Array; signature: string | null; keyId: string | null } }> = [];
   for (const record of records) {
+    if (!record || typeof record !== 'object') {
+      out.refused.push({ id: '?', version: '?', error: 'records_unreadable', message: `an entry of this project's installations file is not a record (${JSON.stringify(record)}).` });
+      continue;
+    }
     if (expectedDir(input.environmentId, record) === null) {
       out.refused.push({
         id: String(record.id),
@@ -387,11 +442,26 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
       out.uninstallPending.push(record);
       continue;
     }
+    if (disabledUnreadable !== null) {
+      out.refused.push({
+        id: record.id,
+        version: record.version,
+        error: 'disabled_state_unreadable',
+        message: `this environment's disable-state file cannot be read (${disabledUnreadable}), so whether it is disabled is not known, and it is not loaded.`,
+      });
+      continue;
+    }
     if (disabled.has(record.id)) {
       out.disabled.push(record);
       continue;
     }
-    const kept = readKept(record);
+    let kept: ReturnType<typeof readKept>;
+    try {
+      kept = readKept(record);
+    } catch (error) {
+      out.refused.push({ id: record.id, version: record.version, error: 'install_unreadable', message: unreadableInstall(record, error) });
+      continue;
+    }
     if (!kept.ok) {
       out.refused.push({ id: record.id, version: record.version, error: kept.error, message: kept.message });
       continue;
@@ -415,7 +485,13 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
     }
   }
   for (const { record, kept } of toCheck) {
-    const checked = await checkRecord(record, kept, keys);
+    let checked: Check;
+    try {
+      checked = await checkRecord(record, kept, keys);
+    } catch (error) {
+      out.refused.push({ id: record.id, version: record.version, error: 'install_unreadable', message: unreadableInstall(record, error) });
+      continue;
+    }
     if (checked.ok) out.verified.push(checked.value);
     else out.refused.push({ id: record.id, version: record.version, error: checked.error, message: checked.message });
   }
@@ -441,6 +517,110 @@ export interface LoadInstalledPluginsInput extends VerifyInstalledPluginsInput {
   wrapBundle(bundle: Record<string, unknown>): unknown | Promise<unknown>;
   /** The dynamic import, injectable for tests. */
   importModule?: (url: string) => Promise<unknown>;
+  /**
+   * A file URL of the host's own: a bare `@objectstack/*` specifier imported
+   * from inside a verified install directory resolves as if this file imported
+   * it (see the module header). Unset, the import resolves as Node resolves it
+   * from the install directory.
+   */
+  resolveHostPackagesFrom?: string;
+}
+
+/**
+ * The resolve hook behind `resolveHostPackagesFrom`, registered with
+ * `module.register` as a `data:` module, so it needs no file of its own on disk.
+ */
+const HOST_PACKAGE_HOOKS = `
+let roots = [];
+let host = '';
+export async function initialize(data) { roots = data.roots; host = data.host; }
+export async function resolve(specifier, context, next) {
+  if (specifier.startsWith('@objectstack/') && typeof context.parentURL === 'string'
+    && roots.some((root) => context.parentURL.startsWith(root))) {
+    return next(specifier, { ...context, parentURL: host });
+  }
+  return next(specifier, context);
+}
+`;
+
+/** The (host, install directory) pairs this process already registered the hook for. */
+const HOST_RESOLUTION_REGISTERED = new Set<string>();
+
+function resolveHostPackagesFor(dirs: readonly string[], host: string): void {
+  const roots = dirs
+    .map((dir) => `${pathToFileURL(dir).href}/`)
+    .filter((root) => !HOST_RESOLUTION_REGISTERED.has(`${host} ${root}`));
+  if (roots.length === 0) return;
+  register(`data:text/javascript,${encodeURIComponent(HOST_PACKAGE_HOOKS)}`, { data: { roots, host } });
+  for (const root of roots) HOST_RESOLUTION_REGISTERED.add(`${host} ${root}`);
+}
+
+/**
+ * Finish the uninstall of `snapshot` under the installations lock, and only
+ * while the record is still that marked one: an id installed again since this
+ * boot read the records keeps its fresh directory and record. Answers `null`
+ * when the record changed.
+ */
+function finishUninstall(environmentId: string | undefined, snapshot: PluginInstallationRecord): { kept: boolean } | null {
+  return withPluginInstallationsLock(environmentId, () => {
+    const current = loadPluginInstallations(environmentId).find((r) => r.id === snapshot.id);
+    if (
+      !current
+      || current.status !== 'uninstall-pending'
+      || current.dir !== snapshot.dir
+      || current.artifact?.sha256 !== snapshot.artifact?.sha256
+    ) {
+      return null;
+    }
+    const sharedDirs = otherProjectsInstallationDirs(environmentId);
+    const kept = sharedDirs === null || sharedDirs.has(current.dir);
+    if (!kept) {
+      rmSync(current.dir, { recursive: true, force: true });
+      // The `<id>` directory goes with its last version.
+      try {
+        rmdirSync(dirname(current.dir));
+      } catch {
+        // not empty, or already gone
+      }
+    }
+    dropPluginInstallation(environmentId, current.id);
+    return { kept };
+  });
+}
+
+/**
+ * The checks on what an entry module exported, and the verdict recorded for
+ * the kernel's loader; answers the refusal, or `null` when the plugin is ready.
+ */
+function inspectImported(record: PluginInstallationRecord, item: VerifiedInstalledPlugin, plugin: unknown): InstalledPluginRefusal | null {
+  const refusal = (error: InstalledPluginRefusalCode, message: string): InstalledPluginRefusal => ({ id: record.id, version: record.version, error, message });
+  if (!plugin || typeof plugin !== 'object' || typeof (plugin as { init?: unknown }).init !== 'function') {
+    return refusal('not_a_plugin', `${item.entry} does not export a plugin (an object with \`init\`).`);
+  }
+  // The signature the artifact verified under rides on the plugin, and the
+  // verdict that verified it is recorded for the kernel's loader, which
+  // refuses a plugin that carries a signature nothing verified.
+  const carried = (plugin as { signature?: unknown }).signature;
+  if (item.signature === null && carried !== undefined) {
+    return refusal('signature_conflict', 'the plugin declares a signature, and its artifact was installed unsigned (--trust-unsigned).');
+  }
+  if (item.signature !== null) {
+    if (carried !== undefined && carried !== item.signature) {
+      return refusal('signature_conflict', 'the plugin declares a signature other than the one its artifact verified under.');
+    }
+    try {
+      (plugin as { signature?: string }).signature = item.signature;
+    } catch {
+      return refusal('signature_conflict', 'the plugin object cannot carry its verified signature (it is frozen).');
+    }
+  }
+  recordPluginArtifactVerdict(plugin as object, {
+    signature: item.signature,
+    keyId: record.signature?.keyId ?? null,
+    fingerprint: record.signature?.fingerprint ?? null,
+    artifactSha256: record.artifact.sha256,
+  });
+  return null;
 }
 
 /**
@@ -454,22 +634,39 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
   const out: InstalledPluginsLoad = { loaded: [], refused: [...verdict.refused], disabled: verdict.disabled, removed: [] };
 
   for (const record of verdict.uninstallPending) {
-    const sharedDirs = otherProjectsInstallationDirs(input.environmentId);
-    const kept = sharedDirs === null || sharedDirs.has(record.dir);
-    if (!kept) {
-      rmSync(record.dir, { recursive: true, force: true });
-      // The `<id>` directory goes with its last version.
-      try {
-        rmdirSync(dirname(record.dir));
-      } catch {
-        // not empty, or already gone
-      }
+    let finished: { kept: boolean } | null;
+    try {
+      finished = finishUninstall(input.environmentId, record);
+    } catch (error) {
+      out.refused.push({
+        id: record.id,
+        version: record.version,
+        error: 'uninstall_failed',
+        message: `finishing its uninstall failed (${(error as Error).message}). Nothing of it was loaded; if its record is still marked, the next boot tries again.`,
+      });
+      continue;
     }
-    dropPluginInstallation(input.environmentId, record.id);
-    out.removed.push({ record, kept });
+    if (finished === null) {
+      out.refused.push({
+        id: record.id,
+        version: record.version,
+        error: 'record_changed',
+        message: 'its record changed while this boot read it (installed again, or its uninstall finished elsewhere). Nothing was removed or loaded; the next boot reads it again.',
+      });
+      continue;
+    }
+    out.removed.push({ record, kept: finished.kept });
   }
 
   const importModule = input.importModule ?? ((url: string) => import(/* webpackIgnore: true */ url));
+  if (input.resolveHostPackagesFrom && verdict.verified.length > 0) {
+    try {
+      resolveHostPackagesFor(verdict.verified.map((v) => v.record.dir), input.resolveHostPackagesFrom);
+    } catch {
+      // No resolve hook (a runtime without `module.register`): a plugin that
+      // imports `@objectstack/*` then fails its import, by name, below.
+    }
+  }
   for (const item of verdict.verified) {
     const { record } = item;
     let plugin: unknown;
@@ -482,36 +679,18 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
       out.refused.push({ id: record.id, version: record.version, error: 'import_failed', message: `importing ${item.entry} failed: ${(error as Error).message}` });
       continue;
     }
-    if (!plugin || typeof plugin !== 'object' || typeof (plugin as { init?: unknown }).init !== 'function') {
-      out.refused.push({ id: record.id, version: record.version, error: 'not_a_plugin', message: `${item.entry} does not export a plugin (an object with \`init\`).` });
+    // The module's top-level code has run from here on. Reading what it
+    // exported can still throw (a getter), which refuses it like a bad export.
+    let refusal: InstalledPluginRefusal | null;
+    try {
+      refusal = inspectImported(record, item, plugin);
+    } catch (error) {
+      refusal = { id: record.id, version: record.version, error: 'not_a_plugin', message: `reading what ${item.entry} exports threw: ${(error as Error).message}` };
+    }
+    if (refusal) {
+      out.refused.push(refusal);
       continue;
     }
-    // The signature the artifact verified under rides on the plugin, and the
-    // verdict that verified it is recorded for the kernel's loader, which
-    // refuses a plugin that carries a signature nothing verified.
-    const carried = (plugin as { signature?: unknown }).signature;
-    if (item.signature === null && carried !== undefined) {
-      out.refused.push({ id: record.id, version: record.version, error: 'signature_conflict', message: 'the plugin declares a signature, and its artifact was installed unsigned (--trust-unsigned).' });
-      continue;
-    }
-    if (item.signature !== null) {
-      if (carried !== undefined && carried !== item.signature) {
-        out.refused.push({ id: record.id, version: record.version, error: 'signature_conflict', message: 'the plugin declares a signature other than the one its artifact verified under.' });
-        continue;
-      }
-      try {
-        (plugin as { signature?: string }).signature = item.signature;
-      } catch {
-        out.refused.push({ id: record.id, version: record.version, error: 'signature_conflict', message: 'the plugin object cannot carry its verified signature (it is frozen).' });
-        continue;
-      }
-    }
-    recordPluginArtifactVerdict(plugin as object, {
-      signature: item.signature,
-      keyId: record.signature?.keyId ?? null,
-      fingerprint: record.signature?.fingerprint ?? null,
-      artifactSha256: record.artifact.sha256,
-    });
     out.loaded.push({ record, plugin });
   }
   return out;

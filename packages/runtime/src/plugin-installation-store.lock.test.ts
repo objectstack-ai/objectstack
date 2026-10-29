@@ -7,10 +7,14 @@
  *
  * Pinned: a writer waits for a live holder and then refuses, naming it and the
  * lock file; a stale lock (dead pid, too old, an unparseable leftover, this
- * process's own pid while it holds nothing) is cleared by the next writer; the
- * lock is re-entrant within a process and always released; two processes
- * writing at once both land every record; and another project's records keep
- * their directories out of an uninstall.
+ * thread's own pid and thread while it holds nothing) is cleared by the next
+ * writer, and another thread of this process holding it is live; a lock judged
+ * stale and replaced by a live writer before it is cleared is left alone (the
+ * two-writer steal race), and a steal lock a crashed writer left is cleared;
+ * the lock is re-entrant and always released, and a release never removes a
+ * lock that is no longer the holder's; two processes writing at once both land
+ * every record; and another project's records keep their directories out of
+ * an uninstall.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,9 +23,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { threadId } from 'node:worker_threads';
 
 import {
   INSTALLATIONS_LOCK_STALE_MS,
+  INSTALLATIONS_LOCK_STEAL_STALE_MS,
+  PluginInstallationsLockedError,
+  installationsLockTestHooks,
   dropPluginInstallation,
   installedPluginDisabledIds,
   loadPluginInstallations,
@@ -96,7 +104,7 @@ describe('the installations lock', () => {
 
   it.each([
     ['a dead pid', () => JSON.stringify({ pid: deadPid(), at: 'then' }), 0],
-    ['this process\'s own pid while it holds nothing', () => JSON.stringify({ pid: process.pid, at: 'then' }), 0],
+    ['this thread\'s own pid and thread while it holds nothing', () => JSON.stringify({ pid: process.pid, thread: threadId, at: 'then' }), 0],
     ['a live pid older than the stale bound', () => JSON.stringify({ pid: process.ppid, at: 'then' }), INSTALLATIONS_LOCK_STALE_MS + 60_000],
     ['an unparseable leftover older than a second', () => '{"pid":', 5_000],
   ])('clears a stale lock: %s', (_label, body, ageMs) => {
@@ -116,6 +124,73 @@ describe('the installations lock', () => {
     expect(() => withPluginInstallationsLock('env_local', () => 'never', { waitMs: 200 }))
       .toThrow(/a writer that has not yet written its pid/);
     expect(existsSync(lock)).toBe(true);
+  });
+
+  it('treats a lock another thread of this process holds as live', () => {
+    const lock = lockFile();
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, thread: threadId + 1, at: '2026-10-29T00:00:00.000Z' }));
+    expect(() => withPluginInstallationsLock('env_local', () => 'never', { waitMs: 200 }))
+      .toThrow(new RegExp(`locked by process ${process.pid} thread ${threadId + 1} `));
+    expect(existsSync(lock)).toBe(true);
+  });
+
+  it('refuses with a PluginInstallationsLockedError, so a caller can name it apart from other failures', () => {
+    writeFileSync(lockFile(), JSON.stringify({ pid: process.ppid, at: 'now' }));
+    let thrown: unknown;
+    try {
+      withPluginInstallationsLock('env_local', () => 'never', { waitMs: 100 });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PluginInstallationsLockedError);
+    expect((thrown as Error).name).toBe('PluginInstallationsLockedError');
+  });
+
+  it('leaves a stale lock alone once a live writer has replaced it since the judgement (the steal race)', () => {
+    // Writer B judges a dead holder's lock stale. Before B clears it, writer A
+    // (the hook) clears the same stale lock and takes a fresh one. B must not
+    // remove A's lock: it waits for A instead, and refuses naming A.
+    const lock = lockFile();
+    writeFileSync(lock, JSON.stringify({ pid: deadPid(), at: 'then' }));
+    const writerA = JSON.stringify({ pid: process.ppid, token: 'writer-a', at: '2026-10-29T00:00:00.000Z' });
+    let ranB = false;
+    installationsLockTestHooks.afterStaleJudged = (path) => {
+      installationsLockTestHooks.afterStaleJudged = undefined;
+      rmSync(path);
+      writeFileSync(path, writerA, { flag: 'wx' });
+    };
+    try {
+      expect(() => withPluginInstallationsLock('env_local', () => { ranB = true; }, { waitMs: 300 }))
+        .toThrow(new RegExp(`locked by process ${process.ppid} `));
+    } finally {
+      installationsLockTestHooks.afterStaleJudged = undefined;
+    }
+    expect(ranB).toBe(false);
+    expect(readFileSync(lock, 'utf8')).toBe(writerA);
+    expect(existsSync(`${lock}.steal`)).toBe(false);
+  });
+
+  it('clears a steal lock a writer left when it died clearing a stale lock', () => {
+    const lock = lockFile();
+    writeFileSync(lock, JSON.stringify({ pid: deadPid(), at: 'then' }));
+    writeFileSync(`${lock}.steal`, JSON.stringify({ pid: deadPid(), at: 'then' }));
+    const then = new Date(Date.now() - INSTALLATIONS_LOCK_STEAL_STALE_MS - 5_000);
+    utimesSync(`${lock}.steal`, then, then);
+    expect(withPluginInstallationsLock('env_local', () => 'ran', { waitMs: 1_000 })).toBe('ran');
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.steal`)).toBe(false);
+  });
+
+  it('never removes, on release, a lock that is no longer the holder\'s', () => {
+    const lock = lockFile();
+    const other = JSON.stringify({ pid: process.ppid, token: 'other', at: 'now' });
+    withPluginInstallationsLock('env_local', () => {
+      // Another writer took the lock over (as one would a lock aged past the
+      // stale bound) while this one still ran.
+      rmSync(lock);
+      writeFileSync(lock, other);
+    });
+    expect(readFileSync(lock, 'utf8')).toBe(other);
   });
 
   it('is re-entrant within a process, and released when the outer holder returns or throws', () => {

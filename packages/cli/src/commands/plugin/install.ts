@@ -66,6 +66,7 @@ import {
   dispatchPluginRuntime,
   recordPluginInstallation,
   withPluginInstallationsLock,
+  PluginInstallationsLockedError,
   type PluginInstallationRecord,
 } from '@objectstack/runtime';
 import {
@@ -77,7 +78,14 @@ import {
   printSuccess,
   printWarningToStderr,
 } from '../../utils/format.js';
-import { MANIFEST_FILENAME, SIGNATURE_FILENAME, readTarGz, sha256Hex, type ArchiveFile } from '../../utils/osplugin.js';
+import {
+  MANIFEST_FILENAME,
+  MAX_UNPACKED_ARTIFACT_BYTES,
+  SIGNATURE_FILENAME,
+  readTarGz,
+  sha256Hex,
+  type ArchiveFile,
+} from '../../utils/osplugin.js';
 import { readTrustedKeys } from '../../utils/plugin-trust-read.js';
 import {
   INSTALLED_ARTIFACT_FILE,
@@ -148,7 +156,13 @@ export default class PluginInstall extends Command {
     }
     let bytes: Uint8Array;
     try {
-      if (!statSync(artifactPath).isFile()) throw new Error('not a regular file');
+      const stat = statSync(artifactPath);
+      if (!stat.isFile()) throw new Error('not a regular file');
+      // Read nothing larger than any artifact may unpack to: the compressed
+      // bytes are held whole for the signature check.
+      if (stat.size > MAX_UNPACKED_ARTIFACT_BYTES) {
+        throw new Error(`it is ${stat.size} bytes, more than the ${MAX_UNPACKED_ARTIFACT_BYTES} an .osplugin may unpack to`);
+      }
       bytes = new Uint8Array(await readFile(artifactPath));
     } catch (error) {
       await refuse({
@@ -403,8 +417,14 @@ export default class PluginInstall extends Command {
         return { record, replaced };
       });
     } catch (error) {
-      // The lock itself: another live writer held it past the wait.
-      outcome = { refusal: { error: 'installations_locked', message: `${(error as Error).message} Nothing was installed.` } };
+      // Another live writer held the lock past the wait, or the lock file
+      // itself could not be written.
+      outcome = {
+        refusal: {
+          error: error instanceof PluginInstallationsLockedError ? 'installations_locked' : 'install_failed',
+          message: `${(error as Error).message} Nothing was installed.`,
+        },
+      };
     }
     if ('refusal' in outcome) {
       await refuse(outcome.refusal);

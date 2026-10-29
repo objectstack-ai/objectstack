@@ -14,8 +14,8 @@
  * and only `runtime: 'node'` is ever imported.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createPublicKey } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -27,6 +27,7 @@ import { dispatchPluginRuntime, loadInstalledPlugins, verifyInstalledPlugins } f
 import {
   INSTALLED_ARTIFACT_FILE,
   INSTALLED_SIGNATURE_FILE,
+  installationsLockTestHooks,
   loadPluginInstallations,
   markPluginUninstall,
   pluginInstallDir,
@@ -37,6 +38,27 @@ import {
 } from './plugin-installation-store.js';
 import { packageStateFileName } from './package-state-store.js';
 import { publicKeyFingerprint, type TrustedKeyResolution } from './plugin-trusted-keys.js';
+
+/**
+ * A file-system call the test makes throw, by its operation and path; every
+ * other call is the real one.
+ */
+const fsFaults = vi.hoisted(() => ({ fail: null as ((op: string, path: string) => string | null) | null }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const faulty = <F extends (...args: never[]) => unknown>(op: string, real: F): F =>
+    ((...args: Parameters<F>) => {
+      const code = fsFaults.fail?.(op, String(args[0]));
+      if (code) throw Object.assign(new Error(`${code}: ${op} refused by the test, '${String(args[0])}'`), { code });
+      return real(...args);
+    }) as F;
+  return {
+    ...actual,
+    readdirSync: faulty('readdir', actual.readdirSync),
+    readFileSync: faulty('readFile', actual.readFileSync),
+    rmSync: faulty('rm', actual.rmSync),
+  };
+});
 
 const ENV = 'env_local';
 
@@ -49,6 +71,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  fsFaults.fail = null;
+  delete installationsLockTestHooks.waitMs;
   if (saved.OS_HOME === undefined) delete process.env.OS_HOME;
   else process.env.OS_HOME = saved.OS_HOME;
   rmSync(home, { recursive: true, force: true });
@@ -393,6 +417,7 @@ describe('what the import answers', () => {
     ['the module exports no plugin', 'not_a_plugin', 'export default 42;\n'],
     ['the plugin declares another signature', 'signature_conflict', 'export default { name: "x", init() {}, signature: "ed25519:other:AAAA" };\n'],
     ['the plugin object is frozen', 'signature_conflict', 'export default Object.freeze({ name: "x", init() {} });\n'],
+    ['reading the export throws', 'not_a_plugin', 'export default { name: "x", init() {}, get signature() { throw new Error("getter"); } };\n'],
   ])('%s → %s', async (_label, error, entry) => {
     install({ entry });
     const out = await load();
@@ -472,5 +497,88 @@ describe('verifyInstalledPlugins changes nothing', () => {
     expect(verdict.uninstallPending.map((u) => u.id)).toEqual(['com.acme.gone']);
     expect(existsSync(pluginInstallDir(ENV, 'com.acme.gone', '1.0.0'))).toBe(true);
     expect(loadPluginInstallations(ENV)).toHaveLength(2);
+  });
+});
+
+describe('a throw on one installation refuses it by name, and the boot goes on', () => {
+  it('an install directory that cannot be listed → install_unreadable; the next plugin still loads', async () => {
+    const locked = install({ id: 'com.acme.locked' });
+    install({ id: 'com.acme.fine' });
+    fsFaults.fail = (op, path) => (op === 'readdir' && path === locked.dir ? 'EACCES' : null);
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ id: 'com.acme.locked', error: 'install_unreadable' })]);
+    expect(out.refused[0].message).toContain('EACCES');
+    expect(out.loaded.map((l) => l.record.id)).toEqual(['com.acme.fine']);
+    expect(out.imported).toHaveLength(1);
+  });
+
+  it('a file that vanishes between the walk and its read → install_unreadable, nothing imported', async () => {
+    const r = install();
+    fsFaults.fail = (op, path) => (op === 'readFile' && path === join(r.dir, 'dist', 'index.mjs') ? 'ENOENT' : null);
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ id: r.id, error: 'install_unreadable' })]);
+    expect(out.imported).toEqual([]);
+  });
+
+  it('a disable-state file that cannot be parsed → disabled_state_unreadable for each plugin, none loaded', async () => {
+    const a = install({ id: 'com.acme.a' });
+    const b = install({ id: 'com.acme.b' });
+    setInstalledPluginDisabled(ENV, a.id, true);
+    const stateDir = join(home, 'package-state');
+    const [stateFile] = readdirSync(stateDir);
+    writeFileSync(join(stateDir, stateFile), '{ not json');
+    const out = await load();
+    expect(out.refused.map((r) => [r.id, r.error])).toEqual([[a.id, 'disabled_state_unreadable'], [b.id, 'disabled_state_unreadable']]);
+    expect(out.imported).toEqual([]);
+    // And a disable or enable writes nothing over the file it could not read.
+    expect(() => setInstalledPluginDisabled(ENV, b.id, true)).toThrow(/cannot be read/);
+    expect(readFileSync(join(stateDir, stateFile), 'utf8')).toBe('{ not json');
+  });
+
+  it('an uninstall whose directory cannot be removed → uninstall_failed; the record stays marked and the next boot finishes it', async () => {
+    const r = install();
+    markPluginUninstall(ENV, r.id);
+    fsFaults.fail = (op, path) => (op === 'rm' && path === r.dir ? 'EBUSY' : null);
+    const out = await load();
+    expect(out.removed).toEqual([]);
+    expect(out.refused).toEqual([expect.objectContaining({ id: r.id, error: 'uninstall_failed' })]);
+    expect(loadPluginInstallations(ENV)).toEqual([expect.objectContaining({ id: r.id, status: 'uninstall-pending' })]);
+    fsFaults.fail = null;
+    const again = await load();
+    expect(again.removed).toEqual([expect.objectContaining({ kept: false })]);
+    expect(existsSync(r.dir)).toBe(false);
+  });
+
+  it('an uninstall the installations lock is held over past the wait → uninstall_failed, nothing removed', async () => {
+    const r = install();
+    markPluginUninstall(ENV, r.id);
+    const lock = `${pluginInstallationsFile(ENV)}.lock`;
+    writeFileSync(lock, JSON.stringify({ pid: process.ppid, thread: 0, token: 'another-writer', at: new Date().toISOString() }));
+    installationsLockTestHooks.waitMs = 200;
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ id: r.id, error: 'uninstall_failed' })]);
+    expect(out.refused[0].message).toMatch(/locked by process/);
+    expect(existsSync(r.dir)).toBe(true);
+    expect(readFileSync(lock, 'utf8')).toContain('another-writer');
+    rmSync(lock);
+  });
+
+  it('an id installed again after this boot read the records keeps its fresh install → record_changed', async () => {
+    const gone = install({ id: 'com.acme.gone' });
+    markPluginUninstall(ENV, gone.id);
+    install({ id: 'com.acme.signed' });
+    const keys = activeKeys();
+    // The trusted-key read happens after the records were read and before
+    // any uninstall is finished: the window an install can land in.
+    const out = await load(async (ids) => {
+      install({ id: 'com.acme.gone' });
+      return keys.resolveKeys(ids);
+    });
+    expect(out.removed).toEqual([]);
+    expect(out.refused).toEqual([expect.objectContaining({ id: gone.id, error: 'record_changed' })]);
+    expect(existsSync(join(gone.dir, INSTALLED_ARTIFACT_FILE))).toBe(true);
+    expect(loadPluginInstallations(ENV).find((r) => r.id === gone.id)?.status).toBe('installed');
+    // The next boot reads the fresh install and loads it.
+    expect((await load()).loaded.map((l) => l.record.id).sort()).toEqual(['com.acme.gone', 'com.acme.signed']);
   });
 });

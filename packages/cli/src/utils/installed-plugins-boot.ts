@@ -8,6 +8,7 @@ import {
   pluginInstallationsFile,
   type InstalledPluginRefusal,
 } from '@objectstack/runtime';
+import { isExitSignal } from './format.js';
 import { pluginEnvironmentId } from './plugin-install.js';
 import { readTrustedKeys } from './plugin-trust-read.js';
 
@@ -22,14 +23,22 @@ import { readTrustedKeys } from './plugin-trust-read.js';
  * the read-only one-shot boot `os plugin install` reads them through
  * (`./plugin-trust-read.ts`, against `OS_DATABASE_URL` or the project
  * database, as the `os plugin` commands resolve it); `AppPlugin` for a plain
- * bundle; and `kernel.use` for each plugin that passed, so dependency order
- * and health checks are the kernel's.
+ * bundle; this file's URL, so a plugin's bare `@objectstack/*` imports resolve
+ * to the packages this CLI runs on; and `kernel.use` for each plugin that
+ * passed, so dependency order and health checks are the kernel's.
  *
  * A refused plugin does not stop the boot — the config `plugins` loop's
- * precedent — but nothing of it runs and it is printed by name, one `✗` line
- * each, with the count on the banner. An installed plugin never supersedes a
- * plugin this boot already registered under the same name (the kernel's
- * same-name rule would replace the host's): it is refused instead.
+ * precedent — and it is printed by name, one `✗` line each, with the count on
+ * the banner. A plugin refused before its import had nothing of it evaluated;
+ * one refused after it (`import_failed`, `not_a_plugin`, `signature_conflict`,
+ * `plugin_name_taken`, `kernel_refused`) had its entry module's top-level code
+ * run, and is not registered. An installed plugin never supersedes a plugin
+ * this boot already registered under the same name (the kernel's same-name
+ * rule would replace the host's): it is refused instead. A host plugin
+ * registered LATER under the same name supersedes the installed one, with the
+ * kernel's warning: the host's wins either way. Even a loader that throws
+ * outright is one `✗` line (`loader_failed`), and the boot goes on without
+ * installed plugins.
  *
  * No installations file for this project and environment: nothing is read,
  * and the boot is as it was.
@@ -51,18 +60,30 @@ export async function registerInstalledPlugins(input: {
   const environmentId = pluginEnvironmentId();
   if (!existsSync(pluginInstallationsFile(environmentId))) return null;
 
-  const result = await loadInstalledPlugins({
-    environmentId,
-    resolveKeys: async (keyIds) => {
-      const read = await readTrustedKeys(keyIds, { databaseUrl: process.env.OS_DATABASE_URL, json: false });
-      if (!read.ok) throw new Error(read.message);
-      return read.keys;
-    },
-    wrapBundle: async (bundle) => {
-      const { AppPlugin } = await import('@objectstack/runtime');
-      return new AppPlugin(bundle);
-    },
-  });
+  let result: Awaited<ReturnType<typeof loadInstalledPlugins>>;
+  try {
+    result = await loadInstalledPlugins({
+      environmentId,
+      resolveKeys: async (keyIds) => {
+        const read = await readTrustedKeys(keyIds, { databaseUrl: process.env.OS_DATABASE_URL, json: false });
+        if (!read.ok) throw new Error(read.message);
+        return read.keys;
+      },
+      wrapBundle: async (bundle) => {
+        const { AppPlugin } = await import('@objectstack/runtime');
+        return new AppPlugin(bundle);
+      },
+      resolveHostPackagesFrom: import.meta.url,
+    });
+  } catch (error) {
+    if (isExitSignal(error)) throw error;
+    result = {
+      loaded: [],
+      removed: [],
+      disabled: [],
+      refused: [{ id: '*', version: '*', error: 'loader_failed', message: `the installed-plugin loader failed (${(error as Error).message}); no installed plugin was loaded.` }],
+    };
+  }
 
   const out: InstalledPluginsBoot = { loaded: [], refused: [...result.refused] };
   for (const { record, kept } of result.removed) {
@@ -77,7 +98,13 @@ export async function registerInstalledPlugins(input: {
     console.error(chalk.dim(`  Installed plugin ${record.id}@${record.version} is disabled (os plugin enable ${record.id})`));
   }
   for (const { record, plugin } of result.loaded) {
-    const name = String((plugin as { name?: unknown }).name ?? record.id);
+    let name: string;
+    try {
+      name = String((plugin as { name?: unknown }).name ?? record.id);
+    } catch (error) {
+      out.refused.push({ id: record.id, version: record.version, error: 'kernel_refused', message: `its plugin name cannot be read: ${(error as Error).message}` });
+      continue;
+    }
     if (input.kernel.hasPlugin(name)) {
       out.refused.push({
         id: record.id,

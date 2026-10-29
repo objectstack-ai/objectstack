@@ -56,7 +56,7 @@ import { ManifestSchema, PluginRuntimeSchema } from './manifest.zod';
 /** Both halves of the truthful split, as separate probes. */
 const SAYS_PUBLISH_GATE_ENFORCED = /publish gate/i;
 const SAYS_422 = /422/;
-const SAYS_BOOT_LOADS_ONLY_NODE = /at boot for a locally installed plugin: only `node` is loaded/i;
+const SAYS_BOOT_LOADS_ONLY_NODE = /at boot for a plugin `os plugin install` installed: only `node` is loaded/i;
 const SAYS_NODE_NOT_ISOLATED = /not isolated/i;
 const SAYS_SANDBOX_WORKER_REFUSED = /`sandbox` and `worker` are refused until/i;
 const RETRACTED_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;

@@ -45,8 +45,20 @@ export default class PluginDisable extends Command {
       this.exit(1);
       return;
     }
-    const changed = !installedPluginDisabledIds(environmentId).has(args.id);
-    if (changed) setInstalledPluginDisabled(environmentId, args.id, true);
+    let changed: boolean;
+    try {
+      changed = !installedPluginDisabledIds(environmentId).has(args.id);
+      if (changed) setInstalledPluginDisabled(environmentId, args.id, true);
+    } catch (error) {
+      const message = `${(error as Error).message}. Nothing was changed.`;
+      if (json) {
+        await emitJson({ error: 'disable_state_failed', message }, 1, { compact: true });
+        return;
+      }
+      printError(message);
+      this.exit(1);
+      return;
+    }
     if (json) {
       await emitJson({ id: args.id, version: found.record.version, environmentId, disabled: true, changed }, 0, { compact: true });
       return;
