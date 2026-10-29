@@ -3,9 +3,9 @@
 /**
  * [#25467 cut 32] A stored commit row's `items` column read back as its revert
  * plan, from `ObjectStackProtocolImplementation`, moved out of `protocol.ts`
- * whole: `parseCommitItems`, which `listPackageCommits` and `revertCommit`
- * call. An array is the plan as stored; a string is parsed as JSON; anything
- * else, or a string that is not a JSON array, reads as no items.
+ * whole: `parseCommitItems`, which `listCommits` and `revertCommit` call. An
+ * array is the plan as stored; a string is parsed as JSON; anything else, or a
+ * string that is not a JSON array, reads as no items.
  *
  * A MOVE, not a redesign. The function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
