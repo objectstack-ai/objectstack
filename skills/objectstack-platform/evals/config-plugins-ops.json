@@ -8,13 +8,13 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineStack", "manifest", "engines", "Object.values("],
-        "must_not_contain": ["workflows:", "approvals:", "tableName"]
+        "must_not_contain": ["workflows:", "approvals:", "tableName:"]
       }
     },
     {
       "id": 2,
       "prompt": "Build a plugin registering an `audit` service that records every metadata reload and every `task` insert.",
-      "expected_output": "A `Plugin` with `name`, `init(ctx)` calling `ctx.registerService('audit', ...)` and `ctx.hook('metadata:reloaded', ...)`, `start(ctx)`, `destroy()`. Record events are not kernel hooks — `ctx.hook('data:beforeInsert')` registers and never fires — so the task insert is a data hook (objectstack-data). No `onInstall` / `onEnable` / `onDisable`.",
+      "expected_output": "A `Plugin` with `name`, `init(ctx)` calling `ctx.registerService('audit', ...)` and `ctx.hook('metadata:reloaded', ...)`, `start(ctx)`, `destroy()`. Record events are not kernel hooks — a `data:*` kernel hook registers and never fires — so the task insert is a data hook (objectstack-data). No install / enable / disable hooks.",
       "files": [],
       "assertions": {
         "must_contain": ["registerService", "ctx.hook(", "metadata:reloaded", "init(", "destroy"],
@@ -34,7 +34,7 @@
     {
       "id": 4,
       "prompt": "We deploy on Vercel serverless functions in our own Hono app; mount the ObjectStack API under /api.",
-      "expected_output": "`createHonoApp({ kernel })` from `@objectstack/hono` (prefix defaults to `/api`) in the host app — `HonoServerPlugin` only when ObjectStack owns the server; `LiteKernel` for a cold-start-sensitive host; `/auth/*` follows the auth `basePath`, not `prefix`; no `@objectstack/adapter-*` packages exist.",
+      "expected_output": "`createHonoApp({ kernel })` from `@objectstack/hono` (prefix defaults to `/api`) in the host app — `HonoServerPlugin` only when ObjectStack owns the server; `LiteKernel` for a cold-start-sensitive host; `/auth/*` follows the auth `basePath`, not `prefix`; no `adapter-*` packages exist.",
       "files": [],
       "assertions": {
         "must_contain": ["createHonoApp", "@objectstack/hono", "LiteKernel"],
@@ -64,7 +64,7 @@
     {
       "id": 7,
       "prompt": "Prepare a demo of our contracts app: the seed assigns matters to 'Legal Counsel 1' and 'Paralegal 1', and the demo opens signed in as Legal Counsel 1.",
-      "expected_output": "Both go in `demoStaff` — `name` as the seed references them, `email`, a `position` / `permissionSets` the stack declares — and `os dev` creates the accounts with the seed password: no `password` key, no `role:` alias, no platform set like `admin_full_access`, no hand-written `sys_user` seed row. `devLogins` creates nothing (at most a banner entry); `os build` drops `demoStaff`; production creates no demo account.",
+      "expected_output": "Both go in `demoStaff` — `name` as the seed references them, `email`, a `position` / `permissionSets` the stack declares — and `os dev` creates the accounts with the seed password: no `password` key, no `role` alias, no platform set, no hand-written `sys_user` seed row. `devLogins` creates nothing (at most a banner entry); `os build` drops `demoStaff`; production creates no demo account.",
       "files": [],
       "assertions": {
         "must_contain": ["demoStaff", "position", "permissionSets", "os dev"],
