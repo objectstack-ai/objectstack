@@ -1232,6 +1232,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     dependentValues,
     dependsOnLabels,
     emptyHint,
+    onInvalidInputChange,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1269,8 +1270,14 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // A record-mode amount's symbol and decimals follow the code the user picks
     // in its sibling select, so the amount box needs the live record too.
     ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
+    // Only the widgets that report unparseable text read it; every other one
+    // would spread an unknown handler onto its DOM (objectstack#27483).
+    ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
   };
 }
+
+/** The registered widgets that fire `onInvalidInputChange`: the date picker's two faces. */
+const INVALID_INPUT_REPORTING_WIDGET_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
 
 /**
  * FullscreenTextarea — `<Textarea>` with a top-right "expand" button that
@@ -3254,6 +3261,11 @@ ComponentRegistry.register('form',
     // on every render — the same React footgun documented at the call site.
     const requiredMessagesRef = React.useRef<Map<string, string> | undefined>(undefined);
     const requiredMessages = (requiredMessagesRef.current ??= new Map<string, string>());
+    // Per field name, the message of text its widget could not parse
+    // (`onInvalidInputChange`, objectstack#27483); absent ⇒ none. A ref for the
+    // reasons `requiredMessages` gives: read by a validator at call time.
+    const invalidInputMessagesRef = React.useRef<Map<string, string> | undefined>(undefined);
+    const invalidInputMessages = (invalidInputMessagesRef.current ??= new Map<string, string>());
 
     // --- Field rendering ---------------------------------------------------
     // Renders ONE field row (or a virtual section divider). Hoisted out of the
@@ -3450,6 +3462,11 @@ ComponentRegistry.register('form',
       }
       const authoredValidate = rules.validate;
       rules.validate = {
+        // Text the widget could not parse was never written, so the value
+        // cannot speak for it: this verdict comes first, under its own key,
+        // and refuses submit the way a missing required value does
+        // (objectstack#27483).
+        invalidInput: () => invalidInputMessages.get(name) ?? true,
         // A field-authored `validate` keeps running, and keeps its own
         // `type: 'validate'` error key.
         ...(typeof authoredValidate === 'function'
@@ -3839,6 +3856,18 @@ ComponentRegistry.register('form',
                   // Undefined when the field is valid, so the key is simply
                   // absent from the DOM rather than rendering `error=""`.
                   error: fieldState.error?.message,
+                  // The widget's verdict on text it could not parse, turned
+                  // into this field's `invalidInput` error at once (above);
+                  // withdrawn, it clears only that error (objectstack#27483).
+                  onInvalidInputChange: (message: string | null) => {
+                    if (message === null) {
+                      if (!invalidInputMessages.delete(name)) return;
+                      if (form.getFieldState(name).error?.type === 'invalidInput') form.clearErrors(name);
+                      return;
+                    }
+                    invalidInputMessages.set(name, message);
+                    void form.trigger(name);
+                  },
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —
