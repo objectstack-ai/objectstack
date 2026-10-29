@@ -8,6 +8,8 @@ fix(rest): `GET /meta/diagnostics` refuses an unknown type, severity or package 
 Clause-②: no (narrowing — owes one contract-review-tier review before the queue)
 Metadata-protocol: none
 
+<!-- adr-0087: not-required (no-migration-prescription) The narrowed face is a REQUEST to one read door: query values that were never honoured (an unknown type, severity or package) are now refused instead of answered with an empty sweep, and an alias's stats move to the canonical key the sweep already listed it under. No stored metadata, package source or object definition holds a diagnostics request or response, no schema key or export changes, and the remedy is the caller's own query string, so there is nothing for `objectstack migrate meta` to rewrite. -->
+
 `/meta/diagnostics` is the door an author, an agent or CI reads to learn whether metadata is healthy, and three query values it could not honour were answered `200` with zero issues.
 
 - **`?type=`** naming no metadata type (`zzz_unknown`) is refused with `400 INVALID_REQUEST`, by the same verdict `GET /meta/:type` uses: the platform's static type spelling, then the types this deployment carries live. A near-miss spelling of a declared type (`viewes`) keeps its existing refusal, which names the spellings it was reaching for.
