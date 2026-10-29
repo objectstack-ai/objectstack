@@ -303,18 +303,56 @@ export async function resolvePasswordChangeUserId(this: Pick<PasswordSessionPoli
   return undefined;
 }
 
+/**
+ * The refusal a forced password change answers when the new password is the
+ * one the administrator issued. The code is `PASSWORD_REUSE` — the condition
+ * IS reuse of the current password — and the message names the case the user
+ * is in, which the history ring's generic message does not.
+ */
+export const FORCED_ROTATION_REUSE_MESSAGE =
+  'Choose a new password that is different from your temporary password.';
+
+/**
+ * Is an administrator's forced password change (`sys_user.must_change_password`,
+ * issued by the admin create-user, set-user-password and import-users doors)
+ * outstanding for `userId`? Read as the system; the column is `readonly`, not
+ * `internal`, so the row carries it. Fails open (false) on a lookup error, as
+ * every read in `assertPasswordNotReused` does.
+ */
+async function isForcedRotationPending(engine: any, userId: string, context: unknown): Promise<boolean> {
+  try {
+    const u = await engine.findOne('sys_user', {
+      where: { id: userId },
+      fields: ['must_change_password'],
+      context,
+    });
+    return u?.must_change_password === true || u?.must_change_password === 1;
+  } catch {
+    return false;
+  }
+}
+
 /** The body of `AuthManager#assertPasswordNotReused`; the method's docblock there is its contract. */
 export async function assertPasswordNotReused(
   this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'parseHashes'>,
   userId: string,
   candidate: string,
   verify?: (data: { password: string; hash: string }) => Promise<boolean>,
+  currentPassword?: string,
 ): Promise<string | undefined> {
   const count = Math.floor(Number(this.config.passwordHistoryCount) || 0);
-  if (count <= 0 || typeof verify !== 'function') return undefined;
+  if (typeof verify !== 'function') return undefined;
   const engine = this.getDataEngine();
   if (!engine) return undefined;
   const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+  // A forced change exists to move the user OFF a password the administrator
+  // knows, so while it is outstanding the current password is refused as the
+  // new one whatever `passwordHistoryCount` says (0, the default, included).
+  // Every door that clears the flag (`stampPasswordChangedAt`, from the
+  // after-hook on `/change-password` and `/reset-password`) passes through
+  // here first.
+  const forced = await isForcedRotationPending(engine, userId, SYSTEM_CTX);
+  if (count <= 0 && !forced) return undefined;
   let account: any;
   try {
     account = await engine.findOne('sys_account', {
@@ -338,6 +376,26 @@ export async function assertPasswordNotReused(
   }
   if (!account?.id) return undefined;
   const currentHash = typeof account.password === 'string' ? account.password : '';
+  if (forced && currentHash) {
+    const matches = async (password: string) => {
+      try { return await verify({ password, hash: currentHash }); } catch { return false; }
+    };
+    // `/change-password` carries the caller's claim of the current password,
+    // and better-auth verifies that claim only AFTER this hook. Judge the new
+    // password only once the claim holds, so this refusal never tells a caller
+    // who does not know the current password whether a guess equals it; a
+    // wrong claim is left to the endpoint's own refusal. `/reset-password`
+    // carries no claim: its token is the caller's authority.
+    const claimHolds = currentPassword === undefined || await matches(currentPassword);
+    if (claimHolds && await matches(candidate)) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('BAD_REQUEST', {
+        message: FORCED_ROTATION_REUSE_MESSAGE,
+        code: 'PASSWORD_REUSE',
+      });
+    }
+  }
+  if (count <= 0) return undefined;
   const compareList = [currentHash, ...this.parseHashes(account.previous_password_hashes)].filter(Boolean);
   for (const h of compareList) {
     let match = false;

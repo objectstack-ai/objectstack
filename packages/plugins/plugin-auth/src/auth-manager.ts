@@ -5443,11 +5443,22 @@ export class AuthManager {
    * native `password.verify` (passed in) rather than re-hashing. Returns the
    * current hash (for the after-hook to append) when the candidate is fresh, or
    * undefined when the feature is off / nothing to compare.
+   *
+   * While an administrator's forced change (`sys_user.must_change_password`)
+   * is outstanding, a candidate matching the CURRENT password is refused with
+   * `PASSWORD_REUSE` whatever `passwordHistoryCount` is, the default 0
+   * included: completing the change clears the flag, and it must not clear
+   * while the user keeps the password the administrator issued.
+   * `currentPassword` is the caller's claim of the current password on
+   * `/change-password` (`''` when the body carries none); that refusal is
+   * answered only once the claim verifies. Omitted on a door that carries no
+   * claim (`/reset-password`, whose token is the authority).
    */
   private assertPasswordNotReused(
     userId: string,
     candidate: string,
     verify?: (data: { password: string; hash: string }) => Promise<boolean>,
+    currentPassword?: string,
   ): Promise<string | undefined> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
     const readConfig = () => this.config;
@@ -5456,7 +5467,7 @@ export class AuthManager {
       getDataEngine: (...a) => this.getDataEngine(...a),
       parseHashes: (...a) => this.parseHashes(...a),
     };
-    return assertPasswordNotReused.call(host, userId, candidate, verify);
+    return assertPasswordNotReused.call(host, userId, candidate, verify, currentPassword);
   }
 
   /**
