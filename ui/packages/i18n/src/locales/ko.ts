@@ -2606,6 +2606,9 @@ const ko = {
       invitationPreviewTitle: "{{inviter}} 님이 {{organization}}에 초대했습니다",
       invitationPreviewTitleNoInviter: "{{organization}}에 초대되었습니다",
       invitationPreviewDescription: "초대를 받은 이메일 주소({{email}})를 사용하세요.",
+      invitationGoneTitle: "이 초대 링크는 더 이상 유효하지 않습니다",
+      invitationGoneDescription: "초대가 만료되었거나, 이미 사용되었거나, 철회되었을 수 있습니다. 초대한 사람에게 새 초대를 요청하세요.",
+      invitationGoneSignIn: "로그인으로 이동",
       showPasswordText: "비밀번호 표시",
       hidePasswordText: "비밀번호 숨기기",
       footer: {
@@ -2639,6 +2642,8 @@ const ko = {
         userExists: "해당 이메일로 이미 계정이 존재합니다. 로그인해 보세요.",
         selfRegistrationClosed: "이 시스템에서는 직접 가입을 받지 않습니다. 관리자에게 초대를 요청하세요.",
         emailDomainNotAllowed: "이 이메일의 도메인으로는 여기에서 가입할 수 없습니다. 조직 이메일을 사용하거나 관리자에게 초대를 요청하세요.",
+        invitationSentTo: "이 초대는 {{email}}(으)로 전송되었습니다. 초대를 수락하려면 해당 주소로 가입하세요.",
+        invitationAddressOnly: "이 초대는 초대를 받은 주소로만 수락할 수 있습니다. 해당 주소로 가입하세요.",
       },
       verifyInbox: {
         title: "받은 편지함을 확인하세요",
@@ -4350,6 +4355,7 @@ const ko = {
       detailLoading: '상세 정보 로드 중…',
       detailLoadFailed: '변경 상세 정보를 불러오지 못했습니다:',
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
+      fieldOrderChanged: '필드 순서가 변경됨',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
       draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',

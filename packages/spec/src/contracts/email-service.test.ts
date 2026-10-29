@@ -109,3 +109,43 @@ describe('Email Service Contract — isConfigured (optional deliverability membe
     expect(typeof bad).toBe('function');
   });
 });
+
+/**
+ * `IEmailService.getDefaultFrom` — the OPTIONAL configured-sender member the
+ * REST send door bounds a caller's `from` to, pinned the way `isConfigured`
+ * is above:
+ *  - an implementation without the member stays assignable (the widening is
+ *    additive; absent reads as "unknown", and the door refuses a caller
+ *    `from` on unknown);
+ *  - when present it is a zero-argument function answering an
+ *    `EmailAddress` (either form) or `undefined` when no sender is configured.
+ */
+describe('Email Service Contract — getDefaultFrom (optional configured-sender member)', () => {
+  const base = {
+    send: async () => ({ id: 'e1', status: 'sent' as const }),
+    sendTemplate: async () => ({ id: 'e1', status: 'sent' as const }),
+    renderTemplate: async () => ({ subject: 's', html: 'h', text: 't' }),
+  };
+
+  it('keeps an implementation without getDefaultFrom assignable (absent = unknown)', () => {
+    const legacy: IEmailService = { ...base };
+    expect(legacy.getDefaultFrom).toBeUndefined();
+  });
+
+  it('accepts either address form or undefined, and refuses a non-address answer at compile time', () => {
+    const bare: IEmailService = { ...base, getDefaultFrom: () => 'no-reply@acme.example' };
+    const named: IEmailService = { ...base, getDefaultFrom: () => ({ name: 'Acme', address: 'no-reply@acme.example' }) };
+    const none: IEmailService = { ...base, getDefaultFrom: () => undefined };
+    expect(bare.getDefaultFrom?.()).toBe('no-reply@acme.example');
+    expect(named.getDefaultFrom?.()).toEqual({ name: 'Acme', address: 'no-reply@acme.example' });
+    expect(none.getDefaultFrom?.()).toBeUndefined();
+
+    type Member = NonNullable<IEmailService['getDefaultFrom']>;
+    // @ts-expect-error getDefaultFrom answers an EmailAddress, not a number
+    const wrongType: Member = () => 42;
+    // @ts-expect-error the object form names its `address`
+    const noAddress: Member = () => ({ name: 'Acme' });
+    expect(typeof wrongType).toBe('function');
+    expect(typeof noAddress).toBe('function');
+  });
+});

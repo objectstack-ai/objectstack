@@ -108,7 +108,7 @@ describe('[#20862] the create and update doors save what they register', () => {
         expect(dataOf(response)?.name).toBe(NEW);
         expect(h.registerFlow).toHaveBeenCalledWith(NEW, body);
         expect(h.saveMetaItem).toHaveBeenCalledTimes(1);
-        expect(h.saveMetaItem).toHaveBeenCalledWith({ type: 'flow', name: NEW, item: body });
+        expect(h.saveMetaItem).toHaveBeenCalledWith({ type: 'flow', name: NEW, item: body, actor: 'u_admin' });
         expect(h.registerFlow.mock.invocationCallOrder[0]).toBeLessThan(h.saveMetaItem.mock.invocationCallOrder[0]!);
     });
 
@@ -119,7 +119,7 @@ describe('[#20862] the create and update doors save what they register', () => {
 
         expect(statusOf(response)).toBe(200);
         expect(h.registerFlow).toHaveBeenCalledWith(CUSTOMER, definition);
-        expect(h.saveMetaItem).toHaveBeenCalledWith({ type: 'flow', name: CUSTOMER, item: definition });
+        expect(h.saveMetaItem).toHaveBeenCalledWith({ type: 'flow', name: CUSTOMER, item: definition, actor: 'u_admin' });
         expect(h.held(CUSTOMER)).toEqual(definition);
     });
 

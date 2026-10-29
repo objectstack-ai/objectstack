@@ -278,11 +278,15 @@ function identityAdminGroupFields(): string[] {
  * member's user-context write naming one is refused by the field-level write
  * gate. Every reader of these fields on a member's OWN row reads through system
  * or auth context (the auth manager's gates and stamps, the better-auth
- * adapter, the authorization resolver's `ai_seat` synthesis), which no
+ * adapter and its session user — which carries the holder's own sign-in phone
+ * number — the authorization resolver's `ai_seat` synthesis), which no
  * permission set reaches. The deactivation flag is declared OUTSIDE the group
  * on purpose (#21237): it is directory status that every user picker filters
- * on, so withholding it would refuse each member's picker query. A fresh
- * object per set, like `denyWritesOnManagedObjects()`.
+ * on, so withholding it would refuse each member's picker query. The sign-in
+ * phone number and its verified flag are declared INSIDE it on purpose: a
+ * sign-in identifier is not directory data, and a user picker's `$search`
+ * stops scanning it for a member by the queryable-field narrowing, not by a
+ * refusal. A fresh object per set, like `denyWritesOnManagedObjects()`.
  */
 const identityAdminFieldSecurity = (
   posture: 'withhold' | 'keep',

@@ -2608,6 +2608,9 @@ const ja = {
       invitationPreviewTitle: "{{inviter}} さんから {{organization}} への招待が届いています",
       invitationPreviewTitleNoInviter: "{{organization}} への招待が届いています",
       invitationPreviewDescription: "招待を受け取ったメールアドレス（{{email}}）をご利用ください。",
+      invitationGoneTitle: "この招待リンクは無効になりました",
+      invitationGoneDescription: "招待の期限切れ、使用済み、または取り消しの可能性があります。招待した方に新しい招待の送信を依頼してください。",
+      invitationGoneSignIn: "サインインへ",
       showPasswordText: "パスワードを表示",
       hidePasswordText: "パスワードを非表示",
       footer: {
@@ -2641,6 +2644,8 @@ const ja = {
         userExists: "このメールアドレスのアカウントはすでに存在します。代わりにサインインしてください。",
         selfRegistrationClosed: "このシステムではセルフ登録を受け付けていません。管理者に招待を依頼してください。",
         emailDomainNotAllowed: "このメールアドレスのドメインはここでの登録が許可されていません。組織のメールアドレスを使用するか、管理者に招待を依頼してください。",
+        invitationSentTo: "この招待は {{email}} 宛てに送信されました。招待を承諾するには、そのアドレスで登録してください。",
+        invitationAddressOnly: "この招待は送信先のアドレスでのみ承諾できます。そのアドレスで登録してください。",
       },
       verifyInbox: {
         title: "受信箱を確認してください",
@@ -4353,6 +4358,7 @@ const ja = {
       detailLoading: '詳細を読み込み中…',
       detailLoadFailed: '変更の詳細を読み込めませんでした：',
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
+      fieldOrderChanged: 'フィールドの順序が変更されました',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'AI コパイロットが下書きした変更を含みます',
       draftedByMcpClient: 'MCP クライアント「{{client}}」が下書きした変更を含みます',

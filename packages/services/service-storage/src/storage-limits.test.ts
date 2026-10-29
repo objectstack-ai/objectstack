@@ -232,6 +232,17 @@ describe('[#22283] §1 · the upload doors refuse a file over max_upload_mb, bef
     expect(rawBody).not.toHaveBeenCalled();
   });
 
+  /**
+   * The init door floors a chunk at 5 MiB, so an upload under a 1 MiB limit
+   * declares ONE chunk, and the chunk door refuses an index past the declared
+   * count (#27412). The limit is judged on the bytes received across chunks,
+   * so these cases widen the session row to two declared chunks to send its
+   * bytes in two.
+   */
+  async function declareTwoChunks(store: { updateSession(id: string, patch: Record<string, unknown>): Promise<unknown> }, uploadId: string) {
+    await store.updateSession(uploadId, { total_chunks: 2 });
+  }
+
   it('chunk door: the chunk that takes the bytes received past the limit is 413 — not stored, progress unchanged', async () => {
     const { adapter, store, routes } = await mountDoors(SAVED_ONE_MB);
     const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
@@ -239,6 +250,7 @@ describe('[#22283] §1 · the upload doors refuse a file over max_upload_mb, bef
     });
     expect(started.status).toBe(200);
     const { uploadId, resumeToken } = started.body.data;
+    await declareTwoChunks(store, uploadId);
     const uploadChunk = vi.spyOn(adapter, 'uploadChunk');
     const chunk = (index: number, bytes: number, headers: Record<string, string> = {}) =>
       call(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {
@@ -263,11 +275,12 @@ describe('[#22283] §1 · the upload doors refuse a file over max_upload_mb, bef
   });
 
   it('chunk door: a RETRIED chunk index replaces its earlier bytes — a retry is not counted twice, a grown retry still is judged', async () => {
-    const { adapter, routes } = await mountDoors(SAVED_ONE_MB);
+    const { adapter, store, routes } = await mountDoors(SAVED_ONE_MB);
     const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
       body: { filename: 'r.bin', mimeType: 'application/octet-stream', totalSize: MIB },
     });
     const { uploadId, resumeToken } = started.body.data;
+    await declareTwoChunks(store, uploadId);
     const uploadChunk = vi.spyOn(adapter, 'uploadChunk');
     const chunk = (index: number, bytes: number) =>
       call(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {

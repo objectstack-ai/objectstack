@@ -358,7 +358,11 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
         expect(anonymousWrongMethod.response?.status).toBe(401);
         expect(anonymousWrongMethod.response?.body?.error?.code).toBe('UNAUTHENTICATED');
         // …and the 405 still answers a signed-in caller.
-        const signedIn = { request: { headers: {} }, executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] } };
+        const signedIn = {
+            request: { headers: {} },
+            executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] },
+            admission: { credential: 'session', authGate: undefined },
+        };
         const wrongMethod = await dispatcher.handleKeys('GET', undefined, signedIn as any);
         expect(wrongMethod.response?.status).toBe(405);
         // A claimed /keysfoo would now answer the floor's 401 (or the 405), so
@@ -375,7 +379,11 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
             getObjects: vi.fn().mockReturnValue({}),
             registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
         };
-        const context: any = { executionContext: { userId: 'caller-1' } };
+        const context: any = {
+            executionContext: { userId: 'caller-1' },
+            // A signed-in caller: the credential the dispatcher's identity step records.
+            admission: { credential: 'session', authGate: undefined },
+        };
         // Direct delegate call — dispatch() would re-resolve identity off the
         // auth-less mock kernel and overwrite the seeded executionContext.
         const result = await makeDispatcher({ objectql }).handleKeys('POST', { name: 'CI Key', user_id: 'attacker' }, context);

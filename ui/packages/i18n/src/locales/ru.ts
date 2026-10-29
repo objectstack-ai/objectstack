@@ -2729,6 +2729,9 @@ const ru = {
       invitationPreviewTitle: "{{inviter}} приглашает вас в {{organization}}",
       invitationPreviewTitleNoInviter: "Вас приглашают в {{organization}}",
       invitationPreviewDescription: "Используйте адрес электронной почты, на который пришло приглашение ({{email}}).",
+      invitationGoneTitle: "Эта ссылка-приглашение больше недействительна",
+      invitationGoneDescription: "Возможно, срок действия приглашения истёк, оно уже было использовано или отозвано. Попросите пригласившего вас человека отправить новое приглашение.",
+      invitationGoneSignIn: "Перейти ко входу",
       showPasswordText: "Показать пароль",
       hidePasswordText: "Скрыть пароль",
       footer: {
@@ -2762,6 +2765,8 @@ const ru = {
         userExists: "Аккаунт с таким email уже существует. Попробуйте войти.",
         selfRegistrationClosed: "Самостоятельная регистрация в этой системе закрыта. Обратитесь к администратору за приглашением.",
         emailDomainNotAllowed: "Регистрация с адресами этого домена здесь не разрешена. Используйте email вашей организации или обратитесь к администратору за приглашением.",
+        invitationSentTo: "Это приглашение было отправлено на {{email}}. Зарегистрируйтесь с этим адресом, чтобы принять его.",
+        invitationAddressOnly: "Это приглашение можно принять только с адресом, на который оно было отправлено. Зарегистрируйтесь с этим адресом.",
       },
       verifyInbox: {
         title: "Проверьте входящие",
@@ -4550,6 +4555,7 @@ const ru = {
       detailLoading: 'Загрузка деталей…',
       detailLoadFailed: 'Не удалось загрузить детали изменения:',
       detailNone: 'Различий не обнаружено — черновик совпадает с опубликованной версией.',
+      fieldOrderChanged: 'Порядок полей изменён',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Включает изменения, подготовленные ИИ-копилотом',
       draftedByMcpClient: 'Включает изменения, подготовленные MCP-клиентом «{{client}}»',

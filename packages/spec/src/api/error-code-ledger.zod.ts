@@ -674,6 +674,15 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_REQUEST',
     'ITEM_LOCKED',                // _lock refuses the write/delete (ADR-0010 §3.3)
     'METADATA_CONFLICT',
+    // The metadata doors' half of "one name, one holder" for a permission set
+    // (maintainer rulings Q4 = A, record 6050490870, and A, record
+    // 6063176077): the save door, the draft promotion and the restore doors
+    // refuse a permission-set write whose name another holder already holds,
+    // naming both, 422 — the same code and status `@objectstack/objectql`'s
+    // registration and cold-boot refusals stamp for the same condition (that
+    // package depends on this one, so the string is spelled in each). Served
+    // by the `/meta` write doors through `errorFromThrown`.
+    'NAMESPACE_CONFLICT',
     'NAMESPACE_PREFIX',           // name violates the package namespace-prefix rule
     'NO_DRAFT',
     'NOT_ATTEMPTED',              // data-batch row never ran — an earlier row's failure stopped the batch, to roll back (atomic, #4793) or because continueOnError was unset (#7539)

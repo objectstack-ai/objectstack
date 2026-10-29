@@ -2665,6 +2665,9 @@ const es = {
       invitationPreviewTitle: "{{inviter}} te invitó a unirte a {{organization}}",
       invitationPreviewTitleNoInviter: "Te invitaron a unirte a {{organization}}",
       invitationPreviewDescription: "Usa el correo al que se envió la invitación ({{email}}).",
+      invitationGoneTitle: "Este enlace de invitación ya no es válido",
+      invitationGoneDescription: "Es posible que haya caducado, que ya se haya usado o que se haya retirado. Pide a quien te invitó que te envíe una nueva invitación.",
+      invitationGoneSignIn: "Ir a iniciar sesión",
       showPasswordText: "Mostrar contraseña",
       hidePasswordText: "Ocultar contraseña",
       footer: {
@@ -2698,6 +2701,8 @@ const es = {
         userExists: "Ya existe una cuenta con ese correo. Intente iniciar sesión.",
         selfRegistrationClosed: "El registro por cuenta propia no está abierto en este sistema. Solicite una invitación a un administrador.",
         emailDomainNotAllowed: "El dominio de este correo no está autorizado para registrarse aquí. Use el correo de su organización o solicite una invitación a un administrador.",
+        invitationSentTo: "Esta invitación se envió a {{email}}. Regístrate con esa dirección para aceptarla.",
+        invitationAddressOnly: "Esta invitación solo puede aceptarse con la dirección a la que se envió. Regístrate con esa dirección.",
       },
       verifyInbox: {
         title: "Revise su bandeja de entrada",
@@ -4446,6 +4451,7 @@ const es = {
       detailLoading: 'Cargando detalles…',
       detailLoadFailed: 'No se pudieron cargar los detalles del cambio:',
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
+      fieldOrderChanged: 'Orden de los campos cambiado',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Incluye cambios redactados por el copiloto de IA',
       draftedByMcpClient: 'Incluye cambios redactados por el cliente MCP «{{client}}»',

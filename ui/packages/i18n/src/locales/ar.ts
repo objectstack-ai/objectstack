@@ -2836,6 +2836,9 @@ const ar = {
       invitationPreviewTitle: "دعاك {{inviter}} للانضمام إلى {{organization}}",
       invitationPreviewTitleNoInviter: "أنت مدعو للانضمام إلى {{organization}}",
       invitationPreviewDescription: "استخدم البريد الإلكتروني الذي أُرسلت إليه الدعوة ({{email}}).",
+      invitationGoneTitle: "رابط الدعوة هذا لم يعد صالحًا",
+      invitationGoneDescription: "ربما انتهت صلاحية الدعوة أو استُخدمت أو سُحبت. اطلب من الشخص الذي دعاك إرسال دعوة جديدة.",
+      invitationGoneSignIn: "الانتقال إلى تسجيل الدخول",
       showPasswordText: "إظهار كلمة المرور",
       hidePasswordText: "إخفاء كلمة المرور",
       footer: {
@@ -2869,6 +2872,8 @@ const ar = {
         userExists: "يوجد حساب بهذا البريد الإلكتروني بالفعل. حاول تسجيل الدخول.",
         selfRegistrationClosed: "التسجيل الذاتي غير متاح في هذا النظام. اطلب دعوة من المسؤول.",
         emailDomainNotAllowed: "نطاق هذا البريد الإلكتروني غير مسموح له بالتسجيل هنا. استخدم البريد الإلكتروني لمؤسستك أو اطلب دعوة من المسؤول.",
+        invitationSentTo: "أُرسلت هذه الدعوة إلى {{email}}. سجّل بهذا العنوان لقبولها.",
+        invitationAddressOnly: "لا يمكن قبول هذه الدعوة إلا بالعنوان الذي أُرسلت إليه. سجّل بهذا العنوان.",
       },
       verifyInbox: {
         title: "تحقق من صندوق الوارد",
@@ -4728,6 +4733,7 @@ const ar = {
       detailLoading: 'جارٍ تحميل التفاصيل…',
       detailLoadFailed: 'تعذر تحميل تفاصيل التغيير:',
       detailNone: 'لم يتم اكتشاف اختلافات — المسودة مطابقة للنسخة المنشورة.',
+      fieldOrderChanged: 'تغيّر ترتيب الحقول',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'يتضمن تغييرات صاغها مساعد الذكاء الاصطناعي',
       draftedByMcpClient: 'يتضمن تغييرات صاغها عميل MCP «{{client}}»',

@@ -10,8 +10,11 @@
  *
  *  - found: the card names the inviter and the organization and shows the
  *    MASKED address as the one to use; the email field stays empty;
- *  - 404: today's generic invitation copy;
- *  - a failed read: today's generic copy too, and the form still renders.
+ *  - a failed read, or a server without the route (a 404 that is not the
+ *    door's): today's generic copy, and the form still renders.
+ *
+ * The door's own 404 — the invitation is gone — is #27509's, pinned in
+ * `invitationGone-27509.test.tsx` beside this file.
  *
  * Rendered with a real `AuthProvider` over a real `createAuthClient`; only
  * `fetch` is a stub. Generic copy is read from the en pack.
@@ -42,7 +45,7 @@ const CONFIG: AuthPublicConfig = {
   features: { audiencePosture: 'invite_only' },
 };
 
-type PreviewAnswer = 'found' | 404 | 500;
+type PreviewAnswer = 'found' | 'no-route' | 500;
 let previewRequests: string[];
 
 function stubServer(answer: PreviewAnswer): typeof fetch {
@@ -56,14 +59,10 @@ function stubServer(answer: PreviewAnswer): typeof fetch {
       if (answer === 'found') {
         return json({ success: true, data: { organizationName: ORG, inviterName: INVITER, email: MASKED } });
       }
+      // better-auth's router for a path nothing serves: 404, empty body.
+      if (answer === 'no-route') return new Response(null, { status: 404, statusText: 'Not Found' });
       return json(
-        {
-          success: false,
-          error:
-            answer === 404
-              ? { code: 'RESOURCE_NOT_FOUND', message: 'Invitation not found.' }
-              : { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' },
-        },
+        { success: false, error: { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' } },
         answer,
       );
     }
@@ -123,12 +122,13 @@ describe('console /login — the invitation landing reads the signed-out preview
     expect(await screen.findByLabelText(en.login.emailLabel)).toHaveValue('');
   });
 
-  it('404: keeps the generic invitation copy', async () => {
-    renderAt(`/login${INVITE_QUERY}`, 404);
+  it('a server without the route: keeps the generic invitation copy and the sign-in form', async () => {
+    renderAt(`/login${INVITE_QUERY}`, 'no-route');
     await previewAnswered();
 
     expect(await screen.findByRole('heading', { name: en.login.invitationTitle })).toBeInTheDocument();
     expect(screen.queryByText(new RegExp(ORG))).toBeNull();
+    expect(await screen.findByLabelText(en.login.emailLabel)).toBeInTheDocument();
   });
 
   it('a failed read: keeps the generic copy and the sign-in form', async () => {
@@ -150,11 +150,12 @@ describe('console /register — the sign-up step reads the same preview (#26473)
     expect(screen.getByLabelText(en.register.emailLabel)).toHaveValue('');
   });
 
-  it('404: keeps the generic invitation copy', async () => {
-    renderAt(`/register${INVITE_QUERY}`, 404);
+  it('a server without the route: keeps the generic invitation copy and the form', async () => {
+    renderAt(`/register${INVITE_QUERY}`, 'no-route');
     await previewAnswered();
 
     expect(await screen.findByRole('heading', { name: en.register.invitationTitle })).toBeInTheDocument();
+    expect(screen.getByLabelText(en.register.emailLabel)).toBeInTheDocument();
   });
 
   it('a failed read: keeps the generic copy and the form', async () => {
