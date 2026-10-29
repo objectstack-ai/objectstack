@@ -63,6 +63,10 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
     kind: 'scope',
     why: "an object's presence (the bell's sys_activity feed) is asked by name through the app scope, until something loads the whole registry",
   },
+  'packages/app-shell/src/views/appReportIndex.ts': {
+    kind: 'scope',
+    why: "the report index's section and row labels: the app's package scope plus the grouped objects by name, until something loads the whole registry",
+  },
   'packages/app-shell/src/hooks/useActionModal.tsx': {
     kind: 'action',
     why: "an object's form modal: the open waits for the whole list, whose subforms come from every object",

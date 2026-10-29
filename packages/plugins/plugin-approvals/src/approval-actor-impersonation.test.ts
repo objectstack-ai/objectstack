@@ -32,9 +32,16 @@ import { ApprovalService, SLA_ACTOR_ID } from './approval-service.js';
 
 interface FakeRow { [k: string]: any }
 
+/**
+ * The accounts this suite routes `user` approver slots to: a `user` approver
+ * holds a slot only when an account carries it (#27397), so the double's
+ * directory starts with them.
+ */
+const ROUTED_USERS = ['bob', 'carol'];
+
 /** Equality/`$in`/`$ne`/`$contains` WHERE matcher — mirrors approval-service.test.ts. */
 function makeFakeEngine() {
-  const tables: Record<string, FakeRow[]> = {};
+  const tables: Record<string, FakeRow[]> = { sys_user: ROUTED_USERS.map((id) => ({ id })) };
   const ensure = (n: string) => (tables[n] ??= []);
 
   function matches(row: FakeRow, filter: any): boolean {

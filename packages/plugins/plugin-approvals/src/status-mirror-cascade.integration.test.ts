@@ -355,6 +355,8 @@ describe('an approval decision cascades as the deciding user (#3783)', () => {
     objectql.registry.registerObject(SysApprovalDelegation as any, 'approvals-test', 'approvals-test');
     automation.registerFlow('on_approved', onApprovedFlow as any);
 
+    // A `user` approver holds a slot only when an account carries it (#27397).
+    await data.insert('sys_user', { id: 'approver', email: 'approver@example.test' }, { context: { isSystem: true } });
     svc = new ApprovalService({ engine: objectql });
     await data.insert('opportunity', { id: 'opp1', amount: 100 }, { context: { isSystem: true } });
   });
