@@ -156,7 +156,9 @@ describe('a field group places a body table at its position (objectstack#27069, 
 
   it('the host-passed sections place the same way (the `{ group }` sections RecordDetailView passes)', () => {
     const def = placed('quote_line_item');
-    const sections = [{ group: 'basic' }, { group: 'terms' }, { group: 'notes' }];
+    // The `{ group }` reference form, as the host writes it (the options type
+    // names the enumerated form only).
+    const sections: Array<Record<string, unknown>> = [{ group: 'basic' }, { group: 'terms' }, { group: 'notes' }];
     expect(shape(items(buildDefaultTabs(def, { sections, related: [LINES] }))[0].children)).toEqual([
       'details(basic,terms)',
       'table(quote_line_item)',
