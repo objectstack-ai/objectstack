@@ -321,6 +321,79 @@ Export follows the same principle. A report declares *what* its export offers
 (`exportOptions`), never *who* may use it: that is the permission-set `allowExport` grant on
 the dataset's base object, which also governs exporting that object's list views.
 
+## Where the numbers come from
+
+The renderer posts one dataset selection — dimensions, measures, and optionally
+`runtimeFilter`, `totals` and `order` — through `dataSource.queryDataset`. That
+is the same governed path dataset-bound dashboard widgets and the dataset
+preview use, which is why a number shown in a report matches the same number
+shown on a dashboard.
+
+Presentation follows from what the server returns: column headers use the
+dataset's server-supplied display label, and measure cells are formatted with
+the field's declared currency and numeral format rather than the raw measure
+name.
+
+## Stored pre-9.0 documents — migration only
+
+<Callout type="warn" title="Not an authoring option">
+  **This section is about documents that already exist in storage. The shape it
+  describes is not available for authoring.** Everything above is how a report is
+  written; nothing below is.
+</Callout>
+
+Before the ADR-0021 cutover a report carried its own query: an `objectName`,
+`columns` as column definition objects with `aggregate`, and
+`groupingsDown` / `groupingsAcross` with `sortOrder` and `dateGranularity`.
+That form is **rejected by the current schema** — `objectName` and
+`groupingsDown` come back as unrecognized keys, and object-shaped `columns`
+fails as the wrong type.
+
+Stored documents in that shape still render, through a deliberately lossy
+bridge: the dispatcher converts them to a presentation-layer report and hands
+them to the viewer. The conversion reads the *current* keys, so a pre-9.0
+document arrives with none of them — what it produces is the report's title and
+an **empty column set**. The document renders; its columns, groupings,
+aggregates and sort do not. There is no diagnostic, which is exactly why the
+bridge is a waiting room and not a supported way to write a report.
+
+Migrating one is a re-expression against the dataset:
+
+| Pre-9.0 key                                    | Where it goes now                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| `objectName`                                   | Gone from the report — the `dataset` owns the object.                  |
+| `columns: [{ field, aggregate }]`              | `values: string[]`; the aggregate becomes a **measure** in the dataset.|
+| `columns: [{ field }]` (non-aggregated)        | `rows: string[]`, as a dimension.                                      |
+| `groupingsDown: [{ field }]`                   | `rows: string[]`.                                                      |
+| `groupingsAcross: [{ field }]`                 | `columns: string[]`.                                                   |
+| `sortOrder` on a grouping                      | `order: [{ by, direction }]` on the report.                            |
+| `dateGranularity` on a grouping                | A time dimension declared at that grain **in the dataset**.            |
+| `filter`                                       | `runtimeFilter`.                                                       |
+
+The work that has no mechanical equivalent is the dataset itself: measures and
+time dimensions the old report declared inline have to exist in the semantic
+layer before the migrated report can name them.
+
+## Filter-time date helpers — current limitation
+
+The server does **not** currently evaluate `` cel`...` `` expressions embedded
+inside filter values; the unevaluated template object reaches the driver.
+Compute concrete ISO date strings instead and treat the report as a snapshot:
+
+```ts
+// Module-load helper. Re-evaluates each time the app boots.
+const daysAgo = (n: number): string => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+};
+
+runtimeFilter: { last_activity_date: { $lt: daysAgo(60) } }
+```
+
+For a sliding window, recompute on each render or key a `useMemo` on a one-hour
+bucket. Native filter-time CEL evaluation is tracked for a future major version.
+
 ## Related
 
 - **Schema reference:** [Report](/docs/references/ui/report) — the full generated property

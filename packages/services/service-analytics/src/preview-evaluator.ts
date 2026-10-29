@@ -41,6 +41,7 @@ import {
   type TemporalComparandKind,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
+import { dateRangeWindowBounds } from './dataset-executor.js';
 import { DATASET_DURATION_UNIT_SECONDS } from '@objectstack/spec/ui';
 import { durationMeasureIn } from './duration-measure-sql.js';
 import type { DurationMeasureSpec } from './strategies/types.js';
@@ -826,7 +827,10 @@ export function evaluateAnalyticsQueryOverRows(
     // widens. This face kept its own copy of the rule here until #5930 step
     // 4, with a `'~'`-suffix reading of a full-timestamp end ("inclusive of
     // that instant's own sub-values") that no other face gives.
-    const bounds = endExclusive ? { $gte: start, $lt: end } : { $gte: start, $lte: end };
+    // [#27172] On a column declared `date`, a resolved preset is the calendar
+    // days it covers in the reference zone — the pair `dateRangeWindowBounds`
+    // spells for the published faces, so the draft counts the published days.
+    const bounds = dateRangeWindowBounds({ start, end, endExclusive }, query.timezone, declaredType?.(field) === 'date');
     const window = previewStorageComparands(lowerFilterCondition({ [field]: bounds }, lowering), kindOf);
     filtered = filtered.filter((r) => matchesWhere(previewStorageRow(r, kindOf), window));
   }

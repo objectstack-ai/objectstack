@@ -26,7 +26,7 @@
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
  *   recordCarriesDesignJudgment  whether a face's record carries item ④, the full review's design judgment
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
- *   contractReviewHandoff    whose review a PR's contract review is — the newest `Contract-review-handoff:` line against the head; `readContractReviewHandoff` reads the line
+ *   contractReviewHandoff    whose review a PR's contract review is — the newest `Contract-review-handoff:` line against the head; `readContractReviewHandoff` reads the line; `contractReviewClaims` (`readContractReviewClaim`, `contractReviewClaimLapse`) who holds the head
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
  *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
@@ -69,12 +69,12 @@
  * which exit — is the guard's.
  */
 
-// The self-test's one read of a GOVERNED file, declared so a card editing that
+// The self-test's reads of GOVERNED files, declared so a card editing either
 // file derives this family (`dispatch-gates.mjs` `declaredSelfTestReads`; the
 // row is `GOVERNED_READ_FLOOR` in `dispatch-gates.data.mjs`). The derivation
 // grades it against the read the self-test really performs, so it cannot be
 // satisfied by deleting either half.
-// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md -- the mailbox doorbell battery pins each of the seven key templates verbatim in that file's 〈信箱 PR〉 section, so a change to the keys' spelling there is judged here
+// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins each of the seven key templates verbatim in project-forms.md's 〈信箱 PR〉 section, and the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, so a change to either spelling there is judged here
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
@@ -91,6 +91,8 @@ import {
   deliveryEvidenceNote,
   latestMarkedComment,
   partOfTargets,
+  readSignatureLine,
+  SEAT_SIGNATURE_SESSION_SOURCE,
   stripSignatureLine,
 } from './check-half-states.mjs';
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
@@ -902,6 +904,154 @@ export function contractReviewHandoff(rows, headSha) {
   // PREFIX either way, as `regenChainToHead` meets two spellings of one commit: the line may abbreviate the head.
   const current = shaMeets(head, line.head.toLowerCase());
   return { state: current ? 'triage' : 'stale', head: line.head, reason: line.reason, handedAt: line.at, ...stamp };
+}
+
+// ---------------------------------------------------------------------------
+// The `Contract-review-claim:` line — one per head, so two reviewers never start on one
+// ---------------------------------------------------------------------------
+
+/**
+ * The `Contract-review-claim:` key line -- who has STARTED the contract review
+ * of one head, posted by that reviewer before it starts, lane seat or triage.
+ *
+ * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
+ * 〈复核归属与资格〉): the lane reviews its own; the triage seat takes a review
+ * only when nobody is doing it. Before starting, every reviewer reads the PR:
+ * a record or a LIVE claim on the current head means do not start. Otherwise it
+ * posts ONE comment carrying this line first, then reviews:
+ *
+ *   Contract-review-claim: session_01AavokzJ5DndAwitDXvKy4U · head 3beee64fe77741d07f035f1b80eeaa07e7280ab4 · 2026-10-28T12:18Z
+ *
+ * Three facts, each required, separated by the doorbell's dot: the SESSION that
+ * reviews (the signature line's session shape, `SEAT_SIGNATURE_SESSION_SOURCE`,
+ * imported, ⛔ never a second spelling), the head as the FULL 40-hex sha --
+ * the rule says full, because a claim is compared against a head that may move
+ * to a sibling sharing a short prefix -- and the UTC time to the minute (seconds
+ * allowed). Backtick wrapping on any value reads; a line missing a fact, or
+ * with a fourth part, is started-and-unreadable, and an unreadable claim is NO
+ * claim: it holds no head.
+ *
+ * A claim LAPSES (`contractReviewClaimLapse`) when the head moves, or
+ * {@link CONTRACT_REVIEW_CLAIM_LAPSE_HOURS} hours after it was posted -- the
+ * reviewer died -- after which the next reviewer may claim. A record on the
+ * head settles the review whatever any claim says; that is the caller's read
+ * (`locateReviewOfRecord`), never this one's. When a lane claim and a triage
+ * claim are both live on one head the LANE wins: triage withdraws by replying
+ * once and discards its subagent's work (`contractReviewClaims` names the
+ * holder).
+ *
+ * ⛔ No gate reads it. The queue guard keeps reading the ONE `## Contract
+ * review` record; this line is coordination between reviewers, never a merge
+ * condition. `contractReviewClaims` below is the reading a seat or the
+ * owed-review list (`check-owed-reviews.mjs`) takes.
+ */
+export const CONTRACT_REVIEW_CLAIM_KEY = 'Contract-review-claim';
+/**
+ * The line exactly as the rule text prints it, placeholders included. This file's self-test pins it
+ * VERBATIM in `references/contract-review.md`, so the text and the reader cannot drift apart.
+ */
+export const CONTRACT_REVIEW_CLAIM_TEMPLATE = `${CONTRACT_REVIEW_CLAIM_KEY}: <session> · head <full sha> · <UTC>`;
+/** Hours after posting that a claim with no record on its head lapses -- the rule's 「2 小时」. */
+export const CONTRACT_REVIEW_CLAIM_LAPSE_HOURS = 2;
+const CONTRACT_REVIEW_CLAIM_LINE = keyLineRegex(CONTRACT_REVIEW_CLAIM_KEY);
+const CLAIM_SESSION = new RegExp(`^\`?(${SEAT_SIGNATURE_SESSION_SOURCE})\`?$`);
+const CLAIM_HEAD = /^head[ \t]+`?([0-9a-fA-F]{40})`?$/;
+const CLAIM_TIME = /^`?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)`?$/;
+
+/**
+ * What one comment declares as a claim on a contract review. The FIRST claim
+ * line of the comment is read, after one leading signature line is set aside
+ * (`stripSignatureLine`, as every reader here does).
+ *
+ * @returns {{ state: 'missing' }
+ *          | { state: 'unreadable', line: string }
+ *          | { state: 'read', session: string, head: string, time: string, at: number }}
+ */
+export function readContractReviewClaim(text) {
+  for (const line of stripSignatureLine(String(text ?? '')).split(/\r?\n/)) {
+    const m = CONTRACT_REVIEW_CLAIM_LINE.exec(line);
+    if (!m) continue;
+    const unreadable = { state: 'unreadable', line: quoteLine(line) };
+    // Leading decoration is the key's (`stripValueDecoration`); trailing spaces and bold are the line's.
+    const parts = stripValueDecoration(m[1]).replace(/(?:[ \t]|\*\*)+$/, '').split(MAILBOX_SEPARATOR);
+    if (parts.length !== 3) return unreadable;
+    const session = CLAIM_SESSION.exec(parts[0]);
+    const head = CLAIM_HEAD.exec(parts[1]);
+    const time = CLAIM_TIME.exec(parts[2]);
+    const at = time ? Date.parse(time[1]) : Number.NaN;
+    if (!session || !head || !Number.isFinite(at)) return unreadable;
+    return { state: 'read', session: session[1], head: head[1].toLowerCase(), time: time[1], at };
+  }
+  return { state: 'missing' };
+}
+
+/**
+ * Is this claim still holding its head? Pure arithmetic, no thread read.
+ *
+ *   live        it names the current head and was posted under the lapse window ago
+ *   head-moved  it names another head -- the head moved past it
+ *   expired     it names the current head and was posted the lapse window ago or more
+ *
+ * `postedAt` is the comment's own `created_at` when the caller holds it -- the
+ * platform's stamp of when the claim was POSTED, which the rule times from --
+ * else the time the line itself states. A head is matched in FULL (both
+ * lowercased): the claim spells the full sha, and so does a pull row's head.
+ *
+ * @param {{ head: string, at: number }} claim  a `read` claim
+ * @param {{ headSha: string, now: number, postedAt?: number }} context
+ * @returns {'live'|'head-moved'|'expired'}
+ */
+export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {}) {
+  if (String(claim?.head ?? '').toLowerCase() !== String(headSha ?? '').toLowerCase()) return 'head-moved';
+  const posted = Number.isFinite(postedAt) ? postedAt : claim?.at;
+  return now - posted >= CONTRACT_REVIEW_CLAIM_LAPSE_HOURS * 3600 * 1000 ? 'expired' : 'live';
+}
+
+/**
+ * Who holds this pull request's current head, read off its comment thread:
+ *
+ *   live        a live claim names the current head -- `holder` is the claim to respect: the LANE's
+ *               when a lane claim and a triage claim are both live (`tie` true), else the earliest posted
+ *   lapsed      claims named the current head, and every one has expired
+ *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
+ *   unreadable  the thread, the head or the clock could not be read
+ *
+ * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): the triage seat
+ * signs `triage#N · …`, and every other claim -- a lane seat's, a cross-account reviewer's, an
+ * unsigned one -- is the `lane` side, which is the side the tie rule protects. Unreadable claim
+ * lines are returned by comment id and hold nothing.
+ *
+ * @param {{ id?: number, body?: string, created_at?: string }[]} rows  the PR's comment rows
+ * @param {string} headSha  the pull request's current head, full
+ * @param {{ now: number }} clock  milliseconds since the epoch
+ */
+export function contractReviewClaims(rows, headSha, { now } = {}) {
+  const gaps = [];
+  if (!Array.isArray(rows)) gaps.push("the pull request's comment thread");
+  const head = String(headSha ?? '').toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(head)) gaps.push("the pull request's full head sha");
+  if (!Number.isFinite(now)) gaps.push('the clock the lapse is measured on');
+  if (gaps.length > 0) return { state: 'unreadable', gaps };
+  const claims = [];
+  const unreadable = [];
+  for (const row of rows) {
+    const line = readContractReviewClaim(row?.body);
+    if (line.state === 'missing') continue;
+    if (line.state === 'unreadable') {
+      unreadable.push({ id: row?.id ?? null, line: line.line });
+      continue;
+    }
+    const stamped = Date.parse(row?.created_at ?? '');
+    const postedAt = Number.isFinite(stamped) ? stamped : line.at;
+    const side = readSignatureLine(row?.body)?.lane === 'triage' ? 'triage' : 'lane';
+    const lapse = contractReviewClaimLapse(line, { headSha: head, now, postedAt });
+    claims.push({ id: row?.id ?? null, session: line.session, head: line.head, time: line.time, postedAt, side, lapse });
+  }
+  const live = claims.filter((c) => c.lapse === 'live').sort((a, b) => a.postedAt - b.postedAt);
+  const tie = live.some((c) => c.side === 'lane') && live.some((c) => c.side === 'triage');
+  const holder = live.find((c) => c.side === 'lane') ?? live[0] ?? null;
+  const state = holder !== null ? 'live' : claims.some((c) => c.lapse === 'expired') ? 'lapsed' : 'none';
+  return { state, holder, tie, claims, unreadable };
 }
 
 // ---------------------------------------------------------------------------
@@ -1748,6 +1898,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 13,
   '⭐ the mailbox doorbell: the seven first-line keys read — kind, numbers, sha, login, time — and anything else refused': 21,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
+  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the lane wins a tie': 21,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1764,7 +1915,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 13 → 14 with the mailbox doorbell battery (the maintainer's per-seat mailbox and its closed
 // vocabulary): one battery, one row.
 // Raised 14 → 15 with the signature-line battery (the maintainer's signed-post rule): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 15;
+// Raised 15 → 16 with the claim-line battery (the maintainer's one-claim-per-head rule): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2150,6 +2302,47 @@ export async function selfTest() {
   t('the key is ONE regex, built by the one key-line convention, and prose naming it mid-sentence is not the line', CONTRACT_REVIEW_HANDOFF_LINE.source === keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY).source && readContractReviewHandoff(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`).state === 'missing' && contractReviewHandoff([HO_ROW(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`)], HO_HEAD).state === 'absent');
   t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a hand-off line beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, HO_ROW(HO_LINE(HEAD_9AF9))] })); return r.state === 'found' && r.id === 3301; })());
 
+  // -- the `Contract-review-claim:` line ----------------------------------------
+  //
+  // The maintainer's rule: the lane reviews its own, triage takes only a review
+  // nobody is doing, and one claim line per head keeps two reviewers off one
+  // head. These cases read the line as the triage seat really posted it, with
+  // and without the signature above it, refuse every shape that names no head
+  // or no time, and pin the lapse arithmetic and the lane-wins tie.
+  battery('⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the lane wins a tie');
+  const CL_HEAD = '3beee64fe77741d07f035f1b80eeaa07e7280ab4';
+  const CL_SESSION = 'session_01AavokzJ5DndAwitDXvKy4U';
+  const CL_LANE_SESSION = 'session_01JQwxbZeBv2y91towxasSUT';
+  const CL_TRIAGE_SIG = `triage#1 · os-zhuang · ${CL_SESSION}`;
+  const CL_LANE_SIG = `domain:ui#1 · os-bill · ${CL_LANE_SESSION}`;
+  const CL_LINE = (session = CL_SESSION, head = CL_HEAD, time = '2026-10-28T12:18Z') => `${CONTRACT_REVIEW_CLAIM_KEY}: \`${session}\` · head \`${head}\` · ${time}`;
+  // The comment exactly as the triage seat posted it on the first draft it took (signature, line, prose).
+  const CL_BODY = (sig = CL_TRIAGE_SIG, line = CL_LINE()) => `${sig === null ? '' : `${sig}\n\n`}${line}\n\nTriage seat, taking the hand-off that names this head.`;
+  const CL_ROW = (body, id = 6468788431, at = '2026-10-28T12:18:56Z') => ({ id, created_at: at, body });
+  const CL_NOW = Date.parse('2026-10-28T13:00:00Z');
+  const CL_J = (v) => JSON.stringify(v);
+  t('⭐ the live specimen reads: the session, the FULL head and the minute, behind the signature line', (() => { const r = readContractReviewClaim(CL_BODY()); return r.state === 'read' && r.session === CL_SESSION && r.head === CL_HEAD && r.time === '2026-10-28T12:18Z' && r.at === Date.parse('2026-10-28T12:18:00Z'); })());
+  t('⭐ with and without the signature line the reading is the same, byte for byte', CL_J(readContractReviewClaim(CL_BODY())) === CL_J(readContractReviewClaim(CL_BODY(null))) && readContractReviewClaim(CL_BODY(null)).state === 'read');
+  t('decoration reads: bare values, a bulleted bolded key, a blockquoted line, seconds on the time', [`${CONTRACT_REVIEW_CLAIM_KEY}: ${CL_SESSION} · head ${CL_HEAD} · 2026-10-28T12:18Z`, `- **${CONTRACT_REVIEW_CLAIM_KEY}:** \`${CL_SESSION}\` · head \`${CL_HEAD}\` · \`2026-10-28T12:18Z\``, `> ${CL_LINE()}`, CL_LINE(CL_SESSION, CL_HEAD, '2026-10-28T12:18:30Z')].every((l) => readContractReviewClaim(l).state === 'read' && readContractReviewClaim(l).head === CL_HEAD));
+  t('the head is read lowercased, so an uppercased spelling holds the same head', readContractReviewClaim(CL_LINE(CL_SESSION, CL_HEAD.toUpperCase())).head === CL_HEAD);
+  t('⛔ an ABBREVIATED head is unreadable — the rule says full, and a short prefix can name a sibling head', readContractReviewClaim(CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))).state === 'unreadable');
+  t('⛔ a missing fact, a fourth part, a non-UTC or impossible time, a session of another shape: unreadable, never a reading', [`${CONTRACT_REVIEW_CLAIM_KEY}: ${CL_SESSION} · head ${CL_HEAD}`, `${CL_LINE()} · round 3`, CL_LINE(CL_SESSION, CL_HEAD, '2026-10-28 12:18'), CL_LINE(CL_SESSION, CL_HEAD, '2026-10-28T12:18+08:00'), CL_LINE(CL_SESSION, CL_HEAD, '2026-13-45T12:18Z'), CL_LINE('domain:skills#2', CL_HEAD), CL_LINE('session_x', CL_HEAD), `${CONTRACT_REVIEW_CLAIM_KEY}:`].every((l) => readContractReviewClaim(l).state === 'unreadable'));
+  t('⛔ the TEMPLATE copied unedited is unreadable — a placeholder holds no head', readContractReviewClaim(CONTRACT_REVIEW_CLAIM_TEMPLATE).state === 'unreadable' && CONTRACT_REVIEW_CLAIM_TEMPLATE === 'Contract-review-claim: <session> · head <full sha> · <UTC>');
+  t('the unreadable line is quoted back, key included', readContractReviewClaim(`${CONTRACT_REVIEW_CLAIM_KEY}: soon`).line.includes(CONTRACT_REVIEW_CLAIM_KEY));
+  t('the key is ONE regex, built by the one key-line convention, and prose naming it mid-sentence is not the line', CONTRACT_REVIEW_CLAIM_LINE.source === keyLineRegex(CONTRACT_REVIEW_CLAIM_KEY).source && readContractReviewClaim(`triage posts the ${CONTRACT_REVIEW_CLAIM_KEY}: line first`).state === 'missing' && readContractReviewClaim('').state === 'missing');
+  t('the FIRST claim line of a comment is the one read', readContractReviewClaim(`${CL_LINE(CL_SESSION, CL_HEAD)}\n${CL_LINE(CL_LANE_SESSION, CL_HEAD)}`).session === CL_SESSION);
+  t('⭐ lapse: the current head under two hours ⇒ live; two hours or more ⇒ expired; another head ⇒ head-moved', (() => { const c = readContractReviewClaim(CL_LINE()); const at = c.at; return contractReviewClaimLapse(c, { headSha: CL_HEAD, now: at + 119 * 60000 }) === 'live' && contractReviewClaimLapse(c, { headSha: CL_HEAD, now: at + 120 * 60000 }) === 'expired' && contractReviewClaimLapse(c, { headSha: 'f'.repeat(40), now: at }) === 'head-moved' && CONTRACT_REVIEW_CLAIM_LAPSE_HOURS === 2; })());
+  t('the lapse is timed from when the comment was POSTED when that stamp is held, else from the line\'s own time', (() => { const c = readContractReviewClaim(CL_LINE()); const posted = c.at + 90 * 60000; return contractReviewClaimLapse(c, { headSha: CL_HEAD, now: c.at + 150 * 60000, postedAt: posted }) === 'live' && contractReviewClaimLapse(c, { headSha: CL_HEAD, now: c.at + 150 * 60000 }) === 'expired'; })());
+  t('⭐ the thread: a live claim on the current head holds it — named by session, comment and side', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.session === CL_SESSION && r.holder.id === 6468788431 && r.holder.side === 'triage' && r.tie === false; })());
+  t('⭐ the LANE wins a tie: a triage claim posted FIRST and a lane claim posted later, both live ⇒ the lane holds, tie named', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.tie === true && r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION; })());
+  t('two claims on one side: the EARLIEST posted holds, and no tie is declared', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 2, '2026-10-28T12:30:00Z'), CL_ROW(CL_BODY(null, CL_LINE(CL_SESSION)), 1, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.tie === false; })());
+  t('an UNSIGNED claim is the lane side — only a `triage#N` signature makes a claim triage\'s', contractReviewClaims([CL_ROW(CL_BODY(null))], CL_HEAD, { now: CL_NOW }).holder.side === 'lane');
+  t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
+  t('an unreadable claim line holds nothing and is returned by comment id', (() => { const r = contractReviewClaims([CL_ROW(`${CL_TRIAGE_SIG}\n${CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))}`, 77)], CL_HEAD, { now: CL_NOW }); return r.state === 'none' && r.unreadable.length === 1 && r.unreadable[0].id === 77; })());
+  t('a thread that is not an array, an abbreviated head, or no clock is a read that could not be made', contractReviewClaims(null, CL_HEAD, { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD.slice(0, 12), { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD, {}).state === 'unreadable' && contractReviewClaims([], CL_HEAD, { now: CL_NOW }).state === 'none');
+  t('⛔ no gate reads it: a claim beside a record on this head leaves the record reading FOUND, and the hand-off reading is untouched', (() => { const rec = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, CL_ROW(CL_BODY(CL_TRIAGE_SIG, CL_LINE(CL_SESSION, HEAD_9AF9.padEnd(40, '0'))))] })); return rec.state === 'found' && rec.id === 3301 && contractReviewHandoff([CL_ROW(CL_BODY())], CL_HEAD).state === 'absent'; })());
+  t('⭐ the line is spelled VERBATIM, in a code span, in the rule text (`references/contract-review.md`), beside its two-hour lapse', (() => { const rules = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8'); return rules.includes(`\`${CONTRACT_REVIEW_CLAIM_TEMPLATE}\``) && rules.includes(`${CONTRACT_REVIEW_CLAIM_LAPSE_HOURS} 小时`); })());
+
   // -- the mailbox doorbell -----------------------------------------------------
   //
   // One mailbox PR per seat, and a CLOSED vocabulary on it (the maintainer's
@@ -2496,7 +2689,8 @@ export async function selfTest() {
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; the mailbox '
       + 'doorbell — seven keys read, each spelled verbatim in the protocol text, and free text, an acknowledgement, '
-      + 'an eighth key, a second line and an over-long line refused; and the ONE '
+      + 'an eighth key, a second line and an over-long line refused; the review claim line — read signed and unsigned, '
+      + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the lane winning a tie; and the ONE '
       + 'thread set, driven through the queue guard itself).',
   );
 

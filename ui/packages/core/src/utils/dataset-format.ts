@@ -305,7 +305,7 @@ function formatMeasureDate(v: unknown, format: string | undefined, locale: strin
  * lived in `@object-ui/i18n`, which depends on `i18next`/`react-i18next` and
  * peer-depends on React, while this package is the React-free engine (AGENTS.md
  * §3: "No UI-lib deps. Logic only.") and a runtime dependency of React-FREE
- * consumers — the `object-ui` VS Code extension and `@object-ui/data-objectstack`.
+ * consumers — `@object-ui/data-objectstack`, and then the VS Code extension too.
  *
  * #4576 removed the boundary rather than working around it: `formatDisplayNumber`
  * is pure, so it moved DOWN into this package (`./number-display.ts`) and

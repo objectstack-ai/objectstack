@@ -30,6 +30,12 @@
  *     options.kanban = { groupBy: 'LANE_FROM_STRAY_GROUPBY' }
  *     kanban         = { groupByField: 'LANE_FROM_CANONICAL' }
  *
+ * (objectstack#25923 retired the bag. The server folds a stored bag onto the
+ * top-level block before the row is served, so that stored row now arrives as
+ * ONE block carrying both keys, `kanban = { groupByField: CANONICAL, groupBy:
+ * STRAY }`, and that served form is the fixture below. The first case pins the
+ * fold that produces it.)
+ *
  * ## THE RULING, and the two halves it asks for
  *
  * Maintainer ruling of 2026-09-12 (decision batch #117 item 5, verbatim
@@ -62,7 +68,10 @@
  *      own block, so both nestings report the arm itself (`invalid_type`). ONE
  *      message — asserted below, because a refusal that only reached the declared nesting
  *      would leave exactly the affected population silently re-grouped, i.e.
- *      option A wearing option B's name.
+ *      option A wearing option B's name. Since objectstack#25923 the bag is
+ *      refused whole and folded onto the block on read, so the affected
+ *      population carries the key in the declared nesting, and the one message
+ *      is asserted there for both fixtures.
  *
  * ## THE CONTROLS, and what each one would catch
  *
@@ -99,6 +108,7 @@ import { render, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { safeValidateSchema } from '@object-ui/types/zod';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { KanbanConfigSchema } from '@objectstack/spec/ui';
 import { ListView } from '../ListView';
 
@@ -168,9 +178,19 @@ const DISTINGUISHING_VIEW = {
   type: 'list-view',
   objectName: OBJECT,
   viewType: 'kanban',
+  kanban: { groupByField: CANONICAL, groupBy: STRAY },
+} as const;
+
+/** The stored row this ruling is about, as written: the stray key in the retired bag. */
+const STORED_LEGACY_ROW = {
+  name: `${OBJECT}.board`,
+  object: OBJECT,
+  viewKind: 'list',
+  type: 'kanban',
+  columns: ['name'],
   options: { kanban: { groupBy: STRAY } },
   kanban: { groupByField: CANONICAL },
-} as const;
+};
 
 /**
  * The read door judges the AUTHORED page node (objectui#12670, ruling C on
@@ -203,6 +223,12 @@ beforeEach(() => {
 });
 
 describe('objectui#8365 · half 1 — the CANONICAL lane wins on the generated node', () => {
+  it('the stored legacy row is served as the distinguishing fixture\'s block (objectstack#25923 fold)', () => {
+    const served = applyConversionsToStoredItem('view', structuredClone(STORED_LEGACY_ROW)) as Record<string, unknown>;
+    expect(served).not.toHaveProperty('options');
+    expect(served.kanban).toEqual(DISTINGUISHING_VIEW.kanban);
+  });
+
   it('the distinguishing fixture resolves the lane from `groupByField`, not the stray `groupBy`', async () => {
     const node = await generatedKanbanNode(DISTINGUISHING_VIEW);
     // Before the fix this read `LANE_FROM_STRAY_GROUPBY`: the `...restKanban`
@@ -235,7 +261,7 @@ describe('objectui#8365 · half 1 — the CANONICAL lane wins on the generated n
   });
 
   it('LANE CONTROL: `groupBy` alone no longer sets the lane — option B, not a silent re-grouping', async () => {
-    const node = await generatedKanbanNode({ options: { kanban: { groupBy: STRAY } } });
+    const node = await generatedKanbanNode({ kanban: { groupBy: STRAY } });
     expect(node.groupBy).not.toBe(STRAY);
   });
 });
@@ -244,13 +270,14 @@ describe('objectui#8365 · half 2 — the stray key is REFUSED at the read door'
   it('the distinguishing fixture is refused BY NAME, pointing at `groupByField`', () => {
     const issues = refusalIssuesFor(DISTINGUISHING_VIEW);
     expect(issues).toHaveLength(1);
-    // ⭐ THE LEGACY NESTING. Until objectui#6152 round 12 `options` was a record
-    // that could declare no MEMBER, so the refusal there was a CHECK (`custom`).
-    // Since that round the bag is the spec's list-overlay bag by reference and
-    // nests the declared slot's own block, so the arm is a member there too:
-    // `invalid_type`, the same code and ONE message in both nestings.
+    // ⭐ THE LEGACY POPULATION. Until objectui#6152 round 12 `options` was a
+    // record that could declare no MEMBER, so the refusal there was a CHECK
+    // (`custom`); from that round the bag nested the declared slot's own block.
+    // objectstack#25923 retired the bag and folds it onto the block on read, so
+    // the stray key now sits in the declared nesting: `invalid_type`, at
+    // `kanban.groupBy`, with ONE message.
     expect(issues[0].code).toBe('invalid_type');
-    expect(bagPath(issues[0].path)).toBe('options.kanban.groupBy');
+    expect(bagPath(issues[0].path)).toBe('kanban.groupBy');
     // The lead sentence is the one the protocol's own `strictObject({ aliases })`
     // answers with, so an author meets ONE remedy on both faces.
     expect(issues[0].message).toContain('Unrecognized key(s) on this kanban configuration: `groupBy`.');
@@ -268,8 +295,8 @@ describe('objectui#8365 · half 2 — the stray key is REFUSED at the read door'
     // `invalid_type` at the key's own path.
     expect(declared[0].code).toBe('invalid_type');
     expect(bagPath(declared[0].path)).toBe('kanban.groupBy');
-    // ⭐ ONE STRING, BOTH NESTINGS — the assertion that keeps the check and the
-    // arm from drifting into two dialects of one remedy.
+    // ⭐ ONE STRING, BOTH FIXTURES — the authored block and the served legacy
+    // row meet one remedy (the check and the arm cannot drift into two dialects).
     const legacy = refusalIssuesFor(DISTINGUISHING_VIEW);
     expect(declared[0].message).toBe(legacy[0].message);
   });

@@ -6,6 +6,7 @@ import { AggregationMetricType, NUMERIC_VALUE_TYPES, type AggregationFunction } 
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext, DurationMeasureSpec } from './types.js';
 import {
   declaredDatetimeLowering,
+  declaredDateColumn,
   findNestedRelationCondition,
   invalidFilterError,
   lowerAnalyticsWhere,
@@ -51,6 +52,7 @@ import { scopedMeasureFilter } from '../scoped-measure-key.js';
 import { isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { dateRangeWindowBounds } from '../dataset-executor.js';
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
 // the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
@@ -1334,6 +1336,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf),
       'type-blind',
     );
+    // [#27172] Which `dateRange` member binds a `date` column, asked of the
+    // SAME target (`dateRangeWindowBounds`).
+    const dateColumn = declaredDateColumn(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf),
+    );
     // [#21376, #21426] The comparand verdicts' member reader (both arms read
     // it), asked of the SAME target, and applied at the same three filter
     // positions, before each is normalized ({@link judgedComparands}).
@@ -1450,7 +1458,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           // `today` does. ⛔ An explicit `[a, b]` a CALLER wrote keeps the
           // inclusive reading it has always had — the #16179 separation, on this
           // side too.
-          const bounds = resolved?.endExclusive ? { $gte: start, $lt: end } : { $gte: start, $lte: end };
+          //
+          // [#27172] On a `date` column a resolved window is the calendar days
+          // it covers in the reference zone, the pair `dateRangeWindowBounds`
+          // spells for every face; its instants slid a day early east of UTC.
+          const bounds = resolved
+            ? dateRangeWindowBounds(resolved, query.timezone, dateColumn(td.dimension))
+            : { $gte: start, $lte: end };
           const windowSql = this.compileFilterNode(
             normalizeDateRangeWindow(td.dimension, bounds, lowering),
             cube,

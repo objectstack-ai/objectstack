@@ -185,7 +185,7 @@ async function objectPageSchema(view: Record<string, unknown>): Promise<any> {
   // `options` is written by the relay literal unconditionally, so its arrival
   // is the signal the relay ran.
   await waitFor(() => {
-    expect(captured?.options).toBeTruthy();
+    expect(captured?.kanban).toBeTruthy();
   });
   return captured;
 }

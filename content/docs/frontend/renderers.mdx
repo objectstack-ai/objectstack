@@ -1,0 +1,117 @@
+---
+title: "Renderer types"
+description: "The renderer types the ObjectUI component packages register, for apps that render their own JSON with the SDK"
+---
+
+<Callout type="warn" title="SDK only">
+  These types exist only inside an app that renders JSON with the ObjectUI SDK. None of them is in
+  `sdui.manifest.json`, so an ObjectStack page cannot use them. The components a page can hold are in the
+  [component reference](/docs/ui/components).
+</Callout>
+
+Importing `@object-ui/components` registers these types with the [component registry](/docs/frontend/component-registry);
+`view-switcher`, `filter-ui` and `sort-ui` register when `@object-ui/plugin-view` is imported. Each type's
+inputs are declared in its `ComponentRegistry.register` call in the linked source file, and `@object-ui/types`
+holds the schema types.
+
+## Basic
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `separator` | Visual divider between content sections | [separator.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/basic/separator.tsx) |
+| `button-group` | Group multiple buttons together with shared styling | [button-group.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/basic/button-group.tsx) |
+| `pagination` | Navigate through pages of content | [pagination.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/basic/pagination.tsx) |
+| `navigation-menu` | Accessible navigation menu with dropdown support | [navigation-menu.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/basic/navigation-menu.tsx) |
+| `sidebar` | An app-level sidebar region that works in any host | [sidebar.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/navigation/sidebar.tsx) |
+| `div` | Deprecated generic container; use the Shadcn-based renderers instead | [div.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/basic/div.tsx) |
+
+## Form
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `input` | Basic text input field for user data entry | [input.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/input.tsx) |
+| `textarea` | Multi-line text input for longer content | [textarea.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/textarea.tsx) |
+| `select` | Dropdown selection from a list of options | [select.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/select.tsx) |
+| `combobox` | Searchable dropdown for selecting from a list of options | [combobox.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/combobox.tsx) |
+| `checkbox` | Toggle selection with checkboxes | [checkbox.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/checkbox.tsx) |
+| `radio-group` | A set of checkable buttons where only one can be selected at a time | [radio-group.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/radio-group.tsx) |
+| `switch` | Toggle switch for binary options | [switch.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/switch.tsx) |
+| `slider` | Select a value from a range | [slider.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/slider.tsx) |
+| `date-picker` | Input for selecting dates with a calendar popup | [date-picker.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/date-picker.tsx) |
+| `input-otp` | One-time password input with auto-focus | [input-otp.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/input-otp.tsx) |
+| `command` | Fast command menu with search and keyboard navigation | [command.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/command.tsx) |
+| `form` | Form container with validation and submission handling | [form.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/form.tsx) |
+| `calendar` | Date selection component with single, multiple, and range modes | [calendar.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/calendar.tsx) |
+| `file-upload` | Modern file upload component with drag-and-drop support | [file-upload.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/file-upload.tsx) |
+| `toggle` | Two-state button for toggling options on and off | [toggle.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/form/toggle.tsx) |
+
+## Layout
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `aspect-ratio` | Maintain a consistent width to height ratio | [aspect-ratio.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/layout/aspect-ratio.tsx) |
+| `page` | Full-page container with title, description, and content sections | [page.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/layout/page.tsx) |
+
+## Data display
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `avatar` | User profile image or fallback initials | [avatar.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/data-display/avatar.tsx) |
+| `list` | Display a list of items | [list.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/data-display/list.tsx) |
+| `breadcrumb` | Display the current location within a navigational hierarchy | [breadcrumb.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/data-display/breadcrumb.tsx) |
+| `kbd` | Display keyboard shortcuts and hotkeys | [kbd.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/data-display/kbd.tsx) |
+| `statistic` | Display key metrics and statistical values with trend indicators | [statistic.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/data-display/statistic.tsx) |
+| `tree-view` | Hierarchical tree structure for displaying nested data | [tree-view.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/data-display/tree-view.tsx) |
+
+## Feedback
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `loading` | Loading spinner to indicate processing | [loading.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/feedback/loading.tsx) |
+| `progress` | Progress bar to show completion status | [progress.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/feedback/progress.tsx) |
+| `skeleton` | Placeholder for loading content | [skeleton.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/feedback/skeleton.tsx) |
+| `spinner` | Loading spinner indicator | [spinner.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/feedback/spinner.tsx) |
+| `empty` | Empty state placeholder with optional action | [empty.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/feedback/empty.tsx) |
+| `toast` | Brief notification messages that appear temporarily | [toast.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/feedback/toast.tsx) |
+| `sonner` | Toast notifications using Sonner library | [sonner.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/feedback/sonner.tsx) |
+
+## Overlay
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `dialog` | Modal dialog overlay for focused interactions | [dialog.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/dialog.tsx) |
+| `drawer` | Sliding panel from edge of screen | [drawer.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/drawer.tsx) |
+| `tooltip` | Contextual information on hover | [tooltip.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/tooltip.tsx) |
+| `popover` | Floating content panel | [popover.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/popover.tsx) |
+| `alert-dialog` | A modal dialog that interrupts the user with important content and expects a response | [alert-dialog.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/alert-dialog.tsx) |
+| `sheet` | Slide-in panel from the edge of the screen | [sheet.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/sheet.tsx) |
+| `hover-card` | Display rich content in a popup when hovering over a trigger | [hover-card.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/hover-card.tsx) |
+| `context-menu` | Display a menu on right-click or long-press | [context-menu.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/context-menu.tsx) |
+| `dropdown-menu` | Display a menu of actions or options triggered by a button | [dropdown-menu.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/dropdown-menu.tsx) |
+| `menubar` | Horizontal menu bar with dropdown menus | [menubar.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/overlay/menubar.tsx) |
+
+## Disclosure
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `collapsible` | Toggle visibility of content | [collapsible.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/disclosure/collapsible.tsx) |
+| `toggle-group` | A group of toggle buttons where one or more can be selected | [toggle-group.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/disclosure/toggle-group.tsx) |
+
+## Navigation
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `header-bar` | Application header with sidebar trigger and breadcrumb navigation | [header-bar.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/navigation/header-bar.tsx) |
+
+## Complex
+
+| Type | What it draws | Source |
+| --- | --- | --- |
+| `data-table` | Enterprise-grade data table with sorting, filtering, pagination, and row actions | [data-table.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/complex/data-table.tsx) |
+| `carousel` | Slideshow component for cycling through content | [carousel.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/complex/carousel.tsx) |
+| `scroll-area` | Customizable scrollable container with styled scrollbars | [scroll-area.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/complex/scroll-area.tsx) |
+| `resizable` | Resizable panel groups with draggable handles | [resizable.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/complex/resizable.tsx) |
+| `filter-builder` | Visual query builder for constructing complex filter conditions | [filter-builder.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/components/src/renderers/complex/filter-builder.tsx) |
+| `view-switcher` | Switch between multiple view configurations in one container | [index.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/plugin-view/src/index.tsx) |
+| `filter-ui` | Build flexible filter panels for list and view toolbars | [index.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/plugin-view/src/index.tsx) |
+| `sort-ui` | Configure sorting with dropdowns or button toggles | [index.tsx](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/plugin-view/src/index.tsx) |

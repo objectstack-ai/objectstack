@@ -269,19 +269,34 @@ function pinTemplateEngine(): void {
     }
     expect(judged, 'the corpus carries holes to compare').toBeGreaterThan(200);
   });
+
+  it('the verbatim boundary: brace text whose part before any `|` is not a path is left as written; a path then `|` is judged', () => {
+    // Not a hole: no path, so it is the template's own text.
+    const literal = '<p>{{ not a path }} {{}} {{ | upper }} {{ a b | upper }} {{ | date-long }}</p>';
+    expect(judgeMailHtmlHoles(literal)).toEqual([]);
+    expect(renderTemplate(literal, everyPath(PERSON_MARKUP))).toBe(literal);
+    // A formatter use: text after the `|` that is not a formatter name is
+    // refused at render in both entry points, never printed as written.
+    for (const hole of ['{{ x | two words }}', '{{ due | date-long }}', '{{ x | }}', '{{{ x | two words }}}']) {
+      expect(() => renderTemplate(`<p>${hole}</p>`, { x: PERSON, due: PERSON }), hole).toThrow(/^TEMPLATE_INVALID: the hole /);
+      expect(() => renderPlainTextTemplate(hole, { x: PERSON, due: PERSON }), hole).toThrow(/^TEMPLATE_INVALID: the hole /);
+    }
+  });
 }
 
 /**
  * The grammar's edges, beside the built-ins' ordinary holes: spacing, dotted
  * paths, formatters with and without an argument, mismatched and stacked
- * braces, and brace pairs the renderer leaves verbatim. No `default`
- * formatter, which renders text for a missing value.
+ * braces, and brace pairs the renderer leaves verbatim (their part before any
+ * `|` is not a path; a path then `|` whose formatter part is not a formatter
+ * is refused, pinned by the boundary case above). No `default` formatter,
+ * which renders text for a missing value.
  */
 const GRAMMAR_CORPUS = [
   '<p>{{a}} {{ a.b }} {{a_b.c1}}{{  spaced  }}</p>',
   '<p>{{ x | upper }} {{ total | currency:EUR }} {{ t | currency: \'USD\' }} {{ d | date }}</p>',
   '<p>{{{a}}} {{{a}} {{a}}} {{{{a}}}} {{{ a }}}</p>',
-  '<p>{{ not a path }} {{}} {{ | upper }} {{ x | two words }} {{a{b}} {x}</p>',
+  '<p>{{ not a path }} {{}} {{ | upper }} {{ a b | upper }} {{a{b}} {x}</p>',
   '<p title="{{a}}">{{ <b }}{{b}}</p><a href="{{{u}}}">{{u}}</a>',
 ];
 

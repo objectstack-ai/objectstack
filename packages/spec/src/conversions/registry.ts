@@ -7896,6 +7896,96 @@ const pageRequiresNonCompiledKindRemoved: MetadataConversion = {
 };
 
 /**
+ * `page.slots.tabs` removed (protocol 18, ADR-0085; #27053, the record-page v3
+ * definition-surface ruling of 2026-10-28: keep the object's roles, its
+ * relationship flags, six slotted slots and `kind: 'full'`; retire the `tabs`
+ * slot).
+ *
+ * The slot replaced the WHOLE synthesized tab strip — the related lists and the
+ * approvals, attachments and history tabs the platform composes from the
+ * object were gone unless the author re-added each one — and it opted the page
+ * out of the record page's column tiers, so the page stayed tabbed at every
+ * width. The parse refuses it (a `retiredKey()` tombstone on the slot map,
+ * `ui/page.zod.ts`); this is the data-at-rest half.
+ *
+ * **A strip, not a rewrite.** The mechanical half deletes the slot, so a stored
+ * page that carried it renders the synthesized strip (and the columns) again,
+ * its other slots unchanged; a page whose ONLY slot was `tabs` is left an empty
+ * slotted page, which is exactly the synthesized default. Whether a page whose
+ * strip was curated — a Security tab, a custom first tab, a list the object's
+ * relationship flags do not produce — should instead become a `kind: 'full'`
+ * page that draws that strip as authored is a judgement no walker can make: the
+ * D3 semantic entry `page-slots-tabs-retired` names it.
+ *
+ * **Retired from the load path, from day one**: the authoring door keeps the
+ * tombstone's prescription; stored rows, artifacts and `os migrate meta` replay
+ * this. Idempotent by construction (`stripKeys` skips an absent key).
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}). `slots`
+ * is a top-level `PageSchema` key with no nested spelling, and the slot map is
+ * the only place a `tabs` slot was authorable.
+ */
+const pageSlotsTabsRemoved: MetadataConversion = {
+  id: 'page-slots-tabs-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface: 'page.slots.tabs',
+  summary:
+    "page slot 'tabs' removed (it replaced the whole synthesized tab strip and kept the page tabbed "
+    + "at every width; the record page composes its strip and columns from the object's roles and "
+    + "relationship flags, ADR-0085, and a page that needs its own strip is kind: 'full')",
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      const slots = page.slots;
+      if (!isDict(slots)) return page;
+      const next = stripKeys(slots, ['tabs'], emit, `${path}.slots`);
+      return next === slots ? page : { ...page, slots: next };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        // A slotted page whose only slot was the strip: left an empty slotted
+        // page, the synthesized default.
+        {
+          name: 'project_detail',
+          type: 'record',
+          object: 'project',
+          kind: 'slotted',
+          slots: { tabs: { type: 'page:tabs', properties: { items: [{ label: 'Related', children: [] }] } } },
+        },
+        // The strip beside other slots: only the strip goes.
+        {
+          name: 'user_detail',
+          type: 'record',
+          object: 'person',
+          kind: 'slotted',
+          slots: { highlights: { type: 'record:highlights' }, tabs: [{ type: 'page:tabs' }], discussion: [] },
+        },
+        // A page with no strip keeps its identity (copy-on-write).
+        { name: 'account_detail', type: 'record', object: 'account', kind: 'slotted', slots: { discussion: [] } },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'project_detail', type: 'record', object: 'project', kind: 'slotted', slots: {} },
+        {
+          name: 'user_detail',
+          type: 'record',
+          object: 'person',
+          kind: 'slotted',
+          slots: { highlights: { type: 'record:highlights' }, discussion: [] },
+        },
+        { name: 'account_detail', type: 'record', object: 'account', kind: 'slotted', slots: { discussion: [] } },
+      ],
+    },
+    // One per stripped slot: the two pages that carried `tabs`.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `page.template: 'full-width'` → `'default'` (protocol 18). The #23610 ruling
  * (A on Q2, record 6190536588) closed the template set and retired `full-width`
  * by name; this entry is the data-at-rest half the P0 that followed it added.
@@ -8190,6 +8280,115 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
     // Two notices: both keys on the one object carrying them (presence-based —
     // the authored `false` is as dead as the authored `true`).
     expectedNotices: 2,
+  },
+};
+
+/**
+ * `buttons.reset` leaves the form view (protocol 18, #27153 — ADR-0049
+ * enforce-or-remove, ruled retire on the card): six console form button bars
+ * draw `submit` and `cancel`, none drew a reset button, and `reset.label` had
+ * no reader. The one fold that read `reset.show` mapped it onto ObjectForm's
+ * clear-after-save flag, so the key never did what it said.
+ *
+ * Authoring refuses the key by its `retiredKey()` tombstone inside the
+ * `buttons` block (`ui/view.zod.ts`); `submit` and `cancel` beside it are
+ * untouched. Deleting is the whole edit. A `buttons` block left empty stays an
+ * empty block, which parses and draws the default buttons.
+ *
+ * **Reach: every FORM payload**, as
+ * {@link formViewPresentationTypesRemoved}: {@link mapViewPayloads}
+ * (`form`, `formViews.*`, a form view item's `config`, a flattened form
+ * overlay) and the assembled-manifest `viewItems` channel
+ * ({@link ASSEMBLED_VIEW_ITEMS_KEY}). A list payload is never judged.
+ *
+ * The block accepted `reset` through 18.2.0 and `PUT /meta/view` persists form
+ * views, so a stored `view` row CAN carry it. **Retired from the load path from
+ * day one**: a live author meets the parse's prescription, and this entry
+ * serves stored-row rehydration, assembled artifacts and `os migrate meta`.
+ * Idempotent by construction (`stripKeys`).
+ *
+ * Behaviour after the edit: `reset.show: true` used to clear the form after
+ * each save (the ObjectForm fold that ObjectView and the record form page
+ * render). A converted row no longer clears after a save. This entry does NOT
+ * map the key onto `submitBehavior`, because whether the author wanted the
+ * clear is not decidable from the row; the D3 entry
+ * `ui-form-view-buttons-reset-retired` carries that, and names
+ * `submitBehavior: { kind: 'continue' }` for an author who did.
+ */
+const formViewButtonsResetRemoved: MetadataConversion = {
+  id: 'form-view-buttons-reset-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface: 'view.form.buttons.reset / view.formViews.<key>.buttons.reset',
+  summary:
+    'form view `buttons.reset` removed (no form drew a reset button and its label had no reader; a form has '
+    + '`submit` and `cancel` only). The key is deleted; `submit` and `cancel` are unchanged. A form whose '
+    + '`reset.show: true` cleared it after a save no longer clears; `submitBehavior: { kind: \'continue\' }` '
+    + 'declares that',
+  apply(stack, emit) {
+    const convertForm = (form: Dict, path: string): Dict => {
+      const buttons = form.buttons;
+      if (!isDict(buttons)) return form;
+      const stripped = stripKeys(buttons, ['reset'], emit, `${path}.buttons`);
+      return stripped === buttons ? form : { ...form, buttons: stripped };
+    };
+    const withViews = mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'form' ? convertForm(payload, path) : payload);
+    return mapCollection(withViews, ASSEMBLED_VIEW_ITEMS_KEY, (item, path) => {
+      if (item.viewKind !== 'form') return item;
+      if (isDict(item.config)) {
+        const config = convertForm(item.config, `${path}.config`);
+        return config === item.config ? item : { ...item, config };
+      }
+      // A flattened form overlay — the body IS the payload. A present but
+      // malformed `config` is neither shape and is left for the parse.
+      return item.config === undefined ? convertForm(item, path) : item;
+    });
+  },
+  fixture: {
+    before: {
+      views: [
+        {
+          object: 'fvr_ticket',
+          // `submit` and `cancel` ride through; only `reset` goes.
+          form: { buttons: { submit: { label: 'Send' }, cancel: { show: false }, reset: { show: true, label: 'Clear' } } },
+          formViews: {
+            // A block holding only `reset` is left as an empty block.
+            quick: { buttons: { reset: { show: false } } },
+            // A form without `reset` rides through by reference.
+            plain: { buttons: { submit: { show: true } } },
+          },
+        },
+        // A form view item record: the payload is `config`.
+        { name: 'fvr_ticket.peek', object: 'fvr_ticket', viewKind: 'form', config: { buttons: { reset: { label: 'Undo' } } } },
+        // A list payload is never judged.
+        { name: 'fvr_ticket.all', object: 'fvr_ticket', viewKind: 'list', config: { type: 'grid', columns: ['subject'] } },
+      ],
+      viewItems: [
+        // An assembled flattened form overlay — the body IS the payload.
+        { name: 'fvr_ticket.side', object: 'fvr_ticket', viewKind: 'form', buttons: { reset: { show: true } } },
+      ],
+    },
+    after: {
+      views: [
+        {
+          object: 'fvr_ticket',
+          form: { buttons: { submit: { label: 'Send' }, cancel: { show: false } } },
+          formViews: {
+            quick: { buttons: {} },
+            plain: { buttons: { submit: { show: true } } },
+          },
+        },
+        { name: 'fvr_ticket.peek', object: 'fvr_ticket', viewKind: 'form', config: { buttons: {} } },
+        { name: 'fvr_ticket.all', object: 'fvr_ticket', viewKind: 'list', config: { type: 'grid', columns: ['subject'] } },
+      ],
+      viewItems: [
+        { name: 'fvr_ticket.side', object: 'fvr_ticket', viewKind: 'form', buttons: {} },
+      ],
+    },
+    // `form`, `quick`, the item record and the assembled overlay: one each.
+    expectedNotices: 4,
   },
 };
 
@@ -10863,6 +11062,195 @@ const viewPageMountRemoved: MetadataConversion = {
       }],
     },
     expectedNotices: 3,
+  },
+};
+
+/**
+ * The per-kind blocks the legacy list-overlay `options` bag could carry, as
+ * the bag declared them when it closed (#25923): every list-view `type` that
+ * also names a block on the list-view shape (`grid` names none). Spelled out
+ * rather than derived, because this conversion replays a shape that is gone:
+ * a kind added later never had a bag spelling to fold.
+ */
+const LIST_VIEW_OPTIONS_BAG_KINDS = ['kanban', 'calendar', 'gantt', 'timeline', 'map', 'gallery', 'chart', 'tree'] as const;
+
+/**
+ * The flattened list overlay's legacy `options` bag folds onto the top-level
+ * per-kind blocks (protocol 18, #25923 — Prime Directive #12, one key per
+ * concept; this supersedes ruling direction A on objectui#10380).
+ *
+ * Until this release the list overlay door accepted `options.KIND` beside the
+ * top-level `KIND` block, judged key by key by the kind's own schema with
+ * every key optional, and stored it. The bag was declared an UNDERLAY: where
+ * both set a key, the top-level block wins. objectui's `ListView` read it that
+ * way for kanban, calendar, gallery, timeline, gantt and map
+ * (`{ ...options.KIND, ...KIND }`), so this fold is that same merge, written
+ * once into the row:
+ *
+ * - `options.KIND` with no top-level `KIND` ⇒ it becomes `KIND`.
+ * - Both present ⇒ `KIND = { ...options.KIND, ...KIND }`, the top-level value
+ *   kept where both set a key.
+ * - `chart` is the one kind the renderer did NOT merge: it read
+ *   `chart || options.chart`, the block replacing the bag WHOLE. So a bag
+ *   beside a top-level `chart` block is dropped (it never drew), and a bag
+ *   with no block becomes the block. Merging it per key would draw keys the
+ *   author never saw.
+ * - A bag left empty is removed.
+ *
+ * **Retired from the load path** — the door refuses `options` by name with
+ * the prescription (`LIST_OVERLAY_OPTIONS_REFUSED` in `ui/view.zod.ts`), so a
+ * live author is taught the top-level spelling. The entry exists because a
+ * STORED list overlay can carry the bag, and every read of a stored `view` row
+ * replays the chain through `applyConversionsToStoredItem` as
+ * `{ views: [row] }`; `os migrate meta` lists the edit for sources.
+ *
+ * **Left as stored, with a TODO** (no lossless rewrite): a bag that is not an
+ * object; an `options.grid` (a grid has no block, and the door refused it
+ * already); a bag key that is not a kind; an `options.KIND` that is not an
+ * object, or whose top-level `KIND` is not one; and any bag on a FORM overlay
+ * (`viewKind: 'form'`), whose blocks have no home on a form. The row keeps its
+ * bag and is badged invalid until its owner decides. The fold also cannot
+ * supply a key the block REQUIRES: the bag was judged with every key
+ * optional, so a bag block can fold into a block still missing one (a
+ * `gantt` with no `titleField`, say). That row is served badged invalid,
+ * and the D3 entry `ui-list-view-options-bag-folded` names the remedy.
+ *
+ * ⚠️ Scoped to the FLATTENED spelling, as {@link viewOverlayOwnerHiddenRemoved}
+ * is: a body with no `config` and no container slot. A view item record
+ * (`config` present) has refused the bag since #20051 with its own
+ * prescription, and the two authoring shapes never declared it.
+ */
+const listViewOptionsBagFolded: MetadataConversion = {
+  id: 'list-view-options-bag-folded',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface: 'view.options.<kind> — on a flattened list view overlay ({ name, object, viewKind, …, no config })',
+  summary:
+    "flattened list overlay 'options.KIND' folded onto the top-level 'KIND' block (the top-level "
+    + "value wins per key; for 'chart' the block wins whole), and the bag removed: the per-kind "
+    + 'blocks are top-level keys of the view, their one spelling',
+  apply(stack, emit, context) {
+    const fold = (view: Dict, path: string): Dict => {
+      if (!('options' in view)) return view;
+      if (view.config !== undefined) return view;
+      if (view.list !== undefined || view.form !== undefined) return view;
+      if (view.listViews !== undefined || view.formViews !== undefined) return view;
+      const bag = view.options;
+      if (view.viewKind === 'form' || !isDict(bag)) {
+        context?.reportTodo?.({
+          path: `${path}.options`,
+          from: JSON.stringify(bag),
+          reason: view.viewKind === 'form'
+            ? 'a form view overlay carries an `options` bag; its per-kind blocks belong to a list view and have no '
+              + 'home on a form. Remove `options`, or save the body as a list view.'
+            : 'the `options` bag is not an object, so there is no per-kind block to fold. Remove `options`.',
+        });
+        return view;
+      }
+      const next: Dict = { ...view };
+      const rest: Dict = { ...bag };
+      let changed = false;
+      for (const kind of LIST_VIEW_OPTIONS_BAG_KINDS) {
+        if (!(kind in rest)) continue;
+        const under = rest[kind];
+        const top = next[kind];
+        if (!isDict(under) || (top !== undefined && !isDict(top))) continue;
+        delete rest[kind];
+        changed = true;
+        if (top === undefined) {
+          next[kind] = under;
+          emit({ from: `options.${kind}`, to: kind, path: `${path}.options.${kind}` });
+        } else if (kind === 'chart') {
+          emit({ from: 'options.chart', to: '(removed: the top-level chart block replaces it whole)', path: `${path}.options.chart` });
+        } else {
+          next[kind] = { ...under, ...top };
+          emit({ from: `options.${kind}`, to: `${kind} (top-level keys kept)`, path: `${path}.options.${kind}` });
+        }
+      }
+      if (Object.keys(rest).length === 0) {
+        delete next.options;
+        if (!changed) emit({ from: 'options', to: '(removed: empty)', path: `${path}.options` });
+        return next;
+      }
+      context?.reportTodo?.({
+        path: `${path}.options`,
+        from: JSON.stringify(rest),
+        reason: `the bag keeps ${Object.keys(rest).map((k) => `\`${k}\``).join(', ')}, which has no top-level block `
+          + 'to fold onto (a grid\'s settings are top-level keys of the view; a non-object block or one beside a '
+          + 'non-object top-level block cannot be merged). Move what you meant to the view\'s own keys, then remove `options`.',
+      });
+      if (!changed) return view;
+      next.options = rest;
+      return next;
+    };
+    return mapCollection(
+      mapCollection(stack, 'views', fold),
+      ASSEMBLED_VIEW_ITEMS_KEY,
+      fold,
+    );
+  },
+  fixture: {
+    before: {
+      // The assembled-manifest channel: an overlay a package export carried.
+      viewItems: [
+        { name: 'crm_deal.map', object: 'crm_deal', viewKind: 'list', type: 'map', options: { map: { latitudeField: 'lat', longitudeField: 'lng' } } },
+      ],
+      views: [
+        // Per key: the top-level `kanban` keeps `groupByField`, the bag adds
+        // `titleField`; the bag's `groupByField` is the one that never drew.
+        {
+          name: 'crm_deal.board',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'kanban',
+          kanban: { groupByField: 'stage' },
+          options: { kanban: { groupByField: 'owner', titleField: 'name' }, calendar: { startDateField: 'close_date' } },
+        },
+        // `chart` is replaced whole by its block, so the bag is dropped.
+        {
+          name: 'crm_deal.chart',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'chart',
+          chart: { dataset: 'deals', values: ['amount'] },
+          options: { chart: { dataset: 'old_deals', values: ['amount'], dimensions: ['stage'] } },
+        },
+        // An empty bag is removed.
+        { name: 'crm_deal.empty', object: 'crm_deal', viewKind: 'list', options: {} },
+        // A record and a container are not flattened overlays: untouched.
+        { name: 'crm_deal.rec', object: 'crm_deal', viewKind: 'list', config: { columns: ['name'] } },
+        { object: 'crm_deal', list: { type: 'grid', columns: ['name'] } },
+      ],
+    },
+    after: {
+      viewItems: [
+        { name: 'crm_deal.map', object: 'crm_deal', viewKind: 'list', type: 'map', map: { latitudeField: 'lat', longitudeField: 'lng' } },
+      ],
+      views: [
+        {
+          name: 'crm_deal.board',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'kanban',
+          kanban: { groupByField: 'stage', titleField: 'name' },
+          calendar: { startDateField: 'close_date' },
+        },
+        {
+          name: 'crm_deal.chart',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'chart',
+          chart: { dataset: 'deals', values: ['amount'] },
+        },
+        { name: 'crm_deal.empty', object: 'crm_deal', viewKind: 'list' },
+        { name: 'crm_deal.rec', object: 'crm_deal', viewKind: 'list', config: { columns: ['name'] } },
+        { object: 'crm_deal', list: { type: 'grid', columns: ['name'] } },
+      ],
+    },
+    // One notice per folded block (map, kanban, calendar, chart) plus the
+    // empty bag's removal.
+    expectedNotices: 5,
   },
 };
 
@@ -14806,11 +15194,13 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: flowDecisionModeInclusiveExplicit, order: 45 },
   { conversion: formFieldPublicPickerRemoved, order: 53 },
   { conversion: formLayoutInlineGridToVertical, order: 40 },
+  { conversion: formViewButtonsResetRemoved, order: 79 },
   { conversion: formViewOptionDefaultRemoved, order: 17 },
   { conversion: formViewPresentationTypesRemoved, order: 78 },
   { conversion: formViewSubformColumnsCanonicalized, order: 51 },
   { conversion: hookTimeoutToTimeoutMs, order: 21 },
   { conversion: jobTimeoutToTimeoutMs, order: 22 },
+  { conversion: listViewOptionsBagFolded, order: 78 },
   { conversion: listViewSortStringClauseToArray, order: 30 },
   { conversion: manifestPermissionsStringListRemoved, order: 61 },
   { conversion: mappingLookupParamsRemoved, order: 11 },
@@ -14836,6 +15226,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: pageListViewObjectNameViewTypeToDataType, order: 68 },
   { conversion: pageMainRegionWidthRemoved, order: 69 },
   { conversion: pageRequiresNonCompiledKindRemoved, order: 58 },
+  { conversion: pageSlotsTabsRemoved, order: 78 },
   { conversion: pageTemplateFullWidthToDefault, order: 67 },
   { conversion: permissionAdminScopeBindingAuthoringRemoved, order: 65 },
   { conversion: permissionAllowRestorePurgeRemoved, order: 16 },

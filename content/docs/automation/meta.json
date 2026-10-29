@@ -6,6 +6,7 @@
     "flows",
     "workflows",
     "approvals",
+    "queues-and-assignment-rules",
     "webhooks",
     "connectors",
     "jobs",

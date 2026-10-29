@@ -777,6 +777,17 @@ function isJudgedNumberType(type: string): boolean {
 }
 
 /**
+ * [#27236] A plain object literal (`{ … }` or a null-prototype record), never
+ * an array, a `Date` or another class instance. It chooses the sentence of a
+ * `currency` field's `invalid_number` refusal, never the verdict.
+ */
+function isPlainObjectValue(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
  * [#20309] A STRING on a number-typed field that the platform's numeric grammar
  * reads is written as the NUMBER it denotes — so what the record validator's
  * number arm judges is what the driver stores.
@@ -1201,9 +1212,14 @@ function validateOne(
   // the payload at the door, so the driver stores what was judged. `min`,
   // `max`, `scale` and `precision` below read that number, as they read a
   // number.
+  //
+  // [#27236] A plain object on a `currency` field is the retired
+  // `{ value, currency }` shape (ADR-0104 D1). It keeps the code, so no client
+  // contract moves; its sentence says the value is a bare number and where the
+  // currency is declared. The sentence is the spec catalog's, never a copy.
   if (isJudgedNumberType(t)) {
     if (typeof value !== 'number' && typeof value !== 'string') {
-      return fail('invalid_number');
+      return fail('invalid_number', undefined, t === 'currency' && isPlainObjectValue(value) ? 'invalid_number_currency_object' : undefined);
     }
     const n = typeof value === 'number' ? value : parseNumericString(value);
     if (n === undefined || !Number.isFinite(n)) {

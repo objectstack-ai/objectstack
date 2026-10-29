@@ -280,10 +280,12 @@ describe('objectui#8980 — a canonical top-level view-kind block reaches the re
  * record by reference) and is NO LONGER READ here. The per-key merge these
  * cases pinned moved to the one door that relays a STORED body into a named
  * view, `@object-ui/app-shell`'s `ViewPreview` (`foldStoredListOptions`), and
- * is pinned there, through this same renderer, in
- * `ViewPreview.optionsFold-7928.test.tsx`. Each case below asserts what the
- * renderer does with the bag now; the fold file asserts the lane it used to
- * resolve still resolves.
+ * objectstack#25923 moved it once more, to the server: the spec's D2 conversion
+ * `list-view-options-bag-folded` folds a stored bag before the row is served.
+ * It is pinned through this same renderer in
+ * `ViewPreview.foldedOnRead-25923.test.tsx` (was `ViewPreview.optionsFold-7928`).
+ * Each case below asserts what the renderer does with the bag now; the fold
+ * file asserts the lane it used to resolve still resolves.
  */
 describe('objectui#8980 → objectui#7928 — the legacy `options.<kind>` nesting is no longer read off a named view; the canonical block is the only source', () => {
   it('INVERTED: the legacy nesting alone no longer resolves the lane — the fold at `ViewPreview` does (objectui#7928)', async () => {
@@ -310,9 +312,10 @@ describe('objectui#8980 → objectui#7928 — the legacy `options.<kind>` nestin
   it('INVERTED: a key only the legacy nesting spells does NOT survive off a named view — the per-key merge is the fold\'s now (objectui#7928)', async () => {
     // Was "survives from the legacy nesting — the merge is per-key, not
     // wholesale". The stored population that mixes the two spellings is still
-    // protected: `foldStoredListOptions` merges per key before the body becomes
-    // a named view, and `ViewPreview.optionsFold-7928.test.tsx` asserts this
-    // exact `titleField` through this renderer.
+    // protected: the server's fold (objectstack#25923, was `foldStoredListOptions`)
+    // merges per key before the body becomes a named view, and
+    // `ViewPreview.foldedOnRead-25923.test.tsx` asserts this exact `titleField`
+    // through this renderer.
     const node = await generatedNodeFor({
       label: 'Board',
       type: 'kanban',

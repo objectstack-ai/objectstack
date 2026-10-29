@@ -13,11 +13,11 @@
 
 ## Summary
 
-145 records under `docs/adr/` (140 numbers), 11 under `ui/docs/adr/` (listed separately below).
+146 records under `docs/adr/` (141 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
-| Accepted | 127 |
+| Accepted | 128 |
 | Proposed | 4 |
 | Superseded | 4 |
 | Draft | 3 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **145** |
+| **Total** | **146** |
 
 ## Shared numbers
 
@@ -212,6 +212,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25 · Amended (2026-10-28, ruling `6457475657` on #25769… | 2026-10-25 | — | — |
 | [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) | Outbound connector auth is open tier — OAuth2 grants, vendor app-credential exchange and request signing in o… | Accepted — 2026-10-28. Proposed 2026-10-27 (#26833, which also landed the… | 2026-10-28 | — | — |
 | [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md) | Multi-currency — a record currency in a sibling code field, dated exchange rates, and a home-currency amount… | Accepted — 2026-10-28, ruled on objectstack#27119 (ruling `6465431966`, de… | 2026-10-28 | — | — |
+| [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Accepted — 2026-10-28, #27251 · Amended (2026-10-28, #27291 — one clause e… | 2026-10-28 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
