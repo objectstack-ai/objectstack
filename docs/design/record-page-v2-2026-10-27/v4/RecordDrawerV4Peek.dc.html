@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>抽屉 v4 · 有界侧窥 · 默认 720、可拖到 60vw · 不压暗 · 列表可点换记录 · ⤢ 原地铺满</title>
+<title>记录 v4 · 默认分栏 · 列表 464 三列 + 记录 720 单列堆叠 · 顶行「联系人 › John Smith … 3 / 21 ↓ ↑ ⤢ ✕」</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -62,7 +62,7 @@ tr.hov td{background:var(--sidebar)}
     <button type="button" style="display:inline-flex;align-items:center;gap:8px;width:300px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:13px"><span style="flex:1;text-align:left">搜索…</span><kbd class="k" style="padding:1px 5px;border:1px solid var(--border);border-radius:4px">⌘K</kbd></button>
     <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><span class="k" style="padding:2px 8px;border:1px solid var(--border);border-radius:6px">/apps/hotcrm/crm_contact?recordId=bI3w…</span><button type="button" aria-label="账户" style="display:inline-flex;width:28px;height:28px;margin-left:6px;align-items:center;justify-content:center;border-radius:14px;background:var(--primary);color:#fff;font-size:11px;font-weight:600">DA</button></div>
   </header>
-  <div style="position:relative;display:grid;grid-template-columns:200px 1fr;min-height:0;overflow:hidden">
+  <div style="position:relative;display:grid;grid-template-columns:200px 1fr 720px;min-height:0;overflow:hidden">
     <aside style="border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px">
       <div class="nav">首页</div><div class="nav">销售主页</div>
       <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">销售</div>
@@ -73,33 +73,33 @@ tr.hov td{background:var(--sidebar)}
 
     <section style="min-width:0;display:flex;flex-direction:column;position:relative">
       <div style="display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 20px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:10px"><span style="font-size:17px;font-weight:600">联系人</span><span style="color:var(--muted-fg)">21 条</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="font-size:17px;font-weight:600">联系人</span><span style="color:var(--muted-fg)">21</span></div>
         <div style="display:flex;gap:6px"><button type="button" class="btn-primary">＋ 新建</button><button type="button" class="iconbtn" aria-label="更多">⋯</button></div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 20px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center"><span class="tab on">全部联系人</span><span class="tab">我的联系人</span><span class="tab">本周新增</span></div>
+        <div style="display:flex;align-items:center"><span class="tab on">全部</span><span class="tab">我的</span><span class="tab" style="color:var(--muted-fg)">更多 ▾</span></div>
         <div style="display:flex;align-items:center;gap:6px"><span class="chip soft" style="height:26px;padding:0 10px">排序 1 ×</span><button type="button" class="iconbtn" aria-label="显示">⚙</button></div>
       </div>
       <table>
-        <thead><tr><th style="width:36px"></th><th>姓名</th><th>公司</th><th>邮箱</th><th>职务</th><th>状态</th><th>负责人</th></tr></thead>
-        <tbody><tr class="sel"><td><span class="k" title="在整页打开">↗</span></td><td class="a">John Smith</td><td>Acme Corp</td><td class="a">john.smith@acme.com</td><td>VP Sales</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr>
-<tr class="hov"><td><span class="k" title="在整页打开">↗</span></td><td class="a">Sarah Johnson</td><td>TechStart</td><td class="a">sarah.j@techstart.io</td><td>CTO</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Emily Davis</td><td>Cloud Nine</td><td class="a">emily@cloudnine.co</td><td>Procurement</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Michael Brown</td><td>Globex</td><td class="a">mbrown@globex.com</td><td>COO</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Olivia Chen</td><td>Initech</td><td class="a">olivia.chen@initech.com</td><td>Buyer</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Daniel Kim</td><td>Umbrella</td><td class="a">dkim@umbrella.org</td><td>Director</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Lucas Martin</td><td>Vandelay</td><td class="a">lucas@vandelay.com</td><td>Engineer</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Ava Wilson</td><td>Hooli</td><td class="a">ava.w@hooli.com</td><td>PM</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Noah Garcia</td><td>Soylent</td><td class="a">noah.g@soylent.com</td><td>CFO</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr></tbody>
+        <thead><tr><th style="width:36px"></th><th>姓名</th><th>状态</th><th>负责人</th></tr></thead>
+        <tbody><tr class="sel"><td><span class="k" title="在整页打开">↗</span></td><td class="a">John Smith</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr>
+<tr class="hov"><td><span class="k" title="在整页打开">↗</span></td><td class="a">Sarah Johnson</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Emily Davis</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Michael Brown</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Olivia Chen</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Daniel Kim</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Lucas Martin</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Ava Wilson</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
+<tr class=""><td></td><td class="a">Noah Garcia</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr></tbody>
       </table>
-      <span class="ann" style="left:46px;top:150px">悬停行：首列 ↗ 在整页打开（#27031）；点击行 = 抽屉换记录，栈不动</span>
+      <span class="ann" style="left:46px;top:150px">列表让出宽度（464）：只剩名字 · 状态 · 负责人；悬停行首列 ↗ 在整页打开；点行 = 右侧换记录，选中跟着走</span>
       <div style="margin-top:auto;height:36px;display:flex;align-items:center;padding:0 20px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">21 条记录</div>
     </section>
 
-    <aside style="position:absolute;top:0;right:0;bottom:0;width:720px;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border);box-shadow:-12px 0 32px rgba(15,23,42,.14)">
+    <aside style="min-width:0;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 8px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">
-        <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;padding-left:4px"><span style="color:var(--fg)">联系人</span><span class="k">3 / 21</span></span>
-        <span style="display:inline-flex;gap:2px"><button type="button" class="iconbtn" aria-label="上一条 · K" style="width:24px;height:24px">↑</button><button type="button" class="iconbtn" aria-label="下一条 · J" style="width:24px;height:24px">↓</button><button type="button" class="iconbtn" aria-label="铺满（原地）" title="铺满 · ⌘⇧↵" style="width:24px;height:24px;margin:0 4px">⤢</button><button type="button" class="iconbtn" aria-label="关闭" style="width:24px;height:24px">✕</button></span>
+        <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;padding-left:4px"><a href="#" style="color:var(--muted-fg)">联系人</a><span class="k">›</span><span style="color:var(--fg);font-weight:600">John Smith</span></span>
+        <span style="display:inline-flex;gap:2px;align-items:center"><span class="k" style="margin-right:4px">3 / 21</span><button type="button" class="iconbtn" aria-label="下一条 · J" title="下一条 · J" style="width:24px;height:24px">↓</button><button type="button" class="iconbtn" aria-label="上一条 · K" title="上一条 · K" style="width:24px;height:24px">↑</button><span style="width:1px;height:16px;background:var(--border);margin:0 6px"></span><button type="button" class="iconbtn" aria-label="铺满 · ⌘⇧↵" title="铺满 · ⌘⇧↵" style="width:24px;height:24px">⤢</button><button type="button" class="iconbtn" aria-label="关闭 · Esc" title="关闭 · Esc" style="width:24px;height:24px">✕</button></span>
       </div>
       
       <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border)">
@@ -122,7 +122,7 @@ tr.hov td{background:var(--sidebar)}
 <div style="height:34px;display:flex;align-items:center;margin-top:10px;font-size:12.5px;font-weight:600;color:var(--muted-fg);position:relative">动态与关联 <span class="k" style="margin-left:8px;font-weight:400">右列按原顺序接在详情下面</span><span class="ann" style="right:0;top:-2px">720 &lt; 760 ⇒ 单列堆叠，不是页签</span></div>
 <div class="pnl"><div class="h">动态 <span class="chip">12</span><span class="chev">▾</span></div><div class="r" style="height:36px"><span style="flex:1;height:26px;border:1px solid var(--border);border-radius:6px;padding:0 8px;display:flex;align-items:center;color:var(--muted-fg)">写一条备注…</span></div><div class="r"><span>Dev Admin 记录了通话</span><span class="k">2 小时前</span></div><div class="r"><span>阶段 → 已联系</span><span class="k">昨天</span></div><div class="r"><span>邮件：报价已发送</span><span class="k">10月27日</span></div><div class="r"><a href="#">查看全部 12 条 →</a></div></div><div class="pnl"><div class="h">任务 <span class="chip">2</span><span class="chev">▾</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div><div class="pnl"><div class="h">商机 <span class="chip">1</span><span class="chev">▾</span></div><div class="r"><a href="#">Acme 年度续约</a><span class="chip ok">¥120,000</span></div></div><div class="pnl empty"><div class="h">还有 3 个空关联 · 案例 · 报价 · 合同 · <a href="#" style="font-weight:400">展开</a></div></div>
 
-        <div style="margin-top:14px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">抽屉 = 有界侧窥：默认 720（`size:'auto'` 不再按字段数撑到 960 / 1200），可拖到 60vw、按对象记忆，再宽就按 ⤢；窄层 = 单列堆叠（详情 → 动态 → 关联面板，即右列整体接在详情下面），页签层退役；没有压暗遮罩，左边的列表照常可读可点；点另一行 = 换记录；⤢ 原地铺满，URL 仍是 ?recordId=；「在整页打开」只在列表行 ↗ 与头部 ⋯ 里。</div>
+        <div style="margin-top:14px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">默认分栏：列表缩窄到剩余宽度、记录 720 在右（`size:'auto'` 不再按字段数撑到 960 / 1200），可拖到 60vw、按对象记忆，再宽就按 ⤢；窄层 = 单列堆叠（详情 → 动态 → 关联面板，即右列整体接在详情下面），页签层退役；列表全程可读可点；点另一行 = 换记录；↓↑ 步进后列表选中跟着走并滚入视口；内容区不足约 1000 时自动退回 overlay 抽屉（读者也可在显示菜单选 overlay）；⤢ 原地铺满，URL 仍是 ?recordId=；「在整页打开」只在列表行 ↗ 与头部 ⋯ 里。</div>
         
       </div>
     </aside>

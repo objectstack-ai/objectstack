@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>抽屉 v4 · ⤢ 铺满态 · 原地铺满内容区（留侧栏）· URL 不变 · 三栏 · 顶行 ↑↓ ⊟ ⤡ ✕</title>
+<title>记录 v4 · ⤢ 铺满态 · 记录占满内容区（留侧栏）· URL 不变 · 三栏 · 顶行「联系人 › John Smith … 3 / 21 ↓ ↑ ⊟ ⤡ ✕」</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -98,8 +98,8 @@ tr.hov td{background:var(--sidebar)}
 
     <aside style="position:absolute;inset:0 0 0 200px;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 8px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">
-        <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;padding-left:4px"><span style="color:var(--fg)">联系人</span><span class="k">3 / 21</span></span>
-        <span style="display:inline-flex;gap:2px"><button type="button" class="iconbtn" aria-label="上一条 · K" style="width:24px;height:24px">↑</button><button type="button" class="iconbtn" aria-label="下一条 · J" style="width:24px;height:24px">↓</button><button type="button" class="iconbtn" title="右栏 · ⌘⇧," aria-label="显示 / 隐藏右栏" style="width:24px;height:24px;background:var(--primary-soft);color:var(--primary)">⊟</button><button type="button" class="iconbtn" aria-label="还原 · Esc" title="还原 · Esc" style="width:24px;height:24px;margin:0 4px">⤡</button><button type="button" class="iconbtn" aria-label="关闭" style="width:24px;height:24px">✕</button></span>
+        <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;padding-left:4px"><a href="#" style="color:var(--muted-fg)">联系人</a><span class="k">›</span><span style="color:var(--fg);font-weight:600">John Smith</span></span>
+        <span style="display:inline-flex;gap:2px;align-items:center"><span class="k" style="margin-right:4px">3 / 21</span><button type="button" class="iconbtn" aria-label="下一条 · J" title="下一条 · J" style="width:24px;height:24px">↓</button><button type="button" class="iconbtn" aria-label="上一条 · K" title="上一条 · K" style="width:24px;height:24px">↑</button><span style="width:1px;height:16px;background:var(--border);margin:0 6px"></span><button type="button" class="iconbtn" aria-label="右栏 · ⌘⇧," title="右栏 · ⌘⇧," style="width:24px;height:24px;background:var(--primary-soft);color:var(--primary)">⊟</button><button type="button" class="iconbtn" aria-label="还原 · Esc" title="还原 · Esc" style="width:24px;height:24px">⤡</button><button type="button" class="iconbtn" aria-label="关闭" title="关闭" style="width:24px;height:24px">✕</button></span>
       </div>
       <div style="padding:14px 24px 10px;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -131,9 +131,9 @@ tr.hov td{background:var(--sidebar)}
         <div class="pnl"><div class="h">商机 <span class="chip">1</span><span class="chev">▾</span></div><div class="r"><a href="#">Acme 年度续约</a><span class="chip ok">¥120,000</span></div></div>
         <div class="pnl empty"><div class="h">还有 3 个空关联 · 案例 · 报价 · 合同 · <a href="#" style="font-weight:400">展开</a></div></div>
 
-          <div style="margin-top:6px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">铺满态：抽屉宽到整个内容区（留出侧栏，宽 = 100vw − 侧栏实时宽度，侧栏折叠即更宽），URL 不变、列表与栈不动；点侧栏任一项 = 关抽屉并跳转；按自己的宽度套层级 ⇒ 1440 走三栏（#27524 第 8 项），时间线按工作对象规则升为独立列；⤡ / Esc 回到 720；✕ 关掉整条路径。不记忆铺满态，下次打开仍是 720。</div>
+          <div style="margin-top:6px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">铺满态：记录占满内容区、列表暂隐（留出侧栏，宽 = 100vw − 侧栏实时宽度，侧栏折叠即更宽），URL 不变、列表与栈不动；点侧栏任一项 = 关抽屉并跳转；按自己的宽度套层级 ⇒ 1440 走三栏（#27524 第 8 项），时间线按工作对象规则升为独立列；⤡ / Esc 回到 720；✕ 关掉整条路径。不记忆铺满态，下次打开仍是 720。</div>
         </div>
-        <span class="ann" style="left:24px;top:-4px">同一个组件、同一条 URL：宽度从 720 变成 100vw − 侧栏；顶行原地不动，只有正文变宽</span>
+        <span class="ann" style="left:24px;top:-4px">同一个组件、同一条 URL：从分栏到铺满只是列表暂隐；顶行原地不动、计数与 ↓↑ 仍可步进，只有正文变宽</span>
       </div>
     </aside>
 
