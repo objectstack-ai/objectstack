@@ -348,6 +348,10 @@ describe('family 1 — settings (`sys_setting.value_enc` and `sys_platform_setti
     const ref = union.references.find((r) => r.handleId === rt.settingsHandleId);
     expect(ref?.family).toBe('settings');
     expect(ref?.holder).toContain('sys_setting(namespace=smtp,key=password');
+    // [#27721] The same place as data: the record, and the pair settings mints for it.
+    expect(ref?.column).toEqual({
+      object: 'sys_setting', field: 'value_enc', record: 'set_1', mintedPair: { namespace: 'smtp', key: 'password' },
+    });
     // No other family holds it — so removing family 1's enumeration reds this.
     expect(union.references.filter((r) => r.handleId === rt.settingsHandleId)).toHaveLength(1);
   });
@@ -394,6 +398,9 @@ describe('family 1 — settings (`sys_setting.value_enc` and `sys_platform_setti
     expect(refs).toHaveLength(1);
     expect(refs[0].family).toBe('settings');
     expect(refs[0].holder).toBe('sys_platform_setting(namespace=smtp,key=password)');
+    expect(refs[0].column).toEqual({
+      object: 'sys_platform_setting', field: 'value_enc', record: 'ps_1', mintedPair: { namespace: 'smtp', key: 'password' },
+    });
   });
 
   it('an unreadable sys_platform_setting gaps the WHOLE settings family', async () => {
@@ -419,6 +426,10 @@ describe('family 2 — the engine secret-field channel (`secret:<id>` on a busin
     const ref = union.references.find((r) => r.handleId === rt.objectFieldHandleId);
     expect(ref?.family).toBe('object-field');
     expect(ref?.holder).toBe('smtp.password#rec_1');
+    // [#27721] The engine mints a secret field's handle under the object and field name.
+    expect(ref?.column).toEqual({
+      object: 'smtp', field: 'password', record: 'rec_1', mintedPair: { namespace: 'smtp', key: 'password' },
+    });
     expect(union.references.filter((r) => r.handleId === rt.objectFieldHandleId)).toHaveLength(1);
   });
 
@@ -492,6 +503,10 @@ describe('family 3 — datasource artefacts (`external.credentialsRef`)', () => 
     const ref = union.references.find((r) => r.handleId === rt.datasourceHandleId);
     expect(ref?.family).toBe('datasource');
     expect(ref?.holder).toBe('datasource(main).external.credentialsRef');
+    // [#27721] No minted pair: the binder records whatever pair its caller passes.
+    expect(ref?.column).toEqual({
+      object: 'datasource', field: 'external.credentialsRef', record: 'main', mintedPair: null,
+    });
     expect(union.references.filter((r) => r.handleId === rt.datasourceHandleId)).toHaveLength(1);
   });
 
@@ -500,7 +515,12 @@ describe('family 3 — datasource artefacts (`external.credentialsRef`)', () => 
       { name: 'analytics', external: { credentialsRef: 'sys_secret:sec_declared_1' } },
     ]);
     expect(result.references).toEqual([
-      { handleId: 'sec_declared_1', family: 'datasource', holder: 'datasource(analytics).external.credentialsRef' },
+      {
+        handleId: 'sec_declared_1',
+        family: 'datasource',
+        holder: 'datasource(analytics).external.credentialsRef',
+        column: { object: 'datasource', field: 'external.credentialsRef', record: 'analytics', mintedPair: null },
+      },
     ]);
   });
 
