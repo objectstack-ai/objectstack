@@ -102,6 +102,9 @@ const HOST_PLUMBING_KEYS = [
   // declared key that happens to have no reader is the correct half of
   // enforce-or-remove; withholding it would leave the contract lying.
   'onUploadingChange',
+  // `onInvalidInputChange` is delivered on the same ground: no inline-edit
+  // host passes it today, so the date picker there keeps its own notice.
+  'onInvalidInputChange',
 
   /* ── The contract's own "Host plumbing" block, verbatim ────────────────── */
   //

@@ -886,12 +886,29 @@ describe('ReportNavItemSchema', () => {
     expect(item.reportName).toBe('pipeline_overview');
   });
 
-  it('should reject report nav item without reportName', () => {
-    expect(() => ReportNavItemSchema.parse({
-      id: 'nav_bad_report',
-      label: 'Bad Report',
-      type: 'report',
-    })).toThrow();
+  // A `report` item without `reportName` is the app's report index entry: it
+  // parses on the variant, through the union and inside an app, and names no
+  // report afterwards.
+  it('accepts a report item without reportName as the app report index entry', () => {
+    const bare = { id: 'nav_reports', type: 'report' as const };
+    expect(ReportNavItemSchema.safeParse(bare).success).toBe(true);
+    const item = NavigationItemSchema.parse(bare);
+    expect(item.type).toBe('report');
+    expect('reportName' in item).toBe(false);
+    const app = AppSchema.safeParse({ name: 'crm', label: 'CRM', navigation: [bare] });
+    expect(app.success).toBe(true);
+  });
+
+  it('still refuses an unknown key on the index entry, and still teaches reportName on other types', () => {
+    const misspelt = ReportNavItemSchema.safeParse({ id: 'nav_reports', type: 'report', report: 'pipeline' });
+    expect(misspelt.success).toBe(false);
+    const elsewhere = NavigationItemSchema.safeParse({ id: 'nav_x', type: 'page', pageName: 'p', reportName: 'r' });
+    expect(elsewhere.success).toBe(false);
+    expect(JSON.stringify(elsewhere.error?.issues)).toContain("type: 'report' (with reportName)");
+  });
+
+  it('describes what an absent reportName opens', () => {
+    expect(ReportNavItemSchema.shape.reportName.description).toContain('report index');
   });
 });
 
