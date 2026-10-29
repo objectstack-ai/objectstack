@@ -2768,6 +2768,7 @@ const ko = {
         submit: "비밀번호 변경 후 계속",
         submitting: "업데이트 중…",
         mismatch: "새 비밀번호가 일치하지 않습니다.",
+        sameAsTemporary: "임시 비밀번호와 다른 새 비밀번호를 설정하세요.",
         failed: "비밀번호를 변경할 수 없습니다.",
       },
       mfa: {

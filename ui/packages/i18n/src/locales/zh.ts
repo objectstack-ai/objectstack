@@ -2843,6 +2843,7 @@ const zh = {
         submit: '修改密码并继续',
         submitting: '正在更新…',
         mismatch: '两次输入的新密码不一致。',
+        sameAsTemporary: '请设置一个与临时密码不同的新密码。',
         failed: '无法修改密码。',
       },
       mfa: {

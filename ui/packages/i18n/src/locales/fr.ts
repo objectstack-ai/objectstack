@@ -2823,6 +2823,7 @@ const fr = {
         submit: "Changer le mot de passe et continuer",
         submitting: "Mise à jour…",
         mismatch: "Les nouveaux mots de passe ne correspondent pas.",
+        sameAsTemporary: "Choisissez un nouveau mot de passe différent de votre mot de passe temporaire.",
         failed: "Impossible de changer le mot de passe.",
       },
       mfa: {

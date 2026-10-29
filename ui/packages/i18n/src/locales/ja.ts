@@ -2770,6 +2770,7 @@ const ja = {
         submit: "パスワードを変更して続行",
         submitting: "更新しています…",
         mismatch: "新しいパスワードが一致しません。",
+        sameAsTemporary: "仮パスワードとは異なる新しいパスワードを設定してください。",
         failed: "パスワードを変更できませんでした。",
       },
       mfa: {
