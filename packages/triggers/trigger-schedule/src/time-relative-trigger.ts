@@ -334,12 +334,28 @@ export class TimeRelativeTrigger implements FlowTrigger {
         const raw = (binding.config as Record<string, unknown> | undefined)?.timeRelative;
         const parsed = TimeRelativeTriggerSchema.safeParse(raw);
         if (!parsed.success) {
-            this.logger.warn(
-                `[time-relative] flow '${binding.flowName}' has no valid \`timeRelative\` descriptor — not bound. ` +
-                    `Provide { object, dateField, and exactly one of withinDays | offsetDays }. ` +
-                    `(${parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')})`,
-            );
-            return;
+            // A descriptor refusal is a binding failure, so it THROWS rather
+            // than logging and returning. `FlowTrigger.start` returns `void`,
+            // and a return here reads to the engine as a successful arm: it
+            // marks the flow bound, and `GET /automation/_status` answers
+            // `bound: true` one line after this said "not bound". Throwing is
+            // the engine's designed path (see `refuseMissingOrganization`'s
+            // header): its catch never marks the flow bound, so the status row
+            // reads `bound: false` with the `binding_failure` cause and the
+            // binding audit lists the flow. Any prior sweep is dropped FIRST,
+            // for the reason the organization refusal below drops it: a hot
+            // re-publish that breaks the descriptor must not leave the previous
+            // job armed behind a line saying it was refused. `warn`, not
+            // `error`: a trigger that is not armed is a functional degradation,
+            // and the status row now says so. One sentence for the log line and
+            // the thrown text, so the two channels cannot drift.
+            const sentence =
+                `flow '${binding.flowName}' has no valid \`timeRelative\` descriptor — not bound. ` +
+                `Provide { object, dateField, and exactly one of withinDays | offsetDays }. ` +
+                `(${parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')})`;
+            this.stop(binding.flowName);
+            this.logger.warn(`[time-relative] ${sentence}`);
+            throw new Error(sentence);
         }
         const desc = parsed.data;
 

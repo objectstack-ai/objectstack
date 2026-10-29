@@ -175,7 +175,7 @@ export const actionForm = defineForm({
         { field: 'requiresMembershipReach', helpText: 'The organization endpoint this action calls, so it is offered only to members whose grade reaches that endpoint. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key.' },
         // #19332 G1b — the RBAC gate, beside the feature gate. `string[]`, so the
         // `app.form.ts` `requiredPermissions` face (`string-tags`).
-        { field: 'requiredPermissions', widget: 'string-tags', helpText: 'Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action route refuses anyone else with 403 (script, flow and modal actions, and the MCP/AI path), and the button is hidden from them. A type api action calls its endpoint directly, so that endpoint must re-check them.' },
+        { field: 'requiredPermissions', widget: 'string-tags', helpText: 'Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action door refuses anyone else with 403 on every call it dispatches, the MCP/AI path included, and the button is hidden from them. A type api action\'s endpoint stays directly reachable, so it must still check these capabilities itself; for an api action with an off-origin target the platform checks nothing server-side.' },
         // `shortcut` input removed with the key (#3896 close-out) — a form
         // input for an unenforced capability is the UI half of false compliance.
       ],

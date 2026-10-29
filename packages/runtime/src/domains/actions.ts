@@ -236,6 +236,13 @@ async function handleActionActivationWrite(
         };
     }
 
+    // ── 3b. switchability (#27506) ──────────────────────────────────────────
+    // An api action whose `target` is on ANOTHER origin has no dispatch on
+    // this server, so a ledger row for it would be a switch nothing consults.
+    // Refused in both directions — there is nothing to switch on either.
+    const unswitchable = actionExec.offOriginApiActivationRefusal(declaration.action, objectName);
+    if (unswitchable) return { handled: true, response: deps.error(unswitchable, 409) };
+
     // ── 4. ambiguity ────────────────────────────────────────────────────────
     const ambiguity = await refuseAmbiguousActionActivation(deps, context, actionName, objectName);
     if (ambiguity) return ambiguity;
@@ -806,6 +813,44 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // built below, and none of them may exist for a caller who has not
         // demonstrated read access to the subject row.
         actionExec.refuseDeniedSubjectLoad(objectName, recordId, subject);
+
+        // ── api forward (#27506, ruling 6499781492) ── a same-origin
+        // `type: 'api'` action is forwarded IN-PROCESS to its declared
+        // `target`, with the body assembled from the declaration and the
+        // caller's own credentials carried across — after every gate above
+        // (the 401 floor, D4, the ADR-0126 §8 consult, the param contract, the
+        // subject load) and BEFORE the trusted-mode context below, which an
+        // api action never receives: the target endpoint authorizes the caller
+        // itself (ADR-0066 D4). The MCP `run_action` bridge runs the identical
+        // sequence (`invokeBusinessAction`). The target's status and body come
+        // back as this door's answer (its `data` unwrapped, as the console's
+        // direct fetch did), and a credential rotation it emitted
+        // (`Set-Cookie` / `set-auth-token` / `set-admin-session-token`, the
+        // impersonation case) is relayed on the response headers.
+        if (actionType === 'api') {
+            const mark = _context?.request?.headers?.[actionExec.API_FORWARD_MARK_HEADER];
+            if (typeof mark === 'string' && mark.length > 0) {
+                return { handled: true, response: deps.error(actionExec.apiActionForwardLoopError(actionDef, mark), 400) };
+            }
+            const inject = await actionExec.resolveInProcessRequest(deps, _context, _context?.environmentId);
+            if (!inject) {
+                return { handled: true, response: deps.error(actionExec.apiActionForwardUnavailableError(actionDef), 503) };
+            }
+            const built = actionExec.buildApiActionRequest(actionDef, { recordId, record, params: reqParams, ec });
+            if ('message' in built) {
+                return { handled: true, response: deps.error(built.message, built.status) };
+            }
+            const answer = await actionExec.forwardApiAction(inject, _context, built, { objectName, actionName });
+            const relayed = Object.keys(answer.headers).length > 0 ? { headers: answer.headers } : {};
+            if (answer.status >= 200 && answer.status < 300) {
+                return { handled: true, response: { ...deps.success(actionExec.apiActionResultOf(answer)), ...relayed } };
+            }
+            const refusal = actionExec.apiActionForwardRefusal(actionDef, answer);
+            return {
+                handled: true,
+                response: { ...deps.error(refusal.message, answer.status, { code: (refusal as any).code }), ...relayed },
+            };
+        }
 
         const actionContext: any = {
             record,

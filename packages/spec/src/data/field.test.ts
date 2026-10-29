@@ -8,6 +8,7 @@ import {
   Field,
   BOUNDED_STRING_FIELD_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
+  summaryFunctionReadsField,
   type SelectOption,
   type CurrencyConfig,
 } from './field.zod';
@@ -1311,6 +1312,40 @@ describe('FieldSchema', () => {
       };
 
       expect(() => FieldSchema.parse(field)).not.toThrow();
+    });
+
+    // [#27462] The describe always said `field` is ignored for count; the
+    // schema now agrees: a count may omit it, every other function needs it.
+    it('accepts a count with no summaryOperations.field, and parses it unchanged', () => {
+      const parsed = FieldSchema.parse({
+        name: 'child_count',
+        type: 'summary',
+        summaryOperations: { object: 'child_object', function: 'count' },
+      });
+      expect(parsed.summaryOperations).toEqual({ object: 'child_object', function: 'count' });
+    });
+
+    it.each(['sum', 'min', 'max', 'avg'] as const)(
+      'refuses %s with no summaryOperations.field, at that path, naming the function and the fix',
+      (fn) => {
+        const result = FieldSchema.safeParse({
+          name: 'child_total',
+          type: 'summary',
+          summaryOperations: { object: 'child_object', function: fn },
+        });
+        expect(result.success).toBe(false);
+        const issues = result.error!.issues;
+        expect(issues).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ code: 'custom', path: ['summaryOperations', 'field'] });
+        expect(issues[0].message).toContain(`\`summaryOperations.function: '${fn}'\` needs \`summaryOperations.field\``);
+        expect(issues[0].message).toContain("`function: 'count'`");
+      },
+    );
+
+    it('summaryFunctionReadsField: only count reads no child field; an unset function still does', () => {
+      expect(summaryFunctionReadsField('count')).toBe(false);
+      for (const fn of ['sum', 'min', 'max', 'avg']) expect(summaryFunctionReadsField(fn)).toBe(true);
+      expect(summaryFunctionReadsField(undefined)).toBe(true);
     });
   });
 

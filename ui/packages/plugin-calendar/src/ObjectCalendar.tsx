@@ -1097,8 +1097,6 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
 
   // --- NavigationConfig support ---
   // Must be called before any early returns to satisfy React hooks rules
-  // When the local navigation mode is the drawer overlay, ignore the
-  // inherited onRowClick so the local overlay wins over parent page-nav.
   // No width is spelled here on purpose (objectui#6303, converging the calendar
   // on the shape #6305 gave ObjectGantt). `width` is `@deprecated [objectstack-ai/objectstack#2578 ->
   // size]` in the spec that owns this shape, and `resolveOverlayWidth` gives an
@@ -1132,9 +1130,21 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   // calendar carries the key only when the author wrote it. The members this
   // read honours are pinned in `__tests__/calendarNavigationMembers-8652.test.tsx`.
   const navConfig = schema.navigation ?? { mode: 'drawer' };
+  // A host's `onRowClick` takes the click, as on the kanban, the grid and
+  // every other view (objectstack#27057). The console hands one down through
+  // `ListView` and opens the record there, in the one record page
+  // (`RecordDetailView`, embedded in the drawer stack), so this calendar's
+  // own drawer is the fallback for a host that routes no click: a standalone
+  // block, or a `ListView` with no host handler. It used to be the other way
+  // round — the local drawer outranked the host, so that a parent which page-
+  // navigated on a row click could not take a calendar's drawer away. The
+  // console's handler opens the drawer itself now and pages only for an
+  // object or view that declares `page`, so the guard kept nothing but a
+  // second, smaller rendering of the same record.
+  //
   // `drawer` is the one overlay mode the spec keeps (objectstack#26677), and
   // the hook's own default for a block written without `mode`.
-  const navIsOverlay = (navConfig.mode ?? 'drawer') === 'drawer';
+  const navIsOverlay = !onRowClick && (navConfig.mode ?? 'drawer') === 'drawer';
   const navigation = useNavigationOverlay({
     navigation: navConfig,
     // The record-page URL follows the RECORD SOURCE (`2ce2612df`): the very
@@ -1152,7 +1162,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     // today EXCEPT the divergence it closes. `ObjectTree`'s converted site and
     // `headerObjectName` both keep the same tail for the same reason.
     objectName: schemaObjectName ?? schema.objectName,
-    onRowClick: navIsOverlay ? undefined : onRowClick,
+    onRowClick,
   });
 
   // objectui#12082 — the calendar's two default writes are rows of the

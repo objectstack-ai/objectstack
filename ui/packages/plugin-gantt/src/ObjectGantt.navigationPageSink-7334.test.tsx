@@ -19,8 +19,10 @@
  *   - `useNavigationOverlay`'s `page` branch calls `onNavigate` and then
  *     RETURNS WITH NO FALLBACK when there is none;
  *   - `ObjectGantt` supplied no `onNavigate`;
- *   - and `ObjectGanttRenderer` hands it no host `onRowClick` either
- *     (objectui#7210 / objectui#7222 — this card's own premise).
+ *   - and `ObjectGanttRenderer` handed it no host `onRowClick` either
+ *     (objectui#7210 / objectui#7222 — this card's own premise). Since
+ *     objectstack#27057 it forwards one when a host passes it; the standalone
+ *     gantts mounted here have none, so the sink is still their only carrier.
  *
  * Both carriers empty at once, so an authored `page` went from "a drawer opens,
  * which is the wrong thing" to "the click does nothing at all". A silent dead

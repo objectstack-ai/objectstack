@@ -300,6 +300,11 @@ stack does not define fails validation with `App '<app>' navigation references r
 no reports at all, where the target may come from another package.) The entry resolves to
 `/report/<reportName>` in the console.
 
+A `report` entry **without** `reportName` opens the app's report index
+(`/apps/<app>/reports`), which lists every report the app ships that the member may
+open. The console adds no index entry by itself: declare `{ id: 'nav_reports', type:
+'report' }` where the menu should carry it.
+
 ## Permissions and protection
 
 The report schema carries exactly **one** access-shaped block, and it is not about

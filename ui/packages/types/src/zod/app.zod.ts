@@ -285,7 +285,7 @@ const NavigationItemObject = z.looseObject({
   runAction: z.string().optional().describe('Auto-run deep link (type: object) — name of an action on the target object that the list surface runs once on arrival. Not combinable with recordId (a record detail page has no list toolbar to auto-run); composes with viewName or filters. Encoded as the reserved ?runAction= search param.'),
   dashboardName: z.string().optional().describe('Target dashboard name (type: dashboard)'),
   pageName: z.string().optional().describe('Target page name (type: page)'),
-  reportName: z.string().optional().describe('Target report name (type: report)'),
+  reportName: z.string().optional().describe('Target report name (type: report); omitted, the entry opens the app\'s report index'),
   url: z.string().optional().describe('Target URL (type: url)'),
   target: z.enum(['_blank', '_self']).optional().describe('Link target (type: url)'),
   componentRef: z.string().optional().describe('Target component reference (type: component) — colon-joined ComponentRegistry key e.g. metadata:resource, routed to /component/<ns>/<name>'),

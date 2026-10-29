@@ -569,6 +569,15 @@ export { resolveFieldCurrency };
 export { formatCurrency };
 
 /**
+ * `formatNumberFieldValue` lives in `./widgets/number-format.ts` and is
+ * re-exported here so a face outside this package that renders a `number`
+ * field's stored value (the record History tab's change list) makes the same
+ * call `NumberCellRenderer` and `NumberField`'s read-only branch make, rather
+ * than a formatter of its own.
+ */
+export { formatNumberFieldValue };
+
+/**
  * Format currency value in compact form for mobile display.
  * E.g., $150,000 → $150K, $1,200,000 → $1.2M
  * When `currency` is undefined, returns a compact number without symbol.
@@ -4271,6 +4280,7 @@ setFieldReadFaceResolver(resolveDeclaredFieldFace);
 // `mapFieldTypeToFormType` moved to './field-type-alias' (re-exported below) so
 // FieldEditWidget can resolve spec aliases without importing this barrel.
 export { mapFieldTypeToFormType } from './field-type-alias.js';
+export { resolveBooleanControl, type BooleanControl } from './widgets/booleanControl.js';
 import { mapFieldTypeToFormType } from './field-type-alias.js';
 // `isRetiredFieldType` is the gate the maintainer ruled onto THIS package's
 // surface (objectui#4914, ruling B) — "export a single `isRetiredFieldType(t)`

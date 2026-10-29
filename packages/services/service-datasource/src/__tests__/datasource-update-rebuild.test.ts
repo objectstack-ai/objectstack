@@ -334,11 +334,48 @@ describe('#13804 — updateDatasource rebuilds the live pool when connectivity c
     const state = rig.connection.getConnectionState('analytics')!;
     expect(state.status).toBe('failed-degraded');
     // 3. Not pool-less: the datasource def the old pool was serving under is
-    //    restored alongside the driver (`unregisterDriver` removes both).
+    //    restored alongside the driver (`unregisterDriver` removes both) —
+    //    [#27666] its driver id included, which is what the engine keys its
+    //    plugin-driver floor on.
     expect(rig.engine.defs.get('analytics')).toMatchObject({
       name: 'analytics',
+      driver: 'sqlite',
       schemaMode: 'external',
     });
+  });
+
+  it('[#27666] the def registered after a rebuild names the NEW driver id; the def restored after a failed rebuild names the OLD one', async () => {
+    // The engine floors a non-managed datasource whose def names a driver id
+    // that is not built in. `unregisterDriver` drops the stored def, so the
+    // id has to travel with every registration this path makes — the rebuilt
+    // pool's from `next`, the kept pool's from `previous` — or a plugin
+    // driver is served unfloored after a reconfigure, and nothing says so.
+    const rig = makeRig({
+      failWhen: (spec) => (spec.config as { filename?: string }).filename === '/tmp/bad.db',
+    });
+    await rig.service.createDatasource(
+      draft({ driver: 'driver.port_schedule', schemaMode: 'external', external: { allowWrites: false } }),
+    );
+    expect(rig.engine.defs.get('analytics')).toMatchObject({ driver: 'driver.port_schedule', schemaMode: 'external' });
+
+    // A reconfigure that changes the driver and succeeds: the def names the new id.
+    const rebuilt = await rig.service.updateDatasource('analytics', {
+      driver: 'driver.port_schedule_v2',
+      config: { filename: '/tmp/new.db' },
+    });
+    expect(rebuilt.status).toBe('ok');
+    expect(rig.engine.drivers.get('analytics')!.builtFrom.driver).toBe('driver.port_schedule_v2');
+    expect(rig.engine.defs.get('analytics')).toMatchObject({ driver: 'driver.port_schedule_v2', schemaMode: 'external' });
+
+    // A reconfigure that changes the driver and fails: the kept pool's def
+    // names the id it was built from, not the one that never came up.
+    const failed = await rig.service.updateDatasource('analytics', {
+      driver: 'driver.port_schedule_v3',
+      config: { filename: '/tmp/bad.db' },
+    });
+    expect(failed.status).toBe('error');
+    expect(rig.engine.drivers.get('analytics')!.builtFrom.driver).toBe('driver.port_schedule_v2');
+    expect(rig.engine.defs.get('analytics')).toMatchObject({ driver: 'driver.port_schedule_v2', schemaMode: 'external' });
   });
 
   it('a supplied secret alone forces a rebuild — rewrap-in-place changes what the ref dereferences to', async () => {

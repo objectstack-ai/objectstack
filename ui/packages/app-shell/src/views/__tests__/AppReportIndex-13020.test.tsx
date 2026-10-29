@@ -95,8 +95,18 @@ const ANSWER: MePermissionsResponse = {
   fields: {},
 };
 
-function adapterFor(reports: unknown[], asked: string[]) {
-  const items: Record<string, unknown[]> = { app: [CRM_APP], report: reports, dataset: DATASETS };
+// objectstack#27525 — the app the card's HotCRM follow-up describes: one
+// report index entry instead of one entry per report.
+const INDEX_ONLY_APP = {
+  ...CRM_APP,
+  navigation: [
+    { id: 'nav_accounts', type: 'object', objectName: 'crm_account', label: 'Accounts' },
+    { id: 'nav_reports', type: 'report' },
+  ],
+};
+
+function adapterFor(reports: unknown[], asked: string[], app: unknown = CRM_APP) {
+  const items: Record<string, unknown[]> = { app: [app], report: reports, dataset: DATASETS };
   return {
     clearCache: vi.fn(),
     // objectui#13044 — the real MetadataProvider reads an object by name through
@@ -121,14 +131,14 @@ function adapterFor(reports: unknown[], asked: string[]) {
   } as unknown as Parameters<typeof MetadataProvider>[0]['adapter'];
 }
 
-function shell(children: React.ReactNode, url: string, reports: unknown[] = REPORTS) {
+function shell(children: React.ReactNode, url: string, reports: unknown[] = REPORTS, app: any = CRM_APP) {
   const asked: string[] = [];
   const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ANSWER }) as unknown as Response);
   render(
     <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })} persistLanguage={false}>
       <MePermissionsProvider endpoint="/api/v1/auth/me/permissions" fetcher={fetcher as unknown as typeof fetch}>
-        <MetadataProvider adapter={adapterFor(reports, asked)}>
-          <ExpressionProvider app={CRM_APP}>
+        <MetadataProvider adapter={adapterFor(reports, asked, app)}>
+          <ExpressionProvider app={app}>
             <MemoryRouter initialEntries={[url]}>{children}</MemoryRouter>
           </ExpressionProvider>
         </MetadataProvider>
@@ -148,17 +158,19 @@ function renderIndex(reports: unknown[] = REPORTS) {
   );
 }
 
-function renderPalette(url: string) {
+function renderPalette(url: string, app: any = CRM_APP) {
   return shell(
     <CommandPaletteProvider>
       <Routes>
         <Route
           path="/apps/:appName"
-          element={<CommandPalette apps={[CRM_APP]} activeApp={CRM_APP} objects={[]} onAppChange={() => {}} />}
+          element={<CommandPalette apps={[app]} activeApp={app} objects={[]} onAppChange={() => {}} />}
         />
       </Routes>
     </CommandPaletteProvider>,
     url,
+    REPORTS,
+    app,
   );
 }
 
@@ -239,5 +251,27 @@ describe('⌘K offers the app\'s reports beyond its navigation (objectui#13020)'
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(asked).not.toContain('report');
     expect(asked).not.toContain('dataset');
+  });
+});
+
+describe('⌘K under a navigation that declares only the report index (objectstack#27525)', () => {
+  it('finds every report the member may open with no entry naming one, and not one on an unreadable object', async () => {
+    renderPalette('/apps/crm?palette=1', INDEX_ONLY_APP);
+    await waitFor(() => expect(paletteReports()).toContain('Win Rate'));
+    expect(paletteReports()).toContain('Pipeline');
+    expect(paletteReports()).not.toContain('Case Aging');
+    expect(paletteReports()).not.toContain('Mixed Blocks');
+    expect(paletteReports()).not.toContain('Headcount');
+  });
+
+  it('offers the index entry itself, routed to the report index', async () => {
+    renderPalette('/apps/crm?palette=1', INDEX_ONLY_APP);
+    await waitFor(() => expect(paletteReports()).toContain('Win Rate'));
+    const index = Array.from(document.querySelectorAll('[cmdk-item][data-value^="report "]')).find(
+      (el) => (el.textContent ?? '').trim() === 'All reports',
+    );
+    expect(index).toBeDefined();
+    // `undefined` never leaks into the matched value of an entry naming no report.
+    expect(index?.getAttribute('data-value')).not.toContain('undefined');
   });
 });

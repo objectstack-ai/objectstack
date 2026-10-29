@@ -164,7 +164,7 @@ const PROBE_OBJECT_SCHEMA = {
       label: 'Probe Action',
       type: 'url',
       locations: ['record_header'],
-      visible: "record.stage === 'qualified'",
+      visible: "record.stage == 'qualified'",
     },
   ],
 };
@@ -254,7 +254,7 @@ const SAMPLE_BY_INPUT: Readonly<Record<string, unknown>> = {
   // reach this block" is even askable — an alert with no predicate is
   // unconditionally visible and identical for every record, which would be the
   // probe answering its own question with a shrug.
-  visible: "record.stage === 'qualified'",
+  visible: "record.stage == 'qualified'",
   title: 'Probe Alert',
   body: 'Probe alert body',
   // `record:related_list.add` — spec-valid minimum, i.e. `picker.object` present.

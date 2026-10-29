@@ -194,7 +194,7 @@ const result = ActionNavItemSchema.parse(data);
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'report'` | ✅ |  |
-| **reportName** | `string` | ✅ | Target report name |
+| **reportName** | `string` | optional | Target report name. Omit it and the entry opens the app's report index (the reports the app ships that the member may open) instead of one report. |
 
 ### Nested Shape: `App.navigation[number][type='action']`
 
@@ -588,7 +588,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'report'` | ✅ |  |
-| **reportName** | `string` | ✅ | Target report name |
+| **reportName** | `string` | optional | Target report name. Omit it and the entry opens the app's report index (the reports the app ships that the member may open) instead of one report. |
 
 ### Nested Shape: `NavigationArea.navigation[number][type='action']`
 
@@ -787,7 +787,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'report'` | ✅ |  |
-| **reportName** | `string` | ✅ | Target report name |
+| **reportName** | `string` | optional | Target report name. Omit it and the entry opens the app's report index (the reports the app ships that the member may open) instead of one report. |
 
 ### Nested Shape: `NavigationContribution.items[number][type='action']`
 
@@ -1039,7 +1039,7 @@ This schema accepts one of the following structures:
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'report'` | ✅ |  |
-| **reportName** | `string` | ✅ | Target report name |
+| **reportName** | `string` | optional | Target report name. Omit it and the entry opens the app's report index (the reports the app ships that the member may open) instead of one report. |
 
 ### Nested Shape: `NavigationItem[type='report'].dataSource`
 
@@ -1294,7 +1294,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'report'` | ✅ |  |
-| **reportName** | `string` | ✅ | Target report name |
+| **reportName** | `string` | optional | Target report name. Omit it and the entry opens the app's report index (the reports the app ships that the member may open) instead of one report. |
 
 ### Nested Shape: `ReportNavItem.dataSource`
 

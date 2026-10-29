@@ -128,3 +128,37 @@ describe('RecordApprovalsPanel — eligible approvers count distinct users (obje
     expect(bar.children).toHaveLength(2);
   });
 });
+
+/**
+ * The chip and the count read as one story when one principal holds several
+ * of a step's slots (objectstack#27615). Neither number changes: the chip
+ * still collapses every slot its person fills, and the eligible count still
+ * counts that person once. The chip now says, in the pack's words, what its
+ * number counts, where it drew a bare "×3" beside "1 eligible approver".
+ */
+describe('RecordApprovalsPanel — a principal holding several slots: the chip and the count read as one story (objectstack#27615)', () => {
+  const chips = (panel: HTMLElement) => within(panel).getAllByTestId('approver-chip');
+
+  it('the stock committee quorum: one chip that says its person holds three slots, beside one eligible approver', async () => {
+    const { panel } = await renderPanel(pendingRequest(['u_dev_admin', 'u_dev_admin', 'u_dev_admin']));
+    const words = row('approverSlots', { count: 3 });
+
+    // The row resolved from the pack's count family, not from the key itself.
+    expect(words).not.toBe('approvalsInbox.approverSlots');
+    expect(words).toContain('3');
+    expect(chips(panel).map((chip) => chip.textContent)).toEqual([`Dev Admin· ${words}`]);
+    expect(panel.textContent).not.toContain('×');
+    expect(within(panel).getByText(row('progressEligible', { count: 1 }))).toBeTruthy();
+  });
+
+  it('one person in two slots among others: only that chip carries the slot words', async () => {
+    const { panel } = await renderPanel(pendingRequest(['u_nina', 'u_dev_admin', 'u_dev_admin', 'u_lee']));
+
+    expect(chips(panel).map((chip) => chip.textContent)).toEqual([
+      'Nina Novak',
+      `Dev Admin· ${row('approverSlots', { count: 2 })}`,
+      'Lee Lin',
+    ]);
+    expect(within(panel).getByText(row('progressEligible', { count: 3 }))).toBeTruthy();
+  });
+});

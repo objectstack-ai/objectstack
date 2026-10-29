@@ -276,3 +276,35 @@ describe('#3896 — outbound text follows the CONVERSATION, in both directions',
     );
   });
 });
+
+/**
+ * objectstack#27480 — the extend-or-new question an `iterate_or_new` plan asks
+ * SENDS one of two answers, so they sit on the send side of the same line: the
+ * conversation's language picks them, never the console's. The rows that can
+ * discriminate are the ones where the two disagree.
+ */
+describe('objectstack#27480 — the extend-or-new answers follow the CONVERSATION', () => {
+  function answers(props: Record<string, unknown>) {
+    return {
+      extend: (props.planExtendExistingMessage as (app: string) => string)('图书馆'),
+      buildNew: props.planBuildNewAppMessage,
+    };
+  }
+
+  it.each(['en', 'zh', 'de'])('%s UI + Chinese thread: both answers are Chinese', (uiLocale) => {
+    expect(answers(renderPane(uiLocale, ZH_THREAD))).toEqual({
+      extend: '在「图书馆」上继续完善，不另建应用。',
+      buildNew: '另建一个独立应用。',
+    });
+  });
+
+  it.each(['zh', 'en', 'de'])('%s UI + English thread: both answers are English', (uiLocale) => {
+    const props = renderPane(uiLocale, EN_THREAD);
+    expect(answers(props)).toEqual({
+      extend: 'Keep improving "图书馆" instead of building a new app.',
+      buildNew: 'Build a separate, new app.',
+    });
+    // Nothing Chinese leaves the console for an English thread but the app's own name.
+    expect(CJK.test(String(props.planBuildNewAppMessage)), `outbound Chinese under ${uiLocale} UI`).toBe(false);
+  });
+});

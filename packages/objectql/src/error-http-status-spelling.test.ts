@@ -37,6 +37,7 @@ import { DuplicateRecordError } from './duplicate-record-error.js';
 import { HookUnscopedDataAccessError } from './hook-run-as.js';
 import { MultiUpdateHookKeyDivergenceError } from './multi-update-hook-key-divergence.js';
 import { EmptyCredentialWriteError } from './secret-fields.js';
+import { SecretRefWriteError } from './engine-secret-internal-fields.js';
 import { SystemWriteOrganizationRequiredError } from './tenancy/system-write-organization.js';
 import { NamespaceConflictError, ArtifactObjectNameConflictError, ObjectOwnershipConflictError } from './registry.js';
 import { invalidFilterError } from './filter-comparand-shape.js';
@@ -52,6 +53,7 @@ const CONSTRUCTED: Array<[string, () => unknown, number]> = [
   ['HookUnscopedDataAccessError', () => new HookUnscopedDataAccessError({ hook: 'beforeFind', object: 'customer', event: 'beforeFind' }), 403],
   ['MultiUpdateHookKeyDivergenceError', () => new MultiUpdateHookKeyDivergenceError('customer', ['a', 'b'], 2), 400],
   ['EmptyCredentialWriteError', () => new EmptyCredentialWriteError('datasource', 'secret_key', 'secret'), 400],
+  ['SecretRefWriteError', () => new SecretRefWriteError('datasource', 'secret_key'), 400],
   ['SystemWriteOrganizationRequiredError', () => new SystemWriteOrganizationRequiredError('sys_job', 'group', 'walled-posture'), 500],
   ['NamespaceConflictError', () => new NamespaceConflictError('crm', 'pkg_a', 'pkg_b'), 422],
   ['ArtifactObjectNameConflictError', () => new ArtifactObjectNameConflictError('customer', 'pkg_a', 'pkg_b'), 422],

@@ -21,6 +21,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { WebhookOutboxPlugin } from './webhook-outbox-plugin.js';
+import { webhookAdministrationSecurity } from './redeliver-entitlement.testkit.js';
 
 const SESSION_COOKIE = 'better-auth.session_token=tok_22258.c2lnbmF0dXJl';
 const BEARER = 'Bearer tok_22258.c2lnbmF0dXJl';
@@ -46,6 +47,8 @@ async function redeliver(headers: Record<string, string>) {
                 return { id, status: 'pending' };
             },
         },
+        // The entitlement gate: every signed-in caller here administers webhooks.
+        security: webhookAdministrationSecurity(),
         auth: {
             api: {
                 getSession: async (input: any) => {

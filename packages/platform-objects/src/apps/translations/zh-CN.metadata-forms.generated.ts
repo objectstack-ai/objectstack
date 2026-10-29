@@ -1877,7 +1877,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "所需权限",
-        helpText: "调用此动作必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D4）。平台动作路由会以 403 拒绝其他调用方（script、flow 和 modal 动作，以及 MCP/AI 路径），并对他们隐藏按钮。type 为 api 的动作由浏览器直接调用其端点，因此该端点必须自行再次检查。"
+        helpText: "调用此动作必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D4）。平台动作门对它分派的每一次调用都以 403 拒绝其他调用方（包括 MCP/AI 路径），并对他们隐藏按钮。type 为 api 的动作，其端点仍可被直接调用，因此该端点仍须自行检查这些能力；target 不同源的 api 动作，平台在服务端不做任何检查。"
       },
       ai: {
         label: "AI 暴露",

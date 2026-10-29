@@ -227,8 +227,8 @@ export const HttpDelivery = ObjectSchema.create({
         // exactly that pair. It must, because a parked row carries no
         // `signature` (the secret that would have produced one is what went
         // missing) and `POST /api/v1/webhooks/redeliver` is reachable by any
-        // authenticated user — so without the refusal, recording the drop would
-        // hand that user a button that delivers the payload UNSIGNED, reopening
+        // webhook administrator — so without the refusal, recording the drop would
+        // hand that caller a button that delivers the payload UNSIGNED, reopening
         // #7799 through a door nobody would think to audit.
         attempts: Field.number({
             label: 'Attempts',

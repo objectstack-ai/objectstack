@@ -107,6 +107,13 @@ class FixturePlugin implements Plugin {
                 isHttpDeliveryReady: () => messaging.isHttpDeliveryReady(),
                 redeliverHttp: (id: string, o: any) => messaging.redeliverHttp(id, o),
             });
+        // The redeliver door's entitlement gate asks whether the caller may
+        // administer webhooks (update sys_webhook); every caller here may.
+        ctx.registerService('security', {
+            async explain(request: { object: string; operation: string }) {
+                return { allowed: request.object === 'sys_webhook' && request.operation === 'update', layers: [] };
+            },
+        });
         ctx.registerService('auth', {
             api: {
                 async getSession(input: { headers: Headers }) {

@@ -1406,6 +1406,9 @@ describe('RestServer', () => {
   // POST /email/send — IEmailService bridge (M11.B1 / M10.7)
   // -----------------------------------------------------------------------
   describe('email send handler', () => {
+    // The door requires the send capability (email-routes.ts, bound 1); these
+    // cases measure what lies past it, so the caller holds it.
+    const EMAIL_SENDER = { userId: 'test-user', systemPermissions: ['manage_platform_settings'] };
     function getEmailRoute(rest: any) {
       const routes = rest.getRoutes();
       return routes.find(
@@ -1415,7 +1418,7 @@ describe('RestServer', () => {
 
     it('returns 501 when no email service provider is wired', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      (rest as any).resolveExecCtx = async () => EMAIL_SENDER;
   rest.registerRoutes();
       const route = getEmailRoute(rest);
       expect(route).toBeDefined();
@@ -1427,13 +1430,14 @@ describe('RestServer', () => {
 
     it('calls email service and returns the SendEmailResult on success', async () => {
       const send = vi.fn(async () => ({ id: 'em-1', status: 'sent', messageId: '<m1@x>' }));
-      const provider = async () => ({ send });
+      // A `from` is admitted only as the configured sender (bound 3).
+      const provider = async () => ({ send, getDefaultFrom: () => 'no@reply.com' });
       const rest = new RestServer(
         server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      (rest as any).resolveExecCtx = async () => EMAIL_SENDER;
   rest.registerRoutes();
       const route = getEmailRoute(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
@@ -1441,7 +1445,7 @@ describe('RestServer', () => {
         body: { to: 'a@b.com', from: 'no@reply.com', subject: 'Hi', text: 'x' },
       } as any, res as any);
       expect(send).toHaveBeenCalledWith(expect.objectContaining({
-        to: 'a@b.com', from: 'no@reply.com', subject: 'Hi',
+        to: 'a@b.com', from: 'no@reply.com', subject: 'Hi', sentBy: 'test-user',
       }));
       expect(res.json).toHaveBeenCalledWith({ id: 'em-1', status: 'sent', messageId: '<m1@x>' });
     });
@@ -1454,7 +1458,7 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      (rest as any).resolveExecCtx = async () => EMAIL_SENDER;
   rest.registerRoutes();
       const route = getEmailRoute(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };

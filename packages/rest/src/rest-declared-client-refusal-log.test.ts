@@ -214,18 +214,6 @@ describe('[#23932] controls that stay LOUD — the verdict is not "any 4xx"', ()
         }
     });
 
-    it('an un-coded business-rule 400 (a sandboxed hook refusal) logs', async () => {
-        const hookRefusal = Object.assign(new Error("hook 'guard' threw: Error: Opportunity is closed."), {
-            innerMessage: 'Opportunity is closed.',
-        });
-        for (const res of await expectLoudAtBothDoors(hookRefusal)) {
-            expect(res.statusCode).toBe(400);
-            // [#27597] It carries `HOOK_ABORTED` now; the log verdict is not
-            // that card's, so it still logs.
-            expect(res.body.code).toBe('HOOK_ABORTED');
-        }
-    });
-
     it('a declared 400 with no code (half an envelope) logs', async () => {
         const uncoded = Object.assign(new Error('bad input'), { status: 400 });
         for (const res of await expectLoudAtBothDoors(uncoded)) {
@@ -269,6 +257,63 @@ describe('[#23932] controls that stay LOUD — the verdict is not "any 4xx"', ()
             expect(res.statusCode).toBe(500);
             expect(res.body.code).toBe('INTERNAL_ERROR');
         }
+    });
+});
+
+describe('[#27508] a hook `onError: abort` is a refusal the route answered — quiet, wire unchanged', () => {
+    /**
+     * The card's reproduction: a sandboxed `beforeInsert` hook declared
+     * `onError: 'abort'` throws `boom abort`. The runner raises a `SandboxError`
+     * (`.message` the debug wrapper, `.innerMessage` the hook's own sentence)
+     * and the abort policy rethrows it unchanged, so this is the exact value
+     * both doors catch.
+     */
+    const hookAbort = () => Object.assign(new Error("hook 'qa_abort' threw: Error: boom abort"), {
+        name: 'SandboxError',
+        innerMessage: 'boom abort',
+    });
+
+    it('POST /data/:object answers the same 400 and prints no "[REST] Unhandled error"', async () => {
+        const res = await postRecord(serverRejecting(hookAbort()));
+        expect(res.statusCode).toBe(400);
+        // [#27597] The door adds the ledgered `HOOK_ABORTED` to an undeclared
+        // abort's answer; the log verdict reads the thrown error, so it stays quiet.
+        expect(res.body).toEqual({ error: 'boom abort', code: 'HOOK_ABORTED', object: 'qa_media' });
+        expect(unhandledLogs()).toHaveLength(0);
+    });
+
+    it('the handleRouteError door agrees: same answer it always gave, no unhandled line', async () => {
+        const res = await putMeta(serverRejecting(hookAbort()));
+        expect(res.statusCode).toBe(400);
+        // [#27597] Same door-added code as above.
+        expect(res.body).toEqual({ error: 'boom abort', code: 'HOOK_ABORTED' });
+        expect(unhandledLogs()).toHaveLength(0);
+    });
+
+    it('CONTROL — a genuine unexpected error at the same door is still logged, by identity', async () => {
+        const bug = new TypeError("Cannot read properties of undefined (reading 'name')");
+        const res = await postRecord(serverRejecting(bug));
+        expect(res.statusCode).toBe(500);
+        expect(unhandledLogs()).toHaveLength(1);
+        expect(unhandledLogs()[0][1]).toBe(bug);
+    });
+
+    it('CONTROL — an un-coded 400 from a producer that is NOT a sandboxed body is still logged', async () => {
+        const uncoded = Object.assign(new Error('bad input'), { status: 400 });
+        const res = await postRecord(serverRejecting(uncoded));
+        expect(res.statusCode).toBe(400);
+        expect(res.body.code).toBeUndefined();
+        expect(unhandledLogs()).toHaveLength(1);
+    });
+
+    it('CONTROL — a sandboxed body that threw an UNREGISTERED code is judged as a coded refusal and still logged', async () => {
+        const coded = Object.assign(new Error("hook 'qa_abort' threw: Error: nope"), {
+            name: 'SandboxError', innerMessage: 'nope', code: 'QA_NOT_A_REGISTERED_CODE', status: 400,
+        });
+        const res = await postRecord(serverRejecting(coded));
+        expect(res.statusCode).toBe(400);
+        expect(res.body.declaredCode).toBe('QA_NOT_A_REGISTERED_CODE');
+        expect(unhandledLogs()).toHaveLength(1);
     });
 });
 

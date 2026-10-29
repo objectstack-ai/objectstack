@@ -88,6 +88,17 @@ describe('EmailService.isConfigured — does mail sent through it get delivered'
   });
 });
 
+describe('EmailService.getDefaultFrom — the configured sender the REST send door bounds `from` to', () => {
+  it('answers the constructor sender, follows setDefaultFrom, and is undefined when none is configured', () => {
+    const svc = new EmailService({ transport: new LogTransport(), defaultFrom: 'no@reply.com' });
+    expect(svc.getDefaultFrom()).toBe('no@reply.com');
+    svc.setDefaultFrom({ name: 'Ops', address: 'ops@reply.com' });
+    expect(svc.getDefaultFrom()).toEqual({ name: 'Ops', address: 'ops@reply.com' });
+    svc.setDefaultFrom(undefined);
+    expect(svc.getDefaultFrom()).toBeUndefined();
+  });
+});
+
 describe('EmailService', () => {
   function makePersistence() {
     const rows = new Map<string, Record<string, any>>();

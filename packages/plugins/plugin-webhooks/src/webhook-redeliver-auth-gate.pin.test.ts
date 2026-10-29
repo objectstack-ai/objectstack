@@ -42,6 +42,7 @@ import type { IWebhookService } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { MemoryHttpOutbox, MessagingService } from '@objectstack/service-messaging';
 import { WebhookOutboxPlugin } from './webhook-outbox-plugin.js';
+import { webhookAdministrationSecurity } from './redeliver-entitlement.testkit.js';
 
 const PATH = '/api/v1/webhooks/redeliver';
 const ORIGIN = 'http://webhooks.test';
@@ -92,6 +93,8 @@ class FixturePlugin implements Plugin {
             async resolveSecretField() { return null; },
         });
         ctx.registerService('messaging', this.messaging);
+        // The entitlement gate: every signed-in caller here administers webhooks.
+        ctx.registerService('security', webhookAdministrationSecurity());
         ctx.registerService('auth', {
             api: {
                 async getSession(input: { headers: Headers }) {
