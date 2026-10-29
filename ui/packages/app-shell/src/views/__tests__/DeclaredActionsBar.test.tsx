@@ -604,8 +604,10 @@ describe('DeclaredActionsBar — declared `visible` on a server-declared action 
     // Phase 2 of the objectui#5330 canon: the row is bound as `record.*` only,
     // so `status` is an unknown variable. This leg opts into `throwOnError`, so
     // its EXISTING policy is fail-closed: the same verdict on the holding row
-    // and the failing one, and one console line naming the variable. The
-    // ungated companion proves the bar rendered.
+    // and the failing one, and one console line naming the predicate. The
+    // ungated companion proves the bar rendered. The bare string is CEL
+    // (objectstack#27457), so the line is the CEL fail-closed probe's, which
+    // names the predicate rather than the legacy grammar's `is not defined`.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const gated = { ...APPROVE, visible: 'status == "pending"' };
@@ -620,7 +622,7 @@ describe('DeclaredActionsBar — declared `visible` on a server-declared action 
         .map((c) => String(c[0]))
         .filter((m) => m.includes('was hidden/disabled: its predicate threw'));
       expect(reports).toHaveLength(1);
-      expect(reports[0]).toContain('status is not defined');
+      expect(reports[0]).toContain('CEL predicate failed to evaluate: status == "pending"');
       expect(reports[0]).toContain('declared action "approval_approve" (visible)');
     } finally {
       warn.mockRestore();

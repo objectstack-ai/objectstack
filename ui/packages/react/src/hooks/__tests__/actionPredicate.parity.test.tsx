@@ -114,10 +114,17 @@ describe('action `visible` — engine path vs renderer path parity (#3314)', () 
       visible: { dialect: 'cel', source: '!(record.a < record.b)' },
       expected: false,
     },
-    // Same text, no envelope → legacy JS on BOTH paths → shown on both.
+    // Same text, no envelope → still CEL on BOTH paths: a bare string is the
+    // envelope's shorthand (objectstack#27457) → hidden on both.
     {
-      what: 'bare string with the same null comparison → shown on both paths',
+      what: 'bare string with the same null comparison → CEL shorthand, hidden on both paths',
       visible: '!(record.a < record.b)',
+      expected: false,
+    },
+    // The legacy JS reading survives only as the `${…}` template → shown on both.
+    {
+      what: '`${…}` template with the same null comparison → legacy JS, shown on both paths',
+      visible: '${!(record.a < record.b)}',
       expected: true,
     },
     {
@@ -191,8 +198,9 @@ describe('action `visible` — engine path vs renderer path parity (#3314)', () 
  * falsy verdict. objectui#3957 moved the engine onto the same definition.
  *
  * Why `rendererVerdict` alone cannot pin this: it models only the second question.
- * For `visible: '   '` it returns `false` (the normalizer wraps a blank string into
- * `'${   }'`, whose verdict is falsy) even though the real renderer SHOWS the
+ * For `visible: '   '` it used to return `false` (the normalizer wrapped a blank
+ * string into `'${   }'`, whose verdict is falsy; since objectstack#27457 it is
+ * the blank `cel` envelope, "no gate") even though the real renderer SHOWS the
  * action, because the declared gate in front of it never consults that verdict.
  * `rendererFace` below composes both questions, exactly as `action-button` /
  * `action-menu` / `DeclaredActionsBar` do.

@@ -513,7 +513,10 @@ const isCelEnvelope = (value: unknown): boolean =>
  * run BEFORE the hoist, so by the time either consumer sees the key the
  * envelope is gone.
  *
- * Both consumers then read a bare string and both take the legacy JS path:
+ * Both consumers then read a bare string and both took the legacy JS path
+ * (a bare string is CEL shorthand since objectstack#27457, so a stripped `cel`
+ * envelope would no longer change engines; the guard stays as the spelling
+ * the spec normalizes to):
  *
  *   1. this component's own `shouldHide` chain, off the post-hoist node; and
  *   2. the RENDERER's `toPredicateInput(…)` → `useCondition(…)` call, one
@@ -1359,9 +1362,10 @@ export const SchemaRenderer: ForwardRefExoticComponent<
      * ## A fault fails CLOSED (objectui#13299)
      *
      * `evaluateCondition` answers an unresolvable predicate with `true`, on
-     * every one of its three internal paths: the CEL envelope fails soft to its
-     * `true` fallback, a bare expression that throws is caught and returns
-     * `true`, and a `${…}` template that throws returns its own SOURCE TEXT,
+     * every one of its three internal paths: the CEL envelope (and a bare
+     * string, its shorthand since objectstack#27457) fails soft to its `true`
+     * fallback, a non-`cel` envelope's `source` that throws is caught and
+     * returns `true`, and a `${…}` template that throws returns its own SOURCE TEXT,
      * which is a non-empty string and therefore truthy. Passing
      * `throwOnError: true` changes none of those verdicts — it only converts
      * "could not evaluate" from a value into a throw.
