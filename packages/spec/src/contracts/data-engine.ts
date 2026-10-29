@@ -169,8 +169,8 @@ export interface WriteObservabilityOptions {
    *
    * This is an IN-PROCESS option, exactly like its neighbour above, and for the
    * same structural reason: `WriteObservabilityOptions` is not the serializable
-   * `EngineUpdateOptionsSchema` bag, so nothing here crosses the RPC / Virtual
-   * Data Engine boundary or is reachable from a REST/wire body. A remote caller
+   * `EngineUpdateOptionsSchema` bag, so nothing here can be serialized, and
+   * none of it is reachable from a REST/wire body. A remote caller
    * cannot set it, and gets NEITHER behaviour: its write is stripped and
    * committed, silently from its side, exactly as before this option existed —
    * a 200 whose read-only columns kept their stored values. That is deliberate

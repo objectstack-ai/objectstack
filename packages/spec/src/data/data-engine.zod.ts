@@ -1343,8 +1343,8 @@ export type QueryWithTransportParsed = z.infer<typeof QueryWithTransportSchema>;
 // `ctx.api.object(name).find(...)` and parses no request schema; the wire batch
 // validates with `CrossObjectBatchRequestSchema` / `BatchUpdateRequestSchema`
 // from `../api/batch.zod.ts`. As published the protocol was also unsafe to
-// implement: every arm admitted a caller-supplied `context` (`isSystem`
-// included), and `execute` carried a raw driver command. Its private helpers
+// implement: every read and write arm admitted a caller-supplied `context`
+// (`isSystem` included), and `execute` carried a raw driver command. Its private helpers
 // (`RpcQueryOptionsSchema` and the `filter`-only fold) went with it;
 // `RPC_QUERY_ALIAS_SLOTS` above stays, since the transport dialect and the
 // engine fold by it.
