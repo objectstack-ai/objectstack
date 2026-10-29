@@ -310,7 +310,7 @@ describe('#27539 — put and delete credit the actor to the audit writer through
 
   it('CONTROL: with no actor the writes carry no attributedUserId key at all — unattributed, as before', async () => {
     const first = await repo.put(ref, view('A'), { parentVersion: null, actor: null });
-    const second = await repo.put(ref, view('B'), { parentVersion: first.version });
+    const second = await repo.put(ref, view('B'), { parentVersion: first.version, actor: null });
     await repo.delete(ref, { parentVersion: second.version, actor: null });
     expect(engine.writes).toHaveLength(6);
     for (const w of engine.writes) {
