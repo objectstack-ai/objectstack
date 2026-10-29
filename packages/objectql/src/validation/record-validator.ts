@@ -404,6 +404,21 @@ export interface ValidationMessageContext {
   translate?: ValidationMessageTranslator;
   /** Object name — needed to address the field's label in the bundle. */
   objectName?: string;
+  /**
+   * [ADR-0029 D9.2a] The PACKAGED (code-shipped) declaration of the rule of
+   * this name on `objectName` — a `conditional` branch addressed by its own
+   * name — read from the packaged owner's declaration, the base `/meta` hands
+   * its translator as `packagedBase`. An authored `rule.message` that diverged
+   * from it is a tenant's rewrite, and the catalog (the packaged rule's
+   * translation) is not applied to it.
+   *
+   * Absent when no packaged owner is registered for the object (a
+   * runtime-authored object, a registry-less host): nothing is inferred and
+   * the catalog applies, as on `/meta` with no base. Present, `undefined`
+   * means the packaged declaration carries no rule of that name, so the
+   * served rule was authored after the fact.
+   */
+  packagedRule?: (ruleName: string) => unknown;
 }
 
 /**

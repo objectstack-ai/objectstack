@@ -299,9 +299,9 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message beats the packaged tran
       wrapper: AUTHORED.wrapper,
       vip_branch: REWRITE.vip_branch,
       standard_branch: ZH.standard_branch,
+      // A rule the packaged object does not declare was authored after the fact.
+      tenant_only_rule: 'Our own rule, in our own words.',
     });
-    // A rule the packaged object does not declare was authored after the fact.
-    expect(out.validations[4].message).toBe('Our own rule, in our own words.');
   });
 
   it('counts every named rule as authored when the packaged object declares none', () => {

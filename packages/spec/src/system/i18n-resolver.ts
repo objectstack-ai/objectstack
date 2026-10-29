@@ -3852,10 +3852,21 @@ function builtinSystemFieldLabel(
  *
  * ⛔ The three conservative edges above are therefore load-bearing in two
  * places. Widening any of them widens the fold's precedence rule too.
+ *
+ * ## `message` — a validation rule's, judged on both of its readers
+ *
+ * A rule's `message` is served on `/meta` ({@link translateObjectValidations})
+ * and returned in the refusal of a write by `@objectstack/objectql`'s rule
+ * evaluator, and both apply the catalog only while the served message still
+ * equals the packaged rule's of the same name (ADR-0029 D9.2a). The evaluator
+ * asks through this export, with the packaged RULE as `base`, so a tenant's
+ * rewrite is judged by one comparison on both readers and the two keep
+ * answering one sentence. The key is the only thing it adds: the three edges
+ * above hold for it unchanged.
  */
 export function scalarOverridesPackagedBase(
   base: unknown,
-  key: 'label' | 'pluralLabel' | 'description',
+  key: 'label' | 'pluralLabel' | 'description' | 'message',
   value: unknown,
 ): boolean {
   return valueOverridesPackagedBase(base, key, value);
@@ -3985,21 +3996,30 @@ const MAX_VALIDATION_DEPTH = 10;
  * branches are translated and the wrapper's `message` is left as authored, the
  * way the extractor leaves it unscaffolded.
  *
- * ## No packaged-base comparison
+ * ## The catalog loses to a tenant's rewrite — ADR-0029 D9.2a
  *
- * Unlike the object's scalars, a rule message is a flat `catalog ?? document`,
- * as a field `label` is. The evaluator translates a refusal without consulting
- * any packaged base, and a divergence rule applied here alone would serve one
- * sentence on `/meta` and another in the refusal of the same write, which is
- * the split this overlay exists to close.
+ * The catalog translates the PACKAGED rule, so a served message that diverged
+ * from the packaged rule of the same name — a tenant overlay that kept the
+ * rule and reworded it — is authored data and keeps its text, judged by
+ * {@link valueOverridesPackagedBase} (⛔ never a second comparison) against
+ * the rule in {@link TranslateDocumentOptions.packagedBase}'s `validations`,
+ * a `conditional` branch by its own name. A rule the base does not declare was
+ * authored after the fact, and its message counts as diverged; no base
+ * supplied means nothing is inferred and the catalog applies.
+ *
+ * The evaluator applies the same rule to its refusal, through the exported
+ * {@link scalarOverridesPackagedBase} and the packaged owner's declaration the
+ * engine hands it, so `/meta` and the refusal of the same write still show one
+ * sentence for one rule and locale.
  */
 function translateObjectValidations(
   validations: unknown,
   bundle: TranslationBundle | undefined,
   objectName: string,
-  opts: ResolveOptions | undefined,
+  opts: TranslateDocumentOptions | undefined,
 ): unknown {
   if (!Array.isArray(validations) || !bundle) return validations;
+  const packaged = packagedRulesByName(opts?.packagedBase);
   const translateRule = (raw: unknown, depth: number): unknown => {
     const rule = asRecord(raw);
     if (rule === undefined || depth >= MAX_VALIDATION_DEPTH) return raw;
@@ -4014,6 +4034,9 @@ function translateObjectValidations(
       };
     }
     if (typeof rule.name !== 'string' || rule.name.length === 0) return raw;
+    if (packaged !== undefined && valueOverridesPackagedBase(packaged.get(rule.name) ?? {}, 'message', rule.message)) {
+      return raw;
+    }
     const path = objectValidationMessageKey(objectName, rule.name).split('.');
     for (const code of localeChain(opts)) {
       const candidate = path.reduce<unknown>(
@@ -4033,6 +4056,32 @@ function translateObjectValidations(
     return translated;
   });
   return changed ? next : validations;
+}
+
+/**
+ * The packaged object's validation rules by `name`, each `conditional` branch
+ * under its own name to {@link MAX_VALIDATION_DEPTH}, for
+ * {@link translateObjectValidations}' divergence test. `undefined` when no
+ * base is known; an empty map when the base declares no rules, so every rule
+ * on the served document then counts as authored. The first rule of a name
+ * wins.
+ */
+function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, unknown>> | undefined {
+  const base = asRecord(packagedBase);
+  if (base === undefined) return undefined;
+  const byName = new Map<string, Record<string, unknown>>();
+  const visit = (raw: unknown, depth: number): void => {
+    const rule = asRecord(raw);
+    if (rule === undefined || depth >= MAX_VALIDATION_DEPTH) return;
+    if (rule.type === 'conditional') {
+      visit(rule.then, depth + 1);
+      visit(rule.otherwise, depth + 1);
+      return;
+    }
+    if (typeof rule.name === 'string' && rule.name.length > 0 && !byName.has(rule.name)) byName.set(rule.name, rule);
+  };
+  if (Array.isArray(base.validations)) for (const raw of base.validations) visit(raw, 0);
+  return byName;
 }
 
 /**
@@ -4091,6 +4140,8 @@ function translateObjectValidations(
  * application of the same rule (ADR-0029 D9.2a, as {@link translateView}
  * applies it), judged per view against the packaged object's own `listViews` —
  * see {@link translateObjectListViews}.
+ * Each `validations[].message` follows it too, judged against the packaged
+ * rule of the same name — see {@link translateObjectValidations}.
  *
  * ## A field's translated help is served on `description` — ADR-0029 D9.2a
  *

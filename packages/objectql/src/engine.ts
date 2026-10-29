@@ -9545,8 +9545,10 @@ export class ObjectQL implements IObjectQLEngine {
   ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
     // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
     const readI18nService = () => this.i18nService;
+    const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof validationMessageContext> = {
       get i18nService() { return readI18nService(); },
+      get registry() { return readRegistry(); },
       negotiatedMessageLocale: (...a) => this.negotiatedMessageLocale(...a),
     };
     return validationMessageContext.call(host, objectName, context);
