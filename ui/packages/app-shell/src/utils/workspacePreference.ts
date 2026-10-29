@@ -7,6 +7,11 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
+import {
+  relatedArrangementFromRecord,
+  relatedArrangementToRecord,
+  type RelatedArrangement,
+} from '@object-ui/plugin-detail';
 
 /**
  * The console's per-reader workspace preferences — how a reader likes the
@@ -149,6 +154,24 @@ export const RECORD_TIMELINE_COLUMN_PREFERENCE = defineWorkspacePreference<Prefe
 export const RECORD_RELATED_COLUMN_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
   name: 'record.columns.related',
   codec: switchCodec,
+});
+
+/**
+ * How the reader arranged the record page's related cards, per object
+ * (scope `object:OBJECT_NAME`, objectstack#27055): `{ v, order, collapsed,
+ * hidden, basedOn }` — plus `seen`, the first-seen stamps of relationships new
+ * since the last drag (the 48 h 「新」 badge needs a clock). The value is a
+ * DIFF against the default order; `resolveRelatedArrangement` in
+ * `@object-ui/plugin-detail` lays it over the default. With no choice the
+ * host passes `EMPTY_RELATED_ARRANGEMENT`: the default order, every card open.
+ */
+export const RECORD_RELATED_ARRANGEMENT_PREFERENCE = defineWorkspacePreference<RelatedArrangement>({
+  name: 'record.related.arrangement',
+  codec: versionedPreferenceCodec<RelatedArrangement>({
+    version: 1,
+    toRecord: relatedArrangementToRecord,
+    fromRecord: relatedArrangementFromRecord,
+  }),
 });
 
 /** The storage surface a read takes — `localStorage`, or a test double. */

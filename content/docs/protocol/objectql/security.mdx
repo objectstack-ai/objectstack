@@ -601,7 +601,7 @@ Set `deterministicEncryption: true` to allow equality queries on the ciphertext,
 
 Object- and field-level history is opt-in metadata, not a free-form `enable.audit` block.
 
-- **Object history tab** — set `enable.trackHistory: true` on the object (the `ObjectCapabilities` block in `object.zod.ts`) to surface the record History tab.
+- **Object history** — set `enable.trackHistory: true` on the object (the `ObjectCapabilities` block in `object.zod.ts`) to surface the record's field changes. On the default record page they join the one Timeline stream (its Changes filter); an assigned page shows them where it places a `record:history` block.
 - **Per-field history** — set `trackHistory: true` on an individual field to render that field's value changes on the record activity timeline. (The former per-field `auditTrail` flag was pruned in 2026-06 — it had no runtime consumer.)
 - **RLS audit** — removed (2026-07, ADR-0056 D8): the `RLSAuditConfigSchema`/`RLSAuditEventSchema` shapes were never emitted or read by the runtime RLS path and were deleted from the spec. Enforcement decisions surface today through the security plugin's fail-closed warnings and the standard audit log (`plugin-audit`), not a dedicated RLS event stream.
 

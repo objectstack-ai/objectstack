@@ -185,9 +185,9 @@ function makeMetadata(objects: any[], pages: any[]) {
   } as any;
 }
 
-function renderDetail(opts: { objects: any[]; pages: any[]; comments?: Array<Record<string, any>> }) {
+function renderDetail(opts: { objects: any[]; pages: any[]; comments?: Array<Record<string, any>>; search?: string }) {
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}${opts.search ?? ''}`]}>
       <MetadataCtx.Provider value={makeMetadata(opts.objects, opts.pages)}>
         <RecordDetailView
           dataSource={makeDataSource(opts.comments ?? [])}
@@ -281,15 +281,16 @@ describe('objectui#7298 — the discussion panel is composed, never appended', (
     expect(composerCount()).toBe(0);
   });
 
-  it('the SYNTHESIZED default page still shows the panel — it declares the node', async () => {
-    // No authored page ⇒ `buildDefaultPageSchema`, which composes
-    // `record:discussion` itself. The ruling removes the host's append, not the
-    // default page's panel, so the out-of-the-box record page is unchanged.
-    renderDetail({ objects: OBJECTS_FEEDS_ON, pages: [], comments: ONE_COMMENT });
+  it('the SYNTHESIZED default page still shows the discussion — its Timeline stream declares it', async () => {
+    // No authored page ⇒ `buildDefaultPageSchema`, which composes the timeline
+    // stream itself (objectstack#27055: discussion, activity and changes in the
+    // Timeline tab's one `record:activity`). The ruling removes the host's
+    // append, not the default page's discussion.
+    renderDetail({ objects: OBJECTS_FEEDS_ON, pages: [], comments: ONE_COMMENT, search: '?tab=timeline' });
     await settled();
 
     await waitFor(() => expect(count(COMMENT_MARKER)).toBeGreaterThan(0));
-    expect(count(PANEL_HEADING)).toBeGreaterThan(0);
+    expect(composerCount()).toBeGreaterThan(0);
   });
 });
 
