@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampChatPaneWidth } from '../AiChatPage';
+import { clampChatPaneWidth, isTooNarrowForSplit } from '../AiChatPage';
 
 const opts = (containerWidth: number) => ({ min: 360, previewMin: 420, containerWidth });
 
@@ -25,5 +25,23 @@ describe('clampChatPaneWidth', () => {
   it('applies only the floor when the container is unmeasured (0)', () => {
     expect(clampChatPaneWidth(5000, opts(0))).toBe(5000);
     expect(clampChatPaneWidth(100, opts(0))).toBe(360);
+  });
+});
+
+// objectstack#27420 — below the two minimums together (360 + 420) the pane
+// previews the way a phone does instead of overflowing.
+describe('isTooNarrowForSplit', () => {
+  it('is narrow below the chat and preview minimums together', () => {
+    expect(isTooNarrowForSplit(779)).toBe(true);
+    expect(isTooNarrowForSplit(300)).toBe(true);
+  });
+
+  it('keeps the split at and above them', () => {
+    expect(isTooNarrowForSplit(780)).toBe(false);
+    expect(isTooNarrowForSplit(1200)).toBe(false);
+  });
+
+  it('treats an unmeasured container (0) as wide enough', () => {
+    expect(isTooNarrowForSplit(0)).toBe(false);
   });
 });
