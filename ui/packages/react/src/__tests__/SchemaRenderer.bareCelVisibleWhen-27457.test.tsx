@@ -23,7 +23,7 @@
  * answer and not "this node never renders".
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
@@ -57,7 +57,7 @@ function mount(visibleWhen: unknown, items: unknown[], user: Record<string, unkn
 
 const shown = () => screen.queryByTestId('probe') !== null;
 
-let warn: ReturnType<typeof vi.spyOn>;
+let warn: MockInstance<typeof console.warn>;
 beforeEach(() => {
   ComponentRegistry.register(NAME, Probe as never, { namespace: 'element', skipFallback: true } as never);
   __resetVisibilityPredicateWarnings();
