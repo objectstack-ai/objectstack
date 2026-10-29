@@ -104,6 +104,14 @@ const RECALC = {
   recordIdParam: 'recordId',
 };
 const PING = { name: 'ping_hook', label: 'Ping', type: 'api', target: 'https://hooks.example.test/ping' };
+/** A one-shot reveal on a stock better-auth route, which answers bare. */
+const ROTATE = {
+  name: 'rotate_secret',
+  label: 'Rotate Secret',
+  type: 'api',
+  target: '/api/v1/auth/oauth2/client/rotate-secret',
+  resultDialog: { fields: [{ path: 'client_secret', label: 'New Client Secret', format: 'secret' }] },
+};
 const CLOSE_SUBTASK = {
   name: 'close_subtask',
   label: 'Close',
@@ -119,7 +127,7 @@ const OBJECTS = [
       id: { type: 'text', label: 'Id' },
       title: { type: 'text', label: 'Title' },
     },
-    actions: [RECALC, PING],
+    actions: [RECALC, PING, ROTATE],
   },
   { name: 'showcase_subtask', label: 'Subtask', fields: { id: { type: 'text', label: 'Id' } }, actions: [CLOSE_SUBTASK] },
 ];
@@ -202,13 +210,29 @@ afterEach(() => {
 });
 
 describe('RecordDetailView api handler — a declared same-origin click goes through the action door (objectstack#27611)', () => {
-  it('a header click sends this page\'s record id to the door, and its answer back as the page always has', async () => {
-    const answer = { success: true, data: { recalculated: 1 } };
-    const { out, url, body } = await clickOnPage(RECALC, 200, answer);
+  it('a header click sends this page\'s record id to the door, and hands back the target\'s payload', async () => {
+    const { out, url, body } = await clickOnPage(RECALC, 200, { success: true, data: { recalculated: 1 } });
 
     expect(url.endsWith(`${DOOR}${OBJECT_NAME}/${RECALC.name}`)).toBe(true);
     expect(body).toEqual({ recordId: RECORD_ID, params: {} });
-    expect(out).toEqual({ success: true, data: answer, reload: false });
+    expect(out).toEqual({ success: true, data: { recalculated: 1 }, reload: false });
+  });
+
+  it('a bare target answer comes back at the level the direct fetch handed back, so a resultDialog path still reads', async () => {
+    // The door wraps a bare (stock better-auth) body as its `data`.
+    const { out, url } = await clickOnPage(ROTATE, 200, { success: true, data: { client_secret: 's3cr3t' } });
+
+    expect(url.endsWith(`${DOOR}${OBJECT_NAME}/${ROTATE.name}`)).toBe(true);
+    expect(out).toEqual({ success: true, data: { client_secret: 's3cr3t' }, reload: false });
+  });
+
+  it('a target\'s HTTP 200 rejection, relayed in the door\'s data, is a failure', async () => {
+    const { out } = await clickOnPage(RECALC, 200, {
+      success: true,
+      data: { success: false, error: { code: 'VALIDATION_ERROR', message: 'Estimate is locked' } },
+    });
+
+    expect(out).toEqual({ success: false, error: 'Estimate is locked' });
   });
 
   it('a switched-off action answers the door\'s 409 ACTION_DISABLED as its sentence', async () => {

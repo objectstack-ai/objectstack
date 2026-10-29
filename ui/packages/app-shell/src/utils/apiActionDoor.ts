@@ -52,11 +52,12 @@
  * `{ recordId, params }` body and the `_rowRecord` strip, and app-shell names
  * that route nowhere else (`actions-envelope.ratchet.test.ts`). Its ANSWER is
  * the forwarded target's, so it is read by the host's api rules — the
- * entitlement dialog, `apiActionFailureMessage`, the `{ success, data }`
- * unwrap and `refreshAfter` — and the raw answer is handed back here for that.
+ * entitlement dialog, `apiActionFailureMessage` and `refreshAfter` — and the
+ * raw answer is handed back here for that. A 2xx is read once, here, for both
+ * hosts ({@link readApiActionDoorSuccess}).
  */
 
-import { createServerActionHandler } from '@object-ui/core';
+import { createServerActionHandler, interpretActionResponse } from '@object-ui/core';
 import type { ActionDef, ActionResult, ServerActionFetch } from '@object-ui/core';
 
 /**
@@ -167,4 +168,20 @@ export async function sendApiActionThroughDoor(input: ApiActionDoorInput): Promi
   });
   const result = await dispatch({ ...input.action, objectName: input.objectName, params: input.params });
   return answered ? { answered: true, ...answered } : { answered: false, result };
+}
+
+/**
+ * Read the door's 2xx answer. The door answers the target's payload as its own
+ * `data`, already unwrapped from the target's `{ success, data }`, so `data`
+ * here is what the direct fetch hands back for a target that answers bare (a
+ * stock better-auth body): a `resultDialog` path such as `client_secret` reads
+ * alike on both roads. A target's HTTP 200 rejection rides inside that `data`,
+ * and the `/actions` envelope rule reads it.
+ */
+export function readApiActionDoorSuccess(
+  answer: { res: { ok: boolean; status: number }; json: unknown },
+  label: string,
+): { ok: true; data: unknown } | { ok: false; error: string } {
+  const outcome = interpretActionResponse(answer.res, answer.json, label);
+  return outcome.ok ? { ok: true, data: outcome.envelope } : { ok: false, error: outcome.error ?? `${label} failed` };
 }

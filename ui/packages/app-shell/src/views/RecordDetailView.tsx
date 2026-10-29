@@ -48,7 +48,7 @@ import { resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionFailureMessage } from '../utils/flowResponse.js';
-import { findDeclaredApiAction, isSameOriginApiTarget, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
+import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
 // Audit provenance renders as the one-line <RecordMetaFooter>; the other
 // framework-injected bookkeeping columns are hidden from the body outright.
@@ -1462,11 +1462,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           if (!door.res.ok) {
             return { success: false, error: apiActionFailureMessage(door.res, door.json, `HTTP ${door.res.status}`, language) };
           }
-          // The door's body, as this page has always handed back its target's:
-          // byte for byte the target's own answer when the target answers the
-          // platform `{ success, data }` envelope.
+          const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
+          if (!answer.ok) return { success: false, error: answer.error };
           if (action.refreshAfter === true) notifyRecordChanged();
-          return { success: true, data: door.json, reload: action.refreshAfter === true };
+          return { success: true, data: answer.data, reload: action.refreshAfter === true };
         }
 
         // Interpolate `{field}` tokens in the target URL. Source: the stashed

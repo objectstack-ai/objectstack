@@ -40,13 +40,7 @@ import type {
   ServerActionHandler,
   ToastHandler,
 } from '@object-ui/core';
-import {
-  actionErrorDetail,
-  captureUpdateUndoData,
-  interpretActionResponse,
-  resolveRecordIdParamSeed,
-  resolveServerActionRecordId,
-} from '@object-ui/core';
+import { actionErrorDetail, captureUpdateUndoData, resolveRecordIdParamSeed, resolveServerActionRecordId } from '@object-ui/core';
 import { useActionModal } from './useActionModal.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from '../views/ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from '../views/ActionParamDialog.js';
@@ -59,7 +53,12 @@ import { entitlementDialogFromError, type EntitlementDialogSpec } from '../envir
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionFailureMessage } from '../utils/flowResponse.js';
-import { findDeclaredApiAction, isSameOriginApiTarget, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
+import {
+  findDeclaredApiAction,
+  isSameOriginApiTarget,
+  readApiActionDoorSuccess,
+  sendApiActionThroughDoor,
+} from '../utils/apiActionDoor.js';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
@@ -483,14 +482,10 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
             });
             if (!door.answered) return door.result;
             if (!door.res.ok) return refused(door.res, door.json);
-            // The door answers the target's payload as its own `data`, already
-            // unwrapped from the target's `{ success, data }` — the level the
-            // direct path below hands back. A target's HTTP 200 rejection rides
-            // there, and the `/actions` envelope rule reads it.
-            const outcome = interpretActionResponse(door.res, door.json, `Action "${action.name}"`);
-            if (!outcome.ok) return { success: false, error: outcome.error };
+            const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
+            if (!answer.ok) return { success: false, error: answer.error };
             if (action.refreshAfter !== false) refresh();
-            return { success: true, data: outcome.envelope, reload: action.refreshAfter !== false };
+            return { success: true, data: answer.data, reload: action.refreshAfter !== false };
           }
         }
 
