@@ -6,6 +6,7 @@ import type { MapConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
+import { carriedRefusalOfResult } from '../inner-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { collectionNotAList, resolveCollectionSlot, resolveValueSlotMap } from './value-slot-map.js';
 
@@ -220,6 +221,10 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
           return {
             success: false,
             error: `map '${node.id}': item ${idx} (subflow '${flowName}') failed: ${child.error ?? 'unknown error'}`,
+            // The failing item's refusal, carried beside the re-worded `error`
+            // (`inner-refusal.ts`); `{}` for a child that met none. The batch
+            // stops here, so it is this — the first failing — item's.
+            ...carriedRefusalOfResult(child),
             // Items that already succeeded wrote real rows; a later item's
             // failure must not erase them from the run's totals — and the
             // failing item's own writes count too, for the same reason.
