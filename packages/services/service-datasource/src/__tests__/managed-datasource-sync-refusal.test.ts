@@ -245,13 +245,17 @@ describe('every Sync door refuses a managed datasource', () => {
     );
   });
 
-  it('a name with no datasource definition is refused too: nothing declares it a federation source', async () => {
+  // [#27618] Refused as every by-name door refuses a name that resolves no
+  // saved datasource, not with this family's 400: it is not a datasource that
+  // fails to be a federation source, it does not exist
+  // (`federation-doors-unknown-name.test.ts` holds the doors equal to GET).
+  it('a name with no datasource definition is refused 404 RESOURCE_NOT_FOUND: it does not exist', async () => {
     const { call } = await boot();
 
     const tables = await call('GET', '/ghost/remote-tables');
-    expect(tables.status).toBe(400);
-    expect(tables.body.error.code).toBe('EXTERNAL_DATASOURCE_ERROR');
-    expect(tables.body.error.message).toContain("Datasource 'ghost' has no datasource definition");
+    expect(tables.status).toBe(404);
+    expect(tables.body.error.code).toBe('RESOURCE_NOT_FOUND');
+    expect(tables.body.error.message).toBe('Datasource "ghost" does not exist.');
   });
 
   it('no refused datasource is introspected, the primary one included', async () => {

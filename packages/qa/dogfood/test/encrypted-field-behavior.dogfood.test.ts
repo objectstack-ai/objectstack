@@ -14,6 +14,10 @@
 //   acceptance[3], negative[1] — with NO crypto provider, a non-empty secret
 //     write is refused and nothing is persisted; a `password` write needs no
 //     provider.
+//   (ADR-0100, beside acceptance[4]) — the same credential columns as filter
+//     and sort keys: refused 400 INVALID_FIELD for a signed-in caller, a
+//     has-a-value check served; an `internal: true` column likewise at the
+//     door. The seeded admin's sign-in in each `beforeAll` is the login leg.
 //
 // ## Two boots
 //
@@ -118,6 +122,46 @@ describe('records-forms.encrypted-field-behavior — the showcase field zoo over
     const control = await call('POST', `/data/${ZOO}/query`, { groupBy: ['name'], aggregations: [{ function: 'count', alias: 'n' }] });
     expect(control.status, control.text).toBe(200);
   });
+
+  // ADR-0100, the filter / sort half of the credential-column guard: the
+  // aggregate refusal above extended to filter and sort keys. A signed-in admin
+  // is not a system context, so every one of these is refused before the
+  // driver; a has-a-value check and every other column are served.
+  it('a filter or sort key on a credential column is refused; a has-a-value check is served', async () => {
+    const created = await call('POST', `/data/${ZOO}`, {
+      name: 'efb-pred', f_master_detail: projectId, f_secret: SECRET, f_password: PASSWORD,
+    });
+    expect(created.status, created.text).toBe(201);
+
+    const refused: Array<[string, string, string, unknown?]> = [
+      ['where equality', 'POST', `/data/${ZOO}/query`, { where: { f_password: PASSWORD } }],
+      ['where range', 'POST', `/data/${ZOO}/query`, { where: { f_password: { $gt: 'a' } } }],
+      ['where $startsWith', 'POST', `/data/${ZOO}/query`, { where: { f_password: { $startsWith: 'p' } } }],
+      ['where $contains', 'POST', `/data/${ZOO}/query`, { where: { f_password: { $contains: 's' } } }],
+      ['where on the secret column', 'POST', `/data/${ZOO}/query`, { where: { f_secret: { $startsWith: 'secret:' } } }],
+      ['orderBy the password column', 'POST', `/data/${ZOO}/query`, { orderBy: [{ field: 'f_password', order: 'asc' }] }],
+      ['list filter param', 'GET', `/data/${ZOO}?filter=${encodeURIComponent(JSON.stringify(['f_password', '=', PASSWORD]))}`],
+    ];
+    for (const [label, method, path, body] of refused) {
+      const res = await call(method, path, body);
+      expect(res.status, `${label}: ${res.text}`).toBe(400);
+      expect(res.json.code, `${label}: ${res.text}`).toBe('INVALID_FIELD');
+      expect(res.text, label).not.toContain(PASSWORD);
+      expect(res.text, label).not.toContain(SECRET);
+    }
+
+    const presence = await call('POST', `/data/${ZOO}/query`, { where: { name: 'efb-pred', f_password: { $null: false } } });
+    expect(presence.status, presence.text).toBe(200);
+    expect(presence.json.records.map((r: any) => r.name)).toEqual(['efb-pred']);
+    expect(presence.text).not.toContain(PASSWORD);
+    const unset = await call('POST', `/data/${ZOO}/query`, { where: { name: 'efb-pred', f_password: null } });
+    expect(unset.status, unset.text).toBe(200);
+    expect(unset.json.records).toHaveLength(0);
+
+    const control = await call('POST', `/data/${ZOO}/query`, { where: { name: 'efb-pred' }, orderBy: [{ field: 'name', order: 'asc' }] });
+    expect(control.status, control.text).toBe(200);
+    expect(control.json.records).toHaveLength(1);
+  });
 });
 
 // ── fail-closed: no crypto provider ──────────────────────────────────────
@@ -136,6 +180,7 @@ const efbStack = defineStack({
         name: Field.text({ label: 'Name', required: true }),
         token: Field.secret({ label: 'Token' }),
         pin: Field.password({ label: 'PIN', ackPlaintextMasking: true }),
+        digest: Field.text({ label: 'Digest', internal: true }),
       },
     }),
   ],
@@ -177,5 +222,29 @@ describe('records-forms.encrypted-field-behavior — fail-closed with no crypto 
     const read = await stack.apiAs(token, 'GET', `/data/${VAULT}/${row.id}`);
     const body: any = await read.json();
     expect((body.record ?? body).pin).toBe(SECRET_MASK);
+  });
+
+  it('a sort or filter key on a password or an `internal: true` column is refused at the REST door', async () => {
+    const res = await stack.apiAs(token, 'POST', `/data/${VAULT}`, { name: 'efb-keys', pin: '7777-pin', digest: 'd-7777' });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const bodies: Array<[string, unknown]> = [
+      ['orderBy pin', { orderBy: [{ field: 'pin', order: 'desc' }] }],
+      ['where pin', { where: { pin: { $startsWith: '7' } } }],
+      ['orderBy digest', { orderBy: [{ field: 'digest', order: 'desc' }] }],
+      ['where digest', { where: { digest: 'd-7777' } }],
+    ];
+    for (const [label, body] of bodies) {
+      const answer = await stack.apiAs(token, 'POST', `/data/${VAULT}/query`, body);
+      const text = await answer.text();
+      expect(answer.status, `${label}: ${text}`).toBe(400);
+      expect(JSON.parse(text).code, `${label}: ${text}`).toBe('INVALID_FIELD');
+      expect(text, label).not.toContain('7777-pin');
+      expect(text, label).not.toContain('d-7777');
+    }
+    // Control: the same door sorts and filters by a plain column.
+    const control = await stack.apiAs(token, 'POST', `/data/${VAULT}/query`, {
+      where: { name: 'efb-keys' }, orderBy: [{ field: 'name', order: 'asc' }],
+    });
+    expect(control.status, await control.clone().text()).toBe(200);
   });
 });

@@ -7,6 +7,7 @@ import type { ControlledByParentWriteOutcome, ExplainAccessRequest } from '@obje
 import type { ExplainDecision } from '@objectstack/spec/security';
 import {
   installAttachmentAccessHooks,
+  installAttachmentFileReferenceGate,
   mayEditAttachmentParent,
   type AttachmentSecurityLike,
   type AttachmentSharingLike,
@@ -68,14 +69,21 @@ function install(opts: {
   /** Parents the CALLER can read through the engine, keyed `object/id`. */
   readable?: string[];
   messageTranslator?: () => ((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined;
+  /** `sys_file` rows the engine serves; with `authorizeFileRead`, the file half of the gate is installed too. */
+  files?: Array<Record<string, unknown>>;
+  authorizeFileRead?: (file: Record<string, unknown>, context: any) => Promise<boolean>;
 }) {
-  const hooks = new Map<string, (ctx: any) => Promise<void>>();
+  // Every handler per event, in registration order — the engine's own order
+  // for same-priority hooks; each event's runner below awaits them in turn.
+  const hooks = new Map<string, Array<(ctx: any) => Promise<void>>>();
+  const fileReads: any[] = [];
   const parentReads: Array<{ object: string; options: any }> = [];
   const parentFind = readableParentFind(opts.readable ?? [], parentReads);
-  const engine: AttachmentLifecycleEngine = {
+  const engine: AttachmentLifecycleEngine & { getObject: (name: string) => unknown } = {
     registerHook: (event, handler) => {
-      hooks.set(event, handler as any);
+      hooks.set(event, [...(hooks.get(event) ?? []), handler as any]);
     },
+    getObject: (name) => (name === 'sys_attachment' ? { fields: { file_id: { label: 'File' } } } : undefined),
     find: async (object, options: any) => {
       if (object !== 'sys_attachment') return parentFind(object, options);
       const rows = (opts.attachments ?? []).filter((r) =>
@@ -84,18 +92,28 @@ function install(opts: {
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     findOne: async (_object, options: any) =>
-      { assertEngineFindOnePredicate(_object, options); return (opts.attachments ?? []).find((r) =>
+      { assertEngineFindOnePredicate(_object, options);
+        if (_object === 'sys_file') {
+          fileReads.push(options);
+          return (opts.files ?? []).find((f) => f.id === options.where.id) ?? null;
+        }
+        return (opts.attachments ?? []).find((r) =>
         Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       ) ?? null; },
     update: async () => ({}),
   };
   const sharing = asTriState(opts.sharing);
   installAttachmentAccessHooks(engine, () => sharing, silentLogger(), opts.messageTranslator, () => opts.security);
+  if (opts.authorizeFileRead) installAttachmentFileReferenceGate(engine, opts.authorizeFileRead);
+  const run = (event: string) => async (ctx: any) => {
+    for (const handler of hooks.get(event) ?? []) await handler(ctx);
+  };
   return {
-    beforeInsert: hooks.get('beforeInsert')!,
-    beforeUpdate: hooks.get('beforeUpdate')!,
-    beforeDelete: hooks.get('beforeDelete')!,
+    beforeInsert: run('beforeInsert'),
+    beforeUpdate: run('beforeUpdate'),
+    beforeDelete: run('beforeDelete'),
     parentReads,
+    fileReads,
   };
 }
 
@@ -1875,5 +1893,114 @@ describe('a kernel that judges no by-id update keeps the record-sharing and mast
       code: 'ATTACHMENT_PARENT_ACCESS',
       status: 403,
     });
+  });
+});
+
+describe('attachment access — the file a row names must be one the caller may open', () => {
+  const OWN_FILE = { id: 'f-own', owner_id: 'u1', scope: 'attachments', status: 'committed' };
+  const OTHER_FILE = { id: 'f-other', owner_id: 'u-admin', scope: 'attachments', status: 'committed' };
+  const ROW = { id: 'a1', parent_object: 'task', parent_id: 't1', file_id: 'f-own', uploaded_by: 'u1' };
+
+  /**
+   * The gate with the file half installed: `openable` lists the file ids the
+   * caller may open. `bound: false` installs the access hooks alone.
+   */
+  function installWithFiles(opts: { openable: string[]; bound?: boolean; canEditParent?: boolean }) {
+    const authorizeFileRead = vi.fn(async (file: Record<string, unknown>, context: any) => {
+      expect(context.userId).toBe('u1');
+      return opts.openable.includes(String(file.id));
+    });
+    const gate = install({
+      attachments: [ROW],
+      files: [OWN_FILE, OTHER_FILE],
+      sharing: { canEdit: async () => opts.canEditParent ?? true },
+      security: null,
+      authorizeFileRead: opts.bound === false ? undefined : authorizeFileRead,
+    });
+    return { ...gate, authorizeFileRead };
+  }
+
+  const attach = (fileId: unknown, session: Record<string, unknown> = { userId: 'u1', organizationId: 'org-1' }) => ({
+    object: 'sys_attachment',
+    event: 'beforeInsert',
+    input: {
+      data: { parent_object: 'task', parent_id: 't1', file_id: fileId, file_name: 'x.png' },
+      options: { context: { userId: 'u1', tenantId: 'org-1', permissions: [] } },
+    },
+    session,
+    api: apiFor(['task/t1']),
+  });
+
+  const repoint = (data: Record<string, unknown>) => ({
+    object: 'sys_attachment',
+    event: 'beforeUpdate',
+    input: { id: 'a1', data, options: { context: { userId: 'u1', tenantId: 'org-1', permissions: [] } } },
+    session: { userId: 'u1', organizationId: 'org-1' },
+    api: apiFor(['task/t1']),
+  });
+
+  const refusal = {
+    code: 'VALIDATION_FAILED',
+    fields: [
+      {
+        field: 'file_id',
+        code: 'invalid_value',
+        label: 'File',
+        message: 'File cannot reference this file: it is not a file you can open. Choose a file you can open, or upload it again.',
+      },
+    ],
+  };
+
+  it('insert refuses a file reference the caller cannot open, with the file-field door envelope', async () => {
+    const { beforeInsert, fileReads } = installWithFiles({ openable: ['f-own'] });
+    await expect(beforeInsert(attach('f-other'))).rejects.toMatchObject(refusal);
+    // Looked up as the acting organization reaches it.
+    expect(fileReads[0].context).toMatchObject({ isSystem: true, tenantId: 'org-1' });
+  });
+
+  it('insert answers an id that names no file exactly as a file the caller cannot open', async () => {
+    const { beforeInsert } = installWithFiles({ openable: ['f-own', 'f-missing'] });
+    await expect(beforeInsert(attach('f-missing'))).rejects.toMatchObject(refusal);
+  });
+
+  it('insert admits a file the caller may open (control)', async () => {
+    const { beforeInsert, authorizeFileRead } = installWithFiles({ openable: ['f-own'] });
+    await expect(beforeInsert(attach('f-own'))).resolves.toBeUndefined();
+    expect(authorizeFileRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('a system insert is not judged (control)', async () => {
+    const { beforeInsert, authorizeFileRead } = installWithFiles({ openable: [] });
+    await expect(beforeInsert(attach('f-other', { isSystem: true }))).resolves.toBeUndefined();
+    expect(authorizeFileRead).not.toHaveBeenCalled();
+  });
+
+  it('a caller the parent rule refuses keeps the parent refusal, and no file is judged', async () => {
+    const { beforeInsert, authorizeFileRead } = installWithFiles({ openable: [], canEditParent: false });
+    await expect(beforeInsert(attach('f-other'))).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403 });
+    expect(authorizeFileRead).not.toHaveBeenCalled();
+  });
+
+  it('without the file gate installed, the file is not judged', async () => {
+    const { beforeInsert, fileReads } = installWithFiles({ openable: [], bound: false });
+    await expect(beforeInsert(attach('f-other'))).resolves.toBeUndefined();
+    expect(fileReads).toHaveLength(0);
+  });
+
+  it('update refuses changing file_id to a file the caller cannot open', async () => {
+    const { beforeUpdate } = installWithFiles({ openable: ['f-own'] });
+    await expect(beforeUpdate(repoint({ file_id: 'f-other' }))).rejects.toMatchObject(refusal);
+  });
+
+  it('update admits changing file_id to a file the caller may open (control)', async () => {
+    const { beforeUpdate } = installWithFiles({ openable: ['f-own', 'f-other'] });
+    await expect(beforeUpdate(repoint({ file_id: 'f-other' }))).resolves.toBeUndefined();
+  });
+
+  it('update that leaves file_id as it is, or does not name it, judges no file (control)', async () => {
+    const { beforeUpdate, authorizeFileRead } = installWithFiles({ openable: [] });
+    await expect(beforeUpdate(repoint({ file_id: 'f-own', file_name: 'y.png' }))).resolves.toBeUndefined();
+    await expect(beforeUpdate(repoint({ file_name: 'z.png' }))).resolves.toBeUndefined();
+    expect(authorizeFileRead).not.toHaveBeenCalled();
   });
 });

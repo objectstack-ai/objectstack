@@ -669,12 +669,28 @@ export const UrlNavItemSchema = lazySchema(() => strictObject(navItemSurface('ur
 
 /**
  * 5. Report Navigation Item
- * Navigates to a specific report.
+ *
+ * ONE variant with two targets, chosen by whether `reportName` is written:
+ *
+ * - `{ type: 'report', reportName }` opens that report (`report/NAME`).
+ * - `{ type: 'report' }` opens the app's report index (`reports`): the list of
+ *   the reports the app ships that the member may open, each linking to its
+ *   own route.
+ *
+ * The index entry is the author's to place. The console draws an index entry
+ * only where the navigation declares one, as it draws every other entry; an
+ * app whose navigation declares none shows no index entry.
  */
 export const ReportNavItemSchema = lazySchema(() => strictObject(navItemSurface('report'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('report'),
-  reportName: z.string().describe('Target report name'),
+  reportName: z
+    .string()
+    .optional()
+    .describe(
+      'Target report name. Omit it and the entry opens the app\'s report index (the reports the app ships '
+      + 'that the member may open) instead of one report.',
+    ),
 }));
 
 /**

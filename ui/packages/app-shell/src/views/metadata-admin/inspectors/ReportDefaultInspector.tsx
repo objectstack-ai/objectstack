@@ -51,6 +51,7 @@ import {
   type DatasetDimensionInfo,
   type DatasetMeasureInfo,
 } from '../previews/useDatasetCatalog.js';
+import { useStudioDatasetAuthoring } from '../../studio-design/datasetCreate.js';
 import { getReportForm, getReportSchema } from '../report-schema.js';
 import { mergeServerFields } from '../mergeServerFields.js';
 import { t } from '../i18n.js';
@@ -351,8 +352,11 @@ export function ReportDefaultInspector({
   const columnsAcross = React.useMemo(() => readNames(draft.columns), [draft.columns]);
 
   // Dataset catalog (binding options) + the bound dataset's semantic layer
-  // (measure/dimension picker options).
-  const catalog = useDatasetCatalog(datasetCatalogOverride);
+  // (measure/dimension picker options). objectstack#27518 — in the Studio the
+  // catalog is the draft-overlaid one, so a report bound to a dataset that is
+  // still a draft (one New dataset just created) offers its measures.
+  const inStudio = useStudioDatasetAuthoring() !== null;
+  const catalog = useDatasetCatalog(datasetCatalogOverride, { previewDrafts: inStudio });
   const semantics = useDatasetSemantics(datasetName || undefined, catalog);
 
   // A FOURTH hand-rolled copy of the unknown-value rule used to sit here, and

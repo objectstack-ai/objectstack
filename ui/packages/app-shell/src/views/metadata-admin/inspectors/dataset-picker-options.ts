@@ -44,3 +44,25 @@ export function datasetSelectOptions(
     label: o.hint ? `${o.label} — ${o.hint}` : o.label,
   }));
 }
+
+/**
+ * objectstack#27518 — the catalog with `packageId`'s own datasets first, each
+ * group in the order served. With no package, the catalog as it is.
+ */
+export function packageDatasetsFirst(
+  datasets: DatasetCatalogEntry[],
+  packageId: string | undefined,
+): DatasetCatalogEntry[] {
+  if (!packageId) return datasets;
+  const own = datasets.filter((d) => d.packageId === packageId);
+  return own.length === 0 ? datasets : [...own, ...datasets.filter((d) => d.packageId !== packageId)];
+}
+
+/**
+ * objectstack#27518 — whether some dataset of the catalog reads one of
+ * `objects` (its base `object`, the FROM). An entry that names no object reads
+ * none of them.
+ */
+export function readsAnyObject(datasets: DatasetCatalogEntry[], objects: ReadonlySet<string>): boolean {
+  return datasets.some((d) => d.object !== undefined && objects.has(d.object));
+}

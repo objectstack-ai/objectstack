@@ -2669,6 +2669,9 @@ const zh = {
       invitationPreviewTitle: '{{inviter}} 邀请你加入 {{organization}}',
       invitationPreviewTitleNoInviter: '你受邀加入 {{organization}}',
       invitationPreviewDescription: '请使用收到邀请的邮箱（{{email}}）。',
+      invitationGoneTitle: '此邀请链接已失效',
+      invitationGoneDescription: '邀请可能已过期、已被使用或已被撤回。请联系邀请你的人重新发送邀请。',
+      invitationGoneSignIn: '前往登录',
       showPasswordText: '显示密码',
       hidePasswordText: '隐藏密码',
       footer: {
@@ -2702,6 +2705,8 @@ const zh = {
         userExists: '该邮箱已被注册，请直接登录或更换邮箱。',
         selfRegistrationClosed: '本系统未开放自助注册，请联系管理员获取邀请。',
         emailDomainNotAllowed: '该邮箱的域名不允许在此注册，请使用组织邮箱，或联系管理员获取邀请。',
+        invitationSentTo: '此邀请发送至 {{email}}，请使用该邮箱注册以接受邀请。',
+        invitationAddressOnly: '此邀请只能由收到邀请的邮箱接受，请使用该邮箱注册。',
       },
       verifyInbox: {
         title: '请检查您的邮箱',
@@ -2854,6 +2859,7 @@ const zh = {
         submit: '修改密码并继续',
         submitting: '正在更新…',
         mismatch: '两次输入的新密码不一致。',
+        sameAsTemporary: '请设置一个与临时密码不同的新密码。',
         failed: '无法修改密码。',
       },
       mfa: {
@@ -3287,6 +3293,7 @@ const zh = {
       detailLoading: '正在加载详情…',
       detailLoadFailed: '无法加载变更详情：',
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
+      fieldOrderChanged: '字段顺序已变更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: '包含由 AI 副驾起草的更改',
       draftedByMcpClient: '包含由 MCP 客户端「{{client}}」起草的更改',
@@ -4355,6 +4362,7 @@ const zh = {
     progressBar: '决策进度',
     declaredActions: '操作',
     decisionPanelOffRequestPage: '审批决策面板仅在审批请求页面上可用。',
+    snapshotAsSubmitted: '提交时的内容',
     attachmentChip: '附件',
     attachmentOpenFailed: '无法打开附件，请重试',
     approveOneTitle: '通过“{{title}}”？',

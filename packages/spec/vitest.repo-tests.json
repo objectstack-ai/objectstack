@@ -52,6 +52,7 @@
   "src/integration/connector-resilience-keys-retirement.test.ts",
   "src/integration/connector-sync-retirement.test.ts",
   "src/integration/connector-triggers-retirement.test.ts",
+  "src/kernel/manifest-packaging-retirement.test.ts",
   "src/kernel/metadata-type-registry-allow-org-override-absence.test.ts",
   "src/kernel/package-upgrade-family-retirement.test.ts",
   "src/marketplace/dependency-spellings-retirement.test.ts",

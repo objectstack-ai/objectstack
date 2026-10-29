@@ -3,15 +3,21 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 // ADR-0069 — the authentication-policy gate's ONE decision, asked by the
 // redeliver door on the session it already reads (see `serveRedeliver`).
-import { evaluateAuthGate } from '@objectstack/core';
+import { evaluateAuthGate, type RequestAuthService } from '@objectstack/core';
 import type {
     AuthSessionApi,
     IDataEngine,
     II18nService,
     IMetadataService,
     IRealtimeService,
+    ISecurityService,
     IWebhookService,
 } from '@objectstack/spec/contracts';
+import {
+    canDecideRedeliverEntitlement,
+    judgeRedeliverEntitlement,
+    redeliverTenancyResolver,
+} from './redeliver-entitlement.js';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
@@ -296,9 +302,10 @@ export class WebhookOutboxPlugin implements Plugin {
                 // step above, and never on the auto-enqueue prerequisites. It
                 // runs before the enqueuer writes its first row (#8069), and
                 // before the mount below is mounted.
-                this.bootRedeliverDoor(ctx, autoEnqueueOpt);
+                const servedAsService = this.bootRedeliverDoor(ctx, autoEnqueueOpt);
                 await this.bootAutoEnqueue(ctx, autoEnqueueOpt);
-                this.registerAdminRoutes(ctx);
+                const mounted = this.registerAdminRoutes(ctx);
+                if (servedAsService || mounted) this.reportRedeliverEntitlementDecider(ctx);
             });
         }
 
@@ -519,8 +526,11 @@ export class WebhookOutboxPlugin implements Plugin {
      *
      * `subscriptionsObject` is read from the auto-enqueue options, as before,
      * so a host that renamed its subscriptions object keeps the veto reading it.
+     *
+     * Returns whether the `webhooks` service was registered (the door's
+     * service face is served).
      */
-    private bootRedeliverDoor(ctx: PluginContext, opt: boolean | AutoEnqueuerOptions): void {
+    private bootRedeliverDoor(ctx: PluginContext, opt: boolean | AutoEnqueuerOptions): boolean {
         const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
         const messaging = this.getMessaging(ctx);
         if (!engine || !messaging) {
@@ -529,16 +539,43 @@ export class WebhookOutboxPlugin implements Plugin {
                     + '— the data engine or the messaging service is not available',
                 { hasEngine: !!engine, hasMessaging: !!messaging },
             );
-            return;
+            return false;
         }
         const subscriptionsObject = typeof opt === 'object' ? opt.subscriptionsObject : undefined;
-        if (!this.installRedeliverGuard(ctx, messaging, engine, subscriptionsObject)) return;
+        if (!this.installRedeliverGuard(ctx, messaging, engine, subscriptionsObject)) return false;
 
         const service: IWebhookService = {
             handleRedeliver: (request: Request) =>
                 this.serveRedeliver(ctx, messaging, requestDoorContext(request)),
         };
         ctx.registerService(WEBHOOKS_SLOT, service);
+        return true;
+    }
+
+    /**
+     * Absence must be loud: a redeliver door that is served (on either face)
+     * on a kernel with no security service to decide webhook administration
+     * answers `503 SERVICE_UNAVAILABLE` to EVERY caller
+     * ({@link judgeRedeliverEntitlement}). Said once, at `kernel:ready` — after
+     * every plugin's `init()` and `start()`, so the registry this reads is
+     * complete — naming the remedy, rather than left to be discovered one
+     * request at a time in the server log.
+     *
+     * `warn`, not `error`, by AGENTS.md's one question: the door is visibly
+     * unavailable (every press answers 503 with the remedy), and nothing that
+     * claims to persist goes missing. The door still decides per request, so a
+     * security service that is present answers as usual whatever this said.
+     */
+    private reportRedeliverEntitlementDecider(ctx: PluginContext): void {
+        const security = this.tryGetService<unknown>(ctx, ['security']);
+        if (canDecideRedeliverEntitlement(security)) return;
+        ctx.logger.warn?.(
+            '[webhook-outbox] no security service is registered to decide who may administer webhooks, '
+                + 'so the redeliver door (POST /api/v1/webhooks/redeliver and the webhooks service\'s '
+                + 'handleRedeliver) answers 503 SERVICE_UNAVAILABLE to every caller. Fix: compose the '
+                + 'security plugin (@objectstack/plugin-security).',
+            { hasSecurityService: security !== undefined },
+        );
     }
 
     /**
@@ -569,7 +606,7 @@ export class WebhookOutboxPlugin implements Plugin {
                     + 'pressing redeliver may send a delivery that can no longer be authenticated '
                     + '(an unsigned send, which webhook delivery otherwise never makes). The POST '
                     + '/api/v1/webhooks/redeliver endpoint is reachable by any '
-                    + 'authenticated user; the webhooks service is not registered. Fix: upgrade '
+                    + 'caller entitled to administer webhooks; the webhooks service is not registered. Fix: upgrade '
                     + '@objectstack/service-messaging to a build that implements registerRedeliverGuard.',
             );
             return false;
@@ -607,26 +644,32 @@ export class WebhookOutboxPlugin implements Plugin {
      * because `getService` throws on an empty slot. Where both names are
      * registered (`plugin-hono-server` registers one server under both), the
      * first answers, so the path is mounted once.
+     *
+     * Returns whether the path was mounted.
      */
-    private registerAdminRoutes(ctx: PluginContext): void {
+    private registerAdminRoutes(ctx: PluginContext): boolean {
         const http = this.tryGetService<any>(ctx, ['http.server', 'http-server']);
         if (!http || typeof http.getRawApp !== 'function') {
             ctx.logger.debug?.('[webhook-outbox] HTTP server not available; redeliver endpoint not mounted');
-            return;
+            return false;
         }
         const rawApp = http.getRawApp();
         const messaging = this.getMessaging(ctx);
-        if (!rawApp || !messaging) return;
+        if (!rawApp || !messaging) return false;
 
         rawApp.post('/api/v1/webhooks/redeliver', async (c: any) => this.serveRedeliver(ctx, messaging, c));
 
         ctx.logger.info?.('[webhook-outbox] redeliver endpoint mounted at POST /api/v1/webhooks/redeliver');
+        return true;
     }
 
     /**
      * The redeliver door: `POST /api/v1/webhooks/redeliver`. Delegates to
      * `messaging.redeliverHttp(deliveryId, …)`. Auth is the better-auth session
-     * cookie — every authenticated user counts.
+     * cookie, and a signed-in caller must also be entitled to ADMINISTER
+     * WEBHOOKS ({@link judgeRedeliverEntitlement}, `redeliver-entitlement.ts`):
+     * asked right after authentication and before the body is read, so an
+     * unentitled caller is answered `403` before any row-specific detail.
      *
      * [#22756] ONE body, two faces. The self-hosted mount
      * ({@link registerAdminRoutes}) hands it the Hono context; the `webhooks`
@@ -642,6 +685,10 @@ export class WebhookOutboxPlugin implements Plugin {
      * unscoped replay from here is an authenticated user reaching another
      * organization's delivery row on a walled deployment. With the tenant
      * threaded, a row outside the caller's organization is simply not found.
+     * The tenant threaded is the organization the entitlement gate ADMITTED the
+     * caller in (the composition's vetted `tenantId`), never the raw session
+     * claim: on a walled posture a claim no current membership backs is
+     * dropped there, and the gate refuses rather than replay with no scope.
      *
      * ⚠️ A session with no active organization threads `undefined`, and the
      * driver's tenant-audit line then fires for that write. That is deliberate:
@@ -678,6 +725,34 @@ export class WebhookOutboxPlugin implements Plugin {
                 401,
             );
         }
+        // [ADR-0124 D1] Entitlement, server-side, before the body is read and
+        // before any row is looked up: every refusal from here is about the
+        // caller, never about a delivery.
+        //
+        // [#10740] `session.session.activeOrganizationId` is the canonical
+        // spelling of the caller's active organization CLAIM (better-auth's
+        // organization plugin; see `plugin-auth/auth-schema-config.ts`). Read
+        // from the one place it lives — a `??` chain over alternative
+        // spellings would make a MISSING organization indistinguishable from
+        // a differently-shaped one, and the missing case is the one that must
+        // stay visible. The gate vets it; the replay below uses the verdict's.
+        const activeOrgClaim = session?.session?.activeOrganizationId;
+        const verdict = await judgeRedeliverEntitlement({
+            headers: c.req.raw.headers,
+            ql: this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']),
+            authService: this.tryGetService<RequestAuthService>(ctx, ['auth']),
+            tenancy: redeliverTenancyResolver(ctx),
+            security: this.tryGetService<Pick<ISecurityService, 'explain'>>(ctx, ['security']),
+            userId,
+            activeOrganizationId: typeof activeOrgClaim === 'string' && activeOrgClaim.length > 0
+                ? activeOrgClaim
+                : undefined,
+            logError: (message, err) => ctx.logger.error?.(message, err as Error),
+        });
+        if (!verdict.admitted) {
+            const { refusal } = verdict;
+            return c.json({ success: false, error: { code: refusal.code, message: refusal.message } }, refusal.status);
+        }
         let body: any;
         try {
             body = await c.req.json();
@@ -692,18 +767,9 @@ export class WebhookOutboxPlugin implements Plugin {
             );
         }
         try {
-            // [#10740] `session.session.activeOrganizationId` is the
-            // canonical spelling of the caller's active organization
-            // (better-auth's organization plugin; see
-            // `plugin-auth/auth-schema-config.ts`). Read from the one
-            // place it lives — a `??` chain over alternative spellings
-            // would make a MISSING organization indistinguishable from a
-            // differently-shaped one, and the missing case is the one that
-            // must stay visible.
-            const activeOrg = session?.session?.activeOrganizationId;
-            const tenantId = typeof activeOrg === 'string' && activeOrg.length > 0
-                ? activeOrg
-                : undefined;
+            // [#10740] The organization the gate admitted the caller in — the
+            // composition's vetted `tenantId` — is the replay's scope.
+            const tenantId = verdict.tenantId;
             const row = await messaging.redeliverHttp(deliveryId, { tenantId });
             ctx.logger.info?.('[webhook-outbox] redelivered', { deliveryId, requestedBy: userId, tenantId });
             return c.json({ success: true, data: { id: row.id, status: row.status } });

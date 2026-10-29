@@ -89,6 +89,44 @@ describe('DatePickerField — the picker, not the native input (objectui#12622)'
     expect(screen.getByTestId('date-picker-notice').textContent).toContain('MM/DD/YYYY');
   });
 
+  // objectstack#27483: unwritten text has to reach the host, or a form saves
+  // the old value as if nothing had been typed.
+  it('reports text naming no date to a host that takes it, and leaves the text to the host', () => {
+    const onChange = vi.fn();
+    const onInvalidInputChange = vi.fn();
+    const { container } = render(
+      <DatePickerField value="" onChange={onChange} field={FIELD} onInvalidInputChange={onInvalidInputChange} />,
+    );
+    expect(onInvalidInputChange).not.toHaveBeenCalled();
+    typeAndCommit(textBox(container), '13/45/2026');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInvalidInputChange).toHaveBeenCalledTimes(1);
+    expect(onInvalidInputChange.mock.calls[0][0]).toContain('13/45/2026');
+    expect(onInvalidInputChange.mock.calls[0][0]).toContain('MM/DD/YYYY');
+    expect(textBox(container).getAttribute('aria-invalid')).toBe('true');
+    expect(screen.queryByTestId('date-picker-notice')).toBeNull();
+
+    typeAndCommit(textBox(container), '10/20/2026');
+    expect(onChange).toHaveBeenCalledWith('2026-10-20');
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(null);
+    expect(onInvalidInputChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('withdraws the report on clear and on unmount', () => {
+    const onInvalidInputChange = vi.fn();
+    const { container, unmount } = render(
+      <DatePickerField value="" onChange={() => {}} field={FIELD} onInvalidInputChange={onInvalidInputChange} />,
+    );
+    typeAndCommit(textBox(container), '13/45/2026');
+    fireEvent.click(screen.getByTestId('date-picker-clear'));
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(null);
+
+    typeAndCommit(textBox(container), 'nonsense');
+    expect(onInvalidInputChange.mock.lastCall?.[0]).toContain('nonsense');
+    unmount();
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(null);
+  });
+
   it('a calendar pick writes the ISO day', async () => {
     const onChange = vi.fn();
     render(<DatePickerField value="2026-10-16" onChange={onChange} field={FIELD} />);
@@ -160,6 +198,17 @@ describe('DateTimePickerField — writes an ISO instant (objectui#12622)', () =>
     const written = onChange.mock.calls[0][0] as string;
     expect(written).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(written).toBe(new Date(2026, 9, 16, 14, 30).toISOString());
+  });
+
+  it('reports a date and time naming no instant to a host that takes it (objectstack#27483)', () => {
+    const onChange = vi.fn();
+    const onInvalidInputChange = vi.fn();
+    const { container } = render(
+      <DateTimePickerField value="" onChange={onChange} field={DT_FIELD} onInvalidInputChange={onInvalidInputChange} />,
+    );
+    typeAndCommit(textBox(container), '13/45/2026 25:99');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInvalidInputChange.mock.calls[0][0]).toContain('13/45/2026 25:99');
   });
 
   it('a calendar pick keeps the value time', async () => {

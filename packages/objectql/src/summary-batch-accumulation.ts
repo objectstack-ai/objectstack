@@ -133,7 +133,10 @@ export function createBatchSummaryAccumulator(
       }
       let value: number | undefined;
       if (desc.fn !== 'count') {
-        const raw = row[desc.sourceField];
+        // A non-count roll-up always names its field (the spec refuses one
+        // without); a definition that reached the registry without it reads
+        // no value, as an absent column would.
+        const raw = desc.sourceField === undefined ? undefined : row[desc.sourceField];
         if (raw == null) continue; // an aggregate skips a null, as SQL does
         if (typeof raw !== 'number' || !Number.isFinite(raw)) { dropped.add(desc); continue; }
         value = raw;

@@ -121,6 +121,15 @@ Reversible, encrypted-at-rest value (DB password, API key, token). Unlike `passw
 { name: 'api_key', label: 'API Key', type: 'secret' }
 ```
 
+**Querying a `password` or `secret` field.** Neither type is a filter, sort or aggregation key.
+Only a has-a-value check is accepted on one: `{ "$null": true | false }`, `{ "$exists": … }`,
+`{ "$empty": … }`, or equality with `null`. Any other operator in `where` or `filter` (equality
+with a value, a range, `$startsWith` / `$contains`, `$in`, a `{ "$field": … }` comparand), an
+`orderBy` entry, a group-by or a min / max over one is refused with `400 INVALID_FIELD` before
+the query runs. That holds for every caller, administrators included. A search also never scans
+such a column, even one listed in `searchableFields`. Only server-side code running as the
+system context may match on the stored value (ADR-0100).
+
 ---
 
 ## Rich Content Types
@@ -703,7 +712,7 @@ Roll-up summary from child records.
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `summaryOperations.object` | `string` | **required** | Child object to aggregate |
-| `summaryOperations.field` | `string` | **required** | Child field to aggregate; ignored for `count` |
+| `summaryOperations.field` | `string` | **required** for `sum`, `avg`, `min`, `max` | Child field to aggregate; a `count` counts the child rows and reads no field, so it may omit it |
 | `summaryOperations.function` | `enum` | **required** | `count`, `sum`, `avg`, `min`, or `max` |
 | `summaryOperations.relationshipField` | `string` | auto | Child FK back to the parent when it cannot be inferred |
 | `summaryOperations.filter` | `FilterCondition` | — | Only child rows matching this `where` predicate are aggregated |
@@ -720,7 +729,6 @@ currencies would be added into one number. A `count` is served
   type: 'summary',
   summaryOperations: {
     object: 'task',
-    field: 'id',
     function: 'count',
     relationshipField: 'project',
   },

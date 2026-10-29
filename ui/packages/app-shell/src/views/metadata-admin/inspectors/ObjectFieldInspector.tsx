@@ -50,10 +50,12 @@
 import * as React from 'react';
 import {
   FieldSchema,
+  isBodyTableRelationship,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
   SelectOptionSchema,
   SINGLE_OPTION_TYPES,
+  summaryFunctionReadsField,
   VALUE_DOMAIN_FIELD_TYPES,
   type SelectOptionKind,
 } from '@objectstack/spec/data';
@@ -121,12 +123,11 @@ import {
   useExternalWriteState,
 } from '../previews/external-object.js';
 import { CelPredicateField } from '../CelPredicateField.js';
-import type { CelLintIssue } from '../celAuthoring.js';
+import type { CelLintIssue, CelValueType } from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import { FilterConditionField } from './FilterConditionField.js';
 import type { FilterCondition } from './datasetFilterCondition.js';
 import { usePickerLoad, type LoadState } from '../loadState.js';
-import { isMainContentList } from '../../../utils/deriveRelatedLists.js';
 import { fieldNameTakenRefusal } from '../../studio-design/AddFieldPopover.js';
 
 
@@ -726,6 +727,20 @@ export function ObjectFieldInspector({
   React.useEffect(() => {
     formulaEdited.current = false;
   }, [name]);
+  // objectstack#27485 — the formula editor's two verdicts on one source, its
+  // lint and its inferred type, which arrive separately and in either order.
+  // The stamp is settled once both are in for the source the draft holds: a
+  // source with a lint error proves no type, so the stored `returnType` stays
+  // (it was cleared on every keystroke that broke the formula, and the broken
+  // body then reached the server without it); a source that lints clean
+  // stamps the proven type, or clears it, as before.
+  const formulaVerdictRef = React.useRef<{
+    field: string;
+    source: string;
+    errors?: number;
+    typed?: boolean;
+    inferred?: CelValueType | null;
+  }>({ field: '', source: '' });
 
   /* ─── Who owns the API name (objectui#7615) ──────────────────────────────
    *
@@ -890,6 +905,20 @@ export function ObjectFieldInspector({
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: nextDef };
     writeView({ shape: view.shape, entries: nextEntries });
+  };
+
+  /** objectstack#27485 — records one of the formula's verdicts and settles `returnType` (see `formulaVerdictRef`). */
+  const settleFormulaType = (verdict: { errors: number } | { typed: true; inferred: CelValueType | null }) => {
+    const source = readPredicate(def.expression ?? def.formula);
+    const was = formulaVerdictRef.current;
+    const same = was.field === entry.name && was.source === source;
+    const now = { ...(same ? was : { field: entry.name, source }), ...verdict };
+    formulaVerdictRef.current = now;
+    if (!formulaEdited.current || now.errors === undefined || !now.typed || now.errors > 0) return;
+    // Spec: `returnType` carries only a PROVEN concrete type —
+    // an ambiguous (`unknown`) or unavailable verdict clears it.
+    const next = now.inferred && now.inferred !== 'unknown' ? now.inferred : undefined;
+    if (def.returnType !== next) patchDef({ returnType: next });
   };
 
   /**
@@ -1384,14 +1413,11 @@ export function ObjectFieldInspector({
                   ...(v.trim() ? {} : { returnType: undefined }),
                 });
               }}
-              onLintChange={(issues) => reportCel('formula', issues)}
-              onInferredTypeChange={(inferred) => {
-                if (!formulaEdited.current) return;
-                // Spec: `returnType` carries only a PROVEN concrete type —
-                // an ambiguous (`unknown`) or unavailable verdict clears it.
-                const next = inferred && inferred !== 'unknown' ? inferred : undefined;
-                if (def.returnType !== next) patchDef({ returnType: next });
+              onLintChange={(issues) => {
+                reportCel('formula', issues);
+                settleFormulaType({ errors: issues.filter((i) => i.severity === 'error').length });
               }}
+              onInferredTypeChange={(inferred) => settleFormulaType({ typed: true, inferred })}
               disabled={readOnly}
               placeholder="record.amount * 0.2"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
@@ -2265,7 +2291,8 @@ type RelatedListMode = 'shown' | 'hidden' | 'primary';
 /**
  * The stored `relatedList` as one of the control's three states. `true` reads
  * as `shown`. ABSENT reads as the relationship's default, which the record
- * page's own predicate decides (`isMainContentList`, objectstack#27069): a
+ * page's own predicate decides (`@objectstack/spec`'s `isBodyTableRelationship`,
+ * objectstack#27069 / objectstack#27478): a
  * `master_detail` FK that sets `inlineEdit` is primary by default, every other
  * FK is shown. Without `field` an absent value reads as `shown`.
  */
@@ -2276,7 +2303,7 @@ export function readRelatedListMode(
   if (value === false) return 'hidden';
   if (value === 'primary') return 'primary';
   if (value === undefined && field && typeof field.type === 'string'
-    && isMainContentList(field.type, { inlineEdit: field.inlineEdit })) return 'primary';
+    && isBodyTableRelationship({ type: field.type, inlineEdit: field.inlineEdit })) return 'primary';
   return 'shown';
 }
 
@@ -2581,22 +2608,25 @@ function SummaryConfigFields({
         onCommit={(v) => patchOps({ function: v || undefined })}
         disabled={readOnly}
       />
-      {/* The spec requires `field` even for `count` (documented as ignored),
-          so it stays visible — hiding it would trap the author with an
-          unfixable "required" issue in the draft banner. */}
-      <InspectorComboField
-        label={tr('designer.field.summary.field')}
-        value={typeof ops.field === 'string' ? ops.field : ''}
-        onCommit={(v) => patchOps({ field: v || undefined })}
-        options={aggregateOptions}
-        loading={loading}
-        placeholder={fieldPlaceholder}
-        searchPlaceholder={tr('designer.field.lookup.searchFields')}
-        disabled={readOnly}
-        mono
-      />
-      {fn === 'count' && (
-        <p className="text-[11px] text-muted-foreground/70 px-0.5 -mt-1">
+      {/* Whether the function reads a child field is the spec's rule
+          (`summaryFunctionReadsField`), not a copy of it: `count` counts the
+          child rows and reads none, so its control is not offered and the
+          roll-up saves without `field`. A `field` already stored on a count
+          is left as it is (ignored), so switching back keeps it. */}
+      {summaryFunctionReadsField(fn || undefined) ? (
+        <InspectorComboField
+          label={tr('designer.field.summary.field')}
+          value={typeof ops.field === 'string' ? ops.field : ''}
+          onCommit={(v) => patchOps({ field: v || undefined })}
+          options={aggregateOptions}
+          loading={loading}
+          placeholder={fieldPlaceholder}
+          searchPlaceholder={tr('designer.field.lookup.searchFields')}
+          disabled={readOnly}
+          mono
+        />
+      ) : (
+        <p className="text-[11px] text-muted-foreground/70 px-0.5">
           {tr('designer.field.summary.countFieldHint')}
         </p>
       )}

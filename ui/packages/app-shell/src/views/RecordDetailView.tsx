@@ -33,7 +33,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
-import { RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 
@@ -3431,10 +3431,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `buildDefaultPageSchema`'s `related` shape. `relationshipField` is
     // the FK field on the child pointing back to this record — passed so
     // the related-list renderer can hide the redundant parent-ID column.
-    // Each list's `record:related_list` renderer self-fetches lazily when
-    // its tab is shown (nothing is preloaded here), and header/row
-    // affordances (+ New / View All / row navigation) are wired
-    // downstream by `RelatedRecordActionsBridge`.
+    // Nothing is preloaded here: in the tabbed tier each list reads when its
+    // tab is shown; in the column tiers the related column counts its cards
+    // up front, in one request set, and a card reads its first rows once it
+    // is in view (`RelatedCardStack`, objectstack#27056). Header/row
+    // affordances (+ New / View All / row navigation) are wired downstream
+    // by `RelatedRecordActionsBridge`.
     // The DEFAULT order of the related lists (objectstack#27055,
     // objectstack#27069): `relatedList: 'primary'` lists first, then the rest,
     // each group in `deriveRelatedLists`' order — the object's declared
@@ -3448,14 +3450,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     ];
     const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
       const childObjectDef = objects.find((o: any) => o.name === childObject);
-      // objectstack#27055, Target 8 — the record's own BODY: a `master_detail`
-      // FK declaring `inlineEdit` (the child is edited as part of the parent),
-      // or a list the author marks `relatedList: 'primary'`. The two keys the
-      // spec already has; no key of its own.
-      const fkDef = (childObjectDef as any)?.fields?.[referenceField];
-      const isBody =
-        isPrimary ||
-        (fkDef?.type === 'master_detail' && (fkDef.inlineEdit === true || fkDef.inlineEdit === 'grid' || fkDef.inlineEdit === 'form'));
+      // objectstack#27055, Target 8 — the record's own BODY: a list the author
+      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring
+      // `inlineEdit` (the child is edited as part of the parent) and no
+      // `relatedList` — `relatedList: true` keeps it a side card. That is
+      // `isPrimary`: `deriveRelatedLists` sets it from `@objectstack/spec`'s
+      // `isBodyTableRelationship` (objectstack#27478), the one predicate the
+      // spec's refusal of a field group naming a side card reads too, so no
+      // second copy of the rule lives here.
+      const isBody = isPrimary;
       // A `relatedListTitle` on the relationship wins; else fall back to the
       // localized child-object PLURAL label — the section lists the child's
       // records, so it is named as that object's list page is (objectui#11733).
@@ -3976,6 +3979,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // included). `null` in the tabbed tier, and for a page whose strip the
   // partition cannot read, which then keeps its tabs.
   const pageColumns = pageInColumnTier ? buildDefaultPageColumns(renderedPage) : null;
+  // The child objects' field definitions this view already holds, for the
+  // related counts asked up front (objectstack#27056): the relationship's
+  // arity is read off them instead of a schema read first.
+  const childFieldsOf = (childObject: string) =>
+    (objects?.find((o: any) => o?.name === childObject) as { fields?: any } | undefined)?.fields;
   // objectstack#27055, Target 8 — the related lists the synthesized page
   // places in its Details tab are the record's body tables (the tabbed tier;
   // the column tiers read the same off their details column).
@@ -4324,6 +4332,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     enlargedRelated={enlargedRelatedParam}
                     onEnlargeRelated={openEnlargedRelated}
                     onCloseEnlargedRelated={closeEnlargedRelated}
+                    relatedFieldsOf={childFieldsOf}
                     footer={
                       <RecordMetaFooter
                         data={readablePageRecord}
@@ -4491,7 +4500,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // A drawer draws this view embedded and is its own host. A page is the host
   // of the drawer its related rows and lookups open over it
   // (objectstack#26679): the same in-place stack, drawn by this same view.
-  if (embedded) return pageTree;
+  // In a drawer, the record ↑ ↓ shows next has its related counts warmed
+  // once this one has loaded (objectstack#27056, Target 4).
+  if (embedded) {
+    return (
+      <>
+        {pageTree}
+        <PrefetchUpcomingRelatedCounts
+          page={renderedPage}
+          objectName={objectName}
+          dataSource={dataSource}
+          fieldsOf={childFieldsOf}
+          ready={pageRecordStatus === 'loaded'}
+        />
+      </>
+    );
+  }
   return (
     <RecordPageDrawerHost
       appName={appName}

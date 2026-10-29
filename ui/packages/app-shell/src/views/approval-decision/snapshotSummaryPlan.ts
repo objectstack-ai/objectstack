@@ -95,7 +95,8 @@ export function planSnapshotSummary(
       // a sum over any other object stays an ordinary row.
       summed ??= sum.object;
       if (sum.object !== summed || summarized?.name !== summed) continue;
-      if (summarized.fields[sum.field]?.type !== 'currency') continue;
+      // A `sum` always names its field (only a `count` may omit it).
+      if (sum.field === undefined || summarized.fields[sum.field]?.type !== 'currency') continue;
     }
     if (n !== 0) {
       lead = key;
