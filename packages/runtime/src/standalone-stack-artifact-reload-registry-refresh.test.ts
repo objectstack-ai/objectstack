@@ -22,7 +22,10 @@
 // and served v2 by name; object served v2 on all three (its own re-ingest).
 //
 // What the fix must leave alone is pinned beside it: the cold boot (each case's
-// v1 control), the installed package's record, and an environment save through
+// v1 control), the installed package's record, one binding per hook and per
+// action with the object's one owner, fields and indexes (the reload now walks
+// the object twice: the package re-registration and the object re-ingest), and
+// an environment save through
 // the protocol, which still wins on every read after the reload re-registers
 // the package beneath it.
 
@@ -47,7 +50,12 @@ const PACKAGE_ID = 'com.test.artifact-reload';
 /** One artifact, every display string carrying `v`. */
 const artifact = (v: string) => ({
   manifest: { id: PACKAGE_ID, name: 'artifact_reload', type: 'app', version: '1.0.0' },
-  objects: [{ name: 'arl_note', label: `Note ${v}`, fields: { title: { type: 'text', label: 'Title' } } }],
+  objects: [{
+    name: 'arl_note',
+    label: `Note ${v}`,
+    fields: { title: { type: 'text', label: 'Title' }, status: { type: 'text', label: 'Status' } },
+    indexes: [{ name: 'arl_note_title', fields: ['title'] }],
+  }],
   emailTemplates: [{ name: 'arl_mail', label: 'Mail', locale: 'en-US', subject: `Subject ${v}`, bodyHtml: `<p>${v}</p>` }],
   dashboards: [{ name: 'arl_dash', label: `Dash ${v}`, widgets: [] }],
   flows: [{
@@ -56,7 +64,20 @@ const artifact = (v: string) => ({
     edges: [{ id: 'e1', source: 'start', target: 'end' }],
   }],
   pages: [{ name: 'arl_page', label: `Page ${v}`, type: 'app', regions: [] }],
-  actions: [{ name: 'arl_action', label: `Action ${v}`, type: 'url', target: 'https://example.com' }],
+  actions: [
+    { name: 'arl_action', label: `Action ${v}`, type: 'url', target: 'https://example.com' },
+    {
+      name: 'arl_complete', label: `Complete ${v}`, objectName: 'arl_note', type: 'script',
+      body: { language: 'js', source: 'return { ran: true };' },
+    },
+  ],
+  hooks: [{
+    name: 'arl_stamp',
+    object: 'arl_note',
+    events: ['beforeInsert'],
+    // Appends, so a hook bound twice is visible on the input.
+    body: { language: 'js', source: "ctx.input.status = (typeof ctx.input.status === 'string' ? ctx.input.status : '') + 'stamped';" },
+  }],
 });
 
 /** `[type, name, the key whose value carries the version, that value's prefix]` for each item above. */
@@ -156,6 +177,35 @@ describe('an artifact hot reload refreshes every read of every item the boot reg
     await reload('v2');
 
     expect(registry.getPackage(PACKAGE_ID)).toMatchObject({ source: 'code', enabled: true, status: 'installed' });
+  }, BOOT_TIMEOUT);
+
+  it('a reload binds each hook and action once, and the object keeps its one owner, its fields and its indexes', async () => {
+    const { kernel, protocol, reload } = await bootOverArtifact();
+    const ql = kernel.getService<ObjectQL>('objectql');
+    const read = async () => {
+      const ctx: any = { object: 'arl_note', event: 'beforeInsert', input: { title: 'probe' }, session: {} };
+      await ql.triggerHooks('beforeInsert', ctx);
+      const object = ql.registry.getObject('arl_note') as any;
+      return {
+        hookRuns: ctx.input.status,
+        boundActions: ql.listRegisteredActions().filter((r) => r.actionName === 'arl_complete').length,
+        listedActions: ((await protocol.getMetaItems({ type: 'action' })).items ?? []).filter((i: any) => i?.name === 'arl_complete').length,
+        listedHooks: ((await protocol.getMetaItems({ type: 'hook' })).items ?? []).filter((i: any) => i?.name === 'arl_stamp').length,
+        contributors: ql.registry.getObjectContributors('arl_note').map((c: any) => `${c.packageId}:${c.ownership}:${c.priority}`),
+        owner: ql.registry.getPackagedObjectOwner('arl_note')?.packageId,
+        fields: Object.keys(object?.fields ?? {}).filter((f) => f === 'title' || f === 'status'),
+        indexes: (object?.indexes ?? []).filter((i: any) => i?.name === 'arl_note_title').length,
+      };
+    };
+    const boot = await read();
+    // Positive control: the boot binds the hook and the action once.
+    expect(boot).toMatchObject({ hookRuns: 'stamped', boundActions: 1, listedActions: 1, listedHooks: 1, owner: PACKAGE_ID, indexes: 1 });
+    expect(boot.contributors).toEqual([`${PACKAGE_ID}:own:100`]);
+
+    await reload('v2');
+    expect(await read()).toEqual(boot);
+    await reload('v3');
+    expect(await read()).toEqual(boot);
   }, BOOT_TIMEOUT);
 
   it('an environment save of the template still wins on every read after a reload re-registers the package', async () => {
