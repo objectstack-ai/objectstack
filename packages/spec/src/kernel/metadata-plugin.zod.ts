@@ -79,7 +79,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'object',      // Business entity definition (ObjectSchema)
   'field',       // Standalone field definition (FieldSchema)
   // ADR-0088: there is no `trigger` metadata type — sync data-layer logic is a
-  // `hook` (24 lifecycle events); async automation is a `record_change` flow.
+  // `hook`; async automation is a `record_change` flow.
   // (The `triggers` capability token in `requires:` is a different namespace.)
   // ADR-0088 (#4509): there is no `validation` metadata type — validation rules
   // are authored INLINE as `object.validations[]`, which is the only shape the
