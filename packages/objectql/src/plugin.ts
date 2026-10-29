@@ -1100,6 +1100,13 @@ export class ObjectQLPlugin implements Plugin {
         //      (`skipSchemaSync` / OS_SKIP_SCHEMA_SYNC) for deployments that
         //      manage DDL out-of-band, and serializes through
         //      `reloadSchemaSync` so overlapping reload events can't race DDL.
+        //   3. Every OTHER item the boot registered through the `manifest`
+        //      service kept its boot copy in the registry, which the list read
+        //      and its execution face lay over the metadata service: an edited
+        //      email template sent its old wording, an edited flow re-bound its
+        //      old body, while the by-name read served the edit. See
+        //      {@link refreshReloadedPackages}.
+        this.refreshReloadedPackages(ctx, payload);
         this.ingestReloadedObjects(ctx, payload);
         if (this.skipSchemaSync) {
             // DDL is managed out-of-band here, but the objects this reload just
@@ -1374,6 +1381,71 @@ export class ObjectQLPlugin implements Plugin {
     if (!owner) return 'own';
     const tenantAuthored = (body as { _provenance?: unknown } | null | undefined)?._provenance === 'org';
     return owner.packageId === packageId && !tenantAuthored ? 'own' : 'overlay';
+  }
+
+  /**
+   * Re-register each package body carried on a `metadata:reloaded` payload
+   * through `registerApp`, the body door the boot registered it through (the
+   * `manifest` service), so every collection that door decomposes into the
+   * SchemaRegistry (`METADATA_ARRAY_KEYS`: email templates, flows, views,
+   * dashboards, pages, actions, …) holds the reloaded item, not the boot copy.
+   *
+   * A REFRESH, never an install: only a package the registry already holds
+   * from code or the marketplace is re-registered, under the source it was
+   * installed with, and `installPackage` keeps its lifecycle (a disabled
+   * package stays disabled). A body the boot never registered — the artifact
+   * door alone serves it, so nothing in the registry is stale — is left to
+   * that door, as before. Ordering is `resolveArtifactPackageEntries`', the
+   * same call the `manifest` service makes on the same artifact.
+   *
+   * Items removed from the artifact stay registered until restart, the
+   * lifecycle {@link ingestReloadedObjects} keeps for objects. A body that
+   * fails to register is named and skipped: the reload goes on, and that
+   * package keeps serving what it served before.
+   */
+  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): void {
+    if (!this.ql) return;
+    const metadata = (payload as { metadata?: unknown } | undefined)?.metadata as Record<string, any> | undefined;
+    if (!metadata || typeof metadata !== 'object') return;
+    // The shape `AppPlugin` hands the `manifest` service: the manifest's
+    // fields with the collections spread over them.
+    const artifact = metadata.manifest && typeof metadata.manifest === 'object'
+      ? { ...metadata.manifest, ...metadata }
+      : metadata;
+    let entries: ReturnType<typeof resolveArtifactPackageEntries>;
+    try {
+      entries = resolveArtifactPackageEntries(
+        Array.isArray(artifact.packages) ? this.ql.convertPackageBodyForward(artifact) : artifact,
+      );
+    } catch (e: any) {
+      ctx.logger.warn('[ObjectQLPlugin] reload could not read the artifact\'s packages — registry entries keep their previous definitions', {
+        error: e?.message,
+      });
+      return;
+    }
+    const scope = {
+      packageIds: entries
+        .map((entry) => artifactPackageId(entry.manifest))
+        .filter((id): id is string => id !== undefined),
+    };
+    const refreshed: string[] = [];
+    for (const { manifest } of entries as Array<{ manifest: any }>) {
+      const id = artifactPackageId(manifest);
+      const installed = id === undefined ? undefined : this.ql.registry.getPackage(id);
+      if (!installed || (installed.source !== 'code' && installed.source !== 'marketplace')) continue;
+      try {
+        this.ql.registerApp(manifest, scope, installed.source);
+        refreshed.push(id!);
+      } catch (e: any) {
+        ctx.logger.warn('[ObjectQLPlugin] reload could not re-register a package — its registry entries keep their previous definitions', {
+          packageId: id,
+          error: e?.message,
+        });
+      }
+    }
+    if (refreshed.length > 0) {
+      ctx.logger.info('[ObjectQLPlugin] reload refreshed the registry entries of its packages', { packageIds: refreshed });
+    }
   }
 
   private ingestReloadedObjects(ctx: PluginContext, payload: unknown): void {

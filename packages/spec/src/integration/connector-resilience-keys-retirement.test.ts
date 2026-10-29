@@ -116,6 +116,23 @@ describe('connector resilience family retirement — the tombstones', () => {
     });
   }
 
+  it('the `webhooks` prescription teaches the declared-webhook model: read from the registry, no `sys_webhook` row', () => {
+    // ADR-0131 D2: a declared top-level webhook is code. The dispatcher reads it
+    // from the metadata registry and no `sys_webhook` row is written for it, so
+    // a prescription that says it "is materialized into `sys_webhook`" sends the
+    // author looking for a row that never appears.
+    const issue = issueAt(ConnectorSchema.safeParse({ ...WELL_FORMED, webhooks: AUTHORED.webhooks }), 'webhooks');
+    expect(issue!.message).toContain('reads a declared webhook from the metadata registry');
+    expect(issue!.message).toContain('it writes no `sys_webhook` row for it');
+    expect(issue!.message).not.toMatch(/materiali[sz]ed into `sys_webhook`/);
+    expect(issue!.message).not.toMatch(/materiali[sz]/);
+    // The D3 entry an upgrading author reads says the same.
+    const entry = MIGRATIONS_BY_MAJOR[18]!.semantic.find((s) => s.id === 'connector-resilience-keys-retired');
+    expect(entry!.replacement).toContain('reads from the metadata registry');
+    expect(entry!.replacement).toContain('writes no `sys_webhook` row');
+    for (const text of [entry!.replacement, entry!.reason]) expect(text).not.toMatch(/materiali[sz]/);
+  });
+
   it('the second carrier, the /meta door and `stack.connectors[]` refuse all three — with controls', () => {
     const door = getMetadataTypeSchema('connector');
     expect(door, 'no schema bound for `connector`').toBeDefined();

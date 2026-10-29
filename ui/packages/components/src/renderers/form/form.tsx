@@ -439,6 +439,9 @@ const useSafeFormTranslation = createSafeTranslation(
     // so a form with no I18nProvider renders what it always did.
     'common.submit': 'Submit',
     'common.cancel': 'Cancel',
+    // objectstack#27247 — the declared Reset button's copy when no
+    // `resetLabel` is authored; the shared key, for the reason above.
+    'common.reset': 'Reset',
     // objectui#3272 — the fullscreen long-text editor (`mobile_fullscreen`).
     // A whole dialog, not a word: title, its sr-only description, the footer's
     // confirm button, and the trigger's accessible name. `Cancel` in the footer
@@ -1617,7 +1620,9 @@ ComponentRegistry.register('form',
       // it". An authored value still wins verbatim, including `''`.
       submitLabel,
       cancelLabel,
+      resetLabel,
       showCancel = false,
+      showReset = false,
       showSubmit = true,
       layout = 'vertical',
       columns = 1,
@@ -3189,6 +3194,20 @@ ComponentRegistry.register('form',
       return submitThroughValidation(event);
     };
 
+    // Handle reset (objectstack#27247). The form goes back to the values it
+    // opened with — react-hook-form's defaults, which the `defaultValues`
+    // reset above keeps current — and nothing is saved. Wired to the
+    // <form>'s own `reset` event, not only to the bar's button, so a footer
+    // outside the form (drawer, modal) reaches it with a `type="reset"`
+    // button naming the form's `id`; `preventDefault` keeps the browser from
+    // also restoring the DOM inputs behind react-hook-form's back.
+    const handleReset = (event?: React.FormEvent<HTMLFormElement>) => {
+      event?.preventDefault();
+      form.reset();
+      setSubmitError(null);
+      setRejectedFieldNames([]);
+    };
+
     // Handle cancel
     const handleCancel = () => {
       form.reset();
@@ -3941,8 +3960,10 @@ ComponentRegistry.register('form',
         // Extract schema props that should not be spread to DOM (handled separately by schema destructuring above)
         submitLabel: _submitLabel,
         cancelLabel: _cancelLabel,
+        resetLabel: _resetLabel,
         showSubmit: _showSubmit,
         showCancel: _showCancel,
+        showReset: _showReset,
 	        resetOnSubmit: _resetOnSubmit,
 	        defaultValues: _defaultValues,
 	        inputType: _inputType,
@@ -3993,6 +4014,7 @@ ComponentRegistry.register('form',
         <form
             ref={formRef}
             onSubmit={handleSubmit}
+            onReset={handleReset}
             className={className}
             {...formProps}
             // Apply designer props
@@ -4176,6 +4198,16 @@ ComponentRegistry.register('form',
                   {cancelLabel ?? t('common.cancel')}
                 </Button>
               )}
+              {showReset && (
+                <Button
+                  type="reset"
+                  variant="outline"
+                  disabled={isSubmitting || disabled}
+                  className="w-full sm:w-auto"
+                >
+                  {resetLabel ?? t('common.reset')}
+                </Button>
+              )}
               {showSubmit && (
               <Button
                 type="submit"
@@ -4209,6 +4241,8 @@ ComponentRegistry.register('form',
       { name: 'submitLabel', type: 'string' },
       { name: 'cancelLabel', type: 'string' },
       { name: 'showCancel', type: 'boolean' },
+      { name: 'showReset', type: 'boolean', description: 'Draw a Reset button that restores the opening values without saving' },
+      { name: 'resetLabel', type: 'string' },
       { 
         name: 'layout', 
         type: 'enum', 

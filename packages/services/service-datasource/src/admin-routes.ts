@@ -86,7 +86,7 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * `DATASOURCE_ADMIN_ERROR` or `EXTERNAL_DATASOURCE_ERROR`. A name that resolves
  * no stored datasource is not a refusal: every `datasource-admin` door that
  * takes `:name` answers it `404` `RESOURCE_NOT_FOUND`, the read and the writes
- * alike (see `badRequest`).
+ * alike, and so does `POST /datasources/:name/test` (see `badRequest`).
  *
  * Served by `datasource-admin`:
  *
@@ -641,7 +641,8 @@ export function registerDatasourceAdminRoutes(
    * unknown datasource reads the same at every by-name door, and a caller can
    * tell "no such datasource" from "your request was refused". The throwers
    * today are the admin service's `updateDatasource`, `removeDatasource` and
-   * `migrateCredential` (`datasourceNotFoundError`).
+   * `migrateCredential`, and the external service's `testConnection` (each
+   * through its `datasourceNotFoundError`).
    */
   const badRequest = (res: any, service: ServiceName, err: unknown) => {
     const envelope = err as { code?: unknown; status?: unknown } | null | undefined;
