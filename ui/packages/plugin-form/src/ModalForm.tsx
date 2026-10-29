@@ -38,7 +38,7 @@ import {
 import { Loader2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
-import { createSafeTranslation } from '@object-ui/i18n';
+import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { buildFlatFields } from './flatFields';
 import { isRecordReadOutstanding } from './recordReadGate';
@@ -354,6 +354,9 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   const uploadGate = useUploadGate();
   const previewMode = usePreviewMode();
   const perms = usePermissions();
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   const [objectSchema, setObjectSchema] = useState<any>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   // The ONE field-gate step every layout draws through (`gateFormFields`,
@@ -577,7 +580,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
         // supplied initial values still win. See `schemaDefaults` for why
         // runtime defaults (`NOW()`, `current_user`, CEL envelopes) are left
         // to the server and why option-level `default` is not read here.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId: perms.userId }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId: perms.userId, homeCurrency }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);

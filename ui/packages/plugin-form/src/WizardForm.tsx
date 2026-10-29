@@ -18,7 +18,7 @@ import type { FormField, FormSchema, DataSource, ObjectFormSchema, ObjectFormSec
 import { Button, cn, toast } from '@object-ui/components';
 import { AlertCircle, Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { resolveFieldRuleState, evalFieldPredicate, isMissingForRequired, isServerOwnedValue } from '@object-ui/core';
-import { createSafeTranslation } from '@object-ui/i18n';
+import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { FormSectionContainer } from './FormSection';
 import { SchemaRenderer, useSafeFieldLabel, usePredicateScope } from '@object-ui/react';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
@@ -475,6 +475,9 @@ export const WizardForm: React.FC<WizardFormProps> = ({
   const { fieldLabel } = useSafeFieldLabel();
   const perms = usePermissions();
   const { userId: currentUserId } = perms;
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   const { t } = useWizardTranslation();
   // Upload-in-flight gate (objectui#10166). Scoped to the FINAL commit, not to
   // step navigation: moving between steps writes nothing, and blocking Next
@@ -650,7 +653,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           // Declared static defaults are this wizard's opening values (#4047)
           // — see `schemaDefaults` for the create-only boundary and for why
           // runtime defaults are left to the server.
-          setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId })));
+          setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
           seededRef.current = true;
         }
         // Not a read, so no earlier record read's failure describes the form.
@@ -1079,7 +1082,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
               // Back to a fresh step 1 for the next entry — "fresh" means the
               // same opening values the wizard had, defaults included (#4047),
               // not a blank object the first entry never started from.
-              setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId })));
+              setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
               setCompletedSteps(new Set());
               setCurrentStep(0);
               setResetNonce((n) => n + 1);
@@ -1136,7 +1139,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           if (schema.resetOnSuccess && schema.mode === 'create') {
             // Back to a fresh step 1 for the next entry — same opening values
             // as the first entry, defaults included (#4047).
-            setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId })));
+            setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
             setCompletedSteps(new Set());
             setCurrentStep(0);
             setResetNonce((n) => n + 1);

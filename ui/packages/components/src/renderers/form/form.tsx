@@ -45,6 +45,7 @@ import React from 'react';
 import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
+import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 
 /**
  * Whether a `section-divider` row draws anything: a heading, a blurb, or both.
@@ -1211,6 +1212,15 @@ function renderFieldDescription(
   );
 }
 
+/**
+ * Widget keys whose DISPLAY reads a sibling field's value: a `record`-mode
+ * amount (ADR-0144 D2) shows the currency its record's code field holds, and a
+ * `formula` declaring `returnType: 'currency'` is drawn by the same widget.
+ * They get the live record (`dependentValues`) and nothing else from the
+ * data-source family — they query nothing.
+ */
+const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula']);
+
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {
     dataSource,
@@ -1256,6 +1266,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // leftover props onto a DOM node, where an unknown `emptyHint` attribute is
     // a React warning — hence an allow-list, not an unconditional pass-through.
     ...(CASCADE_OPTION_WIDGET_TYPES.has(normalizedType) ? { dependentValues, emptyHint } : {}),
+    // A record-mode amount's symbol and decimals follow the code the user picks
+    // in its sibling select, so the amount box needs the live record too.
+    ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
   };
 }
 
@@ -2267,6 +2280,12 @@ ComponentRegistry.register('form',
     // widgets as a prop so they can dynamically load related records.
     const schemaCtx = React.useContext(SchemaRendererContext);
     const contextDataSource = schemaCtx?.dataSource ?? null;
+
+    // The codes already stored on the object's records, for each
+    // record-currency code field's "available" group (ADR-0144 D8 rule 3).
+    // Read once per object and handed down on the field's own metadata.
+    const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
+    const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
 
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
@@ -3760,7 +3779,9 @@ ComponentRegistry.register('form',
                   // is the declared metadata slot (#3090 — never the spec
                   // string); fall back to the field config itself when no
                   // metadata was stashed (standalone forms).
-                  field: field.field || field,
+                  // A record-currency code field also carries the codes its
+                  // object's records already hold (`usedCurrencyCodes`).
+                  field: withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]),
                   ...formField,
                   inputType: fieldProps.inputType,
                   // The field's label, forwarded explicitly because the
