@@ -436,6 +436,8 @@ import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstall
 import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
+// [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
+import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -21280,6 +21282,16 @@ export class ObjectStackProtocolImplementation implements
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+
+        // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
+        // holds: refused 400 before the authoring gate and every write. See {@link datasourceCredentialsRefSaveRefusal}.
+        {
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                repo: this.getOverlayRepo(), type: singularType, name: request.name, item: request.item,
+                mode, packageId: request.packageId, source: request.source,
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
         }
 
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
