@@ -43,7 +43,7 @@
       "TS18048: 'res.response' is possibly 'undefined'.": 14
     },
     "src/http-dispatcher.actions-type-dispatch.test.ts": {
-      "TS18048: 'res.response' is possibly 'undefined'.": 24,
+      "TS18048: 'res.response' is possibly 'undefined'.": 22,
       "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 6
     },
     "src/http-dispatcher.kernel-resolver.test.ts": {
