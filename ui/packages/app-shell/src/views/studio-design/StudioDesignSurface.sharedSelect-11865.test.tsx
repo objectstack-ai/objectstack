@@ -163,6 +163,7 @@ afterEach(() => {
 const OBJECT_PICKER = 'nav-link-object';
 const CHOOSE_OBJECT = en('engine.studio.nav.chooseObject');
 const CHOOSE = en('engine.inspector.appNav.choose');
+const REPORT_INDEX = en('engine.inspector.appNav.reportIndex');
 const SAME_TAB = en('engine.inspector.appNav.urlTargetSelf');
 const NEW_TAB = en('engine.inspector.appNav.urlTargetBlank');
 
@@ -212,6 +213,7 @@ const ENTRIES: Record<string, Record<string, unknown>> = {
   pageOutside: { id: 'nav_p', type: 'page', pageName: 'ghost_page' },
   dashBound: { id: 'nav_d', type: 'dashboard', dashboardName: 'ops_board' },
   reportBorn: { id: 'nav_item_3', type: 'report' },
+  reportBound: { id: 'nav_r', type: 'report', reportName: 'tasks_by_status' },
   actionBorn: { id: 'nav_item_3', type: 'action' },
   actionBound: { id: 'nav_a', type: 'action', actionDef: { actionName: 'sync_all' } },
   compBorn: { id: 'nav_item_3', type: 'component' },
@@ -273,7 +275,10 @@ const NAV_WRITES: ReadonlyArray<readonly [string, string, string, string | null,
   ['pageOutside', 'Page', 'draft_page', '{"navigation":[{"id":"nav_p","type":"page","pageName":"draft_page"}]}', []],
   ['dashBound', 'Dashboard', CHOOSE, '{"navigation":[{"id":"nav_d","type":"dashboard"}]}', []],
   ['dashBound', 'Dashboard', 'Operations (ops_board)', null, []],
-  ['reportBorn', 'Report', CHOOSE, null, []],
+  // objectstack#27525 — the empty face of a report entry's picker is the
+  // report index; on a bound entry it removes `reportName`.
+  ['reportBorn', 'Report', REPORT_INDEX, null, []],
+  ['reportBound', 'Report', REPORT_INDEX, '{"navigation":[{"id":"nav_r","type":"report"}]}', []],
   ['reportBorn', 'Report', 'Tasks by status (tasks_by_status)', '{"navigation":[{"id":"nav_item_3","type":"report","reportName":"tasks_by_status"}]}', []],
   ['actionBorn', 'Action', CHOOSE, null, []],
   ['actionBorn', 'Action', 'Sync all (sync_all)', '{"navigation":[{"id":"nav_item_3","type":"action","actionDef":{"actionName":"sync_all"}}]}', []],
