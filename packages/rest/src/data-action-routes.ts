@@ -82,7 +82,7 @@ import { sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
 import { recordNotFoundError } from '@objectstack/core';
 // [#27501] The data door's answer for a name no object is behind.
 import { objectNotFoundError } from '@objectstack/core';
-import { logError } from './log.js';
+import { logError, logWarn } from './log.js';
 import {
     DATA_EXPORT_PARAMS,
     IMPORT_JOB_OBJECT,
@@ -319,18 +319,28 @@ function importUndoFailure(id: string, action: ImportUndoFailure['action'], erro
  *
  * The object is read by name as the exposure gate reads it (the execution face
  * where the protocol has one, else `getMetaItem`), and counts only under its
- * own name. A read the protocol refuses (its by-name read documents
- * `OBJECT_PACKAGE_DISABLED` for an object of a disabled package, the data
- * door's code for it too) or a read that faults propagates to the caller as
- * thrown; ⛔ never turned into a job.
- * A protocol with no by-name read cannot answer, and is not asked.
+ * own name. A read the protocol refuses `OBJECT_PACKAGE_DISABLED` (its
+ * by-name read's answer for an object of a disabled package, and the data
+ * door's code for it too) propagates as thrown. Any other thrown read fails
+ * OPEN and logs, as the exposure gate's same read does (`loadObjectItem`,
+ * #3545): it is no answer about existence, and each row's data call still
+ * gives the data door's own. A protocol with no by-name read cannot answer,
+ * and is not asked.
  */
 async function assertImportObjectExists(p: any, objectName: string, environmentId: string | undefined): Promise<void> {
     const byName = typeof p.getMetaItemForExecution === 'function'
         ? p.getMetaItemForExecution
         : typeof p.getMetaItem === 'function' ? p.getMetaItem : undefined;
     if (!byName) return;
-    const envelope: any = await byName.call(p, { type: 'object', name: objectName, ...(environmentId ? { environmentId } : {}) });
+    let envelope: any;
+    try {
+        envelope = await byName.call(p, { type: 'object', name: objectName, ...(environmentId ? { environmentId } : {}) });
+    } catch (err) {
+        if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') throw err;
+        logWarn('[REST] import job: object metadata read failed — not refused up front '
+            + '(each row\'s data call still answers for the object)', (err as Error)?.message ?? err);
+        return;
+    }
     const item = envelope?.item;
     if (item !== null && typeof item === 'object' && item.name === objectName) return;
     throw objectNotFoundError(objectName);
