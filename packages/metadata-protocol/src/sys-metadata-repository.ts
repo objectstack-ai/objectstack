@@ -1147,6 +1147,17 @@ export class SysMetadataRepository implements MetadataRepository {
       const version = await this.nextItemVersion(ref, ctx);
       // Per-org monotonic event log cursor.
       const eventSeq = await this.nextEventSeq(ctx);
+      // [#27539, ADR-0073 D3] The context every write below runs under. The
+      // write is AUTHORIZED as the system (the door already authorized the
+      // save), so the actor rides as `attributedUserId` — the attribution
+      // channel the audit writer reads into `sys_audit_log.user_id` — and
+      // never as `userId`, which every caller-gating hook would read as the
+      // caller. No actor → no key: the write stays unattributed, as before.
+      const writeContext = {
+        ...ctx,
+        isSystem: true,
+        ...(opts.actor ? { attributedUserId: opts.actor } : {}),
+      };
 
       const parentRowData: Record<string, unknown> = {
         type: ref.type,
@@ -1203,14 +1214,14 @@ export class SysMetadataRepository implements MetadataRepository {
         }
         await this.engine.update('sys_metadata', parentRowData, {
           where: { id: existingId },
-          context: { ...ctx, isSystem: true },
+          context: writeContext,
         });
       } else {
         parentRowData.created_at = now;
         // [#23033] Who created the row: the first write's actor, set on the
         // insert only — an update never names `created_by`, so it keeps it.
         parentRowData.created_by = opts.actor ?? null;
-        await this.engine.insert('sys_metadata', parentRowData, { context: { ...ctx, isSystem: true } });
+        await this.engine.insert('sys_metadata', parentRowData, { context: writeContext });
       }
 
       // Durable history append — same transaction, so the parent write
@@ -1235,7 +1246,7 @@ export class SysMetadataRepository implements MetadataRepository {
           recorded_by: opts.actor ?? null,
           recorded_at: now,
         },
-        { context: { ...ctx, isSystem: true } },
+        { context: writeContext },
       );
 
       const item: MetadataItem = {
@@ -1356,9 +1367,16 @@ export class SysMetadataRepository implements MetadataRepository {
         eventSeq = await this.nextEventSeq(ctx);
       }
 
+      // [#27539, ADR-0073 D3] As `put`'s: authorized as the system, the
+      // actor credited through `attributedUserId`; no actor → no key.
+      const writeContext = {
+        ...ctx,
+        isSystem: true,
+        ...(opts.actor ? { attributedUserId: opts.actor } : {}),
+      };
       await this.engine.delete('sys_metadata', {
         where: { id: existingId },
-        context: { ...ctx, isSystem: true },
+        context: writeContext,
       });
 
       if (state === 'active') {
@@ -1383,7 +1401,7 @@ export class SysMetadataRepository implements MetadataRepository {
             recorded_by: opts.actor ?? null,
             recorded_at: now,
           },
-          { context: { ...ctx, isSystem: true } },
+          { context: writeContext },
         );
       }
 
