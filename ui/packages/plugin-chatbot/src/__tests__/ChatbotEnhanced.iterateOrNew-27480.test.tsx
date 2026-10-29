@@ -65,11 +65,12 @@ afterEach(cleanup);
 describe('the iterate_or_new plan asks extend-or-new instead of offering Build it (objectstack#27480)', () => {
   it('renders the question naming the existing app, and no approve button', () => {
     render(<ChatbotEnhanced messages={messagesOf(proposal(ITERATE_OR_NEW))} onSendMessage={vi.fn()} />);
-    expect(screen.getByTestId('proposed-plan-iterate-or-new-question').textContent).toContain('图书馆');
+    // The card's done-when first: no approval gate of any kind.
     expect(screen.queryByTestId('proposed-plan-approve')).toBeNull();
     expect(screen.queryByTestId('proposed-plan-adjust')).toBeNull();
     expect(screen.queryByTestId('proposed-plan-fallback')).toBeNull();
     expect(screen.queryByText('Build it')).toBeNull();
+    expect(screen.getByTestId('proposed-plan-iterate-or-new-question').textContent).toContain('图书馆');
     // The plan's own rows stay, so the user sees what would be built either way.
     expect(screen.getByTestId('proposed-plan')).toBeInTheDocument();
   });
