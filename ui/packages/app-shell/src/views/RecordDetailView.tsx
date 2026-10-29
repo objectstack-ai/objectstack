@@ -3448,14 +3448,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     ];
     const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
       const childObjectDef = objects.find((o: any) => o.name === childObject);
-      // objectstack#27055, Target 8 — the record's own BODY: a `master_detail`
-      // FK declaring `inlineEdit` (the child is edited as part of the parent),
-      // or a list the author marks `relatedList: 'primary'`. The two keys the
-      // spec already has; no key of its own.
-      const fkDef = (childObjectDef as any)?.fields?.[referenceField];
-      const isBody =
-        isPrimary ||
-        (fkDef?.type === 'master_detail' && (fkDef.inlineEdit === true || fkDef.inlineEdit === 'grid' || fkDef.inlineEdit === 'form'));
+      // objectstack#27055, Target 8 — the record's own BODY: a list the author
+      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring
+      // `inlineEdit` (the child is edited as part of the parent) and no
+      // `relatedList` — `relatedList: true` keeps it a side card. That is
+      // `isPrimary`: `deriveRelatedLists` sets it from `@objectstack/spec`'s
+      // `isBodyTableRelationship` (objectstack#27478), the one predicate the
+      // spec's refusal of a field group naming a side card reads too, so no
+      // second copy of the rule lives here.
+      const isBody = isPrimary;
       // A `relatedListTitle` on the relationship wins; else fall back to the
       // localized child-object PLURAL label — the section lists the child's
       // records, so it is named as that object's list page is (objectui#11733).

@@ -3314,7 +3314,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.group.collapseHint': 'Controls how this group appears in the actual form (see Preview).',
   'engine.studio.designer.group.relatedListLabel': 'Place a related table here (relatedList)',
   'engine.studio.designer.group.relatedListNone': 'None — a section of fields',
-  'engine.studio.designer.group.relatedListHint': 'The group then stands for that related list\'s table, drawn at this position in the record\'s details column. A group that places a table holds no fields.',
+  'engine.studio.designer.group.relatedListHint': 'The group then stands for that related list\'s table, drawn at this position in the record\'s details column. Only body tables are offered: a relationship marked Primary (in body), or an inline-edited master-detail child. A group that places a table holds no fields.',
+  'engine.studio.designer.group.relatedListNotBody': '“{entry}” is not a body table (a side card or a hidden list), so the record page draws nothing here and publishing refuses it. Mark that relationship Primary (in body), or pick None.',
   'engine.studio.designer.group.relatedListHasFields': 'Move this group\'s fields to another group first: a group that places a related table holds no fields.',
   'engine.studio.designer.group.relatedListLoading': 'Loading the objects that point at this one…',
   // objectui#11788 — the New automation dialog's trigger choice, left unset.
