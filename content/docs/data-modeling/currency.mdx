@@ -175,10 +175,13 @@ that column. A `count` column never carries `currencyField`. See the
 ### In the Console
 
 Each record-mode amount shows the symbol and minor-unit decimals of its own record's code.
-A record whose code is blank shows a plain number. A place that spans many records and is
-not grouped by the code has no one currency to show: the grid footer draws no
+A record whose code is blank shows a plain number. Grouped analytics answers do the same
+per row: the dashboard table, the report table and its export, and the Studio dataset
+preview each take a row's currency from its code column. A place that spans many records
+and is not grouped by the code has no one currency to show: the grid footer draws no
 `sum` / `avg` / `min` / `max` for that column, a group header draws them only when the
-grouping includes the code field, and the counts always stand.
+grouping includes the code field, a report's grand total on such a column shows no
+symbol, and the counts always stand.
 
 ## The home currency
 
