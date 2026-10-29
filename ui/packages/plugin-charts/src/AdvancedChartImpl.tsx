@@ -2226,7 +2226,7 @@ function AdvancedChartImplInner({
    * The tick formatter of the value axis a series' marks are measured
    * against — the one its value labels print with (objectstack#27372).
    */
-  const valueTickFormatterOf = (s: { yAxis?: string }): ((v: any) => string) =>
+  const valueTickFormatterOf = (s: { yAxis?: string }): typeof yTickFormatter =>
     hasDualAxis ? (s.yAxis === 'right' ? rightYTickFormatter : leftYTickFormatter) : yTickFormatter;
 
   /**
