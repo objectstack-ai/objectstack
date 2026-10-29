@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema, FieldType } from './field.zod';
+import { FieldSchema, FieldType, VALUE_DOMAIN_FIELD_TYPES } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -1857,8 +1857,11 @@ function refuseNonPictureImageField(
  * prescription and the object's candidate fields:
  *
  *  - the name is not a declared field (or is the amount itself);
- *  - the field is not `text`;
- *  - the field is `text` without `valueDomain: 'iso_4217_currency'`.
+ *  - the field's type is not one that may declare a value domain
+ *    (`VALUE_DOMAIN_FIELD_TYPES`, field.zod.ts — `text` alone today; the ADR's
+ *    "text field" rests on that set, so this door reads it rather than
+ *    repeating the literal);
+ *  - the field is of such a type without `valueDomain: 'iso_4217_currency'`.
  *
  * Judged against the AUTHORED field map. Not judged on
  * `ObjectExtensionSchema`: an extension's fields merge into an object it does
@@ -1872,15 +1875,17 @@ function refuseDishonestRecordCurrencyField(
   if (fields === null || typeof fields !== 'object') return;
   const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
   const map = fields as Record<string, { type?: unknown; valueDomain?: unknown; currencyConfig?: unknown } | null>;
+  const isCodeType = (type: unknown): boolean => typeof type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(type);
+  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
   const isCodeField = (f: (typeof map)[string]): boolean =>
-    f?.type === 'text' && f.valueDomain === 'iso_4217_currency';
+    isCodeType(f?.type) && f?.valueDomain === 'iso_4217_currency';
   for (const [name, field] of Object.entries(map)) {
     const config = field?.currencyConfig as { currencyMode?: unknown; currencyField?: unknown } | undefined;
     if (config?.currencyMode !== 'record' || typeof config.currencyField !== 'string') continue;
     const target = config.currencyField;
     const candidates = Object.keys(map).filter((k) => k !== name && isCodeField(map[k]!));
     const prescription =
-      '`currencyField` must name a `text` field of this object declaring `valueDomain: \'iso_4217_currency\'` — '
+      `\`currencyField\` must name a ${codeTypes} field of this object declaring \`valueDomain: 'iso_4217_currency'\` — `
       + (candidates.length > 0
         ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
         : 'the object has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`.');
@@ -1896,12 +1901,12 @@ function refuseDishonestRecordCurrencyField(
       continue;
     }
     const type = map[target]?.type;
-    if (type !== 'text') {
+    if (!isCodeType(type)) {
       ctx.addIssue({
         code: 'custom',
         path,
         message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object `
-          + `\`${objectName}\`; a record currency is a \`text\` ISO 4217 code. ${prescription}`,
+          + `\`${objectName}\`; a record currency is an ISO 4217 code in a ${codeTypes} field. ${prescription}`,
       });
       continue;
     }
@@ -1909,7 +1914,7 @@ function refuseDishonestRecordCurrencyField(
       ctx.addIssue({
         code: 'custom',
         path,
-        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`text\` field on object \`${objectName}\` `
+        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object \`${objectName}\` `
           + `that does not declare \`valueDomain: 'iso_4217_currency'\`, so a write could store any string as the `
           + `currency. Add \`valueDomain: 'iso_4217_currency'\` to \`${target}\`, or point at another field. ${prescription}`,
       });

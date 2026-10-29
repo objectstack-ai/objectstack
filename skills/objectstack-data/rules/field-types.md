@@ -174,15 +174,15 @@ Stored as JSON on the parent row — no separate table / FK:
   type: 'currency',
   currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },  // ISO 4217
 }
+// per record: { currencyMode: 'record', currencyField: 'currency_code' }
 ```
 
-**Currency resolution.** The value is a bare number in every mode (ADR-0104
-D1), never `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`;
-`'dynamic'` (default), the tenant `localization.currency`, not
-`defaultCurrency`, else a plain number (never `$`); `'record'`, each record's
-code in the `text` field `currencyField` names, which declares `valueDomain:
-'iso_4217_currency'` (names by convention, not contract: `currency_code`,
-`AMOUNT_home`, `AMOUNT_rate`). A measure's own `currency` wins.
+**Currency resolution.** The value is a bare number in every mode, never
+`{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
+(default), the tenant `localization.currency`, else a plain number (never
+`$`); `'record'`, each record's code in the `text` field `currencyField`
+names, declaring `valueDomain: 'iso_4217_currency'`. Under
+`'fixed'`/`'dynamic'` a measure's own `currency` wins.
 
 ### Select with Default
 
