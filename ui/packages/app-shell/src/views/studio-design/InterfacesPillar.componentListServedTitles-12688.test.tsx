@@ -89,6 +89,8 @@ function editedDraft() {
 const state: { served: unknown; draft: unknown } = { served: SERVED_ZH, draft: null };
 
 const mockClient = {
+  // The Studio's dataset pickers read the draft-overlaid catalog (objectstack#27518).
+  withPreviewDrafts: vi.fn((): unknown => mockClient),
   list: vi.fn(async (type: string) => (type === 'app' ? [{ name: 'showcase_app', label: 'Showcase' }] : [])),
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async (type: string) => {
