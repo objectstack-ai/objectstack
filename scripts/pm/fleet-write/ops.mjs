@@ -85,20 +85,31 @@
  * neither is the first request of its action; `execute.mjs --self-test` pins
  * the fill, the refusal to send and the landing.
  *
- * ## The governed-review follow-up — `pr_create` and `pr_ready` on a Tier H diff
+ * ## The governed-review follow-up — `pr_ready` on a Tier H diff, ⛔ never the draft open
  *
  * A Tier H governed surface (`GOVERNED_SURFACES` rows with tier `H` in
  * `check-governed-merges.mjs`: `docs/adr/**`, `skills/**`, `AGENTS.md`,
  * `CLAUDE.md`, `docs/NORTH-STAR.md`, `.github/workflows/**`) lands only on an
  * APPROVED review by an account in `GOVERNED_APPROVERS`
- * (`check-governed-queue-guard.mjs`, the ONE list of those accounts). The
- * platform summons a code owner only when a pull is opened READY or marked
- * ready for review — measured on this repository's own Tier H pulls, the
- * CODEOWNERS request arrived at `ready_for_review` and never at the draft
- * create — and every relay `pr_create` is a draft (forced above), held draft
- * until that approval. So without this follow-up a seat-driven Tier H pull
- * waits on an approver nobody told. The rows `pr_create` and `pr_ready`
- * therefore carry `governedReview: true`, and the executor, once the row's own
+ * (`check-governed-queue-guard.mjs`, the ONE list of those accounts). WHEN a
+ * human is asked to look is the owning seat's act, never the relay's: a pull
+ * reaches an approver only once the seat's `## 席位核对` ACCEPT and a
+ * `## Contract review` PASS on the pull's CURRENT head are both on its thread,
+ * and then as the seat's own hand-off stroke — `pr_request_reviewers` below,
+ * naming the approvers it owes, and `assign` for an approver who is the pull's
+ * author (pm-dispatch SKILL.md, ACCEPT 之后的路径分叉 ③). The maintainer,
+ * verbatim: 「应该是开发完了你审核通过才会推送给我审核」. So the draft open
+ * summons nobody: a `pr_create` is the create plus the legs the caller spelled,
+ * nothing reads the pull's files there, and a dev's `pr_create` carries no
+ * `assignees` at all — the seat's own account is never assigned to or
+ * requested on a pull. The one follow-up left is `pr_ready`. The platform
+ * summons a code owner only when a pull is opened READY or marked ready for
+ * review — measured on this repository's own Tier H pulls, the CODEOWNERS
+ * request arrived at `ready_for_review` and never at the draft create — and a
+ * Tier H pull is readied only after an approver has already approved it, so
+ * the follow-up there costs zero writes when the hand-off was made and names
+ * the one approver still uncovered when it was not. The row `pr_ready`
+ * therefore carries `governedReview: true`, and the executor, once the row's own
  * requests have landed, reads the pull's file list in full
  * (`GOVERNED_REVIEW_FILES_PAGE_SIZE` per page, at most
  * `GOVERNED_REVIEW_FILES_PAGE_CAP` pages — the endpoint's own ceiling; a walk
@@ -109,8 +120,8 @@
  * `POST /repos/{o}/{r}/pulls/{n}/requested_reviewers` naming every
  * `GOVERNED_APPROVERS` account not already requested, assigned or holding a
  * submitted review (the union the H43 patrol reads as covered — so a re-run,
- * a `pr_ready` after a `pr_create`, or the platform's own CODEOWNERS request
- * landing first costs zero writes), and — because GitHub answers 422 to a
+ * a `pr_ready` after the seat's hand-off, or the platform's own CODEOWNERS
+ * request landing first costs zero writes), and — because GitHub answers 422 to a
  * request naming the pull's own author — ONE
  * `POST /repos/{o}/{r}/issues/{n}/assignees` for the author when the author is
  * itself a missing approver. Each answer is judged as the legs above are:
@@ -120,13 +131,14 @@
  * ungoverned diff send nothing, and the row says which. The reads are unpaced
  * GETs; the writes are paced like every other write verb and are outside the
  * rule ⑤ count (`strokePacing` counts a stroke's spelled requests; these two
- * are conditional and at most two per pull). Both rows spend `issues: write`
+ * are conditional and at most two per pull). The row spends `issues: write`
  * for the assignee fallback (`alsoSpends`), a literal grant on every stroke.
- * `execute.mjs --self-test` pins the plan, the writes and both refusals;
- * `validate.mjs --self-test` pins the two rows and the two endpoints against
- * the refused families. ⛔ This is an ACTION, not a judge: no gate, check-run
- * or patrol row is added by it — the H43 row in `check-half-states.mjs` keeps
- * reading the gap it closes.
+ * `execute.mjs --self-test` pins the plan, the writes and both refusals, and
+ * that `pr_create` sends none of it; `validate.mjs --self-test` pins the one
+ * row and the two endpoints against the refused families. ⛔ This is an
+ * ACTION, not a judge: no gate, check-run or patrol row is added by it — the
+ * H43 row in `check-half-states.mjs` reads the gap left once the hand-off is
+ * due (ACCEPT and a same-head PASS on the thread, and nobody asked).
  *
  * ## The permissions the relay's token is narrowed to
  *
@@ -134,7 +146,7 @@
  * (`github/docs`, `src/github-apps/data/fpt-2022-11-28/server-to-server-permissions.json`):
  * every `/issues/**` write here is `issues: write` — `pr_create`'s assignees
  * and labels legs and the governed-review follow-up's assignee fallback on
- * `pr_create` and `pr_ready` spend it as `alsoSpends`; `/pulls/**` and the
+ * `pr_ready` spend it as `alsoSpends`; `/pulls/**` and the
  * ready / draft GraphQL mutations are `pull-requests: write`; the two
  * auto-merge mutations (`enablePullRequestAutoMerge` /
  * `disablePullRequestAutoMerge`) additionally require `contents: write` —
@@ -933,12 +945,14 @@ export function transferRemedy(source, target) {
  *                 each a literal mint input, never a stroke-scoped one
  *                 (`validate.mjs --self-test` pins it): `pr_create`'s
  *                 assignees and labels legs, LATER requests, the governed-review
- *                 follow-up's assignee fallback on `pr_create` and `pr_ready`, and
+ *                 follow-up's assignee fallback on `pr_ready`, and
  *                 `automerge_enable` on a pull that changes `.github/workflows/**`
  *                 (header above);
  *   `governedReview` (optional) true for a row whose landed requests are followed
- *                 by the governed-review follow-up (header above) — `pr_create`
- *                 and `pr_ready`, the two moments a seat opens or readies a pull;
+ *                 by the governed-review follow-up (header above) — `pr_ready`
+ *                 alone, the moment a seat readies a pull; ⛔ never `pr_create`:
+ *                 the draft open summons nobody, a human is asked at the seat's
+ *                 hand-off (`pr_request_reviewers`, after ACCEPT + same-head PASS);
  *                 the executor reads the pull's files and sends what
  *                 `governedReviewRequests` spells, on a Tier H hit alone;
  *   `distinct`    (optional) two keys the action must give different values —
@@ -1038,8 +1052,9 @@ export const OPS = Object.freeze({
     alsoSpends: Object.freeze(['issues']),
     required: Object.freeze(['title', 'head', 'base']),
     optional: Object.freeze(['body', 'assignees', 'labels']),
-    // The draft open is the moment the platform's CODEOWNERS is silent (header: "The governed-review follow-up").
-    governedReview: true,
+    // ⛔ No `governedReview` here (header: "The governed-review follow-up"): the draft open summons nobody. A human
+    // sees the pull at the seat's hand-off — `pr_request_reviewers` after ACCEPT + a same-head PASS — and a dev's
+    // create carries no `assignees`; the leg stays for the author-is-approver fallback, never for a seat's account.
     // `draft: true` is FORCED — a seat cannot open a ready PR through the relay.
     requests: (a, repo) => [
       { verb: 'POST', path: `/repos/${repo}/pulls`, body: { title: a.title, head: a.head, base: a.base, ...('body' in a ? { body: a.body } : {}), draft: true } },
