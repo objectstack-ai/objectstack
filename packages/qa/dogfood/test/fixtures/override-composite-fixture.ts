@@ -36,7 +36,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
-/** A named approver no account in this fixture ever is — the stranded slate. */
+/**
+ * A named approver who is not there to act — the stranded slate. The pin signs
+ * the account up and no one ever signs in as it: a `user` approver no account
+ * carries adds no slot, so an address with no account would leave the slate
+ * naming no one and open it on the organization's administrators instead.
+ */
 export const DEPARTED_APPROVER = 'override-composite-departed@example.com';
 
 export const OverrideCompositeRequest = ObjectSchema.create({

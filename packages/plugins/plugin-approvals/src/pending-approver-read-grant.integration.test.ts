@@ -117,6 +117,8 @@ async function boot(): Promise<Rig> {
   await installDefaultOrganization(engine);
   await engine.getDriverForObject('sys_organization')!.create('sys_organization', { id: OTHER_ORG, name: 'Other' });
   await engine.getDriverForObject('sys_user')!.create('sys_user', { id: BY_EMAIL, email: BY_EMAIL_ADDRESS });
+  // A `user` approver holds a slot only when an account carries it (#27397).
+  await engine.getDriverForObject('sys_user')!.create('sys_user', { id: BY_ID });
 
   const services: Record<string, unknown> = { objectql: engine };
   const ctx: any = {
