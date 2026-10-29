@@ -165,6 +165,32 @@ export function loadDisabledPackageIds(environmentId?: string): Set<string> {
 }
 
 /**
+ * {@link loadDisabledPackageIds} for a caller that must not take an unreadable
+ * file for "nothing is disabled": throws, naming the file, when the file that
+ * read would use is there and cannot be read or parsed. The installed-plugin
+ * commands and the boot-time loader read it so (ADR-0025 §3.5 M1): a disable
+ * that cannot be read keeps a plugin from loading instead of loading it.
+ */
+export function loadDisabledPackageIdsStrict(environmentId?: string): Set<string> {
+    const file = [stateFilePath(environmentId), legacyStateFilePath(environmentId)].find((f) => existsSync(f));
+    if (file === undefined) return new Set();
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(readFileSync(file, 'utf8'));
+    } catch (error) {
+        throw new Error(`the disable-state file ${file} cannot be read: ${(error as Error).message}`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`the disable-state file ${file} is not a JSON object`);
+    }
+    const disabled = (parsed as PackageStateFile).disabled;
+    if (disabled !== undefined && !Array.isArray(disabled)) {
+        throw new Error(`the disable-state file ${file} holds a \`disabled\` that is not a list`);
+    }
+    return new Set((disabled ?? []).filter((id): id is string => typeof id === 'string'));
+}
+
+/**
  * Persist the disabled/enabled state of a single package. Best-effort: failures
  * are surfaced to the caller so the HTTP layer can log, but disabling already
  * took effect in-memory regardless.

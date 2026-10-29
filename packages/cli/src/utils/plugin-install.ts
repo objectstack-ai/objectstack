@@ -2,6 +2,13 @@
 
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
+import {
+  DEFAULT_PLUGIN_ENVIRONMENT_ID,
+  INSTALLED_ARTIFACT_FILE,
+  INSTALLED_SIGNATURE_FILE,
+  loadPluginInstallations,
+  type PluginInstallationRecord,
+} from '@objectstack/runtime';
 import { sha256Hex, type ArchiveFile } from './osplugin.js';
 import { makeDirectorySync } from './make-directory.js';
 
@@ -13,12 +20,62 @@ import { makeDirectorySync } from './make-directory.js';
 
 /**
  * The names the install directory keeps the ORIGINAL artifact and its detached
- * signature under, beside the unpacked files, so a loader can re-verify the
- * signed bytes rather than the unpacked copy. No archive entry may take either
- * name.
+ * signature under, beside the unpacked files, so the boot-time loader
+ * re-verifies the signed bytes rather than the unpacked copy. No archive entry
+ * may take either name. Declared beside the installation store in
+ * `@objectstack/runtime`, whose loader reads them.
  */
-export const INSTALLED_ARTIFACT_FILE = 'artifact.osplugin';
-export const INSTALLED_SIGNATURE_FILE = 'artifact.osplugin.sig';
+export { INSTALLED_ARTIFACT_FILE, INSTALLED_SIGNATURE_FILE };
+
+/**
+ * The environment id local plugin installations are keyed by: `OS_ENVIRONMENT_ID`,
+ * else `env_local`, the id `os serve` stamps. `os plugin install | disable |
+ * enable | uninstall` write under it and `os serve`'s boot-time loader reads
+ * under it, so all of them name one set of installations.
+ */
+export function pluginEnvironmentId(): string {
+  return process.env.OS_ENVIRONMENT_ID?.trim() || DEFAULT_PLUGIN_ENVIRONMENT_ID;
+}
+
+/**
+ * This project's installation of `id` in `environmentId`, or the refusal
+ * `os plugin disable | enable | uninstall` print: the installations file
+ * cannot be read, no installation of `id` is recorded, or (unless
+ * `pendingIsInstalled`) it is already marked for removal at the next boot.
+ */
+export function findPluginInstallation(
+  environmentId: string,
+  id: string,
+  opts: { pendingIsInstalled?: boolean } = {},
+):
+  | { ok: true; record: PluginInstallationRecord }
+  | { ok: false; error: 'record_unreadable' | 'plugin_not_installed' | 'plugin_uninstall_pending'; message: string } {
+  let records: PluginInstallationRecord[];
+  try {
+    records = loadPluginInstallations(environmentId);
+  } catch (error) {
+    return { ok: false, error: 'record_unreadable', message: (error as Error).message };
+  }
+  const record = records.find((r) => r.id === id);
+  if (!record) {
+    const installed = records.map((r) => r.id);
+    return {
+      ok: false,
+      error: 'plugin_not_installed',
+      message:
+        `No installation of '${id}' is recorded for this project in environment '${environmentId}'`
+        + (installed.length > 0 ? ` (installed: ${installed.join(', ')}).` : ' (nothing is installed).'),
+    };
+  }
+  if (record.status === 'uninstall-pending' && !opts.pendingIsInstalled) {
+    return {
+      ok: false,
+      error: 'plugin_uninstall_pending',
+      message: `'${id}' is marked for removal at the next boot (\`os plugin uninstall\`). Install it again to keep it.`,
+    };
+  }
+  return { ok: true, record };
+}
 
 /**
  * Every reason the archive's entries cannot be unpacked as they stand, one

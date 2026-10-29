@@ -1103,11 +1103,14 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    *    connector authored as pure metadata. At boot the automation service looks
    *    up the installed generic executor named by `provider` (`openapi` / `mcp` /
    *    `rest`, contributed by the matching plugin in `plugins:`), resolves
-   *    `auth.credentialRef` through the secrets/env layer, and registers the
+   *    `auth.credentialRef` (an environment variable, the environment's
+   *    connector credential store, or the host's resolver), and registers the
    *    materialized `{ def, handlers }` on the connector registry — so
    *    `connector_action` dispatches it and `GET /connectors` lists it, exactly
    *    like a hand-written connector. A declared `provider` with no installed
-   *    factory is a **hard boot error**.
+   *    factory is a **hard boot error**. A `credentialRef` nothing resolves, or
+   *    one the upstream refuses, degrades that one instance until the
+   *    credential is set; the boot goes on.
    *
    * 2. **Catalog descriptor** (no `provider`, the #2612 interim contract): an
    *    inert metadata entry for discovery / documentation / marketplace listing.
@@ -1125,7 +1128,8 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     'External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a ' +
     'live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` ' +
     'references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set ' +
-    '`enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097).',
+    '`enabled: false` on deliberate descriptors. Unknown provider / name conflict ⇒ hard boot error; a credentialRef nothing resolves, or one ' +
+    'the upstream refuses, degrades that instance until the credential is set (ADR-0097).',
   ),
 
   /**
