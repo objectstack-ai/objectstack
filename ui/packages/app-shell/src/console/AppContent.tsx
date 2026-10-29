@@ -14,7 +14,8 @@ import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button } from '@object-ui/components';
 import { toast } from 'sonner';
-import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider } from '@object-ui/react';
+import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock } from '@object-ui/react';
+import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
 import { getRecordDisplayName } from '@object-ui/core';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
@@ -829,6 +830,24 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     : currentObjectDef;
   const isChildFormTask = !!formObjectParam && formObjectParam !== currentObjectDef?.name;
 
+  // objectstack#27138 — the record the overlay edits may be held by a pending
+  // approval that locks it. The record's field projection leaves that lock out
+  // (the server judges it on the values a save sends), so the dialog reads it
+  // from the approvals read the record page reads, joined on the wire when the
+  // page already asked, and through the same rule (`openApprovalOf` +
+  // `resolveApprovalLock`): the dialog then draws the record read-only with
+  // the page's lock sentence and no Save. The row has no `approval_status`
+  // here (the overlay holds only its id), so an unanswered read locks nothing.
+  const formApprovals = useRecordApprovals(
+    editingRecord ? formObjectDef?.name : undefined,
+    editingRecord?.id,
+  );
+  const formApprovalLocked = resolveApprovalLock({
+    readAnswered: formApprovals.answered,
+    openApproval: openApprovalOf(formApprovals),
+    recordStatus: undefined,
+  }).locked;
+
   // objectstack-ai/objectstack#26172 — a record save names the record it wrote
   // (`ux-conventions.write-feedback`): `Task "Quarterly review" created`. The
   // name is the saved record's display name from the ONE ADR-0079 resolver,
@@ -1491,6 +1510,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
           {formObjectDef && (
             <ModalForm
               key={`${formObjectDef.name}:${editingRecord?.id || 'new'}`}
+              lockedBy={formApprovalLocked ? 'approval' : undefined}
               schema={{
                 type: 'object-form',
                 formType: 'modal',

@@ -817,10 +817,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "筛选",
         helpText: "仅聚合匹配该判定式的子记录（例如 status == received）"
       },
-      externalId: {
-        label: "外部 ID",
-        helpText: "标记为外部 ID 用于 upsert 操作"
-      },
       storage: {
         label: "存储约束",
         helpText: "物理存储约束（ADR-0113）：写入契约刻意不隐含的 DDL。未设置：不要求任何约束。"
@@ -1848,7 +1844,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "在新标签页打开动作的执行结果：渲染端在点击时同步预开一个标签页（不会被弹窗拦截），随后把它导航到处理程序返回的 redirectUrl。与 `openIn` 不同，后者决定静态 URL 目标的去向。"
       },
       newTabUrl: {
-        label: "新标签页 URL 模板",
+        label: "新标签页路径",
         helpText: "本后端上的路径，必须以 / 开头（如 /sso-open/{recordId}），可用 {recordId} 占位符。与 `opensInNewTab` 同时设置时，渲染端会立即把预开的标签页导航到“后端地址 + 该路径”，不再发起动作请求——因此该端点必须自行校验鉴权。绝对 URL 会被拒绝；要打开外部页面，请用 url 类型的动作，并把“链接打开位置”设为 new-tab。"
       },
       locations: {

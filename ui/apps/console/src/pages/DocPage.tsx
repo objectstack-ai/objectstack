@@ -158,12 +158,14 @@ export default function DocPage() {
   // reading in, so its spine renders as a persistent left nav. Resolved from
   // the portal book set; degrades to no sidebar if the slug is unknown (e.g.
   // the backend serves no books yet).
-  const { books, docs: allDocs } = useBookData();
+  const { books, authoredBooks, docs: allDocs } = useBookData();
   const base = appName ? `/apps/${appName}/docs` : '/docs';
   const resolvedBook = useMemo<ResolvedBook | null>(() => {
     const book = books.find((b) => bookSlug(b) === slug);
-    return book ? resolveBookTree(book, allDocs) : null;
-  }, [books, allDocs, slug]);
+    // Every authored book judges the Uncategorized group, so a doc a sibling
+    // book places is not listed there (objectstack#27091).
+    return book ? resolveBookTree(book, allDocs, undefined, authoredBooks) : null;
+  }, [books, authoredBooks, allDocs, slug]);
   const docHref = useCallback((docName: string) => `${base}/${slug}/${docName}`, [base, slug]);
   // A `:slug` segment that is a book's NAME rather than its slug — what a
   // `{ type: 'doc', book, doc }` navigation entry links to (objectui#11197) — is

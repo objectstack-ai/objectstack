@@ -228,8 +228,6 @@ const unnamed: Judged[] = iconOnly.filter((j) => !j.named);
  * that card's fix.
  */
 const BACKLOG: Array<[file: string, icons: string[]]> = [
-  ['packages/plugin-ai/src/AIFormAssist.tsx', ['RefreshCw', 'X', 'Check', 'X']],
-  ['packages/plugin-ai/src/AIRecommendations.tsx', ['ExternalLink', 'X', 'ThumbsUp', 'ThumbsDown']],
   ['packages/plugin-detail/src/DetailView.tsx', ['ArrowLeft', 'ChevronLeft', 'ChevronRight']],
   ['packages/plugin-detail/src/RecordComments.tsx', ['Send']],
   ['packages/plugin-list/src/ListView.tsx', ['X']],

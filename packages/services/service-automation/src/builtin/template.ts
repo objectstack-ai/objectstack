@@ -35,7 +35,10 @@ export type VariableMap = Map<string, unknown>;
  * compile every text slot first, so this is met only by a flow that reached the
  * executor without them. A guard refusal (#3863): the metadata is wrong,
  * re-running the flow unchanged can never succeed, and a `fault` edge must not
- * swallow it into a notification sent with its holes unfilled.
+ * swallow it into a notification sent with its holes unfilled. The same error
+ * carries a `{{ amount | currency }}` hole with no argument met by a run whose
+ * organization has no default currency ({@link renderTextSlot}): nothing is
+ * sent until the organization sets one or the hole names its code.
  */
 export class FlowTextTemplateError extends Error {
     /** The template text as authored. */
@@ -107,6 +110,15 @@ export function textTemplateScope(variables: VariableMap): Record<string, unknow
  * formatters' locale (#26232 — the engine reads that from its own reserved
  * channel, not from a root).
  *
+ * `currency` is the run's tenant default currency
+ * (`AutomationContext.currency`, seeded at run setup from the
+ * organization's `localization.currency` setting), the code a
+ * `{{ amount | currency }}` hole with no argument formats in. It rides the
+ * engine's reserved `currency` channel, so a flow variable named `currency` is
+ * a value like any other. Without one such a hole does not render: the throw
+ * below names the hole, and nothing goes out with the amount in a guessed
+ * currency.
+ *
  * Absent in, absent out: a slot the author left unset — or one that renders
  * no text at all — returns `undefined`, so a screen falls back to its node
  * label and a notification with no title fails its own guard.
@@ -116,12 +128,12 @@ export function textTemplateScope(variables: VariableMap): Record<string, unknow
  * every door before a run starts (`flow-text-slot-template.ts`), and reaching
  * this renderer it is literal text.
  */
-export function renderTextSlot(value: unknown, variables: VariableMap): string | undefined {
+export function renderTextSlot(value: unknown, variables: VariableMap, currency?: string): string | undefined {
     if (value == null) return undefined;
     const source = String(value);
     const result = templateEngine.evaluate(
         { dialect: 'template', source },
-        { extra: textTemplateScope(variables) },
+        { extra: textTemplateScope(variables), ...(currency ? { currency } : {}) },
     );
     if (!result.ok) {
         throw new FlowTextTemplateError(source, `flow text template \`${source}\`: ${result.error.message}`);

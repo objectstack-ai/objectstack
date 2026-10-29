@@ -30,7 +30,7 @@
  *  (b) RUNTIME — precedence. Maintainer ruling, 2026-08-17 (「同意」, recorded
  *      on objectui#5018): the `map` block is the author face, the flat
  *      top-level spelling is the internal form ObjectView/ListView produce when
- *      they flatten `options.map`, and when both are present the block wins —
+ *      they flatten a view's `map` block, and when both are present the block wins —
  *      what the author wrote outranks what internal flattening produced — with
  *      a dev-mode warning naming the top-level keys that were ignored.
  */

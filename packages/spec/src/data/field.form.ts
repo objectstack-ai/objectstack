@@ -393,7 +393,11 @@ export const fieldForm = defineForm({
       columns: 2,
       fields: [
         // Database & Performance
-        { field: 'externalId', colSpan: 1, helpText: 'Mark as external ID for upsert operations' },
+        // No `externalId` row (#26674). `field.externalId` is graded `dead`
+        // (liveness/field.json): no upsert, import or seed reads it, so a
+        // switch here only invited an author to rely on it. The schema still
+        // parses the key; upsert matching lives on a seed dataset's
+        // `externalId` and an import mapping's `upsertKey`.
         // #19332 G1b — `storage` is a strict object with one boolean, so it takes
         // the same declared-composite face as `currencyConfig` above. The one
         // contradiction the schema refuses (`notNull` beside `requiredWhen`) is

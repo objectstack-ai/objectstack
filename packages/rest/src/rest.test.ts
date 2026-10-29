@@ -749,8 +749,9 @@ describe('RestServer', () => {
       const tree = res.json.mock.calls.at(-1)![0];
       const docsInTree = tree.groups.flatMap((g: any) => g.entries.map((e: any) => e.doc));
       expect(docsInTree).toContain('pub_intro');
-      // org_intro / gated_setup are claimed by other books; the orphan pass
-      // would render them, but the audience filter must drop them for anon.
+      // org_intro / gated_setup are claimed by other books, so they are not
+      // this book's orphans (#27091); the audience filter would drop them for
+      // anon even if they were.
       expect(docsInTree).not.toContain('org_intro');
       expect(docsInTree).not.toContain('gated_setup');
     });
@@ -782,6 +783,27 @@ describe('RestServer', () => {
       const tree = res.json.mock.calls.at(-1)![0];
       const docsInTree = tree.groups.flatMap((g: any) => g.entries.map((e: any) => e.doc));
       expect(docsInTree).toContain('gated_setup');
+    });
+
+    it('tree: [#27091] a holder of every book sees no sibling book\'s pages under Uncategorized', async () => {
+      // Three books split one package's docs: each doc is claimed by exactly
+      // one book, so no tree has a doc "left unplaced" (ADR-0046 §6.4). The
+      // holder reads every doc, so only the resolver can keep them out.
+      protocol.getMetaItems = metaByType([...BOOKS], [...DOCS, { name: 'loose_note', _packageId: 'pkg' }]);
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
+      (rest as any).resolveExecCtx = vi.fn().mockResolvedValue({ userId: 'u1' });
+      (rest as any).securityServiceProvider = async () => ({
+        resolvePermissionSetNames: async () => ['member_default', 'crm_admin'],
+      });
+      rest.registerRoutes();
+      const route = getMetaRoute(rest, 'GET', '/api/v1/meta/book/:name/tree');
+      for (const [name, own] of [['org_book', 'org_intro'], ['gated_book', 'gated_setup']]) {
+        const res = mockRes();
+        await route!.handler({ params: { name }, query: {}, headers: {} }, res);
+        const tree = res.json.mock.calls.at(-1)![0];
+        expect(Object.fromEntries(tree.groups.map((g: any) => [g.key, g.entries.map((e: any) => e.doc)])))
+          .toEqual({ g: [own], uncategorized: ['loose_note'] });
+      }
     });
 
     it('list: anonymous /meta/book returns only public books', async () => {

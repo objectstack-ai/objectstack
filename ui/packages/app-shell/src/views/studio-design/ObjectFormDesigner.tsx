@@ -442,6 +442,7 @@ function Section({
   onDelete,
   onMove,
   readOnly = false,
+  relatedTable,
 }: {
   containerId: string;
   title: string;
@@ -461,9 +462,15 @@ function Section({
   onDelete: () => void;
   onMove: (dir: -1 | 1) => void;
   readOnly?: boolean;
+  /**
+   * objectstack#27069 — the group's `relatedList`: it stands for that related
+   * list's table, holds no fields (the object parse refuses a field whose
+   * group is such a group), and so is no drop target.
+   */
+  relatedTable?: string;
 }): React.ReactElement {
   const locale = useMetadataLocale();
-  const { setNodeRef, isOver } = useDroppable({ id: containerId });
+  const { setNodeRef, isOver } = useDroppable({ id: containerId, disabled: !!relatedTable });
   // `@container` scopes the field grid's container queries to THIS section's
   // width, so a wide screen spreads fields to the same column count the real
   // form uses — while a narrow panel collapses to one column.
@@ -543,6 +550,14 @@ function Section({
           )}
         </div>
       </div>
+      {relatedTable ? (
+        <div
+          data-testid={`form-designer-related-table-${unCid(containerId)}`}
+          className="m-3 flex items-center justify-center rounded-md border border-dashed bg-muted/30 py-3 text-[11px] text-muted-foreground"
+        >
+          {tFormat('engine.studio.designer.relatedTable', locale, { name: relatedTable })}
+        </div>
+      ) : (
       <SortableContext items={fieldIds} strategy={verticalListSortingStrategy}>
         {/* Field grid mirrors the real form's density: container-query columns
             (1 → up to `columns`) via {@link containerGridColsFor}, so the layout
@@ -576,6 +591,7 @@ function Section({
           })}
         </div>
       </SortableContext>
+      )}
     </div>
   );
 }
@@ -627,8 +643,18 @@ export function ObjectFormDesigner({
     [view.entries, systemFieldNames],
   );
 
-  // Container order: declared groups (in order) then the ungrouped bucket.
-  const containerOrder = React.useMemo(() => [...groups.map((g) => cid(g.key)), cid(UNGROUPED)], [groups]);
+  // objectstack#27069 — a group carrying `relatedList` stands for a related
+  // table: it is drawn in its place, but it is no field container (it holds no
+  // fields), so drags, keyboard steps and the commit never reach it.
+  const tableOf = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of groups) if (typeof g.relatedList === 'string' && g.relatedList) m.set(cid(g.key), g.relatedList);
+    return m;
+  }, [groups]);
+  // Section order: declared groups (in order) then the ungrouped bucket.
+  const sectionOrder = React.useMemo(() => [...groups.map((g) => cid(g.key)), cid(UNGROUPED)], [groups]);
+  // Container order: the same, without the related-table groups.
+  const containerOrder = React.useMemo(() => sectionOrder.filter((c) => !tableOf.has(c)), [sectionOrder, tableOf]);
   const labelOf = React.useMemo(() => {
     const m = new Map<string, string>();
     for (const g of groups) {
@@ -857,7 +883,7 @@ export function ObjectFormDesigner({
           onDragCancel={() => setActiveId(null)}
         >
           <div className="mx-auto flex max-w-6xl flex-col gap-4">
-            {containerOrder.map((c) => {
+            {sectionOrder.map((c) => {
               const isUngrouped = c === cid(UNGROUPED);
               // Hide the ungrouped bucket only when it is empty AND groups exist.
               if (isUngrouped && (items[c]?.length ?? 0) === 0 && groups.length > 0) return null;
@@ -882,6 +908,7 @@ export function ObjectFormDesigner({
                   onDelete={() => deleteSection(unCid(c))}
                   onMove={(dir) => moveSection(unCid(c), dir)}
                   readOnly={readOnly}
+                  relatedTable={tableOf.get(c)}
                 />
               );
             })}

@@ -41,9 +41,9 @@ describe('a formatter the whitelist does not name', () => {
       .toBe('one-formatter');
   });
 
-  it('text after the `|` that is not a word names no formatter, and the mail grammar leaves it verbatim', () => {
-    expect(judgeHoleFormatter('{{ x | two words }}', 'two words', 'two words', undefined)).toBeNull();
-    expect(parseMailHole(' x | two words ')).toBeNull();
+  it('text after the `|` that is not a word is refused by the formatter-shape rule, never left verbatim', () => {
+    expect(judgeHoleFormatter('{{ x | two words }}', 'two words', 'two words', undefined)?.rule).toBe('formatter-shape');
+    expect(parseMailHole(' x | two words ')?.refusal?.rule).toBe('formatter-shape');
   });
 });
 

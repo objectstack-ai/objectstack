@@ -343,8 +343,8 @@ function mapComponentTree(
  * component's `properties` containers**, to any depth.
  *
  * `mapper` receives each component dict and its path
- * (`pages[i].regions[j].components[k]`, `pages[i].slots.tabs`,
- * `pages[i].slots.tabs[0]`,
+ * (`pages[i].regions[j].components[k]`, `pages[i].slots.details`,
+ * `pages[i].slots.details[0]`,
  * `pages[i].regions[j].components[k].properties.items[0].children[1]`) and
  * returns the same reference (no change) or a new dict. Every container on the
  * way — the stack, `pages`, a page, its `regions`, a region, its `components`,
@@ -358,10 +358,12 @@ function mapComponentTree(
  * the parse) covers instead. Both halves failed where it counted:
  *
  *   - **`slots` (#6776)** is as typed as a region component — `PageSchema.slots`
- *     is a closed map of seven named slots, each
+ *     is a closed map of named slots, each
  *     `z.union([PageComponentSchema, z.array(PageComponentSchema)])` — and is
  *     the canonical authoring shape for a `kind: 'slotted'` record page. All
- *     four in-repo `page:tabs` sites are `slots.tabs`, so a region-only rewrite
+ *     four in-repo `page:tabs` sites were then `slots.tabs` (a slot retired
+ *     since, #27053, whose stored copies are still walked before the
+ *     `page-slots-tabs-removed` strip runs), so a region-only rewrite
  *     left `os migrate meta` unable to touch the only shape that key is written
  *     in, while the tombstone's prescription promised it would.
  *   - **Container nesting (#6775)** is where "the tombstone covers it" fails: a

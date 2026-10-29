@@ -3,7 +3,6 @@
     "cli",
     "create-plugin",
     "runner",
-    "data-objectstack",
-    "vscode-extension"
+    "data-objectstack"
   ]
 }
