@@ -8,8 +8,9 @@
 
 import * as React from 'react';
 import { Badge, Button, cn } from '@object-ui/components';
+import type { FieldContainerLike } from '@object-ui/core';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
-import { ChevronLeft, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import {
   recordPageArrangementFor,
   relatedListIdsIn,
@@ -59,6 +60,12 @@ export interface RecordPageColumnsProps {
    */
   enlargedRelated?: RelatedCardId;
   onCloseEnlargedRelated?: () => void;
+  /**
+   * The child objects' field definitions the host holds (its metadata), for
+   * the related cards' up-front counts (objectstack#27056). Absent: the counts
+   * read each child's definition first.
+   */
+  relatedFieldsOf?: (objectName: string) => FieldContainerLike;
   className?: string;
 }
 
@@ -121,6 +128,43 @@ const EnlargedRelatedList: React.FC<{ node: any; onClose?: () => void }> = ({ no
 };
 
 const ALL_COLUMNS_ON: RecordPageColumnSwitches = { timeline: true, related: true };
+
+/**
+ * The timeline folded into the related column (objectstack#27052): the
+ * 「动态」 card under the lists. Closed until the reader opens it, and its
+ * blocks are not mounted while closed, so the feed reads nothing before it is
+ * asked for (objectstack#27056, Target 2).
+ */
+const FoldedTimelineCard: React.FC<{ nodes: any[]; label: string }> = ({ nodes, label }) => {
+  const [open, setOpen] = React.useState(false);
+  const bodyId = React.useId();
+  return (
+    <section
+      className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4"
+      aria-label={label}
+      data-record-folded-timeline=""
+    >
+      <h2 className="text-sm font-semibold text-foreground">
+        <button
+          type="button"
+          className="flex items-center gap-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen((value) => !value)}
+          data-record-folded-timeline-toggle=""
+        >
+          <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden />
+          {label}
+        </button>
+      </h2>
+      {open && (
+        <div id={bodyId} className="flex flex-col gap-4">
+          {drawNodes(nodes)}
+        </div>
+      )}
+    </section>
+  );
+};
 
 /**
  * Grid templates by which columns have content. Literal strings, so
@@ -189,6 +233,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   onEnlargeRelated,
   enlargedRelated,
   onCloseEnlargedRelated,
+  relatedFieldsOf,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -236,18 +281,10 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           arrangement={relatedArrangement}
           onArrangementChange={onRelatedArrangementChange}
           onEnlarge={onEnlargeRelated}
+          fieldsOf={relatedFieldsOf}
         />
       </RelatedListCompactContext.Provider>
-      {foldTimeline && (
-        <section
-          className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4"
-          aria-label={foldedTimelineLabel}
-          data-record-folded-timeline=""
-        >
-          <h2 className="text-sm font-semibold text-foreground">{foldedTimelineLabel}</h2>
-          {drawNodes(columns.timeline)}
-        </section>
-      )}
+      {foldTimeline && <FoldedTimelineCard nodes={columns.timeline} label={foldedTimelineLabel} />}
     </>
   );
 
