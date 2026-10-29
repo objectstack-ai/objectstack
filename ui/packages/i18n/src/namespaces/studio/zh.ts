@@ -3189,7 +3189,7 @@ const STUDIO_ZH: Record<string, string> = {
   // is a Chinese name and a short Chinese phrase.
   //
   // This is a translation, not an override. The English stays exactly where
-  // the other 21 node types keep theirs — `defineActionDescriptor` in the
+  // the other node types keep theirs — `defineActionDescriptor` in the
   // framework's plugin-approvals — and `translateNodeLabel`/`translateNodeHint`
   // fall back to it whenever this table has no row, which is the whole reason
   // the en table carries no `engine.flowNode.*` entry at all. Wording follows

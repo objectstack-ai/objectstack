@@ -38,12 +38,12 @@ metadata:
 For comprehensive documentation with incorrect/correct examples:
 
 - **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
-- **[Field Types](./rules/field-types.md)** — All 49 field types and configs
+- **[Field Types](./rules/field-types.md)** — All field types and configs
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
 - **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below)
-- **[Lifecycle Hooks](./references/data-hooks.md)** — the 8 lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
+- **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 - **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
 
@@ -294,7 +294,7 @@ lowercase option values — incorrect/correct examples: [rules/naming.md](./rule
 
 ### Field Type Selection
 
-49 types — the full table, per-type config and traps: [rules/field-types.md](./rules/field-types.md).
+The full table, per-type config and traps: [rules/field-types.md](./rules/field-types.md).
 From here, three to get right: credentials are `secret` (reversible, **encrypted-at-rest**
 via the registered `ICryptoProvider`, masked on read, fail-closed, ADR-0100) — never
 `password`, which on a generic object is **plaintext at rest**; `user` is a person picker
