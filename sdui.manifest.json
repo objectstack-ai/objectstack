@@ -485,7 +485,7 @@
             "drawer",
             "modal"
           ],
-          "description": "The form layout (`simple`, `tabbed`, `wizard`), or the container the block opens it in (`drawer`, `modal`, drawn as a stacked form; `contentLayout: \"tabbed\"` puts a modal's sections on tabs). `split` was retired with ADR-0050: use `tabbed`, or `subforms` to edit child records beside the parent."
+          "description": "The form layout (`simple`, `tabbed`, `wizard`), or the container the block opens it in (`drawer`, `modal`, drawn as a stacked form; `contentLayout: \"tabbed\"` puts a modal's sections on tabs). `split` was retired with ADR-0050: use `tabbed` (one tab per section), or an `object-master-detail-form` block to edit child records beside the parent."
         },
         {
           "name": "sections",

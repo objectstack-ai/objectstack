@@ -296,7 +296,7 @@ ComponentRegistry.register('object-form', ObjectFormRenderer, {
     { ...OBJECT_FORM_OBJECT_NAME_INPUT },
     { name: 'fields', type: 'array', description: 'Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: "note", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations).' },
     { name: 'mode', type: 'enum', enum: ['create', 'edit', 'view'] },
-    { name: 'formType', type: 'enum', enum: ['simple', 'tabbed', 'wizard', 'drawer', 'modal'], description: 'The form layout (`simple`, `tabbed`, `wizard`), or the container the block opens it in (`drawer`, `modal`, drawn as a stacked form; `contentLayout: "tabbed"` puts a modal\'s sections on tabs). `split` was retired with ADR-0050: use `tabbed`, or `subforms` to edit child records beside the parent.' },
+    { name: 'formType', type: 'enum', enum: ['simple', 'tabbed', 'wizard', 'drawer', 'modal'], description: 'The form layout (`simple`, `tabbed`, `wizard`), or the container the block opens it in (`drawer`, `modal`, drawn as a stacked form; `contentLayout: "tabbed"` puts a modal\'s sections on tabs). `split` was retired with ADR-0050: use `tabbed` (one tab per section), or an `object-master-detail-form` block to edit child records beside the parent.' },
     { name: 'sections', type: 'array' },
     // The row's seven `I18nLabel` members (`ComponentPropsMap['object-form']`):
     // `title`, `description` here, and `submitText`, `cancelText`, `nextText`,

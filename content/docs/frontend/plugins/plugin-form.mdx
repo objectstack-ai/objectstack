@@ -74,8 +74,7 @@ its `schema`, but never a `dataSource` — that travels on
 one or wraps the component the same way.
 
 The components are on the package's export surface — `ObjectForm`,
-`TabbedForm`, `WizardForm`, `SplitForm`, `DrawerForm`, `ModalForm`,
-`EmbeddableForm`, `MasterDetailForm`, `LineItemsPanel`, `FormAnalytics`,
+`TabbedForm`, `WizardForm`, `DrawerForm`, `ModalForm`, `EmbeddableForm`, `MasterDetailForm`, `LineItemsPanel`, `FormAnalytics`,
 `FormSectionContainer` — alongside the layout helpers (`applyAutoLayout`,
 `inferColumns`, `filterCreateModeFields`, …) and the per-container schema types
 (`TabbedFormSchema`, `WizardFormSchema`, `ModalFormSchema`, …). There is no
@@ -103,7 +102,7 @@ The plugin supports these field types:
 `@object-ui/types` alongside the rest of the JSON contract. This package imports
 them and does not re-export them — the form types on its own entry are the
 per-container ones (`TabbedFormSchema`, `WizardFormSchema`, `ModalFormSchema`,
-`SplitFormSchema`, `DrawerFormSchema`, `MasterDetailFormSchema`).
+`DrawerFormSchema`, `MasterDetailFormSchema`).
 
 ```typescript
 import type { FormSchema, FormField } from '@object-ui/types';
