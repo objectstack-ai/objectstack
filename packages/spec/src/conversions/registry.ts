@@ -8739,7 +8739,10 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
  * and container nesting — scoped to `type === 'object-form'`, as
  * {@link formLayoutInlineGridToVertical} is. The block accepted `split` and
  * the three keys through 18.2.0, so a stored page or an assembled artifact
- * can carry them.
+ * can carry them. The `object-master-detail-form` block's parent `sections`
+ * are the same section shape (`objectFormSection()`), so its `pane` parsed
+ * through 18.2.0 and is refused now: the walk strips `sections[].pane` there
+ * too, and touches nothing else on that block.
  */
 const formViewPresentationTypesRemoved: MetadataConversion = {
   id: 'form-view-presentation-types-removed',
@@ -8751,13 +8754,15 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
     + 'view.form.sections[].pane / view.form.splitSize / view.form.splitResizable / '
     + "view.form.splitDirection / page.component.object-form.formType ('split') / "
     + 'page.component.object-form.sections[].pane / page.component.object-form.splitDirection / '
-    + 'page.component.object-form.splitSize / page.component.object-form.splitResizable',
+    + 'page.component.object-form.splitSize / page.component.object-form.splitResizable / '
+    + 'page.component.object-master-detail-form.sections[].pane',
   summary:
     "form view `type` members 'split' / 'drawer' / 'modal' removed (`type` is the form's layout — "
     + "simple, tabbed or wizard; where a form opens is the caller's open mode, and a record beside its "
     + 'list is a reader\'s preference), with the split-only keys `sections[].pane`, `splitDirection`, '
     + '`splitSize` and `splitResizable`; the `object-form` page block sheds its `split` member and the same '
-    + 'four keys (its `drawer` / `modal` containers stay). The retired member is deleted, which lands the '
+    + 'four keys (its `drawer` / `modal` containers stay), and the `object-master-detail-form` block its '
+    + 'sections\' `pane`. The retired member is deleted, which lands the '
     + 'form on the `simple` default',
   apply(stack, emit) {
     const RETIRED_TYPES: ReadonlySet<unknown> = new Set(['split', 'drawer', 'modal']);
@@ -8796,10 +8801,14 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
       return stripSectionPanes(next, 'sections', path);
     };
     const withPages = mapPageComponents(stack, (component, path) => {
-      if (component.type !== 'object-form') return component;
+      if (component.type !== 'object-form' && component.type !== 'object-master-detail-form') return component;
       const properties = component.properties;
       if (!isDict(properties)) return component;
-      const next = convertBlock(properties, `${path}.properties`);
+      // The master-detail block's parent `sections` share the `object-form`
+      // section shape, `pane` included; it had no `split` member or split keys.
+      const next = component.type === 'object-form'
+        ? convertBlock(properties, `${path}.properties`)
+        : stripSectionPanes(properties, 'sections', `${path}.properties`);
       return next === properties ? component : { ...component, properties: next };
     });
     const withViews = mapViewPayloads(withPages, (payload, kind, path) =>
@@ -8841,6 +8850,11 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
                 },
                 // A drawer block is a live container on the block: untouched.
                 { type: 'object-form', properties: { objectName: 'fv_task', formType: 'drawer', drawerSide: 'right' } },
+                // A master-detail block's parent sections share the shape: the pane goes.
+                {
+                  type: 'object-master-detail-form',
+                  properties: { objectName: 'fv_task', sections: [{ label: 'Task', pane: 'primary', fields: ['title'] }] },
+                },
                 // The same keys on a component that is NOT an `object-form` survive.
                 { type: 'element:custom', properties: { formType: 'split', splitSize: 40 } },
               ],
@@ -8900,6 +8914,10 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
                   },
                 },
                 { type: 'object-form', properties: { objectName: 'fv_task', formType: 'drawer', drawerSide: 'right' } },
+                {
+                  type: 'object-master-detail-form',
+                  properties: { objectName: 'fv_task', sections: [{ label: 'Task', fields: ['title'] }] },
+                },
                 { type: 'element:custom', properties: { formType: 'split', splitSize: 40 } },
               ],
             },
@@ -8928,12 +8946,13 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
         { name: 'fv_task.side', object: 'fv_task', viewKind: 'form' },
       ],
     },
-    // The split block: the member, three keys and two panes (6). `beside`: the
-    // member, `splitDirection`, `splitSize`, `splitResizable` and two panes
-    // (6); `quick`, `dialog`, the item record and the assembled overlay: one
-    // member each (4). The drawer block, the non-form component, the tabbed
-    // form and the list emit none.
-    expectedNotices: 16,
+    // The split block: the member, three keys and two panes (6). The
+    // master-detail block: its one pane (1). `beside`: the member,
+    // `splitDirection`, `splitSize`, `splitResizable` and two panes (6);
+    // `quick`, `dialog`, the item record and the assembled overlay: one member
+    // each (4). The drawer block, the non-form component, the tabbed form and
+    // the list emit none.
+    expectedNotices: 17,
   },
 };
 

@@ -110,6 +110,7 @@ import {
   ElementRepeaterPropsSchema,
   ObjectFormPropsSchema,
   ObjectGridPropsSchema,
+  ObjectMasterDetailFormPropsSchema,
   ObjectKanbanPropsSchema,
   PageHeaderProps,
 } from '../ui/component.zod';
@@ -429,6 +430,11 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     refusal(
       'object-form sections[].pane',
       () => ObjectFormPropsSchema.safeParse({ objectName: 'crm_contact', sections: [{ pane: 'primary', fields: ['name'] }] }),
+      'sections',
+    ),
+    refusal(
+      'object-master-detail-form sections[].pane',
+      () => ObjectMasterDetailFormPropsSchema.safeParse({ objectName: 'crm_contact', sections: [{ pane: 'primary', fields: ['name'] }] }),
       'sections',
     ),
   ],

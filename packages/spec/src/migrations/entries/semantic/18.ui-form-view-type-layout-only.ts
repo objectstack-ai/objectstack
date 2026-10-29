@@ -23,7 +23,7 @@ export const entry: SemanticMigration = {
     + 'view.form.sections[].pane, view.form.splitDirection, view.form.splitSize and view.form.splitResizable '
     + 'were removed with them; on an object-form page block the value \'split\' and the props '
     + 'splitDirection, splitSize, splitResizable and sections[].pane left too (its \'drawer\' and '
-    + '\'modal\' stay)',
+    + '\'modal\' stay), and so did sections[].pane on an object-master-detail-form block',
   replacement:
     'the form\'s layout: delete the retired value for the `simple` default, or write `tabbed` (one tab '
     + 'per section) or `wizard`. Where the form opens is the caller\'s: a list opens a clicked record in '
@@ -40,13 +40,13 @@ export const entry: SemanticMigration = {
     + '`form-view-presentation-types-removed` makes each stored or existing source parse: it DELETES a '
     + 'retired member, which lands the form on the `simple` default, and strips `pane`, `splitDirection`, '
     + '`splitSize` and `splitResizable` (on an `object-form` page block it deletes `formType: \'split\'` '
-    + 'and strips the same keys). What it cannot decide is the layout a former `split` form should take (`tabbed` '
+    + 'and strips the same keys, and on an `object-master-detail-form` block it strips a section `pane`). What it cannot decide is the layout a former `split` form should take (`tabbed` '
     + 'keeps its sections apart, `simple` stacks them), and how the caller of a former `drawer` or `modal` '
     + 'form should now open it',
   acceptanceCriteria:
     'No form view declares `type` `split`, `drawer` or `modal`, and no form view section declares `pane`, '
     + 'nor a form view `splitDirection`, `splitSize` or `splitResizable`; no `object-form` page block '
-    + 'declares `formType` `split`, `splitDirection`, `splitSize`, `splitResizable` or a section `pane`; each is refused at parse with its prescription, and '
+    + 'declares `formType` `split`, `splitDirection`, `splitSize`, `splitResizable` or a section `pane`, and no `object-master-detail-form` block a section `pane`; each is refused at parse with its prescription, and '
     + 'TypeScript rejects each at a `FormView` position. Every form the conversion changed renders in the '
     + 'layout its author chose, and every entry point that opened it as a drawer or dialog still opens it '
     + 'that way through its own open mode.',

@@ -51,7 +51,7 @@ import { applyConversionsToStoredItem } from '../conversions/stored';
 import type { ConversionNotice } from '../conversions/types';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { defineStack } from '../stack.zod';
-import { ObjectFormPropsSchema } from './component.zod';
+import { ObjectFormPropsSchema, ObjectMasterDetailFormPropsSchema } from './component.zod';
 import { FormSectionSchema, FormViewSchema, VIEW_METADATA_MEMBERS, ViewItemSchema, ViewSchema } from './view.zod';
 
 const CONVERSION_ID = 'form-view-presentation-types-removed';
@@ -306,15 +306,23 @@ describe('the `object-form` block — `split` leaves `formType`, `drawer` / `mod
     }
   });
 
-  it('a section `pane` is a tombstone on the block', () => {
-    const r = ObjectFormPropsSchema.safeParse({ ...BLOCK, formType: 'tabbed', sections: [{ label: 'Main', pane: 'primary', fields: ['name'] }] }) as Parse;
+  // One section shape serves both blocks (`objectFormSection()`), so the
+  // tombstone and its prescription are the same on each.
+  it.each([
+    ['object-form', ObjectFormPropsSchema, { ...BLOCK, formType: 'tabbed' }],
+    ['object-master-detail-form', ObjectMasterDetailFormPropsSchema, { ...BLOCK, formType: 'tabbed' }],
+  ] as const)('a section `pane` is a tombstone on the `%s` block', (_block, schema, base) => {
+    const r = schema.safeParse({ ...base, sections: [{ label: 'Main', pane: 'primary', fields: ['name'] }] }) as Parse;
     expect(r.success).toBe(false);
     const issues = r.error!.issues.filter((i) => i.path.join('.') === 'sections.0.pane');
     expect(issues).toHaveLength(1);
     expect(issues[0]!.message.startsWith(
-      "`object-form` property `sections[].pane` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it placed a "
-      + "section in one pane of a `formType: 'split'` form",
+      'Section property `pane` (on `object-form` and `object-master-detail-form` `sections[]`) was removed in '
+      + "@objectstack/spec 18.3.0 (ADR-0050) — it placed a section in one pane of an `object-form` `formType: 'split'` form",
     ), issues[0]!.message).toBe(true);
+    expect(issues[0]!.message).toContain(MIGRATE_SENTENCE);
+    // CONTROL: the same section without `pane` parses on this block.
+    expect(schema.safeParse({ ...base, sections: [{ label: 'Main', fields: ['name'] }] }).success).toBe(true);
   });
 
   it('the three block keys are registered in RETIRED_KEYS_BY_MAJOR[18]', () => {
@@ -357,6 +365,40 @@ describe('the `object-form` block — `split` leaves `formType`, `drawer` / `mod
     expect(out.regions[0]!.components[0]!.properties).toEqual({ ...BLOCK, sections: [{ label: 'A', fields: ['name'] }] });
     expect(out.regions[0]!.components[1]).toBe(row.regions[0]!.components[1]);
     expect(ObjectFormPropsSchema.safeParse(out.regions[0]!.components[0]!.properties).success).toBe(true);
+  });
+
+  it('a STORED page converts its `object-master-detail-form` blocks: a section `pane` goes, nothing else', () => {
+    // Through 18.2.0 the shared section shape parsed `pane` on this block too.
+    const details = [{ childObject: 'crm_contact_note', title: 'Notes' }];
+    const row = {
+      name: 'desk',
+      regions: [{
+        name: 'main',
+        components: [
+          {
+            type: 'object-master-detail-form',
+            properties: { ...BLOCK, formType: 'tabbed', sections: [{ label: 'A', pane: 'primary', fields: ['name'] }, { label: 'B', fields: ['email'] }], details },
+          },
+          { type: 'object-master-detail-form', properties: { ...BLOCK, sections: [{ label: 'C', fields: ['name'] }], details } },
+        ],
+      }],
+    };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) }) as typeof row;
+    expect(notices.filter(ours).map((n) => [n.from, n.path.replace(/^.*?properties/, 'properties')])).toEqual([
+      ['pane', 'properties.sections[0].pane'],
+    ]);
+    expect(out.regions[0]!.components[0]!.properties).toEqual({
+      ...BLOCK,
+      formType: 'tabbed',
+      sections: [{ label: 'A', fields: ['name'] }, { label: 'B', fields: ['email'] }],
+      details,
+    });
+    // A block without a `pane` keeps its identity.
+    expect(out.regions[0]!.components[1]).toBe(row.regions[0]!.components[1]);
+    expect(ObjectMasterDetailFormPropsSchema.safeParse(out.regions[0]!.components[0]!.properties).success).toBe(true);
+    // Before the conversion the stored block is refused at the pane.
+    expect(ObjectMasterDetailFormPropsSchema.safeParse(row.regions[0]!.components[0]!.properties).success).toBe(false);
   });
 });
 

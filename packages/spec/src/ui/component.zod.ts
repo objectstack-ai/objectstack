@@ -6270,10 +6270,15 @@ const objectFormSplitKeyRetired = (key: string, what: string): string =>
 const OBJECT_FORM_SPLIT_DIRECTION_RETIRED = objectFormSplitKeyRetired('splitDirection', 'set the pane orientation');
 const OBJECT_FORM_SPLIT_SIZE_RETIRED = objectFormSplitKeyRetired('splitSize', 'sized the primary pane');
 const OBJECT_FORM_SPLIT_RESIZABLE_RETIRED = objectFormSplitKeyRetired('splitResizable', 'made the panes resizable');
+/**
+ * One section shape serves the `object-form` block and the parent half of the
+ * `object-master-detail-form` block (`objectFormSection()`), so this
+ * prescription names both.
+ */
 const OBJECT_FORM_SECTION_PANE_RETIRED =
-  '`object-form` property `sections[].pane` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it '
-  + "placed a section in one pane of a `formType: 'split'` form, and `split` left the block in the same "
-  + 'release, so no form draws panes. Delete the key. '
+  'Section property `pane` (on `object-form` and `object-master-detail-form` `sections[]`) was removed in '
+  + "@objectstack/spec 18.3.0 (ADR-0050) — it placed a section in one pane of an `object-form` `formType: 'split'` "
+  + 'form, and `split` left that block in the same release, so no form draws panes. Delete the key. '
   + OBJECT_FORM_SPLIT_FIX;
 
 /**
@@ -6823,9 +6828,9 @@ function objectFormSectionColumnsRefusal(input: unknown): string | undefined {
  *
  * `name` and `label` (the heading, and the per-`formType` maps),
  * `description`, `collapsible` / `collapsed` (`resolveSectionCollapse`),
- * `visibleWhen` (the divider row's predicate), `columns`, `pane` (the split
- * form), `group` (resolved into the field group's own section above the
- * routing) and `fields` (read points recorded in `liveness/page.json`, row
+ * `visibleWhen` (the divider row's predicate), `columns`, `pane` (a
+ * tombstone since 18.3.0: its reader, the split form, retired), `group`
+ * (resolved into the field group's own section above the routing) and `fields` (read points recorded in `liveness/page.json`, row
  * `regions`). That is exactly the form view's section's key set, and objectui
  * declares the same (`ObjectFormSection`).
  *
@@ -7255,7 +7260,7 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
    * one instance {@link buildObjectFormSection} builds (S-forms stage).
    */
   sections: z.array(objectFormSection()).optional()
-    .describe('Parent form sections — the same section shape `object-form` takes: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }` or `{ group, columns?, pane? }`'),
+    .describe('Parent form sections — the same section shape `object-form` takes: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, fields }` or `{ group, columns? }`'),
   fields: formFieldNameList().optional()
     .describe('Parent field names to draw, in order — bare names, as on `object-form`; a `{ name }` or `{ field }` object entry is refused'),
   details: z.array(masterDetailDetailEntry()).optional()
