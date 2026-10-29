@@ -1,3 +1,5 @@
+import { DOCS_SITE_ORIGIN } from '@/redirects.mjs';
+
 /**
  * Canonical identity of the documentation site — the origin it names itself by,
  * and the shared cover asset it presents itself with.
@@ -11,9 +13,11 @@
  * Deliberately NOT read from an environment variable. A preview deployment that
  * derived its own origin would emit canonical links and a sitemap pointing at the
  * preview host — precisely the duplicate-content signal a canonical link exists to
- * suppress. One host, declared once, here.
+ * suppress. One host, declared once: in `redirects.mjs`, the dependency-free
+ * module `next.config.mjs` also reads, because the objectui.org redirects there
+ * answer with this same origin.
  */
-export const SITE_ORIGIN = 'https://objectstack.ai';
+export const SITE_ORIGIN = DOCS_SITE_ORIGIN;
 
 /**
  * Absolute URL for a **site-relative** path.
@@ -25,8 +29,8 @@ export const SITE_ORIGIN = 'https://objectstack.ai';
  * than reported.
  *
  * Next's `metadataBase` wants a `URL` rather than a string — write
- * `new URL(SITE_ORIGIN)` there, so this file stays the only place the origin is
- * spelled out.
+ * `new URL(SITE_ORIGIN)` there, so the origin is never spelled out a second
+ * time.
  */
 export function absoluteUrl(path: string): string {
   if (!path.startsWith('/')) {

@@ -287,7 +287,9 @@ function read(units: Unit[]) {
   return { nodes, declarations };
 }
 
-const DOC_FILES = walk(path.join(repoRoot, 'content/docs'), (name) => /\.mdx?$/.test(name));
+// The ObjectUI pages, under the monorepo's `content/docs/frontend` since
+// objectstack#27145 retired the package's own docs tree.
+const DOC_FILES = walk(path.join(repoRoot, '../content/docs/frontend'), (name) => /\.mdx?$/.test(name));
 const DOC_UNITS = DOC_FILES.flatMap(fencesOf);
 const EXAMPLE_UNITS: Unit[] = walk(
   path.join(repoRoot, 'examples'),
@@ -403,10 +405,10 @@ const DESCRIBED = SHOWING.filter((p) => typeof p.doc.description === 'string');
  */
 const CORRECTED: ReadonlyArray<readonly [file: string, where: string]> = [
   // objectui#11423 — the layout guide.
-  ['content/docs/guide/layout.md', 'Basic Usage'],
-  ['content/docs/guide/layout.md', 'With Action Buttons'],
-  ['content/docs/guide/layout.md', 'Detail Page with Actions'],
-  ['content/docs/guide/layout.md', '3. Action Buttons at the Top of the Body'],
+  ['../content/docs/frontend/layout.mdx', 'Basic Usage'],
+  ['../content/docs/frontend/layout.mdx', 'With Action Buttons'],
+  ['../content/docs/frontend/layout.mdx', 'Detail Page with Actions'],
+  ['../content/docs/frontend/layout.mdx', '3. Action Buttons at the Top of the Body'],
   // objectui#11436 — the catalog demos of the Page reference, and the example app.
   ['examples/schema-catalog/src/schemas/components-layout-page/simple-page.json', ''],
   ['examples/schema-catalog/src/schemas/components-layout-page/page-with-header.json', ''],
@@ -414,17 +416,14 @@ const CORRECTED: ReadonlyArray<readonly [file: string, where: string]> = [
   ['examples/schema-catalog/src/schemas/components-layout-page/settings-layout.json', ''],
   ['examples/schema-catalog/src/schemas/components-layout-page/documentation-page.json', ''],
   ['examples/hello-world/schema.json', ''],
-  // objectui#11436 — docs fences: json, jsonc, tsx and plaintext alike.
-  ['content/docs/api/schema-reference.md', 'PageNodeSchema'],
-  ['content/docs/api/schema-reference.md', 'Schema Composition'],
-  ['content/docs/utilities/runner.mdx', '1. Plugin Development'],
-  ['content/docs/utilities/runner.mdx', 'Add Custom Schemas'],
-  ['content/docs/guide/schema-playground.md', 'Composing Schemas'],
-  ['content/docs/guide/schema-rendering.md', 'The SchemaRenderer Component'],
-  ['content/docs/guide/schema-rendering.md', 'Nested Schemas'],
-  ['content/docs/guide/schema-rendering.md', 'TypeScript Support'],
-  ['content/docs/core/schema-renderer.mdx', 'Simple Rendering'],
-  ['content/docs/components/feedback/toaster.mdx', 'In App Layout'],
+  // objectui#11436 — docs fences: json, jsonc, tsx and plaintext alike. The
+  // rows on `api/schema-reference.md`, `utilities/runner.mdx`,
+  // `guide/schema-playground.md`, `core/schema-renderer.mdx` and
+  // `components/feedback/toaster.mdx` left with those pages, which the move
+  // into the monorepo docs did not carry (objectstack#27145).
+  ['../content/docs/frontend/schema-rendering.mdx', 'The SchemaRenderer Component'],
+  ['../content/docs/frontend/schema-rendering.mdx', 'Nested Schemas'],
+  ['../content/docs/frontend/schema-rendering.mdx', 'TypeScript Support'],
   // objectui#11450 — the producers under `packages/`: two published READMEs,
   // and the page the CLI generator writes.
   ['packages/core/README.md', 'Type Definitions'],
@@ -437,8 +436,10 @@ describe('objectui#11436 — every taught page node draws the heading it shows',
     // A broken walker or fence reader would hand every assertion below an
     // empty list. The floors are loose on purpose: they catch a reader that
     // found nothing, not a page that was deleted.
-    expect(DOC_FILES.length).toBeGreaterThan(100);
-    expect(DOC_UNITS.length).toBeGreaterThan(500);
+    // objectstack#27145 measured 34 pages and 451 fences under
+    // `content/docs/frontend`.
+    expect(DOC_FILES.length).toBeGreaterThan(25);
+    expect(DOC_UNITS.length).toBeGreaterThan(300);
     expect(EXAMPLE_UNITS.length).toBeGreaterThan(100);
     expect(README_FILES.length).toBeGreaterThan(20);
     expect(README_UNITS.length).toBeGreaterThan(100);
@@ -447,7 +448,9 @@ describe('objectui#11436 — every taught page node draws the heading it shows',
     expect(README_FILES.some((f) => path.relative(repoRoot, f).split(path.sep).length > 3)).toBe(true);
     // The population spans fence languages the old `json`-only reader could
     // not see. A parser that stopped reading one of them would drop it here.
-    for (const lang of ['json', 'jsonc', 'tsx', 'plaintext']) {
+    // The `jsonc` and `plaintext` producers were on pages the move into the
+    // monorepo docs did not carry (objectstack#27145); `tsx` still is.
+    for (const lang of ['json', 'tsx']) {
       expect({ lang, read: SHOWING.some((p) => p.lang === lang) }).toEqual({ lang, read: true });
     }
   });
@@ -500,8 +503,7 @@ describe('objectui#11436 — every taught page node draws the heading it shows',
   it('the described population carries the producers that show a description', () => {
     const described = new Set(DESCRIBED.map(label));
     for (const id of [
-      'content/docs/guide/layout.md › Basic Usage',
-      'content/docs/api/schema-reference.md › PageNodeSchema',
+      '../content/docs/frontend/layout.mdx › Basic Usage',
       'examples/schema-catalog/src/schemas/components-layout-page/page-with-header.json',
     ]) {
       expect({ id, described: described.has(id) }).toEqual({ id, described: true });
@@ -531,7 +533,7 @@ describe('objectui#11436 — every taught page node draws the heading it shows',
     // The shape the layout guide's Detail Page with Actions had: `title` on a
     // record page, no `page:header`. The page type is read too, so "no h1" is
     // about the heading and not about the document failing to render.
-    expect(RECORD_HEADER_DRAWN.map(label)).toContain('content/docs/guide/layout.md › Detail Page with Actions');
+    expect(RECORD_HEADER_DRAWN.map(label)).toContain('../content/docs/frontend/layout.mdx › Detail Page with Actions');
     for (const p of RECORD_HEADER_DRAWN) {
       const children = (Array.isArray(p.doc.children) ? p.doc.children : [p.doc.children]).filter(
         (n) => (n as Doc | undefined)?.type !== 'page:header',
@@ -544,8 +546,10 @@ describe('objectui#11436 — every taught page node draws the heading it shows',
   it('a TypeScript shape of the page node that declares `title` also declares `pageType`', () => {
     // The Page reference's Schema block omitted `pageType`, so the one key that
     // decides whether `title` draws was missing from the shape that lists `title`.
+    // That page, `content/docs/components/layout/page.mdx`, was the only
+    // producer and left with the ObjectUI docs site (objectstack#27145), so
+    // the population is empty on this tree; the rule still holds a new one.
     const titled = DECLARATIONS.filter((d) => d.members.includes('title'));
-    expect(titled.map((d) => d.file)).toContain('content/docs/components/layout/page.mdx');
     const offenders = titled.filter((d) => !d.members.includes('pageType')).map((d) => `${d.file} › ${d.where}`);
     expect(offenders).toEqual([]);
   });

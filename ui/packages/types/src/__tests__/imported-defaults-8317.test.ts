@@ -412,11 +412,13 @@ const IMPORTED: Array<readonly [string, z.ZodType]> = [
   // because the census below requires every imported symbol to be measured.
   ['InlineGridColumnSchema', SpecInlineGridColumnSchema],
   // objectui#6152 round 12: `ListViewSchema.options` is the flattened list
-  // overlay's own legacy `options` bag. The binding is `VIEW_METADATA_MEMBERS`, a
+  // overlay's own `options` member. The binding is `VIEW_METADATA_MEMBERS`, a
   // RECORD of member schemas (see `SCHEMA_RECORDS` below), so what crosses is the
-  // bag read off it, and that is what this row measures. It carries a default
-  // (the chart block's `chartType`), so the boundary returns a rebuilt copy.
-  ['ViewMetadataMembers', SpecViewMetadataMembers.listOverlay.shape.options.unwrap() as unknown as z.ZodType],
+  // member read off it, and that is what this row measures. Since #25923 it is
+  // the spec's retired-key tombstone, which carries no default, so the strip is
+  // the identity function (it was the judged bag, whose chart block defaulted
+  // `chartType`, until then).
+  ['ViewMetadataMembers', SpecViewMetadataMembers.listOverlay.shape.options as unknown as z.ZodType],
 ] as const;
 
 /** The subset that actually carries an imported default — where the strip does work. */
@@ -750,7 +752,7 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
      * (objectui#6152 round 12). Such a binding has no Zod internals, so it cannot
      * itself be the argument of `stripImportedDefaults`; the read is accepted only
      * when the WHOLE member chain rooted at the binding is that argument
-     * (`stripImportedDefaults(SpecViewMetadataMembers.listOverlay.shape.options.unwrap())`),
+     * (`stripImportedDefaults(SpecViewMetadataMembers.listOverlay.shape.options)`),
      * which still puts everything that crosses through the boundary. ⛔ Not a
      * route for a schema binding: the assertion below requires each entry to be a
      * non-Zod object whose every value is a schema, and a schema binding keeps the

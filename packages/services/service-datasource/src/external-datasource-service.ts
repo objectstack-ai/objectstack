@@ -27,6 +27,9 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 import { DEFAULT_DATASOURCE_NAME, type DatasourceConnectionState } from './datasource-connection-service.js';
+// [#27618] The package's one "no such datasource" refusal, shared with the
+// admin service so every by-name door answers an unknown name alike.
+import { datasourceNotFoundError } from './datasource-admin-service.js';
 import {
   suggestFieldTypeForSqlType,
   isCompatible,
@@ -518,8 +521,10 @@ function isFederationSource(ds: DatasourceLike | undefined): ds is DatasourceLik
 
 /**
  * [#24837] The refusal every federation door answers for a datasource that is
- * not a federation source by {@link isFederationSource}: a managed one (declared
- * or by default), or a name with no datasource definition.
+ * not a federation source by {@link isFederationSource}: a managed one, declared
+ * or by default. [#27618] A name with no datasource definition is not refused
+ * here: it does not exist, and is answered as every by-name door answers it
+ * ({@link datasourceNotFoundError}).
  *
  * Until this guard, only the primary datasource was refused
  * ({@link primaryDatasourceNotFederatedError}). Every other managed datasource,
@@ -532,14 +537,12 @@ function isFederationSource(ds: DatasourceLike | undefined): ds is DatasourceLik
  * Same status and codes as the primary datasource's refusal, by the same
  * reasoning: the code is the one the calling door serves.
  */
-function notAFederationSourceError(datasource: string, ds: DatasourceLike | undefined, door: FederationDoor): Error {
+function notAFederationSourceError(datasource: string, ds: DatasourceLike, door: FederationDoor): Error {
   const code = door === 'import' ? 'EXTERNAL_IMPORT_ERROR' : 'EXTERNAL_DATASOURCE_ERROR';
-  const lead = !ds
-    ? `Datasource '${datasource}' has no datasource definition, so nothing declares it a federation source`
-    : ds.schemaMode
-      ? `Datasource '${datasource}' is managed (schemaMode '${ds.schemaMode}'), not a federation source`
-      : `Datasource '${datasource}' is managed (it declares no schemaMode, and 'managed' is the default), ` +
-        `not a federation source`;
+  const lead = ds.schemaMode
+    ? `Datasource '${datasource}' is managed (schemaMode '${ds.schemaMode}'), not a federation source`
+    : `Datasource '${datasource}' is managed (it declares no schemaMode, and 'managed' is the default), ` +
+      `not a federation source`;
   const rule =
     `ADR-0015 reserves federation for a datasource whose schemaMode is not 'managed', ` +
     `because the platform owns a managed datasource's schema and its tables are the platform's own objects.`;
@@ -585,16 +588,21 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * tables, drafting one, importing one, refreshing the catalog. Each door
    * names its {@link FederationDoor} kind, which decides the refusal's code.
    *
-   * Two refusals, in this order, and nothing else:
+   * Three refusals, in this order, and nothing else:
    *
    *  - the platform's primary datasource, by name, with its own reason
    *    ({@link primaryDatasourceNotFederatedError}, #24772). No definition is
    *    read for it: no store configuration makes it a federation source.
+   *  - [#27618] a name with no datasource definition: it does not exist, so it
+   *    is the `404` every by-name door answers ({@link datasourceNotFoundError},
+   *    the words `GET /datasources/:name` uses), which both route families
+   *    relay as such. It was folded into the next refusal, a `400` that told
+   *    the caller to re-declare a datasource that is not there.
    *  - any other datasource that is not a federation source by
-   *    {@link isFederationSource}: managed, declared or by default, or with no
-   *    definition ({@link notAFederationSourceError}).
+   *    {@link isFederationSource}: managed, declared or by default
+   *    ({@link notAFederationSourceError}).
    *
-   * Both come before any introspection, so a refused datasource is never
+   * All come before any introspection, so a refused datasource is never
    * read: its tables are the platform's, and listing them is the very thing
    * refused.
    *
@@ -604,6 +612,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   private async assertFederationSource(datasource: string, door: FederationDoor): Promise<DatasourceLike> {
     if (datasource === DEFAULT_DATASOURCE_NAME) throw primaryDatasourceNotFederatedError(datasource, door);
     const ds = await this.config.getDatasource(datasource);
+    if (!ds) throw datasourceNotFoundError(datasource);
     if (!isFederationSource(ds)) throw notAFederationSourceError(datasource, ds, door);
     return ds;
   }
@@ -696,10 +705,24 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * rebuild does, and replaces the verdict either way. A datasource whose
    * failed rebuild kept its old pool serving has a live driver, so it is
    * probed as before.
+   *
+   * [#27510] A name that resolves no saved datasource is not a datasource that
+   * failed its probe, so it is the one outcome that THROWS: the 404
+   * {@link datasourceNotFoundError}, which the route answers exactly as
+   * `GET /datasources/:name` answers the same name. It answered `ok: false`
+   * with the engine's "has no registered driver" sentence, the answer a saved
+   * datasource that is down gets, so a caller could not tell the two apart.
+   * The name is resolved through `getDatasource`, the stored-record read the
+   * sibling `:name` doors make (both plugins wire it to
+   * `metadata.get('datasource', name)`). The primary datasource is not looked
+   * up: it may have no stored record, and its live driver answers for it.
    */
   async testConnection(
     datasource: string,
   ): Promise<{ ok: boolean; latencyMs?: number; tableCount?: number; error?: string }> {
+    if (datasource !== DEFAULT_DATASOURCE_NAME && !(await this.config.getDatasource(datasource))) {
+      throw datasourceNotFoundError(datasource);
+    }
     const started = Date.now();
     try {
       const driver = this.config.liveDriver?.(datasource);

@@ -52,28 +52,6 @@ docs/api
 # ObjectStack bundled files
 *.bundled_*.mjs
 
-# Fumadocs
-apps/site/.next
-apps/site/.map.ts
-apps/site/.source
-
-# Next.js agent-rules files, minted by `next dev` in apps/site (objectui#4160).
-# From next 16.3 (the #4094 bump; 16.2 bundled the docs but generated nothing),
-# `next dev` detects an AI coding agent from the environment (CLAUDECODE,
-# CURSOR, CODEX, AI_AGENT, ...) and writes AGENTS.md + CLAUDE.md next to the
-# app's next.config — see node_modules/next/dist/server/lib/generate-agent-files.js.
-# They appeared from merely RUNNING the app, were neither tracked nor ignored,
-# and the block's own text says "committing it with your work keeps the tree
-# clean": in a repo staged with `git add -A` by parallel agents that is a
-# contamination trap of the objectui#3430 shape. We ignore rather than commit —
-# the prose is tool-minted per next version, and apps/site/CLAUDE.md's
-# `@AGENTS.md` import would splice framework rules into this repo's own binding
-# instruction chain. `agentRules: false` in apps/site/next.config.mjs stops the
-# minting at the source; these two lines are the belt to that braces, because
-# the flag is upstream-owned and can be renamed or dropped by any next bump.
-/apps/site/AGENTS.md
-/apps/site/CLAUDE.md
-
 # Test artifacts
 test-screenshots
 test-results

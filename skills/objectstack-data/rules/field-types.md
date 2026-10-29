@@ -6,7 +6,7 @@
 - [Common Field Configurations](#common-field-configurations)
 - [Incorrect vs Correct](#incorrect-vs-correct)
 
-Quick reference for choosing the right field type from 49 available options.
+Quick reference for choosing the right field type from the available options.
 
 ## Two spellings: `Field.*` factory or object literal
 
@@ -122,7 +122,7 @@ Stored as JSON on the parent row — no separate table / FK:
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `formula` | Computed from an expression referencing other fields — virtual: not aggregatable, a dataset measure needs a stored field (objectstack-ui → Dashboards → Dataset-Bound Widgets) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
-| `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field, function, relationshipField?, filter? }) |
+| `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
 | `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"` |
 
 ## Enhanced Types
@@ -172,19 +172,17 @@ Stored as JSON on the parent row — no separate table / FK:
 ```typescript
 {
   type: 'currency',
-  currencyConfig: {
-    currencyMode: 'fixed',   // 'fixed' = the column is pinned to
-                             // defaultCurrency; 'dynamic' = tenant default
-    defaultCurrency: 'USD',  // ISO 4217
-  },
+  currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },  // ISO 4217
 }
+// per record: { currencyMode: 'record', currencyField: 'currency_code' }
 ```
 
-**Currency resolution.** The value is a bare number in both modes (ADR-0104
-D1), never `{ value, currency }`. The displayed symbol: under `'fixed'`,
-`currencyConfig.defaultCurrency`; under `'dynamic'` (default), the tenant
-`localization.currency` setting, not `defaultCurrency`; with neither, a plain
-grouped number (never a hardcoded `$`). A measure's own `currency` wins.
+**Currency resolution.** The value is a bare number in every mode, never
+`{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
+(default), the tenant `localization.currency`, else a plain number (never
+`$`); `'record'`, each record's code in the `text` field `currencyField`
+names (by convention `currency_code`), with `valueDomain: 'iso_4217_currency'`. Under
+`'fixed'`/`'dynamic'` a measure's own `currency` wins.
 
 ### Select with Default
 
@@ -256,7 +254,7 @@ const total = {
   type: 'summary',
   summaryOperations: {
     object: 'invoice_line_item',   // child object to aggregate
-    field: 'amount',               // child field (ignored for count)
+    field: 'amount',               // child field
     function: 'sum',               // 'count' | 'sum' | 'min' | 'max' | 'avg'
     // relationshipField / filter — optional (see rules/relationships.md)
   },

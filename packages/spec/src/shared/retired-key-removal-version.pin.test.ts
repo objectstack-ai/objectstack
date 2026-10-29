@@ -79,7 +79,7 @@ import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
 import { CurrencyConfigSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
-import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
+import { ManifestPermissionsSchema, PluginPackagingSchema } from '../kernel/manifest.zod';
 import {
   DeleteRecordConfigSchema,
   GetRecordConfigSchema,
@@ -92,7 +92,7 @@ import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { TursoConfigSchema } from '../data/driver/turso.zod';
 import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
+import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema, VIEW_METADATA_MEMBERS } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -108,7 +108,9 @@ import {
   ElementRecordPickerPropsSchema,
   ElementButtonPropsSchema,
   ElementRepeaterPropsSchema,
+  ObjectFormPropsSchema,
   ObjectGridPropsSchema,
+  ObjectMasterDetailFormPropsSchema,
   ObjectKanbanPropsSchema,
   PageHeaderProps,
 } from '../ui/component.zod';
@@ -281,6 +283,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),
   ],
+  // #27123: `packaging: 'manifest-deps'`, refused by the enum's own error map.
+  'manifest-packaging-manifest-deps-removed': [
+    refusal("manifest.packaging 'manifest-deps'", () => PluginPackagingSchema.safeParse('manifest-deps')),
+  ],
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),
   ],
@@ -394,6 +400,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   // #26677: value-level retirements — each retired member is refused by the
   // enum's own error map with its prescription, so the refusal is the parse.
+  'list-view-options-bag-folded': [tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'options')],
   'navigation-mode-overlay-values-removed': [
     ...(['modal', 'split', 'popover'] as const).map((mode) =>
       refusal(`navigation.mode '${mode}'`, () => NavigationModeSchema.safeParse(mode)),
@@ -418,6 +425,27 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(FormSectionSchema, 'view.form.sections[]', 'pane'),
     tombstone(FormViewSchema, 'view.form', 'splitSize'),
     tombstone(FormViewSchema, 'view.form', 'splitResizable'),
+    // #27159 (same family, before 18.3.0 shipped): the form view's last split
+    // key, and the `object-form` block's `split` value with its split-only keys.
+    tombstone(FormViewSchema, 'view.form', 'splitDirection'),
+    refusal(
+      "object-form formType 'split'",
+      () => ObjectFormPropsSchema.safeParse({ objectName: 'crm_contact', formType: 'split' }),
+      'formType',
+    ),
+    tombstone(ObjectFormPropsSchema, 'object-form', 'splitDirection'),
+    tombstone(ObjectFormPropsSchema, 'object-form', 'splitSize'),
+    tombstone(ObjectFormPropsSchema, 'object-form', 'splitResizable'),
+    refusal(
+      'object-form sections[].pane',
+      () => ObjectFormPropsSchema.safeParse({ objectName: 'crm_contact', sections: [{ pane: 'primary', fields: ['name'] }] }),
+      'sections',
+    ),
+    refusal(
+      'object-master-detail-form sections[].pane',
+      () => ObjectMasterDetailFormPropsSchema.safeParse({ objectName: 'crm_contact', sections: [{ pane: 'primary', fields: ['name'] }] }),
+      'sections',
+    ),
   ],
   // #25050: retired after 18.0.0, so the v18 train's major. Partial (unset
   // values and remote urls only), so the prescription's migrate sentence is

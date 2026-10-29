@@ -185,6 +185,7 @@ export {
   buildDefaultDetails,
   buildDefaultTabs,
   buildDefaultDiscussion,
+  buildDefaultTimeline,
   detectStatusField,
   deriveStages,
   deriveHighlightFields,
@@ -208,7 +209,10 @@ export {
   recordTimelineDefaultReason,
   recordPageColumnOfTab,
   buildDefaultPageColumns,
+  bodyTableIdsOf,
 } from './synth/recordPageColumns';
+// objectstack#27069 — the one reading of a related-list entry.
+export { relatedListEntryNames } from './synth/relatedListEntry';
 export type {
   RecordPageTier,
   RecordPageColumn,
@@ -222,6 +226,44 @@ export { useRecordPageTier } from './useRecordPageTier';
 export type { UseRecordPageTierOptions } from './useRecordPageTier';
 export { RecordPageColumns } from './RecordPageColumns';
 export type { RecordPageColumnsProps } from './RecordPageColumns';
+// objectstack#27055 — the record page v3 face: a host drawing the
+// synthesized default page in its tabbed tier marks it, as the column tiers do.
+export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
+export { RecordBodyTablesContext } from './relatedListCompact';
+// objectstack#27056 — for the app-shell record drawer's prefetch: it warms
+// the next record's related counts before the reader steps to it.
+export { prefetchRelatedCounts, relatedCountTargetsIn, relatedCountTargetOf } from './useRelatedCounts';
+export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts';
+// The tabbed tier's 关联 tab in the reader's arrangement (objectstack#27055).
+export { ArrangedRelatedTab } from './ArrangedRelatedTab';
+// objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
+// the record's field changes over through this context.
+export {
+  RecordFieldChangesContext,
+  auditEntriesToFeedItems,
+  mergeTimelineStream,
+  filterTimelineStream,
+} from './recordTimelineStream';
+export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStream';
+// objectstack#27055 — the reader's arrangement of the related cards: the pure
+// merge rule and the stored record's codec halves, for the host's
+// workspace-preference store.
+export {
+  EMPTY_RELATED_ARRANGEMENT,
+  RELATED_CARD_NEW_BADGE_MS,
+  editRelatedArrangement,
+  relatedArrangementFromRecord,
+  relatedArrangementToRecord,
+  relatedCardId,
+  relatedDefaultOrderHash,
+  resolveRelatedArrangement,
+} from './synth/relatedArrangement';
+export type {
+  RelatedArrangement,
+  RelatedArrangementEdit,
+  RelatedCardId,
+  ResolvedRelatedArrangement,
+} from './synth/relatedArrangement';
 
 /**
  * The registry face of `detail-view` — objectui#5378 item 1.

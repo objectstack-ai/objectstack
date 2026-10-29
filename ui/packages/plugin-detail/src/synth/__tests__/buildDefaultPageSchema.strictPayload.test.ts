@@ -33,6 +33,7 @@ import {
   PageSchema,
   PageComponentSchema,
   PageTabsProps,
+  RecordActivityProps,
 } from '@objectstack/spec/ui';
 import {
   buildDefaultPageSchema,
@@ -42,6 +43,7 @@ import {
   buildDefaultDetails,
   buildDefaultTabs,
   buildDefaultDiscussion,
+  buildDefaultTimeline,
   buildDefaultAttachments,
   type ObjectDefLike,
 } from '../buildDefaultPageSchema';
@@ -108,8 +110,6 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
         { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks', limit: 10, icon: 'check' },
         { objectName: 'note', relationshipField: 'parent_id', isPrimary: true },
       ],
-      showActivity: true,
-      history: { entries: [{ id: 'h1' }], loading: false },
       approvals: { count: 2, node: { currentUserId: 'u_1' } },
     });
     expect(issuesOf(PageSchema.safeParse(body))).toEqual([]);
@@ -120,11 +120,7 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
   });
 
   it('is accepted when the caller suppresses every optional slot', () => {
-    const body = createBody(leadDef, {
-      hideDiscussion: true,
-      hideHighlights: true,
-      hidePath: true,
-    });
+    const body = createBody(leadDef, { hideDiscussion: true, hideAttachments: true });
     expect(issuesOf(PageSchema.safeParse(body))).toEqual([]);
   });
 
@@ -138,20 +134,14 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       headerActions: [{ name: 'convert', label: 'Convert', locations: ['record_header'] }],
       related: [
         { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
-        { objectName: 'note', relationshipField: 'parent_id' },
+        { objectName: 'note', relationshipField: 'parent_id', isBody: true },
       ],
-      showActivity: true,
-      history: { entries: [], loading: false },
       approvals: { node: { currentUserId: 'u_1' } },
     };
     const filesDef = { ...leadDef, enable: { files: true } };
-    // Two pages, because the two branches are mutually exclusive by design:
-    // turning the Reference Rail on suppresses the Related tab, so
-    // `record:related_list` and `record:reference_rail` never co-occur.
-    const pages = [
-      buildDefaultPageSchema(filesDef, common),
-      buildDefaultPageSchema(filesDef, { ...common, showReferenceRail: true }),
-    ];
+    // One page: the synthesizer emits no reference rail any more
+    // (objectstack#27055), so every branch it has co-occurs here.
+    const pages = [buildDefaultPageSchema(filesDef, common)];
     const nodes: any[] = [];
     const walk = (n: any): void => {
       if (Array.isArray(n)) return n.forEach(walk);
@@ -169,11 +159,8 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       'record:approvals',
       'record:attachments',
       'record:details',
-      'record:discussion',
       'record:highlights',
-      'record:history',
       'record:path',
-      'record:reference_rail',
       'record:related_list',
     ]);
     for (const node of nodes) {
@@ -184,17 +171,22 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
   it('the sub-builders emit accepted nodes on their own (slot authors compose these)', () => {
     const nodes = [
       buildDefaultHeader(leadDef),
-      buildDefaultHeader(leadDef, { recordChrome: false }),
       buildDefaultActions(leadDef, [{ name: 'edit', label: 'Edit' }]),
       ...buildDefaultHighlights(leadDef),
       buildDefaultDetails(leadDef),
       buildDefaultTabs(leadDef),
       buildDefaultDiscussion(),
+      buildDefaultTimeline(),
       buildDefaultAttachments(),
     ];
     for (const node of nodes) {
       expect([node.type, issuesOf(PageComponentSchema.safeParse(node))]).toEqual([node.type, []]);
     }
+  });
+
+  it('the timeline stream writes only `record:activity` inputs the spec declares (objectstack#27055)', () => {
+    const node = buildDefaultTimeline();
+    expect(issuesOf(RecordActivityProps.safeParse(node.properties))).toEqual([]);
   });
 });
 
@@ -216,17 +208,14 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
    * turned the record chrome OFF (a dashboard / landing page) gets that choice
    * PERSISTED, because `recordChrome` is a declared `page:header` prop
    * (`ComponentPropsMap['page:header'].recordChrome`, #6776) and the bag it
-   * lives in is the spec's own carrier.
+   * lives in is the spec's own carrier. The synthesizer no longer takes a
+   * `recordChrome` hint (objectstack#27055), so the OFF node is the authored
+   * one.
    */
-  it('record chrome turned OFF survives the parse rather than silently reverting', () => {
-    const node = buildDefaultHeader(leadDef, { recordChrome: false });
-    expect(node).toEqual({ type: 'page:header', properties: { recordChrome: false } });
+  it('record chrome turned OFF on an authored header survives the parse rather than silently reverting', () => {
+    const node = { type: 'page:header', properties: { recordChrome: false } };
     const parsed = PageComponentSchema.parse(node) as any;
     expect(parsed.properties.recordChrome).toBe(false);
-    // …and it reaches the page body the console PUTs.
-    const body = createBody(leadDef, { recordChrome: false });
-    const page = PageSchema.parse(body) as any;
-    expect(page.regions[0].components[0].properties.recordChrome).toBe(false);
   });
 
   /**
@@ -238,11 +227,10 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
   it('the tab items are the spec-declared `page:tabs` props, labels/values/children intact', () => {
     const tabs = buildDefaultTabs(leadDef, {
       related: [{ objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' }],
-      showActivity: true,
     });
     const parsed = PageTabsProps.parse(tabs.properties) as any;
-    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Related', 'Activity']);
-    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related', 'activity']);
+    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Related', 'Timeline']);
+    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
     expect(parsed.items[0].children[0].type).toBe('record:details');
     expect(parsed.items[1].children[0].properties.objectName).toBe('task');
   });
@@ -253,7 +241,7 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
     });
     const page = PageSchema.parse(body) as any;
     const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related']);
+    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
     expect(tabs.properties.items[1].children[0].properties.relationshipField).toBe('lead_id');
   });
 });

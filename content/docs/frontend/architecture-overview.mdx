@@ -150,6 +150,7 @@ Plugins use `React.lazy()` wrapped by `LazyPluginLoader` (`packages/react/src/La
 
 Every plugin follows the same structure (see `packages/plugin-kanban/`, `packages/plugin-grid/`):
 
+{/* doc-snippet: fragment — an excerpt of a plugin package's own index: `./KanbanImpl` is that package's sibling module and `Props` its local prop type, neither of which exists outside the plugin being described */}
 ```tsx
 // 1. Lazy-load the heavy implementation
 const LazyKanban = React.lazy(() => import('./KanbanImpl'));
@@ -271,6 +272,7 @@ that dispatch. It owns the protocol (name-based action identity, record-id
 resolution, re-entrancy guard, the `/actions` response-envelope rule) and
 injects the three things core has no opinion about:
 
+{/* doc-snippet: fragment — the three injected values are the reader's own (`myAuthenticatedFetch`, `currentObject`, `notifyDataChanged`), and the closing line is a bare `<ActionProvider ... />` tag whose remaining props are deliberately elided */}
 ```typescript
 import { createServerActionHandler } from '@object-ui/core';
 
@@ -312,20 +314,20 @@ packages/
 │   ├── SchemaRenderer.tsx
 │   ├── LazyPluginLoader.tsx
 │   ├── context/         # All React contexts
-│   └── hooks/           # 20+ hooks (useExpression, useActionRunner, etc.)
-├── components/          # 91+ Shadcn UI atoms
-├── fields/              # 35+ field renderers
+│   └── hooks/           # Hooks (useExpression, useActionRunner, etc.)
+├── components/          # Shadcn UI atoms
+├── fields/              # Field renderers
 ├── layout/              # AppShell, Header, Sidebar
 ├── i18n/                # Internationalization
 ├── auth/                # AuthContext + providers
 ├── permissions/         # RBAC/ABAC
-└── plugin-*/            # 20 plugin packages
+└── plugin-*/            # Plugin packages
     ├── plugin-grid/
     ├── plugin-kanban/
     ├── plugin-charts/
     ├── plugin-dashboard/
     ├── plugin-form/
-    └── ... (15 more)
+    └── ...
 ```
 
 ## Further Reading

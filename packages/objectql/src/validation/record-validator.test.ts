@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { FieldSchema } from '@objectstack/spec/data';
 import { renderValidationMessage } from '@objectstack/spec/system';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './record-validator.js';
+import { validateRecord, validateInsertValues, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './record-validator.js';
 
 /**
  * Required-field validation, with the autonumber exemption (#1603).
@@ -1358,6 +1358,132 @@ describe('validateRecord — `currency` is outside the max_scale enforced set (#
       code: 'max_scale',
       constraint: { scale: 4, actual: 5 },
     });
+  });
+});
+
+/**
+ * [#27236] A `currency` field written as an object, the retired
+ * `{ value, currency }` shape (ADR-0104 D1), is refused with the SAME wire code
+ * as before, `invalid_number` and nothing more, and a sentence that teaches the
+ * shape: a bare number, with the currency declared in `currencyConfig` or taken
+ * from the tenant default. The accept set does not move. A non-number string, an
+ * array, and an object on a `number` field keep the plain sentence (CONTROLS).
+ */
+describe('[#27236] validateRecord — a currency value written as an object names the bare-number shape', () => {
+  const refusalOf = (schema: Parameters<typeof validateRecord>[0], data: Record<string, unknown>, mode: 'insert' | 'update' = 'insert') => {
+    try {
+      validateRecord(schema, data, mode);
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      return (e as ValidationError).fields;
+    }
+    return null;
+  };
+  const lesson = renderValidationMessage({ messageKey: 'invalid_number_currency_object', label: 'Amount', field: 'amount' });
+  const plain = renderValidationMessage({ messageKey: 'invalid_number', label: 'Amount', field: 'amount' });
+  const dynamic = { fields: { amount: { type: 'currency', label: 'Amount' } } };
+  const fixed = { fields: { amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } } };
+
+  for (const [name, schema] of [['dynamic', dynamic], ['fixed', fixed]] as const) {
+    it(`refuses { value, currency } on a ${name}-mode field with invalid_number and the lesson, on insert and update`, () => {
+      for (const mode of ['insert', 'update'] as const) {
+        expect(refusalOf(schema, { amount: { value: 10, currency: 'USD' } }, mode)).toEqual([
+          { field: 'amount', code: 'invalid_number', message: lesson, label: 'Amount' },
+        ]);
+      }
+    });
+  }
+
+  it('the lesson is a different sentence from the plain one and names currencyConfig', () => {
+    expect(lesson).not.toBe(plain);
+    expect(lesson.startsWith('Amount is a currency amount: write it as a bare number')).toBe(true);
+    expect(lesson).toContain('currencyConfig');
+  });
+
+  it('a bare number passes', () => {
+    expect(refusalOf(dynamic, { amount: 10 })).toBeNull();
+    expect(refusalOf(fixed, { amount: 10 }, 'update')).toBeNull();
+  });
+
+  it('CONTROL — a non-number string on a currency field keeps the plain sentence', () => {
+    expect(refusalOf(dynamic, { amount: 'abc' })).toEqual([{ field: 'amount', code: 'invalid_number', message: plain, label: 'Amount' }]);
+  });
+
+  it('CONTROL — an array on a currency field keeps the plain sentence', () => {
+    expect(refusalOf(dynamic, { amount: [10] })).toEqual([{ field: 'amount', code: 'invalid_number', message: plain, label: 'Amount' }]);
+  });
+
+  it('CONTROL — an object on a number field keeps the plain sentence (the lesson is currency-only)', () => {
+    const number = { fields: { amount: { type: 'number', label: 'Amount' } } };
+    expect(refusalOf(number, { amount: { value: 10, currency: 'USD' } })).toEqual([
+      { field: 'amount', code: 'invalid_number', message: plain, label: 'Amount' },
+    ]);
+  });
+});
+
+/**
+ * [#27259] `validateInsertValues` — the insert write's verdict on the values a
+ * row SUPPLIES, which `os validate` / `os build` ask about each seed record. It
+ * answers what `validateRecord(…, 'insert')` answers about a supplied value,
+ * after the door's own rewrites, and nothing about what the row omits or what
+ * the schema does not declare.
+ */
+describe('[#27259] validateInsertValues — the insert verdict on the values a row supplies', () => {
+  const schema = {
+    fields: {
+      name: { type: 'text', label: 'Name', required: true },
+      amount: { type: 'currency', label: 'Amount' },
+      hours: { type: 'number', label: 'Hours', min: 0 },
+      tags: { type: 'multiselect', label: 'Tags', options: [{ label: 'Alpha', value: 'alpha' }] },
+      due: { type: 'date', label: 'Due' },
+      stamp: { type: 'datetime', label: 'Stamp', readonly: true },
+    },
+  };
+  const refusalOf = (fn: () => void) => {
+    try {
+      fn();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      return (e as ValidationError).fields;
+    }
+    return null;
+  };
+  const lesson = renderValidationMessage({ messageKey: 'invalid_number_currency_object', label: 'Amount', field: 'amount' });
+
+  it('refuses a currency written as an object with the same fields validateRecord gives on insert', () => {
+    const row = { name: 'A', amount: { value: 10, currency: 'USD' } };
+    const expected = [{ field: 'amount', code: 'invalid_number', message: lesson, label: 'Amount' }];
+    expect(refusalOf(() => validateInsertValues(schema, row))).toEqual(expected);
+    expect(refusalOf(() => validateRecord(schema, row, 'insert'))).toEqual(expected);
+  });
+
+  it('passes a bare number', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { amount: 10 }))).toBeNull();
+  });
+
+  it('passes what the insert door rewrites into an accepted value: a numeric string, a blank, a scalar on a multi-value field', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { amount: '10', hours: '2.5', due: '', tags: 'alpha' }))).toBeNull();
+  });
+
+  it('does not judge `required` on what the row omits or leaves empty: the load\'s defaults and hooks may fill it', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { amount: 5 }))).toBeNull();
+    expect(refusalOf(() => validateInsertValues(schema, { name: null, amount: 5 }))).toBeNull();
+    // CONTROL — validateRecord on insert does refuse the omission.
+    expect(refusalOf(() => validateRecord(schema, { amount: 5 }, 'insert'))?.map((f) => f.code)).toEqual(['required']);
+  });
+
+  it('CONTROL — a name the schema does not declare gets no answer here', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { no_such_field: { value: 1 } }))).toBeNull();
+  });
+
+  it('judges a readonly value\'s shape, as the insert path does after its strip (a system writer\'s value is stored)', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { stamp: 'yesterday' }))?.map((f) => [f.field, f.code])).toEqual([['stamp', 'invalid_date']]);
+  });
+
+  it('never mutates the row it is handed', () => {
+    const row = { amount: '10', tags: 'alpha', due: '' };
+    validateInsertValues(schema, row);
+    expect(row).toEqual({ amount: '10', tags: 'alpha', due: '' });
   });
 });
 

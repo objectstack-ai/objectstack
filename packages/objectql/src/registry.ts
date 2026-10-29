@@ -103,6 +103,7 @@ import {
   type PicklistReference,
 } from './picklist-resolution.js';
 import { standaloneActionOwnerKey, isObjectLessActionKey } from './action-governance.js';
+import { recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
 
 /**
  * [#24400] A bound top-level action whose target object no package has
@@ -3622,6 +3623,17 @@ export class SchemaRegistry {
     if (ownership === 'extend' && (schema as { membershipKeys?: unknown }).membershipKeys !== undefined) {
       throw new ExtensionMembershipKeysRefusedError(schema.name, packageId);
     }
+    // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
+    // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
+    // their own currency — is refused here, the door every metadata path
+    // passes, before any materialization: the pair is judged at whichever
+    // registration completes it. See `record-currency-aggregate-door.ts`.
+    const recordCurrencySummary = recordCurrencySummaryRefusal(
+      schema,
+      (name) => this.getObject(name),
+      () => this.getAllObjects(),
+    );
+    if (recordCurrencySummary) throw recordCurrencySummary;
 
     // [#25744] A code package's object keeps its own actions as their
     // `ActionSchema` parse — `requiresFeature` / `requiresMembershipReach`

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
+import { memoryBackedTmpEnv } from '../../../scripts/vitest-memory-tmp.mjs';
 
 /**
  * [#12157] `plugin.ts` registers the ADR-0126 §4 activation ledger's object,
@@ -38,7 +39,13 @@ export default defineConfig({
     // ride a bare `console.warn` this level never gates — measured green with
     // the declaration in place. Enforced by
     // scripts/check-registry-log-declared.mjs.
-    env: { OS_REGISTRY_LOG: 'warn' },
+    // TMPDIR on /dev/shm when it is writable (#27306;
+    // scripts/vitest-memory-tmp.mjs): the three tests that persist runs to a
+    // SQLite file do it in an `mkdtemp` under it. Measured beside four
+    // `dd … conv=fsync` writers on the same disk: green in that run, but the
+    // slowest case went from 0.31 s idle to 4.35 s, 87% of its 5 s budget, for
+    // no change in the code; with TMPDIR there, under the same writers, 0.34 s.
+    env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
   },
   resolve: {
     alias: [

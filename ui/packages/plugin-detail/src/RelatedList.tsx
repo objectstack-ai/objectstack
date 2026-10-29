@@ -27,6 +27,7 @@ import {
   EmptyValue,
   hasDeclaredVisibilityGate,
   resolveIcon,
+  Skeleton,
   useIsMobile,
 } from '@object-ui/components';
 import { SchemaRenderer, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
@@ -41,6 +42,7 @@ import {
   AlertTriangle,
   ShieldAlert,
   RotateCw,
+  Maximize2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
@@ -52,6 +54,8 @@ import {
   columnIdentity,
   columnHeader,
   compareSortValues,
+  declaredNameField,
+  deriveTitleField,
   getRecordDisplayName,
   getSortValue,
   isEmptyValue,
@@ -74,9 +78,22 @@ import {
 } from '@object-ui/core';
 import { useSafeFieldLabel } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
+import { useDisplayLocale } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
-import { RelatedListCompactContext } from './relatedListCompact';
+import {
+  COMPACT_RELATED_ROWS,
+  RELATED_CARD_DROP_LINE,
+  RecordBodyTablesContext,
+  RelatedCardChromeContext,
+  RelatedCardCountContext,
+  RelatedEnlargeContext,
+  RelatedListCompactContext,
+  useSeenOnce,
+} from './relatedListCompact';
+import { relatedCardId } from './synth/relatedArrangement';
+import { RelatedCardMenu } from './RelatedCardMenu';
+import { detectStatusField } from '@object-ui/types';
 
 export interface RelatedListProps {
   title: string;
@@ -628,6 +645,63 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
  * seam itself — `@object-ui/core`'s `parent-scope` — so one place answers it.
  */
 
+/** Field types a body table totals (objectstack#27055, Target 8). */
+const TOTALLED_FIELD_TYPES = new Set(['currency', 'number', 'integer', 'decimal']);
+
+/**
+ * The totals line of a body table: the sum of each numeric column over the
+ * rows on show (the page), labelled as the page's — never as the whole
+ * list's, which a windowed list does not hold. Currency sums keep the field's
+ * declared currency. Nothing is drawn without a numeric column.
+ */
+const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefined; objectSchema: any }> = ({
+  rows,
+  columns,
+  objectSchema,
+}) => {
+  const { t } = useDetailTranslation();
+  // The totals format in the reader's display locale, never the machine's.
+  const displayLocale = useDisplayLocale();
+  const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
+  const totals: Array<{ key: string; label: string; text: string }> = [];
+  for (const col of columns ?? []) {
+    const key = col?.accessorKey || columnIdentity(col);
+    const def = key ? fields[key] : undefined;
+    if (!key || !def || !TOTALLED_FIELD_TYPES.has(def.type)) continue;
+    let sum = 0;
+    let counted = 0;
+    for (const row of rows) {
+      const n = typeof row?.[key] === 'number' ? row[key] : Number(row?.[key]);
+      if (row?.[key] === null || row?.[key] === undefined || row?.[key] === '' || !Number.isFinite(n)) continue;
+      sum += n;
+      counted += 1;
+    }
+    if (counted === 0) continue;
+    const currency = def.type === 'currency' ? def.currencyConfig?.defaultCurrency ?? def.currency : undefined;
+    let text: string;
+    try {
+      text = currency
+        ? new Intl.NumberFormat(displayLocale, { style: 'currency', currency }).format(sum)
+        : new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum);
+    } catch {
+      text = String(sum);
+    }
+    totals.push({ key, label: col.header || col.label || def.label || key, text });
+  }
+  if (totals.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs" data-body-table-totals="">
+      <span className="font-medium text-muted-foreground">{t('detail.bodyTableTotals', { defaultValue: 'Totals (this page)' })}</span>
+      {totals.map((total) => (
+        <span key={total.key} className="inline-flex items-center gap-1" data-body-table-total={total.key}>
+          <span className="text-muted-foreground">{total.label}</span>
+          <span className="font-medium tabular-nums">{total.text}</span>
+        </span>
+      ))}
+    </div>
+  );
+};
+
 export const RelatedList: React.FC<RelatedListProps> = ({
   title,
   type,
@@ -706,6 +780,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // The host predicate scope a child row's declared deadline is judged in
   // (objectui#11815) — the scope the grid's cells read.
   const predicateScope = usePredicateScope();
+  // The compact card's date chip formats in the reader's display locale.
+  const displayLocale = useDisplayLocale();
   const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
   // Add-by-picker (generic m2m/junction assignment). `refreshNonce` re-runs the
   // auto-fetch after an add/remove so the list reflects the new link rows.
@@ -783,7 +859,20 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     [toolbarActions, mayInvoke],
   );
 
-  const effectivePageSize = pageSize && pageSize > 0 ? pageSize : 0;
+  // In the record page's related column (objectstack#26678) the list is a
+  // ~20rem card that names its first rows: the identity column alone, since a
+  // second column does not fit beside it and the table would be cut off at the
+  // column's edge.
+  const compact = React.useContext(RelatedListCompactContext);
+  // objectstack#27056 — the card's count, asked up front with the column's
+  // other cards (`RelatedCardStack`); `null` when nothing counted it.
+  const cardCount = React.useContext(RelatedCardCountContext);
+  // The card reads only the rows it names (`$top` 3), and only once it is in
+  // view (Target 2); a card counted at 0 reads none at all.
+  const [compactCard, setCompactCard] = React.useState<HTMLElement | null>(null);
+  const cardSeen = useSeenOnce(compactCard, compact);
+  const rowsWanted = !compact || (cardSeen && cardCount !== 0);
+  const effectivePageSize = compact ? COMPACT_RELATED_ROWS : pageSize && pageSize > 0 ? pageSize : 0;
   // The built-in contains-filter is a CLIENT-side sweep over the list's
   // unmasked columns (objectui#10728, `unmaskedColumnKeysKey`) — inexpressible
   // as a generic server filter. While the user is typing in it
@@ -1062,6 +1151,69 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    */
   const selectKey = selectFields ? selectFields.join(',') : '';
 
+  /**
+   * The compact card's chip (objectstack#27055, Target 4): ONE status or date
+   * field per row. Among the list's authored columns (the relationship's
+   * `relatedListColumns`) when it has any — the status field when it is one
+   * of them, else the first date column; otherwise the object's status field,
+   * else its first date field.
+   */
+  const compactChipField = React.useMemo((): string | undefined => {
+    if (!compact || !objectSchema) return undefined;
+    const fields = objectSchema.fields;
+    const isDate = (key: string): boolean => {
+      const type = (parentRelationshipFieldDef(fields, key) as { type?: unknown } | undefined)?.type;
+      return type === 'date' || type === 'datetime';
+    };
+    const authored = dropRedactedColumns(Array.isArray(columns) ? columns : [], redactedFields)
+      .map(drawnColumnKey)
+      .filter((key): key is string => !!key);
+    const statusField = detectStatusField(objectSchema as any) ?? undefined;
+    if (authored.length > 0) {
+      return statusField && authored.includes(statusField) ? statusField : authored.find(isDate);
+    }
+    if (statusField) return statusField;
+    const declared = Array.isArray(fields)
+      ? fields.map((f: any) => f?.name).filter((n: unknown): n is string => typeof n === 'string')
+      : fields && typeof fields === 'object'
+        ? Object.keys(fields)
+        : [];
+    return declared.find((key) => !redactedFields.has(key) && isDate(key));
+  }, [compact, objectSchema, columns, redactedFields]);
+
+  /**
+   * The compact card's projection (objectstack#27056, Target 2): `id`, the
+   * record's name field and the chip — what the card draws, nothing more. A
+   * field only when the child declares it (or it is a platform column) and
+   * the principal may read it. `undefined` — the list's own projection — when
+   * the name cannot be read off a known field: no child definition, a legacy
+   * `titleFormat` template (it may read any field), or no name field at all.
+   */
+  const compactSelect = React.useMemo((): string[] | undefined => {
+    if (!compact || !objectSchema) return undefined;
+    const declared = declaredNameField(objectSchema);
+    const declaredName = typeof declared === 'string' && declared ? declared : undefined;
+    if (!declaredName && objectSchema.titleFormat) return undefined;
+    const derivedName = deriveTitleField(objectSchema);
+    if (!declaredName && !derivedName) return undefined;
+    const relatedObjectName = objectName || api || '';
+    const projection = new Set<string>(['id']);
+    for (const field of [declaredName, derivedName, compactChipField]) {
+      if (!field || redactedFields.has(field)) continue;
+      const known = parentRelationshipFieldDef(objectSchema.fields, field) !== undefined;
+      if (!known && !PLATFORM_RECORD_COLUMNS.has(field)) continue;
+      if (known && perms?.isLoaded && relatedObjectName && !perms.checkField(relatedObjectName, field, 'read')) continue;
+      projection.add(field);
+    }
+    return Array.from(projection);
+  }, [compact, objectSchema, objectName, api, perms, redactedFields, compactChipField]);
+  // What goes on the wire: the card's projection, and the reference roots it
+  // names, when it has one; the list's own otherwise.
+  const wireSelect = compactSelect ?? selectFields;
+  const wireExpand = compactSelect ? expandFields.filter((root) => compactSelect.includes(root)) : expandFields;
+  const wireSelectKey = wireSelect ? wireSelect.join(',') : '';
+  const wireExpandKey = wireExpand.join(',');
+
   // Sync internal state when data prop changes (e.g., parent fetches async data)
   React.useEffect(() => {
     if (dataProvided) {
@@ -1178,6 +1330,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // spending a query. Removing either half restores the double read, or
       // strands the rows. The loading placeholder is held while it waits.
       if (!objectSchemaReady) return;
+      // objectstack#27056 — a compact card out of view, or counted at 0,
+      // reads nothing; it reads once it comes into view (`rowsWanted` in the
+      // dependency list). The placeholder holds meanwhile.
+      if (!rowsWanted) return;
       // The parent-relationship condition, compiled to match the field's ARITY
       // (objectui#7299). A multi-valued relationship asks a MEMBERSHIP question
       // — "is this parent among the stored values" — and `$contains` is the
@@ -1206,11 +1362,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // the tree does (objectui#10112). Omitted entirely when there is
         // nothing to expand, so a child object with no reference column sends
         // the byte-identical query it always sent.
-        if (expandFields.length > 0) params.$expand = expandFields;
+        if (wireExpand.length > 0) params.$expand = wireExpand;
         // Ask only for what the principal may read and the list draws or its
         // row predicates read (objectui#10186). Omitted on a derived-columns
         // list — see `selectFields` for why that path sends no projection.
-        if (selectFields) params.$select = selectFields;
+        if (wireSelect) params.$select = wireSelect;
         if (windowed) {
           params.$top = effectivePageSize;
           params.$skip = fetchPage * effectivePageSize;
@@ -1358,9 +1514,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // compared by value, that re-runs the effect when the child definition
     // settles. The definition itself reaches the query through `expandKey`,
     // `selectKey` and the arity flag, never named here by identity
-    // (commandment #10).
+    // (commandment #10). `wireExpandKey` / `wireSelectKey` are those two keys
+    // as a compact card narrows them (objectstack#27056), and `rowsWanted` the
+    // card's in-view / non-zero gate, a boolean.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, objectSchemaReady]);
+  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady]);
 
   // Windowed mode: a page beyond the (shrunken) collection — e.g. the last
   // row of the last page was just deleted — comes back empty. Step back one
@@ -2345,11 +2503,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const hasCustomRowActions = Array.isArray(rowActions) && rowActions.length > 0;
   const hasRowActions = !!onRowEdit || !!onRowDelete || hasCustomRowActions;
   const isMobile = useIsMobile();
-  // In the record page's related column (objectstack#26678) the list is a
-  // ~20rem card that names its first rows: the identity column alone, since a
-  // second column does not fit beside it and the table would be cut off at the
-  // column's edge. Display only — the read, filter and sort are unchanged.
-  const compact = React.useContext(RelatedListCompactContext);
+  // objectstack#27055 — the reader's controls over this card (drag, ⋯ menu,
+  // enlarge), handed down by the arranged stack that draws it; `null`
+  // anywhere else.
+  const cardChrome = React.useContext(RelatedCardChromeContext);
+  // objectstack#27055, Target 8 — a body table of the default record page:
+  // collapsible, ⤢ to enlarge, a totals line, no 「查看全部」.
+  const bodyTableIds = React.useContext(RecordBodyTablesContext);
+  const enlargeRelated = React.useContext(RelatedEnlargeContext);
+  const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
+  const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
+  // In the tabbed tier's 关联 tab the reader's arrangement hands the full
+  // list its chrome (objectstack#27055): the title collapses it — a write to
+  // the reader's arrangement, after which the tab draws it collapsed — and
+  // its ⋯ menu moves and hides it.
+  const arrangedFull = !compact && !!cardChrome;
+  const isCollapsible = collapsible || bodyTable || arrangedFull;
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -2444,22 +2613,30 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     }
   }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
 
-  const headerClassName = collapsible ? 'cursor-pointer select-none' : undefined;
-  const handleHeaderClick = collapsible ? () => setCollapsed((c) => !c) : undefined;
+  const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
+  const handleHeaderClick = arrangedFull
+    ? () => cardChrome!.onCollapse()
+    : isCollapsible ? () => setCollapsed((c) => !c) : undefined;
 
   const SectionIcon = resolveIconComponent(icon);
   // Badge shows the COLLECTION size: the server total in windowed mode (only
   // one page is in memory), the loaded row count otherwise.
-  const recordCount = windowed && total != null ? total : relatedData.length;
+  // objectstack#27056 — a compact card counted up front answers from that
+  // count until its rows land (out of view, or counted at 0, they never do).
+  const countAnswers = compact && cardCount !== null && !loadFailure && (loading || !rowsWanted);
+  const recordCount = countAnswers ? cardCount! : windowed && total != null ? total : relatedData.length;
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).
-  const isEmpty = !loading && !loadFailure && relatedData.length === 0 && (!windowed || currentPage === 0);
+  const isEmpty = countAnswers
+    ? cardCount === 0
+    : !loading && !loadFailure && relatedData.length === 0 && (!windowed || currentPage === 0);
   // The same answer, for a caller that arranges several lists (#25895). Before
   // the early return below, so the hook order never changes. A failed read
   // answers `false`, as a refused filter does, so the stack's empty fold
   // leaves it in its own row instead of hiding the failure in the fold line.
-  const emptyAnswer: boolean | null = filterRefusal || loadFailure ? false : loading ? null : isEmpty;
+  const emptyAnswer: boolean | null =
+    filterRefusal || loadFailure ? false : countAnswers ? isEmpty : loading ? null : isEmpty;
   React.useEffect(() => {
     onEmptyChange?.(emptyAnswer);
   }, [emptyAnswer, onEmptyChange]);
@@ -2499,6 +2676,245 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     );
   }
 
+  // The confirm / picker dialogs and the add error, shared by both faces.
+  const trailingDialogs = (
+    <>
+        <AlertDialog
+          open={deleteTarget !== null}
+          onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t('detail.deleteRowTitle', { defaultValue: 'Delete record' })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {/* objectui#13333 — the sentence names the row by its title, the
+                    ONE ADR-0079 resolver over this list's object schema (a
+                    grant's `nameField` formula names the grant and its user). */}
+                {deleteTarget !== null &&
+                  t('detail.deleteRowConfirmation', {
+                    name: getRecordDisplayName(objectSchema, deleteTarget),
+                  })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                {t('detail.cancel', { defaultValue: 'Cancel' })}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleConfirmDelete}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {t('detail.delete', { defaultValue: 'Delete' })}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        {addError && (
+          <div
+            className="mx-4 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            role="alert"
+          >
+            {addError}
+          </div>
+        )}
+        {/* Same gate as the Add button above — `pickerObject` (i.e.
+            `add?.picker?.object`, computed once near the picker-schema fetch) is
+            what the dialog needs, so requiring it here removes the last
+            render-path bare read of `add.picker` rather than optional-chaining
+            it: off-spec `add` still does nothing at all, so no second dialect
+            appears (AGENTS.md #0.1). #3838. */}
+        {add && pickerObject && dataSource && addGranted && (
+          <RecordPickerDialog
+            open={pickerOpen}
+            onOpenChange={(o) => setPickerOpen(o)}
+            multiple
+            dataSource={dataSource as any}
+            objectName={pickerObject}
+            title={add.label || t('detail.add', { defaultValue: 'Add' })}
+            displayField={pickerDisplayField}
+            columns={pickerColumns}
+            cellRenderer={getCellRenderer}
+            fieldsMeta={pickerSchema?.fields}
+            // The author's candidate restriction, handed over VERBATIM (#3831).
+            // `baseFilter` — never `lookupFilters`, which renders its entries as
+            // filter-bar rows the user can edit, i.e. demotes the restriction to a
+            // suggestion. The picker lowers the rule array through the repo's
+            // single filter sink, so no conversion belongs on this side.
+            baseFilter={add.picker.filter}
+            onSelect={() => {}}
+            onSelectRecords={(records: any[]) => { void handleAddRecords(records); }}
+          />
+        )}
+    </>
+  );
+
+  // objectstack#27055, Target 4 — the compact card of the record page's
+  // related column: title + count + ＋ in one row, no table header, up to
+  // three rows of the record's name and ONE status / date chip, ⤢ to enlarge
+  // the list in place. The filter and sort are the list's own; the read asks
+  // for the rows the card names and the fields it draws (objectstack#27056).
+  // No 「查看全部」 footer: the one way to the whole list is ⤢ (Target 9) — the
+  // child's list page is reached from navigation. A card counted at 0 is its
+  // title row alone.
+  if (compact) {
+    const rows = paginatedData.slice(0, COMPACT_RELATED_ROWS);
+    const chipOf = (row: any): React.ReactNode => {
+      const key = compactChipField;
+      if (!key || isEmptyValue(row?.[key])) return null;
+      const def = parentRelationshipFieldDef(objectSchema?.fields, key) as
+        | { type?: unknown; options?: unknown }
+        | undefined;
+      if (def?.type === 'date' || def?.type === 'datetime') {
+        const date = new Date(row[key]);
+        if (Number.isNaN(date.getTime())) return null;
+        return (
+          <span className="shrink-0 text-[11px] text-muted-foreground" data-related-card-chip="date">
+            {date.toLocaleDateString(displayLocale, { month: 'short', day: 'numeric' })}
+          </span>
+        );
+      }
+      const raw = row[key];
+      const option = Array.isArray(def?.options) ? def.options.find((o: any) => o?.value === raw) : undefined;
+      return (
+        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[11px] font-normal" data-related-card-chip="status">
+          {option?.label ?? String(raw)}
+        </Badge>
+      );
+    };
+    const enlarge = cardChrome?.onEnlarge;
+    // Rows still to come: one placeholder per row the count says the card
+    // names, so the card does not grow when they land.
+    const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
+    return (
+      <section
+        ref={setCompactCard}
+        className={cn('rounded-[10px] border border-border bg-card', RELATED_CARD_DROP_LINE, className)}
+        data-related-card=""
+        data-related-card-id={cardChrome?.id}
+        aria-label={title}
+        aria-busy={pendingRows > 0 || undefined}
+      >
+        <div
+          className={cn(
+            'flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold',
+            cardChrome?.dragHandleProps?.draggable && 'cursor-grab active:cursor-grabbing',
+          )}
+          {...(cardChrome?.dragHandleProps ?? {})}
+        >
+          <span className={cn('min-w-0 truncate', isEmpty && 'text-muted-foreground font-medium')}>{title}</span>
+          {cardChrome?.fresh && (
+            <Badge className="h-4 shrink-0 px-1 text-[10px] font-normal" data-related-card-new="">
+              {t('detail.relatedCardNew', { defaultValue: 'New' })}
+            </Badge>
+          )}
+          {!loadFailure && (
+            enlarge ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); enlarge(); }}
+                className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal text-foreground hover:bg-muted/70"
+                aria-label={t('detail.relatedCardCount', { count: recordCount, defaultValue: '{{count}} records — enlarge' })}
+                data-related-card-count=""
+              >
+                {recordCount}
+              </button>
+            ) : (
+              <span className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal" data-related-card-count="">
+                {recordCount}
+              </span>
+            )
+          )}
+          <span className="ml-auto flex shrink-0 items-center gap-0.5">
+            {onNew && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                disabled={newDisabled}
+                aria-label={t('detail.new')}
+                data-testid="related-list-new"
+                onClick={(e) => { e.stopPropagation(); onNew(); }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {add && pickerObject && dataSource && addGranted && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                disabled={addBusy}
+                aria-label={add.label || t('detail.add', { defaultValue: 'Add' })}
+                onClick={(e) => { e.stopPropagation(); setAddError(null); setPickerOpen(true); }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {enlarge && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                aria-label={t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
+                data-related-card-enlarge=""
+                onClick={(e) => { e.stopPropagation(); enlarge(); }}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {cardChrome && <RelatedCardMenu chrome={cardChrome} title={title} collapsed={false} />}
+          </span>
+        </div>
+        {loadFailure ? (
+          <div className="border-t border-border px-3 py-2">
+            <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
+          </div>
+        ) : pendingRows > 0 ? (
+          Array.from({ length: pendingRows }, (_, index) => (
+            <div
+              key={index}
+              className="flex h-8 items-center gap-2 border-t border-border px-3"
+              data-related-card-row-pending=""
+            >
+              <Skeleton className="h-3 w-2/3 rounded" />
+            </div>
+          ))
+        ) : isEmpty && countAnswers ? null : loading && relatedData.length === 0 ? (
+          <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{t('detail.loading')}</div>
+        ) : isEmpty ? (
+          <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{t('detail.noRelatedRecords')}</div>
+        ) : (
+          rows.map((row: any, index: number) => {
+            const name = getRecordDisplayName(objectSchema, row) || String(row?.id ?? '');
+            return (
+              <div
+                key={row?.id ?? index}
+                className="flex h-8 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
+                data-related-card-row=""
+              >
+                {handleRowClick ? (
+                  <button
+                    type="button"
+                    className="min-w-0 truncate text-left text-primary hover:underline"
+                    onClick={(e) => handleRowClick(row, e)}
+                  >
+                    {name}
+                  </button>
+                ) : (
+                  <span className="min-w-0 truncate">{name}</span>
+                )}
+                {chipOf(row)}
+              </div>
+            );
+          })
+        )}
+        {trailingDialogs}
+      </section>
+    );
+  }
+
   return (
     <Card className={cn('shadow-none border-border/60 bg-transparent', isEmpty && 'bg-muted/10', className)}>
       <CardHeader
@@ -2507,7 +2923,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       >
         <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-semibold', compact && 'flex-wrap')}>
           <div className="flex items-center gap-2 min-w-0">
-            {collapsible && (
+            {isCollapsible && (
               collapsed
                 ? (<ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
                 : (<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
@@ -2578,6 +2994,19 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               >
                 <Plus className="h-3.5 w-3.5" />
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
+              </Button>
+            )}
+            {arrangedFull && <RelatedCardMenu chrome={cardChrome!} title={title} collapsed={false} />}
+            {bodyTable && enlargeRelated && ownRelationshipId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 p-0 sm:h-7 sm:w-7 text-muted-foreground"
+                aria-label={t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
+                data-related-card-enlarge=""
+                onClick={(e) => { e.stopPropagation(); enlargeRelated(ownRelationshipId); }}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
               </Button>
             )}
             {onNew && (
@@ -2718,7 +3147,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             truncation condition: the full list page is worth opening even when
             every row fits here (sort, filter, export, a shareable URL). An
             empty list has nothing to see in full. */}
-        {onViewAll && !isEmpty && (
+        {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} />}
+
+        {onViewAll && !isEmpty && !bodyTable && (
           <div className="mt-3 pt-3 border-t flex justify-center">
             <button
               type="button"
@@ -2731,74 +3162,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         )}
       </CardContent>}
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('detail.deleteRowTitle', { defaultValue: 'Delete record' })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {/* objectui#13333 — the sentence names the row by its title, the
-                  ONE ADR-0079 resolver over this list's object schema (a
-                  grant's `nameField` formula names the grant and its user). */}
-              {deleteTarget !== null &&
-                t('detail.deleteRowConfirmation', {
-                  name: getRecordDisplayName(objectSchema, deleteTarget),
-                })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              {t('detail.cancel', { defaultValue: 'Cancel' })}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {t('detail.delete', { defaultValue: 'Delete' })}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      {addError && (
-        <div
-          className="mx-4 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          role="alert"
-        >
-          {addError}
-        </div>
-      )}
-      {/* Same gate as the Add button above — `pickerObject` (i.e.
-          `add?.picker?.object`, computed once near the picker-schema fetch) is
-          what the dialog needs, so requiring it here removes the last
-          render-path bare read of `add.picker` rather than optional-chaining
-          it: off-spec `add` still does nothing at all, so no second dialect
-          appears (AGENTS.md #0.1). #3838. */}
-      {add && pickerObject && dataSource && addGranted && (
-        <RecordPickerDialog
-          open={pickerOpen}
-          onOpenChange={(o) => setPickerOpen(o)}
-          multiple
-          dataSource={dataSource as any}
-          objectName={pickerObject}
-          title={add.label || t('detail.add', { defaultValue: 'Add' })}
-          displayField={pickerDisplayField}
-          columns={pickerColumns}
-          cellRenderer={getCellRenderer}
-          fieldsMeta={pickerSchema?.fields}
-          // The author's candidate restriction, handed over VERBATIM (#3831).
-          // `baseFilter` — never `lookupFilters`, which renders its entries as
-          // filter-bar rows the user can edit, i.e. demotes the restriction to a
-          // suggestion. The picker lowers the rule array through the repo's
-          // single filter sink, so no conversion belongs on this side.
-          baseFilter={add.picker.filter}
-          onSelect={() => {}}
-          onSelectRecords={(records: any[]) => { void handleAddRecords(records); }}
-        />
-      )}
+      {trailingDialogs}
     </Card>
   );
 };

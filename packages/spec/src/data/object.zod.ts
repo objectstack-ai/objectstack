@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema, FieldType } from './field.zod';
+import { FieldSchema, FieldType, VALUE_DOMAIN_FIELD_TYPES } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -262,14 +262,19 @@ export const ObjectCapabilities = strictObject({
   /**
    * History tracking (Audit Trail) master switch — opt-in.
    *
-   * Contract: `true` surfaces the record History tab (audit-trail UI) in the
-   * console. Pair with per-field `trackHistory: true` to select which field
-   * diffs render as human-readable timeline summaries (ADR-0052 §5b). Audit
-   * *capture* into `sys_audit_log` is a compliance ledger and stays on
-   * regardless of this flag; retention is governed by data lifecycle
-   * (ADR-0057), not by hiding the UI.
+   * Contract: `true` surfaces the record's field changes (audit-trail UI) in
+   * the console. On the synthesized record page they join the record's one
+   * timeline stream, beside its discussion and activity, under the stream's
+   * Changes filter; that page has no separate History tab. A page an author
+   * assigns is drawn as authored: a `record:history` or `record:activity`
+   * block placed there shows the record's field changes from its own activity
+   * (`sys_activity`), and neither reads this flag. Pair with per-field
+   * `trackHistory: true` to select which field diffs render as human-readable
+   * timeline summaries (ADR-0052 §5b). Audit *capture* into `sys_audit_log` is
+   * a compliance ledger and stays on regardless of this flag; retention is
+   * governed by data lifecycle (ADR-0057), not by hiding the UI.
    */
-  trackHistory: z.boolean().default(false).describe('Show the record History tab (audit-trail UI). Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
+  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),
@@ -1240,14 +1245,25 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * items can sit under its basic information with its terms after them.
    *
    * Such a group carries no fields: a field whose `group` names it is refused
-   * at parse. A name that matches no inbound relationship is refused at
-   * `defineStack`, as a `relatedLists` entry is. Body tables no group places
-   * keep the record page's default position. `relatedList: false` on the FK
-   * still hides the table.
+   * at parse. Its name is judged exactly as a `relatedLists` entry's is (see
+   * there): a child in the stack with no inbound relationship is refused
+   * everywhere; a child that exists nowhere is refused at `defineStack` (save a
+   * platform-prefixed name, left to the runtime) and by a metadata write that
+   * names no package, and a write into a package stores it, placing nothing.
+   * It names a BODY TABLE only (`isBodyTableRelationship`, #27478): an inbound
+   * FK declaring `relatedList: 'primary'`, or a `master_detail` FK that sets
+   * `inlineEdit` and declares no `relatedList`. Body-ness is the FK's to
+   * decide; the group only positions it. A group naming a side card, or a list
+   * its FK hides with `relatedList: false`, draws nothing at the group, so it
+   * is refused wherever the child's fields are known: at `defineStack` and at
+   * the runtime metadata write door (`related-list-group-not-body`), naming
+   * each FK and the remedy (mark it `relatedList: 'primary'`, name only the
+   * body table as `object.field`, or remove the group's `relatedList`).
+   * Body tables no group places keep the record page's default position.
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused, and so is a name that matches no inbound lookup / master_detail field. relatedList: false on the relationship still hides the table.').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that sets inlineEdit and declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -1835,6 +1851,91 @@ function refuseNonPictureImageField(
       `\`imageField\` names \`${imageField}\`, a \`${String(type)}\` field on object \`${objectName}\`, `
       + `which is not a picture. ${prescription}`,
   });
+}
+
+/**
+ * [ADR-0144 D2] A `record`-mode amount's `currencyConfig.currencyField` names
+ * the field THIS object declares that holds each record's currency: a `text`
+ * field carrying `valueDomain: 'iso_4217_currency'`. The amount stays a bare
+ * number (ADR-0104 D1); the code field is the only place its currency lives,
+ * so a pointer into nothing, into a non-text field or into an unconstrained
+ * text field would parse and give the amount a currency no write ever checks.
+ *
+ * `CurrencyConfigSchema` sees one config at a time and refuses the half it
+ * can see (a `record` config with no pointer, a pointer under another mode);
+ * what the pointer names is judged here, beside
+ * {@link refuseNonPictureImageField}, for the same reason: only the object
+ * holds the field map. Judged for every field whose config is `record`, so a
+ * `formula` declaring `returnType: 'currency'` meets it in the same shape.
+ *
+ * Three refusals, one located issue per offending field at
+ * `['fields', <field>, 'currencyConfig', 'currencyField']`, each carrying the
+ * prescription and the object's candidate fields:
+ *
+ *  - the name is not a declared field (or is the amount itself);
+ *  - the field's type is not one that may declare a value domain
+ *    (`VALUE_DOMAIN_FIELD_TYPES`, field.zod.ts — `text` alone today; the ADR's
+ *    "text field" rests on that set, so this door reads it rather than
+ *    repeating the literal);
+ *  - the field is of such a type without `valueDomain: 'iso_4217_currency'`.
+ *
+ * Judged against the AUTHORED field map. Not judged on
+ * `ObjectExtensionSchema`: an extension's fields merge into an object it does
+ * not hold, so its pointer may name a field only the owner declares.
+ */
+function refuseDishonestRecordCurrencyField(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const map = fields as Record<string, { type?: unknown; valueDomain?: unknown; currencyConfig?: unknown } | null>;
+  const isCodeType = (type: unknown): boolean => typeof type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(type);
+  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
+  const isCodeField = (f: (typeof map)[string]): boolean =>
+    isCodeType(f?.type) && f?.valueDomain === 'iso_4217_currency';
+  for (const [name, field] of Object.entries(map)) {
+    const config = field?.currencyConfig as { currencyMode?: unknown; currencyField?: unknown } | undefined;
+    if (config?.currencyMode !== 'record' || typeof config.currencyField !== 'string') continue;
+    const target = config.currencyField;
+    const candidates = Object.keys(map).filter((k) => k !== name && isCodeField(map[k]!));
+    const prescription =
+      `\`currencyField\` must name a ${codeTypes} field of this object declaring \`valueDomain: 'iso_4217_currency'\` — `
+      + (candidates.length > 0
+        ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
+        : 'the object has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`.');
+    const path = ['fields', name, 'currencyConfig', 'currencyField'];
+    const declared = target !== name && Object.prototype.hasOwnProperty.call(map, target);
+    if (!declared) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, but object \`${objectName}\` declares no `
+          + `other field \`${target}\`. ${prescription}`,
+      });
+      continue;
+    }
+    const type = map[target]?.type;
+    if (!isCodeType(type)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object `
+          + `\`${objectName}\`; a record currency is an ISO 4217 code in a ${codeTypes} field. ${prescription}`,
+      });
+      continue;
+    }
+    if (!isCodeField(map[target]!)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object \`${objectName}\` `
+          + `that does not declare \`valueDomain: 'iso_4217_currency'\`, so a write could store any string as the `
+          + `currency. Add \`valueDomain: 'iso_4217_currency'\` to \`${target}\`, or point at another field. ${prescription}`,
+      });
+    }
+  }
 }
 
 /**
@@ -3042,10 +3143,25 @@ const ObjectSchemaBase = strictObject(
    * one follows in the derived order (owned `master_detail` children, then
    * `lookup` children, each in declaration order).
    *
-   * Strict names: an entry that matches no inbound `lookup` / `master_detail`
-   * field of this object is refused at `defineStack` (the cross-object check,
-   * where every child's fields are known), naming the entry and the inbound
-   * relationships that exist. The shape alone is judged at parse.
+   * Names are judged where the children are known (the shape alone is judged
+   * at parse), and each refusal names the entry and the inbound relationships
+   * that exist:
+   *
+   *  - a child that IS in the stack but has no inbound `lookup` /
+   *    `master_detail` field to this object is refused everywhere: at
+   *    `defineStack` (`os validate`, `os build`) and at the runtime metadata
+   *    write door;
+   *  - a child that exists nowhere is refused at `defineStack` and by a
+   *    metadata write that names no package (judged against the whole
+   *    collection the host serves). `defineStack` leaves a name carrying a
+   *    platform prefix (`sys_`, `cloud_`, `ai_`; `hasPlatformObjectPrefix`)
+   *    unjudged, since a platform or third-party package may provide it; the
+   *    runtime door, which sees the registry, judges it. A write into a package judges only that
+   *    package's closure, and a child outside it may be a downstream
+   *    package's object that points in, so the entry is stored, and the
+   *    record page places nothing for it. The boundary is deliberate: the
+   *    `validate-related-list-refs` rule's header in `@objectstack/lint`
+   *    carries the reasoning.
    *
    * It orders; it does not show or hide. `relatedList: false` on the FK still
    * hides a listed relationship, and a FK's `relatedList: 'primary'` still
@@ -3059,7 +3175,7 @@ const ObjectSchemaBase = strictObject(
     z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
       message: 'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
     }),
-  ).optional().describe('Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry that matches no inbound lookup / master_detail field of this object is refused. It orders only: relatedList: false on the relationship still hides a list, and relatedList: \'primary\' still places a list in the record\'s body, so the order applies among the body tables and among the side cards.'),
+  ).optional().describe('Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere. An entry whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it, since a child outside the package may be a downstream package\'s object that points here, and the record page places nothing for it. It orders only: relatedList: false on the relationship still hides a list, and relatedList: \'primary\' still places a list in the record\'s body, so the order applies among the body tables and among the side cards.'),
   /**
    * [ADR-0085] Semantic role: the field that represents the record's LINEAR
    * lifecycle (an ordered pipeline / stage progression). A string names the
@@ -3482,6 +3598,9 @@ const ObjectSchemaBase = strictObject(
   // object — the same door, for the same reason: only the object holds the
   // field map the pointer resolves against.
   refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
+  // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
+  // ISO 4217 `text` sibling — the same door: only the object holds the map.
+  refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
   // [objectui#12489 ruling 6203737086, letter A] A `referenceDeletedWhen`
   // predicate names a declared single-value `select` sibling and one of its
   // options — the same door: only the object holds the sibling map.

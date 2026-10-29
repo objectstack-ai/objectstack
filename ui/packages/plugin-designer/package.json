@@ -3,7 +3,7 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Visual designer plugin for Object UI with page, data model, process, and report designers plus collaborative editing.",
+  "description": "Visual designer plugin for ObjectUI with page, data model, process, and report designers plus collaborative editing.",
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -85,7 +85,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-designer",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins",
   "publishConfig": {
     "access": "public"
   }

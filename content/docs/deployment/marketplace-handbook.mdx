@@ -35,6 +35,7 @@ the declared keys below are the ones publish actually sends.
 | `displayName` | The name on the card | `--display-name` |
 | `description` | The short description | `--description` |
 | `category` | The catalog category slug (`crm`, `hr`, `finance`, …) | `--category` |
+| `tags` | The listing tags, sent as written. The catalog validates and stores them and refuses a bad list with a 400, which publish prints as it is; `[]` clears the stored tags, and leaving the key out keeps them | — |
 | `iconUrl` | A public http(s) icon URL | `--icon-url`, or `--icon-file` to upload one |
 | `homepageUrl` | Your project or docs URL | `--homepage-url` |
 | `license` | An SPDX identifier | `--license` |
@@ -83,10 +84,12 @@ columns for a missing key. The per-locale shape is the
 **Two things the file can say that never reach the listing.** Publish uploads no
 screenshot images, and the Console's marketplace pages render none: a
 `preview.screenshots` list stays on your disk, and `screenshotCaptions` travels
-with no image to caption. The schema also accepts `tags`, `publisher` and
-`isStarter`, but `os package publish` does not send them. Put the icon, the
-description, the tagline and the README where the table above says, and nothing
-else.
+with no image to caption. The schema also accepts `publisher` and `isStarter`,
+but the platform decides both: an author's value has no effect, so
+`os package publish` never sends them and prints a warning naming each one the
+file declares. `tags` is different: it is sent as written (see the table above).
+Put the icon, the description, the tags, the tagline and the README where the
+table above says, and nothing else.
 </Callout>
 
 ## The README the listing depends on

@@ -4,7 +4,7 @@
   "private": true,
   "description": "ObjectStack Protocol & Specification - Monorepo for TypeScript Interfaces, JSON Schemas, and Convention Configurations",
   "scripts": {
-    "build": "turbo run build --filter=!@objectstack/docs --filter=!./ui*/apps/site",
+    "build": "turbo run build --filter=!@objectstack/docs",
     "dev": "node scripts/check-dev-prereqs.mjs && pnpm --filter @objectstack/example-showcase dev",
     "dev:showcase": "node scripts/check-dev-prereqs.mjs && pnpm --filter @objectstack/example-showcase dev",
     "dev:crm": "node scripts/check-dev-prereqs.mjs && pnpm --filter @objectstack/example-crm dev",
@@ -118,7 +118,7 @@
     "check:adr-symbol-anchors": "node scripts/check-adr-symbol-anchors.mjs --self-test && node scripts/check-adr-symbol-anchors.mjs",
     "check:scripts-symbol-anchors": "node scripts/check-scripts-symbol-anchors.mjs --self-test && node scripts/check-scripts-symbol-anchors.mjs",
     "check:spec-docblock-symbol-anchors": "node scripts/check-spec-docblock-symbol-anchors.mjs --self-test && node scripts/check-spec-docblock-symbol-anchors.mjs",
-    "check:platform-checklist": "node scripts/checklist-select.mjs --self-test && node scripts/check-platform-checklist.mjs --self-test && node scripts/check-platform-checklist.mjs",
+    "check:platform-checklist": "node scripts/checklist-select.mjs --self-test && node scripts/qa/qa-rollup.mjs --self-test && node scripts/qa/retest-owed.mjs --self-test && node scripts/check-platform-checklist.mjs --self-test && node scripts/check-platform-checklist.mjs",
     "gen:checklist-status": "node scripts/gen-checklist-status.mjs --self-test && node scripts/gen-checklist-status.mjs",
     "check:org-identifier": "node scripts/check-org-identifier.mjs --self-test && node scripts/check-org-identifier.mjs",
     "check:runner-env-posture": "node scripts/check-runner-env-posture.mjs --self-test && node scripts/check-runner-env-posture.mjs",

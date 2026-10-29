@@ -4,6 +4,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { hashSpec, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { registerMetadataTypeActions } from '@objectstack/spec/kernel';
+import { resolveDriverId } from '@objectstack/spec/data';
 import type {
   IDatasourceDriverFactory,
   TestConnectionResult,
@@ -21,6 +22,7 @@ import {
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
 import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
+import { resolveTursoUrl } from './turso-driver-config.js';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /**
@@ -872,6 +874,11 @@ export class DatasourceAdminServicePlugin implements Plugin {
     if (!factory.supports(input.driver)) {
       return { ok: false, error: `No driver factory supports driver '${input.driver}'.` };
     }
+    // [#27512] A probe persists nothing, so it may create nothing either.
+    // Judged before the factory builds anything: every file-backed driver
+    // opens its database the way a writing boot does and creates the file.
+    const fileRefusal = await absentDatabaseFileRefusal(input);
+    if (fileRefusal) return { ok: false, error: fileRefusal };
 
     let driver: any;
     try {
@@ -956,6 +963,62 @@ function codeDatasourceNamesOf(ctx: PluginContext): { has(name: string): boolean
  */
 function servedOrigin(ctx: PluginContext, name: string): 'code' | 'runtime' {
   return codeDatasourceNamesOf(ctx)?.has(name) ? 'code' : 'runtime';
+}
+
+/**
+ * The database file a draft opens when its driver is file-backed, or
+ * `undefined` when it opens none — a server database, a remote libSQL url, an
+ * id no file-backed driver answers to. `:memory:` is returned as is; the
+ * judgement below leaves every `:`-prefixed name alone.
+ *
+ * Read as the default driver factory reads the same config: `sqlite` and
+ * `sqlite-wasm` open `config.filename` (`SqliteConfigSchema`, absent ⇒
+ * `:memory:`), and driver-turso's local engine opens the path of a `file:`
+ * url, its scheme matched in any letter case (`TursoDriver.toKnexConfig`).
+ */
+function probedDatabaseFile(input: ProbeInput): string | undefined {
+  const config = (input.config ?? {}) as Record<string, unknown>;
+  switch (resolveDriverId(input.driver)) {
+    case 'sqlite':
+    case 'sqlite-wasm':
+      return typeof config.filename === 'string' ? config.filename : ':memory:';
+    case 'turso': {
+      const url = resolveTursoUrl({ driver: input.driver, config });
+      return url.slice(0, 'file:'.length).toLowerCase() === 'file:' ? url.slice('file:'.length) : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * [#27512] Why the draft probe refuses to open a file-backed draft, or
+ * `undefined` when it may: the file the draft names does not exist, or can be
+ * neither opened nor created. Nothing is written to find out.
+ *
+ * The judgement is driver-sql's one write-free existence check,
+ * `resolveSqliteAbsentFileTarget`: under `'empty-in-memory'` it answers
+ * `openedEmptyInMemory` for an absent file and throws its
+ * `SqliteDatabaseFileError`, naming the file, for one that can be neither
+ * opened nor created — so no second `existsSync` is open-coded here.
+ *
+ * It lives in the probe, not in the driver factory, so it holds whichever
+ * factory the host registered, and a Save, the boot restore and every hot
+ * pool still open the file as before and create it.
+ */
+async function absentDatabaseFileRefusal(input: ProbeInput): Promise<string | undefined> {
+  const filename = probedDatabaseFile(input);
+  if (filename === undefined) return undefined;
+  const { resolveSqliteAbsentFileTarget } = await import('@objectstack/driver-sql');
+  try {
+    if (!resolveSqliteAbsentFileTarget(filename, 'empty-in-memory').openedEmptyInMemory) return undefined;
+  } catch (err) {
+    return errMsg(err);
+  }
+  return (
+    `SQLite database file '${filename}' does not exist. Testing a connection never creates it: `
+    + 'point the draft at an existing database file, or save the datasource to have it created.'
+  );
 }
 
 function errMsg(err: unknown): string {

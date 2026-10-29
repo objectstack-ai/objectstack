@@ -1783,14 +1783,17 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         for (const r of rows) expect(Object.keys(r).sort()).toEqual(['title']);
     });
 
-    it('[#7589 GUARD] a projection of ONLY unknown plain columns still falls back to every field', async () => {
-        // The `SELECT *` fallback itself, pinned as KEPT for the plain case:
-        // this is the documented tolerance the ruling preserves, not a defect
-        // this card missed. (The DOTTED route into this same fallback is what
-        // was closed above.)
-        const rows: any[] = await engine.find('showcase_task', { fields: ['no_such_field'] });
-        expect(rows).toHaveLength(5);
-        expect(Object.keys(rows[0])).toEqual(expect.arrayContaining(['id', 'title', 'status']));
+    it('[#27165] a projection of ONLY unknown plain columns is an empty projection, refused', async () => {
+        // The `SELECT *` fallback this guard pinned as KEPT is closed by its
+        // own ruling (#27165 triage): a projection the tolerance empties is an
+        // empty projection, refused as `fields: []` is (#27008), never read as
+        // every column. The tolerance itself stays for a mixed projection
+        // (the guard above).
+        const err: any = await engine
+            .find('showcase_task', { fields: ['no_such_field'] })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(err.message).toMatch(/names no field in 'fields': got \["no_such_field"\]/);
     });
 
     it('[#7589 GUARD] `engine.findOne` keeps the same plain tolerance', async () => {
@@ -2268,12 +2271,29 @@ describe('#4254 — searchFields / groupBy / aggregations on the list path (real
         })).rejects.toThrow(/scans this object's own columns/);
     });
 
-    it('an empty override is ABSENT, not malformed', async () => {
-        for (const searchFields of ['', []]) {
-            expect(titles(await protocol.findData({
-                object: 'showcase_task', query: { search: 'a', searchFields },
-            }))).toEqual(['A', 'B']);
+    // [#27484] Flipped on purpose (triage ruling 6500648325, option A). This
+    // pin read an empty override as ABSENT; the door now refuses it in the
+    // projection's envelope (#26644), as `$select` refuses a projection naming
+    // no field. Read as absent, the search scanned the default set: a caller who
+    // wrote the parameter meant to narrow, and got the widest scan instead.
+    it('an override naming no field is refused, not read as absent', async () => {
+        const named = [
+            [{ searchFields: '' }, 'searchFields'],
+            [{ searchFields: ',' }, 'searchFields'],
+            [{ searchFields: ' , ' }, 'searchFields'],
+            [{ searchFields: [] }, 'searchFields'],
+            [{ $searchFields: '' }, '$searchFields'],
+            [{ search: { query: 'a', fields: [] } }, 'search'],
+            [{ search: { query: 'a', fields: '' } }, 'search'],
+        ] as const;
+        for (const [query, param] of named) {
+            await expect(protocol.findData({
+                object: 'showcase_task', query: { search: 'a', ...query },
+            }), JSON.stringify(query)).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR', param });
         }
+        // …and a search with no override at all is untouched: absent is absent.
+        expect(titles(await protocol.findData({ object: 'showcase_task', query: { search: 'a' } })))
+            .toEqual(['A', 'B']);
     });
 
     // ─────────────────────────────────────────────────────────────

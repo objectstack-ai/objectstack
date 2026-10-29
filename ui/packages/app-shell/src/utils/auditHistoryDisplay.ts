@@ -19,10 +19,21 @@
  *  2. drop no-op changes where both sides are empty (null vs '' vs []),
  *  3. format values by field type (dates localized, booleans as Yes/No,
  *     select values mapped to option labels, lookup ids mapped to record
- *     names via a caller-resolved id → label map).
+ *     names via a caller-resolved id → label map, currency / number / percent
+ *     amounts through the field renderer's own formatters).
  */
 
 import { toDisplayDate } from '@object-ui/core';
+import type { NumberFieldMetadata } from '@object-ui/types';
+import type { FieldCurrencyConfig } from '@object-ui/i18n';
+import {
+  formatCurrency,
+  formatNumberFieldValue,
+  formatPercent,
+  percentCellScale,
+  resolveFieldCurrency,
+} from '@object-ui/fields';
+import { resolveFieldScale } from '@objectstack/spec/data';
 
 /** Minimal structural view of an object field definition. */
 export interface AuditFieldDef {
@@ -39,6 +50,17 @@ export interface AuditFieldDef {
    * only ever describes an object metadata document.
    */
   reference?: string;
+  /**
+   * The members the field renderer's numeric formatters read
+   * ({@link formatScalar}'s currency / number / percent arm): `scale` the
+   * declared decimal places (`number` / `percent`), `max` the percent storage
+   * hint, `useGrouping` the author's grouping hint, `currencyConfig` the
+   * currency mode and code.
+   */
+  scale?: number;
+  max?: number;
+  useGrouping?: boolean;
+  currencyConfig?: FieldCurrencyConfig;
   [k: string]: unknown;
 }
 
@@ -57,6 +79,14 @@ export interface AuditValueFormatContext {
    * runtime default answers.
    */
   locale?: string;
+  /**
+   * The tenant's default currency code (`useLocalization().currency`,
+   * ADR-0053): the last step of `resolveFieldCurrency`'s precedence, which a
+   * `dynamic`-mode currency field with no code of its own displays in.
+   * Absent, such an amount reads as a plain number, the formatter's no-code
+   * face, never a guessed symbol.
+   */
+  tenantCurrency?: string;
   /** target object name → (record id → display label), for lookup fields. */
   lookupLabels?: Map<string, Map<string, string>>;
 }
@@ -213,8 +243,61 @@ export function collectLookupIds(
   return out;
 }
 
+/**
+ * A stored numeric value as a number, or `null` when it is not one. The audit
+ * payload carries the raw stored value: a JS number, or a decimal column read
+ * back as its numeric string.
+ */
+const asFiniteNumber = (v: unknown): number | null => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * A `currency` / `number` / `percent` amount, formatted by the calls the
+ * record page's cells make for that field (`CurrencyCellRenderer`,
+ * `NumberCellRenderer`, `PercentCellRenderer` in `@object-ui/fields`), so the
+ * History tab reads one stored value the way the record does. ⛔ No formatter
+ * of this helper's own: these are the shared ones, by reference.
+ *
+ * Currency resolves its code through `resolveFieldCurrency`, the cells' one
+ * precedence: a `fixed` field reads its declared code and a `dynamic` one the
+ * tenant default in {@link AuditValueFormatContext.tenantCurrency}. A
+ * `record`-mode field (ADR-0144 D2) keeps its code in a sibling field of the
+ * row, which this per-value call is not handed, so it resolves to no code and
+ * reads as the formatter's plain number: the resolver's own answer for a call
+ * with no record, never a code the amount may not be in.
+ */
+function formatNumericAmount(type: string, def: AuditFieldDef, value: number, ctx: AuditValueFormatContext): string {
+  if (type === 'currency') {
+    return formatCurrency(value, resolveFieldCurrency(def, ctx.tenantCurrency), ctx.locale);
+  }
+  if (type === 'percent') {
+    // The pair `PercentCellRenderer` asks: the declared width through the
+    // protocol's resolver, and the declared storage (fraction unless `max` > 1).
+    const scale = resolveFieldScale({ type, scale: def.scale });
+    return formatPercent(value, percentCellScale(def), scale, ctx.locale);
+  }
+  // The members `formatNumberFieldValue` reads, handed over by name: an object
+  // metadata document's field carries no `name` of its own (it is the key).
+  const numberField: NumberFieldMetadata = {
+    name: '',
+    type: 'number',
+    scale: def.scale,
+    useGrouping: def.useGrouping,
+  };
+  return formatNumberFieldValue(value, numberField, ctx.locale);
+}
+
+const NUMERIC_AMOUNT_TYPES = new Set(['currency', 'number', 'percent']);
+
 function formatScalar(def: AuditFieldDef | undefined, value: unknown, ctx: AuditValueFormatContext): string {
   const type = def?.type;
+
+  if (def && typeof type === 'string' && NUMERIC_AMOUNT_TYPES.has(type)) {
+    const num = asFiniteNumber(value);
+    if (num !== null) return formatNumericAmount(type, def, num, ctx);
+  }
 
   if (type === 'boolean' || typeof value === 'boolean') {
     const truthy = value === true || value === 'true' || value === 1;

@@ -50,8 +50,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { generateEd25519KeyPair, signPayload } from '@objectstack/core';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { isExitSignal } from './format.js';
+import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from './osplugin.js';
 import { bootSchemaStack } from './schema-migrate.js';
 import { buildDataMigrationPlugins } from './data-migration-plugins.js';
 import DbOrphans from '../commands/db/orphans.js';
@@ -75,6 +77,10 @@ import MigrateSecurityCatalogOverlays from '../commands/migrate/security-catalog
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
+import PluginInstall from '../commands/plugin/install.js';
+import PluginTrustAdd from '../commands/plugin/trust/add.js';
+import PluginTrustList from '../commands/plugin/trust/list.js';
+import PluginTrustRevoke from '../commands/plugin/trust/revoke.js';
 import SecretOrphans from '../commands/secret/orphans.js';
 import SecretRewrap from '../commands/secret/rewrap.js';
 import StorageOrphans from '../commands/storage/orphans.js';
@@ -130,7 +136,11 @@ type Invoke = (argv: string[]) => Promise<unknown>;
 interface Mode {
   /** How the case is named in the report. */
   label: string;
-  /** The argv after the command id. `@DB@` is the case's database URL, `@DIR@` the project directory. */
+  /**
+   * The argv after the command id. `@DB@` is the case's database URL, `@DIR@`
+   * the case's directory, `@FIXTURE@` the directory holding the plugin
+   * commands' inputs ({@link writePluginFixture}).
+   */
   argv: string[];
   /**
    * Runs of the same command that must precede this mode on the same case, as
@@ -295,6 +305,26 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate value-shapes', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate value-shapes --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/plugin/trust/add.ts': {
+    run: invoke(PluginTrustAdd),
+    noWrite: [],
+    write: [{ label: 'plugin trust add', argv: ['@FIXTURE@/publisher.pub.pem', '--key-id', 'osf-publisher', '--database-url', '@DB@'] }],
+    note: 'every run of it is the write: it has no preview mode',
+  },
+  'commands/plugin/trust/list.ts': {
+    run: invoke(PluginTrustList),
+    noWrite: [{ label: 'plugin trust list', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [],
+    note: 'a read-only report: it has no writing mode',
+  },
+  'commands/plugin/trust/revoke.ts': {
+    run: invoke(PluginTrustRevoke),
+    noWrite: [],
+    // No such key id: the boot happens and the command then refuses the id
+    // as unknown. The boot is what this case is about.
+    write: [{ label: 'plugin trust revoke', argv: ['osf-absent-key', '--database-url', '@DB@'] }],
+    note: 'every run of it is the write: it has no preview mode',
+  },
   'commands/secret/orphans.ts': {
     run: invoke(SecretOrphans),
     noWrite: [{ label: 'secret orphans', argv: ['--database-url', '@DB@', '--json'] }],
@@ -316,6 +346,22 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'storage orphans', argv: ['--database-url', '@DB@', '--json'] }],
     write: [],
     note: 'report-only: it has no writing mode',
+  },
+  // [#27123] The trusted-key read `os plugin install` and `os serve`'s
+  // boot-time loader share: a utility, so its boot runs through the command
+  // that reaches it from oclif. (`os serve` reaches it too, before its own
+  // kernel bootstraps; a served boot is not a one-shot.)
+  'utils/plugin-trust-read.ts': {
+    run: invoke(PluginInstall),
+    // The fixture artifact is signed under a key id the database does not
+    // trust, so the run reads the trusted-key store and refuses by name. The
+    // boot is what this case is about.
+    noWrite: [{
+      label: 'plugin install (key not trusted)',
+      argv: ['@FIXTURE@/com.example.osf-plugin-1.0.0.osplugin', '--database-url', '@DB@', '--json'],
+    }],
+    write: [],
+    note: 'it writes no database row in any mode: it only reads the trusted-key store, and an install lands under OS_HOME',
   },
 };
 
@@ -480,7 +526,8 @@ function prepareCase(argv: string[], opts: { absent?: boolean } = {}): { dbFile:
   mkdirSync(caseDir, { recursive: true });
   const dbFile = join(caseDir, 'app.db');
   if (!opts.absent) copyFileSync(templateDb, dbFile);
-  const fill = (raw: string[]): string[] => raw.map((a) => a.replace('@DB@', `file:${dbFile}`).replace('@DIR@', caseDir));
+  const fill = (raw: string[]): string[] =>
+    raw.map((a) => a.replace('@DB@', `file:${dbFile}`).replace('@DIR@', caseDir).replace('@FIXTURE@', join(dir, 'fixture')));
   return { dbFile, argv: fill(argv), fill };
 }
 
@@ -490,6 +537,32 @@ async function runBefore(run: Invoke, c: { fill: (argv: string[]) => string[] },
     const result = await runJson(run, c.fill(argv));
     expect(result.payload?.error, `a preceding run failed: ${JSON.stringify(result.payload).slice(0, 400)}`).toBeUndefined();
   }
+}
+
+/**
+ * The `os plugin` commands' inputs, under `<dir>/fixture`: a publisher's
+ * public key, and an artifact signed under its key id (`osf-publisher`) that
+ * no case's database trusts.
+ */
+function writePluginFixture(): void {
+  const fixture = join(dir, 'fixture');
+  mkdirSync(fixture, { recursive: true });
+  const publisher = generateEd25519KeyPair();
+  writeFileSync(join(fixture, 'publisher.pub.pem'), publisher.publicKeyPem);
+  const files: ArchiveFile[] = [{ path: 'dist/index.mjs', data: new TextEncoder().encode('export default {};\n') }];
+  const manifest = {
+    id: 'com.example.osf-plugin',
+    version: '1.0.0',
+    type: 'plugin',
+    runtime: 'node',
+    packaging: 'bundled',
+    integrity: computeIntegrity(files),
+  };
+  files.push({ path: MANIFEST_FILENAME, data: new TextEncoder().encode(JSON.stringify(manifest)) });
+  const artifact = new Uint8Array(createTarGz(files));
+  const artifactPath = join(fixture, 'com.example.osf-plugin-1.0.0.osplugin');
+  writeFileSync(artifactPath, artifact);
+  writeFileSync(`${artifactPath}.sig`, signPayload(artifact, publisher.privateKeyPem, 'osf-publisher'));
 }
 
 beforeAll(async () => {
@@ -520,6 +593,7 @@ beforeAll(async () => {
   await bootServedStack(templateDb);
   // The commands run against the next release of the app.
   writeFileSync(process.env.OS_ARTIFACT_PATH, JSON.stringify(NEXT_ARTIFACT));
+  writePluginFixture();
 }, 180_000);
 
 afterAll(() => {
@@ -556,6 +630,19 @@ describe('[#21391] the bootSchemaStack family is the table above', () => {
       if (caller.noWrite.length === 0 || caller.write.length === 0) expect(caller.note, file).toBeTruthy();
     }
   });
+});
+
+describe('[#27123] the plugin install case reaches its boot, not an earlier refusal', () => {
+  it('the fixture artifact passes every check before the store read, and the store read refuses its key', async () => {
+    const caller = CALLERS['utils/plugin-trust-read.ts'];
+    const c = prepareCase(caller.noWrite[0].argv);
+    const result = await runJson(caller.run, c.argv);
+    // A missing or malformed signature would refuse before the boot and
+    // leave the no-write cases above holding vacuously. (The signature is
+    // verified before the archive is read, so the archive no longer can.)
+    expect(result.payload, JSON.stringify(result.payload).slice(0, 400)).toMatchObject({ error: 'signature_key_untrusted' });
+    expect(result.exitCode).toBe(1);
+  }, CASE_TIMEOUT_MS);
 });
 
 const NO_WRITE = Object.entries(CALLERS).flatMap(([file, c]) => c.noWrite.map((m) => ({ file, run: c.run, ...m })));

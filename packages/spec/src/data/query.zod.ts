@@ -7,6 +7,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { transportProjectionArray } from './projection-names-a-field';
+import { SEARCH_FIELDS_ACCEPT_SET, searchFieldsArray } from './search-fields-names-a-field';
 
 /**
  * QueryAST — Abstract Syntax Tree for data queries.
@@ -449,7 +450,10 @@ const QUERY_WINDOW_FUNCTIONS_REMOVED =
  */
 export const FullTextSearchSchema = lazySchema(() => z.object({
   query: z.string().describe('Search query text'),
-  fields: z.array(z.string()).optional().describe('Fields to search in (if not specified, searches all text fields)'),
+  // [#27683] The search-field override's accept set (`./search-fields-names-a-field.ts`):
+  // the door refuses a list naming no field rather than searching the defaults.
+  fields: searchFieldsArray().optional()
+    .describe(`Fields to search in (if not specified, searches all text fields) — ${SEARCH_FIELDS_ACCEPT_SET}`),
   fuzzy: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag.'),
   operator: z.enum(['and', 'or']).optional().default('or').describe('[EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag.'),
   boost: z.record(z.string(), z.number()).optional().describe('[EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results.'),
@@ -545,9 +549,13 @@ const BaseQuerySchema = z.object({
    * P1 ("formalize `$searchFields`"); the enforcement site is
    * `objectql/src/search-filter.ts` `resolveSearchFields`, proven at the
    * HTTP level by `showcase-search.dogfood.test.ts`.
+   *
+   * [#27683] An override naming no field is refused, as the door refuses it
+   * (`./search-fields-names-a-field.ts`): read as absent it would search the
+   * object's default fields, a widening of what the caller asked for.
    */
-  searchFields: z.array(z.string()).optional()
-    .describe('Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1)'),
+  searchFields: searchFieldsArray().optional()
+    .describe(`Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — ${SEARCH_FIELDS_ACCEPT_SET}`),
 
   /** Order By Clause (Sorting) */
   orderBy: z.array(SortNodeSchema).optional().describe('Sorting instructions (ORDER BY)'),

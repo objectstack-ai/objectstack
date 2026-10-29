@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -213,7 +213,7 @@
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
         "open the record detail; edit exactly one field (annual_revenue); submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>",
-        "open the record's History tab (screenshot first, then read entries)",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). Where the stream sits depends on the record view's width (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), the window minus the console sidebar: at 760 px and wider it is resident (the Timeline column, or, while the reader's timeline switch is off, the Activity card at the foot of the related column); narrower, it is the Timeline tab. A 1440×900 window is a column tier whatever the sidebar does. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
         "delete via the row/detail action; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
@@ -245,9 +245,9 @@
           "evidence": "screenshots"
         },
         {
-          "clause": "record History reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
+          "clause": "the record's field-change history (the record page's sys_audit_log read, shown as the timeline stream's Changes chip) reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object (its option labels, the localized Customer Since date and the resolved owner); it is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
+          "verify": "after a screenshot confirms the Changes chip is selected on the account's timeline stream (steps[5]), read its change lines — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object, at 1440×900 (its option labels, the localized Customer Since date and the resolved owner). The page reads sys_audit_log only for an object whose enable.trackHistory is true (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled), and the rows reach the stream as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The chip also lists the stream's sys_activity created/updated rows, so attribute a line to the audit read before scoring it. ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts the default tabs carry neither Activity nor History), so its absence fails a working product. The spec is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
           "evidence": "screenshot + entries"
         },
         {
@@ -373,6 +373,12 @@
           "date": "2026-10-28",
           "change": "steps[0], steps[1], steps[4], acceptance[4].verify and one source line corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26481, priority:P0, at 756220c4; wave anchor #25807, slice B): the Accounts entry sits in the Data Model group, which the runner found collapsed; the form buttons read 'Create' and 'Update', not 'Save'; and acceptance[4].verify still cited the retired console pin cf153eb2e535 and an objectui blob, while the spec lives in this checkout at ui/e2e/live/record-history-display.spec.ts. Re-read at base fd246c22: examples/app-showcase/src/ui/apps/index.ts (grp_data 'Data Model', nav_accounts), ui/packages/plugin-form/src/ModalForm.tsx and DrawerForm.tsx (form.create 'Create', form.update 'Update'), ui/playwright.live.config.ts. No clause's assertion changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 16,
+          "date": "2026-10-29",
+          "change": "steps[5] and acceptance[4] (clause and verify) re-pointed from the History tab to the record page v3 surface, the same shape records-forms.field-history-tracking took at its revision 10 (#27492). Record page v3 (#27055) removed the History tab at every width, so a runner following the old step found no tab and scored a working product red or blocked. The step now reads the account's sys_audit_log field-change history under the timeline stream's Changes chip, located by width tier (recordPageTierFor), and the verify names the gate (RecordDetailView historyEnabled), the stream mapping (auditEntriesToFeedItems), the sys_activity rows the chip also lists, and the 1440×900 viewport the re-pointed live spec record-history-display.spec.ts uses. The clause's contract (display values, real actor, no raw payloads) is unchanged; no run verdict on it is invalidated beyond the surface it is read on",
+          "ref": "#27654"
         }
       ]
     },
@@ -3699,7 +3705,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3719,7 +3725,7 @@
       "steps": [
         "open a record; run the packaged undoable action (fixtures.requires[0]) on it; confirm the success toast shows an Undo button. An inline edit offers none by design",
         "click Undo (or press Ctrl+Z); capture the resulting update; re-read the record over the API and confirm the prior value is restored",
-        "open the History/audit and confirm a revert entry was added (a forward write, not a silent rollback)",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). Where the stream sits depends on the record view's width (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), the window minus the console sidebar: at 760 px and wider it is resident (the Timeline column, or, while the reader's timeline switch is off, the Activity card at the foot of the related column); narrower, it is the Timeline tab. A 1440×900 window is a column tier whatever the sidebar does. Also read sys_audit_log for the record over the API, and confirm a revert entry was added (a forward write, not a silent rollback)",
         "press Ctrl+Shift+Z (redo); confirm the edited value is restored",
         "CONCURRENT-CLOBBER probe: in session A make the undoable edit; in session B change the SAME field and save; back in A, click Undo",
         "observe and FLAG whether A's undo carries an OCC guard or silently overwrites B's value"
@@ -3738,10 +3744,10 @@
           "evidence": "screenshots of both paths"
         },
         {
-          "clause": "the revert is auditable: the History/audit gains a NEW entry for the undo (undo is a forward write, not a hidden state reset)",
+          "clause": "the revert is auditable: sys_audit_log gains a NEW entry for the undo (undo is a forward write, not a hidden state reset)",
           "oracle": "api",
-          "verify": "after screenshot of the History tab, the audit/read shows the revert as its own update",
-          "evidence": "the History entries + audit read"
+          "verify": "the sys_audit_log read for the record shows the revert as its own update; screenshot the timeline stream's Changes chip showing it as a change line when the object's enable.trackHistory is true (the page reads sys_audit_log only then — ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled). ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055), so its absence fails a working product",
+          "evidence": "the audit read + the Changes chip screenshot"
         },
         {
           "clause": "CONCURRENT-CLOBBER (observe + flag): the undo path issues a bare dataSource.update with NO ifMatch, so an undo after a concurrent edit landed in between will overwrite it — verify the observed behavior and record a silent clobber as a finding, not a silent pass",
@@ -3798,6 +3804,12 @@
           "date": "2026-10-28",
           "change": "BLOCKED premise re-checked and kept (lead from slice B's report 6457925443). At base f2fdac5d, examples/ declares zero `undoable` keys and no packaged action in packages/ declares undoable: true, so the showcase still ships no undoable action; inline edits still push no Undo op (ActionRunner pushes only an action result's undo). fixtures.requires[0] says the reading is current on main, and knownGaps[1] records the re-check and the two undoable shapes the spec now accepts (operation 'update' with a patch, or type 'api'), either of which can be the lifting fixture. `blocked` unchanged. Wave anchor #25807, slice C. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-29",
+          "change": "steps[2] and acceptance[2] (clause, verify, evidence) re-pointed from the History tab to the record page v3 surface, the same shape records-forms.field-history-tracking took at its revision 10 (#27492). Record page v3 (#27055) removed the History tab at every width. The revert's oracle is now the record's sys_audit_log read over the API, with the timeline stream's Changes chip (located by width tier, recordPageTierFor) as the screenshot when the object tracks history. The clause's contract (the undo is a forward, audited write) is unchanged, and the item stays blocked(fixture)",
+          "ref": "#27654"
         }
       ]
     },
@@ -5001,7 +5013,7 @@
       },
       "source": [
         "packages/spec/src/data/field.zod.ts#deleteBehavior (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
-        "packages/objectql/src/engine.ts#required (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
+        "packages/objectql/src/engine-delete-cascade.ts#required (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
         "examples/app-showcase/src/data/objects/invoice.object.ts#InvoiceLine (its invoice master_detail, deleteBehavior 'cascade') + examples/app-showcase/src/data/objects/invoice.object.ts#Invoice (its required account lookup, the required-FK escalation); contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
       ],
       "history": [
@@ -5135,10 +5147,10 @@
     },
     {
       "id": "records-forms.field-history-tracking",
-      "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the History tab and derived history op both ways",
+      "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -5148,17 +5160,18 @@
         "app": "showcase",
         "requires": [
           "showcase_account: enable.trackHistory:true (account.object.ts) + per-field trackHistory on industry/status — the BOTH-halves fixture",
-          "showcase_task: per-field trackHistory on status/priority (examples/app-showcase/src/data/objects/task.object.ts#Task: its status and priority fields declare trackHistory) with NO object-level enable block — the natural negative for the tab/op gating"
+          "showcase_task: per-field trackHistory on status/priority (examples/app-showcase/src/data/objects/task.object.ts#Task: its status and priority fields declare trackHistory) with NO object-level enable block — the natural negative for the audit-read/op gating"
         ],
         "knownGaps": [
-          "no showcase object declares trackHistory:true on a REFERENCE field, so the referenced-record-title rendering (clause 5) is a unit-pin verdict (audit-lookup-summary.test.ts) unless a scratch tracked lookup is authored — record which the verdict rests on"
+          "no showcase object declares trackHistory:true on a REFERENCE field, so the referenced-record-title rendering (clause 5) is a unit-pin verdict (audit-lookup-summary.test.ts) unless a scratch tracked lookup is authored — record which the verdict rests on",
+          "showcase_task's record page is the authored kind:'full' showcase_task_detail page (examples/app-showcase/src/ui/pages/task-detail.page.ts), which draws no timeline stream, and RecordDetailView serves its sys_audit_log read only to a synthesized page (RecordDetailView.recordOpenWaves-13010.test.tsx: 'an assigned page of a trackHistory object never reads the audit log'). So the task's absent read holds with or without enable.trackHistory, and it does not prove the flag half of the gate on its own. No showcase object pairs per-field flags, no enable block and a synthesized page. The flag half rests on the historyEnabled code read unless a scratch object with that shape is authored"
         ]
       },
       "steps": [
         "boot the showcase on its own port and DB; sign in as admin; open a seeded account record",
         "edit the TRACKED select `industry` (e.g. Technology → Finance); save; read the record's sys_activity rows over the API and open the timeline",
         "edit an UNTRACKED field (e.g. website) alone; save; re-read sys_activity for the record",
-        "open the account's History tab; then open a seeded task's detail and look for a History tab",
+        "record the network log from page load, open the account record and select its timeline stream's Changes chip (变更). Record page v3 has no History tab at any width (#27055). Where the stream sits depends on the record view's width (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), which is the window minus the console sidebar. At 760 px and wider it is resident: the Timeline column, or, while the reader's timeline switch is off, the Activity card at the foot of the related column. The switch is off by default for an object that is not worked, and showcase_account is not one (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordTimelineDefaultReason answers null). Narrower, it is the Timeline tab. Measured on this item's re-point: a 1440×900 window gave 1184 px (sidebar expanded) and a 1000×800 window 952 px (sidebar as its icon rail), both columns with no tab strip; only a 700×800 window drew the tabs (Details / Related / Timeline). Then open a seeded task's detail and read the network log again",
         "GET /api/v1/auth/me/permissions and compare apiOperations for showcase_account vs showcase_task"
       ],
       "acceptance": [
@@ -5175,10 +5188,10 @@
           "evidence": "the sys_activity read"
         },
         {
-          "clause": "the History TAB gates on OBJECT-level enable.trackHistory, both ways: the account detail renders the tab (flag true) and the task detail does NOT (no enable block — per-field flags alone do not summon it)",
-          "oracle": "dom",
-          "verify": "screenshot both detail pages after settle (the task detail page carries no tablist at all, so corroborate its 'no History tab' with the absent sys_audit_log fetch, QA run #24616); gating ruled at objectui RecordDetailView.tsx (trackHistory must be explicitly true)",
-          "evidence": "both screenshots"
+          "clause": "the record page's sys_audit_log field-change history gates on OBJECT-level enable.trackHistory, both ways: the account detail (flag true) reads sys_audit_log and its timeline stream's Changes chip lists the tracked edits as old → new lines with display values; the task detail (no enable block — per-field flags alone do not summon it) makes NO sys_audit_log read",
+          "oracle": "network",
+          "verify": "the network log after settle: one sys_audit_log read for the account record (at page load in a column tier; in the tabbed tier when the Timeline tab opens, or at load under ?tab=timeline) and none for the task; screenshot the account's Changes chip showing the industry edit. Gating ruled at ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled: enable.trackHistory explicitly true, sys_audit_log registered, the viewed object not sys_audit_log itself; and the read serves only the synthesized page's stream, never an assigned page); the read's rows reach the stream through RecordFieldChangesContext as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The task half is over-determined (knownGaps): record which gate the verdict rests on. ⛔ An empty Changes chip is never an absence oracle: the chip also lists the stream's sys_activity created/updated rows (ACTIVITY_TYPE_TO_FEED_TYPE maps both to field_change). Measured on a seeded account, the chip showed a sys_activity 'Updated Account …' row beside the audit read. ⛔ Nor is a History tab: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts 'no Activity or History tab'), so looking for one fails a working product (QA run #27438)",
+          "evidence": "the two network logs + the account's Changes screenshot"
         },
         {
           "clause": "the derived `history` API operation follows get ∧ enable.trackHistory, both ways: present in showcase_account's effective operation vocabulary, absent from showcase_task's",
@@ -5194,10 +5207,9 @@
         }
       ],
       "negative": [
-        "an untracked edit producing an old→new diff in the sys_activity summary / Discussion timeline is a FAIL — trackHistory is opt-in per field (spec default false, object.zod.ts family note), and the per-field opt-in governs exactly that surface. ⛔ Not the History tab: it reads sys_audit_log (the compliance audit, objectui RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website: old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA run #24616)",
-        "a task detail rendering a History tab is a FAIL — per-field flags without the object-level opt-in must not summon it",
-        "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that)",
-        "cross-ref guard: do NOT re-score crud-roundtrip clause 5 (History-tab display quality on the create/update pair) here — this item owns the tracked/untracked boundary and the two gating directions, that one owns the tab's rendering contract"
+        "an untracked edit producing an old→new diff in the sys_activity summary is a FAIL — trackHistory is opt-in per field (spec default false, object.zod.ts family note), and the per-field opt-in governs exactly that surface. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
+        "a sys_audit_log read on the task detail is a FAIL — per-field flags without the object-level opt-in must not summon the field-change history; judged on the network log, never on an empty Changes chip or a missing tab (acceptance[2].verify says why)",
+        "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that)"
       ],
       "traps": [
         "hydration-race",
@@ -5205,13 +5217,14 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (the History tab's display contract, which negative[3] assigns to records-forms.crud-roundtrip. It opens showcase_account's History tab in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true half; it never reads the task detail, so the absence half has no pin and is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands the generic frame naming the Website label with no arrow and neither URL, message key activityUpdatedFields) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's. acceptance[2]'s absence half and negative[1] (no History tab on the task detail) stay live browser legs: they are judged on the rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
+        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); ui/e2e/live/record-history-display.spec.ts (the record history's display contract, which the cross-ref in source[4] assigns to records-forms.crud-roundtrip. At 1440×900, a column tier whatever the sidebar does, it opens the timeline stream's Changes chip on showcase_account in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true DOM half; it reads no network log and never opens the task detail, so the read gate both ways is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands the generic frame naming the Website label with no arrow and neither URL, message key activityUpdatedFields) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's. acceptance[2]'s absence half and negative[1] (no sys_audit_log read from the task detail) stay live browser legs: they are judged on the network log of the rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
         "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
-        "objectui: packages/app-shell/src/views/RecordDetailView.tsx (History tab three-precondition gate)",
-        "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture + its comment ruling the tab gate), examples/app-showcase/src/data/objects/task.object.ts#Task (its status and priority fields declare trackHistory)"
+        "ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled, the three-precondition gate on the sys_audit_log read; record page v3 hands its rows to the timeline stream, #27055)",
+        "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture), examples/app-showcase/src/data/objects/task.object.ts#Task (its status and priority fields declare trackHistory)",
+        "cross-ref records-forms.crud-roundtrip clause 5 (acceptance[4]) — it owns the record history's display contract on the create/update pair (option labels, localized dates, real actor); this item owns the tracked/untracked boundary and the two gating directions, so do not re-score that contract here"
       ],
       "history": [
         {
@@ -5267,6 +5280,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says negative[1] and acceptance[2]'s absence half stay live browser legs, and why (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-29",
+          "change": "acceptance[2], negative[1], steps[3] and the title re-pointed from the History tab to the record page v3 surface, from QA run #27438 (18.3.0 sweep, wave 3). Record page v3 (#27055) removed the History tab at every width, and the gate now lives on the sys_audit_log read: the account's read fills the timeline stream's Changes chip, and the task makes none. acceptance[2]'s oracle moves from dom to network, because the Changes chip also lists sys_activity rows and is no absence oracle. Measured at base 882d4e4a5c on a booted showcase with the console dev server. Account: one audit read at load, no tab strip, at 1440×900 (record view 1184 px) and 1000×800 (952 px, the sidebar as its icon rail). Only 700×800 drew tabs (Details / Related / Timeline, no History), and its read went out when Timeline opened. Task: the authored showcase_task_detail page, no stream, no audit read at any of the three widths. So that half is over-determined (new knownGaps entry). negative[0]'s exemption now names the stream's audit-log lines instead of the History tab. negative[3], a cross-reference that could only score skipped, moved to source[4]. source[2] and automated.ref point at ui/ and at the re-pointed live spec, record-history-display.spec.ts, which now reads the Changes chip at 1440×900 (passed once on that boot)",
+          "ref": "#27492"
         }
       ]
     },

@@ -10,8 +10,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, claimQueuedRecord, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
+import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, Rows3, LayoutGrid } from 'lucide-react';
+import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, Activity, PanelRight } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -33,9 +33,12 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
-import { RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_DETAIL_TAB_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_DETAIL_TAB_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+
+/** History-state flag: this view pushed the `?related=` entry, so closing pops it. */
+const RELATED_ENLARGE_PUSHED = '__relatedEnlargePushed';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -44,6 +47,7 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import { apiActionFailureMessage } from '../utils/flowResponse.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
 // Audit provenance renders as the one-line <RecordMetaFooter>; the other
 // framework-injected bookkeeping columns are hidden from the body outright.
@@ -72,6 +76,7 @@ import { useFavorites } from '../hooks/useFavorites.js';
 import {
   RECORD_RELATED_COLUMN_PREFERENCE,
   RECORD_TIMELINE_COLUMN_PREFERENCE,
+  RECORD_RELATED_ARRANGEMENT_PREFERENCE,
   objectPreferenceScope,
   useWorkspacePreference,
 } from '../utils/workspacePreference.js';
@@ -132,11 +137,17 @@ const TOGGLE_RELATED_SHORTCUT: AdvertisedShortcut = {
 };
 
 /**
- * The physical key of each punctuation chord key. Shift changes the character
+ * How each punctuation chord key is recognised. Shift changes the character
  * those keys type (`.` becomes `>` on a US layout), so a chord that holds
- * Shift is matched by `KeyboardEvent.code`, the key itself, not by `key`.
+ * Shift is matched by `KeyboardEvent.code`, the physical key — and, beside it,
+ * by either character `key` reports for that key (objectstack#27241): an
+ * event that carries no `code` (synthetic or injected input, some IMEs and
+ * remote desktops) still names the key it typed.
  */
-const PANEL_CHORD_CODES: Readonly<Record<string, string>> = { '.': 'Period', ',': 'Comma' };
+const PANEL_CHORD_KEYS: Readonly<Record<string, { code: string; keys: readonly string[] }>> = {
+  '.': { code: 'Period', keys: ['.', '>'] },
+  ',': { code: 'Comma', keys: [',', '<'] },
+};
 
 function matchesPanelChord(
   e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
@@ -145,8 +156,9 @@ function matchesPanelChord(
   if (e.altKey) return false;
   if (Boolean(chord.mod) !== (e.metaKey || e.ctrlKey)) return false;
   if (Boolean(chord.shift) !== e.shiftKey) return false;
-  const code = PANEL_CHORD_CODES[chord.key];
-  return code !== undefined ? e.code === code : e.key.toLowerCase() === chord.key;
+  const punctuation = PANEL_CHORD_KEYS[chord.key];
+  if (punctuation) return e.code === punctuation.code || punctuation.keys.includes(e.key);
+  return e.key.toLowerCase() === chord.key;
 }
 
 /**
@@ -245,9 +257,10 @@ const FEED_CONSUMER_TYPES: ReadonlySet<string> = new Set([
 ]);
 /**
  * objectui#13010 part 5 — the block that draws this view's `sys_audit_log`
- * read: the synthesized page's History tab hands it the rows as `entries`.
+ * read: on the synthesized page, the timeline stream (objectstack#27055), a
+ * `record:activity` the field changes reach through `RecordFieldChangesContext`.
  */
-const HISTORY_CONSUMER_TYPES: ReadonlySet<string> = new Set(['record:history']);
+const HISTORY_CONSUMER_TYPES: ReadonlySet<string> = new Set(['record:activity']);
 /** Where a page tree nests nodes: the keys `pageSchemaIntrospect` walks. */
 const PAGE_NODE_KEYS = ['children', 'items', 'body', 'components', 'regions'] as const;
 const PAGE_NODE_PROPERTY_KEYS = ['children', 'items'] as const;
@@ -700,6 +713,30 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // renders the "← All <object>" back link — switching tabs must keep it.
     setTabSearchParams(sp, { replace: true, state: location.state });
   }, [setTabSearchParams, location.state]);
+  // ── The enlarged related list, `?related=object.field` (objectstack#27055,
+  // Target 9) ── One path to a related list's every record and column: a
+  // card's ⤢ (or its count) opens the list as a full-width table over the
+  // page body, addressed by the URL so it survives a reload and a shared link.
+  // Opening PUSHES an entry (the browser's Back returns to the columns);
+  // closing — Esc or ‹ — pops it when this view pushed it, and otherwise
+  // replaces the URL without the parameter.
+  const enlargedRelatedParam = tabSearchParams.get(RECORD_RELATED_ENLARGE_PARAM) ?? undefined;
+  const openEnlargedRelated = useCallback((id: string) => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get(RECORD_RELATED_ENLARGE_PARAM) === id) return;
+    sp.set(RECORD_RELATED_ENLARGE_PARAM, id);
+    const state = location.state && typeof location.state === 'object' ? location.state : {};
+    setTabSearchParams(sp, { state: { ...(state as object), [RELATED_ENLARGE_PUSHED]: true } });
+  }, [setTabSearchParams, location.state]);
+  const closeEnlargedRelated = useCallback(() => {
+    if ((location.state as Record<string, unknown> | null)?.[RELATED_ENLARGE_PUSHED]) {
+      navigate(-1);
+      return;
+    }
+    const sp = new URLSearchParams(window.location.search);
+    sp.delete(RECORD_RELATED_ENLARGE_PARAM);
+    setTabSearchParams(sp, { replace: true, state: location.state });
+  }, [setTabSearchParams, location.state, navigate]);
   // Inline "← back to parent" link shown above the record body. Prefers an
   // explicit history-state `from` (legacy, in-session only), then falls back
   // to the last ancestor in the `?from=` URL trail — which, unlike history
@@ -748,7 +785,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // A record-action flow launch that ended `refused` without pausing (objectui#9973).
   const [flowRefusal, setFlowRefusal] = useState<FlowRefusalState>({ open: false });
   const [historyEntries, setHistoryEntries] = useState<any[] | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [, setHistoryLoading] = useState(false);
   const [recordTitle, setRecordTitle] = useState<string | undefined>();
   const objectDef = objects.find((o: any) => o.name === objectName);
   // objectui#13385 (maintainer ruling, option B) — a record page inside the
@@ -936,6 +973,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     columnDefaults.related ? 'on' : 'off',
   );
   const columnSwitches = { timeline: timelineSwitch === 'on', related: relatedSwitch === 'on' };
+  // objectstack#27055 — the reader's arrangement of the related cards (order,
+  // collapsed, hidden), per object, in the same store as the switches. Laid
+  // over the default order by `RelatedCardStack`; never metadata.
+  const [relatedArrangement, setRelatedArrangement] = useWorkspacePreference(
+    RECORD_RELATED_ARRANGEMENT_PREFERENCE,
+    columnScope,
+    EMPTY_RELATED_ARRANGEMENT,
+  );
   // Which switches the toolbar draws — the columns the page has content for —
   // set at render below and read by the shortcuts, so a shortcut never flips
   // a switch the reader cannot see.
@@ -1490,8 +1535,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         if (!res.ok) {
           let errBody: any = null;
           try { errBody = await res.json(); } catch { /* response body not JSON */ }
-          const detail = errBody?.error?.message || errBody?.error || errBody?.message || `HTTP ${res.status}`;
-          return { success: false, error: typeof detail === 'string' ? detail : `HTTP ${res.status}` };
+          return { success: false, error: apiActionFailureMessage(res, errBody, `HTTP ${res.status}`, language) };
         }
         const data = await res.json().catch(() => ({}));
         if (action.refreshAfter === true) notifyRecordChanged();
@@ -1600,7 +1644,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [dataSource, objectName, objectDef, pureRecordId, pageRecord, authFetch, activeOrganization]);
+  }, [dataSource, objectName, objectDef, pureRecordId, pageRecord, authFetch, activeOrganization, language]);
 
   // Client-side modal transport: `type:'modal'` actions open here (Dialog /
   // Sheet / Drawer by `placement`) and render arbitrary SchemaNode content.
@@ -2269,25 +2313,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return () => observer.disconnect();
   }, [attachmentsFallbackEl, attachmentsFallbackShown]);
 
-  // ── The audit read waits for the History tab (objectui#13010 part 5) ───
+  // ── The audit read waits for the timeline (objectui#13010 part 5) ───────
   //
   // The `sys_audit_log` read below, and the `sys_user` name lookup behind it,
-  // fill only the `record:history` node of the History tab the synthesized
-  // page composes; an assigned page is rendered as authored, and its
-  // `record:history` reads its own source. So, like the feed above, the read
-  // goes out when that node is on screen, judged by `pageShowsNodeOnOpen` on
-  // the page this view synthesizes (the History tab is added only in the
-  // rebuild below, so the judgment synthesizes it here with no rows): at open
-  // when `?tab=` names the History tab, else on the tab switch that mounts it.
-  // Latched for the view's life for the feed's reason.
-  const historyPage = useMemo(() => {
-    if (!historyEnabled || assignedPage || namedPageBlocked || !objectDef) return null;
-    return buildDefaultPageSchema(objectDef, {
-      ...(assignedSlots ? { slots: assignedSlots } : {}),
-      history: { entries: [] },
-    });
-  }, [historyEnabled, assignedPage, namedPageBlocked, objectDef, assignedSlots]);
-  // In a column tier History is a resident block of the timeline column, so
+  // fill only the field changes of the timeline stream the synthesized page
+  // composes (objectstack#27055: one stream, no History tab); an assigned page
+  // is rendered as authored, and its `record:history` reads its own source.
+  // So, like the feed above, the read goes out when the stream is on screen,
+  // judged by `pageShowsNodeOnOpen` on the page this view synthesizes: at open
+  // when the page opens on it (the column tiers, or `?tab=timeline`), else on
+  // the tab switch that mounts it. Latched for the view's life for the feed's
+  // reason.
+  const historyPage = historyEnabled && !assignedPage && !namedPageBlocked && objectDef ? synthesizedPage : null;
+  // In a column tier the stream is a resident block of the timeline column, so
   // its read goes out at open (objectstack#26678).
   const historyConsumerOnScreen = useMemo(
     () =>
@@ -2299,9 +2337,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [historyConsumerShown, setHistoryConsumerShown] = useState(false);
   if (historyConsumerOnScreen && !historyConsumerShown) setHistoryConsumerShown(true);
   const historyWanted = historyConsumerOnScreen || historyConsumerShown;
-  // The read is issued from an effect, after the commit that mounts the tab;
-  // that commit shows the tab's loading state, as the read's own would.
-  const historyPending = historyWanted && !!dataSource && !!pureRecordId;
 
   useEffect(() => {
     if (!dataSource || !pureRecordId || !objectDef || !historyEnabled) {
@@ -3324,8 +3359,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         sections?: Array<Record<string, any>>;
         highlightFields?: string[];
         headerActions?: ActionDef[];
-        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean }>;
-        history?: { entries: any[]; loading: boolean; unknownUserText?: string };
+        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean; isBody?: boolean }>;
         approvals?: { count?: number; node?: Record<string, any> };
       };
     }
@@ -3397,12 +3431,34 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `buildDefaultPageSchema`'s `related` shape. `relationshipField` is
     // the FK field on the child pointing back to this record — passed so
     // the related-list renderer can hide the redundant parent-ID column.
-    // Each list's `record:related_list` renderer self-fetches lazily when
-    // its tab is shown (nothing is preloaded here), and header/row
-    // affordances (+ New / View All / row navigation) are wired
-    // downstream by `RelatedRecordActionsBridge`.
-    const related = childRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
+    // Nothing is preloaded here: in the tabbed tier each list reads when its
+    // tab is shown; in the column tiers the related column counts its cards
+    // up front, in one request set, and a card reads its first rows once it
+    // is in view (`RelatedCardStack`, objectstack#27056). Header/row
+    // affordances (+ New / View All / row navigation) are wired downstream
+    // by `RelatedRecordActionsBridge`.
+    // The DEFAULT order of the related lists (objectstack#27055,
+    // objectstack#27069): `relatedList: 'primary'` lists first, then the rest,
+    // each group in `deriveRelatedLists`' order — the object's declared
+    // `relatedLists` first, in that order (`resolveRelatedListOrder`), then
+    // the derived order (owned before lookup, then declaration). It is the
+    // order the related column's cards, the 关联 tab and the body tables
+    // show to a reader who never arranged them.
+    const orderedRelations = [
+      ...childRelations.filter((relation) => relation.isPrimary),
+      ...childRelations.filter((relation) => !relation.isPrimary),
+    ];
+    const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
       const childObjectDef = objects.find((o: any) => o.name === childObject);
+      // objectstack#27055, Target 8 — the record's own BODY: a list the author
+      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring
+      // `inlineEdit` (the child is edited as part of the parent) and no
+      // `relatedList` — `relatedList: true` keeps it a side card. That is
+      // `isPrimary`: `deriveRelatedLists` sets it from `@objectstack/spec`'s
+      // `isBodyTableRelationship` (objectstack#27478), the one predicate the
+      // spec's refusal of a field group naming a side card reads too, so no
+      // second copy of the rule lives here.
+      const isBody = isPrimary;
       // A `relatedListTitle` on the relationship wins; else fall back to the
       // localized child-object PLURAL label — the section lists the child's
       // records, so it is named as that object's list page is (objectui#11733).
@@ -3442,9 +3498,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // the node is a different fact from "the author said nothing".
         ...(declaredFilter ? { filter: declaredFilter } : {}),
         ...(childObjectDef?.icon ? { icon: childObjectDef.icon } : {}),
-        // `relatedList: 'primary'` prominence flag (ADR-0085) — the list is
-        // promoted to its own tab by `buildDefaultTabs`.
+        // `relatedList: 'primary'` prominence flag (ADR-0085), and the body
+        // verdict above: a body list is a table in the Details tab.
         ...(isPrimary ? { isPrimary: true } : {}),
+        ...(isBody ? { isBody: true } : {}),
       };
     });
 
@@ -3455,13 +3512,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       highlightFields: highlightFields.length > 0 ? highlightFields : undefined,
       headerActions: recordHeaderActions.length > 0 ? (recordHeaderActions as ActionDef[]) : undefined,
       related: related.length > 0 ? related : undefined,
-      ...(historyEnabled && {
-        history: {
-          entries: historyEntries ?? [],
-          loading: (historyLoading || historyPending) && historyEntries === null,
-          unknownUserText: t('detail.unknownUser', { defaultValue: 'Unknown' }),
-        },
-      }),
       // Approvals tab (#3461) — only when the record actually has requests,
       // so approval-free records carry no dead tab. The node carries the
       // LIVE hook result this view already holds (the same read behind the
@@ -3487,7 +3537,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, objects, historyEnabled, historyEntries, historyLoading, historyPending, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // objectstack#27055, Target 3 — the record's field changes, as feed items of
+  // the timeline stream. `null` while there are none to give (no
+  // `trackHistory`, an authored page, the read not made or not landed).
+  const timelineFieldChanges = useMemo(
+    () =>
+      historyEnabled && historyEntries
+        ? auditEntriesToFeedItems(historyEntries, { unknownUser: t('detail.unknownUser', { defaultValue: 'Unknown' }) })
+        : null,
+    [historyEnabled, historyEntries, t],
+  );
 
   if (isLoading) {
     return <SkeletonDetail />;
@@ -3874,13 +3934,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         highlightFields: synthParts.highlightFields,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
-        history: synthParts.history,
         approvals: synthParts.approvals,
-        // ADR-0085 removed the per-object `detail.*` presentation
-        // toggles (show/hideReferenceRail, hideRelatedTab, relatedLayout)
-        // — the synth defaults apply; per-page layout goes through an
-        // assigned Page schema (`record:reference_rail` stays available
-        // there as a renderer capability).
+        // ADR-0085 admits no surface hints: the default page is drawn
+        // from the object's semantic roles, and per-page layout goes
+        // through an assigned Page schema (`record:reference_rail` stays
+        // available there as a renderer capability).
         ...(assignedSlots ? { slots: assignedSlots } : {}),
       });
 
@@ -3921,16 +3979,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // included). `null` in the tabbed tier, and for a page whose strip the
   // partition cannot read, which then keeps its tabs.
   const pageColumns = pageInColumnTier ? buildDefaultPageColumns(renderedPage) : null;
+  // The child objects' field definitions this view already holds, for the
+  // related counts asked up front (objectstack#27056): the relationship's
+  // arity is read off them instead of a schema read first.
+  const childFieldsOf = (childObject: string) =>
+    (objects?.find((o: any) => o?.name === childObject) as { fields?: any } | undefined)?.fields;
+  // objectstack#27055, Target 8 — the related lists the synthesized page
+  // places in its Details tab are the record's body tables (the tabbed tier;
+  // the column tiers read the same off their details column).
+  // A plain computation: this point is below the view's early returns, where
+  // no hook may run.
+  const bodyTableIds = assignedPage || namedPageBlocked ? new Set<string>() : bodyTableIdsOf(renderedPage);
 
-  // objectstack#27052 — the panel toggles on the crumb row: one per column the
-  // page has content for, drawn only where the columns are (never in the
-  // drawer / split pane, never in the tabbed tier).
+  // objectstack#27052 / objectstack#27241 — the panel switches: ONE segmented
+  // control, one segment per column the page has content for, drawn at the end
+  // of the record header's action row (`PageHeaderTrailingContext`), only
+  // where the columns are (never in the drawer / split pane, never in the
+  // tabbed tier), in both column tiers.
   const panelToggleItems: PanelToggleItem[] = [];
   if (pageColumns && pageColumns.timeline.length > 0) {
     panelToggleItems.push({
       id: 'timeline',
       label: t('detail.timeline', { defaultValue: 'Timeline' }),
-      icon: Rows3,
+      icon: Activity,
       pressed: columnSwitches.timeline,
       onPressedChange: (pressed) => setTimelineSwitch(pressed ? 'on' : 'off'),
       shortcut: shortcutKeycaps(TOGGLE_TIMELINE_SHORTCUT.chord),
@@ -3943,7 +4014,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // Not `detail.related`: the rail toggle and the Related tab carry that
       // name, and a second control with the same name would announce as them.
       label: t('detail.relatedColumn', { defaultValue: 'Related column' }),
-      icon: LayoutGrid,
+      icon: PanelRight,
       pressed: columnSwitches.related,
       onPressedChange: (pressed) => setRelatedSwitch(pressed ? 'on' : 'off'),
       shortcut: shortcutKeycaps(TOGGLE_RELATED_SHORTCUT.chord),
@@ -3954,6 +4025,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     timeline: panelToggleItems.some((item) => item.id === 'timeline'),
     related: panelToggleItems.some((item) => item.id === 'related'),
   };
+  const panelToggles =
+    panelToggleItems.length > 0 ? (
+      <PanelToggles label={t('detail.panelToggles', { defaultValue: 'Panels' })} items={panelToggleItems} />
+    ) : null;
 
   // objectui#11958 (card ② of the objectstack#8346 ruling, M1, zero server) —
   // the record page's "print" action. The page this view renders for the
@@ -4064,8 +4139,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // handler's presence. The reaction control is the add row on the
           // records store (its take-back asks the remove row per click), and
           // the column row where the deployment stores reactions in a column.
-          onAddComment={feedGates.comment ? (handleAddComment as any) : undefined}
-          onAddReply={feedGates.comment ? (handleAddReply as any) : undefined}
+          // objectstack#27055: the timeline stream is a `record:activity`,
+          // which feeds-off does not strip, so `enable.feeds: false` withholds
+          // the comment writes here (the server refuses them, 403
+          // FEEDS_DISABLED) and the stream shows activity and changes alone.
+          onAddComment={feedsEnabled && feedGates.comment ? (handleAddComment as any) : undefined}
+          onAddReply={feedsEnabled && feedGates.comment ? (handleAddReply as any) : undefined}
           // objectui#12268: the author's Edit and Delete, each under its own
           // grant; the panel offers them only on the rows the read marked
           // `authoredByViewer`.
@@ -4080,6 +4159,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           }
           mentionSuggestions={mentionSuggestions}
         >
+        {/* objectstack#27055 — the field changes of the timeline stream,
+            for the synthesized page's `record:activity`. */}
+        <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
         {/* No `approval` handler in the set below (objectui#3055): the record
             page has no bespoke approval action TYPE any more. A decision is an
             ordinary `type:'api'` action declared on `sys_approval_request` and
@@ -4113,33 +4195,30 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         >
           <div className="flex-1 overflow-hidden flex flex-row">
             <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
-              {/* The crumb row: the way back on the left — the origin link,
-                  and on a page a drawer's ⤢ opened, the way back into that
-                  drawer (objectstack#26679) — and, on a page in a column
-                  tier, the reader's panel toggles on the right
-                  (objectstack#27052). None of it is drawn inside a drawer:
-                  the drawer's own bar is its way back, and the page's
-                  history state is not its. */}
+              {/* The crumb row: the ways back only — the origin link on the
+                  left and, on a page a drawer's ⤢ opened, the way back into
+                  that drawer on the right (objectstack#26679). The reader's
+                  panel switches are not here: they end the record header's
+                  action row (objectstack#27241). With neither way back the
+                  row has no child, and `empty:hidden` takes it out of the
+                  flow. None of it is drawn inside a drawer: the drawer's own
+                  bar is its way back, and the page's history state is not
+                  its. */}
               {!embedded && (
-                <div className="flex items-center justify-between gap-3 empty:hidden" data-record-crumb-row="">
+                <div
+                  className="mb-3 flex items-center justify-between gap-3 empty:hidden [&>[data-testid=record-drawer-return]]:ml-auto"
+                  data-record-crumb-row=""
+                >
                   {originFrom?.pathname && originFrom?.label && (
                     <Link
                       to={originFrom.pathname}
-                      className="inline-flex items-center gap-1 mb-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <ChevronLeft className="h-4 w-4" />
                       <span>{originFrom.label}</span>
                     </Link>
                   )}
-                  <div className="mb-3 ml-auto flex items-center gap-2 empty:hidden">
-                    <RecordDrawerReturnLink />
-                    {panelToggleItems.length > 0 && (
-                      <PanelToggles
-                        label={t('detail.panelToggles', { defaultValue: 'Panels' })}
-                        items={panelToggleItems}
-                      />
-                    )}
-                  </div>
+                  <RecordDrawerReturnLink />
                 </div>
               )}
               {/* objectui#12906 — the print page's screen-only chrome. A page
@@ -4243,10 +4322,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     so it is read in the tabbed tier only. Nothing is drawn
                     while the tier is unmeasured (one unpainted commit). */}
                 {pageColumns && (recordPageTier === 'two-column' || recordPageTier === 'three-column') ? (
+                  <PageHeaderTrailingContext.Provider value={panelToggles}>
                   <RecordPageColumns
                     tier={recordPageTier}
                     columns={pageColumns}
                     switches={columnSwitches}
+                    relatedArrangement={relatedArrangement}
+                    onRelatedArrangementChange={setRelatedArrangement}
+                    enlargedRelated={enlargedRelatedParam}
+                    onEnlargeRelated={openEnlargedRelated}
+                    onCloseEnlargedRelated={closeEnlargedRelated}
+                    relatedFieldsOf={childFieldsOf}
                     footer={
                       <RecordMetaFooter
                         data={readablePageRecord}
@@ -4255,8 +4341,31 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                       />
                     }
                   />
+                  </PageHeaderTrailingContext.Provider>
                 ) : recordPageTier === null ? null : (
-                  <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                  // objectstack#27055 — the synthesized default page is the
+                  // record page v3 in its tabbed tier too (frameless sections,
+                  // the empty-sections line, the highlight grid); an authored
+                  // page keeps its own face.
+                  <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
+                    <RecordBodyTablesContext.Provider value={bodyTableIds}>
+                      {assignedPage || namedPageBlocked ? (
+                        <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      ) : (
+                        // objectstack#27055 — the 关联 tab in the reader's
+                        // arrangement, the same one the related column reads.
+                        <ArrangedRelatedTab
+                          page={renderedPage}
+                          arrangement={relatedArrangement}
+                          onArrangementChange={setRelatedArrangement}
+                        >
+                          {(arranged) => (
+                            <SchemaRenderer schema={withPageTabsUrlSync(arranged as any, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                          )}
+                        </ArrangedRelatedTab>
+                      )}
+                    </RecordBodyTablesContext.Provider>
+                  </DefaultRecordPageContext.Provider>
                 )}
               </RelatedRecordActionsBridge>
               {/* Approval visibility fallback (objectui#3461) — synthesized
@@ -4303,11 +4412,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   renders nothing when the record carries no audit field. */}
               {/* In a column tier the columns draw it (objectstack#26678). */}
               {!pageColumns && (
-                <RecordMetaFooter
-                  data={readablePageRecord}
-                  objectSchema={objectDef}
-                  objectName={objectName}
-                />
+                <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
+                  <RecordMetaFooter
+                    data={readablePageRecord}
+                    objectSchema={objectDef}
+                    objectName={objectName}
+                  />
+                </DefaultRecordPageContext.Provider>
               )}
               {/* Record-level inline-edit Save/Cancel bar (objectui#2407 P2) —
                   commits the whole draft (highlights + body) in ONE atomic OCC
@@ -4332,6 +4443,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           </div>
           {modalElement}
         </ActionProvider>
+        </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
         </InlineEditProvider>
@@ -4388,7 +4500,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // A drawer draws this view embedded and is its own host. A page is the host
   // of the drawer its related rows and lookups open over it
   // (objectstack#26679): the same in-place stack, drawn by this same view.
-  if (embedded) return pageTree;
+  // In a drawer, the record ↑ ↓ shows next has its related counts warmed
+  // once this one has loaded (objectstack#27056, Target 4).
+  if (embedded) {
+    return (
+      <>
+        {pageTree}
+        <PrefetchUpcomingRelatedCounts
+          page={renderedPage}
+          objectName={objectName}
+          dataSource={dataSource}
+          fieldsOf={childFieldsOf}
+          ready={pageRecordStatus === 'loaded'}
+        />
+      </>
+    );
+  }
   return (
     <RecordPageDrawerHost
       appName={appName}

@@ -23,6 +23,7 @@ import {
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
   DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+  DASHBOARD_FILTER_BINDING_UNKNOWN,
   WIDGET_FILTER_FIELD_UNKNOWN,
   WIDGET_FILTER_FIELD_NOT_INCLUDED,
   WIDGET_SORTBY_UNSELECTED,
@@ -859,6 +860,131 @@ describe('validateWidgetBindings (dashboard-filter-field-unknown, issue #3365)',
 
   it('is silent on dashboards with no dashboard-level filters', () => {
     expect(only(validateWidgetBindings(stack({ dateRange: undefined })))).toHaveLength(0);
+  });
+});
+
+describe('dashboard-filter-binding-unknown (#27445)', () => {
+  const only = (findings: ReturnType<typeof validateWidgetBindings>) =>
+    findings.filter((f) => f.rule === DASHBOARD_FILTER_BINDING_UNKNOWN);
+
+  /**
+   * The card's probe, on a board that declares both kinds of filter: the
+   * built-in `dateRange` and a `globalFilters` entry named `region`. `dash`
+   * overrides the dashboard tail; `widget` the single widget.
+   */
+  function stack(dash: Record<string, unknown> = {}, widget: Record<string, unknown> = {}) {
+    return {
+      objects: [{ name: 'deal', fields: [
+        { name: 'region', type: 'select' },
+        { name: 'sales_region', type: 'select' },
+        { name: 'signed_at', type: 'date' },
+      ] }],
+      datasets: [{ name: 'deal_metrics', object: 'deal',
+        dimensions: [{ name: 'region', field: 'region' }],
+        measures: [{ name: 'deal_count', aggregate: 'count' }] }],
+      dashboards: [{
+        name: 'deal_board',
+        dateRange: { field: 'signed_at' },
+        globalFilters: [{ name: 'region', field: 'region', type: 'select' }],
+        widgets: [{ id: 'kpi_deals', type: 'metric', dataset: 'deal_metrics', values: ['deal_count'], ...widget }],
+        ...dash,
+      }],
+    };
+  }
+
+  it("refuses the card's body: a key naming no declared filter, opt-out spelling", () => {
+    const findings = only(validateWidgetBindings(stack({}, { filterBindings: { regoin: false } })));
+    expect(findings).toHaveLength(1);
+    const f = findings[0];
+    expect(f.severity).toBe('error');
+    expect(f.path).toBe('dashboards[0].widgets[0].filterBindings.regoin');
+    expect(f.message).toBe(
+      'widget "kpi_deals" binds `filterBindings.regoin`, but dashboard "deal_board" declares no filter ' +
+        'named `regoin` (declared: dateRange, region), so the binding is never read',
+    );
+    expect(f.hint).toBe('Rename the key to a declared filter name, or delete the entry. Did you mean "region"?');
+  });
+
+  it('refuses the re-target spelling too, one finding per unknown key', () => {
+    const findings = only(validateWidgetBindings(stack({}, {
+      filterBindings: { region: 'sales_region', no_such_filter: 'status', other: false },
+    })));
+    expect(findings.map((f) => f.path)).toEqual([
+      'dashboards[0].widgets[0].filterBindings.no_such_filter',
+      'dashboards[0].widgets[0].filterBindings.other',
+    ]);
+  });
+
+  it('accepts every key that names a declared filter, dateRange included', () => {
+    expect(only(validateWidgetBindings(stack({}, {
+      filterBindings: { dateRange: false, region: 'sales_region' },
+    })))).toEqual([]);
+  });
+
+  it('a globalFilter with no `name` is bound by its `field`', () => {
+    const findings = validateWidgetBindings(stack(
+      { dateRange: undefined, globalFilters: [{ field: 'region', type: 'select' }] },
+      { filterBindings: { region: false } },
+    ));
+    expect(only(findings)).toEqual([]);
+  });
+
+  it('a custom `name` replaces the field as the key: binding the raw field is refused', () => {
+    const findings = only(validateWidgetBindings(stack(
+      { globalFilters: [{ name: 'deal_region', field: 'region', type: 'select' }] },
+      { filterBindings: { region: false } },
+    )));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('(declared: dateRange, deal_region)');
+  });
+
+  it('`dateRange` is valid only on a dashboard that declares one', () => {
+    const findings = only(validateWidgetBindings(stack(
+      { dateRange: undefined },
+      { filterBindings: { dateRange: false } },
+    )));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('declares no filter named `dateRange` (declared: region)');
+    expect(findings[0].hint).toBe('Declare `dateRange` on the dashboard, or delete the `dateRange` entry.');
+  });
+
+  it('a dashboard with no filters at all refuses every key and says so', () => {
+    const findings = only(validateWidgetBindings(stack(
+      { dateRange: undefined, globalFilters: undefined },
+      { filterBindings: { region: false } },
+    )));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('declares no filters, so the binding is never read');
+    expect(findings[0].hint).toBe("Declare the filter in the dashboard's `globalFilters`, or delete the entry.");
+  });
+
+  it('is judged even when the widget binds no dataset, and is not suppressible', () => {
+    const findings = only(validateWidgetBindings(stack({}, {
+      dataset: undefined,
+      filterBindings: { regoin: false },
+      suppressWarnings: [DASHBOARD_FILTER_BINDING_UNKNOWN],
+    })));
+    expect(findings).toHaveLength(1);
+  });
+
+  it('is silent on a widget with no filterBindings', () => {
+    expect(only(validateWidgetBindings(stack()))).toEqual([]);
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`gates \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, {
+        normalized: stack({}, { filterBindings: { regoin: false } }),
+      }));
+      expect(errors.map((f) => f.rule)).toContain(DASHBOARD_FILTER_BINDING_UNKNOWN);
+    });
+  }
+
+  it('has an `os explain` entry naming the reserved key and the fix', () => {
+    const text = explainRule(DASHBOARD_FILTER_BINDING_UNKNOWN)!.paragraphs.join('\n');
+    expect(text).toContain('`dateRange`');
+    expect(text).toContain('`field` when `name` is omitted');
+    expect(text).toContain('never read');
   });
 });
 

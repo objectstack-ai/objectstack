@@ -52,6 +52,7 @@ import {
   dimensionOptionTranslator,
   findChartSeriesRow,
   formatMeasure,
+  measureCellCurrency,
   formatDimensionValue,
   buildDatasetFieldHelpers,
   buildDatasetDrillFilter,
@@ -92,7 +93,7 @@ import { AlertTriangle, ShieldAlert, Download, ArrowUpIcon, ArrowDownIcon, Minus
 // surface (see that component's header for why it is dashboard-local).
 import { WidgetEmptyState } from './WidgetEmptyState';
 import { useFilterScope } from '@object-ui/react';
-import { resolveFilterPlaceholders, computeMetricDelta, formatMetricDeltaPercent, type MetricDelta } from './utils';
+import { resolveFilterPlaceholders, computeMetricDelta, formatMetricDeltaPercent, deltaToneClass } from './utils';
 import { metricAccentTextClass } from './colorVariants';
 import {
   METRIC_TILE_CONTAINER_CLASS,
@@ -265,31 +266,9 @@ const COMPARE_KIND_TREND_KEY = {
   previousYear: 'vsLastYear',
 } as const satisfies Record<CompareToConfig['kind'], string>;
 
-/**
- * The good/bad colour of a period-over-period delta, judged by the measure's
- * declared polarity (objectstack#26602). The dataset measure's `polarity`
- * reaches this widget on the answer's column descriptor (`fields[].polarity`),
- * relayed by the server like `format` and `currency`.
- *
- * - `lower`: a fall is good news (green) and a rise is bad (red). Turnaround
- *   days, overdue counts, cost: a slower approval no longer reads as a win.
- * - `neutral`: neither direction is good or bad, so no tone at all.
- * - `higher`, and an UNDECLARED polarity: a rise green, a fall red, the
- *   colours every delta had before the key existed. Nothing here guesses a
- *   polarity from the measure's name or unit.
- *
- * The arrow is not this function's business: it always shows which way the
- * number moved. A flat delta (`direction: 'neutral'`) takes no tone under any
- * polarity, as before.
- */
-function deltaToneClass(
-  direction: MetricDelta['direction'],
-  polarity: DatasetResultField['polarity'],
-): string | undefined {
-  if (direction === 'neutral' || polarity === 'neutral') return undefined;
-  const good = polarity === 'lower' ? direction === 'down' : direction === 'up';
-  return good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
-}
+// The good/bad colour of a delta by the measure's declared polarity is
+// `deltaToneClass` in `./utils` (objectstack#26602): one rule shared with the
+// inline `object-metric` tile's badge (objectstack#27347).
 
 /**
  * ISO calendar date, optionally carrying a time part — `2026-01-15`,
@@ -494,10 +473,13 @@ const MEASURE_AXIS_CHART_FAMILIES: ReadonlySet<string> = new Set(DASHBOARD_WIDGE
  * The chart families that draw ONE series, whatever the widget declares
  * (objectui#11417). The shared chart renderer (`AdvancedChartImpl` in
  * `@object-ui/plugin-charts`) binds `series[0]` on its `pie` / `donut`,
- * `funnel`, `treemap` and `sankey` arms and reads no other series there, so a
- * chart of one of these families WITH a dimension draws its first measure and
- * drops every other one, although this widget hands each measure on as a
- * series. (Without a dimension these families take the tile, `isMetric`.)
+ * `funnel` and `treemap` arms and reads no other series there, so a chart of
+ * one of these families WITH a dimension draws its first measure and drops
+ * every other one, although this widget hands each measure on as a series.
+ * Its `sankey` arm reads the series past the first as the groups of a pivoted
+ * second dimension (objectstack#27460), so a sankey is handed only the measure
+ * it renders (see `chartSeries`). (Without a dimension these families take the
+ * tile, `isMetric`.)
  *
  * Read off the family a widget renders AS (`CHART_TYPE_MAP`), so a `pyramid`
  * widget, which renders as a `funnel`, is in it too.
@@ -1902,7 +1884,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                   return (
                     <td key={c} className={cn('px-2 py-1 whitespace-nowrap tabular-nums', numericColumns.has(c) && 'text-right')}>
                       {measure
-                        ? formatMeasure(row[c], measureField(measure)?.format, measureField(measure)?.currency, measureField(measure)?.percentScale, displayLocale)
+                        ? formatMeasure(row[c], measureField(measure)?.format, measureCellCurrency(measureField(measure), state.rows[index]), measureField(measure)?.percentScale, displayLocale)
                         : formatDimensionValue(row[c], displayLocale)}
                     </td>
                   );
@@ -2112,9 +2094,18 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
           ...(aggregate !== undefined ? { aggregate } : {}),
         };
       });
-  const chartSeries = comparisonSeries.length > 0
+  const comparedChartSeries = comparisonSeries.length > 0
     ? [...series.map((s) => ({ ...s, variant: 'current' as const })), ...comparisonSeries]
     : series;
+  // objectstack#27460 — a sankey draws every series past its first as a group
+  // of a pivoted second dimension, one flow per cell. A sankey that declares
+  // several measures (refused by the spec's single-series arm, so only a stored
+  // document reaches here) is handed the one measure it renders, so its other
+  // measures are not drawn as groups and the dropped-measure warning above
+  // stays true. A pivot carries one measure, so nothing is dropped from it.
+  const chartSeries = chartType === 'sankey'
+    ? comparedChartSeries.filter((s) => !droppedMeasures.includes(s.dataKey))
+    : comparedChartSeries;
 
   // Ordered-sequence charts (funnel/pyramid) need a DEFINED stage order.
   // `options.stageOrder` wins when the author states one explicitly; otherwise

@@ -76,7 +76,10 @@ At boot, the automation service resolves each provider-bound entry:
    three in `plugins:` by default, paired with the `automation` capability
    that performs the materialization.
 2. **The factory validates `providerConfig`** and the automation service
-   resolves `auth.credentialRef` to its secret.
+   resolves `auth.credentialRef` to its secret (see
+   [What `credentialRef` resolves through](#what-credentialref-resolves-through)).
+   A reference that is not set yet does not stop the boot: that one instance
+   registers degraded until an administrator sets it.
 3. **The result is registered** on the connector registry — indistinguishable
    from a hand-written connector. Its **actions are derived from the
    upstream** (the OpenAPI document's operations, the MCP server's
@@ -118,8 +121,9 @@ Do not put a credential in `headers` or `defaultHeaders`: both are stored in met
 
 ### `provider: 'openapi'` — one action per operation
 
-Config: **`spec`** (required) and **`baseUrl`** (optional — overrides the
-document's `servers[0].url`). The `spec` takes any of three forms:
+Config: **`spec`** (required), **`baseUrl`** (optional — overrides the
+document's `servers[0].url`) and **`include`** (optional operation allowlist —
+only the listed operations become actions). The `spec` takes any of three forms:
 
 - an **inline OpenAPI 3.x document object** — no I/O at boot, the most
   deterministic form;
@@ -148,10 +152,46 @@ Each operation becomes an action keyed by its `operationId` (or a
 `method_path` slug when the document omits one) — so `getInvoice` in the
 document is `actionId: 'getInvoice'` in your flow.
 
+`include` takes those same action keys and has the same allowlist meaning as
+the `mcp` provider's `include`: list the operations the instance should expose
+and every other operation stays out — the way to bring up a large API (hundreds
+or thousands of operations) as the handful of actions your flows call. An
+operation without an `operationId` is named by its generated `method_path` key
+(`delete /customers/{id}` → `delete_customers_id`); one that has an
+`operationId` is named only by it. An entry the document does not carry — a
+typo, or an operation the upstream renamed or removed — fails the boot with an
+error naming the entry and listing the document's keys; it is never ignored.
+
+```typescript
+providerConfig: {
+  spec: './specs/crm-openapi.json',
+  include: ['listCustomers', 'getCustomer', 'delete_customers_id'],
+},
+```
+
 The document must be **OpenAPI 3.x**. A Swagger 2.0 document — or one with no
 `openapi` version field — is refused at boot with an error naming the inline
 document, URL or file it came from: convert it to OpenAPI 3.x offline and point
 `spec` at the converted document. The runtime never converts.
+
+The ObjectStack repository carries that offline step as a script (it is not
+shipped in the npm package): `normalize-openapi` reads a file or URL, JSON or
+YAML, converts Swagger 2.0 to OpenAPI 3.0, bundles and inlines every `$ref`,
+makes `servers[0].url` absolute, writes one JSON document and prints its
+sha256 — and, given allow-patterns, the `include` list for the operations they
+match.
+
+```bash
+pnpm --filter @objectstack/connector-openapi normalize-openapi \
+  --in https://example.com/openapi.yaml --out ./specs/crm-openapi.json \
+  --include-pattern '^GET /v1/customers'
+```
+
+Inlining is bounded: a recursive schema, or one more than `--max-depth`
+(default 2) named schemas deep, becomes a typed stub whose description names
+the reference it replaced. A Swagger 2.0 operation whose empty `consumes` list
+would drop its request body is refused until `--empty-consumes <media type>`
+says which media type it accepts.
 
 ### `provider: 'mcp'` — one action per tool
 
@@ -187,8 +227,9 @@ paginated tool list is followed through every page (`nextCursor`), up to 100
 pages; a server still paging after that fails discovery instead of yielding a
 truncated tool list. A server that is unreachable or failing degrades the
 instance, which is retried. A credential the server rejects (HTTP 401 / 403 on
-connect, handshake or `tools/list`) is a configuration fault instead: it fails
-the boot and is not retried — fix the credential and reload.
+connect, handshake or `tools/list`) is a configuration fault instead: the
+instance is degraded naming the refusal, as described under *A credential the
+upstream refuses* below.
 
 <Callout type="warn">
 **Declarative stdio transports are denied by default.** Materializing one
@@ -238,18 +279,94 @@ Variant notes:
 - **`basic`** — the `username` stays in metadata (it is not a secret); only
   the password resolves through `credentialRef`.
 
-**What `credentialRef` resolves through.** In the open tier the ref is the
-name of an **environment variable** (`BILLING_API_TOKEN` above means
-`process.env.BILLING_API_TOKEN` on the server). A ref that resolves to nothing
-is a **hard boot error** — an app must not silently run with a dead connector.
-The enterprise tier swaps in a vault/KMS-backed resolver
-(`AutomationServicePluginOptions.credentialResolver`) without changing what
-you author: the entry still just names a ref.
+### What `credentialRef` resolves through
+
+The metadata author names a credential; the administrator who installs the app
+holds it. The automation service asks three sources, in order, and the first
+that answers wins:
+
+1. **An environment variable of the same name** on the server
+   (`BILLING_API_TOKEN` above means `process.env.BILLING_API_TOKEN`). A
+   self-hosted operator keeps this path, and it always wins.
+2. **The connector credential store**, `sys_connector_credential`: one row per
+   reference, its value encrypted at rest by the host's crypto provider and
+   masked on every read. An administrator fills it through the API below, with
+   no access to the server environment, which is the hosted case.
+3. **The host's resolver**, when it injects one
+   (`AutomationServicePluginOptions.credentialResolver`, such as a vault or KMS
+   client). You author the same entry either way: it still just names a ref.
+
+A reference no source answers for **does not fail the boot**. An app installs
+first and gets its credentials after, so that one instance registers
+**degraded**: it is listed on `GET /api/v1/automation/connectors` with a reason
+that names the reference, and a dispatch to it fails with the same reason.
+
+#### Setting a credential
+
+Three routes, each requiring the `manage_metadata` capability:
+
+```http
+GET    /api/v1/automation/connectors/credential-refs
+PUT    /api/v1/automation/connectors/credential-refs/BILLING_API_TOKEN   { "value": "…" }
+DELETE /api/v1/automation/connectors/credential-refs/BILLING_API_TOKEN
+```
+
+- **`GET`** lists every reference an installed connector names, plus every
+  stored one that nothing names any more. Each entry has a `status` (`set`,
+  `missing` or `rejected`), a `source` (`env`, `object`, `vault` or `null`),
+  whether this door can write it, and the instances naming it with their state.
+  A stored one also says when and by whom it was last set (`updatedAt`,
+  `updatedBy`) and when it was last seen working (`lastVerifiedAt`). It never
+  includes a value.
+- **`PUT`** stores the value, then reconciles. Every instance naming the
+  reference re-materializes with it **without a restart**, and the answer is
+  the reference's entry after that. The route refuses, before writing anything:
+  a reference no installed connector declares (`404`), one an environment
+  variable already supplies (`409`, because the variable wins and a stored value
+  would never be read), an empty value, and a value starting with `secret:`
+  (`400`: the store would read it as a handle to another stored secret). With no
+  crypto provider it answers `503`, since a credential is only ever stored
+  encrypted. Writes on one server run one at a time, each with its reconcile, so
+  the instances always end on the value the store ends on.
+- **`DELETE`** removes the stored value. The instances naming the reference
+  are torn down and registered degraded again.
+
+Installing a package reports the same facts for it: the install-local answer
+(`POST /api/v1/marketplace/install-local`, which `os package install` calls)
+lists the `credentialRefs` the package's connectors name, each with its status,
+plus a `credentialNote` naming the ones still to set.
+
+**A credential the upstream refuses** (HTTP `401` / `403`) degrades the
+instance, with a reason quoting the upstream's message, never the value. An
+`mcp` instance finds this out when it connects. A `rest` or `openapi` instance
+finds out on the first call answering `401` / `403`; that call returns its
+answer as usual, and the instance is degraded after it. What happens next
+depends on where the value came from:
+
+- **A value stored here** is marked `rejected`, and its instance is not
+  retried until the credential is set again, its declaration changes, or the
+  server restarts. The mark outlives a restart: it clears only when the value
+  is set again or an `mcp` handshake that carries it succeeds. A `rest` /
+  `openapi` call answered `2xx` does not clear it, because the endpoint may not
+  check the credential at all.
+- **A value from an environment variable or the host's resolver** can change
+  where this door cannot see it (a rotation, or a `403` rate limit that lifts),
+  so its instance is retried on the same 5s→5min backoff as an unreachable
+  upstream. The listing reports it `rejected` until an `mcp` handshake proves
+  it or the server restarts, even while the instance is serving again.
+
+Credentials are **environment-level**: one value per reference for the whole
+environment, read by whichever instance names it. On a multi-organization
+environment (the `group` or `isolated` tenancy posture) the store is not used
+at all. The three routes refuse with a message naming the posture, and a
+reference resolves from the environment variable or the host's resolver only,
+so a row stored before the posture changed is not read.
 
 The same resolver serves an `api` flow's start-node `config.secretRef`, the
-name of its inbound hook secret. That one is read at every post rather than at
-boot, so a name with no value refuses each post with `503` instead of failing
-the boot ([Flows](/docs/automation/flows)).
+name of its inbound hook secret. That one goes through the injected resolver
+alone (environment variables by default) and is read at every post rather than
+at boot, so a name with no value refuses each post with `503`
+([Flows](/docs/automation/flows)).
 
 Inlining a secret is rejected when the stack is validated. Writing the runtime
 shape on a provider-bound instance —
@@ -322,7 +439,8 @@ retry):
 |:---|:---|
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
-| `credentialRef` resolves to nothing | **Hard boot error** — set the env var (open tier) or fix the vault ref |
+| `credentialRef` resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
+| The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |

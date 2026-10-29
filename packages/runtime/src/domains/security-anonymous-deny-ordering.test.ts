@@ -127,6 +127,7 @@ describe('#7911 A — an empty/stubbed security slot still denies anonymous call
         const cases: Array<[string, string]> = [
             ['/suggested-bindings/sug_1/confirm', 'POST'],
             ['/suggested-bindings/sug_1/dismiss', 'POST'],
+            ['/suggested-bindings/sug_1/reopen', 'POST'],
         ];
         for (const [path, method] of cases) {
             expectAnonymousDenied(await dispatch(makeDeps(), anonUnresolved(), path, method));

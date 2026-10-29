@@ -46,7 +46,7 @@ Every field of `AutomationServicePluginOptions` is optional.
 | `maxLogSize` | `number` | `DEFAULT_MAX_EXECUTION_LOG_SIZE` (1000) | In-memory execution-log ring buffer size. |
 | `runSummaryLog` | `RunSummaryLogLevel` | `'info'` | Level for the one-line-per-terminal-run summary. Turning it down changes narration only — the summary is still computed, returned and persisted. |
 | `runHistoryMaxPerFlow` | `number` | `DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW` (100) | Per-flow cap on terminal run-history rows; `0` disables the cap. |
-| `credentialResolver` | `CredentialResolver` | env-var resolver | Resolves a declarative connector's `auth.credentialRef` at boot. |
+| `credentialResolver` | `CredentialResolver` | none for connectors; env-var resolver for `secretRef` | The host's resolver (a vault): third in a declarative connector's `auth.credentialRef` chain, after an environment variable of the same name and the `sys_connector_credential` store (`GET`/`PUT`/`DELETE /api/v1/automation/connectors/credential-refs`). A reference none of them answers degrades its instance; a resolver that throws is fatal at boot. An `api` flow's `secretRef` resolves through this resolver alone. |
 | `packageRoot` | `string` | `process.cwd()` | Root that relative file refs in connector entries resolve against; reads are confined to it. |
 
 The AGE half of run retention is declarative, not an option here: `sys_automation_run`

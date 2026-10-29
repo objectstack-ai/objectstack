@@ -204,10 +204,21 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
             const rawRecordIds = req.method === 'GET' && typeof src.recordIds === 'string' && src.recordIds !== ''
                 ? [src.recordIds]
                 : src.recordIds;
+            // [#27442] An omitted `userId` means the caller; an explicit empty
+            // one names nobody, so it is refused rather than dropped (dropping
+            // it answered about the caller, a principal nobody asked about).
+            // `?userId=` names the key on GET, so it is explicit there too.
+            // The schema's `z.string()` admits "", so the refusal is here.
+            if (src.userId === '') {
+                return respondError(
+                    res, 400, 'VALIDATION_FAILED',
+                    'Invalid explain request — userId is empty. Omit userId to explain your own access, or give the id of the user to explain.',
+                );
+            }
             const parsed = (ExplainRequestSchema as any).safeParse({
                 object: src.object,
                 operation: src.operation ?? 'read',
-                ...(src.userId != null && src.userId !== '' ? { userId: src.userId } : {}),
+                ...(src.userId != null ? { userId: src.userId } : {}),
                 // [C2 / ADR-0095] Optional record id — explains ONE concrete
                 // row at record granularity; omitted stays object-level.
                 ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
@@ -550,5 +561,34 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
             } catch (err: any) { handleError(err, res, 'SUGGESTION_DISMISS_FAILED'); }
         },
         metadata: { summary: 'Dismiss a suggested audience binding, or revoke an accepted one', tags: ['security'] },
+    });
+
+    // REOPEN — takes a dismissal (a decline or a revoke) back: the row is
+    // pending again and grants nothing until confirmed (#27149). The member is
+    // OPTIONAL on `ISecurityService`, so a service without it is a 501 naming
+    // the door, never a call into `undefined`. Its 500 terminal is the
+    // standard `INTERNAL_ERROR`: no family code is registered for it.
+    this.routeManager.register({
+        method: 'POST',
+        path: `${dataPath}/security/suggested-bindings/:id/reopen`,
+        handler: async (req: any, res: any) => {
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                const svc = await resolveService(environmentId);
+                if (!svc) return respond501(res);
+                if (typeof svc.reopenAudienceBindingSuggestion !== 'function') {
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        "This deployment's security service does not implement re-opening a dismissed " +
+                            'audience-binding suggestion, so the dismissal stands.',
+                    );
+                }
+                const result = await svc.reopenAudienceBindingSuggestion(context ?? {}, String(req.params.id));
+                res.json({ data: result });
+            } catch (err: any) { handleError(err, res, 'INTERNAL_ERROR'); }
+        },
+        metadata: { summary: 'Re-open a dismissed or revoked suggested audience binding (pending again; nothing granted until accepted)', tags: ['security'] },
     });
 }

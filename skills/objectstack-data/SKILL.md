@@ -38,12 +38,12 @@ metadata:
 For comprehensive documentation with incorrect/correct examples:
 
 - **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
-- **[Field Types](./rules/field-types.md)** — All 49 field types and configs
+- **[Field Types](./rules/field-types.md)** — All field types and configs
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
 - **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below)
-- **[Lifecycle Hooks](./references/data-hooks.md)** — the 8 lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
+- **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 - **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
 
@@ -289,32 +289,17 @@ column by declaring `storage: { notNull: true }`. CLI details: see
 
 ### Naming Rules Summary
 
-| Context | Convention | Example |
-|:--------|:-----------|:--------|
-| Object `name` | `snake_case` | `project_task` |
-| Field keys | `snake_case` | `first_name`, `due_date` |
-| Schema properties | `camelCase` | `maxLength`, `lookupFilters` |
-| Option `value` | lowercase | `in_progress` |
-
-See [rules/naming.md](./rules/naming.md) for incorrect/correct examples.
+`snake_case` object names and field keys, `camelCase` schema properties,
+lowercase option values — incorrect/correct examples: [rules/naming.md](./rules/naming.md).
 
 ### Field Type Selection
 
-49 types available. Quick categories:
-
-- **Text:** `text`, `textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext` — ⚠️ `password` on a generic object is **plaintext at rest** (masked on read, never hashed); prefer `secret` for credentials
-- **Secret:** `secret` — reversible, **encrypted-at-rest** credential (DB password, API key, token) via the registered `ICryptoProvider`; masked on read, fail-closed (ADR-0100). The recommended type for credentials
-- **Numbers:** `number`, `currency`, `percent`
-- **Date/Time:** `date`, `datetime`, `time`
-- **Logic:** `boolean`, `toggle`
-- **Selection:** `select`, `multiselect`, `radio`, `checkboxes`
-- **Relational:** `lookup`, `master_detail`, `tree`, `user` — `user` is a person picker (a lookup specialized to `sys_user`; stored identically to `lookup`)
-- **Media:** `image`, `file`, `avatar`, `video`, `audio`
-- **Calculated:** `formula`, `summary`, `autonumber` — `formula` fields take a CEL expression in `expression` (use `F\`...\`` from `@objectstack/spec`); see **objectstack-formula** skill
-- **Embedded:** `composite`, `repeater`, `record` — embedded JSON sub-objects stored on the parent row (no separate table / FK)
-- **Enhanced:** `location`, `address`, `code`, `json`, `color`, `rating`, `slider`, `signature`, `qrcode`, `progress`, `tags`, `vector`
-
-See [rules/field-types.md](./rules/field-types.md) for full reference.
+The full table, per-type config and traps: [rules/field-types.md](./rules/field-types.md).
+From here, three to get right: credentials are `secret` (reversible, **encrypted-at-rest**
+via the registered `ICryptoProvider`, masked on read, fail-closed, ADR-0100) — never
+`password`, which on a generic object is **plaintext at rest**; `user` is a person picker
+(a lookup specialized to `sys_user`, stored identically to `lookup`); `formula` takes CEL in
+`expression` (`F\`...\`` from `@objectstack/spec`; see **objectstack-formula**).
 
 ### Relationship Patterns
 
@@ -372,18 +357,11 @@ indexes: [
 ]
 ```
 
-> **`type` and `partial` were retired at protocol 17**: no driver
-> ever read either, so an authored `type` chose no access method and an authored
-> `partial` produced a full index with the predicate discarded. Both are now a
-> `tsc` error and a parse error; `os migrate meta --from 16` lists the edits;
-> `--write` applies the ones it can prove, the rest by hand.
-
-> **A unique index must state its scope** — `'organization'` (one holder per
-> organization, NULL-safe) or `'global'` (one holder across the installation).
-> On a declared index bare `unique: true` is the deprecated spelling of
-> `'global'`: it reads like "per organization" and does the opposite, so `os lint`
-> warns and protocol 18 rejects it. On a FIELD, `unique: true` means
-> `'organization'` and stays valid.
+> `type` and `partial` were **retired at protocol 17** (a `tsc` and parse error;
+> `os migrate meta --from 16` lists the edits). A unique index **states its
+> scope** — `'organization'` or `'global'`: on a declared index bare `unique: true`
+> is the deprecated spelling of `'global'` and protocol 18 rejects it; on a FIELD
+> it means `'organization'` and stays valid.
 
 See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope,
 and how to build partial / gin / gist indexes at the database layer.
@@ -423,6 +401,34 @@ only `own` and `org` work in open source — the hierarchy-relative three need t
 paid `@objectstack/security-enterprise` plugin, **fail closed to `own`** without
 it, and `defineStack` errors unless the grant declares
 `requires: ['hierarchy-security']`. Schema: `PermissionSetSchema.objects.*`.
+
+### Ownership queues — park a record for a team to claim
+
+Every `ownership: 'user'` object carries a platform-injected `queue` column
+beside `owner_id` (an object declaring its own `queue` field is refused). A
+record **sits in** a queue when `owner_id` is empty and `queue` names it: the
+queue's members read and edit it (rows widen, verbs never — no delete). Declare
+the queue on the stack; a declared queue's members are positions only, an
+organization adds users and teams through `sys_queue_member` rows:
+
+<!-- os:check -->
+```typescript
+import { defineQueue } from '@objectstack/spec/security';
+
+export const supportIntake = defineQueue({
+  name: 'support_intake',   // the one name the `queue` column, a rule, an approver and a sharing recipient use
+  label: 'Support Intake',
+  members: [{ type: 'position', value: 'service_agent' }],
+});
+// defineStack({ queues: [supportIntake], assignmentRules: [...] }) — routing rows in: objectstack-automation
+```
+
+**Claim** is an ordinary by-id update, `{ owner_id: <your id> }`, admitted to a
+member while the record is unowned; one writer wins, the other gets `409
+CONCURRENT_UPDATE`. **Release**: the owner writes `owner_id: null` and the record
+sits in its home queue again. **Move**: writing another `queue` is a transfer
+(`allowTransfer` or `modifyAllRecords`). ⛔ Never a per-record `assigned_to`
+picklist, a round-robin counter field, or a hook that picks an owner.
 
 ---
 

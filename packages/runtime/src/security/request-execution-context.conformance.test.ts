@@ -30,7 +30,7 @@
  * never who the caller is.
  *
  * A door's own additions after the function returns (REST's `__kernel`,
- * `__authEnvironmentId` and `__environmentId`, see its `drive`) are not the composition and are
+ * `__authEnvironmentId`, `__environmentId` and `__admittedBy`, see its `drive`) are not the composition and are
  * set aside before the comparison, by name.
  *
  * A projection can drop a parameter's whole effect: the settings context
@@ -344,10 +344,16 @@ async function driveRest(w: World, headers: Record<string, string>): Promise<Exe
   // the resolved kernel (none on this wiring) and the environment whose auth
   // service validated the caller and the environment the request resolved to
   // (none named on this wiring).
-  const { __kernel, __authEnvironmentId, __environmentId, ...context } = ctx;
+  //
+  // …and which credential admitted the caller (`__admittedBy`, what the
+  // function told the door through `onAdmission`, read by the door's API-key
+  // management rule): the API key when the request led with one and it
+  // admitted, the session otherwise.
+  const { __kernel, __authEnvironmentId, __environmentId, __admittedBy, ...context } = ctx;
   expect(__kernel).toBeUndefined();
   expect(__authEnvironmentId).toBeUndefined();
   expect(__environmentId).toBeUndefined();
+  expect(__admittedBy).toBe(headers['x-api-key'] !== undefined ? 'api_key' : 'session');
   return context as ExecutionContext;
 }
 
@@ -447,6 +453,9 @@ const REST_ROW: DoorRow = {
     requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
     accessToken: 'withhold',
     oauth: undefined,
+    // The door passes a callback that keeps the credential beside the context
+    // (`__admittedBy`, asserted in `driveRest`); it shapes no field of the
+    // context itself, so the function is asked without one here.
     onAdmission: undefined,
   }),
 };

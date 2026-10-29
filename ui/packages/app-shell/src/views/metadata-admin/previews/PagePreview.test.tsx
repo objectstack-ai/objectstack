@@ -123,9 +123,10 @@ describe('PagePreview — slotted record page synthesis', () => {
     const comps: any[] = main.components;
     const types = comps.map((c) => c.type);
 
-    // Omitted slots → synthesized defaults.
+    // Omitted slots → synthesized defaults. (The discussion is no longer a
+    // footer node: it rides the default strip's Timeline tab, objectstack#27055,
+    // and this draft authors its own strip.)
     expect(types).toContain('page:header');
-    expect(types).toContain('record:discussion');
 
     // Authored highlights override is applied verbatim (replaces the default
     // chips + chevron path).

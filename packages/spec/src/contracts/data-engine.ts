@@ -58,8 +58,8 @@ import type { IntrospectedSchema } from './schema-diff-service.js';
  *
  * Lives on the TS contract — NOT in the serializable Zod options schemas
  * (`EngineUpdateOptionsSchema` etc.): a function is unrepresentable in JSON
- * Schema and cannot cross the RPC (Virtual Data Engine) boundary, so remote
- * callers simply never receive these events. The event payload itself is
+ * Schema and cannot be serialized, so remote callers (REST, the client SDK)
+ * simply never receive these events. The event payload itself is
  * Zod-first: `DroppedFieldsEventSchema` in `data/data-engine.zod.ts`.
  *
  * A listener that throws must never break the write — engines catch and log.
@@ -169,8 +169,8 @@ export interface WriteObservabilityOptions {
    *
    * This is an IN-PROCESS option, exactly like its neighbour above, and for the
    * same structural reason: `WriteObservabilityOptions` is not the serializable
-   * `EngineUpdateOptionsSchema` bag, so nothing here crosses the RPC / Virtual
-   * Data Engine boundary or is reachable from a REST/wire body. A remote caller
+   * `EngineUpdateOptionsSchema` bag, so nothing here can be serialized, and
+   * none of it is reachable from a REST/wire body. A remote caller
    * cannot set it, and gets NEITHER behaviour: its write is stripped and
    * committed, silently from its side, exactly as before this option existed —
    * a 200 whose read-only columns kept their stored values. That is deliberate
@@ -240,6 +240,22 @@ export interface WriteObservabilityOptions {
  */
 export interface EngineDatasourceDef {
   name: string;
+  /**
+   * The driver id the datasource selects (`driver` on the authored
+   * datasource: a built-in id such as `postgres`, or the `driver.NAME` id a
+   * server plugin published). The engine reads it to decide whether the
+   * datasource's driver is held behind its correctness floor (a non-managed
+   * `schemaMode` on a driver id that is not built in): a plugin driver is
+   * not trusted to have applied the query, so the engine re-applies it in
+   * memory and refuses over the row cap. Only the engine's own manifest
+   * install path used to carry the id, so a datasource registered through
+   * this member — the datasource-connection service on a connect, and again
+   * after a reconnect, whose eviction drops the stored def — read as "not a
+   * plugin driver" and was served unfloored. Optional because a caller that
+   * registers only the write-gate facts keeps the id stored before it; the
+   * engine never reads an absent key as "built in".
+   */
+  driver?: string;
   schemaMode?: string;
   external?: {
     /** Datasource-wide write gate — ADR-0015 §5.3 Gate 3. */

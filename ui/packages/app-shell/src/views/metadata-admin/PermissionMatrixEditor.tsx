@@ -95,6 +95,7 @@ import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from 
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
 // objectstack#26858 — the served verdict the RLS clause editors read at their paths.
 import {
+  DraftVerdictBodyContext,
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
@@ -123,6 +124,7 @@ import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useC
 import { errorCodeIs } from '@object-ui/types';
 import type { MetadataError } from '@object-ui/data-objectstack';
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
+import { isStudioHiddenSystemField } from '../studio-design/studioHiddenSystemField.js';
 import type { PermissionSetCloned } from './permission-set-clone.js';
 import {
   mergePermissionSlice,
@@ -331,6 +333,13 @@ function owdLabel(t: (k: string) => string, value: string): string {
 interface FieldSummary {
   name: string;
   label?: string;
+  /**
+   * objectstack#27404 — the platform's two marks on the served definition, kept
+   * so the field rows can leave out its bookkeeping columns
+   * (`isStudioHiddenSystemField`, objectui#11780).
+   */
+  system?: boolean;
+  hidden?: boolean;
 }
 
 /**
@@ -751,6 +760,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // Snapshot of the last loaded/saved draft — the anchor `isDirty` compares
   // against. `null` until the first load lands (nothing to be dirty against).
   const baselineRef = React.useRef<string | null>(null);
+  // objectstack#27404 — the `${object}.${field}` keys the last loaded/saved set
+  // carries: a platform bookkeeping column with a stored entry keeps its row
+  // while the draft clears it, so the admin still sees what the save changes.
+  const [baselineFieldKeys, setBaselineFieldKeys] = React.useState<ReadonlySet<string>>(() => new Set());
   /** Set the draft AND re-anchor the dirty baseline to it (load + post-save). */
   const resetDraftBaseline = React.useCallback((next: PermissionSetDraft) => {
     try {
@@ -758,6 +771,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     } catch {
       baselineRef.current = null;
     }
+    setBaselineFieldKeys(new Set(Object.keys(next.fields ?? {})));
     // objectui#9484 — a fresh identity, ALWAYS. `isDirty` below is a `useMemo`
     // keyed on `draft`, while the anchor it reads lives in a ref: hand
     // `setDraft` the object that is already the draft and React bails out on
@@ -795,6 +809,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // draft's while the package door holds one (what its publish will refuse),
   // else the layered read's. Taken off each read, never computed here.
   const [servedVerdict, setServedVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // objectstack#27482 — the body that verdict judged, set beside it from the
+  // same read: an editor holds the save on a server error at its path only
+  // while it still shows the text judged here.
+  const [servedVerdictBody, setServedVerdictBody] = React.useState<unknown>(undefined);
   const verdictReadSeq = React.useRef(0);
   const [saving, setSaving] = React.useState(false);
   // objectui#11787 — when the package door's last draft save landed, for the
@@ -935,6 +953,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             layered: lay,
           }),
         );
+        // The same choice `editedItemDiagnostics` makes, for the body judged.
+        setServedVerdictBody(
+          pendingDraft && draftEnvelopeDiagnostics(pendingDraft) ? pendingDraftBody(pendingDraft) : lay?.effective,
+        );
         // ARTIFACT tier input (objectui#4518) — the `code` layer, and its
         // `provenance` (objectui#4526), of the SAME envelope the display
         // baseline comes from, so the writability verdict and the body on
@@ -1028,11 +1050,18 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const raw = obj?.fields;
       const list: FieldSummary[] = (
         Array.isArray(raw)
-          ? raw.map((f: any) => ({ name: String(f?.name ?? ''), label: f?.label }))
+          ? raw.map((f: any) => ({
+              name: String(f?.name ?? ''),
+              label: f?.label,
+              system: f?.system === true,
+              hidden: f?.hidden === true,
+            }))
           : raw && typeof raw === 'object'
             ? Object.entries(raw).map(([name, f]: [string, any]) => ({
                 name: String(f?.name ?? name),
                 label: f?.label,
+                system: f?.system === true,
+                hidden: f?.hidden === true,
               }))
             : []
       )
@@ -1073,7 +1102,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
 
   // Count of blocking CEL parse errors in the RLS editor — gates Save
   // (objectui#2413): a malformed predicate silently mis-scopes rows, so we
-  // don't let it persist.
+  // don't let it persist. objectstack#27482 — it counts the served verdict's
+  // errors at a clause's path too, while that clause still shows the text
+  // the verdict judged (`CelPredicateField`'s `verdictPath`).
   const [celErrorCount, setCelErrorCount] = React.useState(0);
   // objectstack#25866 — blocking lint findings on the field rows' `when`
   // conditions, keyed `${object}.${field}`. Held like the RLS clauses: a
@@ -1467,8 +1498,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // verdict on its next read; the one held described the body before it.
         // Read off the save's path, so a later read (or a load) wins.
         const seq = ++verdictReadSeq.current;
-        void readDraftForSave(client, type, payload.name, packageId).then((read) => {
-          if (seq === verdictReadSeq.current) setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+        void readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(
+          client,
+          type,
+          payload.name,
+          packageId,
+        ).then((read) => {
+          if (seq !== verdictReadSeq.current) return;
+          setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+          setServedVerdictBody(pendingDraftBody(read.answer) ?? undefined);
         });
         // Let the surface count it.
         onDraftSaved?.();
@@ -1502,6 +1540,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         resetDraftBaseline(toDisplayDraft((lay?.effective ?? toSave) as PermissionSetDraft));
         verdictReadSeq.current += 1;
         setServedVerdict(editedItemDiagnostics({ hasDraft: false, draftDiagnostics: undefined, layered: lay }));
+        setServedVerdictBody(lay?.effective);
         setPostSaveRereadFailed(rereadFailed);
         // The write landed, so the server holds the set now whatever the
         // confirming read said (objectui#7611: its holders can be listed). Only
@@ -2192,6 +2231,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                   draft={draft}
                   expanded={expanded}
                   fieldsByObject={fieldsByObject}
+                  baselineFieldKeys={baselineFieldKeys}
                   writable={writable}
                   objectActions={OBJECT_ACTIONS}
                   t={t}
@@ -2217,18 +2257,20 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </div>
             <div hidden={facetTab === null} data-testid="perm-tabpanel-facets" className="min-h-0 flex-1 overflow-auto">
               <DraftVerdictContext.Provider value={servedVerdict}>
-                <PermissionAdvancedFacets
-                  draft={draft}
-                  setDraft={setDraft}
-                  writable={writable}
-                  allSetNames={allSetNames}
-                  loadObjectFields={loadObjectFields}
-                  onCelErrorsChange={setCelErrorCount}
-                  t={t}
-                  only={facetTab}
-                  packageBound={!!packageId}
-                  objectAccessDefault={objectAccessDefault}
-                />
+                <DraftVerdictBodyContext.Provider value={servedVerdictBody}>
+                  <PermissionAdvancedFacets
+                    draft={draft}
+                    setDraft={setDraft}
+                    writable={writable}
+                    allSetNames={allSetNames}
+                    loadObjectFields={loadObjectFields}
+                    onCelErrorsChange={setCelErrorCount}
+                    t={t}
+                    only={facetTab}
+                    packageBound={!!packageId}
+                    objectAccessDefault={objectAccessDefault}
+                  />
+                </DraftVerdictBodyContext.Provider>
               </DraftVerdictContext.Provider>
             </div>
           </div>
@@ -2382,6 +2424,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             draft={draft}
             expanded={expanded}
             fieldsByObject={fieldsByObject}
+            baselineFieldKeys={baselineFieldKeys}
             writable={writable}
             objectActions={OBJECT_ACTIONS}
             t={t}
@@ -2399,17 +2442,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               admin scope, structured editors instead of raw JSON. Collapsed by
               default so they don't crowd the object matrix. */}
           <DraftVerdictContext.Provider value={servedVerdict}>
-            <PermissionAdvancedFacets
-              draft={draft}
-              setDraft={setDraft}
-              writable={writable}
-              allSetNames={allSetNames}
-              loadObjectFields={loadObjectFields}
-              onCelErrorsChange={setCelErrorCount}
-              t={t}
-              packageBound={!!packageId}
-              objectAccessDefault={objectAccessDefault}
-            />
+            <DraftVerdictBodyContext.Provider value={servedVerdictBody}>
+              <PermissionAdvancedFacets
+                draft={draft}
+                setDraft={setDraft}
+                writable={writable}
+                allSetNames={allSetNames}
+                loadObjectFields={loadObjectFields}
+                onCelErrorsChange={setCelErrorCount}
+                t={t}
+                packageBound={!!packageId}
+                objectAccessDefault={objectAccessDefault}
+              />
+            </DraftVerdictBodyContext.Provider>
           </DraftVerdictContext.Provider>
           {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
               (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
@@ -2440,6 +2485,8 @@ interface PermissionTableProps {
   draft: PermissionSetDraft;
   expanded: Set<string>;
   fieldsByObject: Record<string, FieldSummary[]>;
+  /** objectstack#27404 — field-entry keys of the last loaded/saved set (`FieldsSubTable`). */
+  baselineFieldKeys: ReadonlySet<string>;
   writable: boolean;
   objectActions: ReturnType<typeof getObjectActions>;
   t: (key: string) => string;
@@ -2464,6 +2511,7 @@ function PermissionTable({
   draft,
   expanded,
   fieldsByObject,
+  baselineFieldKeys,
   writable,
   objectActions,
   t,
@@ -2654,6 +2702,7 @@ function PermissionTable({
                       objectPerm={perm}
                       fields={fieldsByObject[o.name]}
                       fieldsState={draft.fields ?? {}}
+                      baselineFieldKeys={baselineFieldKeys}
                       writable={writable}
                       t={t}
                       onFieldPerm={onFieldPerm}
@@ -2762,6 +2811,7 @@ function StudioObjectMatrix({
   draft,
   expanded,
   fieldsByObject,
+  baselineFieldKeys,
   writable,
   objectActions,
   t,
@@ -2814,6 +2864,7 @@ function StudioObjectMatrix({
             open={expanded.has(o.name)}
             fieldsState={draft.fields ?? {}}
             fields={fieldsByObject[o.name]}
+            baselineFieldKeys={baselineFieldKeys}
             writable={writable}
             objectActions={objectActions}
             divider={divider}
@@ -2840,6 +2891,7 @@ function StudioObjectRow({
   open,
   fieldsState,
   fields,
+  baselineFieldKeys,
   writable,
   objectActions,
   divider,
@@ -2860,6 +2912,7 @@ function StudioObjectRow({
   open: boolean;
   fieldsState: Record<string, FieldPerm>;
   fields: FieldSummary[] | undefined;
+  baselineFieldKeys: ReadonlySet<string>;
   writable: boolean;
   objectActions: ReturnType<typeof getObjectActions>;
   divider: (i: number) => string;
@@ -3013,6 +3066,7 @@ function StudioObjectRow({
               objectPerm={perm}
               fields={fields}
               fieldsState={fieldsState}
+              baselineFieldKeys={baselineFieldKeys}
               writable={writable}
               t={t}
               onFieldPerm={onFieldPerm}
@@ -3138,6 +3192,7 @@ function FieldsSubTable({
   objectPerm,
   fields,
   fieldsState,
+  baselineFieldKeys,
   writable,
   t,
   onFieldPerm,
@@ -3150,6 +3205,8 @@ function FieldsSubTable({
   objectPerm: ObjectPerm;
   fields: FieldSummary[] | undefined;
   fieldsState: Record<string, FieldPerm>;
+  /** Field-entry keys of the last loaded/saved set: such a row stays while the draft clears it. */
+  baselineFieldKeys: ReadonlySet<string>;
   writable: boolean;
   t: (key: string) => string;
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
@@ -3179,13 +3236,26 @@ function FieldsSubTable({
       </div>
     );
   }
-  if (fields.length === 0) {
+  // objectstack#27404 — the rows OFFER the object's own fields. A column the
+  // platform injects and hides (the `__search` companion,
+  // `owning_business_unit_id`, `organization_id`) is left out, judged by the
+  // Data rail's own predicate (`isStudioHiddenSystemField`, objectui#11780).
+  // One the set already carries an entry for, in the draft or in the last
+  // loaded/saved set, still draws as written (the objectui#13152 CONTROL), so
+  // the bulk shortcuts never reach a bookkeeping column the admin cannot see.
+  const offered = fields.filter(
+    (f) =>
+      !isStudioHiddenSystemField({ system: f.system, hidden: f.hidden }) ||
+      fieldsState[`${objectName}.${f.name}`] !== undefined ||
+      baselineFieldKeys.has(`${objectName}.${f.name}`),
+  );
+  if (offered.length === 0) {
     return <div className="text-xs text-muted-foreground">{t('perm.field.empty')}</div>;
   }
   const q = fieldFilter.trim().toLowerCase();
   const visible = q
-    ? fields.filter((f) => f.name.toLowerCase().includes(q) || (f.label ?? '').toLowerCase().includes(q))
-    : fields;
+    ? offered.filter((f) => f.name.toLowerCase().includes(q) || (f.label ?? '').toLowerCase().includes(q))
+    : offered;
   const visibleNames = visible.map((f) => f.name);
   return (
     <div className="space-y-2">
@@ -3196,7 +3266,7 @@ function FieldsSubTable({
           matrix scrolled sideways (its floor is wider than the Studio
           content column at 1440 px). */}
       <div className="flex flex-wrap items-center gap-2">
-        {fields.length > 6 && (
+        {offered.length > 6 && (
           <Input
             value={fieldFilter}
             onChange={(e) => setFieldFilter(e.target.value)}
@@ -3209,7 +3279,7 @@ function FieldsSubTable({
           data-testid={`perm-field-count-${objectName}`}
           className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
         >
-          {visible.length} / {fields.length}
+          {visible.length} / {offered.length}
         </span>
         {writable && (
           <div className="flex items-center gap-1">
@@ -3341,6 +3411,8 @@ function FieldsSubTable({
                           disabled={!writable}
                           placeholder="status == 'draft'"
                           objectName={objectName}
+                          // Every field, the left-out ones too: a condition may
+                          // still name one, and lint must not call it unknown.
                           fieldNames={fields.map((x) => x.name)}
                           clause="check"
                           onLintChange={(issues) => onFieldWhenLint(objectName, f.name, issues)}

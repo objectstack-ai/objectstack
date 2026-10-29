@@ -1389,9 +1389,16 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * - false  → opt this widget out of that filter
    * - absent → default binding: the filter's own `field`
    *   (dateRange: `dateRange.field ?? 'created_at'`)
+   *
+   * Every key must name a filter the dashboard declares — a `globalFilters`
+   * entry's `name` (its `field` when unnamed), or `dateRange` when the
+   * dashboard declares `dateRange`. The runtime reads a binding by the declared
+   * filter's name, so any other key is never read; the lint rule
+   * `dashboard-filter-binding-unknown` (severity error) refuses it at
+   * `os validate` / `os build` and at the metadata publish door.
    */
   filterBindings: z.record(z.string(), z.union([z.string(), z.literal(false)])).optional()
-    .describe("Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out")
+    .describe("Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out. Each key must name a filter the dashboard declares (dateRange only when declared); lint rule dashboard-filter-binding-unknown refuses any other")
     .meta({ title: 'Filter Bindings' }),
 
   /**

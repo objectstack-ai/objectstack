@@ -6,14 +6,17 @@
  * Cross-cutting system-level objects that don't belong to identity,
  * security, audit, or integration. Hosts the generic settings K/V store
  * backing ADR-0007 (Settings Manifest + K/V Store + Resolver), the
- * deployment-level data-migration flags (#3617), and the packaged-metadata
- * activation ledger (ADR-0126 §4).
+ * deployment-level data-migration flags (#3617), the packaged-metadata
+ * activation ledger (ADR-0126 §4), and the environment's trusted plugin-publisher
+ * keys (ADR-0025 §3.5 M1).
  */
 
 export { SysSetting } from './sys-setting.object.js';
 // [ADR-0131 D7] The settings cascade's global rung, tenant-less.
 export { SysPlatformSetting } from './sys-platform-setting.object.js';
 export { SysSecret } from './sys-secret.object.js';
+// [ADR-0025 §3.5 M1] Trusted plugin-publisher public keys, tenant-less.
+export { SysTrustedKey } from './sys-trusted-key.object.js';
 export { SysMetadataActivation } from './sys-metadata-activation.object.js';
 export { SysSettingAudit } from './sys-setting-audit.object.js';
 // [ADR-0131 D7] The settings audit trail's global rung, tenant-less.

@@ -9,12 +9,19 @@
  *      ManifestSchema (@objectstack/spec/kernel, ADR-0025 §3.2 — landed by
  *      framework F1). Malformed manifests fail fast with zod diagnostics.
  *   2. esbuild-bundle the entry to `dist/index.mjs`, externalizing
- *      `@objectstack/*` (peer-provided by the host runtime; ADR §3.10 #2).
- *      For `packaging: manifest-deps`, dependencies are externalized too and
- *      `package.json` + lockfile are carried for install-time resolution.
- *   3. Compute per-file `integrity` (`sha256-<base64>`, ADR §3.2) and write
+ *      `@objectstack/*` (peer-provided by the host runtime; ADR §3.10 #2) and
+ *      inlining every other dependency: `bundled` is the one packaging
+ *      strategy (ADR-0025 v2 §3.3), since nothing installs a dependency at
+ *      install time — `os plugin install` and the boot-time loader import
+ *      `dist/index.mjs` as packed.
+ *   3. Refuse a native addon (ADR-0025 v2 §3.3): a `.node` module the bundle
+ *      reaches, a bundled package that builds or ships one, or a `.node` file
+ *      under `assets/`. A compiled binary can be neither bundled nor
+ *      verified as JavaScript, so the refusal names every one at once and
+ *      no artifact is written.
+ *   4. Compute per-file `integrity` (`sha256-<base64>`, ADR §3.2) and write
  *      the compiled manifest with that map + a `dist/index.mjs` entry.
- *   4. Pack everything (+ a `SIGNATURE` placeholder) into a reproducible
+ *   5. Pack everything (+ a `SIGNATURE` placeholder) into a reproducible
  *      ustar+gzip `<id>-<version>.osplugin`.
  *
  * Signing is a separate step (`os plugin sign`); this command emits an
@@ -22,8 +29,9 @@
  */
 
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep as PATH_SEP } from 'node:path';
+import type { Metafile, Plugin as EsbuildPlugin } from 'esbuild';
 import { Args, Command, Flags } from '@oclif/core';
 import { ManifestSchema } from '@objectstack/spec/kernel';
 import {
@@ -61,6 +69,101 @@ async function collectDir(dir: string, prefix: string): Promise<ArchiveFile[]> {
     }
   }
   return out;
+}
+
+/** A compiled Node addon's file extension — the one binary shape ADR-0025 v2 §3.3 refuses. */
+const isNativeAddonPath = (p: string): boolean => p.toLowerCase().endsWith('.node');
+
+/**
+ * Loads every `.node` module the bundle reaches as an empty one, so esbuild
+ * finishes the graph and the refusal can name every addon at once (its own
+ * answer is a bare "No loader is configured" for the first one only). The
+ * output is never written: the metafile names the modules and the build
+ * refuses.
+ */
+const nativeAddonCollector: EsbuildPlugin = {
+  name: 'os-plugin-native-addon-refusal',
+  setup(build) {
+    build.onLoad({ filter: /\.node$/i }, () => ({ contents: '', loader: 'empty' }));
+  },
+};
+
+/**
+ * The package directory an esbuild input sits in — the segment after its LAST
+ * `node_modules` (two for a scoped name), so a pnpm store path
+ * (`node_modules/.pnpm/x@1/node_modules/x/…`) answers `x`. Inputs outside any
+ * `node_modules` are the plugin's own source and answer `undefined`.
+ */
+function packageRootOf(input: string): { name: string; dir: string } | undefined {
+  const segments = input.split('/');
+  const at = segments.lastIndexOf('node_modules');
+  if (at < 0 || at + 1 >= segments.length) return undefined;
+  const width = segments[at + 1]!.startsWith('@') ? 2 : 1;
+  if (at + width >= segments.length) return undefined;
+  return { name: segments.slice(at + 1, at + 1 + width).join('/'), dir: segments.slice(0, at + 1 + width).join('/') };
+}
+
+/** The first `.node` file under `dir`, skipping nested `node_modules` (another package's) and symlinks. */
+function findShippedAddon(dir: string, rel = ''): string | undefined {
+  let entries;
+  try {
+    entries = readdirSync(join(dir, rel), { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  for (const e of entries) {
+    const childRel = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isFile() && isNativeAddonPath(e.name)) return childRel;
+  }
+  for (const e of entries) {
+    if (e.isDirectory() && e.name !== 'node_modules') {
+      const hit = findShippedAddon(dir, rel ? `${rel}/${e.name}` : e.name);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+/** Why the package at `dir` is a native addon, or `undefined` when it is not. */
+function nativePackageReason(dir: string): string | undefined {
+  if (existsSync(join(dir, 'binding.gyp'))) return 'declares a node-gyp build (binding.gyp)';
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8')) as { gypfile?: unknown };
+    if (pkg.gypfile === true) return 'declares a node-gyp build (gypfile: true)';
+  } catch {
+    /* no readable package.json — the binary scan below still answers */
+  }
+  const shipped = findShippedAddon(dir);
+  return shipped ? `ships a compiled addon (${shipped})` : undefined;
+}
+
+/**
+ * Every native addon a build would pack or load (ADR-0025 v2 §3.3), one line
+ * each: a `.node` module the bundle reaches (named with its importers), a
+ * bundled package that builds or ships one (its JS may be bundleable, but the
+ * binary it locates at run time — `bindings`, `node-gyp-build` — is not in the
+ * artifact), and a `.node` file staged from `assets/`.
+ */
+function findNativeAddons(metafile: Metafile, cwd: string, assets: ArchiveFile[]): string[] {
+  const found: string[] = [];
+  const inputs = Object.keys(metafile.inputs);
+  for (const input of inputs.filter(isNativeAddonPath)) {
+    const importers = inputs.filter((i) => metafile.inputs[i]!.imports.some((imp) => imp.path === input));
+    found.push(importers.length > 0 ? `${input}, imported by ${importers.join(', ')}` : input);
+  }
+  const packages = new Map<string, { name: string; dir: string }>();
+  for (const input of inputs) {
+    const root = packageRootOf(input);
+    if (root && !packages.has(root.dir)) packages.set(root.dir, root);
+  }
+  for (const { name, dir } of packages.values()) {
+    const reason = nativePackageReason(resolvePath(cwd, dir));
+    if (reason) found.push(`package \`${name}\` (${dir}) ${reason}`);
+  }
+  for (const asset of assets) {
+    if (isNativeAddonPath(asset.path)) found.push(asset.path);
+  }
+  return found;
 }
 
 export default class PluginBuild extends Command {
@@ -153,22 +256,14 @@ export default class PluginBuild extends Command {
       return;
     }
 
-    // Externalize peer-provided @objectstack/*; for manifest-deps, also keep
-    // declared dependencies external (resolved at install time).
-    const external = ['@objectstack/*'];
-    if (packaging === 'manifest-deps') {
-      try {
-        const pkg = JSON.parse(await readFile(resolvePath(cwd, 'package.json'), 'utf-8'));
-        external.push(...Object.keys(pkg.dependencies ?? {}));
-      } catch {
-        /* no package.json — nothing extra to externalize */
-      }
-    }
-
+    // Externalize only the peer-provided @objectstack/* (host singletons);
+    // every other dependency is inlined — `bundled` is the one strategy.
     let bundleBytes: Uint8Array;
+    let metafile: Metafile;
     try {
       const result = await esbuild.build({
         entryPoints: [entryAbs],
+        absWorkingDir: cwd,
         bundle: true,
         format: 'esm',
         platform: 'node',
@@ -177,7 +272,9 @@ export default class PluginBuild extends Command {
         outfile: resolvePath(cwd, 'dist/index.mjs'),
         sourcemap: false,
         minify: flags.minify,
-        external,
+        external: ['@objectstack/*'],
+        plugins: [nativeAddonCollector],
+        metafile: true,
         logLevel: 'silent',
         legalComments: 'none',
         banner: { js: '// @generated by `os plugin build` — do not edit.' },
@@ -186,27 +283,36 @@ export default class PluginBuild extends Command {
       const js = outputs.find((f) => f.path.endsWith('.mjs') || f.path.endsWith('.js')) ?? outputs[0];
       if (!js) throw new Error('esbuild produced no output');
       bundleBytes = js.contents;
+      metafile = result.metafile;
     } catch (err) {
       printError(`Bundle failed: ${(err as Error).message}`);
       this.exit(1);
       return;
     }
 
-    // 3. Stage archive files, compute integrity, compile manifest. ──────
+    // 3. Stage archive files; refuse a native addon. ─────────────────────
     const files: ArchiveFile[] = [{ path: 'dist/index.mjs', data: bundleBytes }];
 
     const assetsDir = resolvePath(cwd, 'assets');
+    const assets: ArchiveFile[] = [];
     if (existsSync(assetsDir) && (await stat(assetsDir)).isDirectory()) {
-      files.push(...(await collectDir(assetsDir, 'assets')));
+      assets.push(...(await collectDir(assetsDir, 'assets')));
+    }
+    files.push(...assets);
+
+    const nativeAddons = findNativeAddons(metafile, cwd, assets);
+    if (nativeAddons.length > 0) {
+      printError(
+        'Native addon refused: a plugin artifact carries bundled JavaScript only (ADR-0025 v2 §3.3), '
+        + 'and a compiled `.node` binary can be neither bundled nor run by every host. Found:\n'
+        + nativeAddons.map((line) => `      - ${line}`).join('\n')
+        + '\n    Replace each with a pure-JavaScript or WebAssembly alternative, or drop it.',
+      );
+      this.exit(1);
+      return;
     }
 
-    if (packaging === 'manifest-deps') {
-      for (const dep of ['package.json', 'pnpm-lock.yaml']) {
-        const p = resolvePath(cwd, dep);
-        if (existsSync(p)) files.push({ path: dep, data: new Uint8Array(await readFile(p)) });
-      }
-    }
-
+    // 4. Compute integrity, compile manifest. ────────────────────────────
     const integrity = computeIntegrity(files);
     const compiledManifest = { ...manifest, main: 'dist/index.mjs', integrity };
     const manifestBytes = new Uint8Array(
@@ -216,7 +322,7 @@ export default class PluginBuild extends Command {
     // Unsigned placeholder; `os plugin sign` overwrites this (ADR §3.4).
     files.push({ path: SIGNATURE_FILENAME, data: new Uint8Array(Buffer.from('unsigned\n', 'utf-8')) });
 
-    // 4. Pack the artifact. ─────────────────────────────────────────────
+    // 5. Pack the artifact. ─────────────────────────────────────────────
     const blob = createTarGz(files);
     const outPath = resolvePath(cwd, flags.out ?? `${id}-${version}${OSPLUGIN_EXT}`);
     // Bounded (#23858): an `--out` directory that can never be made is refused

@@ -330,6 +330,19 @@ export interface ProposedPlan {
    * reads it only when there is no `planCard`, whose views carry the same line.
    */
   viewIntents?: ProposedPlanViewLine[];
+  /**
+   * objectstack#27480 — the envelope's `decision: 'iterate_or_new'`: the plan
+   * overlaps an app that already exists (`existingAppOverlap`), so it is a
+   * QUESTION, not a plan to approve. The card asks whether to keep improving
+   * that app or build a separate one, and draws no "Build it" button. `app` is
+   * the overlapping app's `name` / `label`, absent when the envelope names none.
+   */
+  iterateOrNew?: ProposedPlanIterateOrNew;
+}
+
+/** objectstack#27480 — the extend-or-new question a `decision: 'iterate_or_new'` plan asks. */
+export interface ProposedPlanIterateOrNew {
+  app?: { name: string; label?: string };
 }
 
 /** One view's intent line: `viewIntents[]` and `planCard.views[]` both carry it. */
@@ -448,8 +461,11 @@ export function detectProposedPlan(result: unknown): ProposedPlan | undefined {
       },
     ];
   });
+  // objectstack#27480 — an `iterate_or_new` plan is a question; it is drawn
+  // even when it names no object, because what it asks is the whole card.
+  const iterateOrNew = liftIterateOrNew(obj);
   // No nameable objects → nothing reviewable; don't render an empty card.
-  if (objects.length === 0) return undefined;
+  if (objects.length === 0 && !iterateOrNew) return undefined;
 
   const num = (v: unknown, fallback: number): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback;
@@ -503,6 +519,7 @@ export function detectProposedPlan(result: unknown): ProposedPlan | undefined {
     ...(typeof targetApp === 'string' && targetApp ? { targetApp } : {}),
     ...(planCard ? { planCard } : {}),
     ...(viewIntents.length ? { viewIntents } : {}),
+    ...(iterateOrNew ? { iterateOrNew } : {}),
   };
 }
 
@@ -517,6 +534,20 @@ function viewLines(v: unknown[]): ProposedPlanViewLine[] {
     if (!r || !isText(r.view) || !isText(r.object) || !isText(r.line)) return [];
     return [{ view: r.view, object: r.object, ...(isText(r.label) ? { label: r.label } : {}), line: r.line }];
   });
+}
+
+/**
+ * objectstack#27480 — lift the extend-or-new question off an envelope whose
+ * `decision` is `iterate_or_new`. The overlapping app is read from
+ * `existingAppOverlap`'s own `name` / `label`, the keys the card that asked
+ * for this names; an overlap without a name leaves `app` absent, and the card
+ * then asks without naming the app. Any other `decision` lifts nothing.
+ */
+function liftIterateOrNew(envelope: Record<string, unknown>): ProposedPlanIterateOrNew | undefined {
+  if (envelope.decision !== 'iterate_or_new') return undefined;
+  const overlap = recordOf(envelope.existingAppOverlap);
+  if (!overlap || !isText(overlap.name)) return {};
+  return { app: { name: overlap.name, ...(isText(overlap.label) ? { label: overlap.label } : {}) } };
 }
 
 /**
@@ -1431,40 +1462,130 @@ function extractBlueprintProgress(parts: AnyPart[]): ChatBlueprintProgress | und
  * analysis it wrote after, instead of below all of it. Only when the content
  * IS that join (`anchored`): a legacy string `content` is not built from the
  * parts, so an offset into it would point nowhere and the charts trail it.
+ *
+ * objectstack#25908 — a message with no `data-chart` part reads its charts off
+ * its `visualize_data` results instead ({@link chartFromToolResult}), each at
+ * the offset of its tool part.
  */
 function extractCharts(parts: AnyPart[], opts: { anchored: boolean }): ChatChart[] | undefined {
-  const charts: ChatChart[] = [];
+  const fromParts: ChatChart[] = [];
+  const fromResults: ChatChart[] = [];
   let textOffset = 0;
   for (const p of parts) {
     if (p.type === 'text') {
       textOffset += (p.text ?? '').length;
       continue;
     }
-    if (p.type !== 'data-chart') continue;
-    const d = p.data;
-    if (!d || typeof d !== 'object') continue;
-    const c = d as Record<string, unknown>;
-    const data = Array.isArray(c.data) ? (c.data as Array<Record<string, unknown>>) : [];
-    const series = Array.isArray(c.series)
-      ? (c.series as Array<Record<string, unknown>>)
-          .filter((s) => s && typeof s.dataKey === 'string')
-          .map((s) => ({
-            dataKey: s.dataKey as string,
-            ...(typeof s.label === 'string' ? { label: s.label } : {}),
-          }))
-      : [];
-    // A chart with no series is unrenderable — skip it.
-    if (series.length === 0) continue;
-    charts.push({
-      ...(typeof c.chartType === 'string' ? { chartType: c.chartType as ChatChart['chartType'] } : {}),
-      ...(typeof c.title === 'string' ? { title: c.title } : {}),
-      data,
-      ...(typeof c.xAxisKey === 'string' ? { xAxisKey: c.xAxisKey } : {}),
-      series,
-      ...(opts.anchored ? { textOffset } : {}),
-    });
+    const isPart = p.type === 'data-chart';
+    const chart = isPart ? chartFromDescriptor(p.data) : chartFromToolResult(p);
+    if (!chart) continue;
+    (isPart ? fromParts : fromResults).push(opts.anchored ? { ...chart, textOffset } : chart);
   }
+  // objectstack#25908 — a live stream carries BOTH the transient `data-chart`
+  // part and the `visualize_data` result that persisted the same chart, so the
+  // results are read only for a message with no chart part at all: server
+  // history, where the transient part was never stored.
+  const charts = fromParts.length > 0 ? fromParts : fromResults;
   return charts.length > 0 ? charts : undefined;
+}
+
+/**
+ * Narrow one chart descriptor (a `data-chart` part's `data`, or the `chart` a
+ * `visualize_data` result persisted, which is the same object) to a
+ * {@link ChatChart}. A chart with no series is unrenderable and is dropped.
+ */
+function chartFromDescriptor(d: unknown): ChatChart | undefined {
+  if (!d || typeof d !== 'object') return undefined;
+  const c = d as Record<string, unknown>;
+  const data = Array.isArray(c.data) ? (c.data as Array<Record<string, unknown>>) : [];
+  const series = Array.isArray(c.series)
+    ? (c.series as Array<Record<string, unknown>>)
+        .filter((s) => s && typeof s.dataKey === 'string')
+        .map((s) => ({
+          dataKey: s.dataKey as string,
+          ...(typeof s.label === 'string' ? { label: s.label } : {}),
+        }))
+    : [];
+  if (series.length === 0) return undefined;
+  return {
+    ...(typeof c.chartType === 'string' ? { chartType: c.chartType as ChatChart['chartType'] } : {}),
+    ...(typeof c.title === 'string' ? { title: c.title } : {}),
+    data,
+    ...(typeof c.xAxisKey === 'string' ? { xAxisKey: c.xAxisKey } : {}),
+    series,
+  };
+}
+
+/**
+ * The tool whose result persists a chart. `@objectstack/spec` declares it only
+ * as a member of `PLATFORM_TOOLS_BY_PACKAGE['service-ai']`, with no constant of
+ * its own; `mapMessages.persistedChart-25908.test.ts` pins this spelling to
+ * that registry.
+ */
+export const VISUALIZE_DATA_TOOL = 'visualize_data';
+
+/**
+ * objectstack#25908 — the ONE reader of the chart a `visualize_data` result
+ * persisted. The streamed `data-chart` part is transient, so after a reload the
+ * tool result is the only record of the chart: one JSON string whose `chart`
+ * key holds the very descriptor the part carried as `data`. Its top-level
+ * `rows` are a preview cut for the model's narration and are never drawn, and
+ * a result persisted before the producer wrote `chart` gets no chart: nothing
+ * is rebuilt from its other keys.
+ */
+function chartFromToolResult(p: AnyPart): ChatChart | undefined {
+  const toolName = p.type === 'dynamic-tool' ? p.toolName : p.type?.replace(/^tool-/, '');
+  if (toolName !== VISUALIZE_DATA_TOOL) return undefined;
+  return chartFromDescriptor(parseResultEnvelope(p.output ?? p.result)?.chart);
+}
+
+/**
+ * objectstack#25908 — a stored message's charts, each with the `textOffset` at
+ * which it sat among the text parts: its `data-chart` parts or, when it has
+ * none, the charts its `visualize_data` results persisted. The offsets index
+ * the join of the text parts, which is the `content` app-shell's hydration
+ * builds.
+ */
+export function chartsFromParts(parts: readonly AnyPart[]): ChatChart[] | undefined {
+  return extractCharts([...parts], { anchored: true });
+}
+
+/** One part {@link chartAnswerParts} writes. */
+export type ChartAnswerPart =
+  | { type: 'text'; text: string }
+  | { type: 'data-chart'; data: Omit<ChatChart, 'textOffset'> };
+
+/**
+ * The inverse of {@link chartsFromParts}: the text cut at each chart's
+ * `textOffset`, with the chart between the runs as a `data-chart` part, so a
+ * message rebuilt from these parts maps back to the same `content` and the
+ * same charts at the same offsets. A chart without an offset, or past the end
+ * of the text, follows all of it; an empty run is left out.
+ */
+export function chartAnswerParts(
+  content: string,
+  charts: readonly ChatChart[] | undefined,
+): ChartAnswerPart[] {
+  const placed = (charts ?? [])
+    .map((chart, order) => ({
+      chart,
+      order,
+      at:
+        typeof chart.textOffset === 'number' && Number.isFinite(chart.textOffset)
+          ? Math.min(Math.max(chart.textOffset, 0), content.length)
+          : content.length,
+    }))
+    .sort((a, b) => a.at - b.at || a.order - b.order);
+  const parts: ChartAnswerPart[] = [];
+  let cursor = 0;
+  for (const { chart, at } of placed) {
+    if (at > cursor) parts.push({ type: 'text', text: content.slice(cursor, at) });
+    cursor = at;
+    const { textOffset: _placement, ...data } = chart;
+    parts.push({ type: 'data-chart', data });
+  }
+  if (cursor < content.length) parts.push({ type: 'text', text: content.slice(cursor) });
+  return parts;
 }
 
 /**

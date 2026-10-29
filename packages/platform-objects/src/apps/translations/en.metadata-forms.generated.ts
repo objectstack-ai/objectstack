@@ -618,15 +618,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       currencyConfig: {
         label: "Currency Config",
-        helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in either mode."
+        helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in every mode."
       },
       "currencyConfig.currencyMode": {
         label: "Currency Mode",
-        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency."
+        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency. record: each record has its own currency, stored in the field currencyField names."
+      },
+      "currencyConfig.currencyField": {
+        label: "Currency Field",
+        helpText: "Record mode only, and required there: the field on this object holding each record's ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code."
       },
       "currencyConfig.defaultCurrency": {
         label: "Default Currency",
-        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode."
+        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode; refused in record mode."
       },
       step: {
         label: "Step",
@@ -812,10 +816,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "summaryOperations.filter": {
         label: "Filter",
         helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
-      },
-      externalId: {
-        label: "External Id",
-        helpText: "Mark as external ID for upsert operations"
       },
       storage: {
         label: "Storage",
@@ -1877,7 +1877,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action route refuses anyone else with 403 (script, flow and modal actions, and the MCP/AI path), and the button is hidden from them. A type api action calls its endpoint directly, so that endpoint must re-check them."
+        helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action door refuses anyone else with 403 on every call it dispatches, the MCP/AI path included, and the button is hidden from them. A type api action's endpoint stays directly reachable, so it must still check these capabilities itself; for an api action with an off-origin target the platform checks nothing server-side."
       },
       ai: {
         label: "Ai",

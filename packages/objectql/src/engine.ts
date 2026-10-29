@@ -90,7 +90,6 @@ import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
   isDataMigrationFlagVerified,
-  renderOperationMessage,
   SystemFieldName,
 } from '@objectstack/spec/system';
 // [#25522 cut 1] The validation-message localisation helpers; the methods of the
@@ -109,15 +108,24 @@ import { publishBulkDataEvent, publishDataEvent } from './engine-realtime-publis
 // [#25522 cut 5] The secret and internal-field bodies; the methods of the same
 // names below hand each body the members it reads (`SecretInternalFieldsHost`).
 import {
+  deletedSecretColumns,
+  deletedSecretSlots,
   encryptSecretFields,
   maskSecretFields,
   omitInternalFields,
+  persistSecretRows,
   privilegedReadDriverOptions,
   refuseEmptyPasswordFields,
+  releaseSecretHandles,
   resolveInternalField,
   resolveSecret,
   resolveSecretField,
+  retiredSecretSlots,
+  secretFieldsWritten,
   stripSearchCompanionFromRead,
+  type PendingSecretRow,
+  type SecretHandleSlot,
+  type StoredRowsReader,
 } from './engine-secret-internal-fields.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
@@ -302,9 +310,14 @@ import {
 // (`rejectCredentialAggregation`); the methods of the same names below hand
 // each body the members it reads (`CountAggregateHost`).
 import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
+// ADR-0100: the credential-column guard's filter / sort half, beside the
+// aggregate half above — one collector, one envelope.
+import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
-import { assertProjectionNamesAField } from './empty-projection-door.js';
+import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
+import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
+import { assertRecordCurrencyCodes, touchesRecordCurrency } from './validation/record-currency-code.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
@@ -333,8 +346,8 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
-import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, isScannableValueShapeField } from './validation/record-validator.js';
-import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, isScannableValueShapeField } from './validation/record-validator.js';
+import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink, ValidationMessageContext } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -366,6 +379,14 @@ import {
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
 import { isFederatedObject, isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
+// [#27277] The correctness floor over a plugin driver on an external datasource.
+import {
+  createExternalDriverFloor,
+  externalPredicateWriteRefusal,
+  isExternalDriverFloor,
+  needsExternalDriverFloor,
+  unwrapExternalDriverFloor,
+} from './external-driver-floor.js';
 // [#25522 cut 14] The master-detail landing, the preview's parents and the
 // related reads a validation rule makes; the methods of the same names below
 // hand each body the members it reads (`MasterDetailRelatedHost`). Imported after
@@ -381,6 +402,13 @@ import { composeReadableIdsChain, findUnservableControlledByParentMasters, permi
 // [#25522 cut 16] Type-only, for the `{@link}`s on `composeReadableIdsAtBoundary`'s and
 // `composeReadableIdsChain`'s docblocks: the constant moved with its reader in cut 15.
 import type { READABLE_IDS_MAX_CHAIN_DEPTH } from './engine-readable-ids-permission-formula.js';
+// [#25522 cut 19] The delete cascade's collection walk, the in-cascade
+// `restrict` judge, the `DELETE_RESTRICTED` refusal, the reference-probe
+// filter and the reference-check elevation record; the methods of the same
+// names below hand each body the members it reads (`DeleteCascadeHost`).
+// Imported after every module those bodies import, so the engine's module
+// evaluation order is what it was.
+import { collectCascadeDeleteSet, deleteRestrictedError, recordReferenceCheckElevation, referenceProbeFilter, refuseRestrictsInsideOwnCascade } from './engine-delete-cascade.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -597,8 +625,8 @@ export const HOOK_EVENT_DISPATCH_VOCABULARY = {
  *
  * `where` is the slot every method folds; `limit` additionally applies to the
  * find-shaped bags, which declare `top` (OData) as its alias. The other four
- * pairs in the table are RPC/wire spellings folded at parse by
- * `RpcQueryOptionsSchema` / the protocol normalizer — their values need shape
+ * pairs in the table are wire spellings folded at parse by
+ * `QueryWithTransportSchema` / the protocol normalizer — their values need shape
  * lowering (`sort` records, `populate` lists) that belongs to those layers, so
  * the engine deliberately does not fold them.
  */
@@ -1659,7 +1687,7 @@ function formulaRoundingScale(def: { scale?: unknown } | undefined): number | un
  * `MULTI_OPTION_TYPES` membership written out at a site would be a second
  * answer to a question the ruling gave exactly one.
  */
-function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | null | undefined): boolean {
+export function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | null | undefined): boolean {
   return isMultiValueField({
     type: typeof field?.type === 'string' ? field.type : '',
     multiple: field?.multiple === true,
@@ -4519,6 +4547,12 @@ interface TransactionScope {
  */
 export interface DatasourceDef {
   name: string;
+  /**
+   * [#27277] The driver id the datasource selects. Read to decide whether the
+   * engine floors the datasource's driver (`needsExternalDriverFloor`: a
+   * non-managed datasource on a driver id that is not built in).
+   */
+  driver?: string;
   schemaMode?: string;
   external?: {
     /** Datasource-wide write gate — ADR-0015 §5.3 Gate 3. */
@@ -4549,7 +4583,7 @@ export interface DatasourceDef {
  * input can name a record into it, and a caller that passed no context still
  * passes none.
  */
-interface CascadeDeleteSet {
+export interface CascadeDeleteSet {
   /**
    * Object name → ids the cascade deletes, the root included. Collected by a
    * read-only walk across every CASCADING relation before any write, so it is
@@ -4589,34 +4623,17 @@ interface CascadeDeleteSet {
 }
 
 /** [#26718] One member of a {@link CascadeDeleteSet}, as a single key. */
-function cascadeMemberKey(object: string, id: unknown): string {
+export function cascadeMemberKey(object: string, id: unknown): string {
   return JSON.stringify([object, String(id)]);
 }
 
-/**
- * [#26718] Every member a cascade reaches from `object`/`id` through the
- * set's own {@link CascadeDeleteSet.cascadeEdges}: its details, theirs, and so
- * on, indexed like {@link CascadeDeleteSet.members}. The member itself is in
- * it only when a cycle in the data leads back.
- */
-function cascadeReachOf(set: CascadeDeleteSet, object: string, id: unknown): Map<string, Set<string>> {
-  const reach = new Map<string, Set<string>>();
-  const queue: Array<{ object: string; id: unknown }> = [{ object, id }];
-  for (const from of queue) {
-    for (const next of set.cascadeEdges.get(cascadeMemberKey(from.object, from.id)) ?? []) {
-      if (cascadeSetAdd(reach, next.object, next.id)) queue.push(next);
-    }
-  }
-  return reach;
-}
-
 /** Is `id` of `object` in this index of a {@link CascadeDeleteSet}? */
-function cascadeSetHas(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
+export function cascadeSetHas(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
   return id != null && index.get(object)?.has(String(id)) === true;
 }
 
 /** Add `id` of `object`; `true` when it was not there yet. */
-function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
+export function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
   let ids = index.get(object);
   if (!ids) { ids = new Set(); index.set(object, ids); }
   const key = String(id);
@@ -9056,7 +9073,8 @@ export class ObjectQL implements IObjectQLEngine {
   registerDriver(driver: IDataDriver, isDefault: boolean = false) {
     const existing = this.drivers.get(driver.name);
     if (existing) {
-      if (existing !== driver) {
+      // [#27277] The entry may be the floored instance of this very driver.
+      if (unwrapExternalDriverFloor(existing) !== unwrapExternalDriverFloor(driver)) {
         this.logger.warn(
           'Driver name collision — KEEPING the already-registered driver and DISCARDING the one just supplied. ' +
             'Two different driver instances claim one name, so whatever configuration the discarded instance carried ' +
@@ -9087,6 +9105,7 @@ export class ObjectQL implements IObjectQLEngine {
     this.drivers.set(driver.name, driver);
     this.supplyFileColumnsMovedResolver(driver);
     this.supplyTenantKeyCertifiedResolver(driver);
+    this.applyExternalDriverFloor(driver.name);
     this.logger.info('Registered driver', {
       driverName: driver.name,
       version: driver.version
@@ -9229,7 +9248,46 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerDatasourceDef(def: DatasourceDef): void {
     if (!def?.name) return;
-    this.datasourceDefs.set(def.name, { schemaMode: def.schemaMode, external: def.external });
+    // [#27277] A def that names no driver keeps the id stored before it: a
+    // caller registering only the write-gate facts after a connect must not
+    // take the floor back off, so an absent key never reads as "not a plugin
+    // driver". It is a keep, not a source: `unregisterDriver` drops the stored
+    // def, so a connect that follows an eviction has nothing to keep — the
+    // datasource-connection service names `driver` on every registration
+    // ([#27666], `EngineDatasourceDef.driver`).
+    const driver = def.driver ?? this.datasourceDefs.get(def.name)?.driver;
+    this.datasourceDefs.set(def.name, { driver, schemaMode: def.schemaMode, external: def.external });
+    this.applyExternalDriverFloor(def.name);
+  }
+
+  /**
+   * [#27277] Put the registered driver of datasource `name` behind the engine's
+   * correctness floor when its definition calls for one, or take it back out
+   * when a later definition no longer does (`external-driver-floor.ts`).
+   *
+   * Called from both doors — {@link registerDriver} and
+   * {@link registerDatasourceDef} — because either can come first. The floored
+   * driver REPLACES the entry in `drivers`, once, so every reader of the map
+   * (`getDriver`, `getDriverByName`, the default-driver and transaction-scope
+   * identity checks) holds one instance.
+   */
+  private applyExternalDriverFloor(name: string): void {
+    const current = this.drivers.get(name);
+    if (!current) return;
+    const floored = isExternalDriverFloor(current);
+    if (needsExternalDriverFloor(this.datasourceDefs.get(name))) {
+      if (floored) return;
+      this.drivers.set(name, createExternalDriverFloor(current, {
+        datasource: name,
+        fieldsOf: (object) => this._registry.getObject(object)?.fields,
+        logger: this.logger,
+      }));
+      this.logger.info('Datasource served by a plugin driver: the engine applies each query in memory', {
+        datasource: name,
+      });
+    } else if (floored) {
+      this.drivers.set(name, unwrapExternalDriverFloor(current));
+    }
   }
 
   /**
@@ -9499,11 +9557,13 @@ export class ObjectQL implements IObjectQLEngine {
     // Only `locale` is read — narrower than `ExecutionContext` so both the
     // resolved and the input-shaped envelope satisfy it.
     context?: { locale?: string },
-  ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
+  ): ValidationMessageContext & { objectName: string } {
     // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
     const readI18nService = () => this.i18nService;
+    const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof validationMessageContext> = {
       get i18nService() { return readI18nService(); },
+      get registry() { return readRegistry(); },
       negotiatedMessageLocale: (...a) => this.negotiatedMessageLocale(...a),
     };
     return validationMessageContext.call(host, objectName, context);
@@ -10493,9 +10553,12 @@ export class ObjectQL implements IObjectQLEngine {
    * Two channels share the read mask ({@link SECRET_MASK}) but differ on write
    * (see ADR-0100):
    *
-   *  - **`secret`** — encrypted: each plaintext is wrapped by the ICryptoProvider,
-   *    persisted as a `sys_secret` row, and replaced on `row` by an opaque ref.
-   *    Cleartext never reaches the business table.
+   *  - **`secret`** — encrypted: each plaintext is wrapped by the ICryptoProvider
+   *    and replaced on `row` by an opaque ref. Cleartext never reaches the
+   *    business table. [#27495] The `sys_secret` row is SEALED here and handed
+   *    back, not written: the caller writes it with {@link persistSecretRows}
+   *    immediately before the record's own driver write, so a write refused
+   *    after this pass (validation, the post-image seam) leaves no row behind.
    *  - **`password`** (generic, non-`better-auth`) — plaintext at rest: stored
    *    verbatim, no encryption and no `sys_secret` row. Only the echoed-mask drop
    *    below applies to it.
@@ -10516,7 +10579,16 @@ export class ObjectQL implements IObjectQLEngine {
    *    (maintainer ruling 2026-08-13 on #8559). The `password` half of the same
    *    ruling lands at its own seam — {@link refuseEmptyPasswordFields} — since
    *    the two types share the read mask but not this encryption path.
-   *  - Secret value already a ref (re-save of an unchanged ref) ⇒ left as-is.
+   *  - Secret value already a ref ⇒ [#27582] a non-system write may only seal
+   *    a new value or keep its own record's ref. From the system principal
+   *    (`context.isSystem === true`) it is left as-is, as it always was. From
+   *    any other caller it is kept only when every row the write lands on
+   *    already holds exactly that ref in that column — read from `storedRows`,
+   *    which each call site supplies (none for an insert, the pre-image for a
+   *    by-id update, the matched rows for a predicate update) — and then the
+   *    key is dropped, as the echoed mask is. Any other ref is REFUSED with
+   *    {@link SecretRefWriteError} (ADR-0112 `VALIDATION_ERROR`/400), one
+   *    answer whatever the ref names.
    *  - **Fail-closed:** any other secret value with no CryptoProvider registered,
    *    or no reachable `sys_secret` store, THROWS — never persists cleartext.
    *    (A `password` field needs no CryptoProvider — it is stored as-is.)
@@ -10526,7 +10598,8 @@ export class ObjectQL implements IObjectQLEngine {
     row: Record<string, unknown>,
     context: ExecutionContext | undefined,
     driverOptions: unknown,
-  ): Promise<void> {
+    storedRows: StoredRowsReader,
+  ): Promise<PendingSecretRow[]> {
     // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
     const readRegistry = () => this._registry;
     const readCryptoProvider = () => this.cryptoProvider;
@@ -10535,7 +10608,76 @@ export class ObjectQL implements IObjectQLEngine {
       get cryptoProvider() { return readCryptoProvider(); },
       getDriver: (...a) => this.getDriver(...a),
     };
-    return encryptSecretFields.call(host, object, row, context, driverOptions);
+    return encryptSecretFields.call(host, object, row, context, driverOptions, storedRows);
+  }
+
+  /**
+   * [#27495] Write the `sys_secret` rows {@link encryptSecretFields} sealed for
+   * one record write. Called immediately before that record's driver write and
+   * after every pass that can refuse it, so the credential row is written only
+   * with the record that names it. Each row lands on `written` as it is
+   * written, which is what the write's failure path hands to
+   * {@link releaseSecretHandles} when the record write does not land.
+   */
+  private async persistSecretRows(pending: readonly PendingSecretRow[], written: PendingSecretRow[]): Promise<void> {
+    // [#27495] The body lives in `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const host: ThisParameterType<typeof persistSecretRows> = {
+      getDriver: (...a) => this.getDriver(...a),
+    };
+    return persistSecretRows.call(host, pending, written);
+  }
+
+  /**
+   * [#27495] Remove each `sys_secret` row in `slots` that the column it was
+   * minted for no longer names — best-effort, and never a throw.
+   *
+   * Two occasions reach it. `'refused'`: a write that sealed and wrote a row
+   * did not complete, so the row may name nothing. `'retired'`: a committed
+   * update cleared the field (`null`) or replaced its value, so the handle the
+   * column named before may name nothing; [#27581] a committed delete reaches
+   * it the same way, for every handle the removed rows held. The same three
+   * checks decide both,
+   * and every one that cannot pass KEEPS the row, the recoverable direction
+   * (deleting a handle a row still names destroys that credential, and nothing
+   * can name what was lost):
+   *
+   *  - **Verified, never inferred.** No row of `object` may still name the
+   *    handle in that column: a predicate write seals ONE handle for every row
+   *    it matches, so clearing one of them leaves the handle in force for the
+   *    rest; a write that did land after all (a partially applied batch) still
+   *    names its row.
+   *  - **This column's own handle.** The `sys_secret` row's `namespace`/`key`
+   *    must be this object and field; a ref a system writer copied onto another
+   *    column is not released through that column.
+   *  - **Inside the record's unit.** The count and the delete ride the open
+   *    transaction where it covers their drivers, so they see the write's own
+   *    state and roll back with it; a record write in a unit that does not
+   *    cover the `sys_secret` store keeps the row, since the delete could
+   *    outlive a rollback of the record.
+   *
+   * A row kept for a failure (not for being in use) is reported once at
+   * `error`, naming the column and the remedy: the caller's answer does not
+   * change, and the stored ciphertext is exactly what the operator believes
+   * gone. Legacy orphans written before this existed are not swept here; the
+   * orphan report lists them.
+   */
+  private async releaseSecretHandles(
+    object: string,
+    slots: readonly SecretHandleSlot[],
+    context: ExecutionContext | undefined,
+    occasion: 'refused' | 'retired',
+  ): Promise<void> {
+    // [#27495] The body lives in `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readTxStore = () => this.txStore;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof releaseSecretHandles> = {
+      get txStore() { return readTxStore(); },
+      get logger() { return readLogger(); },
+      getDriver: (...a) => this.getDriver(...a),
+      transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+    };
+    return releaseSecretHandles.call(host, object, slots, context, occasion);
   }
 
   /**
@@ -13274,7 +13416,12 @@ export class ObjectQL implements IObjectQLEngine {
       // narrowing must be a 400, not a silent widening. A direct engine caller
       // naming one has it intersected away here, the engine's existing tolerant
       // posture for an unknown requested search field.
-      const internalFields = collectInternalReadFields(schema);
+      // [ADR-0100] …and never a `secret` / `password` column either, by the
+      // collector the credential guards read: the auto-default already skips
+      // those types, and an author-declared `searchableFields` naming one is
+      // withheld here the same way, so a search term is never evaluated over
+      // a value the read path masks.
+      const internalFields = [...new Set([...collectInternalReadFields(schema), ...collectCredentialFields(schema)])];
       const scanFields = internalFields.length === 0
         ? (schema.fields as any)
         : Object.fromEntries(
@@ -13537,6 +13684,11 @@ export class ObjectQL implements IObjectQLEngine {
     // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
+    // [ADR-0100] A `secret` / `password` column is never a filter or sort key
+    // for a non-system caller — judged on the caller's own `where` / `orderBy`
+    // / `expand`, before the search term is expanded into `where` and before
+    // the middlewares inject their server-authored filters.
+    rejectCredentialEvaluation(object, 'find', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -13591,10 +13743,10 @@ export class ObjectQL implements IObjectQLEngine {
       // Whole names, no head-splitting: only plain entries reach here (the
       // dotted refusal above fired on anything carrying a '.').
       const filtered = ast.fields.filter(f => known.has(f));
-      // Guard against an empty projection — fall back to `*` so the
-      // request still returns rows. An empty SELECT list would either
-      // 400 in Postgres or silently project nothing.
-      ast.fields = filtered.length > 0 ? filtered : undefined;
+      // [#27165] Nothing left is an empty projection, refused as `fields: []`
+      // is — never read as every column.
+      if (filtered.length === 0) refuseProjectionOfUnknownColumns(object, 'find', ast.fields);
+      ast.fields = filtered;
     }
 
     const opCtx: OperationContext = {
@@ -13862,6 +14014,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
+    // [ADR-0100] Same credential-column refusal as `find`, same position.
+    rejectCredentialEvaluation(objectName, 'findOne', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -13897,7 +14051,9 @@ export class ObjectQL implements IObjectQLEngine {
       // in schema.fields (matches `find()` behavior, one list).
       const known = new Set<string>([...Object.keys(_findOneSchema.fields), ...PLATFORM_PROVISIONED_COLUMNS]);
       const filtered = ast.fields.filter(f => known.has(f));
-      ast.fields = filtered.length > 0 ? filtered : undefined;
+      // [#27165] Same refusal as `find`.
+      if (filtered.length === 0) refuseProjectionOfUnknownColumns(objectName, 'findOne', ast.fields);
+      ast.fields = filtered;
     }
 
     const opCtx: OperationContext = {
@@ -14850,7 +15006,7 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // #8682's rule applied one step in — a refusal must cost nothing — so
       // this runs before `resolveSystemInsertOrganization`, before the
-      // credential channel (`encryptSecretFields` writes a `sys_secret` row),
+      // credential channel (`encryptSecretFields` seals a `sys_secret` row),
       // before validation and before `applyAutonumbers`. Pre-statement, so the
       // driver is never reached: that is also what puts #8682's Half B
       // statement-and-values leak out of reach on this path, since both SQL
@@ -14906,7 +15062,7 @@ export class ObjectQL implements IObjectQLEngine {
       // [#8682] Rows the declared-field door refused are already dead on
       // arrival — seeded before the strips, before the seam, and so before
       // the credential loop further down, which is the first pass with a
-      // real side effect (`encryptSecretFields` writes a `sys_secret` row):
+      // real side effect (`encryptSecretFields` seals a `sys_secret` row):
       // a culled row is neither stripped, nor judged, nor able to mint a
       // secret for a write that will never happen.
       const rowErrors: (unknown | undefined)[] = new Array(rows.length);
@@ -15084,7 +15240,7 @@ export class ObjectQL implements IObjectQLEngine {
       // Placement obeys the rule #8682 wrote for the declared-field door and
       // commit b003cf2e8 restated for its post-hook half: a refusal must cost nothing.
       // This sits after that door and BEFORE every producer —
-      // `resolveSystemInsertOrganization`, `encryptSecretFields` (which writes
+      // `resolveSystemInsertOrganization`, `encryptSecretFields` (which seals
       // a `sys_secret` row), `applyAutonumbers` (which CONSUMES a sequence
       // number), validation and the statement.
       //
@@ -15207,6 +15363,10 @@ export class ObjectQL implements IObjectQLEngine {
       for (const rowCtx of rowHookContexts) {
         rowCtx.input.options = driverOptions;
       }
+      // [#27495] The credential rows each row's secret fields are sealed into,
+      // and the ones this write has actually written to `sys_secret`.
+      const sealedSecrets: PendingSecretRow[][] = rows.map(() => []);
+      const writtenSecrets: PendingSecretRow[] = [];
 
       try {
         let result: any;
@@ -15228,7 +15388,8 @@ export class ObjectQL implements IObjectQLEngine {
             // carries the secret-arm refusal). Same try, so partial mode
             // reports either refusal per-row instead of killing the batch.
             this.refuseEmptyPasswordFields(object, rows[i]);
-            await this.encryptSecretFields(object, rows[i], opCtx.context, driverOptions);
+            // [#27582] A new record holds no ref of its own: no stored rows.
+            sealedSecrets[i] = await this.encryptSecretFields(object, rows[i], opCtx.context, driverOptions, async () => []);
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -15382,6 +15543,9 @@ export class ObjectQL implements IObjectQLEngine {
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
             validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+            // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
+            // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
+            assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i], 'insert');
             emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -15460,6 +15624,11 @@ export class ObjectQL implements IObjectQLEngine {
         const liveIndexes: number[] = [];
         for (let i = 0; i < rows.length; i++) if (rowErrors[i] === undefined) liveIndexes.push(i);
         const liveRows = liveIndexes.map((i) => rows[i]);
+        // [#27495] The live rows' credential rows, and only theirs, written now:
+        // every pass that can refuse a row has run, so a refused write or a
+        // culled row never reaches `sys_secret`. A statement that then fails
+        // takes them back in the `catch` below.
+        await this.persistSecretRows(liveIndexes.flatMap((i) => sealedSecrets[i]), writtenSecrets);
         if (isBatch) {
           if (liveRows.length === 0) {
                result = [];
@@ -15715,6 +15884,10 @@ export class ObjectQL implements IObjectQLEngine {
           'Insert operation failed',
           writeFailureLogMeta(redactBoundStatement(logged), { object }),
         );
+        // [#27495] A write that did not complete takes back the credential rows
+        // it wrote; one a stored row names after all (a batch the driver
+        // partially applied, an after-hook refusal of a landed row) is kept.
+        await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
         throw e;
       }
     });
@@ -15814,6 +15987,9 @@ export class ObjectQL implements IObjectQLEngine {
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
      options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
+     // [ADR-0100] A predicate write is judged like a read: a non-system
+     // caller's `where` evaluates no `secret` / `password` column.
+     rejectCredentialEvaluation(object, 'update', options, options?.context, this.relatedSchemaOf);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -16351,6 +16527,9 @@ export class ObjectQL implements IObjectQLEngine {
            // boundary's status passthrough — decorated; the #5748/#11009
            // family stays a plain Error, byte-identical to before.
            if (dispatch.kind === 'reject') throw engineUpdateDispatchRejectError(dispatch);
+           // [#27277] A floored plugin driver offers no `updateMany` on purpose:
+           // say so, rather than ask for the `multi` this caller already passed.
+           if (isExternalDriverFloor(driver)) throw externalPredicateWriteRefusal(driver.name, object, 'update');
            throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
        }
 
@@ -16747,6 +16926,12 @@ export class ObjectQL implements IObjectQLEngine {
        reportDroppedFields(preComputedPayload, computedStripUpdate.rows[0] as Record<string, unknown> | null | undefined, 'computed');
 
        hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+       // [#27495] The credential rows this write seals, the ones it has written
+       // to `sys_secret`, and the handles its committed statement moved the
+       // secret columns off.
+       let sealedSecrets: PendingSecretRow[] = [];
+       const writtenSecrets: PendingSecretRow[] = [];
+       let retiredSecrets: SecretHandleSlot[] = [];
 
        try {
            let result;
@@ -16859,7 +17044,8 @@ export class ObjectQL implements IObjectQLEngine {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
-               await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
+               // [#27582] This record's own stored row is the pre-image read above.
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options, async () => [priorRecord]);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a
@@ -17099,6 +17285,14 @@ export class ObjectQL implements IObjectQLEngine {
                // because those are already judged. See `ReadonlyValueScope`.
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
                validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [ADR-0144 D8 rule 4] The stored row with the FINAL payload laid
+               // over it keeps a currency code beside a record-mode amount the
+               // payload touches (`ERR_CURRENCY_CODE_REQUIRED`).
+               assertRecordCurrencyCodes(
+                 object, (updateSchema as { fields?: unknown } | undefined)?.fields,
+                 { ...(priorRecord ?? {}), ...(hookContext.input.data as Record<string, unknown>) },
+                 'update', hookContext.input.data as Record<string, unknown>, hookContext.input.id,
+               );
                // ── [#19989] The post-image seam on the BY-ID path ─────────────
                //
                // The by-id twin of the predicate-path call below, placed at the
@@ -17163,6 +17357,10 @@ export class ObjectQL implements IObjectQLEngine {
                // dispatch and the roll-up recompute, so an envelope applied
                // there would attribute a violation raised by a nested driver
                // call inside a hook to THIS object.
+               // [#27495] The credential row is written now, after every pass that
+               // can refuse this write and immediately before the statement; a
+               // statement that fails takes it back (the outer `catch`).
+               await this.persistSecretRows(sealedSecrets, writtenSecrets);
                try {
                    // [ADR-0142 D4] A write under a precondition is the driver's
                    // conditional update plus a readback — see
@@ -17183,6 +17381,9 @@ export class ObjectQL implements IObjectQLEngine {
                // `data.record.updated` event and the door's ingress strip. A
                // `null` readback (the row left the caller's scope) stays `null`.
                result = withDeclaredColumnsOnly(result, declaredColumnSet(updateSchema));
+               // [#27495] The handle the stored row named before, where this
+               // statement cleared or replaced it.
+               retiredSecrets = retiredSecretSlots(updateSchema, [priorRecord], hookContext.input.data);
            } else {
                // [#6262] A bulk SET clause must not carry `id`. Reaching this
                // branch AT ALL means `resolveEngineUpdateDispatch` returned
@@ -17241,7 +17442,9 @@ export class ObjectQL implements IObjectQLEngine {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
-               await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
+               // [#27582] The rows this write lands on are the matched rows: the
+               // D7 memo, read here only when a non-system payload carries a ref.
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options, readPriorRows);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a
@@ -17418,6 +17621,20 @@ export class ObjectQL implements IObjectQLEngine {
                // N rows are written.
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
                validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [ADR-0144 D8 rule 4] The predicate-path twin: every matched row,
+               // with the FINAL payload laid over it, keeps a currency code beside
+               // a record-mode amount the payload touches. The matched rows are
+               // read only for such a payload (`readPriorRows` is the memo the
+               // seams below share).
+               {
+                   const currencyPayload = hookContext.input.data as Record<string, unknown>;
+                   const currencyFields = (updateSchema as { fields?: unknown } | undefined)?.fields;
+                   if (touchesRecordCurrency(currencyFields, currencyPayload)) {
+                       for (const row of (await readPriorRows()) ?? []) {
+                           assertRecordCurrencyCodes(object, currencyFields, { ...row, ...currencyPayload }, 'update', currencyPayload, row?.id);
+                       }
+                   }
+               }
                // ── [#19950] The post-image seam on the PREDICATE path ─────────
                //
                // An enforcement layer's write `check` must hold for EVERY row a
@@ -17449,11 +17666,11 @@ export class ObjectQL implements IObjectQLEngine {
                // changes a value before the statement. The seam judges the rows
                // that will be stored, which is the rule the insert seam was
                // held to. The credential channel (`encryptSecretFields`) runs
-               // above on this branch, so a refused write that carried a secret
-               // field has already minted its `sys_secret` row. A validation
-               // refusal two lines down already pays the same cost here, and
-               // moving that channel is a separate change. A `check` naming a
-               // secret field judges the stored reference.
+               // above on this branch and only SEALS the `sys_secret` row there;
+               // the row is written immediately before the statement (#27495),
+               // so a write this seam or the validation below refuses leaves
+               // none. A `check` naming a secret field judges the stored
+               // reference.
                //
                // `honoured` is set BEFORE `evaluate`, exactly as on the insert
                // path: it answers "did the seam run", never "did the write
@@ -17549,12 +17766,25 @@ export class ObjectQL implements IObjectQLEngine {
                    const payload = hookContext.input.data as Record<string, unknown>;
                    summaryRows = { previous, next: previous.map((row) => ({ ...row, ...payload })) };
                }
+               // [#27495] The handles the matched rows hold in the secret columns
+               // this payload moves, read BEFORE the statement replaces them:
+               // the D7 memo when a consumer above already made it, otherwise
+               // only those columns, through this write's own AST and options.
+               // A payload that moves no secret column reads nothing here.
+               const movedSecretColumns = secretFieldsWritten(updateSchema, hookContext.input.data);
+               const priorSecretRows = movedSecretColumns.length === 0
+                 ? []
+                 : priorRowsRead
+                   ? ((await readPriorRows()) ?? [])
+                   : (((await driver.find(object, { ...ast, fields: ['id', ...movedSecretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
+               await this.persistSecretRows(sealedSecrets, writtenSecrets);
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                isPredicateWrite = true;
+               retiredSecrets = retiredSecretSlots(updateSchema, priorSecretRows, hookContext.input.data);
            }
 
            hookContext.event = 'afterUpdate';
@@ -17695,6 +17925,12 @@ export class ObjectQL implements IObjectQLEngine {
            // reason as the insert path: a strip HERE also fired on writes no
            // external caller ever sees). The generic READ path is unchanged:
            // {@link omitInternalFields} still runs on every find/findOne.
+           // [#27495] The write is complete: release the handles its statement
+           // moved the secret columns off, each only once storage confirms no
+           // row of its column still names it. After the `afterUpdate` chain, so
+           // a refusal that rolls the record back never reaches here, and before
+           // the roll-up verdict below, which reports a write that did land.
+           await this.releaseSecretHandles(object, retiredSecrets, opCtx.context, 'retired');
            // The record IS updated; a summary that could not recompute after
            // retries must surface, not stay silent (framework#3147).
            if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);
@@ -17721,6 +17957,9 @@ export class ObjectQL implements IObjectQLEngine {
             'Update operation failed',
             writeFailureLogMeta(redactBoundStatement(logged), { object }),
           );
+          // [#27495] The insert door's twin: a write that did not complete takes
+          // back the credential row it wrote, unless a stored row names it.
+          await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
           throw e;
        }
      });
@@ -17968,19 +18207,8 @@ export class ObjectQL implements IObjectQLEngine {
     fdef: { type?: unknown; multiple?: unknown },
     id: string | number,
   ): Record<string, unknown> {
-    // [#18408] Was `fdef?.multiple !== true`. See {@link declaredMultiValued}.
-    if (!declaredMultiValued(fdef)) return { [fieldName]: id };
-    const raw = String(id);
-    // The BODY of the JSON string form — `JSON.stringify('a"b')` is `"a\"b"`,
-    // and the quotes are the serialization's, not the id's.
-    const escaped = JSON.stringify(raw).slice(1, -1);
-    if (escaped === raw) return { [fieldName]: { $contains: raw } };
-    return {
-      $or: [
-        { [fieldName]: { $contains: raw } },
-        { [fieldName]: { $contains: escaped } },
-      ],
-    };
+    // [#25522 cut 19] The body moved to `engine-delete-cascade.ts`.
+    return referenceProbeFilter(fieldName, fdef, id);
   }
 
   /**
@@ -18113,30 +18341,12 @@ export class ObjectQL implements IObjectQLEngine {
     fieldName: string,
     context?: ExecutionContext,
   ): void {
-    // The triggered-by half. `userId` survives the `sudo()`-shaped elevation,
-    // which is what makes the two halves recordable at all; `actor` is the
-    // service-principal channel (the `ExecutionContext.actor` contract,
-    // `@objectstack/spec` kernel/execution-context.zod.ts) that keeps a
-    // non-user-authenticated caller attributable instead of anonymous.
-    const triggeredBy =
-      (context?.userId != null && String(context.userId)) ||
-      (typeof (context as any)?.actor === 'string' && (context as any).actor.trim()) ||
-      // Not "unknown": a context with neither channel IS the platform acting
-      // for itself (boot provisioning, seed replay, an inner cascade), and
-      // naming that honestly is more useful than a null.
-      (context?.isSystem === true ? 'system' : 'anonymous');
-    this.logger.info(
-      `[reference-cleanup] referential integrity check on '${childName}' executed as SYSTEM ` +
-      `for delete of ${object}/${String(id)} triggered by ${triggeredBy}`,
-      {
-        triggeredBy,
-        executedAs: 'system',
-        object,
-        recordId: String(id),
-        referencedObject: childName,
-        relationField: fieldName,
-      },
-    );
+    // [#25522 cut 19] The body moved to `engine-delete-cascade.ts` (see `DeleteCascadeHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof recordReferenceCheckElevation> = {
+      get logger() { return readLogger(); },
+    };
+    return recordReferenceCheckElevation.call(host, object, id, childName, fieldName, context);
   }
 
   /**
@@ -18404,70 +18614,13 @@ export class ObjectQL implements IObjectQLEngine {
     objects: ServiceObject[],
     opts: { fileElevations: boolean } = { fileElevations: true },
   ): Promise<CascadeDeleteSet> {
-    const set: CascadeDeleteSet = {
-      members: new Map(), entered: new Map(), elevationsFiled: new Set(), cascadeEdges: new Map(), cleared: new Map(),
+    // [#25522 cut 19] The body moved to `engine-delete-cascade.ts` (see `DeleteCascadeHost`).
+    const host: ThisParameterType<typeof collectCascadeDeleteSet> = {
+      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
+      fileReferenceCheckElevation: (...a) => this.fileReferenceCheckElevation(...a),
+      probeReferencingRowsOfSet: (...a) => this.probeReferencingRowsOfSet(...a),
     };
-    let frontier = new Map<string, Array<string | number>>([[object, []]]);
-    for (const id of ids) {
-      if (cascadeSetAdd(set.members, object, id)) frontier.get(object)!.push(id);
-    }
-    // The cascading relations pointing at each object, scanned once per object
-    // rather than once per record: a wide cascade has many records of few
-    // objects.
-    const cascading = new Map<string, Array<{ childName: string; fieldName: string; fdef: any }>>();
-    const cascadingInto = (target: string) => {
-      let relations = cascading.get(target);
-      if (!relations) {
-        relations = [];
-        for (const child of objects) {
-          const childName = (child as any)?.name as string | undefined;
-          const fields = (child as any)?.fields as Record<string, any> | undefined;
-          if (!childName || !fields) continue;
-          for (const [fieldName, fdef] of Object.entries(fields)) {
-            if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'cascade') {
-              relations.push({ childName, fieldName, fdef });
-            }
-          }
-        }
-        cascading.set(target, relations);
-      }
-      return relations;
-    };
-    // Breadth-first, one depth at a time: the records each depth adds are the
-    // next one's targets, grouped by object.
-    while (frontier.size > 0) {
-      const next = new Map<string, Array<string | number>>();
-      for (const [target, targetIds] of frontier) {
-        if (targetIds.length === 0) continue;
-        for (const { childName, fieldName, fdef } of cascadingInto(target)) {
-          if (opts.fileElevations) {
-            for (const id of targetIds) {
-              this.fileReferenceCheckElevation(set, target, id, childName, fieldName, context);
-            }
-          }
-          const referencing = await this.probeReferencingRowsOfSet(childName, fieldName, fdef, targetIds, context);
-          for (const id of targetIds) {
-            for (const row of referencing.get(String(id)) ?? []) {
-              const depId = row?.id;
-              if (depId == null) continue;
-              // [#26718] The edge is kept even for a row already in the set: a
-              // row reached by two paths is in the reach of both.
-              const from = cascadeMemberKey(target, id);
-              let edges = set.cascadeEdges.get(from);
-              if (!edges) { edges = []; set.cascadeEdges.set(from, edges); }
-              edges.push({ object: childName, id: depId });
-              if (cascadeSetAdd(set.members, childName, depId)) {
-                let found = next.get(childName);
-                if (!found) { found = []; next.set(childName, found); }
-                found.push(depId);
-              }
-            }
-          }
-        }
-      }
-      frontier = next;
-    }
-    return set;
+    return collectCascadeDeleteSet.call(host, object, ids, context, objects, opts);
   }
 
   /**
@@ -19149,80 +19302,15 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
     objects: ServiceObject[],
   ): Promise<void> {
-    // The members with the ids as the rows carried them (the set's own index
-    // holds strings), so each probe below spells its filter as the walk does:
-    // the roots, then every member in the order the collection found it.
-    const members: Array<{ object: string; id: string | number }> = [];
-    const seen = new Set<string>();
-    const visit = (member: { object: string; id: string | number }) => {
-      const key = cascadeMemberKey(member.object, member.id);
-      if (seen.has(key)) return;
-      seen.add(key);
-      members.push(member);
+    // [#25522 cut 19] The body moved to `engine-delete-cascade.ts` (see `DeleteCascadeHost`).
+    const host: ThisParameterType<typeof refuseRestrictsInsideOwnCascade> = {
+      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
+      fileReferenceCheckElevation: (...a) => this.fileReferenceCheckElevation(...a),
+      probeReferencingRowsOfSet: (...a) => this.probeReferencingRowsOfSet(...a),
+      deleteRestrictedError: (...a) => this.deleteRestrictedError(...a),
+      referenceProbeFilter: (...a) => this.referenceProbeFilter(...a),
     };
-    for (const root of roots) visit(root);
-    for (const member of members) {
-      for (const next of cascadeSet.cascadeEdges.get(cascadeMemberKey(member.object, member.id)) ?? []) visit(next);
-    }
-    // The restrict relations pointing at each object whose own object has a
-    // member, scanned once per object.
-    const restricting = new Map<string, Array<{ child: ServiceObject; childName: string; fieldName: string; fdef: any }>>();
-    const restrictingInto = (target: string) => {
-      let relations = restricting.get(target);
-      if (!relations) {
-        relations = [];
-        for (const child of objects) {
-          const childName = (child as any)?.name as string | undefined;
-          const fields = (child as any)?.fields as Record<string, any> | undefined;
-          if (!childName || !fields || !cascadeSet.members.has(childName)) continue;
-          for (const [fieldName, fdef] of Object.entries(fields)) {
-            if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'restrict') {
-              relations.push({ child, childName, fieldName, fdef });
-            }
-          }
-        }
-        restricting.set(target, relations);
-      }
-      return relations;
-    };
-    // [#27004] Which member asks which relation, in the order it is judged:
-    // a relation is asked about a member only when its object has a member in
-    // that member's reach.
-    type Relation = { child: ServiceObject; childName: string; fieldName: string; fdef: any };
-    const asks: Array<{ object: string; id: string | number; relation: Relation; reach: Map<string, Set<string>> }> = [];
-    const askedOf = new Map<Relation, { object: string; ids: Array<string | number> }>();
-    for (const { object, id } of members) {
-      const relations = restrictingInto(object);
-      if (relations.length === 0) continue;
-      const reach = cascadeReachOf(cascadeSet, object, id);
-      for (const relation of relations) {
-        if (!reach.has(relation.childName)) continue;
-        asks.push({ object, id, relation, reach });
-        let asked = askedOf.get(relation);
-        if (!asked) { asked = { object, ids: [] }; askedOf.set(relation, asked); }
-        asked.ids.push(id);
-      }
-    }
-    // One probe per relation per batch of the members asking it.
-    const referencing = new Map<Relation, Map<string, any[]>>();
-    for (const [relation, { object, ids }] of askedOf) {
-      const { childName, fieldName, fdef } = relation;
-      for (const id of ids) this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
-      referencing.set(relation, await this.probeReferencingRowsOfSet(childName, fieldName, fdef, ids, context));
-    }
-    for (const { object, id, relation, reach } of asks) {
-      const { child, childName, fieldName, fdef } = relation;
-      const rows = referencing.get(relation)!.get(String(id)) ?? [];
-      const dependents = rows.filter((row) => cascadeSetHas(reach, childName, row?.id));
-      if (dependents.length === 0) continue;
-      throw await this.deleteRestrictedError({
-        object, id, child, childName, fieldName, fdef, dependents,
-        probeWhere: this.referenceProbeFilter(fieldName, fdef, id),
-        probedIds: rows.map((r: any) => String(r?.id)),
-        multiValued: declaredMultiValued(fdef),
-        objects, context,
-      });
-    }
+    return refuseRestrictsInsideOwnCascade.call(host, cascadeSet, roots, context, objects);
   }
 
   /**
@@ -19246,87 +19334,13 @@ export class ObjectQL implements IObjectQLEngine {
     objects: ServiceObject[];
     context: ExecutionContext | undefined;
   }): Promise<Error> {
-    const {
-      object, id, child, childName, fieldName, fdef, dependents, probeWhere, probedIds, multiValued, objects, context,
-    } = args;
-    // [#7307] TWO messages, two audiences — because this error has two
-    // and they were sharing one string.
-    //
-    // `message` is what a BUSINESS USER reads: REST ships it verbatim as
-    // `body.error` in the flat 409 envelope (`mapDataError`), and Console
-    // renders that as-is in a toast. It was composed English-only with the
-    // API names concatenated in and a metadata-authoring instruction on
-    // the end, so an operator deleting a 部门 in a fully Chinese app got an
-    // English sentence naming two tables and a column they have never
-    // seen, ending in advice only a developer can act on. It is now
-    // rendered through the operation-message catalog in the caller's
-    // locale against resolved LABELS — the same fix #3957 made one layer
-    // down for field constraints, reached from the operation side.
-    //
-    // `developerMessage` is what the DEVELOPER reads, and is the previous
-    // sentence unchanged, byte for byte: English, API names, and the
-    // `deleteBehavior:'cascade'` hint — which is correct and useful, and
-    // is not lost, it is addressed. It rides the structured half of the
-    // envelope alongside `dependentObject` / `dependentCount`, which
-    // already carry API names, so it discloses nothing new; no
-    // user-facing surface reads it.
-    //
-    // The wire code does NOT split: one `DELETE_RESTRICTED` (ADR-0112),
-    // two SENTENCES, exactly as the field catalog splits a message key
-    // without splitting `FieldErrorCode`.
-    const required = fdef.deleteBehavior !== 'restrict' && fdef.required === true;
-    const msgCtx = this.validationMessageContext(object, context);
-    const parent = objects.find((o) => (o as any)?.name === object);
-    // [#12166, ruling constraint 2] Whether this refusal may carry the
-    // row COUNT — see `dependentCountIsDisclosable` for why the elevation
-    // above is what makes the question exist, and why the answer is "only
-    // if the caller's own identity would have produced the same rows".
-    // The OBJECT is named either way: that half is what the ruling
-    // requires the caller to learn.
-    const discloseCount = await this.dependentCountIsDisclosable(
-      childName, probeWhere, probedIds, fieldName, multiValued, id, context,
-    );
-    const err: any = new Error(
-      renderOperationMessage(
-        {
-          messageKey: discloseCount
-            ? (required ? 'delete_restricted_required' : 'delete_restricted')
-            : (required ? 'delete_restricted_required_opaque' : 'delete_restricted_opaque'),
-          params: {
-            object: this.objectDisplayLabel(object, (parent as any)?.label, msgCtx),
-            dependentObject: this.objectDisplayLabel(childName, (child as any)?.label, msgCtx),
-            field: resolveFieldLabel(fieldName, fdef, { ...msgCtx, objectName: childName }),
-            ...(discloseCount ? { count: dependents.length } : {}),
-          },
-        },
-        { locale: msgCtx.locale, translate: msgCtx.translate },
-      ),
-    );
-    // The DEVELOPER half is subject to the same rule, and the reason is
-    // measured rather than assumed: for `DELETE_RESTRICTED` (unlike the
-    // #7414 permission denial) this sentence RIDES THE ENVELOPE — REST's
-    // `mapDataError` ships it — so a count withheld from `message` and
-    // left here would not be withheld at all.
-    err.developerMessage =
-      `Cannot delete ${object} (${id}): ` +
-      `${discloseCount ? `${dependents.length} dependent ${childName} record(s) reference it` : `dependent ${childName} record(s) reference it`} via ${fieldName}` +
-      `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
-      `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
-    err.code = 'DELETE_RESTRICTED';
-    err.status = 409;
-    err.httpStatus = 409;
-    err.object = object;
-    // Constraint 2's REQUIRED half — the referenced object is named
-    // unconditionally, because "which table is blocking me" is the one
-    // thing the reporting deployment's admins could not self-diagnose.
-    err.dependentObject = childName;
-    // …and its withheld half. Absent rather than zeroed: `0` would be a
-    // false statement about the rows (there is at least one, or this
-    // branch would not have been reached), and REST's envelope builder
-    // already omits the key for a non-number, so an absent count reaches
-    // the client as an absent key rather than as a lie.
-    if (discloseCount) err.dependentCount = dependents.length;
-    return err;
+    // [#25522 cut 19] The body moved to `engine-delete-cascade.ts` (see `DeleteCascadeHost`).
+    const host: ThisParameterType<typeof deleteRestrictedError> = {
+      validationMessageContext: (...a) => this.validationMessageContext(...a),
+      dependentCountIsDisclosable: (...a) => this.dependentCountIsDisclosable(...a),
+      objectDisplayLabel: (...a) => this.objectDisplayLabel(...a),
+    };
+    return deleteRestrictedError.call(host, args);
   }
 
   /**
@@ -19615,6 +19629,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [#5158] Same ordering reason as update(): the dispatch decision below
     // reads `where.id`, which an unlowered array never carries.
     options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf);
+    // [ADR-0100] Same credential-column refusal as update().
+    rejectCredentialEvaluation(object, 'delete', options, options?.context, this.relatedSchemaOf);
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
@@ -19837,6 +19853,11 @@ export class ObjectQL implements IObjectQLEngine {
       // delete (`null` when no roll-up aggregates this object).
       let predicateMatchedRows: Record<string, unknown>[] | null = null;
       let summaryPriorRows: Record<string, unknown>[] | null = null;
+      // [#27581] The `secret` columns this object declares, and the handles the
+      // removed rows held in them: the by-id pre-image, or the predicate
+      // path's matched rows, read before the statement takes them away.
+      const secretColumns = deletedSecretColumns(deleteSchema);
+      let deletedSecrets: SecretHandleSlot[] = [];
 
       // [#5574] The dispatch ladder, resolved BEFORE the before phase — see
       // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
@@ -19863,7 +19884,10 @@ export class ObjectQL implements IObjectQLEngine {
         // refusal names the dropped `where` keys; the classic shape keeps
         // `ENGINE_DELETE_REJECT_MESSAGE`; the fallback arm is a `multi`
         // verdict against a driver with no `deleteMany`.
-        throw new Error(dispatch.kind === 'reject' ? dispatch.message : ENGINE_DELETE_REJECT_MESSAGE);
+        if (dispatch.kind === 'reject') throw new Error(dispatch.message);
+        // [#27277] See update()'s twin: a floored plugin driver offers no `deleteMany`.
+        if (isExternalDriverFloor(driver)) throw externalPredicateWriteRefusal(driver.name, object, 'delete');
+        throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
       }
 
       // [#6966] See update()'s twin — same rule, same single binding point.
@@ -20055,6 +20079,8 @@ export class ObjectQL implements IObjectQLEngine {
                   if (plan === 'split') this.warnCascadeNotAtomic(object);
                   result = await runByIdDelete(opCtx.context);
               }
+              // [#27581] The handles the removed row held, off its pre-image.
+              deletedSecrets = deletedSecretSlots(deleteSchema, [priorRecord]);
           } else {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
@@ -20089,6 +20115,14 @@ export class ObjectQL implements IObjectQLEngine {
                    summaryPriorRows = predicateMatchedRows
                      ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
                  }
+                 // [#27581] The handles the matched rows hold, read BEFORE the
+                 // statement removes them: the per-row hook read when it was
+                 // made, otherwise only `id` and the secret columns, through
+                 // this write's AST and options. No secret column, no read.
+                 if (secretColumns.length > 0) {
+                   deletedSecrets = deletedSecretSlots(deleteSchema, predicateMatchedRows
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...secretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]));
+                 }
                  result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
                } else {
                  // Otherwise: resolve the matched rows through the composed,
@@ -20104,9 +20138,12 @@ export class ObjectQL implements IObjectQLEngine {
                  // branch's, for the same reasons (#7413).
                  const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
                    const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
-                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   // [#27581] The same read carries the secret columns, so the
+                   // handles released are those of the rows deleted.
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns, ...secretColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
+                   deletedSecrets = deletedSecretSlots(deleteSchema, matched);
                    // [#27004] One walk, rooted at the whole matched set.
                    await this.cascadeDeleteRelations(object, matchedIds, writeContext);
                    // The id set rides an `$in`; batched so one statement never
@@ -20168,6 +20205,14 @@ export class ObjectQL implements IObjectQLEngine {
               result: hookContext.result,
             });
           }
+
+          // [#27581] The delete is complete: release the handles the removed
+          // rows held, through the release a committed update uses, so each one
+          // goes only once storage confirms no row of its column still names it,
+          // inside this write's unit. After the `afterDelete` chain, so a hook
+          // can still dereference the value and a refusal that rolls the delete
+          // back never reaches here.
+          await this.releaseSecretHandles(object, deletedSecrets, opCtx.context, 'retired');
 
           // Roll-up: recompute the parent summary now that the child is gone,
           // from the row's FK values captured BEFORE deletion. [#5272] That
@@ -20318,6 +20363,10 @@ export class ObjectQL implements IObjectQLEngine {
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
       query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object), this.relatedSchemaOf);
+      // [ADR-0100] The filter half of the credential-column guard — `where`
+      // and every `aggregations[i].filter` — before the search term joins
+      // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
+      rejectCredentialEvaluation(object, 'aggregate', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).
@@ -20343,6 +20392,11 @@ export class ObjectQL implements IObjectQLEngine {
       // string on SQLite and a 500 on PostgreSQL; `sum` over one answered `0`,
       // `0` and a 500. Every row of the table is asked (see the door's header).
       assertAggregationFieldTypesAccepted(object, this._registry.getObject(object), query.aggregations);
+      // [ADR-0144 D6] …and a `sum` / `avg` / `min` / `max` over a `record`-mode
+      // amount that does not group by its code field: the rows hold amounts in
+      // different currencies, which add into one number under one label.
+      // After the type door, so a type it refuses keeps that door's words.
+      assertRecordCurrencyAggregatesGrouped(object, this._registry.getObject(object), query.groupBy, query.aggregations);
       // [#25818] …and the two shapes that answered a plausible wrong table: a
       // `dateGranularity` over a field declared neither a date nor a datetime
       // (every row in one null bucket), and two columns of the aggregated row

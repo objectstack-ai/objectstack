@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: one in-process boot of the real stack with SCIM and SSO on, then sign-ins per door under each held state armed in turn; slowest CI reading 32.65 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 
 /**
  * ADR-0069 D3 at the platform-admin doors better-auth serves itself, on a real

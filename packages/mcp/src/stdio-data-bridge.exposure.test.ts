@@ -495,3 +495,77 @@ describe('#15416 the stdio refusal never names an operation it also allows', () 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Beside the exposure gate: changing an API key requires a signed-in session
+// ---------------------------------------------------------------------------
+
+/**
+ * This transport's principal is admitted by `OS_MCP_STDIO_API_KEY` alone
+ * (ADR-0101), so its write arms ask `apiKeyManagementCredentialRefusal`
+ * (`@objectstack/core`) with the API-key credential, after the exposure gate
+ * and before the engine. Refusals are asserted by envelope (`code` + `status`)
+ * with the engine never asked; every served case asserts the engine call.
+ */
+describe('stdio data bridge: a sys_api_key write is refused 403 PERMISSION_DENIED', () => {
+  /** The shipped declaration's method set, and an unrestricted one that lets every write verb reach the rule. */
+  const SHIPPED = { name: 'sys_api_key', enable: { apiMethods: ['get', 'list', 'update'] } };
+  const UNRESTRICTED = { name: 'sys_api_key' };
+
+  const expectCredentialRefusal = async (run: () => Promise<unknown>) => {
+    let thrown: any;
+    try {
+      await run();
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown, 'the write must be refused').toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: 'sys_api_key' });
+  };
+
+  it('refuses update on the shipped declaration, and never asks the engine', async () => {
+    const { bridge, engine } = makeBridge(SHIPPED);
+    await expectCredentialRefusal(() => bridge.update('sys_api_key', 'k1', { revoked: false }));
+    expect(engine.find).not.toHaveBeenCalled();
+    expect(engine.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses create, update and remove when every verb is exposed, and never asks the engine', async () => {
+    const { bridge, engine } = makeBridge(UNRESTRICTED);
+    await expectCredentialRefusal(() => bridge.create('sys_api_key', { name: 'x' }));
+    await expectCredentialRefusal(() => bridge.update('sys_api_key', 'k1', { revoked: true }));
+    await expectCredentialRefusal(() => bridge.remove('sys_api_key', 'k1'));
+    expect(engine.insert).not.toHaveBeenCalled();
+    expect(engine.find).not.toHaveBeenCalled();
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(engine.delete).not.toHaveBeenCalled();
+  });
+
+  it('an operation the object does not expose keeps its 405, ahead of the rule', async () => {
+    const { bridge, engine } = makeBridge(SHIPPED);
+    for (const run of [() => bridge.create('sys_api_key', { name: 'x' }), () => bridge.remove('sys_api_key', 'k1')]) {
+      let thrown: any;
+      try { await run(); } catch (e) { thrown = e; }
+      expect(thrown).toMatchObject({ code: 'OBJECT_API_METHOD_NOT_ALLOWED', status: 405 });
+    }
+    expect(engine.insert).not.toHaveBeenCalled();
+    expect(engine.delete).not.toHaveBeenCalled();
+  });
+
+  it('serves reads of sys_api_key', async () => {
+    const { bridge, engine } = makeBridge(SHIPPED);
+    const listed: any = await bridge.query('sys_api_key', { limit: 5 });
+    const one: any = await bridge.get('sys_api_key', 'r1');
+    expect(listed.records).toHaveLength(1);
+    expect(one?.id).toBe('r1');
+    // Both reads reach the engine (the by-id read goes through `find` too).
+    expect(engine.find).toHaveBeenCalledTimes(2);
+  });
+
+  it('serves a write to another object', async () => {
+    const { bridge, engine } = makeBridge({ name: 'task' });
+    await bridge.update('task', 'r1', { title: 'x' });
+    expect(engine.update).toHaveBeenCalledTimes(1);
+    expect(engine.update.mock.calls[0][0]).toBe('task');
+  });
+});

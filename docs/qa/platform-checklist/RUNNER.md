@@ -78,22 +78,38 @@ selector handed you has a verdict; planned ids are listed, not chased.
      issue. A `fail` with no reproduction rule in its issue is not a completed verdict.
      (The screenshot that convinced you is a live judgment aid, not report content —
      describe what it showed in one line; never attach it.)
-   - **Carve-out — authentication and authorization findings only.** ⛔ Never publish a
-     reproduction for an authentication or authorization hole **anywhere on GitHub**: not
-     the run issue, not a tracking or extracted card, not a comment. Relocating it is not a
-     mitigation — a tracking card is a public issue in a public repo just the same. Such a
-     `fail` **is a completed verdict** when it records the item id, the clause, and `detail
-     withheld pending maintainer`; the reproduction stays in the runner session. The fix is
-     **dispatched directly through `pm-dispatch`**, never waiting on the maintainer: a card
-     carrying only the item id, the clause and `detail withheld pending maintainer`, then an
-     in-seat `mode:subagent` `os-dev` dispatch (a disclosure-discipline card) whose prompt
-     alone carries the reproduction. A one-shot runner with no dispatch channel hands that to
-     the session that dispatched it. Existence published, recipe withheld, is a complete and
-     actionable report — getting a defect fixed never requires handing anyone a working
-     exploit. (Maintainer disclosure ruling, 2026-08-18, recorded on #9387; fix-dispatch
-     ruling, 2026-10-27, recorded on #25807; the `checklist-test` skill states the same
-     guardrail in the same terms — one rule written in both places, not a precedence claim
-     by either.)
+   - **Carve-out — security findings.** A security finding is an authentication or
+     authorization hole, or any finding whose reproduction is an exploit recipe. ⛔ It gets
+     **no GitHub card at all**: no withheld-detail card, no tracking or extracted card, and
+     no line about it on the wave's anchor. A card that withholds the recipe still announces,
+     in a public repository, that a named item carries a hole before its fix lands. ⛔ Its
+     reproduction appears nowhere on GitHub: not the run issue, not a card, not a comment,
+     not a PR. The run record carries one row,
+     `area.item · clause · security finding — detail withheld, reported to PM`; that row
+     **is a completed verdict**, and the title counts it as a `FAIL`. The runner reports the
+     reproduction **privately** to the session that dispatched it, in a session-to-session
+     message, and keeps it nowhere else; a runner with no such channel keeps it in its own
+     session and reports the hand-off as blocked, without the reproduction. **That
+     dispatching PM session** decides the fix and dispatches it through `pm-dispatch`: an
+     in-seat `os-dev` subagent at `xhigh` whose dispatch prompt alone carries the
+     reproduction, and whose PR, commit and changeset describe a hardening without the
+     exploit steps. A finding that needs a contract decision first goes to the maintainer
+     instead. Getting a defect fixed never requires handing anyone a working exploit.
+   - **The runner only tests.** Its record, its defect cards, its comments, and every issue
+     or PR handling step of the run (extraction, dedupe, close-out) go through the
+     `pm-dispatch` write doors (`scripts/pm/`). ⛔ It never spawns `os-dev` and never drives
+     a PR: the dispatching PM session owns every PR the run produces, through review,
+     contract review where it is owed, readiness and landing. When the runner's own
+     permission check refuses a write door, it does not route around it: it stages the
+     writes in a file and hands off to the dispatching session with the path **and the
+     staged text itself**, in its final report or by session-to-session message, because
+     the dispatching session cannot read a file in a cloud runner's container. That session
+     posts them through the same doors in the staged order. ⛔ The staged text never carries
+     a security reproduction; that travels only in the private report. (Maintainer
+     disclosure ruling, 2026-08-18, recorded on #9387; fix-dispatch ruling, 2026-10-27,
+     recorded on #25807; no-card, runner-only-tests and PM-dispatches-the-fix rulings,
+     2026-10-29, recorded on #27377; the `checklist-test` skill states the same guardrail in
+     the same terms — one rule written in both places, not a precedence claim by either.)
      **No other failure class is softened by this**: everything else owes its reproduction
      rule in full.
 3. **Classify blockers honestly.** Missing seed/persona/fixture → `blocked(fixture)`,
@@ -763,10 +779,11 @@ its README.
 reach a verdict — never report artifacts. What the report carries for a defect is the
 **reproduction rule**: ordered steps / API calls (method · path · body) / the
 ref-targeted selector path + expected-vs-actual from the oracle, enough to re-hit it on a
-fresh boot with no picture — **except under rule 2's authentication/authorization
-carve-out**, where the report carries the item, the clause and `detail withheld pending
-maintainer`, and nothing else. A clause whose oracle was a screenshot is recorded as a
-one-line text description of what it showed, not a link.
+fresh boot with no picture — **except under rule 2's security-finding carve-out**, where
+the report carries the one row
+`area.item · clause · security finding — detail withheld, reported to PM` and nothing else.
+A clause whose oracle was a screenshot is recorded as a one-line text description of what it
+showed, not a link.
 
 The in-environment JSON scratch (RUNNER shape, never committed):
 
@@ -860,12 +877,11 @@ closing out the report includes the extraction, owed by the runner:
 - **Product defects found during the run**: at close-out, extract each one into its own
   standalone issue — self-contained title, reproduction and mechanism itemized in the
   card, a pointer back to the run record for the full evidence chain. A defect card does
-  not carry `qa-run`; it enters triage first-touch normally. ⛔ An authentication or
-  authorization defect is extracted under rule 2's carve-out — item, clause, `detail
-  withheld pending maintainer`, no recipe — and its fix is dispatched at once (rule 2). The
-  extracted card is public too. Every product defect the run meets, a clause `fail` or an
-  off-clause probe finding alike, is extracted in the same run — ⛔ never left only in the
-  run record or the chat.
+  not carry `qa-run`; it enters triage first-touch normally. ⛔ A security finding is never
+  extracted: it gets no card at all, and its reproduction goes privately to the dispatching
+  session, which dispatches the fix (rule 2's carve-out). Every other product defect the
+  run meets, a clause `fail` or an off-clause probe finding alike, is extracted in the same
+  run — ⛔ never left only in the run record or the chat.
 - **Checklist-accuracy findings and fixture gaps** close out through the wave's anchor
   card (the sweep's tracking issue) — ⛔ not extracted.
 - **Environment blockers**: recorded in the run record is enough.

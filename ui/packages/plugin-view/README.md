@@ -778,7 +778,7 @@ const userView: ObjectViewSchema = {
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-view)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-view)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-view)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

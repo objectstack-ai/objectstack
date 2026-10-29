@@ -36,9 +36,9 @@ export {
 
 // Per-file artifact integrity verification (ADR-0025 §3.2) — pure and
 // portable like the signature contract above; consumed by the
-// `os plugin publish` preflight. Unpack-time re-verification is owned by
-// the future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
-// control plane (that leg is unbuilt).
+// `os plugin publish` preflight and by `os plugin install`, which
+// re-verifies at unpack (ADR-0025 §3.5 M1). The cloud control plane stores
+// the artifact blob opaquely.
 export {
   verifyIntegrity,
   formatIntegrityViolation,
@@ -47,6 +47,26 @@ export {
   type IntegrityViolationKind,
   type VerifyIntegrityResult,
 } from './plugin-artifact-integrity.js';
+
+// [ADR-0025 §3.5 M1] Reading an `.osplugin` (gunzip bounded, then ustar) — one
+// reader for `os plugin install` and the runtime's boot-time loader, which
+// re-reads the artifact an install kept. The writer stays with `os plugin build`.
+export {
+  MAX_UNPACKED_ARTIFACT_BYTES,
+  readTar,
+  readTarGz,
+  sha256Hex,
+  type ArchiveFile,
+} from './plugin-artifact-archive.js';
+
+// [ADR-0025 §3.5 M1] The verdict the host that verified an installed plugin's
+// artifact records against the plugin object, which `PluginLoader` reads: a
+// plugin carrying a signature no host verified is refused.
+export {
+  recordPluginArtifactVerdict,
+  pluginArtifactVerdict,
+  type PluginArtifactVerdict,
+} from './plugin-artifact-verdict.js';
 
 // The outbound HTTP signature scheme (`X-Objectstack-Signature`) — one
 // definition shared by the messaging outbox and the flow `http` node's inline
@@ -343,6 +363,15 @@ export {
   type InboundHookRouteMatch,
   type UserAuthGateSource,
 } from './auth-gate.js';
+
+// Managing API keys is a signed-in-session act on every data door: the one
+// rule the runtime dispatcher's and RestServer's per-object gates ask.
+export {
+  apiKeyManagementCredentialRefusal,
+  API_KEY_MANAGEMENT_READ_OPERATIONS,
+  API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE,
+  type ApiKeyManagementCredentialInput,
+} from './api-key-management-credential.js';
 
 // #2567 — the single anonymous-deny decision shared by every HTTP seam.
 export {

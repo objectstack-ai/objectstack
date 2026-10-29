@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "RBAC permission system for Object UI with object/field/row-level access control, permission guards, and hooks.",
-  "homepage": "https://www.objectui.org/docs/packages/permissions",
+  "description": "RBAC permission system for ObjectUI with object/field/row-level access control, permission guards, and hooks.",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

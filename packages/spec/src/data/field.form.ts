@@ -107,13 +107,16 @@ export const fieldForm = defineForm({
           field: 'currencyConfig',
           type: 'composite',
           visibleWhen: "data.type == 'currency' || (data.type == 'formula' && data.returnType == 'currency')",
-          helpText: 'Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in either mode.',
+          helpText: 'Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in every mode.',
           fields: [
-            { field: 'currencyMode', type: 'select', helpText: 'dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency.', options: [
+            { field: 'currencyMode', type: 'select', helpText: 'dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency. record: each record has its own currency, stored in the field currencyField names.', options: [
               { label: 'Dynamic — the tenant default currency', value: 'dynamic' },
               { label: 'Fixed — one currency for this field', value: 'fixed' },
+              { label: 'Record — each record names its currency', value: 'record' },
             ] },
-            { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode.' },
+            // ADR-0144 D2 — the record-mode pointer.
+            { field: 'currencyField', type: 'text', helpText: 'Record mode only, and required there: the field on this object holding each record\'s ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code.' },
+            { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode; refused in record mode.' },
           ],
         },
         // Every `visibleWhen` below is a MEANINGFULNESS gate, not a parse gate:
@@ -374,7 +377,10 @@ export const fieldForm = defineForm({
               ],
               helpText: 'Aggregation function',
             },
-            { field: 'field', required: true, helpText: 'Child field to aggregate (ignored for count)' },
+            // Not `required`: a `count` reads no child field and saves without one
+            // (`summaryFunctionReadsField` in field.zod.ts); the schema refuses a
+            // missing `field` on every other function, naming it.
+            { field: 'field', helpText: 'Child field to aggregate (ignored for count)' },
             { field: 'relationshipField', helpText: 'Child FK back to this parent (auto-detected when omitted)' },
             { field: 'filter', widget: 'filter-condition', helpText: 'Only child rows matching this predicate are aggregated (e.g. status == received)' },
           ],
@@ -390,7 +396,11 @@ export const fieldForm = defineForm({
       columns: 2,
       fields: [
         // Database & Performance
-        { field: 'externalId', colSpan: 1, helpText: 'Mark as external ID for upsert operations' },
+        // No `externalId` row (#26674). `field.externalId` is graded `dead`
+        // (liveness/field.json): no upsert, import or seed reads it, so a
+        // switch here only invited an author to rely on it. The schema still
+        // parses the key; upsert matching lives on a seed dataset's
+        // `externalId` and an import mapping's `upsertKey`.
         // #19332 G1b — `storage` is a strict object with one boolean, so it takes
         // the same declared-composite face as `currencyConfig` above. The one
         // contradiction the schema refuses (`notNull` beside `requiredWhen`) is

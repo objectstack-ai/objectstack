@@ -22,8 +22,8 @@ The Data Engine acts as the "Driver" layer in the Hexagonal Architecture.
 ## TypeScript Usage
 
 ```typescript
-import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryPageWindowSchema, QueryPageWindowParamSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '@objectstack/spec/data';
-import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineExecuteRequest, DataEngineFilter, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryPageWindow, QueryPageWindowParam, QueryTransportParams, QueryWithTransport, ValidationAdvisoryEvent } from '@objectstack/spec/data';
+import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineCountOptionsSchema, DataEngineDeleteOptionsSchema, DataEngineFilterSchema, DataEngineInsertOptionsSchema, DataEngineQueryOptionsSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryPageWindowSchema, QueryPageWindowParamSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineFilter, DataEngineInsertOptions, DataEngineQueryOptions, DataEngineSort, DataEngineUpdateOptions, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryPageWindow, QueryPageWindowParam, QueryTransportParams, QueryWithTransport, ValidationAdvisoryEvent } from '@objectstack/spec/data';
 
 // Validate data
 const result = BaseEngineOptionsSchema.parse(data);
@@ -134,33 +134,6 @@ Options for DataEngine.aggregate operations
 
 ---
 
-## DataEngineAggregateRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'aggregate'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
-
-### Nested Shape: `DataEngineAggregateRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
-| **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
-| **timezone** | `string` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
-
----
-
 ## DataEngineCountOptions
 
 Options for DataEngine.count operations
@@ -209,29 +182,6 @@ Options for DataEngine.count operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineCountRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'count'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; search?: string \| object; searchFields?: string[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineCountRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
 ---
@@ -289,42 +239,6 @@ Options for DataEngine.delete operations
 
 ---
 
-## DataEngineDeleteRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'delete'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single delete, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
-
-### Nested Shape: `DataEngineDeleteRequest.options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
-
----
-
-## DataEngineExecuteRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'execute'` | ✅ |  |
-| **command** | `any` | ✅ |  |
-| **options** | `Record<string, any>` | optional |  |
-
-
----
-
 ## DataEngineFilter
 
 Data Engine query filter conditions
@@ -344,76 +258,6 @@ Type: `Record<string, any>`
 Reference: any
 
 ---
-
-
----
-
-## DataEngineFindOneRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'findOne'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineFindOneRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
-
-
----
-
-## DataEngineFindRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'find'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineFindRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
 
 
 ---
@@ -466,20 +310,6 @@ Options for DataEngine.insert operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineInsertRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'insert'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any> \| Record<string, any>[]` | ✅ |  |
-| **options** | `{ context?: object; returning?: boolean }` | optional | Options for DataEngine.insert operations |
 
 
 ---
@@ -538,221 +368,6 @@ Query options for IDataEngine.find() operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineRequest
-
-Virtual ObjectQL Request Protocol
-
-### Union Options
-
-This schema accepts one of the following structures:
-
-#### Option 1
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'find'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='find'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
-
----
-
-#### Option 2
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'findOne'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='findOne'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
-
----
-
-#### Option 3
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'insert'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any> \| Record<string, any>[]` | ✅ |  |
-| **options** | `{ context?: object; returning?: boolean }` | optional | Options for DataEngine.insert operations |
-
----
-
-#### Option 4
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'update'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any>` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single update, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; returning?: boolean; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='update'].options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **returning** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 5
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'delete'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single delete, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='delete'].options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 6
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'count'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; search?: string \| object; searchFields?: string[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='count'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 7
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'aggregate'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
-
-### Nested Shape: `DataEngineRequest[method='aggregate'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
-| **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
-| **timezone** | `string` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 8
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'execute'` | ✅ |  |
-| **command** | `any` | ✅ |  |
-| **options** | `Record<string, any>` | optional |  |
-
----
-
-#### Option 9
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'vectorFind'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **vector** | `number[]` | ✅ |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **limit** | `integer` | optional (default: `5`) |  |
-| **threshold** | `number` | optional |  |
-
----
 
 
 ---
@@ -837,49 +452,6 @@ Options for DataEngine.update operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineUpdateRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'update'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any>` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single update, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; returning?: boolean; … }` | optional |  |
-
-### Nested Shape: `DataEngineUpdateRequest.options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **returning** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
-
----
-
-## DataEngineVectorFindRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'vectorFind'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **vector** | `number[]` | ✅ |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **limit** | `integer` | optional (default: `5`) |  |
-| **threshold** | `number` | optional |  |
 
 
 ---
@@ -977,7 +549,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -1044,7 +616,7 @@ QueryAST-aligned options for DataEngine.count operations
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -1172,7 +744,7 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -1188,7 +760,7 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -1310,7 +882,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
-| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
+| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
@@ -1327,7 +899,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -1346,7 +918,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -1367,7 +939,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any` | optional | Filtering criteria (WHERE) — a filter condition, or the input-only `FilterArray` sugar (`['status', '=', 'open']`), which is lowered through `parseFilterAST` before the query is produced. |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `integer` | optional | Max records to return (LIMIT) |
 | **offset** | `integer` | optional | Records to skip (OFFSET) |
@@ -1388,7 +960,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
-| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
+| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
@@ -1402,7 +974,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -1436,7 +1008,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -1458,7 +1030,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -1477,7 +1049,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |

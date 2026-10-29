@@ -24,13 +24,6 @@ metadata:
 
 # Platform — ObjectStack Bootstrap & Plugin System
 
-Two concerns over one `defineStack()` / kernel surface: **project setup**
-(`objectstack.config.ts`, drivers, the boot sequence) and **plugin
-development** (plugins, services, kernel hook / event handlers,
-`ObjectKernel` vs `LiteKernel`).
-
----
-
 ## `defineStack()` — The Core Configuration
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Minimal Example.
@@ -53,6 +46,14 @@ an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
 A phantom key like `roles:` or `policies:` is **not** a silent
 no-op — the top level refuses it and the stack fails to load.
+
+`queues` declares ownership queues (`defineQueue`, `@objectstack/spec/security`;
+objectstack-data): named sets of people a new record of an `ownership: 'user'`
+object sits in until a member claims it. `assignmentRules` (`defineAssignmentRule`,
+`@objectstack/spec/automation`; objectstack-automation) routes each inserted
+ownerless row into a queue — parked, `round_robin` or `least_loaded` — or to one
+user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers
+(`sharing` in `requires`): a stack declaring either without it is refused at boot.
 
 Undeclared keys are handled per surface, and the two postures are worth
 keeping straight:
@@ -133,11 +134,10 @@ manifest: {
 ```
 
 **`manifest.engines.protocol`:** the metadata-protocol major the app is authored
-against. `create-objectstack` stamps it into every project it emits (and all
-three example apps carry it). The runtime checks it **before it loads
-anything**, so a runtime outside the range refuses the app at the boundary with
-the exact migration command instead of crashing later. Change it when you
-deliberately move to a new protocol major — never to silence a mismatch.
+against (stamped by `create-objectstack`; the example apps carry it). The runtime
+checks it **before it loads anything** and refuses an out-of-range app at the
+boundary with the exact migration command. Change it when you deliberately move
+to a new protocol major — never to silence a mismatch.
 
 **Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load.
 
@@ -257,13 +257,9 @@ own plugins). Pick a driver by setting the DB URL, not by writing code.
 
 Construct `DriverPlugin` yourself only when **you** own the runtime — embedding
 via `Runtime` / `ObjectKernel`, or a test that boots a kernel directly:
-
-```typescript
-import { DriverPlugin } from '@objectstack/runtime';
-import { SqlDriver } from '@objectstack/driver-sql';
-
-new DriverPlugin(new SqlDriver({ client: 'pg', connection: process.env.DATABASE_URL }));
-```
+`new DriverPlugin(new SqlDriver({ client: 'pg', connection: process.env.DATABASE_URL }))`
+(`@objectstack/runtime` / `@objectstack/driver-sql`; a full boot:
+[Programmatic Bootstrap](./references/bootstrap.md#programmatic-bootstrap-without-cli)).
 
 ---
 
@@ -337,10 +333,8 @@ CLI: `os serve` / `os dev`
   6. Server listens on the resolved port
 ```
 
-**Port resolution** (both `os dev` and `os start` → `os serve`):
-`--port` flag › `$OS_PORT` › `$PORT` › `3000`. On a conflict the behaviour is
-mode-dependent — dev hops to the next free port, production fails loudly. See
-[Ports & networking](./references/operations.md#ports--networking).
+**Port resolution** and conflict behaviour (dev hops to the next free port,
+production fails loudly): [Ports & networking](./references/operations.md#ports--networking).
 
 ### `requires:` — which service plugins boot
 
@@ -421,15 +415,9 @@ and which keys are derived. In particular `object` is derived from the object
 definition: never write it by hand, and never hand-write a raw
 `data: [{ object: … }]` literal.
 
-`mode` decides what a seed run does to rows that already exist:
-
-| Mode | Behavior |
-|:-----|:---------|
-| `upsert` (default) | Insert or update based on `externalId` match |
-| `insert` | Always insert (fails on duplicate) |
-| `update` | Only update found records; ignore new ones |
-| `ignore` | Insert if not exists, skip otherwise |
-| `replace` | ⚠️ **Data loss** — drops and re-inserts all records |
+`mode` (`upsert` default · `insert` · `update` · `ignore` · `replace` ⚠️ **data
+loss**) decides what a replay does to rows that already exist —
+[Import modes](../objectstack-data/references/seeds.md#import-modes).
 
 ### Demo accounts — `demoStaff` vs `devLogins`
 

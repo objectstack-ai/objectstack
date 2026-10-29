@@ -72,6 +72,7 @@ export type {
   DriverHealth,
   DatasourceUnavailableInfo,
   DatasourceUnavailableKind,
+  DatasourceUnavailableReason,
 } from './driver-connect-errors.js';
 
 // In-memory aggregation fallback

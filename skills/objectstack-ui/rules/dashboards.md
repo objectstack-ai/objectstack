@@ -246,9 +246,9 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 ```
 
 * **Metric widgets** — a delta arrow plus a trend label from the kind (`vs
-  previous period`). Its colour follows the measure's `polarity`: `'lower'`
-  (turnaround, cost) draws a rise red, `'neutral'` uncoloured; undeclared =
-  rise green. `options.trend` reaches no renderer; `compareTo` is the trend.
+  previous period`). Its colour follows `polarity` (the measure's; an inline
+  `object-metric` declares its own): `'lower'` (turnaround, cost) draws a rise
+  red, `'neutral'` uncoloured; undeclared = rise green. `compareTo` is the trend.
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
   `scatter`) — the comparison series is appended after the primary series
   with `variant: 'comparison'`, muted per family (dashed `'4 4'` on
@@ -295,12 +295,13 @@ defineDataset({
   dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
   measures: [{ name: 'signed_count', aggregate: 'count' }],
 });
-// A monetary measure may declare `currency` (ISO 4217) for a locale-correct
-// symbol: `{ name: 'revenue', aggregate: 'sum', field: 'amount', currency: 'USD' }`.
-// It resolves measure `currency` → the aggregated field's
-// `currencyConfig.defaultCurrency` (only under `currencyMode: 'fixed'`) → the
-// tenant `localization.currency` (`CurrencyConfigSchema`'s `currencyMode`
-// describe). Omit it for non-money measures (count, avg-of-hours).
+// A money measure may set `currency` (ISO 4217):
+// `{ name: 'revenue', aggregate: 'sum', field: 'amount', currency: 'USD' }`.
+// Chain: measure `currency` → the field's `defaultCurrency` (`fixed`
+// only) → tenant `localization.currency`; omit it for counts. A
+// `currencyMode: 'record'` amount refuses `currency` and ungrouped
+// sum/avg/min/max; grouped by its code field, the column carries
+// `currencyField` (per-row code column); a `count` never does.
 
 // The widget just selects the dimension by name:
 const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',

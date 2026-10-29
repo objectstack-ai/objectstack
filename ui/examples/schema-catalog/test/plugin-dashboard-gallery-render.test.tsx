@@ -67,34 +67,7 @@ import '@object-ui/plugin-charts';
 import { registerLayout } from '@object-ui/layout';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererContext } from '@object-ui/react';
-import fs from 'node:fs';
-import path from 'node:path';
 import { examplesByCategory } from '../src/index.js';
-
-/**
- * The repo root, derived from THIS FILE's own location — never from
- * `process.cwd()` (objectui#7799, and the gate that closed the class,
- * objectui#8953).
- *
- * What stood at the read site below was `path.join(process.cwd(), …)` under the
- * comment "`process.cwd()` is the repo root by construction:
- * `scripts/vitest-invocation-guard.mjs` refuses any run whose Vitest root is
- * not it". THAT PREMISE IS FALSE. The guard rejects a run whose VITEST root is
- * not the repo root; this package's own `test` script — `vitest run --root ../..
- * examples/schema-catalog/` — sets that root correctly while leaving
- * `process.cwd()` in the package directory. The guard passes and the cwd is the
- * package, so `expect(fs.existsSync(siteDir)).toBe(true)` was asserting against
- * a path that does not exist under that invocation.
- *
- * Spelled in string operations, copying the landed precedent of objectui#7791
- * (PR #7796) and objectui#7799 (PR #7806): only BARE `import.meta.url` is read
- * here and taken apart by hand.
- */
-const SELF_DEPTH_BELOW_REPO_ROOT = 4; // examples / schema-catalog / test / this file
-const REPO_ROOT = decodeURIComponent(new URL(import.meta.url).pathname)
-  .split('/')
-  .slice(0, -SELF_DEPTH_BELOW_REPO_ROOT)
-  .join('/');
 
 registerLayout();
 
@@ -217,35 +190,7 @@ describe('plugin-dashboard catalog entries render in the docs gallery (objectui#
     });
   });
 
-  /**
-   * GALLERY PARITY (source-text guard, deliberately not behavioural).
-   *
-   * The cases above mirror the gallery: the same registry and the same
-   * dataset-capable `dataSource`. They cannot mirror it by construction —
-   * `apps/**` is excluded from every root Vitest project — so removing the
-   * gallery's own wiring would leave them green while `/docs/guide/schema-
-   * catalog` went back to "Unknown component type" (before objectui#4600 that
-   * was its real state: `SchemaThumbnail` loaded no dashboard package) or to
-   * the dataset error. This case reads the two host files and pins the three
-   * things this pin assumes about them.
-   */
-  it('the docs-site gallery host still registers the dashboard packages and passes the dataset stub', () => {
-    // Rooted at this file, never at the cwd — see `REPO_ROOT` above.
-    const siteDir = path.join(REPO_ROOT, 'apps/site/app/components');
-    expect(fs.existsSync(siteDir)).toBe(true);
-    const registrations = fs.readFileSync(path.join(siteDir, 'registerCatalogBlocks.ts'), 'utf8');
-    expect(registrations).toContain('@object-ui/plugin-dashboard');
-    expect(registrations).toContain('@object-ui/plugin-charts');
-
-    const dataSourceModule = fs.readFileSync(path.join(siteDir, 'galleryDataSource.ts'), 'utf8');
-    expect(dataSourceModule).toContain('queryDataset');
-
-    // The stub must reach the renderer as a PROP: `SchemaRendererContext`
-    // alone does not reach `DashboardRenderer`, which takes `dataSource` as a
-    // React prop (measured on objectui#4600 — a context-only stub still
-    // rendered the dataset error).
-    const thumbnail = fs.readFileSync(path.join(siteDir, 'SchemaThumbnail.tsx'), 'utf8');
-    expect(thumbnail).toContain('galleryDataSource');
-    expect(thumbnail).toMatch(/<SchemaRenderer[^>]*dataSource=\{/);
-  });
+  // ⛔ The GALLERY PARITY case that read the docs-site host files
+  // (`registerCatalogBlocks.ts`, `galleryDataSource.ts`, `SchemaThumbnail.tsx`)
+  // was deleted with the site by objectstack#27145; nothing is left to read.
 });

@@ -3525,6 +3525,15 @@ export function selfTest({ tier = 'full' } = {}) {
   t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
   const anchorRootHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
+  // The same class on a non-instruction root file, driven end to end through the
+  // live fleet: `check:sdui-reference` reads the repo-root `sdui.manifest.json`
+  // and reds in CI when the manifest moves without the reference, so the
+  // manifest alone must place it. Fixed by the gate's own declaration, never by
+  // admitting bare root literals here. If the gate stops reading the manifest,
+  // delete these cases with the declaration.
+  const sduiReference = discoverFamilies().byCheck.get('check:sdui-reference');
+  t('a diff of sdui.manifest.json alone derives pnpm check:sdui-reference', Boolean(sduiReference) && placeFamily(sduiReference, ['sdui.manifest.json']).verdict === 'matched');
+  t('and that declaration claims no same-named file inside a directory', Boolean(sduiReference) && placeFamily(sduiReference, ['examples/sdui.manifest.json']).verdict !== 'matched');
 
   // A THIRD shape of the same class, and the one with the worst failure
   // direction (#13207): a gate whose declared population was its OWN GUARDED

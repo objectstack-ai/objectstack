@@ -6,6 +6,7 @@ import type { FilterArray, FilterCondition } from './filter.zod';
 import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, GroupByNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
 import type { QueryAST, QueryInput } from './query.zod';
 import { PROJECTION_NAMES_NO_FIELD, transportProjectionArray } from './projection-names-a-field';
+import { SEARCH_FIELDS_ACCEPT_SET, searchFieldsArray, searchFieldsString } from './search-fields-names-a-field';
 import { retiredKey } from '../shared/retired-key';
 import { ExecutionContextSchema } from '../kernel/execution-context.zod';
 
@@ -97,12 +98,10 @@ export const BaseEngineOptionsSchema = lazySchema(() => z.object({
  * rule cannot drift apart.
  *
  * [#26954] The engine-side declarations of the same projection —
- * `EngineQueryOptionsSchema.fields`, `RpcQueryOptionsSchema.select`, the
- * legacy `DataEngineQueryOptionsSchema.select` and
- * `DataEngineVectorFindRequestSchema.fields` — take the array arm from here
- * too. It is declared ahead of both because
- * `RpcQueryOptionsSchema` extends `EngineQueryOptionsSchema` at module load,
- * which runs the lazy factory before any later `const` exists.
+ * `EngineQueryOptionsSchema.fields` and the legacy
+ * `DataEngineQueryOptionsSchema.select` — take the array arm from here too.
+ * (So did the Virtual ObjectQL request arms' `select` / `fields` until #27028
+ * retired that block; see section 9.)
  *
  * [#27166] The array arm and its sentence live in
  * `./projection-names-a-field.ts`, because `QuerySchema.fields` (and so every
@@ -309,8 +308,8 @@ export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
  * Delivered in-process via the `onFieldsDropped` listener on the write options
  * (see `WriteObservabilityOptions` in `contracts/data-engine.ts`). The
  * listener itself is deliberately NOT part of this serializable options
- * schema: a function is unrepresentable in JSON Schema and cannot cross the
- * RPC (Virtual Data Engine) boundary.
+ * schema: a function is unrepresentable in JSON Schema and cannot be
+ * serialized.
  */
 export const DroppedFieldsEventSchema = lazySchema(() => z.object({
   /** Object the write targeted (resolved object name). */
@@ -574,52 +573,20 @@ export const DataEngineCountOptionsSchema = lazySchema(() => BaseEngineOptionsSc
 }).describe('Options for DataEngine.count operations'));
 
 // ==========================================================================
-// 8. Definition (Contract)
+// 8. Definition (Contract) — retired
 // ==========================================================================
-
-export const DataEngineContractSchema = lazySchema(() => z.object({
-  find: z.function()
-    .input(z.tuple([z.string(), EngineQueryOptionsSchema.optional()]))
-    .output(z.promise(z.array(z.unknown()))),
-    
-  findOne: z.function()
-    .input(z.tuple([z.string(), EngineQueryOptionsSchema.optional()]))
-    .output(z.promise(z.unknown())),
-    
-  insert: z.function()
-    .input(z.tuple([z.string(), z.union([z.record(z.string(), z.unknown()), z.array(z.record(z.string(), z.unknown()))]), DataEngineInsertOptionsSchema.optional()]))
-    .output(z.promise(z.unknown())),
-    
-  update: z.function()
-    .input(z.tuple([z.string(), z.record(z.string(), z.unknown()), EngineUpdateOptionsSchema.optional()]))
-    .output(z.promise(z.unknown())),
-    
-  delete: z.function()
-    .input(z.tuple([z.string(), EngineDeleteOptionsSchema.optional()]))
-    .output(z.promise(z.unknown())),
-    
-  count: z.function()
-    .input(z.tuple([z.string(), EngineCountOptionsSchema.optional()]))
-    .output(z.promise(z.number())),
-    
-  aggregate: z.function()
-    .input(z.tuple([z.string(), EngineAggregateOptionsSchema]))
-    .output(z.promise(z.array(z.unknown())))
-}).describe('Standard Data Engine Contract'));
+//
+// `DataEngineContractSchema` stood here until #27028 retired it with the
+// Virtual ObjectQL request protocol (section 9). It restated the engine's
+// methods as `z.function()` members, so no JSON Schema was ever emitted for it,
+// nothing parsed it, and it had drifted from the contract it described: its
+// reads took no trailing options argument and it declared neither `vectorFind`
+// nor `execute`. The contract is `IDataEngine` in `../contracts/data-engine.ts`,
+// a TypeScript interface the compiler holds every engine to.
 
 // ==========================================================================
-// 9. Virtualization & RPC Protocol
+// 9. Query alias slots
 // ==========================================================================
-
-/**
- * Data Engine RPC Request (Virtual ObjectQL)
- * 
- * This schema defines the serialized format for executing Data Engine operations
- * via HTTP, Message Queue, or Plugin boundaries.
- * 
- * It enables "Virtual Data Engines" where the implementation resides in a 
- * separate microservice or plugin.
- */
 
 /**
  * One RPC query-options slot: the canonical QueryAST key plus the deprecated
@@ -645,12 +612,12 @@ export interface QueryAliasConflict {
 
 /**
  * The six alias pairs the RPC query surface accepts (#3795, #4346) — the ONE
- * place the alias → canonical mapping is declared. The schema transform below
- * folds parsed input by this table, the protocol normalizer
- * (`metadata-protocol`) folds raw wire input by the same table, extended with
- * the wire-only spellings `filters` / `$filter` / `$expand` that no schema
- * declares, and the ObjectQL engine folds the slots its own option bags still
- * admit (`where`, `limit`) on every entry point. Before this table existed the
+ * place the alias → canonical mapping is declared. The protocol normalizer
+ * (`metadata-protocol`) folds raw wire input by this table, and
+ * {@link QueryWithTransportSchema} folds parsed input by it, both extended with
+ * the transport-only spellings `filters` / `$filter` / `$expand`
+ * ({@link QUERY_TRANSPORT_ALIAS_SLOTS}); the ObjectQL engine folds the slots
+ * its own option bags still admit (`where`, `limit`) on every entry point. Before this table existed the
  * precedence lived in prose only, so every reader re-implemented it — the
  * #3713 condition — and the two readers disagreed on three of the five pairs,
  * four of them backwards.
@@ -724,11 +691,6 @@ export function foldQueryAliasSlots(
   return arrivedAs;
 }
 
-/** The `where` slot alone — for RPC options that accept only the `filter` alias. */
-const RPC_WHERE_SLOT: readonly QueryAliasSlot[] = RPC_QUERY_ALIAS_SLOTS.filter(
-  (slot) => slot.canonical === 'where',
-);
-
 function aliasConflictIssue(conflict: QueryAliasConflict): {
   code: 'custom';
   path: string[];
@@ -743,84 +705,6 @@ function aliasConflictIssue(conflict: QueryAliasConflict): {
       'given different values. Send exactly one.',
   };
 }
-
-/**
- * RPC backward-compatibility mixin — shared `@deprecated filter` field.
- * The parse transform folds `filter` into `where` and drops it; both spellings
- * with different values fail the parse (see `RpcQueryOptionsSchema`).
- */
-const RpcLegacyFilterMixin = {
-  /** @deprecated Use `where` */
-  filter: DataEngineFilterSchema.optional(),
-};
-
-/**
- * Parse-time fold for options that accept only the `filter` alias
- * ({@link RpcLegacyFilterMixin}): `filter` lands on `where` and is dropped
- * from the parsed output, so `filter` is absent from the inferred type and a
- * TS consumer reading it fails to compile instead of silently reading
- * `undefined` (the #3742 / #3764 shape, one layer down).
- */
-function foldRpcLegacyFilter<T extends { filter?: unknown }>(
-  input: T,
-  ctx: z.core.$RefinementCtx,
-): Omit<T, 'filter'> {
-  const bag: Record<string, unknown> = { ...input };
-  foldQueryAliasSlots(bag, RPC_WHERE_SLOT, (conflict) => ctx.addIssue(aliasConflictIssue(conflict)));
-  return bag as Omit<T, 'filter'>;
-}
-
-/**
- * Parse-time fold for the full RPC query options: each legacy alias lands on
- * its canonical key (with the alias's legacy value shape lowered to the
- * canonical one) and is dropped from the parsed output.
- */
-function foldRpcQueryOptions(input: object, ctx: z.core.$RefinementCtx): EngineQueryOptions {
-  const bag = { ...(input as Record<string, unknown>) };
-  foldQueryAliasSlots(bag, RPC_QUERY_ALIAS_SLOTS, (conflict) => ctx.addIssue(aliasConflictIssue(conflict)));
-  // A folded `sort` may carry the record spellings `DataEngineSortSchema`
-  // allows; canonical `orderBy` declares `SortNode[]` only, so lower them.
-  if (bag.orderBy !== undefined && bag.orderBy !== null && !Array.isArray(bag.orderBy)) {
-    bag.orderBy = Object.entries(bag.orderBy as Record<string, 'asc' | 'desc' | 1 | -1>).map(
-      ([field, order]) => ({ field, order: order === 'asc' || order === 1 ? 'asc' : 'desc' }),
-    );
-  }
-  // A folded `populate` is a relation-name list; canonical `expand` is a
-  // `{name: QueryAST}` record.
-  if (Array.isArray(bag.expand)) {
-    bag.expand = Object.fromEntries(
-      (bag.expand as string[]).map((rel) => [rel, { object: rel }]),
-    );
-  }
-  return bag as EngineQueryOptions;
-}
-
-/**
- * RPC query options that accept BOTH new (where/fields/orderBy) and
- * legacy (filter/select/sort/skip/populate) parameter names.
- *
- * **One slot, one value (#3795):** each legacy alias is folded into its
- * canonical key at parse — `filter`→`where`, `select`→`fields`,
- * `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand`, `top`→`limit`
- * ({@link RPC_QUERY_ALIAS_SLOTS}) — and the alias is dropped from the parsed
- * output, so consumers only ever read canonical QueryAST keys. Sending both
- * spellings with the SAME value is redundant and tolerated; sending DIFFERENT
- * values for one slot is irreconcilable — picking either would silently drop
- * the other (#4181) — and fails the parse. The protocol normalizer applies
- * the same table to raw wire input, so mixed vocabularies resolve identically
- * on every path.
- */
-const RpcQueryOptionsSchema = EngineQueryOptionsSchema.extend({
-  ...RpcLegacyFilterMixin,
-  /** @deprecated Use `fields` — the same projection rule (#26954) */
-  select: transportProjectionArray(z.string()).optional(),
-  /** @deprecated Use `orderBy` */
-  sort: DataEngineSortSchema.optional(),
-  /** @deprecated Use `offset` */
-  skip: z.number().int().min(0).optional(),
-  /** @deprecated Use `expand` */
-  populate: z.array(z.string()).optional(),
-}).transform((options, ctx) => foldRpcQueryOptions(options, ctx));
 
 // ==========================================================================
 // 2c. The QUERY TRANSPORT dialect — the FLATTENED SPELLING of the QueryAST
@@ -1075,9 +959,13 @@ export const QueryTransportParamsSchema = lazySchema(() => z.object({
   /** OData spelling of `search`. */
   $search: z.union([z.string(), FullTextSearchSchema]).nullable().optional()
     .describe('Transport spelling of `search` (OData `$search`)'),
-  /** OData spelling of `searchFields`. */
-  $searchFields: z.union([z.string(), z.array(z.string())]).nullable().optional()
-    .describe('Transport spelling of `searchFields` (OData `$searchFields`)'),
+  /**
+   * OData spelling of `searchFields`. [#27683] Declares the override the door
+   * accepts (`./search-fields-names-a-field.ts`): a value naming no field is
+   * refused, as the canonical `QuerySchema.searchFields` refuses it.
+   */
+  $searchFields: z.union([searchFieldsString(), searchFieldsArray()]).nullable().optional()
+    .describe(`Transport spelling of \`searchFields\` (OData \`$searchFields\`) — ${SEARCH_FIELDS_ACCEPT_SET}`),
   /** OData spelling of the response total-count flag. */
   $count: TransportCountValueSchema.nullable().optional()
     .describe('Transport spelling of the response total-count flag (OData `$count`)'),
@@ -1112,9 +1000,8 @@ export const QueryTransportParamsSchema = lazySchema(() => z.object({
  * canonical slot via {@link foldQueryAliasSlots}.
  *
  * Deliberately a fold over the shared TABLES rather than a second copy of the
- * normalizer: this is the parse-time application, exactly as
- * `foldRpcQueryOptions` is the parse-time application of
- * {@link RPC_QUERY_ALIAS_SLOTS}.
+ * normalizer: this is the parse-time application of the tables the
+ * normalizer applies at the wire.
  *
  * A CONFLICT — two spellings of one slot carrying different values — fails the
  * parse with {@link aliasConflictIssue} at the canonical path, quoting the
@@ -1451,125 +1338,29 @@ export const QueryWithTransportSchema = lazySchema(
  */
 export type QueryWithTransportParsed = z.infer<typeof QueryWithTransportSchema>;
 
-export const DataEngineFindRequestSchema = lazySchema(() => z.object({
-  method: z.literal('find'),
-  object: z.string(),
-  query: RpcQueryOptionsSchema.optional()
-}));
-
-export const DataEngineFindOneRequestSchema = lazySchema(() => z.object({
-  method: z.literal('findOne'),
-  object: z.string(),
-  query: RpcQueryOptionsSchema.optional()
-}));
-
-export const DataEngineInsertRequestSchema = lazySchema(() => z.object({
-  method: z.literal('insert'),
-  object: z.string(),
-  data: z.union([z.record(z.string(), z.unknown()), z.array(z.record(z.string(), z.unknown()))]),
-  options: DataEngineInsertOptionsSchema.optional()
-}));
-
-export const DataEngineUpdateRequestSchema = lazySchema(() => z.object({
-  method: z.literal('update'),
-  object: z.string(),
-  data: z.record(z.string(), z.unknown()),
-  id: z.union([z.string(), z.number()]).optional().describe('ID for single update, or use where in options'),
-  options: EngineUpdateOptionsSchema.extend(RpcLegacyFilterMixin)
-    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx)).optional()
-}));
-
-export const DataEngineDeleteRequestSchema = lazySchema(() => z.object({
-  method: z.literal('delete'),
-  object: z.string(),
-  id: z.union([z.string(), z.number()]).optional().describe('ID for single delete, or use where in options'),
-  options: EngineDeleteOptionsSchema.extend(RpcLegacyFilterMixin)
-    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx)).optional()
-}));
-
-export const DataEngineCountRequestSchema = lazySchema(() => z.object({
-  method: z.literal('count'),
-  object: z.string(),
-  query: EngineCountOptionsSchema.extend(RpcLegacyFilterMixin)
-    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx)).optional()
-}));
-
-export const DataEngineAggregateRequestSchema = lazySchema(() => z.object({
-  method: z.literal('aggregate'),
-  object: z.string(),
-  query: EngineAggregateOptionsSchema.extend(RpcLegacyFilterMixin)
-    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx))
-}));
-
-/**
- * Data Engine Execute Request (Raw Command)
- * Execute a raw command/query native to the driver (e.g. SQL, Shell, Remote API).
- */
-export const DataEngineExecuteRequestSchema = lazySchema(() => z.object({
-  method: z.literal('execute'),
-  /** The abstract command (string SQL, or JSON object) */
-  command: z.unknown(),
-  /** Optional options */
-  options: z.record(z.string(), z.unknown()).optional()
-}));
-
-/**
- * Data Engine Vector Find Request (AI/RAG)
- * Perform a similarity search using vector embeddings.
- */
-export const DataEngineVectorFindRequestSchema = lazySchema(() => z.object({
-  method: z.literal('vectorFind'),
-  object: z.string(),
-  /** The vector embedding to search for */
-  vector: z.array(z.number()),
-  /** Optional pre-filter (Metadata filtering) — standard QueryAST `where` */
-  where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
-  /** Fields to retrieve — standard QueryAST `fields`; the same projection rule (#26954) */
-  fields: transportProjectionArray(z.string()).optional(),
-  /** Number of results */
-  limit: z.number().int().default(5).optional(),
-  /** Minimum similarity score (0-1) or distance threshold */
-  threshold: z.number().optional()
-}));
-
-// `DataEngineBatchRequestSchema` stood here until ADR-0119 D3 (#4618) retired
-// it with the `IDataEngine.batch?` member it existed to describe. Nothing ever
-// parsed it: no engine implemented `batch`, no caller invoked it, and the
-// wire-side batch route validates with `CrossObjectBatchRequestSchema` /
-// `BatchUpdateRequestSchema` from `../api/batch.zod.ts` — a different schema
-// entirely. Deleted outright rather than tombstoned with `retiredKey()`,
-// because a tombstone's prescription reaches an author through a PARSE, and
-// there was no parse to reach: a prescription nobody can receive is noise
-// (the spec-property-retirement playbook's third route). Its three
-// `authorable-surface.json` baseline lines and its `json-schema.manifest.json`
-// entry go with it, deliberately.
+// The Virtual ObjectQL request protocol stood here until #27028 retired it:
+// `DataEngineRequestSchema`, the `method`-discriminated union, and its nine
+// arms (`find`, `findOne`, `insert`, `update`, `delete`, `count`, `aggregate`,
+// `execute`, `vectorFind`), the serialized form of an engine call for a
+// "Virtual Data Engine" living in another process. No such engine existed and
+// nothing parsed the protocol, in this repo or in its sister repos. The one
+// real boundary engine calls cross, the QuickJS hook/action sandbox, speaks
+// `ctx.api.object(name).find(...)` and parses no request schema; the wire batch
+// validates with `CrossObjectBatchRequestSchema` / `BatchUpdateRequestSchema`
+// from `../api/batch.zod.ts`. As published the protocol was also unsafe to
+// implement: every read and write arm admitted a caller-supplied `context`
+// (`isSystem` included), and `execute` carried a raw driver command. Its private helpers
+// (`RpcQueryOptionsSchema` and the `filter`-only fold) went with it;
+// `RPC_QUERY_ALIAS_SLOTS` above stays, since the transport dialect and the
+// engine fold by it.
 //
-// The tell that nobody ever designed against it: its `requests` array nested
-// the request union recursively, so a batch could contain batches, with no
-// statement anywhere about what that meant for ordering or rollback.
-
-/**
- * Unified Data Engine Request Union
- * Use this to validate any incoming "Virtual ObjectQL" request.
- *
- * NOTE (#4618): every arm below now has zero readers in this repo — there is
- * no Virtual Data Engine implementation, only this schema describing one. That
- * makes the whole block an ADR-0049 enforce-or-remove candidate, deliberately
- * left standing here because retiring a published wire protocol is a different
- * decision from retiring `batch?`, and it is tracked separately rather than
- * folded into a removal whose title promised something narrower.
- */
-export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('method', [
-  DataEngineFindRequestSchema,
-  DataEngineFindOneRequestSchema,
-  DataEngineInsertRequestSchema,
-  DataEngineUpdateRequestSchema,
-  DataEngineDeleteRequestSchema,
-  DataEngineCountRequestSchema,
-  DataEngineAggregateRequestSchema,
-  DataEngineExecuteRequestSchema,
-  DataEngineVectorFindRequestSchema
-]).describe('Virtual ObjectQL Request Protocol'));
+// Deleted outright rather than tombstoned with `retiredKey()`, the
+// spec-property-retirement playbook's third route: a tombstone's prescription
+// reaches an author through a PARSE, and there was no parse to reach. The
+// ten JSON Schema defs are registered in `RETIRED_DEFS_BY_MAJOR` and the D3
+// entry `data-engine-rpc-protocol-retired` names the doors that exist.
+// `DataEngineBatchRequestSchema` went the same way earlier (ADR-0119 D3,
+// #4618), together with the `IDataEngine.batch?` member it described.
 
 // ==========================================================================
 // 10. Type Exports
@@ -1634,9 +1425,3 @@ export type DataEngineDeleteOptions = z.input<typeof DataEngineDeleteOptionsSche
 export type DataEngineAggregateOptions = z.input<typeof DataEngineAggregateOptionsSchema>;
 /** @deprecated Use `EngineCountOptions` instead. */
 export type DataEngineCountOptions = z.input<typeof DataEngineCountOptionsSchema>;
-export type DataEngineRequest = z.input<typeof DataEngineRequestSchema>;
-/** Post-parse shape of {@link DataEngineRequest} — defaults applied, transforms run (ADR-0122). */
-export type DataEngineRequestParsed = z.infer<typeof DataEngineRequestSchema>;
-export type DataEngineExecuteRequest = z.input<typeof DataEngineExecuteRequestSchema>;
-export type DataEngineInsertRequest = z.input<typeof DataEngineInsertRequestSchema>;
-export type DataEngineVectorFindRequest = z.input<typeof DataEngineVectorFindRequestSchema>;

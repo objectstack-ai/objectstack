@@ -40,6 +40,10 @@ export {
   // field, now that it is resolved on the object graph rather than skipped
   // whenever it was dotted.
   DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+  // [#27445] A `filterBindings` KEY naming no filter the dashboard declares:
+  // the runtime reads a binding by the declared filter's name, so the entry is
+  // never read and the widget keeps the filter it meant to drop or re-target.
+  DASHBOARD_FILTER_BINDING_UNKNOWN,
   // [#14148] The widget's OWN two references, at the same site: the keys of its
   // presentation-scope `filter` (resolved on the #14105 object-graph seam, with
   // the ADR-0021 `include` clause its `runtimeFilter` really is subject to) and
@@ -380,6 +384,17 @@ export type {
   SharingRuleEnforceabilitySeverity,
 } from './validate-sharing-rule-enforceability.js';
 
+// A writable external object on an owner-keyed sharing model whose owner column
+// no remote row serves refuses every member edit and delete (403).
+export {
+  validateExternalOwnerSharing,
+  SECURITY_EXTERNAL_OWNER_UNMAPPED,
+} from './validate-external-owner-sharing.js';
+export type {
+  ExternalOwnerSharingFinding,
+  ExternalOwnerSharingSeverity,
+} from './validate-external-owner-sharing.js';
+
 // #4983 — the sibling surface, and ADR-0056 D4's gate finally wired. An RLS
 // `using` / `check` the runtime cannot compile is DROPPED (and, when it is the
 // only applicable policy, replaced by the deny sentinel), so the policy reads
@@ -571,10 +586,12 @@ export type {
 // [#27069] Related-list names: each `relatedLists` entry and field-group
 // `relatedList` must match an inbound lookup / master_detail relationship.
 // `error`, the verdict `defineStack` gives, and on the runtime publish door,
-// which runs no `defineStack`.
+// which runs no `defineStack`. [#27478] A field group's `relatedList` must
+// name body tables only (`related-list-group-not-body`).
 export {
   validateRelatedListRefs,
   RELATED_LIST_REF_UNKNOWN,
+  RELATED_LIST_GROUP_NOT_BODY,
 } from './validate-related-list-refs.js';
 export type {
   RelatedListRefFinding,

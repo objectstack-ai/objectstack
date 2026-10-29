@@ -1,7 +1,7 @@
 {
   "name": "@object-ui/types",
   "version": "18.2.0",
-  "description": "Pure TypeScript type definitions for Object UI - The Protocol Layer",
+  "description": "Pure TypeScript type definitions for ObjectUI - The Protocol Layer",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -105,7 +105,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/api/schema-reference",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "publishConfig": {
     "access": "public"
   }

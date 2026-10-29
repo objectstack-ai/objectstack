@@ -43,7 +43,7 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, collectFilterReads, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, suggestFieldName } from './protocol.js';
+import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, collectFilterReads, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, quotedQueryValue, suggestFieldName } from './protocol.js';
 import { objectNotFoundError, relationConditionSites } from '@objectstack/core';
 import { collectInternalWriteResponseFields } from './write-response-internal-fields.js';
 import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
@@ -874,10 +874,26 @@ export function assertSearchFieldsAreSearchable(
         err.param = param;
         throw err;
     }
-    // An empty override is ABSENT — the engine falls through to the
-    // allowed set for it, which for a caller who named nothing is the
-    // answer they asked for, not a widened one.
-    if (names.length === 0) return;
+    // [#27484] …and an override naming NO field is refused, not read as
+    // absent. A blank or comma-only string, an empty array, or an empty
+    // object-form `search.fields` used to return here, and the engine then
+    // scanned the object's whole default set: a caller who wrote the
+    // parameter meant to narrow, so its silent widening to the defaults is
+    // the failure this gate exists for. Absent stays absent (the caller
+    // passes no override, and the door never calls this gate). The
+    // projection's envelope (`projectionFieldsValue`, #26644), so `$select`
+    // and `$searchFields` answer a value naming no field alike.
+    if (names.length === 0) {
+        const err: any = new Error(
+            `Query parameter '${param}' names no field; got ${quotedQueryValue(requested)}. The query was not `
+            + "run: an empty search-field list was read as no narrowing, which scans the object's default "
+            + 'search fields. Name at least one field, or leave the parameter out to search the default fields.',
+        );
+        err.status = 400;
+        err.code = 'VALIDATION_ERROR';
+        err.param = param;
+        throw err;
+    }
     const gate = this.resolveQueryFields(object);
     if (!gate) return;
     // [#22646] A field declared `internal: true` is never a search target,

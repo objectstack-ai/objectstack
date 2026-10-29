@@ -103,7 +103,7 @@ They share one reading of that, in `widgets/numberBadInput.tsx`:
 
 ⛔ Silence therefore means "the browser read *something*", never "the value is
 correct". User-facing wording lives in
-[the fields guide](../../content/docs/guide/fields.md). The measured browser vs
+[the fields guide](https://objectstack.ai/docs/frontend/fields). The measured browser vs
 happy-dom matrix is in `src/__tests__/numberInputBrowserReadings.ts`.
 
 ### Rendering form field widgets outside the form
@@ -319,7 +319,7 @@ an anchor as a grant target; a stored anchor still shows as its own option.
 When the adapter cannot list a registry, the list is empty, or the
 load fails, it is a text box that takes the typed name (a failure is shown with
 its cause). See
-[`content/docs/guide/fields.md`](../../content/docs/guide/fields.md).
+[the fields guide](https://objectstack.ai/docs/frontend/fields).
 
 ### Multi-value selects
 
@@ -341,7 +341,7 @@ single dropdown does.
 `visibleWhen` CEL predicate (offered only when TRUE, evaluated against the live
 record + `current_user`) and a field-level `dependsOn`. Together they drive
 dependent selects (country → province → city) and role-gated options with no
-bespoke matrix — the same primitives dependent lookups use. All four widgets
+bespoke matrix — the same primitives dependent lookups use. All of these widgets
 resolve this through the shared [`useCascadingOptions`](./src/widgets/useCascadingOptions.ts)
 hook, which wraps the pure `resolveCascadingOptions` helper in `@object-ui/core`
 (also used by the form renderer's inline pre-filter, so gating and filtering
@@ -351,15 +351,15 @@ change re-filters the list and clears a now-invalid value (scalar `select` /
 offered-out entries).
 An option whose `label` is blank (the empty string is a legal label; an absent one is
 not) displays its `value` instead of an empty row, on the editable and the read-only
-path alike — all eight read sites across the four widgets share the one
+path alike — every read site across these widgets shares the one
 `optionDisplayLabel` helper in `@object-ui/core` (objectui#9230).
 Client-side hiding is UX only — gate authorization-sensitive values on the
 server too. See
-[`content/docs/fields/select.mdx`](../../content/docs/fields/select.mdx).
+[the `select` field type](https://objectstack.ai/docs/data-modeling/field-types#select).
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/guide/fields)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/fields)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/fields)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

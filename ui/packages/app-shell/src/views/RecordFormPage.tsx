@@ -18,10 +18,10 @@
  *     fetches the existing record (in edit mode) via `dataSource.findOne`,
  *     so this page does not need to manage its own loading state for
  *     record data.
- *   - On success / cancel, navigates back if the user has history, otherwise
- *     falls back to a sensible parent route (record detail in edit mode,
- *     object list in create mode). Cancel always navigates back without a
- *     toast.
+ *   - On success / cancel, navigates back when an earlier entry of THIS
+ *     console session is behind the page, otherwise goes to the parent route
+ *     (record detail in edit mode, object list in create mode). Cancel never
+ *     toasts.
  *   - Wraps the form in a sticky page header (back button + title) for a
  *     consistent full-screen chrome.
  *
@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { ArrowLeft, Building2, Database } from 'lucide-react';
@@ -71,6 +71,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
     recordId: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const dataSource = useAdapter();
   const { objects, loading: metadataLoading } = useMetadata();
@@ -120,18 +121,22 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   /**
    * Navigate back to the most relevant location.
-   * Prefer `history.back()` so users return to the exact list/view they came
-   * from (preserving filters, scroll position, etc.). Fall back to the
-   * record detail (edit mode) or list (create mode) when there is no
-   * history entry — happens on direct/refreshed loads of the URL.
+   * Back when a page of this console is behind this one (react-router keys
+   * the entry it started on `'default'`, as `FormPage`'s cancel reads it), so
+   * users return to the exact list/view they came from. ⛔ Not
+   * `window.history.length`: it counts the tab's entries from before the
+   * console loaded, so a pasted URL went Back out of the app and lost the save
+   * toast (objectstack-ai/objectstack#27454). Otherwise the record detail
+   * (edit) or list (create), inside the app.
    */
+  const hasInAppHistory = location.key !== 'default';
   const goBack = useCallback(() => {
-    if (typeof window !== 'undefined' && window.history.length > 1) {
+    if (hasInAppHistory) {
       navigate(-1);
     } else {
       navigate(recordDetailUrl, { replace: true });
     }
-  }, [navigate, recordDetailUrl]);
+  }, [navigate, recordDetailUrl, hasInAppHistory]);
 
   // Two names, not one (objectui#11733): the title and the toasts speak of ONE
   // record, so they keep the singular; the breadcrumb link opens the object's
@@ -313,16 +318,16 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   }
 
   // Honour the object's form view layout (objectstack-ai/objectstack#1890): wire the declared `type`
-  // (simple/tabbed/wizard/split) + `sections` through to ObjectForm, which
-  // already renders each variant. Page-level layouts only — `drawer`/`modal`
-  // are presentation/open-modes, not record-page layouts, so they fall back to
-  // `simple` here (see the form-layout-vs-presentation modelling note in objectstack-ai/objectstack#1890).
+  // (simple/tabbed/wizard) + `sections` through to ObjectForm, which renders
+  // each layout. Those three are the form view `type`'s whole vocabulary
+  // (ADR-0050); anything else — a stored row not yet converted — falls back
+  // to `simple` here.
   // The form view is the one the record flow selects (objectui#13099): a
   // create uses the object's `create` form view when it declares one, an edit
   // the default form view — the same selection the New/Edit modal makes.
   const formDef: any = selectRecordFormView(objectDef as any, mode) ?? {};
-  const pageFormType: 'simple' | 'tabbed' | 'wizard' | 'split' =
-    ['tabbed', 'wizard', 'split'].includes(formDef.type) ? formDef.type : 'simple';
+  const pageFormType: 'simple' | 'tabbed' | 'wizard' =
+    ['tabbed', 'wizard'].includes(formDef.type) ? formDef.type : 'simple';
   // Curated `sections` are wired through for EVERY layout family — a `simple`
   // form view's sections still carry the authored field selection, order,
   // grouping and per-field `visibleOn` predicates (#2212). Dropping them for
@@ -336,9 +341,6 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
         tabPosition: formDef.tabPosition,
         allowSkip: formDef.allowSkip,
         showStepIndicator: formDef.showStepIndicator,
-        splitDirection: formDef.splitDirection,
-        splitSize: formDef.splitSize,
-        splitResizable: formDef.splitResizable,
       }
     : {};
   // objectstack-ai/objectstack#26843 — the form view's `buttons`, `layout`

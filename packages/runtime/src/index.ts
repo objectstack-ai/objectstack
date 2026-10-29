@@ -17,6 +17,70 @@ export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDa
 export { devAutoMigrateConfig } from './dev-auto-migrate.js';
 export type { DevAutoMigrateConfig } from './dev-auto-migrate.js';
 
+// [ADR-0025 §3.5 M1] The local plugin install loop's two stores — public because
+// `@objectstack/cli` writes them (`os plugin trust`, `os plugin install`,
+// `os plugin disable | enable | uninstall`) and the runtime's boot-time loader
+// below reads the same ones.
+export {
+  TRUSTED_KEY_OBJECT,
+  TRUSTED_KEY_ID_PATTERN,
+  publicKeyFingerprint,
+  readPublisherPublicKey,
+  listTrustedKeys,
+  addTrustedKey,
+  revokeTrustedKey,
+  resolveTrustedKey,
+} from './plugin-trusted-keys.js';
+export type {
+  TrustedKeyRow,
+  TrustedKeyStatus,
+  TrustedKeySource,
+  TrustedKeyEngine,
+  PublisherKeyRead,
+  PublisherKeyRefusal,
+  AddTrustedKeyResult,
+  AddTrustedKeyRefusal,
+  RevokeTrustedKeyResult,
+  TrustedKeyResolution,
+} from './plugin-trusted-keys.js';
+export {
+  DEFAULT_PLUGIN_ENVIRONMENT_ID,
+  INSTALLED_ARTIFACT_FILE,
+  INSTALLED_SIGNATURE_FILE,
+  INSTALLATIONS_LOCK_WAIT_MS,
+  INSTALLATIONS_LOCK_STALE_MS,
+  PluginInstallationsLockedError,
+  pluginsHome,
+  pluginInstallDir,
+  pluginInstallationsFile,
+  loadPluginInstallations,
+  recordPluginInstallation,
+  withPluginInstallationsLock,
+  markPluginUninstall,
+  dropPluginInstallation,
+  installedPluginDisabledIds,
+  setInstalledPluginDisabled,
+} from './plugin-installation-store.js';
+export type { PluginInstallationRecord } from './plugin-installation-store.js';
+// The boot-time loader and its tier dispatch point (ADR-0025 §3.5 / §3.6, M1):
+// `os serve` calls it before the kernel bootstraps and `kernel.use`s what it
+// answers.
+export {
+  dispatchPluginRuntime,
+  verifyInstalledPlugins,
+  loadInstalledPlugins,
+} from './installed-plugin-loader.js';
+export type {
+  InstalledPluginRefusalCode,
+  InstalledPluginRefusal,
+  VerifiedInstalledPlugin,
+  InstalledPluginsVerdict,
+  VerifyInstalledPluginsInput,
+  LoadedInstalledPlugin,
+  InstalledPluginsLoad,
+  LoadInstalledPluginsInput,
+} from './installed-plugin-loader.js';
+
 // The ONE libSQL/Turso loader (commit 68f5eccb1). Public because `@objectstack/cli` is a
 // consumer, not a second implementation: `utils/storage-driver.ts` delegates to
 // `loadTursoDriverFactory` and RE-EXPORTS `MissingDriverPackageError`, so

@@ -406,7 +406,7 @@ Full TypeScript support with discriminated unions:
 ```typescript
 import type { AnySchema, ButtonSchema, FormSchema, InputSchema } from '@object-ui/types';
 
-// The shipped `AnySchema` carries 50+ members. These three are a slice of it,
+// The shipped `AnySchema` carries many members. These three are a slice of it,
 // and the assignment below is what proves the slice really is part of the union.
 type SchemaSlice = InputSchema | ButtonSchema | FormSchema;
 declare const slice: SchemaSlice;
@@ -502,7 +502,7 @@ We follow these constraints for this package:
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/api/schema-reference)
+- 📚 [Documentation](https://objectstack.ai/docs/ui/components)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/types)
 - 📝 [Changelog](./CHANGELOG.md)
 - 💻 [GitHub repository](https://github.com/objectstack-ai/objectui)

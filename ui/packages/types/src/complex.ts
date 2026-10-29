@@ -23,6 +23,7 @@ import type {
   ViewFilterOperator as SpecViewFilterOperator,
 } from '@objectstack/spec/ui';
 import type { BaseSchema, SchemaNode } from './base.js';
+import type { FilterFieldType } from './filter-field-types.js';
 import type { DASHBOARD_SPEC_EXCLUDED } from './zod/complex.zod.js';
 // `GroupingConfig`, `KanbanConditionalFormattingRule` and `ViewNavigationConfig`
 // were imported for `KanbanSchema`'s `grouping`, `conditionalFormatting` and
@@ -757,13 +758,12 @@ export interface FilterField {
    * `operatorsForFieldType` both read (`fieldType || "text"` and
    * `const type = fieldType || "text"` in `custom/filter-builder.tsx`).
    *
-   * The fourteen members are the published doc's
-   * (`content/docs/components/complex/filter-builder.mdx`), which objectui#7562
-   * ruled the authority for this authoring surface, in the doc's own order.
-   * Every one of them was measured to have a renderer branch before this union
-   * widened — the ruling's precondition — and none had to be withdrawn from the
-   * doc. The mirror's docblock (`zod/complex.zod.ts`, `FilterFieldSchema`)
-   * carries the branch-by-branch table with the file:line for each bucket.
+   * The members are `FILTER_FIELD_TYPES` (`filter-field-types.ts`), the
+   * one list the zod mirror and the renderer's behaviour buckets also read, so
+   * the three cannot drift apart (objectui#7562 and #8774 each found them
+   * apart). The fourteen were first the published doc's, the authority
+   * objectui#7562 ruled for this surface; that doc retired with the ObjectUI
+   * docs site, and the shared list kept its members and order.
    *
    * `string` is still absent and is the contrast that makes the rest read: it
    * is named nowhere in the renderer and reaches the text control only by the
@@ -771,12 +771,7 @@ export interface FilterField {
    * shares that fallthrough but IS named — line 408 is where an absent `type`
    * acquires it — which is why one is declared and the other is not.
    */
-  type?:
-    | 'text' | 'number' | 'currency' | 'percent' | 'rating'
-    | 'date' | 'datetime' | 'time'
-    | 'boolean'
-    | 'select' | 'status'
-    | 'lookup' | 'master_detail' | 'user';
+  type?: FilterFieldType;
   /**
    * Available operators for this field.
    *

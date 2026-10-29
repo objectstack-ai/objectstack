@@ -256,10 +256,10 @@ const FIELD_MAPPINGS_RETIRED =
 // through `ConnectorSchema.webhooks`. They left whole with that key: a webhook
 // nested inside a connector was never registered as a `webhook` metadata item
 // (the stack decomposition registers a connector entry WHOLE), so
-// `@objectstack/plugin-webhooks` never materialized it into `sys_webhook` and
-// nothing ever delivered it — and no code path emits a connector lifecycle
-// event (`sync.completed`, `auth.expired`, …) for `events` to have subscribed
-// to. The three defs are declared in `RETIRED_DEFS_BY_MAJOR[18]`; the carrier
+// `@objectstack/plugin-webhooks`' dispatcher, which reads declared `webhook`
+// items from the metadata registry, never read it and nothing ever delivered
+// it — and no code path emits a connector lifecycle event (`sync.completed`,
+// `auth.expired`, …) for `events` to have subscribed to. The three defs are declared in `RETIRED_DEFS_BY_MAJOR[18]`; the carrier
 // key is the `webhooks` tombstone on `ConnectorBaseSchema` below, and the
 // section "REMOVED: `health`, `status` and the nested `webhooks`" records the
 // measurement. A webhook that is actually delivered is declared in the stack's
@@ -574,9 +574,9 @@ const CONNECTOR_RETIRED_KEY_RESIDUE = {
 //    and nothing read it back; those writes were deleted with it.
 //  - `webhooks` (the nested `WebhookConfig[]`): zero reads of a connector's own
 //    array. The stack decomposition registers a connector entry WHOLE, so a
-//    webhook nested in it never became a `webhook` item, never reached
-//    `@objectstack/plugin-webhooks`' materializer and was never delivered — the
-//    top-level `webhooks:` collection is the delivered one.
+//    webhook nested in it never became a `webhook` item, was never read by
+//    `@objectstack/plugin-webhooks`' declared-webhook reader and was never
+//    delivered — the top-level `webhooks:` collection is the delivered one.
 //
 // `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
 // strip (ADR-0104): each carrier key is a `retiredKey()` tombstone below,
@@ -646,13 +646,15 @@ const STATUS_RETIRED =
  */
 const WEBHOOKS_RETIRED =
   '`connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
-  + 'a webhook nested inside a connector was never registered as a `webhook` item, so it was '
-  + 'never materialized into `sys_webhook` and never delivered, and nothing emits the connector '
+  + 'a webhook nested inside a connector was never registered as a `webhook` item, so the '
+  + 'webhook dispatcher never read it and never delivered it, and nothing emits the connector '
   + 'events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete '
   + 'the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, '
   + '`WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack\'s '
-  + 'top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on '
-  + 'record events — note that doing so STARTS deliveries this connector never made. '
+  + 'top-level `webhooks:` collection. The platform reads a declared webhook from the metadata '
+  + 'registry and delivers it on record events; it writes no `sys_webhook` row for it '
+  + '(`sys_webhook` holds only the webhooks an organization authors at runtime). Note that '
+  + 'declaring it STARTS deliveries this connector never made. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 // ============================================================================
@@ -904,7 +906,7 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
    * secret inline. Requires `provider`.
    */
   auth: ConnectorInstanceAuthSchema.optional().describe(
-    'Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097).',
+    'Declarative instance auth — references credentials via `credentialRef` (resolved when the instance materializes), never inline secrets. Requires `provider` (ADR-0097).',
   ),
 
   /** Zapier-style Capabilities */
@@ -942,11 +944,12 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
 
   /**
    * `webhooks` — RETIRED (ADR-0049 enforce-or-remove). A webhook nested in a
-   * connector was never registered as a `webhook` item, so it was never
-   * materialized into `sys_webhook` and never delivered; the delivered surface
-   * is the stack's top-level `webhooks:` collection. `ConnectorSchema` is NOT
-   * `.strict()`, so a plain delete would be a silent strip (ADR-0104); the
-   * tombstone makes the removal audible in `tsc` and at parse. See "REMOVED:
+   * connector was never registered as a `webhook` item, so the webhook
+   * dispatcher never read it and never delivered it; the delivered surface is
+   * the stack's top-level `webhooks:` collection, read from the metadata
+   * registry (no `sys_webhook` row is written for a declared webhook).
+   * `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
+   * strip (ADR-0104); the tombstone makes the removal audible in `tsc` and at parse. See "REMOVED:
    * `health`, `status` and the nested `webhooks`" above.
    */
   webhooks: retiredKey(WEBHOOKS_RETIRED),

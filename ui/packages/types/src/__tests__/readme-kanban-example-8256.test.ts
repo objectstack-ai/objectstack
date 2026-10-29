@@ -54,7 +54,7 @@ import { uiRoot } from '../../../../scripts/ui-root.mjs';
 
 // The root README's examples live in the quick-start guide since objectstack#26080
 // folded that README into the repository root's; the same fence, read there.
-const README = join(uiRoot(), 'content/docs/guide/quick-start.md');
+const README = join(uiRoot(), '../content/docs/frontend/quick-start.mdx');
 const HEADING = 'Kanban Board';
 
 /** The README section this example lives in, bounded to its own heading. */

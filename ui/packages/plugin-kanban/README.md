@@ -284,7 +284,7 @@ handler to supply, and the document key is refused by name.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-kanban)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-kanban)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-kanban)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

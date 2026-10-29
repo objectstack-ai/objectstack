@@ -30,6 +30,17 @@
  *
  * The text is display only. A picker shows it beside the machine name; what a
  * binding stores is still the name.
+ *
+ * ## Drafts (objectstack#27518)
+ *
+ * A Studio author's datasets are drafts until the package publishes, like
+ * every other item Studio creates. A caller that authors in that world asks
+ * for `previewDrafts`: the catalog is then the draft-overlaid list
+ * (`?preview=draft`), which serves a draft-only dataset with its body, its
+ * package (`_packageId`) and its `_draft` mark, and the semantics hydration
+ * below reads the same world. A caller the server does not admit to drafts is
+ * answered the published list, as if it had not asked. Without the option the
+ * catalog is the published list, as before.
  */
 
 import * as React from 'react';
@@ -72,6 +83,13 @@ export interface DatasetCatalogEntry {
    * (objectui#11576); an entry without one is therefore never offered there.
    */
   object?: string;
+  /**
+   * The package the served document names (`_packageId`); absent when it
+   * names none. The Studio pickers list their own package's datasets first.
+   */
+  packageId?: string;
+  /** Served from its pending draft (`_draft`), not from a published version. */
+  draft?: boolean;
   /** Human label, resolved in the designer locale (falls back to the name). */
   label: string;
   /**
@@ -87,6 +105,25 @@ export interface UseDatasetCatalogResult {
   datasets: DatasetCatalogEntry[];
   loading: boolean;
   error: string | null;
+  /**
+   * Whether the catalog is the draft-overlaid list
+   * ({@link DatasetCatalogOptions.previewDrafts}); the semantics hydration
+   * reads the same world.
+   */
+  previewDrafts?: boolean;
+  /**
+   * Read the list again, e.g. after a dataset was created beside the picker.
+   * Absent on a pre-resolved catalog, which has nothing to re-read.
+   */
+  reload?: () => void;
+}
+
+export interface DatasetCatalogOptions {
+  /**
+   * Read the draft-overlaid list (`?preview=draft`), so a dataset that is
+   * still a draft is offered with its body (see the file header).
+   */
+  previewDrafts?: boolean;
 }
 
 /**
@@ -131,6 +168,8 @@ export function toCatalogEntry(doc: Record<string, unknown>, locale: string): Da
   return {
     name,
     ...(typeof doc.object === 'string' && doc.object ? { object: doc.object } : {}),
+    ...(typeof doc._packageId === 'string' && doc._packageId ? { packageId: doc._packageId } : {}),
+    ...(doc._draft === true ? { draft: true } : {}),
     label: authoredText(doc.label, locale) ?? name,
     description: authoredText(doc.description, locale),
     dimensions,
@@ -144,9 +183,11 @@ export function useDatasetCatalog(
    * entirely and returns this list verbatim.
    */
   override?: DatasetCatalogEntry[],
+  options: DatasetCatalogOptions = {},
 ): UseDatasetCatalogResult {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
+  const previewDrafts = !override && options.previewDrafts === true;
   // The documents as served; their text is resolved below, where the hook
   // returns, so a language switch needs no refetch.
   const [state, setState] = React.useState<{
@@ -154,12 +195,17 @@ export function useDatasetCatalog(
     loading: boolean;
     error: string | null;
   }>({ docs: [], loading: !override, error: null });
+  // Bumped by `reload`; the read below keys on it.
+  const [readNonce, setReadNonce] = React.useState(0);
+  const reload = React.useCallback(() => setReadNonce((n) => n + 1), []);
 
   React.useEffect(() => {
     if (override) return;
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
-    client
+    // Derived here rather than memoised: the effect keys on `client`
+    // (AGENTS.md #10), and the derived client shares its transport.
+    (previewDrafts ? client.withPreviewDrafts(true) : client)
       .list<Record<string, unknown>>('dataset')
       .then((docs) => {
         if (cancelled) return;
@@ -172,7 +218,7 @@ export function useDatasetCatalog(
     return () => {
       cancelled = true;
     };
-  }, [client, override]);
+  }, [client, override, previewDrafts, readNonce]);
 
   const datasets = React.useMemo(
     () =>
@@ -184,7 +230,10 @@ export function useDatasetCatalog(
   );
   const loading = override ? false : state.loading;
   const error = override ? null : state.error;
-  return React.useMemo(() => ({ datasets, loading, error }), [datasets, loading, error]);
+  return React.useMemo(
+    () => ({ datasets, loading, error, previewDrafts, ...(override ? {} : { reload }) }),
+    [datasets, loading, error, previewDrafts, override, reload],
+  );
 }
 
 export interface UseDatasetSemanticsResult {
@@ -197,7 +246,8 @@ export interface UseDatasetSemanticsResult {
 /**
  * Resolve the bound dataset's dimensions/measures from the catalog, lazily
  * hydrating via `client.get('dataset', name)` when the list endpoint returned
- * a summary without them (some servers list names only).
+ * a summary without them (some servers list names only). A draft-overlaid
+ * catalog hydrates from the same world (objectstack#27518).
  */
 export function useDatasetSemantics(
   name: string | undefined,
@@ -228,7 +278,7 @@ export function useDatasetSemantics(
     if (!needsFetch || !name) return;
     if (fetched?.name === name) return;
     let cancelled = false;
-    client
+    (catalog.previewDrafts ? client.withPreviewDrafts(true) : client)
       .get<Record<string, unknown>>('dataset', name)
       .then((doc) => {
         if (cancelled) return;
@@ -241,7 +291,7 @@ export function useDatasetSemantics(
     return () => {
       cancelled = true;
     };
-  }, [client, name, needsFetch, fetched]);
+  }, [client, name, needsFetch, fetched, catalog.previewDrafts]);
 
   const own = needsFetch && fetched?.name === name ? fetched : null;
   const ownDoc = own?.doc ?? null;

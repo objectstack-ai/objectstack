@@ -115,12 +115,15 @@ describe('ListView — timeline date binding reaches the renderer (objectui#3129
     expect(findCalls[0].$select).not.toContain('start_date');
   });
 
-  it('forwards the legacy `options.timeline` nesting by its spec key; the retired alias binds nothing (objectui#6152 round 14)', async () => {
+  it('RETIRED (objectstack#25923): the legacy `options.timeline` nesting binds nothing, by its spec key or by the retired alias', async () => {
+    // The first half forwarded `start_date` until the bag was retired: a stored
+    // bag is folded onto `timeline` by the server before the row is served, and
+    // `ListView` reads no `options`. The top-level spelling is pinned above.
     const viaStart = await timelineProps({
       ...BASE,
       options: { timeline: { startDateField: 'start_date', endDateField: 'end_date' } },
     });
-    expect(viaStart.schema.startDateField).toBe('start_date');
+    expect(viaStart.schema.startDateField).toBeUndefined();
 
     // This half used to read `start_date` too: the bag's `dateField` was a rung
     // of `resolveTimelineDateBinding`. Round 14 retired it, and no fold reaches
@@ -135,13 +138,13 @@ describe('ListView — timeline date binding reaches the renderer (objectui#3129
     // The gap the report isolated: "the same start_date / end_date fields render
     // correctly in the Calendar and Gantt views". A view whose date axis lives
     // under `calendar` is OFFERED the Timeline visualization — the capability
-    // gate has always accepted `options.calendar.startDateField` as a
+    // gate has always accepted `calendar.startDateField` (then under `options`) as a
     // timeline-resolvable axis — but the render branch never read calendar
     // config, so it bucketed every record under "No date" while the calendar
     // rendered the very same field.
     const props = await timelineProps({
       ...BASE,
-      options: { calendar: { startDateField: 'start_date', endDateField: 'end_date' } },
+      calendar: { startDateField: 'start_date', endDateField: 'end_date' },
     });
     expect(props.schema.startDateField).toBe('start_date');
     expect(props.schema.endDateField).toBe('end_date');
@@ -157,12 +160,13 @@ describe('ListView — timeline date binding reaches the renderer (objectui#3129
   });
 
   it('a timeline config with no date key does not shadow the calendar binding', async () => {
-    // app-shell emits an `options.timeline` object for every object view (it
-    // carries the object's titleField), so "the config object exists" must not
-    // be read as "the axis is bound".
+    // app-shell emits a `timeline` block for every object view (it carries
+    // the object's titleField), so "the config object exists" must not be read
+    // as "the axis is bound".
     const props = await timelineProps({
       ...BASE,
-      options: { timeline: { titleField: 'name' }, calendar: { startDateField: 'start_date' } },
+      timeline: { titleField: 'name' },
+      calendar: { startDateField: 'start_date' },
     });
     expect(props.schema.startDateField).toBe('start_date');
     expect(props.schema.timeline.startDateField).toBe('start_date');
@@ -192,7 +196,7 @@ describe('ListView — timeline date binding reaches the renderer (objectui#3129
   it('the capability gate and the render branch read ONE resolution', () => {
     // The gate used to be the wider of the two: it accepted a calendar binding
     // the renderer could not use. Same function now answers both questions.
-    expect(resolveTimelineDateBinding({ options: { calendar: { startDateField: 'start_date' } } }))
+    expect(resolveTimelineDateBinding({ calendar: { startDateField: 'start_date' } }))
       .toEqual({ startDateField: 'start_date', endDateField: undefined, titleField: undefined });
     // The timeline's own axis wins over the calendar's. Re-spelled from the
     // retired `timeline.dateField` (objectui#6152 round 14): the precedence was
@@ -248,7 +252,7 @@ describe('ListView — timeline date binding reaches the renderer (objectui#3129
  *
  * ⭐ What the floor actually produced, measured rather than assumed: the axis it
  * invented was never even FETCHED. The `$select` projection is collected from
- * the DECLARED `schema.timeline` / `schema.options.timeline` blocks (see
+ * the DECLARED `schema.timeline` block (and, until objectstack#25923, the bag's; see
  * `collectViewFields`), never from this flat prop — so an undeclared view got a
  * timeline bound to a column the query did not request and bucketed every record
  * into "No date". That is the outcome the refusal replaces.
@@ -283,12 +287,13 @@ describe('ListView timeline branch — the date-axis floor is retired (objectui#
     expect(props.schema.startDateField).toBeUndefined();
   });
 
-  it('invents no axis for the empty `options.timeline` bag the object page emits', async () => {
-    // app-shell's `timelineViewOptions` emits a bag carrying only the title for
-    // a view that declared no axis. "The config object exists" is not "the axis
-    // is bound" — the same distinction the objectui#3129 block above pins for
-    // the NESTED config, asked here of the flat prop.
-    const props = await timelineProps({ ...BASE, options: { timeline: { titleField: 'name' } } });
+  it('invents no axis for the title-only `timeline` block the object page emits', async () => {
+    // app-shell's `timelineViewOptions` emits a block carrying only the title
+    // for a view that declared no axis (under `options` until objectstack#25923).
+    // "The config object exists" is not "the axis is bound" — the same
+    // distinction the objectui#3129 block above pins for the NESTED config,
+    // asked here of the flat prop.
+    const props = await timelineProps({ ...BASE, timeline: { titleField: 'name' } });
     expect(props.schema.startDateField).toBeUndefined();
   });
 
@@ -307,7 +312,7 @@ describe('ListView timeline branch — the date-axis floor is retired (objectui#
     // break a correctly authored view.
     const props = await timelineProps({
       ...BASE,
-      options: { calendar: { startDateField: 'start_date', endDateField: 'end_date' } },
+      calendar: { startDateField: 'start_date', endDateField: 'end_date' },
     });
     expect(props.schema.startDateField).toBe('start_date');
     expect(props.schema.timeline.startDateField).toBe('start_date');

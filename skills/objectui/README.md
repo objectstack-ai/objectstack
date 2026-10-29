@@ -55,8 +55,8 @@ The published packages this skill covers. Nothing checks this list against the
 - **Parsing & runtime:** `@objectstack/sdui-parser`, `react-runtime`
 - **Integration:** `@object-ui/app-shell`, `providers`, `data-objectstack`
 - **Platform features:** `@object-ui/auth`, `permissions`, `i18n`, `mobile`, `collaboration`
-- **Plugins (19):** `plugin-{grid, list, detail, form, kanban, calendar, timeline, gantt, dashboard, report, charts, map, editor, markdown, view, tree, designer, ai, chatbot}`
-- **Tooling:** `@object-ui/cli`, `create-plugin`, `vscode-extension`
+- **Plugins:** `plugin-{grid, list, detail, form, kanban, calendar, timeline, gantt, dashboard, report, charts, map, editor, markdown, view, tree, designer, chatbot}`
+- **Tooling:** `@object-ui/cli`, `create-plugin`
 
 ## Reference
 

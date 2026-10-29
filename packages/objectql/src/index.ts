@@ -295,9 +295,28 @@ export type {
   DriverHealth,
   DatasourceUnavailableInfo,
   DatasourceUnavailableKind,
+  DatasourceUnavailableReason,
   PrimaryDatasourceVerdict,
   PrimaryDatasourceUnresolvedReason,
 } from './driver-connect-errors.js';
+// [#27277] The engine's floor over a plugin driver on an external datasource
+// (epic #27261 Tier A): the in-memory reading of a driver query it applies, and
+// the two 422 refusals it raises (registered in ERROR_CODE_LEDGER), plus
+// [#27471] the 400 read refusal (the standard INVALID_QUERY).
+export { applyDriverQueryInMemory } from './driver-query-in-memory.js';
+export type { DriverQueryInMemory, DriverQueryInMemoryOptions } from './driver-query-in-memory.js';
+export {
+  ExternalWriteRefusedError,
+  ExternalReadRefusedError,
+  ExternalRowCapExceededError,
+  EXTERNAL_WRITE_REFUSED_CODE,
+  EXTERNAL_ROW_CAP_EXCEEDED_CODE,
+  EXTERNAL_ROW_CAP,
+  EXTERNAL_WRITE_REFUSED_STATUSES,
+  EXTERNAL_READ_REFUSED_STATUSES,
+} from './external-driver-errors.js';
+export type { ExternalWriteOperation } from './external-driver-errors.js';
+export { needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';
 export type { InsertManyRowOutcome } from './engine.js';
 // [#5696] Thrown by `transaction(cb, base, { require: true })` when the
 // datasource cannot give a real transaction. Exported so a caller that fails
@@ -425,7 +444,7 @@ export { evaluateFormulaField } from './engine.js';
 // [#16260] The constant is batteries-only while `ValidationError` is ALSO on the
 // lean `./core` entry, matching every existing `*_CODE` in this package; that
 // asymmetry is #16260's question, deliberately not decided here.
-export { ValidationError, validateRecord, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
+export { ValidationError, validateRecord, validateInsertValues, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
 // [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
 // off-shape value. Exported because the fresh-datastore attestation

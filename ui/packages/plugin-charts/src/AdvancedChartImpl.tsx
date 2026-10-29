@@ -482,6 +482,36 @@ function estimateLabelWidthPx(label: string): number {
 /** recharts' default chart margin, left plus right (5px each side). */
 const CHART_MARGIN_X_PX = 10;
 
+/** The font size `showDataLabels` prints each point's value in, in px. */
+const DATA_LABEL_FONT_PX = 11;
+/** recharts' `LabelList` default `offset`: the gap between a mark and its label. */
+const DATA_LABEL_OFFSET_PX = 5;
+
+/**
+ * The chart margin a vertical cartesian chart (bar, line, area, combo) takes
+ * while `showDataLabels` is on (objectstack#27372).
+ *
+ * A data label sits ABOVE its mark: its baseline is `DATA_LABEL_OFFSET_PX`
+ * over the mark's top. recharts' default margin leaves 5px between the plot's
+ * top edge and the end of the chart surface, and the value axis's nice domain
+ * routinely puts the tallest mark exactly on that edge (a 400,000 bar under a
+ * 400K top tick). Its label was then drawn wholly outside the surface: the
+ * tallest bar, the one a reader looks at first, was the one with no value.
+ *
+ * The top margin is that 5px plus the label's own height (offset and font),
+ * so a mark ON the top edge still has its label inside the surface. A margin
+ * rather than a padded domain: an author's `yAxis.max` pins the domain and
+ * must keep doing so, and the margin holds whatever the domain is. The other
+ * three sides stay recharts' default 5px, which `CHART_MARGIN_X_PX` counts on.
+ * Horizontal bars are left alone: their value runs across the plot.
+ */
+const DATA_LABEL_CHART_MARGIN = {
+  top: 5 + DATA_LABEL_OFFSET_PX + DATA_LABEL_FONT_PX,
+  right: 5,
+  bottom: 5,
+  left: 5,
+} as const;
+
 /**
  * The inset, in px, a line or area chart's categorical x axis keeps at BOTH
  * ends of the plot (objectui#13390).
@@ -1121,6 +1151,93 @@ function SankeyOmittedRowsNote({ shown, total, dataKey }: { shown: number; total
       ))}
     </p>
   );
+}
+
+/**
+ * The series a sankey draws as FLOWS (objectstack#27460): every series except a
+ * comparison overlay, which is the same measure one period back and no group of
+ * it, so it never becomes a flow.
+ */
+const sankeyFlowSeries = (series: readonly NormalizedSeries[]): NormalizedSeries[] =>
+  series.filter((s) => s.variant !== 'comparison');
+
+/** One drawn flow of a two-level sankey, and the cell it was drawn from. */
+interface SankeyCellLink {
+  source: number;
+  target: number;
+  value: number;
+  /** The `data` row the flow leaves — what a click drills to, with `seriesKey`. */
+  rowIndex: number;
+  /** The series (the second dimension's group) the flow enters. */
+  seriesKey: string;
+}
+
+/** A target column whose carried cells were not all drawn: the omitted-rows note's inputs. */
+interface SankeyOmittedColumn {
+  label: string;
+  shown: number;
+  total: number;
+}
+
+/**
+ * A TWO-LEVEL sankey: each row's category flows into each series it carries
+ * (objectstack#27460).
+ *
+ * A sankey declares ONE measure (the spec's `SINGLE_SERIES_CHART_TYPES` refuses
+ * a second), so two or more flow series reaching the arm are the groups of that
+ * one measure: `buildChartSeries` pivots a SECOND dimension into series exactly
+ * when the chart carries one measure, one row per first-dimension value and one
+ * column per second-dimension value. The arm used to read `series[0]` alone and
+ * drew the first group's flows as if they were the whole chart, with nothing
+ * saying the rest were dropped. Here every cell is a flow: source = the row's
+ * category (`xAxisKey`), target = the series, width = the cell.
+ *
+ * A cell the row does not CARRY is not a flow and not an omission: the pivot
+ * writes a column only for a combination the dataset answered, so an absent key
+ * is a combination with no records. A cell it carries that is not above zero is
+ * dropped, as the one-level arm drops a row, and counted per target column, so
+ * the chart says which flows it left out. Nodes with no drawn flow are left out
+ * too: Recharts would draw them as zero-height bars with a label and no link.
+ */
+function buildSankeyCellFlows(
+  data: ReadonlyArray<Record<string, any>>,
+  xAxisKey: string,
+  flowSeries: readonly NormalizedSeries[],
+  palette: readonly string[],
+): { nodes: Array<{ name: string; fill: string }>; links: SankeyCellLink[]; omitted: SankeyOmittedColumn[] } {
+  const cells = data.map((row) =>
+    flowSeries.map((s) => {
+      const carried = row != null && Object.prototype.hasOwnProperty.call(row, s.dataKey);
+      return { carried, value: carried ? Number(row[s.dataKey]) || 0 : 0 };
+    }),
+  );
+  const sourceRows = data.flatMap((_, i) => (cells[i].some((c) => c.value > 0) ? [i] : []));
+  const targetColumns = flowSeries.flatMap((_, j) => (cells.some((r) => r[j].value > 0) ? [j] : []));
+  const nodes = [
+    ...sourceRows.map((i, n) => ({
+      name: String(data[i]?.[xAxisKey] ?? ''),
+      fill: resolveColor(palette[n % palette.length]),
+    })),
+    ...targetColumns.map((j, n) => ({
+      name: String(flowSeries[j].label ?? flowSeries[j].dataKey),
+      fill: resolveColor(palette[(sourceRows.length + n) % palette.length]),
+    })),
+  ];
+  const links: SankeyCellLink[] = [];
+  sourceRows.forEach((i, sourceNode) => {
+    targetColumns.forEach((j, n) => {
+      const { value } = cells[i][j];
+      if (value > 0) {
+        links.push({ source: sourceNode, target: sourceRows.length + n, value, rowIndex: i, seriesKey: flowSeries[j].dataKey });
+      }
+    });
+  });
+  const omitted = flowSeries.flatMap((s, j) => {
+    const total = cells.filter((r) => r[j].carried).length;
+    const shown = cells.filter((r) => r[j].value > 0).length;
+    return shown < total ? [{ label: String(s.label ?? s.dataKey), shown, total }] : [];
+  });
+  return { nodes, links, omitted };
 }
 
 /**
@@ -1998,7 +2115,30 @@ function AdvancedChartImplInner({
 
   const scatterClickProps = onChartClick ? { onClick: handleScatterClick, cursor: 'pointer' } : {};
   const treemapClickProps = onChartClick ? { onClick: handleTreemapClick, style: { cursor: 'pointer' as const } } : {};
+  // A two-level sankey (objectstack#27460) drills on a FLOW: a link is exactly
+  // one cell, the row it leaves and the series it enters, which is the
+  // `{ category, series }` pair the drill lookup resolves to one dataset row. A
+  // node is no single cell — a category node spans every series and a series
+  // node every category — so a node click does not drill, as the one-level
+  // root does not.
+  const handleSankeyFlowClick = React.useCallback((item: any, type?: string) => {
+    if (!onChartClick || type !== 'link') return;
+    const link = item?.payload as Partial<SankeyCellLink> | undefined;
+    const row = typeof link?.rowIndex === 'number' ? data[link.rowIndex] : undefined;
+    const key = link?.seriesKey;
+    if (!row || typeof key !== 'string') return;
+    const cat = row[xAxisKey];
+    onChartClick({
+      category: cat != null ? String(cat) : undefined,
+      categoryId: chartRowBucketId(row),
+      series: key,
+      seriesLabel: seriesLabelForKey(key, series),
+      value: typeof row[key] === 'number' ? row[key] : undefined,
+    });
+  }, [onChartClick, data, xAxisKey, series]);
+
   const sankeyClickProps = onChartClick ? { onClick: handleSankeyClick, style: { cursor: 'pointer' as const } } : {};
+  const sankeyFlowClickProps = onChartClick ? { onClick: handleSankeyFlowClick, style: { cursor: 'pointer' as const } } : {};
 
   React.useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -2128,10 +2268,6 @@ function AdvancedChartImplInner({
     yAxisPositionNotes(yPlacement, categoriesRunDown),
     yAxisUndrawnNotes(yPlacement, yAxes, categoriesRunDown),
   );
-  /** The entry a series' marks are measured against — for its value labels. */
-  const axisOfSeries = (s: { yAxis?: string }): NormalizedAxis | undefined =>
-    hasDualAxis ? (s.yAxis === 'right' ? rightY : leftY) : primaryY;
-
   const xTickFormatter = React.useMemo(
     () => formatterFor(xAxisSpec?.format, displayLocale) ?? formatTick,
     [xAxisSpec?.format, displayLocale, formatTick],
@@ -2196,6 +2332,12 @@ function AdvancedChartImplInner({
     () => formatterFor(rightY?.format, displayLocale) ?? formatYTick,
     [rightY?.format, displayLocale, formatYTick],
   );
+  /**
+   * The tick formatter of the value axis a series' marks are measured
+   * against — the one its value labels print with (objectstack#27372).
+   */
+  const valueTickFormatterOf = (s: { yAxis?: string }): typeof yTickFormatter =>
+    hasDualAxis ? (s.yAxis === 'right' ? rightYTickFormatter : leftYTickFormatter) : yTickFormatter;
 
   /**
    * Every number plotted in one slot of a dual axis (or on the only axis,
@@ -2317,10 +2459,16 @@ function AdvancedChartImplInner({
     ? <Brush dataKey={xAxisKey} height={24} travellerWidth={8} stroke="hsl(var(--muted-foreground))" />
     : null;
 
-  /** `showDataLabels` prints each point's value on the mark itself. */
-  const dataLabel = (formatter?: (v: any) => string) =>
+  /**
+   * `showDataLabels` prints each point's value on the mark itself, in the
+   * units of the value axis the mark is measured against (objectstack#27372):
+   * the caller passes that axis's own tick formatter, so an authored
+   * `yAxis.format` wins and an axis without one gives its label the compact
+   * default (`174K` beside a `400K` tick, never a raw `174000`).
+   */
+  const dataLabel = (formatter: (v: any) => string) =>
     showDataLabels
-      ? <LabelList position="top" className="fill-foreground" fontSize={11} {...(formatter ? { formatter } : {})} />
+      ? <LabelList position="top" className="fill-foreground" fontSize={DATA_LABEL_FONT_PX} offset={DATA_LABEL_OFFSET_PX} formatter={formatter} />
       : null;
 
   // Shared X-axis props for time/categorical axes, in two branches.
@@ -2669,6 +2817,59 @@ function AdvancedChartImplInner({
   // (The dashboard aggregate yields one value per category; a real multi-stage
   // flow needs richer data, but this honestly renders the sankey family.)
   if (chartType === 'sankey') {
+    // Two or more flow series are the groups of a pivoted second dimension,
+    // drawn as a second column of nodes (objectstack#27460,
+    // `buildSankeyCellFlows`). One series keeps the one-level flow below.
+    const flowSeries = sankeyFlowSeries(series);
+    if (flowSeries.length >= 2) {
+      const flows = buildSankeyCellFlows(data, xAxisKey, flowSeries, getPalette());
+      if (flows.links.length === 0) {
+        // Rows arrived and none carries a cell above zero: the one-level
+        // refusal below (objectui#7140), naming every column it tested.
+        if (data.length === 0) {
+          return <div className={className} />;
+        }
+        return (
+          <ChartRefusal code="no-positive-flow" className={className}>
+            This chart has no flow to draw: no row&apos;s{' '}
+            {flowSeries.map((s, i) => (
+              <React.Fragment key={s.dataKey}>
+                {i > 0 ? ' / ' : null}
+                <code className="font-mono">{s.label ?? s.dataKey}</code>
+              </React.Fragment>
+            ))}{' '}
+            is above zero.
+          </ChartRefusal>
+        );
+      }
+      // A partial flow says it is partial (objectui#7148), once per target
+      // column that left a carried cell out.
+      return (
+        <ChartFootnote
+          note={
+            flows.omitted.length > 0 ? (
+              <>
+                {flows.omitted.map((c) => (
+                  <SankeyOmittedRowsNote key={c.label} shown={c.shown} total={c.total} dataKey={c.label} />
+                ))}
+              </>
+            ) : null
+          }
+        >
+          <ChartContainer config={config} className={className} {...containerProps}>
+            <Sankey
+              data={{ nodes: flows.nodes, links: flows.links }}
+              nodePadding={24}
+              link={SankeyLinkShape}
+              node={SankeyNodeShape}
+              {...sankeyFlowClickProps}
+            >
+              <Tooltip />
+            </Sankey>
+          </ChartContainer>
+        </ChartFootnote>
+      );
+    }
     const dataKey = series[0]?.dataKey || 'value';
     const rootName = series[0]?.label || dataKey;
     const rows = data.filter((r) => (Number(r?.[dataKey]) || 0) > 0);
@@ -3034,7 +3235,7 @@ function AdvancedChartImplInner({
             happens at chart level because that is the only place the CATEGORY
             is known — a line/area item handler is handed the curve's props and
             no datum. */}
-        <ComposedChart ref={setChartSurface} data={data} {...comboClickProps}>
+        <ComposedChart ref={setChartSurface} data={data} {...(showDataLabels ? { margin: DATA_LABEL_CHART_MARGIN } : {})} {...comboClickProps}>
           <CartesianGrid {...gridProps} {...valueAxisIdFor(valueAxesHaveIds, categoriesRunDown)} />
           <XAxis dataKey={xAxisKey} {...xAxisCommonProps} />
           {/* A combo always draws both value axes (an authored combo binds an
@@ -3072,7 +3273,7 @@ function AdvancedChartImplInner({
                 : (seriesType === 'bar' ? 'left' : 'right');
             const pres = seriesStyle(s, seriesType as any);
             const stackProps = s.stack ? { stackId: String(s.stack) } : {};
-            const valueFormatter = formatterFor((yAxisId === 'right' ? rightY : leftY)?.format, displayLocale);
+            const valueFormatter = yAxisId === 'right' ? rightYTickFormatter : leftYTickFormatter;
 
             if (seriesType === 'line') {
               return (
@@ -3122,7 +3323,7 @@ function AdvancedChartImplInner({
     <ChartFrame title={title} subtitle={subtitle}>
     <ChartFootnote note={joinNotes(xPositionNote, yPositionNote)}>
     <ChartContainer config={config} className={className} {...containerProps}>
-      <ChartComponent ref={setChartSurface} data={data} layout={isHorizontal ? 'vertical' : 'horizontal'} {...cartesianClickProps}>
+      <ChartComponent ref={setChartSurface} data={data} layout={isHorizontal ? 'vertical' : 'horizontal'} {...(showDataLabels && !isHorizontal ? { margin: DATA_LABEL_CHART_MARGIN } : {})} {...cartesianClickProps}>
         <defs>
           {gradColors.map((c) => (
             <React.Fragment key={gslug(c)}>
@@ -3263,7 +3464,7 @@ function AdvancedChartImplInner({
           // Recharts keys stacking off `stackId`, so the author's group name
           // passes through unchanged.
           const stackProps = s.stack ? { stackId: String(s.stack) } : {};
-          const valueFormatter = formatterFor(axisOfSeries(s)?.format, displayLocale);
+          const valueFormatter = valueTickFormatterOf(s);
 
           if (chartType === 'bar' || chartType === 'horizontal-bar') {
             // One series, one colour: a bar's colour names its SERIES, so a

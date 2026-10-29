@@ -88,6 +88,7 @@ Now you can use it in schemas:
 
 All registered components receive the schema as props:
 
+{/* doc-snippet: fragment — continues the custom-component block above — `BaseSchema` and `MyComponentSchema` are declared there, and re-declaring them here would teach the reader to write the same interface twice (measured: TS2304 x3) */}
 ```tsx
 interface ComponentProps<T extends BaseSchema = BaseSchema> {
   // The complete schema object
@@ -119,6 +120,7 @@ function MyRenderer(props: ComponentProps<MyComponentSchema>) {
 
 Register components with additional metadata:
 
+{/* doc-snippet: fragment — continues the custom-component block above — `MyComponent` and the `ComponentRegistry` import come from it (measured: TS2304 x2). The `ComponentMeta` literal this block shows is type-checked on the complete example at the end of the page, which does compile */}
 ```tsx
 ComponentRegistry.register('my-component', MyComponent, {
   label: 'My Custom Component',
@@ -144,6 +146,7 @@ of a react page's JSX scope — and does not stand in for the slot.
 
 Register components that load on demand:
 
+{/* doc-snippet: fragment — `./HeavyComponent` is the reader's own module, so the dynamic import cannot resolve here (measured: TS2307 x1, plus TS2304 on the `ComponentRegistry` the block above imports) */}
 ```tsx
 // The loader runs the first time a schema asks for `heavy-component`.
 ComponentRegistry.registerLazy('heavy-component', () => import('./HeavyComponent'))
@@ -153,6 +156,7 @@ ComponentRegistry.registerLazy('heavy-component', () => import('./HeavyComponent
 
 Override default components with your own:
 
+{/* doc-snippet: fragment — `MyCustomButton` is the reader's own replacement component; there is nothing in this repo to import it from (measured: TS2304 x1) */}
 ```tsx
 import { ComponentRegistry } from '@object-ui/core'
 import { initializeComponents } from '@object-ui/components'
@@ -309,6 +313,7 @@ Use kebab-case for component types:
 
 ### 4. Provide Meaningful Metadata
 
+{/* doc-snippet: fragment — `RatingComponent` is the component built in the complete example at the end of this page, and the `ComponentRegistry` import comes with it (measured: TS2304 x2) */}
 ```tsx
 ComponentRegistry.register('rating', RatingComponent, {
   label: 'Star Rating',
@@ -320,6 +325,7 @@ ComponentRegistry.register('rating', RatingComponent, {
 
 ### 5. Handle Missing Props Gracefully
 
+{/* doc-snippet: fragment — continues the component-interface block above — `ComponentProps` is declared there and `MySchema` stands for whatever schema the reader's component takes (measured: TS2304 x2) */}
 ```tsx
 function MyComponent(props: ComponentProps<MySchema>) {
   const { schema } = props
@@ -339,6 +345,7 @@ function MyComponent(props: ComponentProps<MySchema>) {
 
 Group related components into plugin packages:
 
+{/* doc-snippet: fragment — the three chart components are files the reader is being told to write, so `./BarChart` / `./LineChart` / `./PieChart` cannot resolve here (measured: TS2307 x3) */}
 ```tsx
 // @my-org/objectui-plugin-charts
 import { ComponentRegistry } from '@object-ui/core'
@@ -355,6 +362,7 @@ export function registerChartComponents() {
 
 Usage:
 
+{/* doc-snippet: fragment — `@my-org/objectui-plugin-charts` is the package the reader has just been shown how to create, not one this repo publishes (measured: TS2307 x1) */}
 ```tsx
 import { initializeComponents } from '@object-ui/components'
 import '@object-ui/fields'

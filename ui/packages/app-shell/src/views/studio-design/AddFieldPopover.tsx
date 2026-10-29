@@ -38,8 +38,25 @@ import {
 } from '@object-ui/components';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import { FieldTypePicker } from '../metadata-admin/inspectors/FieldTypePicker.js';
-import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { toFieldNameLoose } from '../metadata-admin/previews/object-fields-io.js';
+
+/**
+ * The refusal for an api name another field of the object already holds, or
+ * `null` when `name` is free. The one duplicate-name refusal Studio has: this
+ * popover and the field inspector's API name box both say it, so the author
+ * reads the same sentence whichever door they rename through
+ * (objectstack#27517).
+ */
+export function fieldNameTakenRefusal(
+  name: string,
+  takenNames: readonly string[],
+  locale: SupportedLocale,
+): string | null {
+  return name && takenNames.includes(name)
+    ? tFormat('engine.studio.data.addFieldApiNameTaken', locale, { name })
+    : null;
+}
 
 export interface AddFieldPopoverProps {
   /**
@@ -98,7 +115,8 @@ export function AddFieldPopover({
   // The label alone cannot name the field: the author types the api name.
   const asksName = !!trimmed && (!derived || derivedTaken);
   const typed = apiName.replace(/_+$/, '');
-  const typedTaken = !!typed && takenNames.includes(typed);
+  const typedRefusal = fieldNameTakenRefusal(typed, takenNames, locale);
+  const typedTaken = !!typedRefusal;
   const canCreate = !!trimmed && (!asksName || (!!typed && !typedTaken));
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,11 +126,11 @@ export function AddFieldPopover({
   };
   const nameHint = !asksName
     ? null
-    : typedTaken || (!typed && derivedTaken)
-      ? tFormat('engine.studio.data.addFieldApiNameTaken', locale, { name: typed || derived })
-      : !typed
-        ? t('engine.studio.data.addFieldApiNameNotDerived', locale)
-        : null;
+    : typed
+      ? typedRefusal
+      : derivedTaken
+        ? fieldNameTakenRefusal(derived, takenNames, locale)
+        : t('engine.studio.data.addFieldApiNameNotDerived', locale);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

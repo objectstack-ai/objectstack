@@ -12,7 +12,7 @@ import { Routes, Route, Navigate, matchRoutes, useNavigate, useLocation, usePara
 import { useState, useEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
-import { Empty, EmptyTitle, EmptyDescription, Button } from '@object-ui/components';
+import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
@@ -505,8 +505,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // `recordHref`). A member reaches both under the Setup segment, so whether
   // they wait on Setup's verdict is a product decision, left open on
   // objectui#12706.
+  //
+  // objectstack#27507 — two more wait on it: the settings pages
+  // (`system/settings`, `system/settings/:namespace`, the console host's) and
+  // the marketplace (`system/marketplace[/:packageId]`, this file's). Without
+  // the verdict a member opening them got the default app's chrome around the
+  // page's own reading of the server's refusal: an empty settings hub ("No
+  // settings registered"), the raw capability error on a settings page, the
+  // marketplace's admin-only notice. Each now reads as the app root does; the
+  // pages' inner states stay for a caller the app lets in.
   const isSetupRootRoute = location.pathname === '/apps/setup' || location.pathname === '/apps/setup/';
-  const appSurfaceAwaitsVerdict = !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute);
+  const [appSubRoot, appSubPage] = appSubPath.split('/');
+  const isSettingsOrMarketplaceRoute =
+    appSubRoot === 'system' && (appSubPage === 'settings' || appSubPage === 'marketplace');
+  const appSurfaceAwaitsVerdict =
+    !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute || isSettingsOrMarketplaceRoute);
 
   // Post-publish readiness: when a requested app isn't in the loaded metadata,
   // re-check ONCE (the registry can lag a beat behind a publish) before
@@ -1680,6 +1693,34 @@ function resolveLandingRoute(navigation: NavigationItem[], ctx?: NavTemplateCont
 }
 
 /**
+ * objectstack-ai/objectstack#27450 — the landing target with the search and
+ * hash the app-root URL arrived with carried onto it. The URL overlays
+ * (`?palette=1`, `?recordId=`, `?form=`, `urlParams.ts`) live in the query, so
+ * a redirect that rebuilt the URL from the landing alone dropped the overlay a
+ * deep link asked for before anything read it.
+ *
+ * A landing that has a query of its own (a `page` entry's `params`, an
+ * `object` entry's `filters`) keeps it, and the two MERGE: a key the arriving
+ * URL names replaces the landing's values for that key, never doubles them —
+ * the link is the more specific ask. With nothing arriving the target is
+ * returned untouched; with no query on the landing the arriving search is
+ * appended as written.
+ */
+function carryQueryOntoLanding(target: string, search: string, hash: string): string {
+  const hashAt = target.indexOf('#');
+  const beforeHash = hashAt >= 0 ? target.slice(0, hashAt) : target;
+  const carriedHash = hash || (hashAt >= 0 ? target.slice(hashAt) : '');
+  if (!search || search === '?') return `${beforeHash}${carriedHash}`;
+  const queryAt = beforeHash.indexOf('?');
+  if (queryAt < 0) return `${beforeHash}${search}${carriedHash}`;
+  const params = new URLSearchParams(beforeHash.slice(queryAt + 1));
+  const arriving = new URLSearchParams(search);
+  for (const key of new Set(arriving.keys())) params.delete(key);
+  arriving.forEach((value, key) => params.append(key, value));
+  return `${beforeHash.slice(0, queryAt)}?${params.toString()}${carriedHash}`;
+}
+
+/**
  * The app root (`/apps/:appName`): navigates to the app's landing, or says the
  * member has nothing here.
  *
@@ -1718,6 +1759,7 @@ function AppRootLanding({
   setupPath: string | null;
 }) {
   const gates = useNavMemberGates();
+  const location = useLocation();
   // objectstack#25338 — an app that names objects, none of which this member
   // may read, has nothing for them: its dashboards and pages would answer a
   // grid of "You don't have access" tiles. Say so once, before any landing is
@@ -1750,7 +1792,9 @@ function AppRootLanding({
       </div>
     );
   }
-  if (landing) return <Navigate to={landing} replace />;
+  // objectstack-ai/objectstack#27450 — search and hash carry over, as on the
+  // other URL-rewrite redirects in this file.
+  if (landing) return <Navigate to={carryQueryOntoLanding(landing, location.search, location.hash)} replace />;
   // objectui#12079 — an app that shows this member NO navigation (every entry
   // gated away from them, or none served at all) is an app they have no access
   // in yet. Say so, and offer Setup to a caller who can grant access: the
@@ -1868,21 +1912,22 @@ function RouteNotFound() {
  */
 function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
   const { t } = useObjectTranslation();
+  // #25915 — drawn by the shared `DataErrorState`, so the failure is
+  // `role="alert"` by construction. Retry is passed as `children` (not
+  // `onRetry`) so it keeps its own test id.
   return (
     <div className="flex h-full w-full items-center justify-center p-8">
-      <Empty data-testid="route-object-read-failed">
-        <EmptyTitle>{t('list.loadErrorTitle', { defaultValue: 'Couldn\u2019t load records' })}</EmptyTitle>
-        <EmptyDescription>
-          {t('list.loadErrorMessage', {
-            defaultValue: 'Something went wrong while loading this data. Check your connection and try again.',
-          })}
-        </EmptyDescription>
-        <div className="mt-4">
-          <Button onClick={onRetry} data-testid="route-object-read-failed-retry">
-            {t('common.retry', { defaultValue: 'Retry' })}
-          </Button>
-        </div>
-      </Empty>
+      <DataErrorState
+        data-testid="route-object-read-failed"
+        title={t('list.loadErrorTitle', { defaultValue: 'Couldn\u2019t load records' })}
+        message={t('list.loadErrorMessage', {
+          defaultValue: 'Something went wrong while loading this data. Check your connection and try again.',
+        })}
+      >
+        <Button onClick={onRetry} data-testid="route-object-read-failed-retry">
+          {t('common.retry', { defaultValue: 'Retry' })}
+        </Button>
+      </DataErrorState>
     </div>
   );
 }

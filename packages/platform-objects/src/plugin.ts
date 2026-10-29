@@ -7,6 +7,7 @@ import { SysMigration } from './system/sys-migration.object.js';
 import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
 import { SysExchangeRate } from './system/sys-exchange-rate.object.js';
+import { SysTrustedKey } from './system/sys-trusted-key.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
 import type {
   II18nService,
@@ -49,6 +50,12 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    service-settings registered it, a kernel composed without settings
  *    hard-failed every secret-field write with an error that blamed
  *    platform-objects. Registered here, that error message is true.
+ *  - **`sys_trusted_key`** — the environment's trusted plugin-publisher
+ *    PUBLIC keys (ADR-0025 §3.5 M1). Its readers span domains: the CLI's
+ *    `os plugin install` resolves an artifact signature's key id here today,
+ *    and ADR-0025 M1's boot-time plugin loader in the runtime is the second
+ *    reader (not built yet). No capability plugin owns plugin distribution,
+ *    so it rides with the other platform infrastructure (ADR-0029 D1/D2).
  *  - **`sys_metadata_activation`** — the packaged-metadata activation
  *    ledger (ADR-0126 §4). Same story a third time, and the ruling that
  *    moved it here is recorded verbatim on #12359 (maintainer, 2026-08-26,
@@ -120,8 +127,8 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
 /**
  * [#12359 / ADR-0126 §4] The manifest the activation ledger is registered
  * under — this plugin's, but SEPARATE from the one carrying `sys_migration` /
- * `sys_migration_journal` / `sys_secret`, and carrying the automation
- * manifest's `scope` / `namespace` / `defaultDatasource` triple verbatim.
+ * `sys_migration_journal` / `sys_secret` / `sys_trusted_key`, and carrying the
+ * automation manifest's `scope` / `namespace` / `defaultDatasource` triple verbatim.
  *
  * ## Why a second manifest rather than a fourth entry in the first one
  *
@@ -149,7 +156,7 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  * wall this card was given, discharged by preserving the status quo rather
  * than by asserting it.
  *
- * ⛔ The three siblings are deliberately NOT given this triple. They ride the
+ * ⛔ The siblings are deliberately NOT given this triple. They ride the
  * project database today and moving them is a different, larger question.
  * ⛔ And it is NOT spelled as `datasource: 'cloud'` on the object itself: that
  * is binding step 1, which answers even when no such driver is registered, so
@@ -195,7 +202,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey],
       });
       ctx?.getService?.('manifest')?.register?.({
         ...ACTIVATION_LEDGER_MANIFEST,

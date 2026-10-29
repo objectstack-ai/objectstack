@@ -579,6 +579,12 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
 // `--ledger-root`, for the #5623 reason each block above states, and every
 // mutation targets `manifest/runtime` — the row the status shipped with — so
 // each run has exactly one cause for its verdict.
+//
+// #27123 flipped that row to `live` (the boot-time loader for installed
+// plugins dispatches on the tier), and no shipped row carries the verdict
+// since. So each case PLANTS it: the copy's `manifest/runtime` is put back as
+// the `live-elsewhere` row it was, attested today, with the copy's count shard
+// moved by the same one row, and the case's mutation lands on that.
 describe('check:liveness — the live-elsewhere criteria (#13483)', () => {
   let tmp: string;
 
@@ -587,10 +593,44 @@ describe('check:liveness — the live-elsewhere criteria (#13483)', () => {
   });
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-  /** Copy the real ledgers and rewrite fields of one property in the copy. */
-  function withProp(name: string, type: string, prop: string, edit: (entry: any) => void): string {
+  /** The `manifest/runtime` row as it stood before #27123, attested today so it is inside the window. */
+  const plantedRow = () => ({
+    status: 'live-elsewhere',
+    verifiedAt: new Date().toISOString().slice(0, 10),
+    evidenceScope: 'cross-repo',
+    evidence:
+      'cloud: packages/service-cloud/src/plugin-permission-audit.ts#auditPluginPermissions @15f55df + '
+      + 'packages/service-cloud/src/routes/package-publish.ts:530 — the marketplace publish gate (planted by the self-test)',
+    note: 'PLANTED by check-liveness.test.ts: the live-elsewhere row manifest.runtime was until #27123.',
+  });
+
+  /**
+   * Copy the real ledgers, plant {@link plantedRow} on `manifest/runtime`, and
+   * move the copy's `manifest` count shard by that one row (`live` → `elsewhere`),
+   * so the planting is the copy's only difference the gate can see.
+   */
+  function planted(name: string): string {
     const root = path.join(tmp, name);
     cpSync(LEDGERS, root, { recursive: true });
+    const file = path.join(root, 'manifest.json');
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    expect(ledger.props.runtime.status, 'the planting starts from the shipped `live` row').toBe('live');
+    ledger.props.runtime = plantedRow();
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+    const shard = path.join(root, 'state-counts', 'manifest.md');
+    const counts = readFileSync(shard, 'utf8');
+    const moved = counts.replace(
+      /^\| `manifest` \| (\d+) \| (\d+) \| (\d+) \| /m,
+      (_row, live, exp, elsewhere) => `| \`manifest\` | ${Number(live) - 1} | ${exp} | ${Number(elsewhere) + 1} | `,
+    );
+    expect(moved, 'the manifest count shard has its row').not.toBe(counts);
+    writeFileSync(shard, moved);
+    return root;
+  }
+
+  /** {@link planted}, then rewrite fields of one property in the copy. */
+  function withProp(name: string, type: string, prop: string, edit: (entry: any) => void): string {
+    const root = planted(name);
     const file = path.join(root, `${type}.json`);
     const ledger = JSON.parse(readFileSync(file, 'utf8'));
     edit(ledger.props[prop]);
@@ -598,19 +638,35 @@ describe('check:liveness — the live-elsewhere criteria (#13483)', () => {
     return root;
   }
 
-  // The control, and the population line. The shipped `manifest.runtime` row is
-  // the day-one population, so a green run must show it counted AND satisfied —
-  // "no findings" over zero rows is also what a check wired to nothing prints.
+  /** The gate's `live-elsewhere:` population line, parsed. */
+  function population(output: string): { line: string; carry: number; foreign: number } {
+    const line = output.split('\n').find((l) => l.startsWith('live-elsewhere:')) ?? '';
+    const m = /live-elsewhere: (\d+) entr\(ies\) carry the verdict .*?, (\d+) with a foreign pointer/.exec(line);
+    expect(m, line).not.toBeNull();
+    return { line, carry: Number(m![1]), foreign: Number(m![2]) };
+  }
+
+  // The controls, and the population line. A green run must show the planted
+  // row counted AND satisfied — "no findings" over zero rows is also what a
+  // check wired to nothing prints — and the shipped ledgers, which hold no
+  // such row today, must be green and print the line all the same.
   it('is green on the shipped ledgers and publishes the population beside the verdict', () => {
     const root = path.join(tmp, 'verbatim');
     cpSync(LEDGERS, root, { recursive: true });
     const { status, output } = runGate(root);
     expect(status, output).toBe(0);
-    const line = output.split('\n').find((l) => l.startsWith('live-elsewhere:')) ?? '';
-    const m = /live-elsewhere: (\d+) entr\(ies\) carry the verdict .*?, (\d+) with a foreign pointer/.exec(line);
-    expect(m, line).not.toBeNull();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(1);
-    expect(m![2]).toBe(m![1]);
+    const { line, carry, foreign } = population(output);
+    expect(foreign).toBe(carry);
+    expect(line).not.toContain('MALFORMED');
+    expect(line).not.toContain('EXPIRED');
+  });
+
+  it('is green on a planted live-elsewhere row and counts it as carrying the verdict with a foreign pointer', () => {
+    const { status, output } = runGate(planted('planted'));
+    expect(status, output).toBe(0);
+    const { line, carry, foreign } = population(output);
+    expect(carry).toBeGreaterThanOrEqual(1);
+    expect(foreign).toBe(carry);
     expect(line).not.toContain('MALFORMED');
     expect(line).not.toContain('EXPIRED');
   });

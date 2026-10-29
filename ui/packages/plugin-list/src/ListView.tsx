@@ -11,7 +11,7 @@ import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuild
 import type { SortItem } from '@object-ui/components';
 import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
+import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
@@ -33,7 +33,7 @@ import type { DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
 import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
-import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
+import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
 // `resolveI18nLabel`: it resolves the INLINE per-locale map
@@ -51,7 +51,7 @@ import { RecordDetailPanel } from '@object-ui/plugin-detail';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
- * `schema.options.map`'s CONTENTS to the top level — one entry per key
+ * the view's `map` block's CONTENTS to the top level — one entry per key
  * `ObjectMapConfigSchema` declares, written under the name the FLAT form uses
  * for that key. Whitelisted rather than a whole-bag spread: `style` is ALSO
  * `BaseSchema.style` (inline CSS, legal on every node), and spreading the raw
@@ -136,38 +136,32 @@ function pickFlatMapConfig(
 
 /**
  * The effective map configuration for a list view: the spec's VIEW-LEVEL `map`
- * block merged OVER the legacy `options.map` bag, per key.
+ * block, through the flat whitelist.
  *
  * `map` is `ListMapConfigSchema` (objectstack#9340, consumable here since the
  * `@objectstack/spec` 17.1.0 pin) — a strict, seven-key block that flows into
  * this package's own `ListViewSchema` by reference (it is not in
  * `LIST_VIEW_LOCAL_OVERRIDES`, so `specFieldsExcept` imports it). It was
- * authorable and validated but never read: `case 'map'` forwarded only
- * `schema.options?.map`, so declaring it changed nothing at runtime
+ * authorable and validated but never read: `case 'map'` forwarded only the
+ * legacy `options.map` bag, so declaring it changed nothing at runtime
  * (objectui#5042).
  *
- * PRECEDENCE — the view-level block wins, per key. Both halves of that are the
- * convention already set by every sibling visualization in this file, not a new
- * rule: `kanban`, `calendar`, `gallery`, `timeline` and `gantt` each spread
- * `schema.options?.<kind>` FIRST and `schema.<kind>` LAST, which is a per-key
- * override in the view-level block's favour. (`tree` and `chart` also put the
- * view-level block first, but with `||` — whole-block replacement rather than a
- * merge. The direction is unanimous across all seven; only the granularity
- * differs, and this follows the five that merge, which are also the five that
- * flatten config into props the way the map branch does.)
+ * ONE SOURCE (#25923). This merged the block OVER the legacy `options.map` bag,
+ * per key, until the spec retired the bag: the list overlay refuses `options`,
+ * and a stored bag is folded onto the top-level block (per key, the block
+ * winning — this function's old precedence) by the spec's ADR-0087 D2
+ * conversion `list-view-options-bag-folded` before a row is served. So the
+ * block is all there is to read, here and in every sibling visualization.
  *
- * Both sides go through the same whitelist, so the typed block cannot
- * reintroduce the `style` namespace collision that objectui#5177 closed.
+ * The block goes through the whitelist, so it cannot reintroduce the `style`
+ * namespace collision that objectui#5177 closed.
  *
  * NOT a second validation of the seven keys — that reading belongs to
  * `getMapConfig` in `ObjectMap.tsx` and stays there (objectui#5018). This is
  * the whitelist-flatten that already existed, applied to one more source.
  */
-function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {
-  return {
-    ...pickFlatMapConfig(schema.options?.map),
-    ...pickFlatMapConfig(schema.map),
-  };
+function resolveListMapConfig(schema: { map?: unknown }): Record<string, unknown> {
+  return pickFlatMapConfig(schema.map);
 }
 
 /**
@@ -186,11 +180,11 @@ function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown
  * back to `['grid']` (ADR-0047, whitelist ∩ resolvable). Same shape and same
  * fix as `map`'s (objectui#5042, `resolveListMapConfig` above).
  *
- * PRECEDENCE is the render branch's existing one, not a new rule: the
- * view-level block replaces the legacy `options.chart` bag WHOLESALE (`||`) —
- * `chart` and `tree` are the two visualizations in this file that replace
- * rather than merge, and the gate inherits whichever the renderer uses so the
- * two can never judge different configs.
+ * ONE SOURCE (#25923): the view-level `chart` block. It used to replace the
+ * legacy `options.chart` bag WHOLESALE (`||`); the spec retired the bag, and its
+ * D2 fold keeps that precedence for a stored row (a bag beside a block is
+ * dropped, a bag alone becomes the block). The gate and the render branch read
+ * the same block, so the two can never judge different configs.
  *
  * `resolves` is the "renders from names the AUTHOR wrote" question: an ADR-0021
  * (objectstack-ai/objectstack#1890) `dataset` with at least one measure in
@@ -201,8 +195,7 @@ function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown
  * axes (`xAxisField` / `categoryField`, `yAxisFields` / `valueField`,
  * `aggregation`) were the legacy leg of this resolver, read in both nestings;
  * every door refuses them by name (the spec's `ListChartConfigSchema` is a
- * strict object of `chartType` / `dataset` / `dimensions` / `values`, and the
- * bag is that block's own partial), so the leg and its `'name'` / `'value'`
+ * strict object of `chartType` / `dataset` / `dimensions` / `values`), so the leg and its `'name'` / `'value'`
  * floors retired with the render path they fed. A block that names no
  * `dataset` is `'unbound'`: the gate never offers a switch into it, and a view
  * whose `viewType` forces it reaches `case 'chart'`'s unbound node, which
@@ -210,7 +203,7 @@ function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown
  * nobody wrote.
  */
 interface ListChartBinding {
-  /** The effective chart block — view-level `chart`, else the `options.chart` bag. */
+  /** The view-level `chart` block. */
   config: Record<string, any>;
   /** `'dataset'` when the block names an ADR-0021 `dataset`, else `'unbound'`. */
   shape: 'dataset' | 'unbound';
@@ -222,8 +215,8 @@ interface ListChartBinding {
   values: string[];
 }
 
-function resolveListChartBinding(schema: { chart?: unknown; options?: { chart?: unknown } }): ListChartBinding {
-  const config: Record<string, any> = (schema.chart || schema.options?.chart || {}) as Record<string, any>;
+function resolveListChartBinding(schema: { chart?: unknown }): ListChartBinding {
+  const config: Record<string, any> = (schema.chart || {}) as Record<string, any>;
 
   if (config.dataset) {
     const dimensions: string[] = Array.isArray(config.dimensions) ? config.dimensions : [];
@@ -756,7 +749,7 @@ export function resolveAddRecordPlacement(position: unknown): { top: boolean; bo
  * the capability gate (may this view offer the Timeline visualization?) and the
  * timeline render branch (which field does it bucket by?). Those two used to
  * carry separate, unequal source lists, and the gate was the wider of the pair —
- * it accepted `options.calendar.startDateField` as a timeline-resolvable axis
+ * it accepted the calendar's `startDateField` as a timeline-resolvable axis
  * while the render branch never read calendar config at all. A view that binds
  * its dates under `calendar` therefore got the Timeline option offered and then
  * bucketed every record into "No date" (objectui#3129), which is exactly the
@@ -768,9 +761,10 @@ export function resolveAddRecordPlacement(position: unknown): { top: boolean; bo
  * `defaultCalendarFromObject` helper it uses for calendars. What was missing is
  * that one of the two read-sites never honoured the promise the other made.
  *
- * Both nestings are read at each level: the spec-authored `schema.timeline` /
- * `schema.calendar` and the legacy `schema.options.*` twin that app-shell's
- * object pages still emit. Each by its spec key only. The pre-#2231 `dateField`
+ * The spec-authored blocks are read, `schema.timeline` before `schema.calendar`,
+ * each by its spec key only. The legacy `schema.options.*` twin was read too
+ * until #25923 retired the bag (a stored bag is folded onto the blocks by the
+ * spec's D2 conversion `list-view-options-bag-folded`). The pre-#2231 `dateField`
  * alias for `startDateField` had a rung here until objectui#6152 round 14
  * retired it: every list-view door refuses it by name on all four blocks, and
  * the calendar branch already ignored it (objectui#8355), so one stored row
@@ -783,12 +777,7 @@ export function resolveTimelineDateBinding(schema: any): {
   endDateField?: string;
   titleField?: string;
 } {
-  const sources = [
-    schema?.timeline,
-    schema?.options?.timeline,
-    schema?.calendar,
-    schema?.options?.calendar,
-  ];
+  const sources = [schema?.timeline, schema?.calendar];
   const pick = (read: (src: any) => unknown): string | undefined => {
     for (const src of sources) {
       if (!src) continue;
@@ -1269,13 +1258,15 @@ const DEFAULT_LIST_DISPLAY_PAGE_SIZE = readSpecDisplayPageSize();
 export const DEFAULT_LIST_FETCH_BATCH_SIZE = 100;
 
 /**
- * The view's kanban block, as the board branch reads it: the spec's block over
- * the legacy `options.kanban` bag, per key (objectui#10380). One reading for the
- * branch and for `kanbanLanesPaged`, so the lane the board is built on and the
- * lane its query is gated on are one answer.
+ * The view's kanban block, as the board branch reads it: the spec's block
+ * alone. It was merged over the legacy `options.kanban` bag, per key, until
+ * #25923 retired the bag (objectui#10380's underlay); a stored bag is folded
+ * onto the block by the spec's D2 conversion before a row is served. One
+ * reading for the branch and for `kanbanLanesPaged`, so the lane the board is
+ * built on and the lane its query is gated on are one answer.
  */
 function kanbanBlockOf(schema: ListViewSchema): Record<string, any> {
-  return { ...((schema.options as any)?.kanban || {}), ...((schema as any).kanban || {}) };
+  return { ...((schema as any).kanban || {}) };
 }
 
 /**
@@ -2593,15 +2584,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       }
     };
     collectViewFields((schema as any).kanban);
-    collectViewFields((schema as any).options?.kanban);
     collectViewFields((schema as any).calendar);
-    collectViewFields((schema as any).options?.calendar);
     collectViewFields((schema as any).gallery);
-    collectViewFields((schema as any).options?.gallery);
     collectViewFields((schema as any).timeline);
-    collectViewFields((schema as any).options?.timeline);
     collectViewFields((schema as any).gantt);
-    collectViewFields((schema as any).options?.gantt);
     // [objectui#10370] The map, read through the resolver its render branch
     // and capability gate share — see the `$select` twin below for why the
     // resolver rather than the two blocks one at a time. A coordinate or title
@@ -2672,7 +2658,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     (schema as any).timeline,
     (schema as any).gantt,
     schema.map,
-    (schema as any).options,
     perms,
     schema.objectName,
   ]);
@@ -2837,10 +2822,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * draws by. Declared bindings only (objectui#7029): an undeclared one stays
    * absent. ⚠️ Change one pair, change both.
    */
-  const calendarStartField: string | undefined =
-    schema.calendar?.startDateField || schema.options?.calendar?.startDateField || undefined;
-  const calendarEndField: string | undefined =
-    schema.calendar?.endDateField || schema.options?.calendar?.endDateField || undefined;
+  const calendarStartField: string | undefined = schema.calendar?.startDateField || undefined;
+  const calendarEndField: string | undefined = schema.calendar?.endDateField || undefined;
 
   /**
    * Does this view fetch a DATE WINDOW for the calendar it hosts?
@@ -3169,13 +3152,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             for (const f of candidates) addSpeculative(f);
           };
           collectViewFields(schema.kanban);
-          collectViewFields(schema.options?.kanban);
           collectViewFields(schema.calendar);
-          collectViewFields(schema.options?.calendar);
           collectViewFields(schema.gallery);
-          collectViewFields(schema.options?.gallery);
           collectViewFields(schema.timeline);
-          collectViewFields(schema.options?.timeline);
           // Timeline plugin shows status / priority chips inline. Auto-include
           // them for every timeline view so views like `task_timeline`
           // ({ columns: ['subject', 'status'] }) still get priority badges out
@@ -3189,14 +3168,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // timeline no longer reads. The chips are always the built-in pair
           // now, so their values are always fetched.
           {
-            const tCfg = schema.timeline ?? schema.options?.timeline;
+            const tCfg = schema.timeline;
             if (tCfg) {
               addSpeculative('status');
               addSpeculative('priority');
             }
           }
           collectViewFields(schema.gantt);
-          collectViewFields(schema.options?.gantt);
           // [objectui#10370] The MAP's bindings, which this collector had no
           // arm for: a map view whose columns omit its location field asked
           // for `id` plus those columns, and on a backend that honours
@@ -3204,11 +3182,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // markers, no error, no warning.
           //
           // Read through `resolveListMapConfig`, the resolver `case 'map'` and
-          // the capability gate already share, not through `schema.map` and
-          // `schema.options?.map` one at a time: it reads both of those, per
-          // key with the view-level block winning, so the projection asks for
-          // exactly the bindings the markers are drawn from. A bag value the
-          // block shadows is read by nothing and is not requested. A top-level
+          // the capability gate already share, so the projection asks for
+          // exactly the bindings the markers are drawn from. A top-level
           // `locationField` is no spelling at all — the spec's list view
           // refuses it by name and no map branch reads it — so it stays out.
           //
@@ -3666,7 +3641,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, (schema as any).kanban, (schema as any).calendar, (schema as any).gallery, (schema as any).timeline, (schema as any).gantt, schema.map, (schema as any).options, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, (schema as any).kanban, (schema as any).calendar, (schema as any).gallery, (schema as any).timeline, (schema as any).gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -3696,28 +3671,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
     // Check for Kanban capabilities (spec config takes precedence)
     //
-    // Both nestings, by the spec key. The `options.kanban` bag was once asked
-    // for the LEGACY `groupField` only, so a producer writing the SPEC key into
-    // the bag was invisible here while rendering perfectly — objectui#5042
-    // (`map`) and objectui#7544 (`chart`) a third time: the gate and the seam
-    // must answer one question (objectui#8193). The `groupField` alias rungs
-    // retired with the render branch's (objectui#6152 round 14), so the gate
-    // still asks exactly what the branch below reads.
-    if (schema.kanban?.groupByField || schema.options?.kanban?.groupByField) {
+    // By the spec key, of the block the branch below reads: the gate and the
+    // seam must answer one question (objectui#8193). The `groupField` alias
+    // rungs retired with the render branch's (objectui#6152 round 14), and the
+    // `options.kanban` bag with every other bag read (#25923).
+    if (schema.kanban?.groupByField) {
       resolvable.push('kanban');
     }
 
     // Check for Gallery capabilities (spec config takes precedence)
     //
-    // Both nestings, by the spec's `coverField` (the bag's rung is objectui#6152
-    // round 12, the objectui#8193 repair a fourth time). The `imageField` alias
-    // rungs retired with the render branch's (objectui#6152 round 14).
-    if (schema.gallery?.coverField || schema.options?.gallery?.coverField) {
+    // By the spec's `coverField`. The `imageField` alias rungs retired with the
+    // render branch's (objectui#6152 round 14), the bag's rung with the bag
+    // (#25923).
+    if (schema.gallery?.coverField) {
       resolvable.push('gallery');
     }
 
     // Check for Calendar capabilities (spec config takes precedence)
-    if (schema.calendar?.startDateField || schema.options?.calendar?.startDateField) {
+    if (schema.calendar?.startDateField) {
       resolvable.push('calendar');
     }
 
@@ -3729,28 +3701,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
 
     // Check for Gantt capabilities (spec config takes precedence)
-    if (schema.gantt?.startDateField || schema.options?.gantt?.startDateField) {
+    if (schema.gantt?.startDateField) {
       resolvable.push('gantt');
     }
 
     // Check for Map capabilities (spec config takes precedence)
     //
-    // Asked of the SAME merged config the render branch forwards
-    // (`resolveListMapConfig`), not of `options.map` alone: the gate and the
-    // seam must answer one question, or a view that binds its coordinates in
+    // Asked of the SAME config the render branch forwards
+    // (`resolveListMapConfig`): the gate and the seam must answer one question, or a view that binds its coordinates in
     // the view-level `map` block renders fine but is filtered out of
     // `allowedVisualizations` below — whitelist ∩ resolvable — and falls back
     // to `['grid']`. That is what made the spec block inert for the SWITCHER
     // even where the forward alone would have been enough (objectui#5042).
-    // Sharing the resolver also means a split binding (`latitudeField` on the
-    // block, `longitudeField` in the bag) is judged the way it will render.
     const mapConfig = resolveListMapConfig(schema);
     if (mapConfig.locationField || (mapConfig.latitudeField && mapConfig.longitudeField)) {
       resolvable.push('map');
     }
 
     // Check for Tree capabilities — a self-referencing parent pointer.
-    if ((schema as any).tree?.parentField || schema.options?.tree?.parentField || schema.viewType === 'tree') {
+    if ((schema as any).tree?.parentField || schema.viewType === 'tree') {
       resolvable.push('tree');
     }
 
@@ -3791,7 +3760,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
 
     return resolvable;
-  }, [schema.options, schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, (schema as any).tree, (schema as any).chart, schema.appearance?.allowedVisualizations]);
+  }, [schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, (schema as any).tree, (schema as any).chart, schema.appearance?.allowedVisualizations]);
 
   /**
    * Whether the visualization switcher is actually WORTH drawing (objectui#7547).
@@ -4120,6 +4089,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // tree branch spread an untyped block (`...treeCfg`), and one `any` member
   // made the whole union `any`. That spread is retired, so the annotation now
   // says what the inference used to.
+  // A primitive for the memo below: the host's handler is often an inline
+  // arrow, and only its presence is read there (objectstack#27057).
+  const hostRoutesRowClicks = !!onRowClick;
   const viewComponentSchema = React.useMemo((): any => {
     const densityRowHeight = density.mode === 'compact'
       ? 'compact'
@@ -4152,6 +4124,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // Hydrate child grid with previously persisted column state.
       ...(schema.columnState ? { columnState: schema.columnState } : {}),
     };
+    // objectstack#27057 — the calendar and the gantt give a row click to
+    // whoever hands them one and keep their own record drawer for when nobody
+    // does. So they carry this list's click router only when this list's HOST
+    // routes record clicks (`onRowClick`, which the console's object, data and
+    // interface pages all pass): the host then opens the record in the one
+    // record page. A list with no host handler routes nothing by itself for a
+    // view that authored no `navigation` (the absent key is the host's call,
+    // `useNavigationOverlay`), so handing them the router there would turn
+    // their drawer into a click that opens nothing.
+    const { onRowClick: _listRouter, ...basePropsWithoutRouter } = baseProps;
+    const routedByHost = hostRoutesRowClicks ? baseProps : basePropsWithoutRouter;
 
     switch (currentView) {
       // `default` deliberately shares the grid branch: an unrecognized
@@ -4216,8 +4199,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ...(schema.bulkActions ? { batchActions: schema.bulkActions } : {}),
           ...((schema as any).bulkActionDefs ? { bulkActionDefs: (schema as any).bulkActionDefs } : {}),
           // ⛔ No `options.grid` spread (objectui#6152 round 14). A grid has no
-          // per-kind block: the spec's list-overlay bag and `ListViewSchema.options`
-          // refuse `options.grid` (round 12), and the raw spread that still put
+          // per-kind block: the spec refuses the whole `options` bag (#25923;
+          // `options.grid` since round 12), and the raw spread that still put
           // its keys onto this node, after the node's own, is retired with the
           // other legacy readers. A grid's settings are top-level keys of the view.
         };
@@ -4304,12 +4287,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // ⚠️ The fetch windows on these same two reads, made again at component
         // scope as `calendarStartField` / `calendarEndField` (objectui#12081):
         // change one pair, change both.
-        const startDateField =
-          schema.calendar?.startDateField || schema.options?.calendar?.startDateField;
-        const endDateField =
-          schema.calendar?.endDateField || schema.options?.calendar?.endDateField;
-        const titleField =
-          schema.calendar?.titleField || schema.options?.calendar?.titleField;
+        const startDateField = schema.calendar?.startDateField;
+        const endDateField = schema.calendar?.endDateField;
+        const titleField = schema.calendar?.titleField;
         // ⭐ THIS BRANCH FORWARDS THE BLOCK'S DECLARED KEYS ONLY. It used to end
         // with two raw spreads of the authored block, which is how `dateField` /
         // `endField` reached the generated `object-calendar` node WITHOUT this
@@ -4326,10 +4306,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         //
         // ⛔ STRIPPING IS ONLY THE QUIET HALF. The loud half is the read door:
         // `@object-ui/types` declares both spellings as `aliasKeyRefusal()` arms
-        // on the view-level calendar block, on the legacy `options.calendar`
-        // nesting and on the flat node face, so an author meets a by-name
-        // refusal naming `startDateField` / `endDateField` instead of a calendar
-        // that silently stops binding. Removing one half without the other is
+        // on the view-level calendar block and on the flat node face (the
+        // legacy `options.calendar` nesting is refused whole since #25923), so
+        // an author meets a by-name refusal naming `startDateField` /
+        // `endDateField` instead of a calendar that silently stops binding. Removing one half without the other is
         // what broke a live authoring path once already.
         //
         // ⛔ Deliberately NOT folded onto the canonical keys. Option A
@@ -4337,10 +4317,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // state: it keeps a second spelling alive at the producer, which is the
         // lenient alias AGENTS.md #0.1 names. The reads are canonical-only, so a
         // fold would re-create the dialect this closes.
-        const colorField =
-          schema.calendar?.colorField || schema.options?.calendar?.colorField;
-        const allDayField =
-          schema.calendar?.allDayField || schema.options?.calendar?.allDayField;
+        const colorField = schema.calendar?.colorField;
+        const allDayField = schema.calendar?.allDayField;
         // ⭐ objectstack#25923 — the five go out NESTED, as the node's own
         // `calendar` block: the spec's `ComponentPropsMap['object-calendar']`
         // refuses them flat, so the published `ObjectCalendarSchema` no longer
@@ -4364,7 +4342,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           : undefined;
         return {
           type: 'object-calendar',
-          ...baseProps,
+          ...routedByHost,
           ...(calendarBlock ? { calendar: calendarBlock } : {}),
           // objectui#12081 — the days the calendar draws come back here, and
           // this view's fetch windows on them (`calendarWindowed`). Handed only
@@ -4373,9 +4351,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         };
       }
       case 'gallery': {
-        // Merge spec config over legacy options into nested gallery prop
+        // The spec's gallery block into the nested gallery prop
         const mergedGallery = {
-          ...(schema.options?.gallery || {}),
           ...(schema.gallery || {}),
           // User's runtime override from the toolbar density button wins
           // over schema defaults. Persisted to localStorage in ListView.
@@ -4392,16 +4369,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // refuses by name.
           gallery: Object.keys(mergedGallery).length > 0 ? mergedGallery : undefined,
           // Deprecated top-level prop for backward compat
-          titleField: schema.gallery?.titleField || schema.options?.gallery?.titleField || 'name',
+          titleField: schema.gallery?.titleField || 'name',
           ...(groupingConfig ? { grouping: groupingConfig } : {}),
         };
       }
       case 'timeline': {
-        // Merge spec config over legacy options into nested timeline prop
-        const mergedTimeline = {
-          ...(schema.options?.timeline || {}),
-          ...(schema.timeline || {}),
-        };
+        // The spec's timeline block into the nested timeline prop
+        const mergedTimeline = { ...(schema.timeline || {}) };
         // The one resolution the capability gate above also uses (objectui#3129).
         const dateBinding = resolveTimelineDateBinding(schema);
         // The resolved axis has to appear on the NESTED config too, not just on
@@ -4436,7 +4410,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // and made its refusal screen (objectui#7459, step ① of the same
           // ruling) unreachable from this route. Worse, the axis it invented was
           // never FETCHED: the `$select` projection is collected from the
-          // DECLARED `timeline` / `options.timeline` blocks above, never from
+          // DECLARED `timeline` block above, never from
           // this prop — so an undeclared view rendered a timeline bound to a
           // column the query had not requested and bucketed every record into
           // "No date". Absent is now absent, and the renderer says which keys to
@@ -4491,8 +4465,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // config: `getGanttConfig` gates on the two date fields alone, so the
         // refusal screen stays exactly as reachable as it was (pinned in
         // `plugin-gantt/src/ObjectGantt.unconfiguredRefusal-7070.test.tsx`).
-        const startDateField = schema.gantt?.startDateField || schema.options?.gantt?.startDateField;
-        const endDateField = schema.gantt?.endDateField || schema.options?.gantt?.endDateField;
+        const startDateField = schema.gantt?.startDateField;
+        const endDateField = schema.gantt?.endDateField;
         // ⭐ objectstack#25923 — the block goes out NESTED, as the node's own
         // `gantt`: `ComponentPropsMap['object-gantt']` refuses every
         // `GanttConfig` key written flat, so the published `ObjectGanttSchema`
@@ -4513,19 +4487,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         const ganttBlock =
           startDateField && endDateField
             ? {
-                // The block's DECLARED keys, bag under block per key, exactly as
-                // the two raw spreads this replaced merged them (objectui#6152
-                // round 14). See `GANTT_CONFIG_SPELLING` for what the spreads
-                // let through.
-                ...pickFlatMapConfig({ ...(schema.options?.gantt || {}), ...(schema.gantt || {}) }, GANTT_CONFIG_SPELLING),
+                // The block's DECLARED keys (objectui#6152 round 14). See
+                // `GANTT_CONFIG_SPELLING` for what the raw spreads this replaced
+                // let through. The `options.gantt` bag that sat under the block
+                // per key is retired (#25923).
+                ...pickFlatMapConfig(schema.gantt || {}, GANTT_CONFIG_SPELLING),
                 startDateField,
                 endDateField,
-                titleField: schema.gantt?.titleField || schema.options?.gantt?.titleField || 'name',
+                titleField: schema.gantt?.titleField || 'name',
               }
             : undefined;
         return {
           type: 'object-gantt',
-          ...baseProps,
+          ...routedByHost,
           // objectui#10037 — the EFFECTIVE filter, not the authored one: the
           // chart queries for itself, so this key is the only way the
           // toolbar's Filter control and the `UserFilters` chips reach it.
@@ -4571,17 +4545,20 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           //     `onRowClick` UNCONDITIONALLY, so the authored config would
           //     arrive and then be outranked — declared, delivered, and STILL
           //     not enforced, which is this card's own defect relocated;
-          //   - calendar alone mirrors gantt's `navIsOverlay ? undefined :
-          //     onRowClick`, so it would genuinely CHANGE BEHAVIOUR: today its
-          //     `navConfig` is always the `{ mode: 'drawer' }` fallback and it
-          //     suppresses the host handler; fed an authored `page` it would
-          //     stop suppressing and defer to ListView's overlay instead.
+          //   - calendar, when this was written, suppressed the host handler in
+          //     drawer mode as gantt did, so it would have CHANGED BEHAVIOUR: fed
+          //     an authored `page` it would stop suppressing and defer to
+          //     ListView's overlay instead.
           //
           // That is two sources of truth for one question. `gantt` is the only
           // branch where forwarding settles the question rather than splitting
-          // it: its wrapper drops host props entirely (objectui#7210 /
-          // objectui#7222), so the schema path is the only live carrier and
-          // `onRowClick` is not there to outrank anything.
+          // it: the router reaches it only when this list's host routes clicks
+          // (`routedByHost`, objectstack#27057), and that host then decides how
+          // the record opens (the console's object page reads the view's
+          // `navigation` for it), so without one the schema path is the only
+          // live carrier and `onRowClick` is not there to outrank anything.
+          // Its wrapper forwards no other host prop (objectui#7210 /
+          // objectui#7222).
           //
           // Conditional, not `navigation: schema.navigation` — an ABSENT key,
           // not present-and-undefined, the same distinction the two non-axis
@@ -4601,17 +4578,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       case 'map': {
         // Whitelisted flatten (objectui#5177) — see `FLAT_MAP_CONFIG_SPELLING`,
         // which also carries `style` out as `mapStyle` (objectui#9950).
-        // `schema.options.map` is an untyped bag; a raw spread here forwarded
-        // every key the author wrote, including `style`, which `ObjectMap`'s
-        // `FlatMapConfigKeys` declares OUT of this flat form.
-        //
-        // The spec's view-level `map` block merges over that bag — see
-        // `resolveListMapConfig` for the precedence and its sibling evidence.
+        // A raw spread of the block forwarded every key the author wrote,
+        // including `style`, which `ObjectMap`'s `FlatMapConfigKeys` declares
+        // OUT of this flat form. The block is the one source — see
+        // `resolveListMapConfig` (the `options.map` bag retired in #25923).
         //
         // Emitted in the FLAT form, deliberately, exactly as before: a nested
-        // `map` key would win OUTRIGHT at `getMapConfig` (objectui#5018), which
-        // would turn this per-key merge into whole-block replacement of the bag
-        // and would trip `warnOnShadowedFlatMapKeys`. That precedence rule is
+        // `map` key would win OUTRIGHT at `getMapConfig` (objectui#5018) and
+        // would trip `warnOnShadowedFlatMapKeys`. That precedence rule is
         // written around the flatten product — "neither flattener emits a `map`
         // key at all" — and this branch keeps that true.
         //
@@ -4640,10 +4614,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         };
       }
       case 'tree': {
-        // Self-referencing tree-grid. Config lives under view.tree.* (direct)
-        // or options.tree.* (app-shell object pages). parentField auto-detects
+        // Self-referencing tree-grid. Config lives under view.tree.* (the
+        // `options.tree` bag retired in #25923). parentField auto-detects
         // from the object's tree/self-reference field when omitted.
-        const treeCfg = (schema as any).tree || schema.options?.tree || {};
+        const treeCfg = (schema as any).tree || {};
         return {
           type: 'object-tree',
           ...baseProps,
@@ -4728,9 +4702,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   const hasFilters = currentFilters.conditions && currentFilters.conditions.length > 0;
+  // The count the toolbar shows: a record-mode amount's code condition is
+  // part of its amount row (objectstack#27188), not a filter of its own.
+  const shownFilterCount = (currentFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, currentFilters)).length;
 
   /**
    * Every field this view can name, before any per-builder rule narrows it.
@@ -4819,6 +4796,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // picker keys the lookup by its own `id` default, and `plugin-grid`'s
             // copy set copies no id column either.
             displayField: field.displayField,
+            // ADR-0144 D6: a `record`-mode amount's row pairs with its code
+            // field, so the filter compares within one currency.
+            ...(recordCurrencyField(field) ? { currencyField: recordCurrencyField(field) } : {}),
         }));
     }
 
@@ -5796,14 +5776,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 // `title` — with the active-filter count, which the badge
                 // would otherwise be alone in carrying (objectui#12500).
                 aria-label={hasFilters
-                  ? t('list.filterActive', { count: currentFilters.conditions?.length || 0 })
+                  ? t('list.filterActive', { count: shownFilterCount })
                   : t('list.filter')}
                 title={t('list.filter')}
               >
                 <Funnel className="h-3.5 w-3.5" />
                 {hasFilters && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {currentFilters.conditions?.length || 0}
+                    {shownFilterCount}
                   </span>
                 )}
               </Button>

@@ -52,3 +52,8 @@ export type { PublishHealth, PublishOutcome } from './publishHealth';
 // with the live one (objectui#8442). `mapMessages` holds only `import type`
 // edges back into the chat UI, which are erased.
 export { detectPendingApproval } from './mapMessages';
+
+// objectstack#25908 — the chart reader the hydration mapper and the message
+// cache share with the live one, so a stored chart has one dialect.
+export { chartsFromParts, chartAnswerParts } from './mapMessages';
+export type { ChartAnswerPart } from './mapMessages';

@@ -114,6 +114,18 @@ const SECURITY_OWD_UNSET_EXPLANATION: RuleExplanation = {
       'default); \'public_read\' — everyone reads, the owner writes; \'public_read_write\' — everyone ' +
       'reads and writes; \'controlled_by_parent\' — access derives from the master record (a ' +
       'master-detail child).',
+    'An external object with no provable owner is the exception to that recommendation. On a writable ' +
+      'binding (`external.writable: true`) the remote row carries no `owner_id` or `created_by` the platform can read, so on \'private\' every ' +
+      'member edit is refused, and where the object carries `owner_id` a member reads no row at all ' +
+      '(`os explain security-external-owner-unmapped`). There the fix line names that rule\'s two ways out ' +
+      'instead: \'public_read_write\' with a `beforeUpdate` hook that decides who may edit, or the ownership ' +
+      'column (`owner_id`, or `created_by` on an object without one) declared in `fields` and returned by ' +
+      'the driver, after which \'private\' or \'public_read\' admits edits by the user that column names. ' +
+      'A read-only external binding (`external.writable` not `true`, or a datasource declared with ' +
+      '`external.allowWrites: false`) whose `owner_id` no declared field or `external.columnMap` entry names ' +
+      'is told to declare \'public_read\' instead: no member writes it, and on \'private\' a member reads none ' +
+      'of its rows. An external object whose owner is provable (a declared field, or on a read-only binding ' +
+      'a `columnMap` entry onto `owner_id`) keeps the usual fix line.',
     'System objects (`isSystem: true`, or a name starting with `sys_`) are not judged: the platform ' +
       'owns their posture.',
   ],
@@ -376,6 +388,25 @@ const DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'and its prefix must be declared in the dataset\'s `include` ' +
       '(`dashboard-filter-field-not-included` otherwise). The verdict\'s "Did you mean" names the ' +
       'nearest field of the object the miss landed on.',
+  ],
+};
+
+const DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-filter-binding-unknown',
+  covers: 'which keys a widget\'s filterBindings may name',
+  paragraphs: [
+    'A widget\'s `filterBindings` maps a dashboard filter\'s NAME to one of the widget\'s own fields ' +
+      '(re-target) or to `false` (opt out). The names a widget may bind are the ones its dashboard ' +
+      'declares: each `globalFilters` entry under its `name` (its `field` when `name` is omitted), and ' +
+      'the reserved name `dateRange` when the dashboard declares `dateRange`.',
+    'The runtime reads a binding by looking up each declared filter\'s name, so a key that names no ' +
+      'declared filter is never read. A misspelled opt-out leaves the widget scoped by the filter it ' +
+      'was meant to ignore, and a misspelled re-target leaves the filter on its default field. Either ' +
+      'way the widget counts different rows than the author wrote, with nothing on the page to say so, ' +
+      'which is why the rule is an error and is not suppressible.',
+    'To fix it, rename the key to a declared filter name (the finding names the nearest one), declare ' +
+      'the filter on the dashboard, or delete the entry. A `dateRange` key on a dashboard that declares ' +
+      'no `dateRange` is reported the same way: there is no date range for it to bind.',
   ],
 };
 
@@ -727,6 +758,51 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
       'caller against) and key the policy on it, or drop the policy. The opt-in is refused by the parse ' +
       'on an object whose `sharingModel` is not `controlled_by_parent`, so it cannot be declared where ' +
       'nothing reads it.',
+  ],
+};
+
+const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
+  rule: 'security-external-owner-unmapped',
+  covers: 'why members cannot write an external object',
+  paragraphs: [
+    'Before a member updates or deletes one record, the platform runs two row-level checks. Record ' +
+      'sharing, on a `private` or `public_read` object that carries an `owner_id` column, asks for the ' +
+      'row\'s `owner_id` and admits the owner (widened by write depth, an `edit` share or Modify All ' +
+      'Data). The platform ownership floor, `created_by` equal to the caller, stays in force unless record ' +
+      'sharing admits the write or the object declares `sharingModel: \'public_read_write\'`.',
+    'The registry adds `owner_id` and `created_by` to an external object as it does to every object, but ' +
+      'the remote database owns the table and the platform creates no column for either. So the remote row ' +
+      'answers no `owner_id` (record sharing refuses) and no `created_by` equal to the caller (the floor ' +
+      'refuses). A member whose permission set grants `allowEdit` is refused every edit and every delete ' +
+      'with 403 `PERMISSION_DENIED` (404 on `private`, where reads are scoped by the same owner and no row is ' +
+      'in reach), unless an app-authored row-level policy admits the row; otherwise only ' +
+      'an administrator can write. An object with no `sharingModel` is ' +
+      'judged as \'private\', the value the runtime falls back to.',
+    '`ownership: \'none\'` (or `\'org\'`, `\'business_unit\'`) is not a way out: without `owner_id` record ' +
+      'sharing stops judging the row, and the floor\'s `created_by` check refuses the same write. Turning ' +
+      'the audit columns off (`systemFields.audit: false`) does not help either: the floor then has no ' +
+      'column to compare and refuses every row.',
+    'There are two ways out. Declare `sharingModel: \'public_read_write\'`: every member who holds ' +
+      '`allowEdit` may then edit, and a `beforeUpdate` hook decides who really may. Or serve the column ' +
+      'the check reads: declare `owner_id` in `fields` and have the driver return the remote owner under ' +
+      'that name, so the owner edits and deletes the row and other members are refused. A built-in SQL ' +
+      'driver does that through `external.columnMap` (remote column to `owner_id`); `columnMap` is applied ' +
+      'by those drivers, not by the engine, so a plugin driver must return the field itself. Declaring ' +
+      'the field matters for reads too: the platform\'s own `owner_id`, with no field or `columnMap` entry ' +
+      'naming it, proves no owner, so on `private` a member reads no row at all. On an object without ' +
+      '`owner_id`, declare `created_by` the same way instead, ' +
+      'so the creator writes the row.',
+    'A `columnMap` entry for the column without a declared field is reported too, with its own wording: ' +
+      'it serves the check on a built-in SQL driver and does nothing on a plugin driver, and the ' +
+      'declaration is what holds on both.',
+    'Deletes are not opened by `public_read_write`: that model opens edits, and the floor keeps deletes ' +
+      'to the row\'s `created_by`. On an external object that column has no storage either, so member ' +
+      'deletes stay refused unless the driver returns `created_by` or an authored policy or share grants them.',
+    'The rule judges only a writable binding (`external.writable: true`, on a datasource this stack does ' +
+      'not declare with `external.allowWrites: false`) on a model that keys writes to ' +
+      'an owner (`private`, `public_read`, or none on a custom object). `controlled_by_parent` is not judged: ' +
+      'the master record\'s gate decides its writes. It is a warning, not an error: the stack is valid and ' +
+      'an administrator can still write.',
   ],
 };
 
@@ -3801,6 +3877,27 @@ const RELATED_LIST_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const RELATED_LIST_GROUP_NOT_BODY_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-group-not-body',
+  covers: 'which related list a field group may place',
+  paragraphs: [
+    'A field group\'s `relatedList` places one related list\'s table among the field sections of the ' +
+      'record\'s details column. It only POSITIONS a list that is already a body table; it does not make ' +
+      'one. Whether a list is a body table is decided once, by the relationship\'s own FK field on the ' +
+      'child: `relatedList: \'primary\'`, or a `master_detail` FK that sets `inlineEdit` and declares no ' +
+      '`relatedList`. Every other list is a side card in the related column (`relatedList: true` or ' +
+      'absent), or hidden (`relatedList: false`).',
+    'A group naming a side card or a hidden list draws nothing at the group, silently, so it is an ' +
+      'error, the verdict `defineStack` gives on `os validate` and `os build` and the runtime publish ' +
+      'gate gives too. A bare child name names every FK of that child, so it is refused when any of ' +
+      'them is not a body table. The fix is on the relationship (mark it `relatedList: \'primary\'`), ' +
+      'in the name (`object.field` for the one FK that is a body table), or removing the group\'s ' +
+      '`relatedList`.',
+    'Judged on the children this rule can see, the same ones `related-list-ref-unknown` judges: a ' +
+      'child outside the stack (another package\'s object) is not judged here.',
+  ],
+};
+
 // ── Object-name references (`validate-object-references.ts`) ────────────────
 
 /** The sites judged — both object-reference ids. */
@@ -5134,6 +5231,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION.rule]: WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,
+  [DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION.rule]: DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION,
   [WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [WIDGET_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: WIDGET_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,
@@ -5150,6 +5248,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
+  [SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION.rule]: SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION,
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
@@ -5260,6 +5359,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [NAV_TARGET_UNRESOLVED_EXPLANATION.rule]: NAV_TARGET_UNRESOLVED_EXPLANATION,
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_REF_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_REF_UNKNOWN_EXPLANATION,
+  [RELATED_LIST_GROUP_NOT_BODY_EXPLANATION.rule]: RELATED_LIST_GROUP_NOT_BODY_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,

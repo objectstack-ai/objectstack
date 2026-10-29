@@ -18,12 +18,12 @@ Server-connected create/edit/view form for one object. Config props come from th
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
 | `objectName` | `string` | binding | ✓ | The object this block binds to (server-connected). |
-| `formType` | `'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'` | binding |  | Form presentation; drawer/modal render the form in a built-in overlay (use drawerSide/drawerWidth/modalSize). |
+| `formType` | `'simple' \| 'tabbed' \| 'wizard' \| 'drawer' \| 'modal'` | binding |  | The form's layout (simple/tabbed/wizard), or the built-in container the block opens it in: drawer/modal (use drawerSide/drawerWidth/modalSize; contentLayout 'tabbed' puts a modal's sections on tabs). |
 | `fields` | `string[]` | binding |  | Limit/order the fields shown (defaults to the object form fields). |
 | `initialValues` | `Record<string, any>` | binding |  | Prefill values in create mode. |
 | `customFields` | `any[]` | binding |  | Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source. |
 | `readOnly` | `boolean` | binding |  | Render every field read-only, whatever `mode` says. |
-| `modalCloseButton` | `boolean` | binding |  | Show the modal presentation's close button (formType 'modal'; honoured by the modal form). |
+| `modalCloseButton` | `boolean` | binding |  | Show the close button of the block's modal container (formType 'modal'). |
 | `contentLayout` | `'simple' \| 'tabbed'` | binding |  | How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'. |
 | `confirmOnDiscard` | `boolean` | binding |  | Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately. |
 | `submitText` | `string` | binding |  | Label of the submit button. |
@@ -44,10 +44,9 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `layout` | `'vertical' \| 'horizontal'` | data |  | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | `columns` | `integer` | data |  | Number of columns for the form body |
 | `tabPosition` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Tab strip position (tabbed forms) |
-| `drawerSide` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Drawer side (drawer forms) |
-| `drawerWidth` | `string` | data |  | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
-| `modalSize` | `'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'` | data |  | Modal size (modal forms) |
-| `splitDirection` | `'horizontal' \| 'vertical'` | data |  | Split orientation (split forms) |
+| `drawerSide` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer' |
+| `drawerWidth` | `string` | data |  | [DEPRECATED → size buckets] Width of the drawer container the React `ObjectForm` block opens with formType 'drawer', e.g. "480px". A pixel width cannot be chos… |
+| `modalSize` | `'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'` | data |  | Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal… |
 | `sections` | `object[]` | data |  |  |
 | `subforms` | `object[]` | data |  | Inline master-detail child collections |
 | `submitBehavior` | `object` | data |  | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
@@ -61,7 +60,6 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | `data` | `ViewData — { provider: 'object', object: string } binds an object` | binding | ✓ | The object this block binds to, written as the metadata-tier data source: data={{ provider: 'object', object: '…' }}. Any ViewData provider is accepted (a 'value' provider renders static rows); nothing stamps the object on a react page, so this prop is required. |
 | `navigation` | `{ mode: 'drawer' \| 'page' \| 'new_window' \| 'none' }` | binding |  | What a row click does. Use { mode: "none" } when you handle clicks via onRowClick. |
 | `fields` | `string[]` | binding |  | Limit/order the columns shown (defaults to the object list fields). |
-| `options` | `Record<string, any>` | binding |  | View-type-specific options bag (kanban/calendar/gantt extras); prefer the typed spec props where they exist. |
 | `filters` | `FilterArray e.g. ['status','=','active']` | controlled |  | ObjectQL base filter; drive from React state for tabbed/searched lists. ([field, op, value]; ops =, !=, >, <, contains, in; compound: ["and", […], […]]). |
 | `onRowClick` | `(record) => void` | callback |  | Called with the clicked row's record — the hook for master/detail. |
 | `onNavigate` | `(recordId, action: 'view' \| 'new_window') => void` | callback |  | Called for page-level navigation. The second argument is a navigation-MODE token from a CLOSED vocabulary — 'view' opens the record page, 'new_window' opens it in a new browser tab; the reference implementation emits no other value and reads no other branch. |

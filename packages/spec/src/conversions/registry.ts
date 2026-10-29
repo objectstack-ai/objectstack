@@ -5722,6 +5722,105 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
 };
 
 /**
+ * A plugin manifest's `packaging: 'manifest-deps'` → dropped (protocol 18 —
+ * ADR-0025 v2 §3.3, maintainer decision Q6; ADR-0049 enforce-or-remove).
+ *
+ * `PluginPackagingSchema` was `bundled | manifest-deps`. The second member
+ * existed on the build side only: `os plugin build` kept the `package.json`
+ * dependencies out of the bundle and packed `package.json` + `pnpm-lock.yaml`
+ * for an install-time resolution that nothing ever ran — `os plugin install`
+ * and the boot-time loader import `dist/index.mjs` as packed — so an artifact
+ * built with it could not load the dependencies it left out. The build forks
+ * are gone, `bundled` is the one strategy, and an absent key means the same.
+ *
+ * ## Why a strip and not a rewrite to `bundled`
+ *
+ * The key is optional with no default, and `bundled` is what the build does
+ * with or without it, so the delete is lossless and leaves no new authored
+ * value behind; writing `bundled` in would author a key the author never
+ * chose.
+ *
+ * ## Reach
+ *
+ * The manifest sits in two places a converted definition carries it, as for
+ * `manifest-permissions-string-list-removed` below: the stack's own
+ * `manifest`, and each `packages[].manifest` of a multi-package artifact
+ * (ADR-0130 D4). Only the exact retired string is this entry's surface; a
+ * live `bundled` or any other value is left for the schema to judge.
+ * `devPlugins[]` is not walked (its entries may be live plugin objects).
+ * `objectstack.plugin.json`, the plugin project's own manifest, is no stack
+ * source: `os plugin build` parses it straight through `ManifestSchema`,
+ * whose refusal carries the prescription.
+ *
+ * ## Why `retiredFromLoadPath`
+ *
+ * The schema refuses the value with its prescription, so a live author is
+ * taught rather than silently rewritten; the entry exists so a stored
+ * artifact built while the value was legal replays clean at the artifact
+ * door, and so `os migrate meta --from 17` lists the mechanical edit for
+ * author sources. Deletion is idempotent by construction: a manifest without
+ * the value is returned as is.
+ */
+const manifestPackagingManifestDepsRemoved: MetadataConversion = {
+  id: 'manifest-packaging-manifest-deps-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface: 'manifest.packaging',
+  summary:
+    "manifest 'packaging: manifest-deps' removed (ADR-0025 v2 §3.3, ADR-0049 — nothing ever installed the "
+    + "dependencies it left out of the bundle; 'bundled' is the only strategy and the default, so the key is "
+    + 'deleted)',
+  apply(stack, emit) {
+    const stripValue = (manifest: unknown, path: string): unknown => {
+      if (!isDict(manifest) || manifest.packaging !== 'manifest-deps') return manifest;
+      const next: Dict = { ...manifest };
+      delete next.packaging;
+      emit({ from: 'manifest-deps', to: '(removed)', path: `${path}.packaging` });
+      return next;
+    };
+
+    let next = stack;
+    const manifest = stripValue(stack.manifest, 'manifest');
+    if (manifest !== stack.manifest) next = { ...next, manifest };
+
+    const packages = stack.packages;
+    if (Array.isArray(packages)) {
+      let touched = false;
+      const nextPackages = packages.map((entry, i) => {
+        if (!isDict(entry)) return entry;
+        const converted = stripValue(entry.manifest, `packages[${i}].manifest`);
+        if (converted === entry.manifest) return entry;
+        touched = true;
+        return { ...entry, manifest: converted };
+      });
+      if (touched) next = { ...next, packages: nextPackages };
+    }
+    return next;
+  },
+  fixture: {
+    before: {
+      manifest: { id: 'com.acme.stripe', packaging: 'manifest-deps', runtime: 'node' },
+      packages: [
+        { manifest: { id: 'com.acme.stripe.webhooks', packaging: 'manifest-deps' } },
+        // The live value rides through untouched — the strip dispatches on
+        // the retired string, never on the key.
+        { manifest: { id: 'com.acme.stripe.billing', packaging: 'bundled' } },
+      ],
+    },
+    after: {
+      manifest: { id: 'com.acme.stripe', runtime: 'node' },
+      packages: [
+        { manifest: { id: 'com.acme.stripe.webhooks' } },
+        { manifest: { id: 'com.acme.stripe.billing', packaging: 'bundled' } },
+      ],
+    },
+    // One per stripped value — the stack's own manifest and one package entry.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * A package manifest's `permissions` as a flat list of permission strings →
  * dropped (protocol 18 — ADR-0049 enforce-or-remove, ruled option A: retire
  * the legacy arm so the structured ADR-0025 §3.2 block is the only one).
@@ -8899,10 +8998,20 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
  * tombstone. Deleting is the whole edit: a form whose `type` was retired lands
  * on the `simple` default, the conversion invents no layout. The keys go on
  * every form, whatever its `type`: each is refused on every form now, and a
- * `pane` on a non-split form was already a parse error. `splitDirection`,
- * `drawerSide`, `drawerWidth` and `modalSize` stay — the first three for the
- * React `ObjectForm` block contract (#27159), `modalSize` because the
- * console's record dialog reads it on every layout.
+ * `pane` on a non-split form was already a parse error. `drawerSide`,
+ * `drawerWidth` and `modalSize` stay — the first two for the React
+ * `ObjectForm` block contract, whose drawer container reads them, `modalSize`
+ * because the console's record dialog reads it on every layout.
+ *
+ * **[#27159] The renderer half, absorbed here** (the skill's same-major rule:
+ * 18.3.0 is unreleased — `@objectstack/spec` is 18.2.0 on `main` — and one
+ * entry keeps the fixtures disjoint). Once `SplitForm` retired, `splitDirection`
+ * lost its last reader and goes from every form payload too, and the
+ * `object-form` PAGE BLOCK sheds its own copies: a `formType: 'split'` member
+ * (deleted — the block lands on `simple`), `splitDirection`, `splitSize`,
+ * `splitResizable` and every `sections[].pane`. The block's `drawer` / `modal`
+ * members are NOT touched: the block renderer still supplies those containers
+ * (`ObjectFormContainer` in objectui), so they stay authorable there.
  *
  * **Reach: every FORM payload**, exactly as
  * {@link formViewSubformColumnsCanonicalized} below: {@link mapViewPayloads}
@@ -8923,6 +9032,15 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
  * The D3 entry `ui-form-view-type-layout-only` carries what the edit cannot
  * decide: whether a former `split` form reads better `tabbed`, and how the
  * caller of a former `drawer` / `modal` form opens it.
+ *
+ * **Page-block reach** ([#27159]): {@link mapPageComponents} — regions, slots
+ * and container nesting — scoped to `type === 'object-form'`, as
+ * {@link formLayoutInlineGridToVertical} is. The block accepted `split` and
+ * the three keys through 18.2.0, so a stored page or an assembled artifact
+ * can carry them. The `object-master-detail-form` block's parent `sections`
+ * are the same section shape (`objectFormSection()`), so its `pane` parsed
+ * through 18.2.0 and is refused now: the walk strips `sections[].pane` there
+ * too, and touches nothing else on that block.
  */
 const formViewPresentationTypesRemoved: MetadataConversion = {
   id: 'form-view-presentation-types-removed',
@@ -8931,12 +9049,19 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
   retiredAfter: '18.2.0',
   surface:
     "view.form.type / view.formViews.<key>.type ('split' | 'drawer' | 'modal') / "
-    + 'view.form.sections[].pane / view.form.splitSize / view.form.splitResizable',
+    + 'view.form.sections[].pane / view.form.splitSize / view.form.splitResizable / '
+    + "view.form.splitDirection / page.component.object-form.formType ('split') / "
+    + 'page.component.object-form.sections[].pane / page.component.object-form.splitDirection / '
+    + 'page.component.object-form.splitSize / page.component.object-form.splitResizable / '
+    + 'page.component.object-master-detail-form.sections[].pane',
   summary:
     "form view `type` members 'split' / 'drawer' / 'modal' removed (`type` is the form's layout — "
     + "simple, tabbed or wizard; where a form opens is the caller's open mode, and a record beside its "
-    + 'list is a reader\'s preference), with the split-only keys `sections[].pane`, `splitSize` and '
-    + '`splitResizable`. The retired member is deleted, which lands the form on the `simple` default',
+    + 'list is a reader\'s preference), with the split-only keys `sections[].pane`, `splitDirection`, '
+    + '`splitSize` and `splitResizable`; the `object-form` page block sheds its `split` member and the same '
+    + 'four keys (its `drawer` / `modal` containers stay), and the `object-master-detail-form` block its '
+    + 'sections\' `pane`. The retired member is deleted, which lands the '
+    + 'form on the `simple` default',
   apply(stack, emit) {
     const RETIRED_TYPES: ReadonlySet<unknown> = new Set(['split', 'drawer', 'modal']);
     const stripSectionPanes = (form: Dict, key: 'sections' | 'groups', path: string): Dict => {
@@ -8958,11 +9083,33 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
         next = { ...next };
         delete next.type;
       }
-      next = stripKeys(next, ['splitSize', 'splitResizable'], emit, path);
+      next = stripKeys(next, ['splitDirection', 'splitSize', 'splitResizable'], emit, path);
       next = stripSectionPanes(next, 'sections', path);
       return stripSectionPanes(next, 'groups', path);
     };
-    const withViews = mapViewPayloads(stack, (payload, kind, path) =>
+    // [#27159] The `object-form` page block: only `split` left its `formType`.
+    const convertBlock = (properties: Dict, path: string): Dict => {
+      let next = properties;
+      if (next.formType === 'split') {
+        emit({ from: 'split', to: '(removed)', path: `${path}.formType` });
+        next = { ...next };
+        delete next.formType;
+      }
+      next = stripKeys(next, ['splitDirection', 'splitSize', 'splitResizable'], emit, path);
+      return stripSectionPanes(next, 'sections', path);
+    };
+    const withPages = mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-form' && component.type !== 'object-master-detail-form') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      // The master-detail block's parent `sections` share the `object-form`
+      // section shape, `pane` included; it had no `split` member or split keys.
+      const next = component.type === 'object-form'
+        ? convertBlock(properties, `${path}.properties`)
+        : stripSectionPanes(properties, 'sections', `${path}.properties`);
+      return next === properties ? component : { ...component, properties: next };
+    });
+    const withViews = mapViewPayloads(withPages, (payload, kind, path) =>
       kind === 'form' ? convertForm(payload, path) : payload);
     return mapCollection(withViews, ASSEMBLED_VIEW_ITEMS_KEY, (item, path) => {
       if (item.viewKind !== 'form') return item;
@@ -8977,14 +9124,49 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
   },
   fixture: {
     before: {
+      pages: [
+        {
+          name: 'fv_task_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // [#27159] A split block: the member, the three keys and both panes go.
+                {
+                  type: 'object-form',
+                  properties: {
+                    objectName: 'fv_task',
+                    formType: 'split',
+                    splitDirection: 'horizontal',
+                    splitSize: 40,
+                    splitResizable: true,
+                    sections: [
+                      { label: 'Task', pane: 'primary', fields: ['title'] },
+                      { label: 'Schedule', pane: 'secondary', fields: ['due_date'] },
+                    ],
+                  },
+                },
+                // A drawer block is a live container on the block: untouched.
+                { type: 'object-form', properties: { objectName: 'fv_task', formType: 'drawer', drawerSide: 'right' } },
+                // A master-detail block's parent sections share the shape: the pane goes.
+                {
+                  type: 'object-master-detail-form',
+                  properties: { objectName: 'fv_task', sections: [{ label: 'Task', pane: 'primary', fields: ['title'] }] },
+                },
+                // The same keys on a component that is NOT an `object-form` survive.
+                { type: 'element:custom', properties: { formType: 'split', splitSize: 40 } },
+              ],
+            },
+          ],
+        },
+      ],
       views: [
         {
           object: 'fv_task',
           // A live layout rides through by reference.
           form: { type: 'tabbed', sections: [{ label: 'Main', fields: ['title'] }] },
           formViews: {
-            // A split form: the member, both panes and both split keys go;
-            // `splitDirection` stays (the React block contract still reads it).
+            // A split form: the member, both panes and the three split keys go.
             beside: {
               type: 'split',
               splitSize: 40,
@@ -9012,13 +9194,40 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
       ],
     },
     after: {
+      pages: [
+        {
+          name: 'fv_task_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-form',
+                  properties: {
+                    objectName: 'fv_task',
+                    sections: [
+                      { label: 'Task', fields: ['title'] },
+                      { label: 'Schedule', fields: ['due_date'] },
+                    ],
+                  },
+                },
+                { type: 'object-form', properties: { objectName: 'fv_task', formType: 'drawer', drawerSide: 'right' } },
+                {
+                  type: 'object-master-detail-form',
+                  properties: { objectName: 'fv_task', sections: [{ label: 'Task', fields: ['title'] }] },
+                },
+                { type: 'element:custom', properties: { formType: 'split', splitSize: 40 } },
+              ],
+            },
+          ],
+        },
+      ],
       views: [
         {
           object: 'fv_task',
           form: { type: 'tabbed', sections: [{ label: 'Main', fields: ['title'] }] },
           formViews: {
             beside: {
-              splitDirection: 'vertical',
               sections: [
                 { label: 'Task', fields: ['title'] },
                 { label: 'Schedule', fields: ['due_date'] },
@@ -9035,10 +9244,13 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
         { name: 'fv_task.side', object: 'fv_task', viewKind: 'form' },
       ],
     },
-    // `beside`: the member, `splitSize`, `splitResizable` and two panes (5);
+    // The split block: the member, three keys and two panes (6). The
+    // master-detail block: its one pane (1). `beside`: the member,
+    // `splitDirection`, `splitSize`, `splitResizable` and two panes (6);
     // `quick`, `dialog`, the item record and the assembled overlay: one member
-    // each (4). The tabbed form and the list emit none.
-    expectedNotices: 9,
+    // each (4). The drawer block, the non-form component, the tabbed form and
+    // the list emit none.
+    expectedNotices: 17,
   },
 };
 
@@ -10294,8 +10506,8 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
  * had no engine — nothing polled, counted consecutive failures or tripped a
  * breaker; `status` was read by nothing (the runtime publishes a COMPUTED
  * `state`, and participation is `enabled`); and a webhook nested in a
- * connector was never registered as a `webhook` item, so it was never
- * materialized into `sys_webhook` or delivered.
+ * connector was never registered as a `webhook` item, so the webhook
+ * dispatcher never read it or delivered it.
  *
  * A pure lossless delete, one notice per stripped key: none of the three ever
  * had an effect to preserve. In particular the nested `webhooks` are STRIPPED,
@@ -11066,6 +11278,195 @@ const viewPageMountRemoved: MetadataConversion = {
 };
 
 /**
+ * The per-kind blocks the legacy list-overlay `options` bag could carry, as
+ * the bag declared them when it closed (#25923): every list-view `type` that
+ * also names a block on the list-view shape (`grid` names none). Spelled out
+ * rather than derived, because this conversion replays a shape that is gone:
+ * a kind added later never had a bag spelling to fold.
+ */
+const LIST_VIEW_OPTIONS_BAG_KINDS = ['kanban', 'calendar', 'gantt', 'timeline', 'map', 'gallery', 'chart', 'tree'] as const;
+
+/**
+ * The flattened list overlay's legacy `options` bag folds onto the top-level
+ * per-kind blocks (protocol 18, #25923 — Prime Directive #12, one key per
+ * concept; this supersedes ruling direction A on objectui#10380).
+ *
+ * Until this release the list overlay door accepted `options.KIND` beside the
+ * top-level `KIND` block, judged key by key by the kind's own schema with
+ * every key optional, and stored it. The bag was declared an UNDERLAY: where
+ * both set a key, the top-level block wins. objectui's `ListView` read it that
+ * way for kanban, calendar, gallery, timeline, gantt and map
+ * (`{ ...options.KIND, ...KIND }`), so this fold is that same merge, written
+ * once into the row:
+ *
+ * - `options.KIND` with no top-level `KIND` ⇒ it becomes `KIND`.
+ * - Both present ⇒ `KIND = { ...options.KIND, ...KIND }`, the top-level value
+ *   kept where both set a key.
+ * - `chart` is the one kind the renderer did NOT merge: it read
+ *   `chart || options.chart`, the block replacing the bag WHOLE. So a bag
+ *   beside a top-level `chart` block is dropped (it never drew), and a bag
+ *   with no block becomes the block. Merging it per key would draw keys the
+ *   author never saw.
+ * - A bag left empty is removed.
+ *
+ * **Retired from the load path** — the door refuses `options` by name with
+ * the prescription (`LIST_OVERLAY_OPTIONS_REFUSED` in `ui/view.zod.ts`), so a
+ * live author is taught the top-level spelling. The entry exists because a
+ * STORED list overlay can carry the bag, and every read of a stored `view` row
+ * replays the chain through `applyConversionsToStoredItem` as
+ * `{ views: [row] }`; `os migrate meta` lists the edit for sources.
+ *
+ * **Left as stored, with a TODO** (no lossless rewrite): a bag that is not an
+ * object; an `options.grid` (a grid has no block, and the door refused it
+ * already); a bag key that is not a kind; an `options.KIND` that is not an
+ * object, or whose top-level `KIND` is not one; and any bag on a FORM overlay
+ * (`viewKind: 'form'`), whose blocks have no home on a form. The row keeps its
+ * bag and is badged invalid until its owner decides. The fold also cannot
+ * supply a key the block REQUIRES: the bag was judged with every key
+ * optional, so a bag block can fold into a block still missing one (a
+ * `gantt` with no `titleField`, say). That row is served badged invalid,
+ * and the D3 entry `ui-list-view-options-bag-folded` names the remedy.
+ *
+ * ⚠️ Scoped to the FLATTENED spelling, as {@link viewOverlayOwnerHiddenRemoved}
+ * is: a body with no `config` and no container slot. A view item record
+ * (`config` present) has refused the bag since #20051 with its own
+ * prescription, and the two authoring shapes never declared it.
+ */
+const listViewOptionsBagFolded: MetadataConversion = {
+  id: 'list-view-options-bag-folded',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface: 'view.options.<kind> — on a flattened list view overlay ({ name, object, viewKind, …, no config })',
+  summary:
+    "flattened list overlay 'options.KIND' folded onto the top-level 'KIND' block (the top-level "
+    + "value wins per key; for 'chart' the block wins whole), and the bag removed: the per-kind "
+    + 'blocks are top-level keys of the view, their one spelling',
+  apply(stack, emit, context) {
+    const fold = (view: Dict, path: string): Dict => {
+      if (!('options' in view)) return view;
+      if (view.config !== undefined) return view;
+      if (view.list !== undefined || view.form !== undefined) return view;
+      if (view.listViews !== undefined || view.formViews !== undefined) return view;
+      const bag = view.options;
+      if (view.viewKind === 'form' || !isDict(bag)) {
+        context?.reportTodo?.({
+          path: `${path}.options`,
+          from: JSON.stringify(bag),
+          reason: view.viewKind === 'form'
+            ? 'a form view overlay carries an `options` bag; its per-kind blocks belong to a list view and have no '
+              + 'home on a form. Remove `options`, or save the body as a list view.'
+            : 'the `options` bag is not an object, so there is no per-kind block to fold. Remove `options`.',
+        });
+        return view;
+      }
+      const next: Dict = { ...view };
+      const rest: Dict = { ...bag };
+      let changed = false;
+      for (const kind of LIST_VIEW_OPTIONS_BAG_KINDS) {
+        if (!(kind in rest)) continue;
+        const under = rest[kind];
+        const top = next[kind];
+        if (!isDict(under) || (top !== undefined && !isDict(top))) continue;
+        delete rest[kind];
+        changed = true;
+        if (top === undefined) {
+          next[kind] = under;
+          emit({ from: `options.${kind}`, to: kind, path: `${path}.options.${kind}` });
+        } else if (kind === 'chart') {
+          emit({ from: 'options.chart', to: '(removed: the top-level chart block replaces it whole)', path: `${path}.options.chart` });
+        } else {
+          next[kind] = { ...under, ...top };
+          emit({ from: `options.${kind}`, to: `${kind} (top-level keys kept)`, path: `${path}.options.${kind}` });
+        }
+      }
+      if (Object.keys(rest).length === 0) {
+        delete next.options;
+        if (!changed) emit({ from: 'options', to: '(removed: empty)', path: `${path}.options` });
+        return next;
+      }
+      context?.reportTodo?.({
+        path: `${path}.options`,
+        from: JSON.stringify(rest),
+        reason: `the bag keeps ${Object.keys(rest).map((k) => `\`${k}\``).join(', ')}, which has no top-level block `
+          + 'to fold onto (a grid\'s settings are top-level keys of the view; a non-object block or one beside a '
+          + 'non-object top-level block cannot be merged). Move what you meant to the view\'s own keys, then remove `options`.',
+      });
+      if (!changed) return view;
+      next.options = rest;
+      return next;
+    };
+    return mapCollection(
+      mapCollection(stack, 'views', fold),
+      ASSEMBLED_VIEW_ITEMS_KEY,
+      fold,
+    );
+  },
+  fixture: {
+    before: {
+      // The assembled-manifest channel: an overlay a package export carried.
+      viewItems: [
+        { name: 'crm_deal.map', object: 'crm_deal', viewKind: 'list', type: 'map', options: { map: { latitudeField: 'lat', longitudeField: 'lng' } } },
+      ],
+      views: [
+        // Per key: the top-level `kanban` keeps `groupByField`, the bag adds
+        // `titleField`; the bag's `groupByField` is the one that never drew.
+        {
+          name: 'crm_deal.board',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'kanban',
+          kanban: { groupByField: 'stage' },
+          options: { kanban: { groupByField: 'owner', titleField: 'name' }, calendar: { startDateField: 'close_date' } },
+        },
+        // `chart` is replaced whole by its block, so the bag is dropped.
+        {
+          name: 'crm_deal.chart',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'chart',
+          chart: { dataset: 'deals', values: ['amount'] },
+          options: { chart: { dataset: 'old_deals', values: ['amount'], dimensions: ['stage'] } },
+        },
+        // An empty bag is removed.
+        { name: 'crm_deal.empty', object: 'crm_deal', viewKind: 'list', options: {} },
+        // A record and a container are not flattened overlays: untouched.
+        { name: 'crm_deal.rec', object: 'crm_deal', viewKind: 'list', config: { columns: ['name'] } },
+        { object: 'crm_deal', list: { type: 'grid', columns: ['name'] } },
+      ],
+    },
+    after: {
+      viewItems: [
+        { name: 'crm_deal.map', object: 'crm_deal', viewKind: 'list', type: 'map', map: { latitudeField: 'lat', longitudeField: 'lng' } },
+      ],
+      views: [
+        {
+          name: 'crm_deal.board',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'kanban',
+          kanban: { groupByField: 'stage', titleField: 'name' },
+          calendar: { startDateField: 'close_date' },
+        },
+        {
+          name: 'crm_deal.chart',
+          object: 'crm_deal',
+          viewKind: 'list',
+          type: 'chart',
+          chart: { dataset: 'deals', values: ['amount'] },
+        },
+        { name: 'crm_deal.empty', object: 'crm_deal', viewKind: 'list' },
+        { name: 'crm_deal.rec', object: 'crm_deal', viewKind: 'list', config: { columns: ['name'] } },
+        { object: 'crm_deal', list: { type: 'grid', columns: ['name'] } },
+      ],
+    },
+    // One notice per folded block (map, kanban, calendar, chart) plus the
+    // empty bag's removal.
+    expectedNotices: 5,
+  },
+};
+
+/**
  * [#17053] The bare string `sort` clause on a list-view payload becomes the
  * `{ field, order }[]` array — one sort orthography platform-wide.
  *
@@ -11228,9 +11629,11 @@ const ACTION_CONTAINER_BLOCK_TYPES = new Set(['action:group', 'action:menu']);
  * longer read that word, and would fall back to a plain button with no
  * refusal anywhere to say so. Its own `variant` and its members' are renamed
  * as the four blocks' are. Every other value is left alone, and so is every
- * other component type: `destructive` stays the Button primitive's word on
- * `element:button` and the other primitive-backed components, which this
- * entry never reads. A member that is not an object, or a list that is not an
+ * other component type, which this entry never reads: `element:button`
+ * already spells the arm `danger` and refuses `destructive`, and the record
+ * blocks that forward a variant to the Button primitive unchanged
+ * (`record:quick_actions`, a `record:alert` action) keep the primitive's own
+ * `destructive`. A member that is not an object, or a list that is not an
  * array, is left as stored. The reach is every position `mapPageComponents`
  * visits — regions, slots, nested containers — the props gate's own reach.
  * Idempotent by construction: a rewritten value reads `'danger'`, which this
@@ -11305,7 +11708,7 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
                 // Canonical already, and another value: untouched.
                 { type: 'action:button', properties: { label: 'Archive', actionType: 'script', variant: 'danger' } },
                 { type: 'action:button', properties: { label: 'Open', actionType: 'url', target: '/apps/ops', variant: 'outline' } },
-                // The Button primitive's own word on another component: not this entry's.
+                // Another component type: not this entry's, whatever it holds (its own row refuses `destructive`).
                 { type: 'element:button', properties: { label: 'Reset', variant: 'destructive' } },
                 // A container's trigger and one of its members: both renamed, the other member untouched.
                 {
@@ -15011,7 +15414,9 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: formViewSubformColumnsCanonicalized, order: 51 },
   { conversion: hookTimeoutToTimeoutMs, order: 21 },
   { conversion: jobTimeoutToTimeoutMs, order: 22 },
+  { conversion: listViewOptionsBagFolded, order: 78 },
   { conversion: listViewSortStringClauseToArray, order: 30 },
+  { conversion: manifestPackagingManifestDepsRemoved, order: 80 },
   { conversion: manifestPermissionsStringListRemoved, order: 61 },
   { conversion: mappingLookupParamsRemoved, order: 11 },
   { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },

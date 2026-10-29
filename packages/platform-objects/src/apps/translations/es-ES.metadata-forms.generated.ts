@@ -618,15 +618,19 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "Configuración de moneda",
-        helpText: "En qué moneda está este campo: un campo de moneda, o una fórmula cuyo tipo de retorno es Moneda. Sin definir: modo dynamic. En ambos modos el valor es un número sin más."
+        helpText: "En qué moneda está este campo: un campo de moneda, o una fórmula cuyo tipo de retorno es Moneda. Sin definir: modo dynamic. En todos los modos el valor es un número sin más."
       },
       "currencyConfig.currencyMode": {
         label: "Modo de moneda",
-        helpText: "dynamic (predeterminado): el campo no tiene moneda propia y los importes se muestran en la moneda predeterminada del tenant (el ajuste localization.currency). fixed: el campo tiene una única moneda, defaultCurrency."
+        helpText: "dynamic (predeterminado): el campo no tiene moneda propia y los importes se muestran en la moneda predeterminada del tenant (el ajuste localization.currency). fixed: el campo tiene una única moneda, defaultCurrency. record: cada registro tiene su propia moneda, guardada en el campo que indica currencyField."
+      },
+      "currencyConfig.currencyField": {
+        label: "Campo de moneda",
+        helpText: "Solo en modo record, y obligatorio en él: el campo de este objeto que guarda el código ISO 4217 de cada registro — un campo de texto con valueDomain iso_4217_currency, por convención currency_code."
       },
       "currencyConfig.defaultCurrency": {
         label: "Moneda predeterminada",
-        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Obligatorio en modo fixed; no se rellena automáticamente. No se lee en modo dynamic."
+        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Obligatorio en modo fixed; no se rellena automáticamente. No se lee en modo dynamic; se rechaza en modo record."
       },
       step: {
         label: "Incremento",
@@ -812,10 +816,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "summaryOperations.filter": {
         label: "Filtro",
         helpText: "Solo se agregan las filas hijas que coinciden con este predicado (p. ej. status == received)"
-      },
-      externalId: {
-        label: "ID externo",
-        helpText: "Marca como ID externo para operaciones upsert"
       },
       storage: {
         label: "Almacenamiento",
@@ -1877,7 +1877,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "Permisos requeridos",
-        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para invocar esta acción (ADR-0066 D4). La ruta de acciones de la plataforma rechaza a cualquier otro con 403 (acciones script, flow y modal, y la vía MCP/IA), y se le oculta el botón. Una acción de type api llama directamente a su endpoint, así que ese endpoint debe volver a comprobarlas."
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para invocar esta acción (ADR-0066 D4). La puerta de acciones de la plataforma rechaza a cualquier otro con 403 en cada llamada que despacha, incluida la vía MCP/IA, y se le oculta el botón. El endpoint de una acción de type api sigue siendo accesible directamente, así que debe seguir comprobándolas por sí mismo; en una acción api con un target de otro origen, la plataforma no comprueba nada en el servidor."
       },
       ai: {
         label: "Exposición a IA",

@@ -1,0 +1,635 @@
+---
+title: "Virtual objects — rows from your server, shown in any view"
+navTitle: Virtual Objects (Plugin Driver)
+description: Serve an object's rows from your own server through a plugin driver, so grids, gantts, forms, permissions, formulas and hooks work over data ObjectStack never stores.
+---
+
+A **virtual object** is an ordinary object whose rows your own code answers on every
+read. ObjectStack stores none of them: a **plugin driver** — a class implementing the
+driver contract, published by a plugin — receives each query and asks the system that
+really holds the data. Every view, form, permission set, formula and hook works on it the
+way it works on a stored object, and it takes no new metadata at all: a datasource with
+`schemaMode: 'external'` and an object bound to it, the same two declarations
+[federation](/docs/data-modeling/external-datasources) uses. The difference is who
+answers: there, a built-in SQL driver reads a remote database; here, your driver reads
+whatever you put behind it — a REST API, a planning engine, a device gateway.
+
+Everything on this page is what the platform's reference test boots and asserts
+(`packages/runtime/src/plugin-driver-external-object.spike.test.ts`, with the gantt half
+in `ui/packages/plugin-gantt/src/ObjectGantt.pluginDriverTree.test.tsx`). Read them when
+this page and the runtime seem to disagree.
+
+## Virtual, or a real object?
+
+Make it virtual when a copy would be **wrong**, and real when a copy is merely
+**convenient**:
+
+| The data is… | Choose | Why |
+| :--- | :--- | :--- |
+| **Computed** by the remote when asked — a plan, a price, an availability | virtual | a stored copy is yesterday's answer to today's question |
+| **Must not land** — a system of record you may not copy (residency, licence, audit, personal data) | virtual | no copy exists to leak, drift or fall out of retention |
+| **Real-time** — state that changes faster than any sync could follow | virtual | the row is read at the moment the page is drawn |
+| **Slow-changing reference data** — codes, catalogues, registries that change monthly | a real object fed by a [scheduled pull](/docs/automation/jobs#pulling-a-mapping) | indexes, every query operator, search, reports, and pages that keep working while the remote is down |
+
+If the remote is a SQL database you can reach, you need no driver of your own — use a
+built-in one through [External datasources](/docs/data-modeling/external-datasources).
+
+A virtual object pays for its freshness on every request: each list read is a round
+trip to the remote, and a read can match at most 1000 rows
+([the cap](#the-engine-re-applies-every-query)). That is the trade the table above
+decides.
+
+## The recipe
+
+The worked example is a port's berth plan: the terminal's scheduling system owns the
+plan and its dependencies, planners reschedule slots on a gantt, a locked plan cannot be
+moved, and only a slot's own planner may move it. Five pieces, the first two code and the
+rest metadata.
+
+### 1. The driver
+
+The driver translates the engine's query into a request the remote understands, and
+refuses what it cannot translate. The transport — your HTTP client — is passed in, which
+is also what makes the driver testable ([below](#pin-the-shapes-your-driver-receives)).
+
+{/* os:check */}
+```typescript
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
+
+type Row = Record<string, unknown>;
+
+/** One condition your remote API can run. Grow it only as far as the API does. */
+export type RemoteCondition = { field: string; op: 'eq' | 'ne' | 'in'; value: unknown };
+
+export interface RemoteListRequest {
+  filter: RemoteCondition[];
+  sort: Array<{ field: string; desc: boolean }>;
+  limit?: number;
+  offset?: number;
+  fields?: string[];
+}
+
+/** The remote system, as your driver sees it. Back it with your HTTP client. */
+export interface PortScheduleTransport {
+  list(resource: string, request: RemoteListRequest): Promise<Row[]>;
+  count(resource: string, filter: RemoteCondition[]): Promise<number>;
+  patch(resource: string, id: string, changes: Row): Promise<Row | null>;
+}
+
+/**
+ * Per object: the remote resource, and the columns the remote really has.
+ * The driver is handed the OBJECT name, never `external.remoteName`.
+ */
+const RESOURCES: Record<string, { resource: string; columns: ReadonlySet<string>; writable: ReadonlySet<string> }> = {
+  berth_slot: {
+    resource: 'slots',
+    columns: new Set(['id', 'name', 'parent', 'start_date', 'end_date', 'depends_on', 'planner', 'plan_locked', 'archived', 'plan_note']),
+    writable: new Set(['start_date', 'end_date', 'plan_note']),
+  },
+};
+
+const OPERATORS: Record<string, RemoteCondition['op']> = { $eq: 'eq', $ne: 'ne', $in: 'in' };
+
+/** A refusal of this request, by name. `status: 400` is what the engine reads to tell it from an outage. */
+function refuse(what: string): never {
+  throw Object.assign(new Error(`port_schedule driver: the remote cannot run ${what}`), { status: 400 });
+}
+
+function resourceOf(object: string) {
+  return RESOURCES[object] ?? refuse(`object '${object}' (no remote resource is mapped)`);
+}
+
+/** Translate the whole `where`, or refuse. Never drop a condition. */
+function toFilter(object: string, where: unknown, out: RemoteCondition[] = []): RemoteCondition[] {
+  if (where === undefined || where === null) return out;
+  if (typeof where !== 'object' || Array.isArray(where)) refuse(`a where of shape ${JSON.stringify(where)}`);
+  const { columns } = resourceOf(object);
+  for (const [key, cond] of Object.entries(where as Row)) {
+    if (key === '$and') {
+      for (const part of cond as unknown[]) toFilter(object, part, out);
+      continue;
+    }
+    if (key.startsWith('$')) refuse(`the combinator ${key}`);
+    if (!columns.has(key)) refuse(`a filter on '${key}', which ${object} does not carry`);
+    if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+      for (const [op, value] of Object.entries(cond as Row)) {
+        out.push({ field: key, op: OPERATORS[op] ?? refuse(`the operator ${op} on '${key}'`), value });
+      }
+      continue;
+    }
+    out.push({ field: key, op: 'eq', value: cond });
+  }
+  return out;
+}
+
+function toListRequest(object: string, query: DriverQuery): RemoteListRequest {
+  const request: RemoteListRequest = {
+    filter: toFilter(object, query.where),
+    sort: (query.orderBy ?? []).map((s) => ({ field: s.field, desc: s.order === 'desc' })),
+  };
+  if (typeof query.limit === 'number') request.limit = query.limit;
+  if (typeof query.offset === 'number') request.offset = query.offset;
+  if (Array.isArray(query.fields)) request.fields = ['id', ...query.fields.filter((f): f is string => typeof f === 'string' && f !== 'id')];
+  return request;
+}
+
+const notSupported = (what: string) => async (): Promise<never> => refuse(what);
+
+export function createPortScheduleDriver(transport: PortScheduleTransport): IDataDriver {
+  return {
+    name: 'port_schedule', // = the datasource name; the plugin registers `driver.port_schedule`
+    version: '1.0.0',
+    supports: { transactionsUnsupported: true },
+
+    async connect() { /* open a session, check the remote answers; throw to refuse the boot */ },
+    async disconnect() {},
+    async checkHealth() { return true; },
+
+    async find(object, query) {
+      return transport.list(resourceOf(object).resource, toListRequest(object, query));
+    },
+    async findOne(object, query) {
+      const rows = await transport.list(resourceOf(object).resource, { ...toListRequest(object, query), limit: 1 });
+      return rows[0] ?? null;
+    },
+    async count(object, query) {
+      return transport.count(resourceOf(object).resource, toFilter(object, query?.where));
+    },
+    async update(object, id, data) {
+      const { resource, writable } = resourceOf(object);
+      // The engine adds `id`, `updated_at` and `updated_by` to the patch; send
+      // only what the remote owns.
+      const changes = Object.fromEntries(Object.entries(data).filter(([k]) => writable.has(k)));
+      return transport.patch(resource, String(id), changes);
+    },
+
+    // Not offered by this remote: refuse by name, never pretend.
+    execute: notSupported('execute'),
+    create: notSupported('create'),
+    upsert: notSupported('upsert'),
+    delete: notSupported('delete'),
+    bulkCreate: notSupported('bulkCreate'),
+    bulkUpdate: notSupported('bulkUpdate'),
+    bulkDelete: notSupported('bulkDelete'),
+    beginTransaction: notSupported('beginTransaction'),
+    commit: notSupported('commit'),
+    rollback: notSupported('rollback'),
+    dropTable: notSupported('dropTable'),
+    async syncSchema() { /* external: the platform runs no DDL; nothing to do */ },
+  };
+}
+```
+
+**A driver cannot opt out of correctness, only of performance.** The engine does not
+trust a plugin driver to have applied the query: it re-applies it
+([below](#the-engine-re-applies-every-query)). The rules the driver keeps:
+
+- **Never return fewer rows than match.** The engine filters, sorts and pages the rows
+  your driver returns, so extra rows cost only transfer, but a row your driver leaves out
+  is lost. When you cannot translate part of a `where`, send the remote a WIDER filter,
+  never a narrower one: drop an untranslatable member of a top-level `$and` (or the whole
+  `where`), and drop a whole `$or` or `$not` that contains one. ⛔ Dropping one branch
+  of an `$or` narrows the result. The skeleton above takes the stricter road and refuses
+  instead, which is also safe.
+- **Fail when the remote fails.** Throw; ⛔ never return an empty array, which reads
+  exactly like "no rows match". What the caller sees depends on the `status` (or
+  `statusCode`) on the error you throw:
+  - A read refused for the request's own sake (400, 404 or 422), which is what
+    `refuse()` above throws, answers `400`. The code is `INVALID_QUERY`, or the code you
+    set on the error when it is a registered one (`INVALID_FILTER`, say). A retry of the
+    same read never clears it. The caller reads your error's message, so they know which
+    operator or column to drop. Write it for them: ⛔ no remote URL, host or credential
+    in it. The message is withheld, and goes to the server log, when the read carries a
+    predicate the caller did not write, such as a sharing or row-level security scope,
+    because it may name that predicate's column or value. A remote `404` on a list
+    endpoint often means a wrong base path or resource mapping in your driver, not a bad
+    query.
+  - A write refused for the request's own sake (400, 404, 409, 412 or 422) answers
+    `422 EXTERNAL_WRITE_REFUSED` carrying your error's message.
+  - Anything else answers `503 ERR_DATASOURCE_UNAVAILABLE` with `reason: 'remote'`: a
+    5xx, an unreachable remote, a throw with no `status`, and also 401, 403, 407 and 429,
+    because an expired credential or a rate limit is the operator's to fix and its text
+    may name the credential. The message says the remote could not answer and to retry;
+    your error's own text goes to the server log at `warn` and never to the caller.
+- **Send the remote only the columns it owns.** `update` receives the patch plus any
+  field a hook stamped, plus `id`, `updated_at` and `updated_by`, which the engine adds on
+  its own and no remote column declares.
+- **Declare `supports.transactionsUnsupported: true`** for a transport with no
+  transactions (any REST API): the engine reads the bit before it reaches for one.
+- **Throw from `connect()` to refuse the boot** when the remote is unusable — the
+  operator then reads your message instead of a failure per request
+  ([Writing a driver](/docs/data-modeling/drivers#writing-a-driver-connect-is-where-you-refuse-to-start)).
+
+### 2. The plugin
+
+A plugin publishes the driver as the service `driver.<name>` during `init`. That is the
+whole server half of the integration.
+
+```typescript
+import type { Plugin, PluginContext } from '@objectstack/core';
+import type { IDataDriver } from '@objectstack/spec/contracts';
+
+export function portScheduleDriverPlugin(driver: IDataDriver): Plugin {
+  return {
+    name: 'com.example.driver-port-schedule',
+    version: '1.0.0',
+    init: async (ctx: PluginContext) => {
+      ctx.registerService(`driver.${driver.name}`, driver);
+    },
+  };
+}
+```
+
+Mount it in the stack's `plugins` like any other plugin
+([Register with the kernel](/docs/plugins/development#step-6-register-with-the-kernel)):
+`plugins: [portScheduleDriverPlugin(createPortScheduleDriver(myTransport))]`. Register the
+service in `init`, not `start`: the engine adopts `driver.*` services, and the datasource
+connect step looks the driver up, once every plugin has initialised.
+
+### 3. The datasource, the object, the hook, the views
+
+{/* os:check */}
+```typescript
+import { defineStack, defineView } from '@objectstack/spec';
+
+const BerthViews = defineView({
+  list: {
+    label: 'All slots',
+    type: 'grid',
+    data: { provider: 'object', object: 'berth_slot' },
+    columns: ['name', 'start_date', 'end_date'],
+  },
+  listViews: {
+    plan: {
+      label: 'Berth plan',
+      type: 'gantt',
+      data: { provider: 'object', object: 'berth_slot' },
+      columns: ['name'],
+      filter: [{ field: 'archived', operator: 'equals', value: false }],
+      sort: [{ field: 'start_date', order: 'asc' }],
+      gantt: {
+        startDateField: 'start_date',
+        endDateField: 'end_date',
+        titleField: 'name',
+        parentField: 'parent',
+        lockField: 'locked',
+        dependenciesField: 'depends_on',
+      },
+    },
+  },
+});
+
+export default defineStack({
+  manifest: { id: 'com.example.port', name: 'Port operations', version: '1.0.0', type: 'app' },
+  datasources: [
+    {
+      name: 'port_schedule',
+      label: 'Terminal schedule (plugin driver)',
+      driver: 'port_schedule',      // the service suffix: the plugin published `driver.port_schedule`
+      schemaMode: 'external',
+      config: {},                   // the driver was built by your code; nothing to configure here
+      external: {
+        allowWrites: true,
+        // A driver without `introspectSchema` cannot be validated at boot;
+        // `checkOnBoot: false` is what lets it come up.
+        validation: { onMismatch: 'fail', checkOnBoot: false },
+      },
+    },
+  ],
+  objects: [
+    {
+      name: 'berth_slot',
+      label: 'Berth slot',
+      datasource: 'port_schedule',
+      external: { remoteName: 'slots', writable: true },
+      // Remote rows carry no `owner_id` / `created_by`: who may edit is the
+      // hook's decision. See "Choose the sharing model on purpose" below.
+      sharingModel: 'public_read_write',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        parent: { type: 'lookup', reference: 'berth_slot', label: 'Parent' },
+        start_date: { type: 'date', label: 'Start' },
+        end_date: { type: 'date', label: 'End' },
+        depends_on: { type: 'text', label: 'Depends on' },
+        planner: { type: 'text', label: 'Planner' },
+        plan_locked: { type: 'boolean', label: 'Plan locked' },
+        archived: { type: 'boolean', label: 'Archived' },
+        plan_note: { type: 'text', label: 'Plan note' },
+        // Per caller: locked once the plan is, and for anyone but the slot's planner.
+        locked: {
+          type: 'formula',
+          label: 'Locked',
+          returnType: 'boolean',
+          expression: 'record.plan_locked || record.planner != current_user.id',
+        },
+      },
+    },
+  ],
+  views: [BerthViews],
+  hooks: [
+    {
+      name: 'berth_slot_plan_guard',
+      object: 'berth_slot',
+      events: ['beforeUpdate'],
+      refusals: {
+        PLAN_LOCKED: { message: 'This plan is locked; unlock it before rescheduling.', status: 409 },
+        NOT_PLANNER: { message: 'Only the planner of this slot may reschedule it.', status: 403 },
+      },
+      body: {
+        language: 'js',
+        source:
+          "if (ctx.previous && ctx.previous.plan_locked === true) throw Object.assign(new Error(), { code: 'PLAN_LOCKED' });\n"
+          + "if (ctx.previous && ctx.previous.planner !== ctx.user?.id) throw Object.assign(new Error(), { code: 'NOT_PLANNER' });\n"
+          + "ctx.input.plan_note = 'checked';\n",
+        capabilities: [],
+        timeoutMs: 5000,
+      },
+    },
+  ],
+  permissions: [
+    {
+      name: 'berth_planner',
+      label: 'Berth planner',
+      objects: { berth_slot: { allowRead: true, allowEdit: true } },
+    },
+  ],
+});
+```
+
+What each piece does on a plugin driver:
+
+- **The datasource names the driver by its service suffix.** Keep four names equal:
+  the driver's `name`, the service suffix, the datasource `name` and its `driver`. The
+  connect step finds the driver already registered and leaves it alone — it builds
+  nothing and connects it once.
+- **Writes are a double opt-in**, exactly as for federation:
+  `external.allowWrites` on the datasource and `external.writable` on the object
+  ([Writes](/docs/data-modeling/external-datasources#5-writes-double-opt-in)).
+- **The formula is the UI's lock; the hook is the rule.** `locked` evaluates per caller
+  on every read — the planner reads `false` on an open slot, an administrator `true` — and
+  the gantt offers no drag grips on a locked bar. A PATCH does not consult a formula, so
+  the `beforeUpdate` hook enforces the same rule: its refusal answers with the declared
+  message and status, and the driver is never asked to write. It reads the pre-image
+  (`ctx.previous`) through your driver, and may stamp fields (`plan_note`) that then reach
+  `update`. See [Before hook](/docs/automation/hooks#before-hook) and
+  [Hook bodies](/docs/automation/hook-bodies).
+- **Permission sets apply as on any object.** A caller whose sets grant nothing on
+  `berth_slot` is refused `403` on a list read before your driver is asked anything. On a
+  PATCH the write door loads the record first, so the remote sees one by-id read for a
+  caller it then refuses.
+- **The gantt is an ordinary list view** ([Gantt](/docs/ui/views#gantt)): `parentField`
+  builds the summary-and-children tree, `dependenciesField` draws the links, and
+  `lockField` reads the per-caller formula. A drag on an unlocked bar issues the
+  `PATCH /data/berth_slot/:id` above.
+
+<Callout type="warn" title="Choose the sharing model on purpose">
+On the default sharing model, **every member edit is refused**, even for a member whose
+permission set grants `allowEdit`. That model keys reads to the row's `owner_id`, a column
+a remote row does not carry, so the member's read scope admits no row: lists come back
+empty and an edit answers `404`. On `public_read` the rows are readable, but before a write
+the platform's ownership checks ask the remote for `owner_id` and for `created_by` equal to
+the caller, find neither, and refuse the edit with `403`
+([#27332](https://github.com/objectstack-ai/objectstack/issues/27332)). Declare
+`sharingModel: 'public_read_write'` and decide who may edit in `beforeUpdate`, as above.
+Serving an owner column the checks can read is the other way out; the reference test
+does not cover it, so pin it in your own test if you take it.
+
+Missing owner columns fail closed: the edit is refused, never allowed by mistake. Setting
+`sharingModel` is not enough by itself, because an explicit `private` is refused the
+same way. There are two ways out:
+
+- `sharingModel: 'public_read_write'` with a `beforeUpdate` hook that decides, as above;
+- a declared owner field that your driver returns under that field name. A built-in SQL
+  driver maps it through `external.columnMap`; on a plugin driver the mapping is your
+  driver's own job, because the engine does not apply `columnMap`.
+
+On `public_read_write`, a member's delete is still refused: the ownership floor keeps
+deletes by design. A delete passes only when your driver returns `created_by`, or when a
+policy or a share grants it. The validation warning for an external object whose owner
+is unmapped is tracked in
+[#27332](https://github.com/objectstack-ai/objectstack/issues/27332).
+</Callout>
+
+### The engine re-applies every query
+
+For a datasource whose `schemaMode` is not `managed` and whose `driver` is not a built-in
+id (memory, sqlite, sqlite-wasm, postgres, mysql, mongodb, turso), the engine holds the
+driver behind a correctness floor. It does not change a federated database on a built-in
+driver.
+
+- **What the driver is sent.** `find` gets `where` and `orderBy`, which it may push
+  down, and `limit: 1001`. It never gets `offset` or `fields`. `findOne` and `count`
+  reach your driver as that same `find`. `aggregate` is never called; the engine
+  aggregates in memory.
+- **What the engine does with the rows.** It applies the whole query itself: `where`
+  (the engine's own operator vocabulary, `$like` and `$ilike` included), the sort (no
+  value sorts last), `offset` and `limit` (a paged read breaks ties by `id`), and the
+  projection.
+- **Writes** go to your driver unchanged, one record at a time. The floored driver does
+  not offer `updateMany` or `deleteMany`, so no `where` the engine cannot re-check
+  reaches a write. A by-id write under a precondition goes through `update` by id, and
+  a multi-row predicate update or delete is refused.
+
+So a driver grows in three steps, each correct:
+
+1. **Return every row.** Ignore the query and answer the resource's rows. The answer is
+   correct for any resource with at most 1000 rows. Honour `limit` by paging the remote:
+   a remote whose page is smaller than 1001 rows, and that you do not page through,
+   answers fewer rows than match, and the engine cannot detect it.
+2. **Push `where` and `orderBy` down.** The remote returns only the matching rows, so the
+   1000-row cap now counts matching rows, not the whole resource, and less travels. The
+   engine still re-checks every row, so a translation slip shows up as a missing row
+   (step 1's rule), never as an extra one.
+3. **Skip the floor with a conformance-tested driver.** This is planned for a later
+   phase ([#27261](https://github.com/objectstack-ai/objectstack/issues/27261)): a driver
+   that passes the platform's conformance kit would be trusted with paging and the cap.
+   It does not exist yet.
+
+**The 1000-row cap.** A read that matches more than 1000 rows is refused with
+`422 EXTERNAL_ROW_CAP_EXCEEDED` rather than answered from a partial set. The fix is to
+narrow the filter so fewer rows match, or, for data that size, to mirror it into a real
+object with a [scheduled pull](/docs/automation/jobs#pulling-a-mapping) and read that.
+The cap applies to plugin drivers only. It also means a list cannot page past its first
+1000 matching rows: when more than 1000 rows match, every page of that read is refused,
+the one at offset 1000 included. The cap is fixed and not configurable.
+
+**Not covered by the floor.**
+
+- Predicate writes. `updateMany` and `deleteMany` are not offered on a floored datasource,
+  so a write that selects its rows by a filter is refused rather than handed to your
+  driver. Read the ids, then write each one.
+- A read whose scope composes a `ReadableIds` leaf, such as an object
+  `controlled_by_parent`, is refused (ADR-0139): the engine has no semi-join over a
+  plugin driver's rows.
+
+### Credentials
+
+⛔ Never put a credential in the stack — not in `config`, not in a hook body, not in an
+object. On a plugin driver, also know what `external.credentialsRef`
+([Credentials](/docs/data-modeling/external-datasources#4-credentials)) does **not** do:
+it is resolved when the platform builds the driver from the datasource, and a driver your
+plugin registered is already built, so the connect step skips it before credential
+resolution. A `credentialsRef` on this datasource is not resolved, not handed to your
+driver, and does not fail the boot when no secret store is configured. A plugin is
+configured by the host that composes it, through the options it passes to the plugin;
+keep the credential in the host's secret handling and out of metadata and the
+repository.
+
+## What your driver receives
+
+Measured on the reference test, request by request, with the engine's floor
+([above](#the-engine-re-applies-every-query)) in place:
+
+| The platform does | Your driver is called with |
+| :--- | :--- |
+| Boots | `connect()` once. No `syncSchema`, no `introspectSchema` (`checkOnBoot: false`). |
+| Serves a list (`GET /data/berth_slot` with the view's filter, sort and page size) | `find(object, { where, orderBy, limit: 1001 })`, then `find(object, { where, limit: 1001 })` for the total. The page size is applied by the engine. |
+| Serves a record (`GET /data/berth_slot/:id`) | `find(object, { where: { id }, limit: 1001 })` |
+| Writes (`PATCH /data/berth_slot/:id`) | several by-id reads as `find` (the pre-image for hooks and checks), then `update(object, id, patch)` with the extra keys above |
+| Refuses a caller with no grant on a list read | nothing |
+
+Your driver should still implement `findOne` and `count`: the engine calls them on a
+driver that is not behind the floor, and the shape test below exercises them.
+
+Two details catch every first driver:
+
+- **`object` is the object name** (`berth_slot`), never `external.remoteName` (`slots`).
+  The mapping from object to remote resource is the driver's.
+- **`object` also rides inside the query** (`{ where, …, object: 'berth_slot' }`)
+  although `DriverQuery` omits it from its type. Read the object name from argument one;
+  do not forward the query object to the remote as-is.
+
+The filter arrives in the engine's `where` shape: equality as a bare value
+(`{ archived: false }`), operators as `{ field: { $op: value } }`, and combinators such
+as `$and`. The console lowers the view's
+`[{ field: 'archived', operator: 'equals', value: false }]` to
+`?filter=["archived","=",false]`, which arrives as `{ archived: false }`.
+
+## Pin the shapes your driver receives
+
+A driver is correct when, for every query shape the engine sends, the remote is asked for
+exactly the right thing — and asked for nothing when the driver cannot honour the shape.
+Pin that in a test of the driver alone, with a recording transport in place of the
+network. The shapes below are the ones the reference test measured; add one for every
+view filter your app ships.
+
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+import { createPortScheduleDriver, type PortScheduleTransport } from './port-schedule-driver';
+
+/** A transport that records what the remote is asked, and answers nothing in particular. */
+function recordingTransport() {
+  return {
+    list: vi.fn(async () => [{ id: 's_1', name: 'Berth 4 — MSC Aurora' }]),
+    count: vi.fn(async () => 1),
+    patch: vi.fn(async (_resource: string, id: string, changes: Record<string, unknown>) => ({ id, ...changes })),
+  } satisfies PortScheduleTransport;
+}
+
+describe('port_schedule driver — the shapes the engine sends, and what the remote is asked', () => {
+  it('a list view read: every filter, the sort and the page size reach the remote', async () => {
+    const remote = recordingTransport();
+    const driver = createPortScheduleDriver(remote);
+    // The DriverQuery a list view with a filter, a sort and a page size produces.
+    // `object` rides inside it although the type omits it.
+    await driver.find('berth_slot', {
+      where: { archived: false },
+      orderBy: [{ field: 'start_date', order: 'asc' }],
+      limit: 50,
+      object: 'berth_slot',
+    } as never);
+    expect(remote.list).toHaveBeenCalledWith('slots', {
+      filter: [{ field: 'archived', op: 'eq', value: false }],
+      sort: [{ field: 'start_date', desc: false }],
+      limit: 50,
+    });
+  });
+
+  it('the total: count carries the same filter', async () => {
+    const remote = recordingTransport();
+    await createPortScheduleDriver(remote).count('berth_slot', { object: 'berth_slot', where: { archived: false } } as never);
+    expect(remote.count).toHaveBeenCalledWith('slots', [{ field: 'archived', op: 'eq', value: false }]);
+  });
+
+  it('a by-id read (record page, pre-image for a hook) asks for one row', async () => {
+    const remote = recordingTransport();
+    const row = await createPortScheduleDriver(remote).findOne('berth_slot', { where: { id: 's_1' }, object: 'berth_slot', limit: 1 } as never);
+    expect(remote.list).toHaveBeenCalledWith('slots', { filter: [{ field: 'id', op: 'eq', value: 's_1' }], sort: [], limit: 1 });
+    expect(row).toMatchObject({ id: 's_1' });
+  });
+
+  it('an update forwards only the columns the remote owns', async () => {
+    const remote = recordingTransport();
+    // The patch, the hook's stamp, and what the engine adds on its own.
+    await createPortScheduleDriver(remote).update('berth_slot', 's_1', {
+      start_date: '2026-11-03', end_date: '2026-11-07', plan_note: 'checked',
+      id: 's_1', updated_at: '2026-11-01T08:00:00.000Z', updated_by: 'usr_planner',
+    });
+    expect(remote.patch).toHaveBeenCalledWith('slots', 's_1', { start_date: '2026-11-03', end_date: '2026-11-07', plan_note: 'checked' });
+  });
+
+  it('a condition the remote cannot run is refused by name — never dropped, never an empty answer', async () => {
+    const remote = recordingTransport();
+    const driver = createPortScheduleDriver(remote);
+    await expect(driver.find('berth_slot', { where: { $or: [{ archived: false }, { planner: 'u1' }] } } as never)).rejects.toThrow(/\$or/);
+    // The status the engine reads: a refusal of this request answers 400, not "retry later".
+    await expect(driver.find('berth_slot', { where: { $or: [{ archived: false }] } } as never)).rejects.toMatchObject({ status: 400 });
+    await expect(driver.find('berth_slot', { where: { start_date: { $gte: '2026-11-01' } } } as never)).rejects.toThrow(/\$gte/);
+    // The default sharing model asks for ownership columns no remote row carries.
+    await expect(driver.findOne('berth_slot', { where: { $and: [{ id: 's_1' }, { created_by: 'u1' }] } } as never)).rejects.toThrow(/created_by/);
+    expect(remote.list).not.toHaveBeenCalled();
+  });
+});
+```
+
+When the remote gains an operator, the refusal case is the one that changes: move the
+operator from "refused" to a shape case, then teach `OPERATORS` the mapping. To see the
+same shapes arrive through a booted stack — HTTP door, permissions, formula, hook —
+start from the reference test named at the top of this page.
+
+## Five business examples
+
+**Port berth scheduling — computed, real-time.** The worked example above. The
+terminal's planning system recomputes the plan as vessels slip; the platform is the
+plan's view and its edit door. A gantt over the tree, a per-caller lock formula, a
+`beforeUpdate` guard, writes through `update` only.
+
+**SAP sales orders — must not land.** The ERP is the system of record, and orders may not
+be copied out of it. The driver reads orders through the ERP's own query API and writes
+the few fields users may change through its update API; the ERP's own validation answers
+a write it rejects, so let that error reach the caller rather than retrying around it.
+Refuse `create` and `delete` until the integration deliberately offers them, and keep
+the object's `writable` and the datasource's `allowWrites` as narrow as the API.
+
+**HR directory — must not land.** People's records stay in the HR system, so a leaver
+disappears from every page the moment HR removes them, with no copy left to purge. Read
+only: leave `allowWrites` off, grant read by permission set, and choose `public_read` —
+an owner-keyed sharing model judges records by ownership columns an HR row does not
+carry (the callout above).
+
+**Equipment live status — real-time.** Cranes, reefers, gates: the state a device
+reports now, read from the gateway when the page is drawn; a copy would be stale before
+it landed. Read only, small pages, and a `find` that throws when the gateway does not
+answer, so a dead gateway reads as an error and never as "no alarms".
+
+**Counter-example: vessel and port codes — a real object.** UN/LOCODE port codes, vessel
+registries, cost centres change monthly and are read by every page, filtered, joined and
+reported on. Make them a real object filled by a scheduled pull — a `mapping` whose
+`connectorSource` names the API, and a `job` whose `pull` runs it
+([Pulling a mapping](/docs/automation/jobs#pulling-a-mapping)) — and they get indexes,
+every query operator and search, and stay readable when the source is down. There is no
+separate data-sync metadata type: a sync is defined on its target, as that mapping.
+
+## See also
+
+- [External datasources](/docs/data-modeling/external-datasources) — the datasource and
+  `external` binding this page builds on, federation over SQL, the write gates and
+  credentials.
+- [Database drivers](/docs/data-modeling/drivers) — the built-in drivers and the
+  driver-startup contract.
+- [Formulas](/docs/data-modeling/formulas) — `current_user` and the formula bindings.
+- [Hooks](/docs/automation/hooks) and [Hook bodies](/docs/automation/hook-bodies) — the
+  `beforeUpdate` guard.
+- [Views](/docs/ui/views) — the gantt and every other list view.
+- ADR-0015 (federation spec) — the plugin driver is its Tier A: a driver, zero protocol
+  change.

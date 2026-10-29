@@ -131,7 +131,7 @@ exported for hand-assembled shells: `presentNotificationToast` (the `onToast`
 delegate) and `ConsoleNotificationBanners` (the banners, guarded by
 `useHasNotificationProvider()` so a layout without the provider renders no
 banners instead of throwing). See the
-[notifications guide](https://objectui.org/docs/guide/notifications).
+[notifications guide](https://objectstack.ai/docs/build-without-code).
 
 ## Read-rate report (environment admin)
 
@@ -543,6 +543,21 @@ The metadata-admin engine (`src/views/metadata-admin`) renders an in-app editor
 for each metadata type. Every type has a pure-renderer **preview** that doubles
 as its **designer** when given `editing` + `onPatch` props — no backend round
 trip is required to edit a draft.
+
+### New dataset beside the Studio's dataset pickers (objectstack#27518)
+
+The Interfaces pillar provides `StudioDatasetAuthoringContext`
+(`src/views/studio-design/datasetCreate.tsx`): the package being edited and the
+pillar's draft-saved signal. A dataset picker that finds it (the New report
+dialog's `ReportCreateFields` and the dashboard widget inspector) reads the
+draft-overlaid dataset catalog (`useDatasetCatalog(…, { previewDrafts: true })`),
+lists the package's datasets first, and renders `DatasetCreateEntry`: a **New
+dataset** button whose dialog saves a `dataset` draft in the package through
+the draft door (the spec's create seed, the picked object, a dimension per
+group-by field and a `sum` measure per total), re-reads the catalog and binds
+the new name. While no dataset reads one of the package's objects, the entry
+says so. Outside the Studio there is no context: Setup's editors keep the
+published catalog and offer no entry.
 
 ### AI chat conversation key (ADR-0057)
 
@@ -1173,7 +1188,7 @@ For a per-row **Edit** that follows the record under the cursor, use the
 list or detail view's built-in **Edit** entry point instead: under
 `editMode: 'page'` it already routes to the same URL.
 
-See [`content/docs/guide/record-edit-modes.md`](../../content/docs/guide/record-edit-modes.md)
+See [Modal or page (`editMode`)](https://objectstack.ai/docs/ui/create-vs-edit-form#modal-or-page-editmode)
 for a longer walkthrough.
 
 ## Record approval visibility (Approvals tab / `record:approvals`)
@@ -1248,7 +1263,11 @@ key that only looks like an amount by its name never leads. A key the object
 does not declare, a framework column, an
 unresolved reference id, a field declared `hidden: true` and a field the
 reader may not read take no row. Without the target object's definition, the
-summary is not drawn.
+summary is not drawn. The summary is headed "As submitted"
+(`approvalsInbox.snapshotAsSubmitted`): the snapshot is the target record as it
+was submitted, not its current state, so after a decision its values can
+differ from the request's status in the page's highlights. The record's
+current values are the Details tab's record card.
 
 Two more parts come from the same request row. A request no person submitted
 (its `submitter_id` absent or null, as the approvals get serves a request a
@@ -1319,7 +1338,7 @@ The sidebar's Pinned section keeps the user's order, stored with the pins:
 drag a pinned row, or move it from the keyboard. The app's own menu is not
 reorderable: its order is authored in Studio.
 
-See [User-Scoped State Persistence](../../content/docs/guide/user-state-persistence.md)
+See [A user's list state never writes the view](https://objectstack.ai/docs/ui/views#a-users-list-state-never-writes-the-view)
 for the adapter contract, backend schema, and how to plug in your own backend.
 
 ## Command palette (⌘K)
@@ -1545,7 +1564,7 @@ const request: Pick<AppShellRuntimeConfig, 'hideSingleAppSwitcher'> = {
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/layout/app-shell)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/app-shell)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/app-shell)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

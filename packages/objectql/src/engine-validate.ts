@@ -50,6 +50,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStringValues, ValidationError, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { assertRecordCurrencyCodes, RecordCurrencyCodeRequiredError } from './validation/record-currency-code.js';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from './engine-update-dispatch.js';
 import {
   droppedFieldEvents,
@@ -393,11 +394,15 @@ export async function validate(
   // `undefined` = no stored row: the row is judged on the patch alone, as
   // it was before these reads existed.
   const storedRows: Array<Record<string, unknown> | undefined> = [];
+  // The by-id address each stored row was read from, for a refusal that names the record.
+  const storedIds: unknown[] = [];
   for (const submitted of submittedRows) {
     let stored: Record<string, unknown> | undefined;
+    let storedId: unknown;
     if (mode === 'update' && submitted && typeof submitted === 'object') {
       const dispatch = resolveEngineUpdateDispatch(submitted as EngineUpdateDispatchData, undefined);
       if (dispatch.kind === 'by-id') {
+        storedId = dispatch.id;
         const visible = await this.findOne(object, {
           where: { id: dispatch.id },
           context: { ...(options?.context ?? {}), [RAW_FILE_VALUES_CONTEXT_KEY]: true },
@@ -417,6 +422,7 @@ export async function validate(
       }
     }
     storedRows.push(stored);
+    storedIds.push(storedId);
   }
   // The merged view each rule evaluates, and the one the reference reads
   // below key on: the write reads a traversed FK off the same merge
@@ -543,6 +549,21 @@ export async function validate(
         // preview admits exactly what the write would.
         keptOptionValues: options?.context?.keptOptionValues,
       });
+      // [ADR-0144 D8 rule 4] The write's blank-code refusal, at the write's
+      // step and on the write's image: the insert row as stored, or the stored
+      // row with the patch over it (`judgedViews`, the by-id update's
+      // `priorRecord ⊕ payload`), judging only the pairs the patch touches.
+      // An update with no stored row here (a predicate dispatch, an id this
+      // caller cannot read) is not judged: the image the write judges is a
+      // row the preview does not hold. A code column the read door withholds
+      // from this caller is absent from the stored row, so the preview reads
+      // it as blank — stricter than the write, never laxer.
+      if (mode === 'insert' || storedRows[i]) {
+        assertRecordCurrencyCodes(
+          object, (schemaForValidation as { fields?: unknown } | undefined)?.fields,
+          mode === 'insert' ? row : judgedViews[i], mode, mode === 'insert' ? undefined : row, storedIds[i],
+        );
+      }
       warnings.push(...evaluateValidationRules(schemaForValidation as any, row, mode, {
         // [#22445] The stored row, when this row named one: the by-id
         // update's `previous: priorRecord`. Absent, the record is the patch.
@@ -570,6 +591,10 @@ export async function validate(
     } catch (e) {
       if (e instanceof ValidationError) {
         return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
+      }
+      // The write throws this refusal whole; the preview answers it as the row's finding.
+      if (e instanceof RecordCurrencyCodeRequiredError) {
+        return { valid: false, errors: [{ field: e.field, code: e.code, message: e.message }], warnings };
       }
       throw e;
     }

@@ -70,7 +70,9 @@
  *     server-side; this closes the UI/DX gap.
  */
 
+import { isBodyTableRelationship } from '@objectstack/spec/data';
 import { convertSortToQueryParams } from '@object-ui/core';
+import { relatedListEntryNames } from '@object-ui/plugin-detail';
 
 /** Audit/ownership FKs that exist on nearly every object — never related lists. */
 const AUDIT_FK_FIELDS = new Set(['created_by', 'updated_by', 'owner_id']);
@@ -112,10 +114,13 @@ export interface DerivedRelatedList {
   /** True when the child→parent link is a `master_detail` (owned) relationship. */
   isOwned: boolean;
   /**
-   * True when the list is part of the record's MAIN CONTENT: the FK declares
-   * `relatedList: 'primary'`, or it is a `master_detail` FK that sets
-   * `inlineEdit` and declares no `relatedList` at all (objectstack#27069 — line
-   * items edited inside the parent's form are drawn under it, not beside it).
+   * True when the list is part of the record's MAIN CONTENT — a body table: the
+   * FK declares `relatedList: 'primary'`, or it is a `master_detail` FK that
+   * sets `inlineEdit` and declares no `relatedList` at all (objectstack#27069 —
+   * line items edited inside the parent's form are drawn under it, not beside
+   * it). The verdict is `@objectstack/spec`'s `isBodyTableRelationship`
+   * (objectstack#27478), the one predicate the spec's refusal of a field group
+   * naming a side card reads too.
    * A placement, not an order: the body draws primary lists as full-width
    * tables, the tabbed page gives each its OWN tab, and non-primary lists are
    * the side cards (a single "Related" tab on the tabbed page).
@@ -237,22 +242,6 @@ function isDeclaredFilter(value: unknown): value is Record<string, any> {
 }
 
 /**
- * Is this FK's list part of the record's main content (`isPrimary`)?
- *
- * `relatedList: 'primary'` says so explicitly. Left unset, a `master_detail`
- * FK that sets `inlineEdit` (any arm: `true`, `'grid'`, `'form'`) is primary
- * by default — the spec's own reading of the key (objectstack#27069). An
- * explicit `true` is the author keeping the list a side card, so the default
- * applies only to an ABSENT `relatedList`.
- */
-export function isMainContentList(type: string, fieldDef: Record<string, any>): boolean {
-  if (fieldDef.relatedList === 'primary') return true;
-  if (fieldDef.relatedList !== undefined) return false;
-  const inlineEdit = fieldDef.inlineEdit;
-  return type === 'master_detail' && (inlineEdit === true || inlineEdit === 'grid' || inlineEdit === 'form');
-}
-
-/**
  * The ONE resolution of related-list order (objectstack#27069): the parent's
  * declared `relatedLists` first, in the declared order; every list no entry
  * names after it, in the order `lists` already carries (the derived order).
@@ -286,18 +275,12 @@ export function resolveRelatedListOrder<T extends { childObject: string; referen
 
 /**
  * Does one `relatedLists` entry (or a field group's `relatedList`) name this
- * list? A bare child object name names every list of that child; `object.field`
- * names the one FK. The ONE reading of an entry, shared by
- * {@link resolveRelatedListOrder} and the Studio editors that author entries.
+ * list? The ONE reading of an entry lives in `@object-ui/plugin-detail`, where
+ * the synthesized record page places a body table by a field group's entry
+ * (objectstack#27069); re-exported here for {@link resolveRelatedListOrder}
+ * and the Studio editors that author entries.
  */
-export function relatedListEntryNames(
-  entry: string,
-  list: { childObject: string; referenceField: string },
-): boolean {
-  const dot = entry.indexOf('.');
-  if (dot === -1) return list.childObject === entry;
-  return list.childObject === entry.slice(0, dot) && list.referenceField === entry.slice(dot + 1);
-}
+export { relatedListEntryNames };
 
 /** Normalize an object's `fields` (record or array) into `[name, def]` pairs. */
 function fieldEntries(fields: MergedObjectLike['fields']): Array<[string, any]> {
@@ -397,7 +380,7 @@ export function deriveRelatedLists(
         childLabel,
         referenceField: fieldName,
         isOwned: type === 'master_detail',
-        isPrimary: isMainContentList(type, fieldDef),
+        isPrimary: isBodyTableRelationship(fieldDef),
         ...(inheritedSort ? { sort: inheritedSort } : {}),
         ...(hidden ? { isHidden: true as const } : {}),
         _fkLabel: (typeof fieldDef.label === 'string' && fieldDef.label) || fieldName,

@@ -34,7 +34,6 @@ const page = buildDefaultPageSchema(
       { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
       { objectName: 'note', relationshipField: 'parent_id', title: 'Notes' },
     ],
-    history: { entries: [] },
   },
 );
 const columns = buildDefaultPageColumns(page)!;
@@ -72,10 +71,18 @@ describe('RecordPageColumns — the column switches (objectstack#27052)', () => 
     const folded = related.querySelector('[data-record-folded-timeline]')!;
     expect(folded).not.toBeNull();
     expect(folded.getAttribute('aria-label')).toBe('Activity');
-    expect(nodesIn(folded)).toEqual(['record:discussion', 'record:history']);
-    // Lists first, the folded card after them, the footer last.
-    expect(nodesIn(related)).toEqual(['record:related_list', 'record:related_list', 'record:discussion', 'record:history']);
-    expect(related.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
+    // Closed until opened, and its blocks are not mounted while closed, so the
+    // feed reads nothing before the reader asks for it (objectstack#27056).
+    const toggle = folded.querySelector('[data-record-folded-timeline-toggle]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(nodesIn(folded)).toEqual([]);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(nodesIn(folded)).toEqual(['record:activity']);
+    // Lists first, the folded card after them; the meta line closes the
+    // details column (objectstack#27055).
+    expect(nodesIn(related)).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
+    expect(column(container, 'details')!.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
     // The related lists stay siblings of one parent (one empty-fold stack).
     const lists = related.querySelectorAll('[data-node="record:related_list"]');
     expect(lists[0].parentElement).toBe(lists[1].parentElement);
@@ -90,9 +97,27 @@ describe('RecordPageColumns — the column switches (objectstack#27052)', () => 
     expect(within(column(container, 'related')!).getAllByText('task')).toHaveLength(1);
   });
 
-  it('related off, three columns: details | timeline, the related column behind the rail toggle', () => {
+  it('related off, three columns: details | timeline, no related column and no rail toggle (objectstack#27241)', () => {
     const { container } = render(
       <RecordPageColumns tier="three-column" columns={columns} switches={{ timeline: true, related: false }} />,
+    );
+    expect(shown(container)).toBe('details timeline');
+    expect(column(container, 'related')).toBeNull();
+    expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
+  });
+
+  it('related off, two columns: no rail toggle — the switch decides whether the column exists (objectstack#27241)', () => {
+    const { container } = render(
+      <RecordPageColumns tier="two-column" columns={columns} switches={{ timeline: true, related: false }} />,
+    );
+    expect(shown(container)).toBe('details timeline');
+    expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
+    expect(column(container, 'related')).toBeNull();
+  });
+
+  it('related on, two columns: the rail toggle is there and opens the related column (objectstack#27241)', () => {
+    const { container } = render(
+      <RecordPageColumns tier="two-column" columns={columns} switches={{ timeline: true, related: true }} />,
     );
     expect(shown(container)).toBe('details timeline');
     expect(column(container, 'related')).toBeNull();
@@ -100,12 +125,12 @@ describe('RecordPageColumns — the column switches (objectstack#27052)', () => 
     expect(nodesIn(column(container, 'related'))).toEqual(['record:related_list', 'record:related_list']);
   });
 
-  it('both off: details alone; the rail holds the lists and the folded timeline', () => {
+  it('both off: details alone, no rail', () => {
     const { container } = render(
       <RecordPageColumns tier="three-column" columns={columns} switches={{ timeline: false, related: false }} />,
     );
     expect(shown(container)).toBe('details');
-    fireEvent.click(screen.getByTestId('record-related-rail-toggle'));
-    expect(column(container, 'related')!.querySelector('[data-record-folded-timeline]')).not.toBeNull();
+    expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
+    expect(container.querySelector('[data-record-folded-timeline]')).toBeNull();
   });
 });

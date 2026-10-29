@@ -212,15 +212,25 @@ function navTarget(it: RawNav): string | undefined {
 }
 
 /**
+ * The target-bearing branches whose target key the spec makes optional, with
+ * a meaning for its absence: a `report` entry with no `reportName` opens the
+ * app's report index (objectstack#27525). Such an entry names a target, so a
+ * save sends it.
+ */
+const NAV_TARGET_OPTIONAL: ReadonlySet<string> = new Set(['report']);
+
+/**
  * Whether a save leaves this entry out (objectui#11776): it has no `type` (the
  * placeholder an unbind leaves behind), or its `type` is a target-bearing
  * branch and none of that branch's target keys holds a string — the entry the
  * spec refuses for want of a target ("navigation.N.objectName — expected
  * string, received undefined"). A key that holds a string is a target the
- * spec takes, so the save sends it and the server judges it.
+ * spec takes, so the save sends it and the server judges it. A branch in
+ * {@link NAV_TARGET_OPTIONAL} is never left out for want of its key.
  */
 function namesNoTarget(it: RawNav): boolean {
   if (typeof it.type !== 'string') return true;
+  if (NAV_TARGET_OPTIONAL.has(it.type)) return false;
   const reads = NAV_TARGET_READS.get(it.type);
   return !!reads && !reads.some((read) => typeof read(it) === 'string');
 }
@@ -291,6 +301,14 @@ export interface AppNavCanvasProps {
   onPatch?: (patch: Record<string, unknown>) => void;
   selection: { kind: string; id: string } | null;
   onSelectionChange?: (sel: { kind: string; id: string; label?: string } | null) => void;
+  /**
+   * objectstack#27464 — the label of the entry whose rename is typed but not
+   * yet committed (the input differs from the authored label), or `null`. A
+   * rename commits on blur or Enter, so a reload or a tab close before either
+   * drops it; a host reports it as an edit held unsent. Optional: a host with
+   * no departure guard leaves it out.
+   */
+  onRenamePendingChange?: (label: string | null) => void;
 }
 
 export function AppNavCanvas({
@@ -299,6 +317,7 @@ export function AppNavCanvas({
   onPatch,
   selection,
   onSelectionChange,
+  onRenamePendingChange,
 }: AppNavCanvasProps) {
   const locale = useMetadataLocale();
   const targetLabel = useNavTargetLabel();
@@ -477,6 +496,7 @@ export function AppNavCanvas({
               canEdit={!!onPatch}
               onClick={(p, lbl) => onSelectionChange?.({ kind: 'nav', id: p, label: lbl })}
               onRename={(lbl) => renameItem(i, lbl)}
+              onRenamePendingChange={onRenamePendingChange}
               onRemove={() => removeItem(i)}
               onDragStart={() => setDragIndex(i)}
               onDragEnd={() => setDragIndex(null)}
@@ -504,6 +524,7 @@ function NavCardTree({
   canEdit,
   onClick,
   onRename,
+  onRenamePendingChange,
   onRemove,
   onDragStart,
   onDragEnd,
@@ -519,6 +540,7 @@ function NavCardTree({
   canEdit: boolean;
   onClick: (path: string, label: string) => void;
   onRename: (label: string) => void;
+  onRenamePendingChange?: (label: string | null) => void;
   onRemove: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -537,6 +559,7 @@ function NavCardTree({
         canEdit={canEdit && depth === 0}
         onClick={() => onClick(path, navLabel(item, index, locale, targetLabel))}
         onRename={onRename}
+        onRenamePendingChange={onRenamePendingChange}
         onRemove={onRemove}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
@@ -580,6 +603,7 @@ function NavCard({
   canEdit,
   onClick,
   onRename,
+  onRenamePendingChange,
   onRemove,
   onDragStart,
   onDragEnd,
@@ -595,6 +619,7 @@ function NavCard({
   canEdit: boolean;
   onClick: () => void;
   onRename: (label: string) => void;
+  onRenamePendingChange?: (label: string | null) => void;
   onRemove: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -614,6 +639,27 @@ function NavCard({
   React.useEffect(() => {
     if (!editing) setDraft(authored);
   }, [authored, editing]);
+
+  // objectstack#27464 — a typed rename that blur or Enter has not committed
+  // yet is reported, keyed on the label string (AGENTS.md #10). Only a card
+  // that has reported takes it back, so the other cards' mounts never clear it.
+  const pendingRename = editing && draft.trim() !== '' && draft.trim() !== authored ? label : null;
+  const reportRef = React.useRef(onRenamePendingChange);
+  React.useLayoutEffect(() => {
+    reportRef.current = onRenamePendingChange;
+  });
+  const reportedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (pendingRename === null && !reportedRef.current) return;
+    reportedRef.current = pendingRename !== null;
+    reportRef.current?.(pendingRename);
+  }, [pendingRename]);
+  React.useEffect(
+    () => () => {
+      if (reportedRef.current) reportRef.current?.(null);
+    },
+    [],
+  );
 
   return (
     <div className={cn('relative', DEPTH_INDENT[Math.min(depth, DEPTH_INDENT.length - 1)])}>

@@ -13,12 +13,12 @@
 
 ## Summary
 
-145 records under `docs/adr/` (140 numbers), 11 under `ui/docs/adr/` (listed separately below).
+146 records under `docs/adr/` (141 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
-| Accepted | 126 |
-| Proposed | 5 |
+| Accepted | 128 |
+| Proposed | 4 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **145** |
+| **Total** | **146** |
 
 ## Shared numbers
 
@@ -105,7 +105,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0032](./0032-unified-expression-layer.md) | Expression layer for an AI-authored platform — validate-by-default, schema-aware, one CEL language, no silent… | Accepted — implemented; designer builders pending (objectui) (proposed 202… | 2026-06-02 | — | — |
 | [ADR-0033](./0033-ai-assisted-metadata-authoring.md) | AI-assisted metadata authoring — one agent brain, draft-gated review, type-agnostic apply, open-core boundary | Accepted — 2026-06-02 | 2026-06-02 | — | cloud ADR-0025 |
 | [ADR-0034](./0034-transactional-writes-and-ambient-transaction.md) | Robust multi-write transactions (ambient transaction context) | Accepted — implemented (v8.0.0) (calibrated 2026-06-12) | 2026-06-12 | — | — |
-| [ADR-0035](./0035-config-driven-master-detail.md) | Config-driven master-detail (declare on the relationship, forms derive) | Accepted | — | — | — |
+| [ADR-0035](./0035-config-driven-master-detail.md) | Config-driven master-detail (declare on the relationship, forms derive) | Accepted — · Amended (2026-10-28, #27069, maintainer rulings on that card:… | 2026-10-28 | — | — |
 | [ADR-0036](./0036-app-as-rest-api-and-mcp-server.md) | Every app is a REST API + an MCP server — make it visible and connectable after build | Accepted — framework implemented; cloud surfacing pending (proposed 2026-0… | 2026-06-06 | — | — |
 | [ADR-0037](./0037-live-canvas-draft-preview.md) | Live Canvas — draft-overlay live preview while you build | Accepted — 2026-06-10 — all four phases implemented: `previewDrafts` reads… | 2026-06-10 | — | — |
 | [ADR-0038](./0038-build-verification-loop.md) | Build Verification Loop — the agent builds, verifies, and corrects itself | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | cloud ADR-0025 |
@@ -211,7 +211,8 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | — |
 | [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25 · Amended (2026-10-28, ruling `6457475657` on #25769… | 2026-10-25 | — | — |
 | [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) | Outbound connector auth is open tier — OAuth2 grants, vendor app-credential exchange and request signing in o… | Accepted — 2026-10-28. Proposed 2026-10-27 (#26833, which also landed the… | 2026-10-28 | — | — |
-| [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Proposed — 2026-10-28. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-10-28 | — | — |
+| [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md) | Multi-currency — a record currency in a sibling code field, dated exchange rates, and a home-currency amount… | Accepted — 2026-10-28, ruled on objectstack#27119 (ruling `6465431966`, de… | 2026-10-28 | — | — |
+| [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Accepted — 2026-10-28, #27251 · Amended (2026-10-28, #27291 — one clause e… | 2026-10-28 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

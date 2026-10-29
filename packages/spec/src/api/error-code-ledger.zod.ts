@@ -674,6 +674,15 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_REQUEST',
     'ITEM_LOCKED',                // _lock refuses the write/delete (ADR-0010 §3.3)
     'METADATA_CONFLICT',
+    // The metadata doors' half of "one name, one holder" for a permission set
+    // (maintainer rulings Q4 = A, record 6050490870, and A, record
+    // 6063176077): the save door, the draft promotion and the restore doors
+    // refuse a permission-set write whose name another holder already holds,
+    // naming both, 422 — the same code and status `@objectstack/objectql`'s
+    // registration and cold-boot refusals stamp for the same condition (that
+    // package depends on this one, so the string is spelled in each). Served
+    // by the `/meta` write doors through `errorFromThrown`.
+    'NAMESPACE_CONFLICT',
     'NAMESPACE_PREFIX',           // name violates the package namespace-prefix rule
     'NO_DRAFT',
     'NOT_ATTEMPTED',              // data-batch row never ran — an earlier row's failure stopped the batch, to roll back (atomic, #4793) or because continueOnError was unset (#7539)
@@ -784,6 +793,12 @@ export const ERROR_CODE_LEDGER = {
     // the one the transaction was opened on (`CrossDatasourceTransactionWriteError`,
     // `transaction-errors.ts`). Same #8087-gate family as above.
     'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE',
+    // [ADR-0144 D8 rule 4, Open item 9] A write would store a `record`-mode
+    // currency amount beside a blank currency code — a number in no currency.
+    // 400; the driver is never asked to write the row (`RecordCurrencyCodeRequiredError`,
+    // `validation/record-currency-code.ts`); `field` names the code field to
+    // fill. The server never fills a currency in.
+    'ERR_CURRENCY_CODE_REQUIRED',
     'ERR_DATASOURCE_UNAVAILABLE',
     'ERR_DRIVER_CONNECT',
     // [#8846] a `before*` hook moved or cleared the id the engine resolved a
@@ -814,6 +829,35 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#27277] The engine's floor over a plugin driver on an external
+    // datasource (epic #27261 Tier A, ruling 6487532394 on #27277;
+    // `external-driver-floor.ts`). Both are 422
+    // with their status declared on the thrown error (the
+    // `driver-connect-errors.ts` pattern), and neither is an ADR-0015 gate
+    // refusal: `EXTERNAL_WRITE_FORBIDDEN` (403, `@objectstack/spec/shared`)
+    // is the platform's own write switch being off; these are fixed by
+    // changing the payload or the filter.
+    //
+    // The remote system refused a write with a 4xx (its validation, a lock,
+    // a missing record). The message is the remote's own; `details` carries
+    // `remoteStatus`. A remote that failed or did not answer is
+    // ERR_DATASOURCE_UNAVAILABLE / 503 above, not this.
+    'EXTERNAL_WRITE_REFUSED',
+    // A read matched more rows than the engine reads from a plugin driver
+    // for one request (1000). The engine applies the query to the rows the
+    // driver returns, so it refuses rather than answer over a set it only
+    // partly holds. The message prescribes narrowing the filter or mirroring
+    // the data with DataSync.
+    //
+    // Deliberately NOT the standard `MAX_RECORDS_EXCEEDED` (400, `errors.zod.ts`:
+    // a caller-side limit, the request asked for more than a request may
+    // carry). This is a 422 on a VALID query that the remote's size makes
+    // unservable: the request is well-formed and its limit is fine, the
+    // matching set is what cannot be held, and the remedy is the data's
+    // shape (narrow the filter, mirror the data) rather than the request's
+    // form. Ruling 6487532394 on #27277 chose the code and the status;
+    // `standardSynonymOf` deliberately maps neither of these two rows.
+    'EXTERNAL_ROW_CAP_EXCEEDED',
     // [#15823] an `afterFind` handler REPLACED `ctx.result` with something that
     // is not an array, breaking `find()`'s declared `Promise<any[]>`. It was the
     // FIRST of the four `return hookContext.result` sites in `engine.ts` to be
@@ -1558,6 +1602,13 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_REQUEST',
   ],
   '@objectstack/spec': [
+    // [#27237] `door: 'none'` — `ConnectorCredentialRejectedError`
+    // (`integration/connector-provider-errors.ts`), thrown by a connector
+    // provider factory whose upstream refused the instance's credential (401 /
+    // 403, carried as `status`). The automation materializer catches it and
+    // degrades the instance; no HTTP door on this tree answers with it, the
+    // thrown value is the boundary.
+    'CONNECTOR_CREDENTIAL_REJECTED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',

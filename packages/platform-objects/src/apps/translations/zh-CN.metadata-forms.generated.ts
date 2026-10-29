@@ -618,15 +618,19 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "货币配置",
-        helpText: "此字段使用哪种货币——货币字段，或返回类型为“货币”的公式字段。未设置时为 dynamic 模式。两种模式下值都是一个纯数字。"
+        helpText: "此字段使用哪种货币——货币字段，或返回类型为“货币”的公式字段。未设置时为 dynamic 模式。任何模式下值都是一个纯数字。"
       },
       "currencyConfig.currencyMode": {
         label: "货币模式",
-        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。"
+        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。record：每条记录有自己的货币，保存在 currencyField 指向的字段中。"
+      },
+      "currencyConfig.currencyField": {
+        label: "币种字段",
+        helpText: "仅用于 record 模式，且在该模式下必填：本对象上保存每条记录 ISO 4217 币种代码的字段——一个声明了 valueDomain iso_4217_currency 的文本字段，惯例命名为 currency_code。"
       },
       "currencyConfig.defaultCurrency": {
         label: "默认货币",
-        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。fixed 模式下必填，不会自动填入。dynamic 模式下不读取。"
+        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。fixed 模式下必填，不会自动填入。dynamic 模式下不读取；record 模式下不允许设置。"
       },
       step: {
         label: "步进值",
@@ -812,10 +816,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "summaryOperations.filter": {
         label: "筛选",
         helpText: "仅聚合匹配该判定式的子记录（例如 status == received）"
-      },
-      externalId: {
-        label: "外部 ID",
-        helpText: "标记为外部 ID 用于 upsert 操作"
       },
       storage: {
         label: "存储约束",
@@ -1877,7 +1877,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "所需权限",
-        helpText: "调用此动作必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D4）。平台动作路由会以 403 拒绝其他调用方（script、flow 和 modal 动作，以及 MCP/AI 路径），并对他们隐藏按钮。type 为 api 的动作由浏览器直接调用其端点，因此该端点必须自行再次检查。"
+        helpText: "调用此动作必须持有的能力（权限集的 systemPermissions），列出的每一项都必须持有（ADR-0066 D4）。平台动作门对它分派的每一次调用都以 403 拒绝其他调用方（包括 MCP/AI 路径），并对他们隐藏按钮。type 为 api 的动作，其端点仍可被直接调用，因此该端点仍须自行检查这些能力；target 不同源的 api 动作，平台在服务端不做任何检查。"
       },
       ai: {
         label: "AI 暴露",

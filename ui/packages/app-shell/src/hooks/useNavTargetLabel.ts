@@ -45,6 +45,11 @@
  * A target with no label answers `undefined` — the renderer then falls through
  * the spec's ladder and, at the bottom, to the target's machine name.
  *
+ * The app's report index (`reportIndex`, a `report` entry with no
+ * `reportName`, objectstack#27525) is named by no metadata record: it answers
+ * the console's own wording for that page, `sidebar.allReports`, the text the
+ * console's injected index row showed before navigation declared it.
+ *
  * ## A designer's pending drafts — the last rung (objectui#11862)
  *
  * A draft-only object or dashboard is in no published list, so the metadata
@@ -135,7 +140,7 @@ function listViewsOf(def: LabelledRecord | undefined): Record<string, LabelledRe
 export function useNavTargetLabel(): NavTargetLabelResolver {
   const metadata = useMetadata();
   const { objectLabel, viewLabel, dashboardLabel } = useObjectLabel();
-  const { language } = useObjectTranslation();
+  const { language, t } = useObjectTranslation();
   const drafts = useContext(DraftTargetLabels);
 
   return useMemo<NavTargetLabelResolver>(
@@ -159,10 +164,12 @@ export function useNavTargetLabel(): NavTargetLabelResolver {
             metadataText(def?.label, language) ?? draftText(drafts, 'dashboard', target.dashboardName, language);
           return nonEmpty(dashboardLabel({ name: target.dashboardName, label: text ?? '' }));
         }
+        case 'reportIndex':
+          return nonEmpty(t('sidebar.allReports', { defaultValue: 'All reports' }));
         default:
           return undefined;
       }
     },
-    [metadata, objectLabel, viewLabel, dashboardLabel, language, drafts],
+    [metadata, objectLabel, viewLabel, dashboardLabel, language, t, drafts],
   );
 }

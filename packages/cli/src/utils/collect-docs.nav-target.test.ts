@@ -15,6 +15,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { collectAndLintDocs, lintDocNavTargets } from './collect-docs.js';
 
 const app = (navigation: unknown[]) => ({ name: 'crm_app', label: 'CRM', navigation });
@@ -86,6 +87,40 @@ describe('docs/nav-target — a doc nav item must open something this package ha
       manifest: { ...STACK.manifest, navigationContributions: [{ app: 'setup', items: [{ id: 'nav_crm_help', type: 'doc', doc: 'ghost_doc' }] }] },
     }, DOCS);
     expect(issues.map((i) => i.path)).toEqual(['apps/setup/navigation/nav_crm_help']);
+  });
+
+  it('judges an app a package body carries on a multi-package `preserve` artifact', () => {
+    // The real composer: a `preserve` artifact keeps `apps` in the package body, not at its top level.
+    const composed = (doc: string) => JSON.parse(JSON.stringify(composeStacks([
+      defineStack({ manifest: { id: 'com.example.svc', name: 'svc', namespace: 'svc', version: '1.0.0', type: 'app' } } as never, { strict: false }),
+      defineStack({
+        manifest: { id: 'com.example.crm', name: 'crm', namespace: 'crm', version: '1.0.0', type: 'app' },
+        apps: [app([{ id: 'nav_page', type: 'doc', label: 'Guide', doc }])],
+      } as never, { strict: false }),
+    ], { manifest: 'preserve' }))) as Record<string, unknown>;
+    expect(composed('crm_lead_guide').apps).toBeUndefined();
+    expect(lintDocNavTargets(composed('crm_lead_guide'), DOCS)).toEqual([]);
+    const issues = lintDocNavTargets(composed('crm_lead_gide'), DOCS);
+    expect(issues.map((i) => [i.rule, i.path])).toEqual([['docs/nav-target', 'apps/crm_app/navigation/nav_page']]);
+  });
+
+  it('judges the doc entries every package body contributes on a multi-package `preserve` artifact, each once', () => {
+    // The real composer: the top-level manifest is the last package's (the owner's) copy, so a
+    // non-owner package's contributions sit only in its body.
+    const contribution = (id: string, doc: string) => [{ app: 'setup', items: [{ id, type: 'doc', doc }] }];
+    const composed = (svc: unknown, crm?: unknown) => JSON.parse(JSON.stringify(composeStacks([
+      defineStack({ manifest: { id: 'com.example.svc', name: 'svc', namespace: 'svc', version: '1.0.0', type: 'app', navigationContributions: svc } } as never, { strict: false }),
+      defineStack({ manifest: { id: 'com.example.crm', name: 'crm', namespace: 'crm', version: '1.0.0', type: 'app', ...(crm ? { navigationContributions: crm } : {}) } } as never, { strict: false }),
+    ], { manifest: 'preserve' }))) as Record<string, unknown>;
+    const nonOwner = composed(contribution('nav_svc_help', 'ghost_doc'));
+    expect((nonOwner.manifest as Record<string, unknown>).navigationContributions).toBeUndefined();
+    expect(lintDocNavTargets(composed(contribution('nav_svc_help', 'crm_intro')), DOCS)).toEqual([]);
+    expect(lintDocNavTargets(nonOwner, DOCS).map((i) => [i.rule, i.path]))
+      .toEqual([['docs/nav-target', 'apps/setup/navigation/nav_svc_help']]);
+    // The owner contributes too: its top-level copy is not judged a second time.
+    const both = composed(contribution('nav_svc_help', 'ghost_doc'), contribution('nav_crm_help', 'ghost_doc'));
+    expect(lintDocNavTargets(both, DOCS).map((i) => i.path))
+      .toEqual(['apps/setup/navigation/nav_svc_help', 'apps/setup/navigation/nav_crm_help']);
   });
 
   it('resolves a book declared on a package body, and that package id as its implicit book', () => {

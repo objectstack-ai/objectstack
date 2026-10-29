@@ -67,7 +67,6 @@ import { NavigationModeSchema, resolveI18nLabel, type I18nLabel, type Navigation
 import { InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
 import { FieldsListEditor } from '../metadata-admin/previews/FieldsListEditor.js';
 import { useObjectFields } from '../metadata-admin/previews/useObjectFields.js';
-import { foldStoredListOptions } from '../metadata-admin/previews/ViewPreview.js';
 import { colFieldName } from '../metadata-admin/previews/view-column-io.js';
 import { WIDGETS, type ObjectFieldOption } from '../metadata-admin/widgets.js';
 import { failed, loaded, type LoadState } from '../metadata-admin/loadState.js';
@@ -181,14 +180,14 @@ function withListBody(row: Row, body: Row): Row {
 }
 
 /**
- * The view as one entry of `object-view`'s `listViews`: its list body, with a
- * stored `options.KIND` bag folded as the Studio's view preview folds it
- * (`foldStoredListOptions`), and the item's label.
+ * The view as one entry of `object-view`'s `listViews`: its list body and the
+ * item's label. (A stored `options.KIND` bag is folded onto the body's blocks
+ * by the server before the row reaches here, #25923.)
  */
 export function namedListViewOf(row: Row): Row {
   const body = listBodyOf(row);
   const label = row.label ?? body.label;
-  return { ...foldStoredListOptions(body), ...(label !== undefined ? { label } : {}) };
+  return { ...body, ...(label !== undefined ? { label } : {}) };
 }
 
 /**
@@ -909,7 +908,11 @@ export function ObjectListViewInspector({
     ? failed(fieldState.error)
     : fieldState.loading
       ? { status: 'loading' }
-      : loaded(fields.map((f) => ({ name: f.name, label: f.label, type: f.type })));
+      : loaded(
+          // `options` ride along for the filter's picklist value picker
+          // (objectstack#27515); the other pickers read name, label and type.
+          fields.map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.options ? { options: f.options } : {}) })),
+        );
   const labelOf = (name: string) => fields.find((f) => f.name === name)?.label ?? name;
   const sort = sortEntriesOf(body.sort);
   const sortSummary = sort

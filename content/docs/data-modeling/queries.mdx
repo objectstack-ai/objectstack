@@ -322,6 +322,10 @@ This object form of a field node isn't wired up for top-level `fields` projectio
 object's schema is registered, the engine's unknown-field filter compares each entry against
 the schema's field names via `String(f)`, so an object entry never matches and is silently
 dropped from the projection — the aliased field is simply missing from results, no error.
+That holds only while some other entry is known: when **every** top-level `fields` entry is
+unknown (object-form entries included), `engine.find()` / `findOne()` refuse the read with
+`400 VALIDATION_ERROR` naming the requested columns, instead of reading every column. A mix of
+known and unknown entries still drops the unknown ones and projects the rest.
 
 Dotted relationship paths (`'owner.name'`) fare no better: the unknown-field filter validates
 only the **head** segment and keeps the path, but there is no populate step anywhere in the
@@ -536,10 +540,12 @@ Only `query` and `fields` are implemented. The engine expands `search` into a dr
 **narrow** the scan within the server-resolved searchable set — the object's declared
 `searchableFields`, or a text-like auto-default when none are declared. Over the
 REST/protocol ingress a name outside that set is `400 INVALID_FIELD`, with distinct
-messages for a field that does not exist and a real field that is not searchable. The
-engine used to drop unknown names and fall back to the full searchable set — a parameter
-that exists to narrow a search, silently widening it. Internal callers reaching
-`engine.find()` directly are unaffected.
+messages for a field that does not exist and a real field that is not searchable. An
+override that names no field at all (`?$searchFields=`, `?$searchFields=,`, an empty
+array) is `400 VALIDATION_ERROR`, as `$select=` is; leave the parameter out to scan the
+default set. The engine used to drop unknown names and fall back to the full searchable
+set — a parameter that exists to narrow a search, silently widening it. Internal callers
+reaching `engine.find()` directly are unaffected.
 </Callout>
 
 ### Searching by a related record's title — mirror the value

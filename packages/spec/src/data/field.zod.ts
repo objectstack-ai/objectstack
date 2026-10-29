@@ -535,6 +535,50 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
 };
 
 /**
+ * [ADR-0144 D2] `currencyMode: 'record'` ⇔ `currencyField`, and no
+ * `defaultCurrency` beside it. A `record`-mode amount has no currency until a
+ * pointer names the sibling code field; a pointer under `dynamic` / `fixed` is
+ * read by nothing, and neither is a `defaultCurrency` under `record` — each is
+ * the declared-but-inert shape ADR-0078 keeps out. `record` is new, so no
+ * stored row carries the second one (unlike `dynamic`, whose inert code is
+ * tolerated for the rows #27157 left behind). One located issue per inert or
+ * missing key; what the pointer NAMES is the object's to judge (object.zod.ts).
+ */
+function refuseRecordModeKeyMismatch(
+  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (config.currencyMode === 'record' && config.defaultCurrency !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultCurrency'],
+      message:
+        `\`defaultCurrency\` is not read under \`currencyMode: 'record'\`, where each record names its own currency in `
+        + 'the field `currencyField` names: delete `defaultCurrency`, or use `currencyMode: \'fixed\'` if the field has '
+        + 'one currency.',
+    });
+  }
+  if (config.currencyMode === 'record' && config.currencyField === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['currencyField'],
+      message:
+        '`currencyMode: \'record\'` needs `currencyField`: name the field on this object that holds each '
+        + 'record\'s ISO 4217 code — a `text` field with `valueDomain: \'iso_4217_currency\'`, conventionally '
+        + '`currency_code` — or use `currencyMode: \'fixed\'` (one currency) or `\'dynamic\'` (the tenant default).',
+    });
+  } else if (config.currencyMode !== 'record' && config.currencyField !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['currencyField'],
+      message:
+        `\`currencyField\` is read only under \`currencyMode: 'record'\`, and this config is \`${config.currencyMode}\`: `
+        + 'set `currencyMode: \'record\'` if each record carries its own currency, or delete `currencyField`.',
+    });
+  }
+}
+
+/**
  * The refusal a `fixed` currency config without a code meets (#27157, ruling
  * 6464202770 on #27119, Q2 = X). Until this ruling the schema filled the code
  * in with `'CNY'`, so the field silently became a yuan field.
@@ -547,11 +591,41 @@ const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
 
 /** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
 function refuseFixedCurrencyWithoutCode(
-  config: { currencyMode: 'dynamic' | 'fixed'; defaultCurrency?: string },
+  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string },
   ctx: z.RefinementCtx,
 ): void {
   if (config.currencyMode === 'fixed' && config.defaultCurrency === undefined) {
     ctx.addIssue({ code: 'custom', path: ['defaultCurrency'], message: CURRENCY_CONFIG_FIXED_WITHOUT_CODE });
+  }
+}
+
+/**
+ * Does a roll-up with this `summaryOperations.function` read a child field?
+ *
+ * `count` counts the matching child rows and reads no field, so it needs no
+ * `summaryOperations.field`; `sum`, `min`, `max` and `avg` aggregate one, so
+ * they do. This is the ONE place that rule is written: the schema's refusal
+ * below and Studio's roll-up editor (which hides the child-field control for
+ * `count`) both read it. An unset function answers `true`, so an editor still
+ * offers the control before a function is picked.
+ */
+export function summaryFunctionReadsField(fn: string | undefined): boolean {
+  return fn !== 'count';
+}
+
+/** The refusal a non-`count` roll-up without `summaryOperations.field` meets, naming its function. */
+const summaryWithoutFieldMessage = (fn: string): string =>
+  `\`summaryOperations.function: '${fn}'\` needs \`summaryOperations.field\`, the child field the ${fn} `
+  + 'aggregates: name it (e.g. `field: \'amount\'`), or use `function: \'count\'`, which counts the '
+  + 'child rows and reads no field.';
+
+/** `sum`/`min`/`max`/`avg` ⇒ an authored `field`; `count` reads none, so it needs none. */
+function refuseSummaryWithoutField(
+  ops: { function: string; field?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (summaryFunctionReadsField(ops.function) && ops.field === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['field'], message: summaryWithoutFieldMessage(ops.function) });
   }
 }
 
@@ -590,33 +664,22 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   aliases: { mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
   guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
-  currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way.'),
-  defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency.'),
+  currencyMode: z.enum(['dynamic', 'fixed', 'record']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1).'),
+  defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own.'),
+  // ADR-0144 D2 — the pointer of a `record`-mode amount. Optional at the key
+  // level and never empty; `refuseRecordModeKeyMismatch` below makes it
+  // required under `record` and refuses it under the other two modes, and the
+  // object's `superRefine` (`refuseDishonestRecordCurrencyField`,
+  // object.zod.ts) checks what it names, because only the object holds the
+  // sibling field map.
+  currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty.'),
   // #19992 — no `.overwrite()` here any more: the #7918 ISO 4217 contradiction
   // check and the #11423 default-materializing `.overwrite()` both existed only
   // for the removed `precision` key (see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE
-  // above). #27157 — the one refinement left is `fixed` ⇒ a code, below; parse
-  // output is `{ currencyMode }` plus the `defaultCurrency` the author wrote.
-}).superRefine(refuseFixedCurrencyWithoutCode));
-
-/**
- * Currency Value Schema
- * Runtime value structure for currency fields
- *
- * Note: Currency codes are validated by length only (3 characters) to support flexibility.
- * See CurrencyConfigSchema for details on currency code validation strategy.
- *
- * @deprecated This shape was never consumed and contradicts the actual runtime
- * contract: a `currency` field's value is a BARE NUMBER everywhere (validator,
- * SQL driver `float` column, import coercion, field-zoo oracle); the currency
- * code lives in field config (`CurrencyConfigSchema`), not per value. Use
- * `valueSchemaFor` from `field-value.zod.ts` (ADR-0104 D1). Removal rides the
- * next spec major.
- */
-export const CurrencyValueSchema = lazySchema(() => z.object({
-  value: z.number().describe('Monetary amount'),
-  currency: z.string().length(3).describe('Currency code (ISO 4217)'),
-}));
+  // above). #27157 — `fixed` ⇒ a code; ADR-0144 D2 — `record` ⇔ a pointer and
+  // no code, both below. Parse output is `{ currencyMode }` plus the `defaultCurrency` and
+  // `currencyField` the author wrote.
+}).superRefine(refuseFixedCurrencyWithoutCode).superRefine(refuseRecordModeKeyMismatch));
 
 /**
  * Address Schema — structured address for the `address` field type.
@@ -1734,17 +1797,20 @@ export const FieldSchema = lazySchema(() => {
    * Tri-state (ADR-0085 semantic-role style — a statement about the
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
-   *   - `true` / absent  → shown as a supporting list: a side card beside the
-   *                       record (under the tabbed page, the shared "Related"
-   *                       tab). There is no count-based auto-split.
+   *   - `true` / absent  → shown as a supporting list: a side card in the
+   *                       record's related column (under the tabbed page, the
+   *                       shared "Related" tab). There is no count-based
+   *                       auto-split.
    *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): drawn in
-   *                       the record's body — the details column, after the
-   *                       field sections — as a full-width table, not as a side
-   *                       card (under the tabbed page, its own tab). A field
-   *                       group's `relatedList` can place it among the field
-   *                       sections instead. `'primary'` no longer ORDERS lists:
-   *                       the parent's `ObjectSchema.relatedLists` does, among
-   *                       the body tables and among the side cards alike.
+   *                       the record's body — the details column, after its
+   *                       first field section — as a full-width table, not as
+   *                       a side card (under the tabbed page, inside the
+   *                       Details tab: a primary list gets no tab of its
+   *                       own). A field group's `relatedList` can place it
+   *                       among the field sections instead. `'primary'` no
+   *                       longer ORDERS lists: the parent's
+   *                       `ObjectSchema.relatedLists` does, among the body
+   *                       tables and among the side cards alike.
    *
    * Absent on a `master_detail` field that sets `inlineEdit`, the list is
    * `'primary'` by default: line items edited inside the parent's form are part
@@ -1762,7 +1828,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card beside the record (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after the field sections) as a full-width table (its own tab on the tabbed page). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card in the record\'s related column (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after its first field section) as a full-width table (inside the Details tab on the tabbed page, with no tab of its own). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
@@ -1937,7 +2003,10 @@ export const FieldSchema = lazySchema(() => {
     },
   }, {
     object: z.string().describe('Source child object name for roll-up'),
-    field: z.string().describe('Field on child object to aggregate (ignored for count)'),
+    // Required for every function but `count` (`summaryFunctionReadsField`):
+    // the `.superRefine` at the end of this object refuses its absence there.
+    // A `count` may still carry one, and it stays ignored, as it always was.
+    field: z.string().optional().describe('Field on the child object to aggregate. Required for sum, min, max and avg; count counts the child rows and reads no field, so a count may omit it (ignored when given).'),
     function: z.enum(['count', 'sum', 'min', 'max', 'avg']).describe('Aggregation function to apply'),
     relationshipField: z.string().optional().describe('FK field on the child pointing back to this parent. Auto-detected from the child\'s lookup/master_detail field referencing this object when omitted; set explicitly only when the child has more than one such reference.'),
     /**
@@ -1953,7 +2022,7 @@ export const FieldSchema = lazySchema(() => {
      * parent on its next write like any other child update.
      */
     filter: FilterConditionSchema.optional().describe("Predicate restricting which child rows are aggregated (a query `where` FilterCondition, e.g. { status: 'received' } or { type: { $in: ['signup','trial'] } }). Omit to aggregate all children. Lets one child object feed multiple filtered roll-ups."),
-  }).optional().describe('Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted.'),
+  }).superRefine(refuseSummaryWithoutField).optional().describe('Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted.'),
 
   /** Enhanced Field Type Configurations */
   // Pruned 2026-06 — per-type *display* knobs that were dead in both layers (no
@@ -3099,7 +3168,6 @@ export type Address = z.input<typeof AddressSchema>;
 export type CurrencyConfig = z.input<typeof CurrencyConfigSchema>;
 /** Post-parse shape of {@link CurrencyConfig} — defaults applied, transforms run (ADR-0122). */
 export type CurrencyConfigParsed = z.infer<typeof CurrencyConfigSchema>;
-export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
 
 /**
  * Field Factory Helper

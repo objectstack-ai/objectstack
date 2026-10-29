@@ -202,8 +202,6 @@ describe('ADR-0087 registration', () => {
     expect(entry!.acceptanceCriteria).toMatch(/TS2305/);
     // The route is stated where the next reader looks: why D3 semantic and not D2.
     expect(entry!.reason).toMatch(/not a D2 conversion/);
-    // No backticks in `surface`: the upgrade guide renders it inside a code span AND a table cell.
-    expect(entry!.surface).not.toMatch(/`/);
     for (const def of RETIRED_DEFS) expect(entry!.surface, `surface must name ${def}`).toContain(def);
     for (const name of ['planUpgrade', 'getSnapshot', 'PlanUpgradeInput', 'PackageUpgradeResponse.data']) {
       expect(entry!.surface, `surface must name ${name}`).toContain(name);

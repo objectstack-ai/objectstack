@@ -233,6 +233,13 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.canvas.removeSectionHint': '删除分组（字段移至未分组）',
   'designer.canvas.renameHint': '双击重命名',
   'designer.canvas.sectionN': '分组 {n}',
+  // External (ADR-0015) objects: field source and write state
+  'designer.external.from': '来自 {datasource}',
+  'designer.external.readOnly': '只读',
+  'designer.external.writable': '可写',
+  'designer.external.unconfirmed': '写入未确认',
+  'designer.external.unconfirmedHint': '写入需要数据源 {datasource} 开启 allowWrites，且本对象开启 writable；未能读取该数据源。',
+  'designer.external.notice': '外部对象：字段映射数据源 {datasource} 中的表，不能在此添加、删除、重命名字段或更改字段类型。',
   // Field stubs (disabled runtime-preview placeholders)
   'designer.stub.pickDate': '选择日期…',
   'designer.stub.off': '关闭',
@@ -270,7 +277,6 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.description': '描述',
   'designer.field.readonly': '只读',
   'designer.field.hidden': '隐藏',
-  'designer.field.externalId': '外部 ID',
   'designer.field.trackHistory': '记录历史',
   'designer.field.placeholder': '占位符',
   'designer.field.group': '分组',
@@ -351,7 +357,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.summary.field': '汇总的子字段',
   'designer.field.summary.relationshipField': '子关系字段(可选)',
   'designer.field.summary.setObjectFirst': '请先选择子对象',
-  'designer.field.summary.countFieldHint': '计数时不参与计算,但规范要求必填——任选一个子字段即可。',
+  'designer.field.summary.countFieldHint': '计数统计子记录条数,无需选择子字段。',
   'designer.field.summary.filterSection': '筛选(参与汇总的子记录)',
   'designer.field.summary.addFilter': '添加条件',
   'designer.field.summary.noFilter': '未设筛选 — 所有子记录都参与汇总。',
@@ -368,6 +374,17 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.maxLength': '最大长度',
   'designer.field.valueDomain': '值域',
   'designer.field.valueDomainNone': '— 无 —',
+  // ADR-0144 D2 — the currency section (`CurrencyConfigField`).
+  'designer.field.currency.mode': '币种模式',
+  'designer.field.currency.modeDynamic': '动态 — 组织币种',
+  'designer.field.currency.modeFixed': '固定 — 本字段一种币种',
+  'designer.field.currency.modeRecord': '按记录 — 每条记录自带币种',
+  'designer.field.currency.defaultCurrency': '币种（ISO 4217 代码）',
+  'designer.field.currency.currencyField': '币种字段',
+  'designer.field.currency.currencyFieldNone': '— 选择币种字段 —',
+  'designer.field.currency.createCodeField': '创建币种字段',
+  'designer.field.currency.codeFieldLabel': '币种',
+  'designer.field.currency.recordHint': '列出本对象中值域为 ISO 4217 币种的文本字段。每条记录在其中保存自己的币种代码，金额按该币种显示。',
   // Object basics (no-selection default inspector)
   'designer.object.kind': '对象',
   'designer.object.section.basic': '基础信息',
@@ -593,6 +610,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.appNav.choose': '— 请选择 —',
   'engine.inspector.appNav.noTargets': '还没有可链接的此类型条目。',
   'engine.inspector.appNav.unboundHint': '选定目标之前,该导航项保留在此处,但不会写入保存的导航。',
+  'engine.inspector.appNav.reportIndex': '报表索引',
+  'engine.inspector.appNav.reportIndexHint': '未选定报表时,该导航项打开应用的报表索引:列出应用自带、且当前成员可以打开的全部报表。',
   'engine.inspector.appNav.actionHint': '只有未绑定到对象的动作才能从菜单运行。',
   'engine.inspector.appNav.docPage': '文档页',
   'engine.inspector.appNav.book': '文档集',
@@ -642,7 +661,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.pageBlock.option.formType.simple': '简单',
   'engine.inspector.pageBlock.option.formType.tabbed': '标签页',
   'engine.inspector.pageBlock.option.formType.wizard': '向导',
-  'engine.inspector.pageBlock.option.formType.split': '分栏',
   'engine.inspector.pageBlock.option.formType.drawer': '抽屉',
   'engine.inspector.pageBlock.option.formType.modal': '弹窗',
   'engine.inspector.pageBlock.field.object-form.layout': '布局',
@@ -1982,9 +2000,9 @@ const STUDIO_ZH: Record<string, string> = {
     '记录可见性通过主从(master-detail)关系继承自父级(主)记录。',
   'engine.studio.settings.capabilities': '能力开关(enable.*)',
   'engine.studio.settings.capabilitiesHint': '记录页能力 —— 这里的每个开关都由运行时真实强制',
-  'engine.studio.settings.capTrackHistory': '历史标签页(trackHistory)',
+  'engine.studio.settings.capTrackHistory': '字段变更历史(trackHistory)',
   'engine.studio.settings.capTrackHistoryDesc':
-    '在记录页显示只读的历史标签页(审计轨迹)。配合字段级历史跟踪可得到可读的字段级差异;审计采集本身始终开启(合规要求)。',
+    '显示记录的字段变更:在默认记录页上,它们并入记录唯一的时间线,归在「变更」筛选下。配合字段级历史跟踪可选择汇总哪些字段的差异;审计采集本身始终开启(合规要求)。',
   'engine.studio.settings.capFiles': '附件(files)',
   'engine.studio.settings.capFilesDesc':
     '记录页通用附件面板(上传/下载/删除)。关闭后服务端同时拒绝指向该对象的新附件。',
@@ -2663,6 +2681,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.needsRuleField': '规则「{rule}」需要选择一个字段',
   'engine.studio.held.needsRuleMessage': '规则「{rule}」需要一条错误消息',
   'engine.studio.held.widgetNeedsInput': '组件「{widget}」的「{input}」需要填写',
+  // objectstack#27464 — a navigation rename typed but not committed yet.
+  'engine.studio.held.navRename': '导航项「{item}」的重命名尚未完成',
+  'engine.studio.held.celInvalid': '字段「{field}」的表达式有错误需要修正',
+  'engine.studio.held.celInvalidRule': '规则「{rule}」的表达式有错误需要修正',
+  'engine.studio.held.celInvalidAction': '动作「{action}」的表达式有错误需要修正',
+  'engine.studio.held.inspectorInvalid': '「{item}」在检查器中有错误需要修正',
   'engine.studio.held.line': '尚未保存：{clause}。更改已保留在此处，补全后会自动保存。',
   'engine.studio.held.publish': '未发布：{clause}，该更改尚未保存。请先补全，再发布。',
   'engine.studio.held.inputHint': '必填。填写后才会保存更改。',
@@ -2884,10 +2908,27 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.interfaces.create.measure': '度量',
   'engine.studio.interfaces.create.measurePlaceholder': '选择度量…',
   'engine.studio.interfaces.create.reportHint': '报表展示一个数据集的度量。创建后可在属性面板中添加更多度量与分组。',
-  'engine.studio.interfaces.create.noDatasets': '还没有可用于报表的数据集。报表展示的是数据集的度量,请先创建数据集。',
   'engine.studio.interfaces.create.datasetsFailed': '无法加载数据集:{error}',
   'engine.studio.interfaces.create.noMeasures': '这个数据集没有声明度量,报表无法展示它。',
   'engine.studio.interfaces.create.needsBinding': '请选择这个报表读取的数据集,以及其中的一个度量。',
+  // objectstack#27518 — New dataset, beside the report dialog's and the widget inspector's dataset pickers.
+  'engine.studio.interfaces.newDataset.open': '新建数据集',
+  'engine.studio.interfaces.newDataset.title': '新建数据集',
+  'engine.studio.interfaces.newDataset.description':
+    '存为本包的草稿。数据集统计所读对象的记录数;报表与图表展示它的度量,并按你选择的字段分组。',
+  'engine.studio.interfaces.newDataset.nameLabel': '数据集名称',
+  'engine.studio.interfaces.newDataset.namePlaceholder': '数据集名称(如:工单)',
+  'engine.studio.interfaces.newDataset.idPlaceholder': '标识符(如:work_orders)',
+  'engine.studio.interfaces.newDataset.object': '对象',
+  'engine.studio.interfaces.newDataset.needsObject': '请选择这个数据集读取的对象。',
+  'engine.studio.interfaces.newDataset.groupBy': '分组',
+  'engine.studio.interfaces.newDataset.groupByHint': '图表为这些字段的每个取值各画一根柱或一块扇区。',
+  'engine.studio.interfaces.newDataset.totals': '合计',
+  'engine.studio.interfaces.newDataset.totalsHint': '此处勾选的每个数字字段都会求和。每个数据集也都会统计记录数。',
+  'engine.studio.interfaces.newDataset.noFields': '这个对象还没有可分组或合计的字段。数据集将统计它的记录数。',
+  'engine.studio.interfaces.newDataset.taken': '已有标识为「{name}」的数据集,请换一个标识。',
+  'engine.studio.interfaces.newDataset.noPackageDatasets':
+    '还没有读取本包对象的数据集。报表与图表展示的是数据集的度量:请用「新建数据集」创建一个。',
   'engine.studio.interfaces.create.page': '新建页面',
   'engine.studio.interfaces.create.pageNameLabel': '页面名称',
   'engine.studio.interfaces.create.pageNamePlaceholder': '页面名称(如:团队手册)',
@@ -2945,7 +2986,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.designer.group.collapseHint': '控制该分组在真实表单（预览）中的折叠方式。',
   'engine.studio.designer.group.relatedListLabel': '在此放置关联表(relatedList)',
   'engine.studio.designer.group.relatedListNone': '无 —— 一组字段',
-  'engine.studio.designer.group.relatedListHint': '该分组将代表这张关联列表的表格,显示在记录详情栏的这个位置。放置表格的分组不含字段。',
+  'engine.studio.designer.group.relatedListHint': '该分组将代表这张关联列表的表格,显示在记录详情栏的这个位置。只列出正文表格:标为「主要（进正文）」的关系,或内嵌编辑的主从子对象。放置表格的分组不含字段。',
+  'engine.studio.designer.group.relatedListNotBody': '“{entry}”不是正文表格(是侧栏卡片或已隐藏的列表),记录页不会在此绘制任何内容,发布时会被拒绝。请把该关系标为「主要（进正文）」,或选择「无」。',
   'engine.studio.designer.group.relatedListHasFields': '请先把本分组的字段移到其他分组:放置关联表的分组不含字段。',
   'engine.studio.designer.group.relatedListLoading': '正在加载指向本对象的对象…',
   // objectui#11788 — 新建自动化对话框里不选触发方式时的选项。
@@ -2965,6 +3007,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.owd.saved': '已保存 {count} 个对象草稿。',
   'engine.studio.owd.unsaved': '未保存',
   'engine.studio.owd.byParent': '受父级控制 → {master}',
+  'engine.studio.owd.cbpPrereqTitle': '将该关系设为必填？',
+  'engine.studio.owd.cbpPrereqDesc':
+    '受父级控制需要恰好一个必填的主从字段。以此方式保存 {object} 会把下面的关系设为必填，服务器将其标记为需要确认的变更：',
+  'engine.studio.owd.cbpPrereqConfirm': '设为必填并保存',
   'engine.studio.owd.byParentNoMaster': '受父级控制 —— 没有主记录:该对象需要恰好一个必填的主从字段',
   'engine.studio.owd.masterTip':
     '受父级控制 —— 记录可见性继承自主记录。',
@@ -3182,7 +3228,7 @@ const STUDIO_ZH: Record<string, string> = {
   // is a Chinese name and a short Chinese phrase.
   //
   // This is a translation, not an override. The English stays exactly where
-  // the other 21 node types keep theirs — `defineActionDescriptor` in the
+  // the other node types keep theirs — `defineActionDescriptor` in the
   // framework's plugin-approvals — and `translateNodeLabel`/`translateNodeHint`
   // fall back to it whenever this table has no row, which is the whole reason
   // the en table carries no `engine.flowNode.*` entry at all. Wording follows

@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // `@object-ui/plugin-chatbot` is already a static member of this package's
 // barrel closure (`index.ts` re-exports `AiChatPage`, which imports it), so
 // this adds no package edge and no eager bundle weight.
-import { detectPendingApproval } from '@object-ui/plugin-chatbot/core';
+import { chartAnswerParts, detectPendingApproval } from '@object-ui/plugin-chatbot/core';
 
 /** Minimal UIMessage shape compatible with `@ai-sdk/react`'s `useChat`. */
 export interface HydratedUIMessagePart {
@@ -167,6 +167,12 @@ interface CachedProposedPlan {
   questions: string[];
   assumptions: string[];
   targetApp?: string;
+  /**
+   * objectstack#27480 — the extend-or-new question a `decision: 'iterate_or_new'`
+   * plan asks. Kept through the cache because without it a cache-fallback
+   * reload turns the question back into a plan with a "Build it" button.
+   */
+  iterateOrNew?: { app?: { name: string; label?: string } };
 }
 
 interface CacheableChatToolInvocation {
@@ -213,6 +219,8 @@ interface CacheableChatMessage {
   role: 'user' | 'assistant' | 'system';
   content?: string;
   toolInvocations?: CacheableChatToolInvocation[];
+  /** The answer's charts, each at its `textOffset` into `content`. */
+  charts?: Parameters<typeof chartAnswerParts>[1];
 }
 
 /**
@@ -254,6 +262,13 @@ function proposedPlanToCachedResult(pp: CachedProposedPlan): Record<string, unkn
     counts: pp.counts,
     questions: pp.questions,
     ...(pp.targetApp ? { targetApp: pp.targetApp } : {}),
+    // objectstack#27480 — the two keys `detectProposedPlan` reads the question from.
+    ...(pp.iterateOrNew
+      ? {
+          decision: 'iterate_or_new',
+          ...(pp.iterateOrNew.app ? { existingAppOverlap: pp.iterateOrNew.app } : {}),
+        }
+      : {}),
     blueprint: {
       objects: pp.objects.map((o) => ({
         name: o.name,
@@ -443,10 +458,15 @@ export function sanitizeChatMessagesForCache(
 ): HydratedUIMessage[] {
   return messages
     .map<HydratedUIMessage | undefined>((message) => {
-      const parts: HydratedUIMessagePart[] = [];
-      if (message.content) {
-        parts.push({ type: 'text', text: message.content });
-      }
+      // objectstack#25908 — an answer's charts are cached as the `data-chart`
+      // parts the live stream gave, between the text runs they sat between:
+      // the stream's own chart part is never stored, and a tool part carries
+      // no position, so this is the one record that keeps both the chart and
+      // its place. `hydratedMessagesToChatMessages` reads them back.
+      const parts: HydratedUIMessagePart[] = chartAnswerParts(
+        message.content ?? '',
+        message.role === 'assistant' ? message.charts : undefined,
+      );
       if (message.role === 'assistant') {
         for (const tool of message.toolInvocations ?? []) {
           // Re-serialize the draft/plan affordance into a compact tool `output`.

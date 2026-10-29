@@ -16,6 +16,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import type { FormField, FormSchema, DataSource, ObjectFormSchema, ObjectFormSection } from '@object-ui/types';
 import { cn, toast } from '@object-ui/components';
+import { useLocalization } from '@object-ui/i18n';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { seedCreateValues } from './schemaDefaults';
@@ -93,10 +94,10 @@ export interface FormSectionConfig {
    * `Omit<FormSectionConfig, 'visibleWhen'>` — a derivation that defended the
    * one key it named while every FUTURE key added here still reached a wizard
    * step by default. `WizardStepConfig` is now declared independently, exactly
-   * as `SplitFormSectionConfig` / `ModalFormSectionConfig` /
-   * `DrawerFormSectionConfig` already are, so this type and the wizard's share
-   * nothing: a key is authorable on a wizard step only if someone writes it
-   * there, on the type whose renderer has to honour it.
+   * as `ModalFormSectionConfig` / `DrawerFormSectionConfig` already are, so
+   * this type and the wizard's share nothing: a key is authorable on a wizard
+   * step only if someone writes it there, on the type whose renderer has to
+   * honour it.
    */
   visibleWhen?: string | { dialect?: string; source: string };
   /**
@@ -200,6 +201,13 @@ export interface TabbedFormSchema {
    * @default true
    */
   showCancel?: boolean;
+
+  /**
+   * Show the Reset button, which restores the opening values without saving
+   * (objectstack#27247).
+   * @default false
+   */
+  showReset?: boolean;
   
   /**
    * Cancel button text
@@ -292,6 +300,9 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
   const { t } = useFormChromeTranslation();
   const perms = usePermissions();
   const { userId: currentUserId } = perms;
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   const [objectSchema, setObjectSchema] = useState<any>(null);
   // Upload-in-flight gate (objectui#10166): a `file`/`image` value is only its
   // fileId once the presigned upload settles, so a save during that window
@@ -386,7 +397,7 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
         // Declared static defaults are this form's opening values (#4047) —
         // see `schemaDefaults` for the create-only boundary and for why
         // runtime defaults are left to the server.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);
@@ -697,6 +708,7 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
     cancelLabel: schema.cancelText,
     showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
     showCancel: schema.showCancel !== false,
+    showReset: schema.showReset === true && schema.mode !== 'view',
     onSubmit: handleSubmit,
     onCancel: handleCancel,
     // The renderer's dirtiness feeds the bus gate above (objectui#10715).

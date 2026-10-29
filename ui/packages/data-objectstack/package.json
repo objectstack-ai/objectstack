@@ -1,7 +1,7 @@
 {
   "name": "@object-ui/data-objectstack",
   "version": "18.2.0",
-  "description": "ObjectStack Data Adapter for Object UI",
+  "description": "ObjectStack Data Adapter for ObjectUI",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -66,5 +66,5 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/guide/data-source"
+  "homepage": "https://objectstack.ai/docs/frontend/data-objectstack"
 }

@@ -46,7 +46,7 @@ import '@object-ui/components';
 import '@object-ui/fields';
 import '../index';
 
-const GUIDE = path.resolve(__dirname, '../../../../content/docs/guide/building-crud-app.md');
+const GUIDE = path.resolve(__dirname, '../../../../../content/docs/frontend/building-crud-app.mdx');
 
 const TASK_SCHEMA = {
   name: 'task',

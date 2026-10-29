@@ -15,6 +15,12 @@
  * These tests pin the ported dispatch: `flow` → the automation service with
  * the caller's identity forwarded, `script` → the registry (unchanged), and
  * the client-side types → an actionable 400 instead of a registry miss.
+ *
+ * Since #27506 a same-origin `type: 'api'` action is no longer client-side at
+ * this door: the route forwards it in-process to its declared `target` (so the
+ * ADR-0126 §8 switch and the D4 gate hold for api actions too). The api cases
+ * below pin that forward, and the 503 a kernel answers when it has no HTTP
+ * server to forward through.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -42,6 +48,12 @@ function makeDispatcher(opts: {
     record?: any;
     /** Simulate a metadata plane that cannot answer (ADR-0110 D3). */
     metadataDegraded?: string;
+    /**
+     * An in-process request path (`IHttpServer.getRawApp().request`) for the
+     * same-origin `type: 'api'` forward (#27506). Absent by default, which is
+     * the shape of a kernel with no HTTP server plugin.
+     */
+    rawRequest?: (url: string, init: RequestInit) => Promise<Response>;
 } = {}) {
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
     const objectDef = opts.objectDef ?? { name: 'crm_lead', actions: [] };
@@ -76,6 +88,8 @@ function makeDispatcher(opts: {
                 n === 'objectql' || n === 'data' ? ql
                 : n === 'metadata' ? metadata
                 : n === 'automation' ? (opts.automation ?? null)
+                : (n === 'http.server' || n === 'http-server') && opts.rawRequest
+                    ? { getRawApp: () => ({ request: opts.rawRequest }) }
                 : null,
         },
     };
@@ -347,21 +361,70 @@ describe('REST /actions — client-side action types (#3915)', () => {
         expect(res.response.status).toBe(403);
     });
 
-    it('points a `type: api` action at the endpoint it actually dispatches on', async () => {
-        const apiAction = {
-            name: 'create_team',
-            type: 'api',
-            target: '/api/v1/auth/organization/create-team',
-            method: 'POST',
-        };
+    // [#27506] A same-origin `type: 'api'` action is NOT a client-side type at
+    // this door any more: the route forwards it in-process to its declared
+    // `target`, so the ADR-0126 §8 switch and the D4 gate reach it. The former
+    // pin here (400 "call the target yourself") asserted the gap the card
+    // closes, so it is rewritten, not deleted.
+    const apiAction = {
+        name: 'create_team',
+        type: 'api',
+        target: '/api/v1/auth/organization/create-team',
+        method: 'POST',
+    };
+
+    it('forwards a same-origin `type: api` action in-process to its declared target instead of the script registry', async () => {
+        const rawRequest = vi.fn(async (_url: string, _init: RequestInit) =>
+            new Response(JSON.stringify({ success: true, data: { id: 'team_1' } }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }));
+        const { dispatcher, executeAction } = makeDispatcher({
+            objectDef: { name: 'sys_team', actions: [apiAction] },
+            rawRequest,
+        });
+
+        const res = await dispatcher.handleActions(
+            '/sys_team/create_team',
+            'POST',
+            { params: { name: 'Core' } },
+            ctxFor(),
+        );
+
+        expect(executeAction).not.toHaveBeenCalled();
+        expect(rawRequest).toHaveBeenCalledTimes(1);
+        const [url, init] = rawRequest.mock.calls[0];
+        expect(url).toBe('http://localhost/api/v1/auth/organization/create-team');
+        expect(init.method).toBe('POST');
+        // `/api/v1/auth/` targets receive the caller's organization scope, as
+        // the console's api handler sends it.
+        expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({ name: 'Core' }));
+        const answer = res.response;
+        if (!answer) throw new Error('the door answered without a response envelope');
+        expect(answer.status).toBe(200);
+        // The target's own envelope is unwrapped once: `data` is its `data`.
+        expect(answer.body.data).toEqual({ id: 'team_1' });
+    });
+
+    it('answers 503 (not a 4xx "call it yourself") for a same-origin `type: api` action when the kernel has no HTTP server to forward through, and still names the target', async () => {
+        // This fixture's kernel exposes no `http.server` service — the shape of
+        // a deployment without an HTTP server plugin. The door cannot do the
+        // work, so the condition is the deployment's (503, with the target
+        // named so an operator can see what the forward would have reached),
+        // not the caller's request (4xx). The caller is not sent around the
+        // door: that would re-open the gap #27506 closes.
         const { dispatcher, executeAction } = makeDispatcher({
             objectDef: { name: 'sys_team', actions: [apiAction] },
         });
 
         const res = await dispatcher.handleActions('/sys_team/create_team', 'POST', {}, ctxFor());
 
-        expect(res.response.status).toBe(400);
-        expect(res.response.body.error.message).toContain('/api/v1/auth/organization/create-team');
+        const answer = res.response;
+        if (!answer) throw new Error('the door answered without a response envelope');
+        expect(answer.status).toBe(503);
+        expect(answer.body.error.message).toContain('/api/v1/auth/organization/create-team');
+        expect(answer.body.error.message).toContain('getRawApp');
+        expect(answer.body.error.message).not.toMatch(/not found/i);
         expect(executeAction).not.toHaveBeenCalled();
     });
 });

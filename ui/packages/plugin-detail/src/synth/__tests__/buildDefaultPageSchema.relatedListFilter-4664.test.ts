@@ -62,13 +62,15 @@ describe('buildDefaultTabs — related list filter (objectui#4664)', () => {
     expect('filter' in props(node)).toBe(false);
   });
 
-  it('the filter travels on an isPrimary list too — its own tab, same key', () => {
+  it('the filter travels on an isPrimary list too — a body table of the Details tab, same key', () => {
+    // objectstack#27055: a primary list is part of the record's body.
     const declared = { status: { $ne: 'archived' } };
     const tabs = buildDefaultTabs(def, {
       related: [{ ...BASE, isPrimary: true, filter: declared } as any],
     });
-    const ownTab = tabItems(tabs).find((t: any) => t.label === 'Checks');
-    expect(props(ownTab.children[0]).filter).toEqual(declared);
+    const details = tabItems(tabs).find((t: any) => t.value === 'details');
+    const table = details.children.find((n: any) => n.type === 'record:related_list');
+    expect(props(table).filter).toEqual(declared);
   });
 
   it('the filter rides alongside sort/columns/limit rather than displacing them', () => {

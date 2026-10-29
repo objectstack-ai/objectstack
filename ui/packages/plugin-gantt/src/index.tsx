@@ -14,7 +14,7 @@ import {
   type ElementDataSourceMapping,
 } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { ObjectGantt } from './ObjectGantt';
+import { ObjectGantt, type ObjectGanttProps } from './ObjectGantt';
 
 export { ObjectGantt };
 export type { ObjectGanttProps, QuickFilterDef } from './ObjectGantt';
@@ -87,8 +87,29 @@ const OBJECT_GANTT_DATA_SOURCE: ElementDataSourceMapping = {
   sort: true,
 };
 
+/**
+ * The one host prop this renderer forwards: a host's row-click handler
+ * (objectstack#27057), and only when it really is a function.
+ *
+ * `ListView` builds the `object-gantt` node with `onRowClick:
+ * navigation.handleClick`, a real function on a real node key, and in the
+ * console that is the handler that opens the record in the one record page
+ * (`RecordDetailView` in the drawer stack). Dropping it left a gantt bar
+ * opening this chart's own quick-look drawer while a grid row of the same
+ * object opened the page. An SDUI author writing JSON can never produce a
+ * function, so an authored value under the key is dropped, the answer
+ * `object-calendar`'s declared host hatch gives (`HOST_CALLBACKS` in
+ * `plugin-calendar`, objectui#4492).
+ *
+ * ⛔ Nothing else is forwarded. A host's `data` in particular stays dropped: a
+ * page of host rows would truncate the chart (`ObjectGantt.hostDataProp-7210`).
+ */
+function hostRowClick(raw: unknown): ObjectGanttProps['onRowClick'] {
+  return typeof raw === 'function' ? (raw as ObjectGanttProps['onRowClick']) : undefined;
+}
+
 // Register component
-export const ObjectGanttRenderer: React.FC<{ schema: any }> = elementDataSourceBlock(({ schema }) => {
+export const ObjectGanttRenderer: React.FC<{ schema: any; onRowClick?: unknown }> = elementDataSourceBlock(({ schema, onRowClick }) => {
   // `useSchemaContext()` may hand back a NULL adapter: a host with nothing
   // bound spells absence either way, and the seam declares both
   // (`DataSource | null | undefined`, objectui#7912). The widget below
@@ -112,7 +133,7 @@ export const ObjectGanttRenderer: React.FC<{ schema: any }> = elementDataSourceB
         defaultValue: 'This gantt chart’s data source could not be resolved',
       })}
     >
-      {(bound) => <ObjectGantt schema={bound} dataSource={dataSource} />}
+      {(bound) => <ObjectGantt schema={bound} dataSource={dataSource} onRowClick={hostRowClick(onRowClick)} />}
     </ElementDataSourceGate>
   );
 });
@@ -182,9 +203,9 @@ ComponentRegistry.register('object-gantt', ObjectGanttRenderer, {
   inputs: [
     { name: 'objectName', type: 'string', description: 'ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-gantt` schema refuses a block that declares none of them, unless the node\'s `dataSource.object` names the object, which then lands on this key.' },
     { name: 'gantt', type: 'object', description: 'Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored. The spec requires `startDateField`, `endDateField` and `titleField`, which name the record fields a task\'s bar starts at, ends at and is titled by; the other members (`progressField`, `colorField`, `dependenciesField`, `parentField`, `viewMode`, `exportFileName`, …) are optional.' },
-    { name: 'data', type: 'object', description: 'A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a gantt carrying one never reaches `staticData` and never queries `objectName`. `{ provider: \'value\', items }` charts those rows, `{ provider: \'object\', object }` queries that object and `{ provider: \'api\', read }` reads through that request. A bare array is not this key’s shape and is not a record source: the gantt falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`.' },
+    { name: 'data', type: 'object', description: 'A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a gantt carrying one never reaches `staticData`. The gantt reads two providers: `{ provider: \'value\', items }` charts those rows and never queries `objectName`, and `{ provider: \'object\', object }` queries that object in place of `objectName`. Rows a server computes reach the gantt as an object whose plugin driver computes them, never as a request URL in the view. A bare array is not this key’s shape and is not a record source: the gantt falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`.' },
     { name: 'staticData', type: 'array', description: 'Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a gantt carrying both charts these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones.' },
-    { name: 'filter', type: 'array', description: 'Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the tasks the gantt charts — from every record source it reads: the object, an `api` request, or inline rows. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape.' },
+    { name: 'filter', type: 'array', description: 'Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the tasks the gantt charts — from every record source it reads: the object or inline rows. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape.' },
     { name: 'sort', type: 'array', description: 'Task order in `[{ field, order }]` form, ordering the rows the gantt charts. Lowered to `$orderby` on the same query.' },
     { name: 'navigation', type: 'object', description: OBJECT_GANTT_NAVIGATION_DESCRIPTION },
     { name: 'label', type: ['string', 'object'], description: 'Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label. A string is used as written, and an inline locale map (`{ en, "zh-CN", … }`) gives the entry for the display locale. The chart draws it nowhere else.' },

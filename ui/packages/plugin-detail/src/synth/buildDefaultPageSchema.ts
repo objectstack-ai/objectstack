@@ -32,6 +32,8 @@ import { detectStatusField } from '@object-ui/types';
 // at this depth, and both spellings resolve to one table and one dedupe set.
 import { isRetiredFieldType, reportRetiredFieldType, resolveNameField } from '@object-ui/core';
 import { inferDetailColumns } from '../autoLayout';
+import { recordTimelineDefaultReason } from './recordPageColumns';
+import { relatedListEntryNames } from './relatedListEntry';
 
 /** Minimal shape of an object definition we read here. We deliberately
  *  duck-type so this helper has zero hard dependency on a specific
@@ -46,7 +48,7 @@ export interface ObjectDefLike {
   stageField?: string | false;
   stages?: Array<{ value: any; label: string }>;
   /** Semantic role (ADR-0085): the object's most important fields —
-   *  drives the highlight strip (first 4). */
+   *  drives the highlight strip (first {@link RECORD_HIGHLIGHTS_MAX}). */
   highlightFields?: string[];
   /**
    * ACCEPTED BUT NEVER READ — do not "tidy" this away (objectui#7287).
@@ -150,41 +152,23 @@ export interface BuildPageOptions {
   /** Override the auto-derived section grouping. The heading rides `label` —
    *  the one slot `@object-ui/types` declares (objectui#6190). */
   sections?: Array<{ label?: string; columns?: number; fields?: any[] }>;
-  /** Suppress the auto-appended `record:discussion` slot. */
+  /**
+   * Suppress the timeline stream (objectstack#27055): no Timeline tab, no
+   * timeline column. It used to suppress the discussion footer the stream
+   * replaced.
+   */
   hideDiscussion?: boolean;
   /** Suppress the auto-emitted Attachments tab (`enable.files`, objectstack#4358). */
   hideAttachments?: boolean;
-  /** Suppress the auto-prepended `record:highlights` strip. */
-  hideHighlights?: boolean;
-  /** Suppress the auto-prepended `record:path` stepper. */
-  hidePath?: boolean;
-  /**
-   * Opt in to the Reference Rail (aside region with
-   * `record:reference_rail`). The rail is OFF by default — it fans out a
-   * collection query per related list, which is wasteful on records the
-   * author never intended to summarize. Set `showReferenceRail: true` on
-   * this options object to surface it — that is the only route: ADR-0085
-   * removed the per-object `detail` hints block, so no object definition
-   * can switch the rail on, and a per-page rail is an authored
-   * `record:reference_rail` node in an assigned Page schema. It then
-   * emits only when `related` has at least 2 entries.
-   * Pinned by `__tests__/referenceRailRoute-9816.test.ts`.
-   */
-  showReferenceRail?: boolean;
-  /**
-   * Force-suppress the Reference Rail even when `showReferenceRail` is on.
-   * Retained for callers that toggle the rail off contextually.
-   */
-  hideReferenceRail?: boolean;
-  /**
-   * Suppress the auto-emitted `Related` tab in `buildDefaultTabs`.
-   * Auto-set to `true` by `buildDefaultPageSchema` when the Reference
-   * Rail is being emitted, to avoid showing the same related-list data
-   * in two places (the rail and the tab). Authors can override.
-   */
-  hideRelatedTab?: boolean;
-  /** Pass-through to `page:header.recordChrome`. Defaults to true. */
-  recordChrome?: boolean;
+  // objectstack#27055 (ADR-0085) — the per-surface presentation hints this
+  // options bag used to carry are GONE: `hideHighlights`, `hidePath`,
+  // `showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`,
+  // `relatedLayout`, `recordChrome` and the `slots.rightRail` slot. No console
+  // caller passed any of them, ADR-0085 admits no surface hints, and
+  // `rightRail` is not a slot the spec's strict slot enum names. The default
+  // page is drawn from the object's semantic roles alone; a page that wants
+  // a reference rail places an authored `record:reference_rail` node (the
+  // renderer stays registered for exactly that).
   /**
    * Action definitions to surface in the header. When provided and
    * non-empty, the synthesizer emits a `record:quick_actions` node
@@ -239,43 +223,29 @@ export interface BuildPageOptions {
      */
     filter?: Record<string, any> | any[];
     /**
-     * `relatedList: 'primary'` — a CORE relationship. Under the default
-     * layout this list is promoted to its OWN tab; non-primary lists collapse
-     * into a single "Related" tab. Ignored when `relatedLayout` forces a
-     * uniform layout.
+     * `relatedList: 'primary'` — a CORE relationship (ADR-0085 prominence).
+     * Under the record page v3 (objectstack#27055) a primary list is part of
+     * the record's BODY: unless `isBody` says otherwise, it is drawn as a
+     * table in the Details tab, not as a side card.
      */
     isPrimary?: boolean;
+    /**
+     * The list is the record's own body (objectstack#27055, Target 8):
+     * `relatedList: 'primary'`, or a `master_detail` FK declaring `inlineEdit`
+     * and no `relatedList`. Drawn as a full-width table section in the Details
+     * tab, right after the first field section, instead of in the Related tab /
+     * related column. Absent: `isPrimary` decides. The host computes it from
+     * the FK with `@objectstack/spec`'s `isBodyTableRelationship`
+     * (objectstack#27478) — the one predicate, which the spec's refusal of a
+     * field group naming a side card reads too (no spec key of its own).
+     */
+    isBody?: boolean;
   }>;
-  /**
-   * How the related child lists are laid out under the tab strip.
-   *
-   * - **default (unset)** — the ADR-0085 prominence rule: lists flagged
-   *   `relatedList: 'primary'` (`isPrimary`) each get their OWN tab; every
-   *   other related list collapses into a single stacked `Related` tab. With
-   *   no primary lists this is identical to the legacy stacked behavior, so
-   *   the change is opt-in per relationship — never a surprise.
-   * - `'stack'` — app-level override: ALL related lists stack vertically
-   *   inside one `Related` tab, ignoring `isPrimary`.
-   * - `'tabs'` — app-level override: EVERY related child gets its own peer
-   *   tab (label = the child's `title`, falling back to `objectName`),
-   *   ignoring `isPrimary`.
-   *
-   * Precise per-tab ordering / filtered splits / non-relationship tabs are a
-   * custom Page concern (Tier 2) — this synthesizer only covers the derived
-   * default. Ignored when the `Related` tab is suppressed (`hideRelatedTab`).
-   */
-  relatedLayout?: 'stack' | 'tabs';
-  /**
-   * When true, emit an Activity tab that renders `record:activity`.
-   * The activity renderer fetches its own data via RecordContext.
-   */
-  showActivity?: boolean;
-  /**
-   * When provided, emit a History tab containing a `record:history`
-   * renderer. The host supplies the audit-log `entries` and `loading`
-   * flag because the data fetch logic lives in RecordDetailView.
-   */
-  history?: { entries: any[]; loading?: boolean; emptyText?: string; unknownUserText?: string };
+  // objectstack#27055 (Target 3): `showActivity` and `history` are gone too.
+  // The timeline is ONE stream — discussion, activity (`sys_activity`) and
+  // field changes (`trackHistory`) — drawn by the Timeline tab's
+  // `record:activity` node; the host hands the field changes to it through
+  // `RecordFieldChangesContext` instead of building a History tab.
   /**
    * When provided, emit an Approvals tab containing a `record:approvals`
    * renderer (objectui#3461). `node` is spread verbatim onto the node — the
@@ -302,21 +272,13 @@ export interface BuildPageOptions {
    *   path). The override fires even when neither auto-emission
    *   condition is met.
    * - `details` — replaces the Details tab body (the `record:details`
-   *   node). Other tabs (Related / Activity / History) are unaffected.
+   *   node). Other tabs (Timeline / Related / Approvals) are unaffected.
    *   There is no `tabs` slot (objectstack#27053): the strip is composed
    *   from the object's roles and relationship flags, and a page that
    *   needs its own strip is a `kind: 'full'` page, drawn as authored.
-   * - `discussion` — replaces `record:discussion`. Fires even when
-   *   `hideDiscussion` is true (the override is explicit intent to
-   *   surface a custom footer).
-   * - `rightRail` — additional component(s) to drop into the
-   *   right-side `aside` region (the same region that hosts the
-   *   auto-emitted `record:reference_rail`). When provided, the
-   *   `aside` region is always rendered — even when no reference
-   *   rail would otherwise be emitted — so plugins can contribute
-   *   contextual side panels (activity feed, related summary,
-   *   workflow status, presence list, etc.) without depending on
-   *   the related-list heuristic.
+   * - `discussion` — replaces the timeline stream (the Timeline tab's
+   *   content, objectstack#27055). Fires even when `hideDiscussion` is true
+   *   (the override is explicit intent to surface a custom feed).
    */
   slots?: {
     header?: any | any[];
@@ -325,7 +287,6 @@ export interface BuildPageOptions {
     highlights?: any | any[];
     details?: any | any[];
     discussion?: any | any[];
-    rightRail?: any | any[];
   };
 }
 
@@ -519,6 +480,14 @@ function membersOfGatedFieldGroups(def: ObjectDefLike): Set<string> {
 }
 
 /**
+ * How many highlights the record header shows (objectstack#27055, the v3
+ * header: 「要点 6 项等宽」 — the same six Studio's highlight editor offers).
+ * A declared `highlightFields` list longer than this is cut here, and so is
+ * the derived one.
+ */
+export const RECORD_HIGHLIGHTS_MAX = 6;
+
+/**
  * Pick up to N "highlight" fields by name. Skips the status field
  * (already shown in `record:path`) and obvious junk like id / created_at.
  * Members of a group gated by `visibleWhen` are never picked
@@ -527,7 +496,7 @@ function membersOfGatedFieldGroups(def: ObjectDefLike): Set<string> {
 export function deriveHighlightFields(
   def: ObjectDefLike | undefined,
   statusField: string | null,
-  max = 4,
+  max = RECORD_HIGHLIGHTS_MAX,
 ): string[] {
   if (!def) return [];
   // Semantic role first (ADR-0085): top-level `highlightFields`. (The
@@ -688,10 +657,13 @@ export function deriveHighlightFields(
  */
 export function buildDefaultHeader(
   _def: ObjectDefLike | undefined,
-  options: Pick<BuildPageOptions, 'recordChrome'> & { actions?: any[] } = {},
+  options: { actions?: any[] } = {},
 ): any {
+  // `recordChrome` is the `page:header` prop that draws the title as the
+  // record chip; the default record page always wants it, so it is written
+  // as `true` rather than read off a caller hint (objectstack#27055).
   return componentNode('page:header', {
-    recordChrome: options.recordChrome !== false,
+    recordChrome: true,
     ...(Array.isArray(options.actions) && options.actions.length > 0
       ? { actions: options.actions }
       : {}),
@@ -724,19 +696,18 @@ export function buildDefaultActions(
  */
 export function buildDefaultHighlights(
   def: ObjectDefLike | undefined,
-  options: Pick<BuildPageOptions,
-    'highlightFields' | 'statusField' | 'stages' | 'hideHighlights' | 'hidePath'
-  > = {},
+  options: Pick<BuildPageOptions, 'highlightFields' | 'statusField' | 'stages'> = {},
 ): any[] {
   const statusField = options.statusField ?? detectStatusField(def);
   const stages = options.stages ?? (statusField ? deriveStages(def, statusField) : null);
-  const highlightFields =
-    options.highlightFields ?? deriveHighlightFields(def, statusField);
+  const highlightFields = (
+    options.highlightFields ?? deriveHighlightFields(def, statusField)
+  ).slice(0, RECORD_HIGHLIGHTS_MAX);
   const out: any[] = [];
-  if (!options.hideHighlights && highlightFields.length > 0) {
+  if (highlightFields.length > 0) {
     out.push(componentNode('record:highlights', { fields: highlightFields }));
   }
-  if (!options.hidePath && statusField && stages && stages.length > 0) {
+  if (statusField && stages && stages.length > 0) {
     out.push(componentNode('record:path', { statusField, stages }));
   }
   return out;
@@ -938,9 +909,117 @@ export function buildDefaultDetails(
   });
 }
 
+/** Rows on the first page of a body table (objectstack#27055, Target 8). */
+export const BODY_TABLE_PAGE_SIZE = 10;
+
 /**
- * Sub-builder: the `page:tabs` node. Emits Details / Related /
- * Activity / History tabs in stable order based on the options.
+ * The Details tab's body with the record's body tables placed in it
+ * (objectstack#27055, Target 8; objectstack#27069):
+ *
+ *  - a body table some field group places — the group's `relatedList` names
+ *    its relationship (a child object name, or `object.field`; the ONE
+ *    reading is `relatedListEntryNames`) — is drawn at that group's position
+ *    among the object's `fieldGroups`: after the sections of the groups
+ *    declared before it, before those declared after it. Such a group holds
+ *    no fields (the spec refuses one that does), so it is a position, never a
+ *    section of its own. A group only POSITIONS a body table: only the
+ *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
+ *    the spec refuses a group naming a side card or a hidden list, by the same
+ *    `isBodyTableRelationship` the host computes `isBody` with);
+ *  - every other body table goes right after the FIRST field section
+ *    (conventionally 基本信息), stacked in the order given; with one section
+ *    or none, after the details.
+ *
+ * The details node is split around the tables: each run of consecutive
+ * sections is one `record:details`. A section names its group by `group` (the
+ * spec's reference form) or by `name` (a resolved section); the ungrouped
+ * bucket names none and stays after every declared group.
+ */
+export function bodyTablePlacement(
+  def: ObjectDefLike | undefined,
+  sections: BuildPageOptions['sections'],
+  hideFields: string[] | undefined,
+  bodies: any[],
+): any[] {
+  if (bodies.length === 0) return [buildDefaultDetails(def, sections, hideFields)];
+  const resolved = resolveDetailSections(def, sections) ?? [];
+
+  // The declared groups in order, and the position of each group that places
+  // a body table.
+  const groups = Array.isArray(def?.fieldGroups) ? def!.fieldGroups : [];
+  const groupIndex = new Map<string, number>();
+  const placingGroups: Array<{ index: number; entry: string }> = [];
+  groups.forEach((group, index) => {
+    if (!group || typeof group.key !== 'string') return;
+    if (!groupIndex.has(group.key)) groupIndex.set(group.key, index);
+    const entry = (group as { relatedList?: unknown }).relatedList;
+    if (typeof entry === 'string' && entry.length > 0) placingGroups.push({ index, entry });
+  });
+  const placedAt = (node: any): number | null => {
+    const p = { ...node, ...(node?.properties ?? {}) };
+    if (typeof p.objectName !== 'string' || typeof p.relationshipField !== 'string') return null;
+    const list = { childObject: p.objectName, referenceField: p.relationshipField };
+    const group = placingGroups.find(({ entry }) => relatedListEntryNames(entry, list));
+    return group ? group.index : null;
+  };
+  const placed = bodies
+    .map((node, order) => ({ node, order, at: placedAt(node) }))
+    .filter((b): b is { node: any; order: number; at: number } => b.at !== null)
+    .sort((a, b) => a.at - b.at || a.order - b.order);
+  const unplaced = bodies.filter((node) => placedAt(node) === null);
+  const sectionGroupIndex = (section: Record<string, any>): number => {
+    const key = typeof section?.group === 'string' ? section.group : typeof section?.name === 'string' ? section.name : undefined;
+    const index = key !== undefined ? groupIndex.get(key) : undefined;
+    return index ?? Number.POSITIVE_INFINITY;
+  };
+
+  if (placed.length === 0 && resolved.length <= 1) {
+    return [buildDefaultDetails(def, sections, hideFields), ...bodies];
+  }
+
+  // Lay the sections and the tables out in one sequence, then fold each run
+  // of consecutive sections into one details node.
+  type Slot = { section: Record<string, any> } | { table: any };
+  const slots: Slot[] = [];
+  let next = 0;
+  const flushPlacedBefore = (index: number) => {
+    while (next < placed.length && placed[next].at < index) slots.push({ table: placed[next++].node });
+  };
+  resolved.forEach((section, i) => {
+    flushPlacedBefore(sectionGroupIndex(section));
+    slots.push({ section });
+    if (i === 0) for (const node of unplaced) slots.push({ table: node });
+  });
+  if (resolved.length === 0) for (const node of unplaced) slots.push({ table: node });
+  while (next < placed.length) slots.push({ table: placed[next++].node });
+
+  const out: any[] = [];
+  let run: Array<Record<string, any>> = [];
+  const closeRun = () => {
+    if (run.length > 0) out.push(buildDefaultDetails(def, run, hideFields));
+    run = [];
+  };
+  for (const slot of slots) {
+    if ('section' in slot) run.push(slot.section);
+    else {
+      closeRun();
+      out.push(slot.table);
+    }
+  }
+  closeRun();
+  // No section at all: the details node still leads (it draws the object's
+  // highlight fields, `resolveDetailSections`' rule 3).
+  if (resolved.length === 0) out.unshift(buildDefaultDetails(def, sections, hideFields));
+  return out;
+}
+
+/**
+ * Sub-builder: the `page:tabs` node. Emits the Details tab, always first,
+ * then the Timeline tab (the one stream, objectstack#27055: field changes
+ * join it under its Changes filter, so there is no History tab), the Related
+ * tab and the Approvals tab, each of those three only when the options give
+ * it content. The order is stable: Timeline sits second for a worked object
+ * and last otherwise.
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into
@@ -949,8 +1028,15 @@ export function buildDefaultDetails(
 export function buildDefaultTabs(
   def: ObjectDefLike | undefined,
   options: Pick<BuildPageOptions,
-    'sections' | 'related' | 'showActivity' | 'history' | 'highlightFields' | 'statusField' | 'hideRelatedTab' | 'relatedLayout' | 'hideAttachments' | 'approvals'
-  > = {},
+    'sections' | 'related' | 'highlightFields' | 'statusField' | 'hideAttachments' | 'approvals' | 'hideDiscussion'
+  > & {
+    /**
+     * The Timeline tab's content (objectstack#27055); `buildDefaultPageSchema`
+     * passes the `discussion` slot here. Absent: the default stream, unless
+     * `hideDiscussion`.
+     */
+    timeline?: any[];
+  } = {},
 ): any {
   const statusField = options.statusField ?? detectStatusField(def);
   const highlightFields =
@@ -959,58 +1045,59 @@ export function buildDefaultTabs(
   // tab is URL-addressable (`?tab=<value>`, ADR-0054 C3), so values must
   // survive related lists being added/removed — an index-derived value
   // (`tab-2`) would silently point at a different tab after a schema change.
-  const items: any[] = [
-    { label: 'Details', value: 'details', children: [buildDefaultDetails(def, options.sections, highlightFields)] },
-  ];
-  if (
-    !options.hideRelatedTab &&
-    Array.isArray(options.related) &&
-    options.related.length > 0
-  ) {
-    const relatedNode = (rel: NonNullable<BuildPageOptions['related']>[number]) =>
-      componentNode('record:related_list', {
-        title: rel.title,
-        objectName: rel.objectName,
-        relationshipField: rel.relationshipField,
-        ...(rel.columns ? { columns: rel.columns } : {}),
-        ...(rel.limit ? { limit: rel.limit } : {}),
-        ...(rel.icon ? { icon: rel.icon } : {}),
-        // objectui#5795. Emitted only when the host actually supplied one, for
-        // the reason every sibling key here is: a `sort: undefined` written
-        // onto the node is a different fact from "the author said nothing",
-        // and it is the one a later liveness audit would read.
-        ...(rel.sort ? { sort: rel.sort } : {}),
-        // objectui#4664 — same emit-only-when-supplied rule as `sort` above,
-        // and for the same reason. The tab strip's count probe reads this key
-        // off the node it is badging, so emitting it is also what keeps the
-        // badge and the rows asking one question.
-        ...(rel.filter ? { filter: rel.filter } : {}),
-      });
-    const asOwnTab = (rel: NonNullable<BuildPageOptions['related']>[number]) => ({
-      label: rel.title || rel.objectName,
-      value: `related:${rel.objectName}`,
+  const relatedNode = (rel: NonNullable<BuildPageOptions['related']>[number], defaultLimit?: number) =>
+    componentNode('record:related_list', {
+      title: rel.title,
+      objectName: rel.objectName,
+      relationshipField: rel.relationshipField,
+      ...(rel.columns ? { columns: rel.columns } : {}),
+      ...(rel.limit ? { limit: rel.limit } : defaultLimit ? { limit: defaultLimit } : {}),
       ...(rel.icon ? { icon: rel.icon } : {}),
-      children: [relatedNode(rel)],
+      // objectui#5795. Emitted only when the host actually supplied one, for
+      // the reason every sibling key here is: a `sort: undefined` written
+      // onto the node is a different fact from "the author said nothing",
+      // and it is the one a later liveness audit would read.
+      ...(rel.sort ? { sort: rel.sort } : {}),
+      // objectui#4664 — same emit-only-when-supplied rule as `sort` above,
+      // and for the same reason. The tab strip's count probe reads this key
+      // off the node it is badging, so emitting it is also what keeps the
+      // badge and the rows asking one question.
+      ...(rel.filter ? { filter: rel.filter } : {}),
     });
-    if (options.relatedLayout === 'tabs') {
-      // App-level override: one peer tab per related child.
-      for (const rel of options.related) items.push(asOwnTab(rel));
-    } else if (options.relatedLayout === 'stack') {
-      // App-level override: all related lists share one stacked `Related` tab.
-      items.push({ label: 'Related', value: 'related', children: options.related.map(relatedNode) });
-    } else {
-      // DEFAULT (rule Z, ADR-0085 prominence): `isPrimary` lists become their
-      // own tab; the rest collapse into one `Related` tab. Owned-before-lookup
-      // order is preserved by deriveRelatedLists upstream. With no primary
-      // lists this is identical to the legacy stacked default (opt-in per
-      // relationship, never a surprise).
-      const primary = options.related.filter((r) => r.isPrimary);
-      const rest = options.related.filter((r) => !r.isPrimary);
-      for (const rel of primary) items.push(asOwnTab(rel));
-      if (rest.length > 0) {
-        items.push({ label: 'Related', value: 'related', children: rest.map(relatedNode) });
-      }
-    }
+  // objectstack#27055, Target 8 — a list that is the record's own body
+  // (`isBody`, else `isPrimary`) is a table section of the Details tab; every
+  // other list is a side card in the one `Related` tab. Body tables keep the
+  // order the host passed (the object's `relatedLists`, then the derived
+  // order — objectstack#27069), unless a field group places one
+  // (`bodyTablePlacement`).
+  const related = Array.isArray(options.related) ? options.related : [];
+  const isBody = (rel: (typeof related)[number]) => rel.isBody ?? rel.isPrimary === true;
+  const bodies = related.filter(isBody).map((rel) => relatedNode(rel, BODY_TABLE_PAGE_SIZE));
+  const sides = related.filter((rel) => !isBody(rel));
+  const items: any[] = [
+    {
+      label: 'Details',
+      value: 'details',
+      children: bodyTablePlacement(def, options.sections, highlightFields, bodies),
+    },
+  ];
+  // objectstack#27055, Targets 3 and 6 — the tab strip is 详情 / 时间线 / 关联 /
+  // （审批）: the timeline stream is ONE tab, second for a worked object (the
+  // object-derived default of the timeline column, `recordTimelineDefaultReason`)
+  // and last otherwise; attachments close the Related tab, as they close the
+  // related column.
+  const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
+  const timelineTab = timeline.length > 0 ? { label: 'Timeline', value: 'timeline', children: timeline } : null;
+  const worked = recordTimelineDefaultReason(def as never) !== null;
+  if (timelineTab && worked) items.push(timelineTab);
+  // Attachments (objectstack#4358) — for `enable.files: true` objects; the
+  // tab strip's count badge reads the `record:attachments` node.
+  const relatedChildren = [
+    ...sides.map((rel) => relatedNode(rel)),
+    ...(def?.enable?.files === true && !options.hideAttachments ? [buildDefaultAttachments()] : []),
+  ];
+  if (relatedChildren.length > 0) {
+    items.push({ label: 'Related', value: 'related', children: relatedChildren });
   }
   // Approvals tab (objectui#3461) — emitted only when the host reports the
   // record actually HAS approval requests, so approval-free records carry no
@@ -1029,42 +1116,35 @@ export function buildDefaultTabs(
       children: [componentNode('record:approvals', { ...(options.approvals.node || {}) })],
     });
   }
-  // Attachments tab (objectstack#4358) — emitted for `enable.files: true`
-  // objects so the panel is a peer of Details/Related instead of a footer
-  // widget buried under the discussion feed. `PageTabsRenderer` derives the
-  // count badge from the `record:attachments` node the same way it counts
-  // `record:related_list` tabs. The English label goes through the tab
-  // strip's pack lookup (`detail.attachments` → 附件 / 添付ファイル /
-  // Adjuntos …), matching its sibling tabs — see the Approvals tab above for
-  // why this no longer names `KNOWN_LABEL_DICT` (objectui#4645).
-  if (def?.enable?.files === true && !options.hideAttachments) {
-    items.push({ label: 'Attachments', value: 'attachments', children: [buildDefaultAttachments()] });
-  }
-  if (options.showActivity) {
-    items.push({ label: 'Activity', value: 'activity', children: [componentNode('record:activity')] });
-  }
-  if (options.history) {
-    items.push({
-      label: 'History',
-      value: 'history',
-      children: [
-        componentNode('record:history', {
-          entries: options.history.entries,
-          loading: options.history.loading,
-          emptyText: options.history.emptyText,
-          unknownUserText: options.history.unknownUserText,
-        }),
-      ],
-    });
-  }
+  if (timelineTab && !worked) items.push(timelineTab);
   return componentNode('page:tabs', { items });
 }
 
 /**
- * Sub-builder: the inline `record:discussion` footer slot.
+ * Sub-builder: the inline `record:discussion` footer slot. The synthesized
+ * page no longer emits it (objectstack#27055: the timeline stream carries the
+ * discussion); kept for slotted authors composing one.
  */
 export function buildDefaultDiscussion(): any {
   return componentNode('record:discussion');
+}
+
+/**
+ * Sub-builder: the timeline stream (objectstack#27055, Target 3) — ONE
+ * `record:activity` merging the discussion (`enable.feeds`), the activity
+ * (`enable.activities`, `sys_activity`) and the field changes
+ * (`trackHistory`), the composer on top. On the default record page the
+ * block draws its stream face (filter chips 全部 / 活动 / 讨论 / 变更, compact
+ * system lines); its keys are the spec's own `record:activity` inputs:
+ * completed tasks shown (a stream shows what happened), replies and
+ * reactions on.
+ */
+export function buildDefaultTimeline(): any {
+  return componentNode('record:activity', {
+    showCompleted: true,
+    enableThreading: true,
+    enableReactions: true,
+  });
 }
 
 /**
@@ -1114,12 +1194,7 @@ export function buildDefaultPageSchema(
   if ('header' in slots && slots.header !== undefined) {
     components.push(...toNodeArray(slots.header));
   } else {
-    components.push(
-      buildDefaultHeader(def, {
-        recordChrome: options.recordChrome,
-        actions: options.headerActions,
-      }),
-    );
+    components.push(buildDefaultHeader(def, { actions: options.headerActions }));
   }
 
   // 2) Header action bar — only emitted as a separate node when an
@@ -1146,39 +1221,32 @@ export function buildDefaultPageSchema(
       highlightFields: options.highlightFields,
       statusField: options.statusField,
       stages: options.stages,
-      hideHighlights: options.hideHighlights,
-      hidePath: options.hidePath,
     }));
   }
 
-  // Decide whether to emit the Reference Rail. When emitted, suppress
-  // the duplicate Related tab to avoid showing the same data twice
-  // (HubSpot/Dynamics convention). Authors can opt out of either via
-  // `hideReferenceRail` / `hideRelatedTab`.
-  const willEmitRail =
-    options.showReferenceRail === true &&
-    !options.hideReferenceRail &&
-    Array.isArray(options.related) &&
-    options.related.length >= 2;
-  const hideRelatedTab =
-    options.hideRelatedTab ?? willEmitRail;
+  // The timeline stream's content (objectstack#27055): an authored
+  // `discussion` slot replaces it; `hideDiscussion` drops it.
+  const timeline =
+    'discussion' in slots && slots.discussion !== undefined
+      ? toNodeArray(slots.discussion)
+      : options.hideDiscussion
+        ? []
+        : [buildDefaultTimeline()];
 
   // 4) Tabs — always the synthesized strip (the `tabs` slot that replaced
   //    it retired, objectstack#27053). A `details` slot is spliced into the
-  //    Details tab body; Related/Activity/History tabs stay synthesized.
+  //    Details tab body; the other tabs stay synthesized.
   if ('details' in slots && slots.details !== undefined) {
     const detailsBody = toNodeArray(slots.details);
     const tabsNode = buildDefaultTabs(def, {
       sections: options.sections,
       related: options.related,
-      showActivity: options.showActivity,
-      history: options.history,
       approvals: options.approvals,
       highlightFields: options.highlightFields,
       statusField: options.statusField,
-      hideRelatedTab,
-      relatedLayout: options.relatedLayout,
       hideAttachments: options.hideAttachments,
+      hideDiscussion: options.hideDiscussion,
+      timeline,
     });
     // Replace the first tab's children (Details) with the override. The items
     // live in the node's `properties` bag — the canonical carrier per
@@ -1192,31 +1260,19 @@ export function buildDefaultPageSchema(
     components.push(buildDefaultTabs(def, {
       sections: options.sections,
       related: options.related,
-      showActivity: options.showActivity,
-      history: options.history,
       approvals: options.approvals,
       highlightFields: options.highlightFields,
       statusField: options.statusField,
-      hideRelatedTab,
-      relatedLayout: options.relatedLayout,
       hideAttachments: options.hideAttachments,
+      hideDiscussion: options.hideDiscussion,
+      timeline,
     }));
   }
 
-  // 5) Discussion footer. (Attachments are NOT part of this footer: for
-  //    `enable.files` objects buildDefaultTabs emits a peer Attachments tab
-  //    instead — objectstack#4358.)
-  if ('discussion' in slots && slots.discussion !== undefined) {
-    components.push(...toNodeArray(slots.discussion));
-  } else if (!options.hideDiscussion) {
-    components.push(buildDefaultDiscussion());
-  }
-
-  // 6) Reference Rail — Salesforce/HubSpot-style aside summary of
-  //    related collections. Auto-emit only when the record has at
-  //    least 2 related lists; otherwise the rail is mostly noise.
-  //    Hidden on screens below `xl` so the main column owns full width
-  //    at common laptop widths.
+  // ADR-0085 (objectstack#27055): the synthesized page has ONE region. The
+  // opt-in reference rail and the `rightRail` slot that used to add an
+  // `aside` here are gone; an authored page places `record:reference_rail`
+  // itself.
   const regions: any[] = [
     {
       name: 'main',
@@ -1224,38 +1280,6 @@ export function buildDefaultPageSchema(
       components,
     },
   ];
-
-  const rightRailExtras = toNodeArray(slots.rightRail);
-  const willEmitAside = willEmitRail || rightRailExtras.length > 0;
-
-  if (willEmitAside) {
-    const asideComponents: any[] = [];
-    if (willEmitRail) {
-      // No `icon` on rail entries: `ReferenceRailEntrySchema` is `$strict`
-      // without it, so emitting `rel.icon` here wrote a key the spec refuses
-      // at save — and no render path ever read it (objectui#5494).
-      asideComponents.push(componentNode('record:reference_rail', {
-        entries: (options.related as any[]).map((rel) => ({
-          objectName: rel.objectName,
-          relationshipField: rel.relationshipField,
-          title: rel.title,
-          displayField: rel.displayField,
-          limit: 3,
-        })),
-      }));
-    }
-    // Author-contributed right-rail nodes follow the reference rail so the
-    // canonical "related" summary stays anchored at the top.
-    if (rightRailExtras.length > 0) {
-      asideComponents.push(...rightRailExtras);
-    }
-    regions.push({
-      name: 'aside',
-      width: 'small',
-      className: 'hidden xl:flex flex-col gap-4',
-      components: asideComponents,
-    });
-  }
 
   return {
     type: 'record',

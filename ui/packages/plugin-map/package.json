@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Map visualization plugin for Object UI",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-map",
+  "description": "Map visualization plugin for ObjectUI",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-map",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

@@ -1109,7 +1109,10 @@ export function lintMetadataEmbeds(
  * judged here so one nav item is judged in one place.
  *
  * Walked: every app's `navigation` and `areas[].navigation` (children
- * included), and the items of `manifest.navigationContributions`.
+ * included) — the top level's apps, or each package body's when the top level
+ * carries none — and the items of `navigationContributions`: each package
+ * body's when the stack carries `packages[]`, otherwise the top-level
+ * manifest's.
  *
  * ## What resolves
  *
@@ -1175,7 +1178,13 @@ export function lintDocNavTargets(stack: Record<string, unknown>, docNames: Read
     }
   };
 
-  const apps = Array.isArray(stack.apps) ? (stack.apps as AnyRec[]) : [];
+  // A multi-package `preserve` artifact carries its apps in the package bodies
+  // and none at its top level. The top level's apps when it carries the key,
+  // otherwise each body's: `resolveStackCollection`'s rule, over the same
+  // `artifactPackages` walk as the books above, which refuses no entry shape.
+  const apps = (Array.isArray(stack.apps)
+    ? stack.apps
+    : artifactPackages(stack).flatMap(({ body }) => (Array.isArray(body.apps) ? body.apps : []))) as AnyRec[];
   for (const app of apps) {
     if (!app || typeof app !== 'object') continue;
     const appName = typeof app.name === 'string' ? app.name : '(unnamed)';
@@ -1187,7 +1196,15 @@ export function lintDocNavTargets(stack: Record<string, unknown>, docNames: Read
   // A package may also CONTRIBUTE a doc entry into an app it does not own
   // (ADR-0029 D7). The entry opens this package's docs, so it is judged here,
   // against this package's set, under the name of the app it lands in.
-  const contributions = (stack.manifest as { navigationContributions?: unknown } | undefined)?.navigationContributions;
+  // On a multi-package `preserve` artifact each package's contributions sit in
+  // its body, and the top-level manifest is only the owner's copy: each body's
+  // when the stack carries `packages[]` (so the owner's are judged once),
+  // otherwise the top-level manifest's — `collectNavGroupInputs`' rule, over
+  // the same `artifactPackages` walk as the books and apps above.
+  const bodies = artifactPackages(stack);
+  const contributions = (bodies.length > 0
+    ? bodies.flatMap(({ body }) => (Array.isArray(body.navigationContributions) ? body.navigationContributions : []))
+    : (stack.manifest as { navigationContributions?: unknown } | undefined)?.navigationContributions);
   if (Array.isArray(contributions)) {
     for (const c of contributions as AnyRec[]) {
       check(c?.items, typeof c?.app === 'string' ? c.app : '(unnamed)');

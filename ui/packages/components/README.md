@@ -6,7 +6,7 @@ Standard UI component library for Object UI, built with Shadcn UI + Tailwind CSS
 
 - 🎨 **Tailwind Native** - Built entirely with Tailwind CSS utility classes
 - 🧩 **Shadcn UI** - Based on Radix UI primitives for accessibility
-- 📦 **60+ Components** - Complete set of UI components (46 from Shadcn + 14 custom)
+- 📦 **Components** - A complete set of UI components, Shadcn's plus custom ones
 - ♿ **Accessible** - WCAG compliant components
 - 🎯 **Type-Safe** - Full TypeScript support
 - 🔌 **Extensible** - Easy to customize and extend
@@ -246,7 +246,7 @@ raised through `NotificationProvider` from `@object-ui/react`. One per spec
 `toast` stays with the host's `onToast` delegate (sonner in the console). All of
 them draw the notification's `severity` icon unless it declares an `icon`
 override naming a real Lucide icon. See the
-[notifications guide](https://objectui.org/docs/guide/notifications).
+[notifications guide](https://objectstack.ai/docs/build-without-code).
 
 <!-- doc-snippet: fragment — router-layout excerpt: `Outlet` is react-router's, supplied by the host application -->
 ```tsx
@@ -294,11 +294,11 @@ here is renderable from schema anywhere in the app.
 
 ## API Reference
 
-See [full documentation](https://objectui.org/docs/components) for detailed API reference.
+See [full documentation](https://objectstack.ai/docs/ui/components) for detailed API reference.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/components)
+- 📚 [Documentation](https://objectstack.ai/docs/ui/components)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/components)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

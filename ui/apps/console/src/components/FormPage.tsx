@@ -149,7 +149,12 @@ import {
   resolveFormWidgetType,
 } from '@object-ui/fields';
 import { Tabs, TabsContent, TabsList, TabsTrigger, cn } from '@object-ui/components';
-import { SchemaRendererContext, usePredicateScope, type ApiFetch } from '@object-ui/react';
+import {
+  SchemaRendererContext,
+  extractFieldErrors,
+  usePredicateScope,
+  type ApiFetch,
+} from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useSafeFieldLabel } from '@object-ui/i18n';
 import type { FormFieldSpec, FormSectionSpec, FormViewSpec } from '@object-ui/app-shell';
 import type { ObjectFormSection } from '@object-ui/types';
@@ -256,8 +261,12 @@ interface ObjectFieldDef {
   requiredWhen?: FieldRulePredicate;
 }
 
-/** Visualization types the form renderer understands (FormViewSpec.type). */
-const FORM_SPEC_TYPES = new Set(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']);
+/**
+ * The form layouts a form view declares (FormViewSpec.type) — `simple`,
+ * `tabbed` and `wizard` since ADR-0050 (#27155 / #27159): `split`, `drawer`
+ * and `modal` left the enum, and the spec refuses each at parse.
+ */
+const FORM_SPEC_TYPES = new Set(['simple', 'tabbed', 'wizard']);
 
 /**
  * The form CONFIG plus the view identity that travels beside it (objectui#5596).
@@ -1814,7 +1823,7 @@ async function submitPublic(slug: string, data: Record<string, unknown>): Promis
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Submit failed (${res.status}): ${body || res.statusText}`);
+    throw refusedWriteError(`Submit failed (${res.status}): ${body || res.statusText}`, body);
   }
   return res.json().catch(() => ({}));
 }
@@ -1854,11 +1863,42 @@ async function submitInternal(
   );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(
+    throw refusedWriteError(
       `${recordId ? 'Update' : 'Create'} failed (${res.status}): ${body || res.statusText}`,
+      body,
     );
   }
   return res.json().catch(() => ({}));
+}
+
+/**
+ * The error a refused submit throws (objectstack-ai/objectstack#27417): the
+ * message this page has always shown, plus the response body attached the way
+ * `@objectstack/client` attaches it to its own errors — the semantic `code`,
+ * and `details` from the wrapped envelope's `error.details`, else the whole
+ * flat body.
+ *
+ * That is what lets the record dialog's reader of the server's field paths,
+ * `extractFieldErrors` (`@object-ui/react`), read this page's refusals exactly
+ * as it reads the client's: the flat `400 VALIDATION_FAILED` with `fields[]`
+ * the submit routes answer, and the `409 UNIQUE_VIOLATION` naming its one
+ * `field`. ⛔ No field path is read here; a body that is not JSON attaches
+ * nothing, and the refusal marks no field.
+ */
+function refusedWriteError(message: string, body: string): Error {
+  const error = new Error(message) as Error & { code?: string; details?: unknown };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return error;
+  }
+  if (!parsed || typeof parsed !== 'object') return error;
+  const envelope = parsed as { code?: unknown; details?: unknown; error?: { code?: unknown; details?: unknown } };
+  const code = [envelope.code, envelope.error?.code].find((c) => typeof c === 'string' && c);
+  if (typeof code === 'string') error.code = code;
+  error.details = envelope.details ?? envelope.error?.details ?? envelope;
+  return error;
 }
 
 // ─── Field renderers ─────────────────────────────────────────────────
@@ -1871,6 +1911,14 @@ function controlIdOf(fieldName: string): string {
 /** The id a row's visible label publishes when it is associated by IDREF. */
 function labelIdOf(fieldName: string): string {
   return `f_${fieldName}-label`;
+}
+
+/**
+ * The id of the message a refused submit puts under a row's control, which the
+ * control names in `aria-describedby` (objectstack-ai/objectstack#27417).
+ */
+function errorIdOf(fieldName: string): string {
+  return `f_${fieldName}-error`;
 }
 
 /**
@@ -1936,6 +1984,16 @@ interface FieldInputProps {
   state: { readonly: boolean; required: boolean };
   value: unknown;
   onChange: (v: unknown) => void;
+  /**
+   * Why the last submit refused this row, or undefined when it did not
+   * (objectstack-ai/objectstack#27417): the reason, and the id of the element
+   * that says it — the text the host draws under the control
+   * ({@link errorIdOf}), or the page's banner. The widget gets the reason as
+   * its `error`, which the widget contract reads for `aria-invalid` only, and
+   * the control is pointed at the text — the record dialog's split between the
+   * widget and `<FormMessage/>`.
+   */
+  refusal?: { message: string; describedBy: string };
   /**
    * The form's live values, handed to the widgets that re-resolve against the
    * record — see {@link needsDependentValues}.
@@ -2005,7 +2063,7 @@ function needsDependentValues(widgetKey: string): boolean {
  * The widget is lazy by construction, hence the boundary. The fallback is a
  * neutral, unannounced placeholder of the control's height.
  */
-function FieldInput({ field, state, value, onChange, values, onUploadingChange }: FieldInputProps) {
+function FieldInput({ field, state, value, onChange, refusal, values, onUploadingChange }: FieldInputProps) {
   // `getLazyFieldWidget` caches ONE lazy component per key, so this identity is
   // stable across renders of the same row — the component is looked up, not
   // created during render. The memo only keeps the lookup off the hot path;
@@ -2020,6 +2078,11 @@ function FieldInput({ field, state, value, onChange, values, onUploadingChange }
   const labelling = widgetLabelling(widgetKey);
   const controlId = controlIdOf(field.name);
   const labelId = labelIdOf(field.name);
+  // The refusal's state and its text, on the element that answers for the row:
+  // the control (or group), or the host's wrapper around a display.
+  const invalid = refusal
+    ? { 'aria-invalid': true as const, 'aria-describedby': refusal.describedBy }
+    : null;
 
   const widget = (
     // eslint-disable-next-line react-hooks/static-components -- getLazyFieldWidget returns a per-key cached lazy component (stable identity), not a component created during render
@@ -2033,6 +2096,8 @@ function FieldInput({ field, state, value, onChange, values, onUploadingChange }
       field={widgetField}
       disabled={state.readonly}
       aria-required={state.required || undefined}
+      {...(refusal?.message ? { error: refusal.message } : null)}
+      {...(labelling === 'display' ? null : invalid)}
       {...(labelling === 'group' ? { 'aria-labelledby': labelId } : null)}
       {...(needsDependentValues(widgetKey) ? { dependentValues: values } : null)}
       {...(isUploadWidget(widgetKey) ? { onUploadingChange } : null)}
@@ -2044,7 +2109,7 @@ function FieldInput({ field, state, value, onChange, values, onUploadingChange }
       fallback={<div className="h-9 w-full animate-pulse rounded-md bg-muted/40" aria-hidden="true" />}
     >
       {labelling === 'display' ? (
-        <div id={controlId} role="group" aria-labelledby={labelId}>
+        <div id={controlId} role="group" aria-labelledby={labelId} {...invalid}>
           {widget}
         </div>
       ) : (
@@ -2271,6 +2336,17 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The rows the last submit refused, by field name (objectstack-ai/objectstack#27417).
+   * The `error` banner and the outcome toast still say the whole refusal; this
+   * marks WHICH inputs it names. A string is the reason drawn under the row's
+   * control; `null` marks a row the banner itself names and explains (a faulted
+   * `visibleWhen`), so the control points at the banner instead of repeating
+   * it. Written by every refusal — {@link reportRefusals} for this page's own
+   * checks, the submit's catch for the server's — and an edit to a row clears
+   * that row's mark.
+   */
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
   const [loaded, setLoaded] = useState<LoadedForm | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -2320,6 +2396,8 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
    * confirmation this id carries, exactly as objectui#4190 ruled.
    */
   const outcomeToastId = `form-outcome:${useId()}`;
+  /** The `error` banner's id, which a row the banner names points at (objectstack-ai/objectstack#27417). */
+  const errorBannerId = `form-error:${useId()}`;
   const [submitted, setSubmitted] = useState(false);
   /**
    * The outcome of a `redirect` submit behaviour: the in-app route to go to
@@ -2343,6 +2421,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setFieldErrors({});
     // A `?recordId=` we cannot make sense of never reaches a loader: it is an
     // edit intent this route cannot honour, and #4278 ruling point 2 says
     // refuse rather than degrade into the create path.
@@ -2463,7 +2542,9 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
    * Puts the client-side refusals — see `findSubmitRefusals` — on screen, and
    * answers whether there were any. Both go out on the page's failure channel
    * and the outcome toast id, so a retry that succeeds supersedes them exactly
-   * as it supersedes a refused write (objectui#7252).
+   * as it supersedes a refused write (objectui#7252). Each refused row is
+   * marked too (objectstack-ai/objectstack#27417), and a check that refuses
+   * nothing clears every mark.
    */
   const reportRefusals = (
     object: string,
@@ -2480,6 +2561,9 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       });
       setError(msg);
       toast.error(msg, { id: outcomeToastId });
+      // Nothing typed into the row answers it, and the banner already names
+      // the row and the rule: the rows point at the banner.
+      setFieldErrors(Object.fromEntries(faultedVisibleWhen.map((f) => [f.name, null])));
       return true;
     }
     // The client-side required refusal the native attribute used to give the
@@ -2495,9 +2579,34 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       });
       setError(msg);
       toast.error(msg, { id: outcomeToastId });
+      // The record form's message for an empty required field, per row.
+      setFieldErrors(Object.fromEntries(missing.map((f) => [
+        f.name,
+        t('validation.required', { field: fieldLabel(object, f.name, f.label) }),
+      ])));
       return true;
     }
+    setFieldErrors({});
     return false;
+  };
+
+  /**
+   * Brings the first refused row into view on a tabbed or wizard form view, the
+   * way the app's tabbed form jumps to it (objectstack-ai/objectstack#26843),
+   * and marks every wizard step a refused row sits on, as the app's wizard does
+   * (objectstack-ai/objectstack#27224). One rule for this page's own refusals
+   * and the server's (objectstack-ai/objectstack#27417).
+   */
+  const revealRefused = (refusedRows: RenderableField[]) => {
+    const first = refusedRows[0];
+    if (first && tabbedView) {
+      const at = stepOf(first);
+      if (at >= 0) setPickedTab(sectionTabKey(sections[at], at));
+    }
+    if (wizardView) {
+      setInvalidSteps(new Set(refusedRows.map(stepOf).filter((at) => at >= 0)));
+      if (first && stepOf(first) >= 0) setWizardStep(stepOf(first));
+    }
   };
 
   /** Opens a wizard step, from the indicator or Back (objectstack-ai/objectstack#27224). */
@@ -2533,6 +2642,32 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     goToStep(currentStep + 1);
   };
 
+  /**
+   * A submit the browser blocks (objectstack-ai/objectstack#27496), such as a
+   * malformed `type="email"`, never reaches `handleSubmit`, so the banner kept
+   * an earlier attempt's text. It describes the current attempt instead: this
+   * page's own checks run again over the rows the submit would judge (nothing
+   * refused clears the banner), and each control the browser refused is marked
+   * with the browser's own message. `invalid` fires once per refused control,
+   * so the marks are re-read from the whole form each time.
+   */
+  const handleNativeInvalid = (e: FormEvent<HTMLFormElement>) => {
+    if (!loaded) return;
+    const refusals = findSubmitRefusals(
+      wizardView && !onLastStep ? [sections[currentStep]] : sections,
+      values,
+      loaded.record,
+      isCreateForm,
+      predicateScope,
+    );
+    if (!reportRefusals(loaded.object, refusals)) setError(null);
+    const native: Record<string, string> = {};
+    for (const el of Array.from(e.currentTarget.elements) as HTMLInputElement[]) {
+      if (el.name && el.validity && !el.validity.valid) native[el.name] = el.validationMessage;
+    }
+    setFieldErrors((prev) => ({ ...prev, ...native }));
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!loaded) return;
@@ -2550,22 +2685,10 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       predicateScope,
     );
     // On a tabbed form view the refused field may sit on a tab that is not
-    // open (objectstack-ai/objectstack#26843): open the tab of the first field
-    // the message below names, the way the app's tabbed form jumps to it. A
-    // wizard opens that field's step (objectstack-ai/objectstack#27224) and
-    // marks every step a refused field sits on, as the app's wizard does.
-    const refused = refusals.faultedVisibleWhen[0] ?? refusals.missing[0];
-    if (refused && tabbedView) {
-      const at = stepOf(refused);
-      if (at >= 0) setPickedTab(sectionTabKey(sections[at], at));
-    }
-    if (wizardView) {
-      const blocked = refusals.faultedVisibleWhen.length > 0
-        ? refusals.faultedVisibleWhen
-        : refusals.missing;
-      setInvalidSteps(new Set(blocked.map(stepOf).filter((at) => at >= 0)));
-      if (refused && stepOf(refused) >= 0) setWizardStep(stepOf(refused));
-    }
+    // open: the rows the message below names, the faulted rule's first.
+    revealRefused(
+      refusals.faultedVisibleWhen.length > 0 ? refusals.faultedVisibleWhen : refusals.missing,
+    );
     if (reportRefusals(loaded.object, refusals)) return;
     setSubmitting(true);
     setError(null);
@@ -2672,6 +2795,17 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       const msg = err?.message ?? String(err);
       setError(msg);
       toast.error(msg, { id: outcomeToastId });
+      // The fields the server's refusal names, read by the record dialog's
+      // reader (see `refusedWriteError`), marked where this form draws them. A
+      // field the form does not draw marks nothing; the banner still says it.
+      const drawn = sections.flatMap((s) => s.fields);
+      const named = (extractFieldErrors(err) ?? []).filter((fe) =>
+        drawn.some((f) => f.name === fe.field),
+      );
+      setFieldErrors(Object.fromEntries(
+        named.map((fe) => [fe.field, fe.message || t('form.submitFailed')]),
+      ));
+      revealRefused(drawn.filter((f) => named.some((fe) => fe.field === f.name)));
     } finally {
       setSubmitting(false);
     }
@@ -2783,6 +2917,14 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // it three times would be three chances to disagree.
           const state = resolveRowState(f, values, loaded.record, isCreateForm, predicateScope);
           if (!state.visible) return null;
+          // The row's refusal mark, if the last submit left one: its own text
+          // under the control, or the banner that names it.
+          const mark = f.name in fieldErrors ? fieldErrors[f.name] : undefined;
+          const refusal = mark === undefined
+            ? undefined
+            : mark === null
+              ? { message: error ?? '', describedBy: errorBannerId }
+              : { message: mark, describedBy: errorIdOf(f.name) };
           const spanClass =
             f.colSpan === 2 ? 'sm:col-span-2'
               : f.colSpan === 3 ? 'sm:col-span-3'
@@ -2828,11 +2970,26 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
               state={state}
               value={values[f.name]}
               values={values}
-              onChange={(v) => setValues((prev) => ({ ...prev, [f.name]: v }))}
+              onChange={(v) => {
+                setValues((prev) => ({ ...prev, [f.name]: v }));
+                // An edit answers the row's refusal; the next submit judges again.
+                setFieldErrors((prev) => {
+                  if (!(f.name in prev)) return prev;
+                  const next = { ...prev };
+                  delete next[f.name];
+                  return next;
+                });
+              }}
+              refusal={refusal}
               onUploadingChange={(u) =>
                 setUploading((prev) => (prev[f.name] === u ? prev : { ...prev, [f.name]: u }))
               }
             />
+            {typeof mark === 'string' && (
+              <p id={errorIdOf(f.name)} className="mt-1 text-xs font-medium text-destructive">
+                {mark}
+              </p>
+            )}
             {f.helpText && (
               <p className="mt-1 text-xs text-muted-foreground">{f.helpText}</p>
             )}
@@ -3037,7 +3194,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           <p className="mt-1 text-sm text-muted-foreground">{loaded.form.description}</p>
         )}
       </header>
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} onInvalidCapture={handleNativeInvalid} className="space-y-6">
         {wizardView ? renderWizardSteps() : tabbedView ? renderTabbedSections() : sections.map((sec, i) => {
           // A section conditioned away is skipped IN PLACE rather than filtered
           // out of the list first (objectui#5627). The key here is the section's
@@ -3065,7 +3222,10 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           );
         })}
         {error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <div
+            id={errorBannerId}
+            className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          >
             {error}
           </div>
         )}

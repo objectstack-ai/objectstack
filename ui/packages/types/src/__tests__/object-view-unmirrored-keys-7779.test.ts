@@ -167,7 +167,7 @@ const REGISTRATION = 'packages/plugin-view/src/index.tsx';
 const MIRROR = 'packages/types/src/zod/objectql.zod.ts';
 const DECLARATION = 'packages/types/src/objectql.ts';
 const README = 'packages/plugin-view/README.md';
-const DOC = 'content/docs/plugins/plugin-view.mdx';
+const DOC = '../content/docs/frontend/plugins/plugin-view.mdx';
 
 const SPEC_REFERENCED = ['navigation', 'searchableFields', 'filterableFields'] as const;
 const SIBLING_REFERENCED = ['allowCreateView', 'viewActions'] as const;
@@ -577,6 +577,16 @@ const RETIRED_BY_11013 = ['allowExport'] as const;
 const RETIRED_BY_13118 = ['filterableFields'] as const;
 
 /**
+ * The bucket-③ member objectstack#25923 retired as a `?: never` tombstone: the
+ * twenty-second, `options`. It was HELD under objectui#7928's Q2 (i) until the
+ * protocol retired the list view's `options` bag (the server folds a stored one
+ * onto the top-level blocks) and the readers were deleted. Kept apart from
+ * {@link NAMED_LIST_VIEW_TOMBSTONES} for the same reason as
+ * {@link RETIRED_BY_11013}.
+ */
+const RETIRED_BY_25923 = ['options'] as const;
+
+/**
  * The bucket-③ member retired LATER than its neighbours, by ruling A′ on
  * objectui#7924: a legacy spelling of top-level `rowHeight` whose only reader
  * is the runtime fold.
@@ -587,8 +597,9 @@ const DENSITY_MODE_RETIRED = 'densityMode';
  * Every `?: never` tombstone objectui#7924 put on `NamedListView`: the eight
  * bucket-② spellings plus the nine bucket-③ members nothing outside the fold
  * reads (`densityMode` joined the eight at ruling A′). `options`, unread off a
- * named view since objectui#7928, is the eleventh bucket-③ member and is held
- * rather than tombstoned ({@link BUCKET_LOCAL_ONLY_HELD}). Derived off the AST (a
+ * named view since objectui#7928, is the eleventh bucket-③ member; it was held
+ * rather than tombstoned until objectstack#25923 ({@link RETIRED_BY_25923}).
+ * Derived off the AST (a
  * member whose type node is the `never` keyword).
  */
 const NAMED_LIST_VIEW_TOMBSTONES = [
@@ -624,19 +635,20 @@ const PROTOCOL_RETIRED_TOMBSTONE_DOC: Readonly<Record<(typeof BUCKET_PROTOCOL_RE
  * objectui#7928. It was the whole cost of a by-reference mirror in one name: the
  * strict protocol value refuses it, and the renderer read it. The director
  * ruling on that card (comment 5856694523) removed the read and folds a stored
- * body's bag at `ViewPreview`, so it joined bucket ③. It is NOT tombstoned:
- * Q2 (i) of the same ruling keeps `NamedListView` exported and unchanged; its
- * retirement or narrowing follows objectui#7924's ruling A′ (which retired
- * `densityMode` and left `options` declared) and the `allowExport` ruling, not
- * that card ({@link BUCKET_LOCAL_ONLY_HELD}).
+ * body's bag at `ViewPreview`, so it joined bucket ③. It was NOT tombstoned
+ * then: Q2 (i) of the same ruling kept `NamedListView` exported and unchanged
+ * ({@link BUCKET_LOCAL_ONLY_HELD}). objectstack#25923 retired the bag in the
+ * protocol, moved the fold to the server and tombstoned the member
+ * ({@link RETIRED_BY_25923}).
  */
 const LOCAL_ONLY_READ = 'options';
 
 /**
  * Bucket-③ members kept declared and NOT tombstoned by a ruling rather than by
- * a read: `options`, under objectui#7928's Q2 (i).
+ * a read. EMPTY since objectstack#25923: it held `options`, under objectui#7928's
+ * Q2 (i), until the protocol retired the bag ({@link RETIRED_BY_25923}).
  */
-const BUCKET_LOCAL_ONLY_HELD = [LOCAL_ONLY_READ] as const;
+const BUCKET_LOCAL_ONLY_HELD = [] as const;
 
 /** The `SHOW_FLAG_TO_USER_ACTION` fold lives here, and is read off disk. */
 const FOLD = 'packages/core/src/utils/normalize-list-view.ts';
@@ -1367,11 +1379,13 @@ describe('objectui#7779 — the zod mirror REFUSES `viewTabBar` by name', () => 
 /* ── `listViews`: the measurement that keeps it in the ledger ─────────────── */
 
 /**
- * The pages that author named list views (objectui#8255): three on an
+ * The pages that author named list views (objectui#8255): two on an
  * `object-view` node, plus the CRUD guide's object definition, whose
- * `listViews` the spec types with the same `ObjectListViewSchema` value.
+ * `listViews` the spec types with the same `ObjectListViewSchema` value. The
+ * fourth, `content/docs/api/schema-reference.md`, was removed as a duplicate
+ * when the ObjectUI docs moved into the monorepo (objectstack#27145).
  */
-const NAMED_VIEW_DOCS = [README, DOC, 'content/docs/api/schema-reference.md', 'content/docs/guide/building-crud-app.md'] as const;
+const NAMED_VIEW_DOCS = [README, DOC, '../content/docs/frontend/building-crud-app.mdx'] as const;
 
 /** A literal expression's value. Anything else THROWS, so a reading is never silently partial. */
 function literalValue(node: ts.Expression, where: string): unknown {
@@ -1465,7 +1479,7 @@ describe('objectui#7779 → objectui#7928 — `listViews` was ledgered on the fa
     expect(SpecObjectListViewSchema.safeParse({ label: 'Directory', columns: ['name', 'email'] }).success).toBe(true);
   });
 
-  it('the docs now teach the spec shape — every named view the four pages author parses under `ObjectListViewSchema` (objectui#8255, off disk)', () => {
+  it('the docs now teach the spec shape — every named view the three pages author parses under `ObjectListViewSchema` (objectui#8255, off disk)', () => {
     // The predicate, and the SAME function the positive control below runs.
     const refused = (entries: ReadonlyArray<{ where: string; view: unknown }>): string[] =>
       entries.filter((e) => !SpecObjectListViewSchema.safeParse(e.view).success).map((e) => e.where);
@@ -1884,7 +1898,7 @@ describe('objectui#7924 — the unread members, in the FOUR buckets the ruling w
     expect(BUCKET_LOCAL_ONLY_UNREAD as readonly string[]).toContain(LOCAL_ONLY_READ);
   });
 
-  it('NO objectui-only member is read off a named view since objectui#7928 — the one that was, `options`, is folded at `ViewPreview`', () => {
+  it('NO objectui-only member is read off a named view since objectui#7928 — the one that was, `options`, is folded by the server since objectstack#25923', () => {
     const reads = deriveNamedViewReads().reads;
     const protocolKeys = protocolListViewKeys();
     const localOnlyRead = reads.filter((r) => !protocolKeys.includes(r));
@@ -2173,10 +2187,14 @@ describe('objectui#7924 — the retirement: seventeen `?: never` tombstones, obj
     // about objectui#7924's seventeen.
     const tombstones = allTombstones.filter((t) => !(BUCKET_PROTOCOL_RETIRED_TOMBSTONED as readonly string[]).includes(t)
       && !(RETIRED_BY_11013 as readonly string[]).includes(t)
-      && !(RETIRED_BY_13118 as readonly string[]).includes(t));
-    // 20 until objectui#13118 tombstoned `filterableFields`.
-    expect(allTombstones).toHaveLength(21);
+      && !(RETIRED_BY_13118 as readonly string[]).includes(t)
+      && !(RETIRED_BY_25923 as readonly string[]).includes(t));
+    // 20 until objectui#13118 tombstoned `filterableFields`; 21 until
+    // objectstack#25923 tombstoned `options`.
+    expect(allTombstones).toHaveLength(22);
     for (const m of RETIRED_BY_13118) expect(allTombstones).toContain(m);
+    for (const m of RETIRED_BY_25923) expect(allTombstones).toContain(m);
+    expect(BUCKET_LOCAL_ONLY_HELD).toHaveLength(0);
     expect([...tombstones].sort()).toEqual([...NAMED_LIST_VIEW_TOMBSTONES]);
     expect(tombstones).toHaveLength(17);
     expect(BUCKET_LOCAL_ONLY_RETAINED).toHaveLength(0);
@@ -2184,7 +2202,7 @@ describe('objectui#7924 — the retirement: seventeen `?: never` tombstones, obj
     const expected = [
       ...BUCKET_LEGACY_SHOW_SPELLINGS,
       ...BUCKET_LOCAL_ONLY_UNREAD.filter((m) => !(RETIRED_BY_11013 as readonly string[]).includes(m)
-        && !(BUCKET_LOCAL_ONLY_HELD as readonly string[]).includes(m)),
+        && !(RETIRED_BY_25923 as readonly string[]).includes(m)),
     ].sort();
     expect([...tombstones].sort()).toEqual(expected);
     // A tombstone is still a declared member — that is what makes the refusal
@@ -2267,11 +2285,15 @@ describe('objectui#7924 — the retirement: seventeen `?: never` tombstones, obj
     expect(fold).toContain('delete next.densityMode;');
   });
 
-  it('`options` is HELD, not tombstoned: unread off a named view since objectui#7928, and `NamedListView` stays unchanged by that ruling\'s Q2 (i)', () => {
-    const { tombstones, names } = namedListViewMembers();
+  it('INVERTED (objectstack#25923): `options` is a tombstone, no longer HELD — the protocol retired the bag, and its docblock names the top-level blocks', () => {
+    const { tombstones, names, docs } = namedListViewMembers();
     expect(names).toContain(LOCAL_ONLY_READ);
-    expect(tombstones).not.toContain(LOCAL_ONLY_READ);
-    expect(readRepo(DECLARATION)).toContain('options?: Record<string, any>;');
+    // Inverted from `not.toContain`: held under objectui#7928's Q2 (i) until the
+    // protocol retired the list view's `options` bag.
+    expect(tombstones).toContain(LOCAL_ONLY_READ);
+    expect(readRepo(DECLARATION)).not.toContain('options?: Record<string, any>;');
+    expect(docs[LOCAL_ONLY_READ]).toContain('RETIRED (objectstack#25923)');
+    expect(docs[LOCAL_ONLY_READ]).toContain('top level of the view');
     // …while the named-view record refuses it: `ObjectViewSchema.listViews` is
     // the protocol's strict value by reference.
     const r = ObjectViewSchema.safeParse({ ...NODE, listViews: { v1: { label: 'x', columns: ['a'], [LOCAL_ONLY_READ]: {} } } });

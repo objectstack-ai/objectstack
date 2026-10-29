@@ -743,6 +743,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${D7}: every sys_secret read is by id under the system context, never by organization; systemFields.tenant: ` +
       'false with the open ceremony (18.x step 6, line fact F2)',
   },
+  {
+    object: 'sys_trusted_key',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the environment's trusted plugin-publisher keys, ` +
+      'read by key id under the system context, never by organization',
+  },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   {
     object: 'sys_flow_credential',
@@ -751,6 +759,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     citation:
       `${D7}: a flow's encrypted credential is read by its flow, never by organization; systemFields.tenant: false ` +
       'with the open ceremony (18.x step 6, line fact F2)',
+  },
+  {
+    object: 'sys_connector_credential',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: a declarative connector's stored credential is environment-level, ` +
+      'read by the reference its instances name, never by organization',
   },
   // Inbound mail (`@objectstack/service-mailbox`): every row is written by the
   // system with the mailbox's organization stamped (ADR-0131 D9), so a NULL

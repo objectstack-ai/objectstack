@@ -7,19 +7,18 @@
  *
  *   objectstack.plugin.json   ← compiled manifest (with `integrity`)
  *   dist/**                   ← bundled, @objectstack/*-externalized code
- *   assets/**                 ← optional static assets
- *   package.json              ← only for `packaging: manifest-deps`
- *   pnpm-lock.yaml            ← only for `packaging: manifest-deps`
+ *                               (every other dependency inlined: `bundled`
+ *                               is the one packaging strategy, ADR §3.3)
+ *   assets/**                 ← optional static assets (never a `.node`
+ *                               addon: `os plugin build` refuses one)
  *   SIGNATURE                 ← detached publisher signature (placeholder
  *                               until `os plugin sign`; ADR §3.4)
  *
  * The control plane (cloud) stores this blob opaquely. The per-file
- * `integrity` map is computed here at build time and self-checked by the
- * `os plugin publish` preflight; re-verification at install/load-time
- * unpack is not implemented in this repo and is owned by the
- * future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
- * control plane (#11331). This module owns the two contracts the
- * runtime and cloud must agree on byte-for-byte:
+ * `integrity` map is computed here at build time, self-checked by the
+ * `os plugin publish` preflight, and re-verified at unpack by
+ * `os plugin install` (ADR-0025 §3.5 M1). This module owns the two
+ * contracts the runtime and cloud must agree on byte-for-byte:
  *
  *   1. The integrity digest STRING FORMAT — Subresource-Integrity style
  *      `sha256-<base64>` (matches ADR-0025 §3.2's example). See
@@ -28,33 +27,29 @@
  *      reader (node-tar, GNU tar) can unpack it. See {@link createTarGz}.
  *
  * Everything here is pure (no oclif / filesystem) so it can be unit-tested
- * and reused by `os plugin sign` / `publish`.
+ * and reused by `os plugin sign` / `publish` / `install`.
+ *
+ * The READER (`readTar`, `readTarGz` with its bounded gunzip, `sha256Hex`)
+ * lives in `@objectstack/core` since the runtime's boot-time loader re-reads
+ * the artifact an install kept (ADR-0025 §3.5 M1); it is re-exported here so
+ * every CLI caller keeps its import.
  */
 
 import { createHash } from 'node:crypto';
-import { gzipSync, gunzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
+import { readTarGz, type ArchiveFile } from '@objectstack/core';
 
-/** A single file destined for the archive. `path` is POSIX, archive-relative. */
-export interface ArchiveFile {
-  path: string;
-  data: Uint8Array;
-}
+export { readTar, readTarGz, sha256Hex, MAX_UNPACKED_ARTIFACT_BYTES, type ArchiveFile } from '@objectstack/core';
 
 /**
  * Subresource-Integrity-style digest of `bytes`: `sha256-<base64>`.
  * This is the canonical per-file integrity string written into the
- * compiled manifest's `integrity` map and checked back at the
- * `os plugin publish` preflight (unpack-time re-verification is owned
- * by the future runtime loader — ADR-0025 §3.5 steps 4–7 — not by the
- * cloud control plane, #11331).
+ * compiled manifest's `integrity` map, checked back at the
+ * `os plugin publish` preflight and again at unpack by `os plugin install`
+ * (ADR-0025 §3.5 M1).
  */
 export function sriDigest(bytes: Uint8Array): string {
   return 'sha256-' + createHash('sha256').update(bytes).digest('base64');
-}
-
-/** Plain hex sha256 of bytes (used for the whole-artifact checksum). */
-export function sha256Hex(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }
 
 /**
@@ -137,29 +132,6 @@ export function createTar(files: ArchiveFile[]): Buffer {
 /** ustar + gzip → the `.osplugin` blob bytes. */
 export function createTarGz(files: ArchiveFile[]): Buffer {
   return gzipSync(createTar(files), { level: 9 });
-}
-
-/**
- * Parse a ustar buffer back into its files — the inverse of {@link createTar}.
- * Reads regular-file entries only; stops at the end-of-archive zero block.
- */
-export function readTar(buf: Uint8Array): ArchiveFile[] {
-  const b = Buffer.from(buf);
-  const files: ArchiveFile[] = [];
-  let off = 0;
-  while (off + BLOCK <= b.length) {
-    const name = b.toString('utf8', off, off + 100).replace(/\0.*$/s, '');
-    if (!name) break; // zero block → end of archive
-    const size = parseInt(b.toString('ascii', off + 124, off + 136).replace(/\0.*$/s, '').trim(), 8) || 0;
-    files.push({ path: name, data: new Uint8Array(b.subarray(off + BLOCK, off + BLOCK + size)) });
-    off += BLOCK + Math.ceil(size / BLOCK) * BLOCK;
-  }
-  return files;
-}
-
-/** gunzip + untar an `.osplugin` blob into its files. */
-export function readTarGz(blob: Uint8Array): ArchiveFile[] {
-  return readTar(gunzipSync(Buffer.from(blob)));
 }
 
 /**

@@ -180,7 +180,7 @@ function makeMetadata() {
 
 function tree(dataSource: any) {
   return (
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
       <MetadataCtx.Provider value={makeMetadata()}>
         <RecordDetailView
           dataSource={dataSource}

@@ -1038,7 +1038,7 @@ export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSo
       }
 
       // Tenant-default currency backstops a currency column with no explicit code.
-      const cell = (value: any): React.ReactNode => renderFieldValue(value, fieldMeta, tenantCurrency, displayLocale);
+      const cell = (value: any, row?: any): React.ReactNode => renderFieldValue(value, fieldMeta, tenantCurrency, displayLocale, row);
       return { ...col, name: fieldMeta.name, type: columnType, align: inferredAlign, cell, ...maskedStamp };
     };
 

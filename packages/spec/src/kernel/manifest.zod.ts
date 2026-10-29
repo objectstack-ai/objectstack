@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { PROTOCOL_MAJOR } from './protocol-version';
 import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { formatSuggestion } from '../shared/suggestions.zod';
 import { SeedSchema } from '../data/seed.zod';
@@ -197,37 +197,70 @@ export type PluginEngines = z.input<typeof PluginEnginesSchema>;
  * forced to manual review. That gate is a real consumer of this key, which is
  * why the tier is not a candidate for retirement.
  *
- * NOT ENFORCED at load. Load-side enforcement is **not implemented** — nothing
- * dispatches on the tier (its only reads are two CLI progress lines that echo
- * the value), so a locally installed plugin runs in-process with a full
- * PluginContext whatever tier it declares. `sandbox` and `worker` therefore
- * name the isolation the publish gate assumes, not isolation the loader
- * applies; a local install is not confined by this field. The QuickJS runner
- * under `packages/runtime/src/sandbox/` is the hook / action SCRIPT-BODY
- * sandbox and is never reached from a plugin's declared tier.
+ * ENFORCED at load for a plugin `os plugin install` installed (ADR-0025 §3.5
+ * M1): the boot-time loader (`packages/runtime/src/installed-plugin-loader.ts`,
+ * `dispatchPluginRuntime`) dispatches on the tier before it imports anything.
+ * `node` is imported in process with a full PluginContext — author code in
+ * the host process, T0, NOT isolation. `sandbox` and `worker` are REFUSED by
+ * name until M3 routes them, with no in-process fallback, and an installed
+ * plugin that declares no tier is refused too (default-deny). So a declared
+ * `sandbox` is never run unconfined: today it is not run at all. The QuickJS
+ * runner under `packages/runtime/src/sandbox/` is the hook / action
+ * SCRIPT-BODY sandbox and is not reached from a plugin's declared tier yet.
  *
- * Enforcing the tier at load is tracked as its own decision (v18 direction);
- * do not read this field as an isolation guarantee until it lands.
+ * A plugin a stack's own `plugins` array names is the app's code and is not
+ * dispatched on this field.
  */
 export const PluginRuntimeSchema = z
   .enum(['node', 'sandbox', 'worker'])
   .describe(
     'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
     + 'marketplace publish gate (an unverified publisher requesting `node` is rejected with '
-    + 'HTTP 422 and forced to manual review); load-side enforcement is NOT implemented, so a '
-    + 'locally installed plugin is not isolated by the tier it declares',
+    + 'HTTP 422 and forced to manual review) and at boot for a plugin `os plugin install` '
+    + 'installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are '
+    + 'refused until they are routed (ADR-0025 M3), never run in process instead',
   );
 
 export type PluginRuntime = z.input<typeof PluginRuntimeSchema>;
 
+// `packaging: 'manifest-deps'` — the retired member's prescription
+// (`enumWithRetiredValues`, `../shared/retired-key.ts`). Declared with `//` on
+// purpose: an enum's error map consumes it, it is no documented surface.
+//
+// ADR-0025 v2 §3.3 (maintainer decision Q6, 2026-10-28): the strategy existed
+// on the build side only — `os plugin build` left the `package.json`
+// dependencies out of the bundle and packed `package.json` + `pnpm-lock.yaml`
+// for an install-time resolution nothing ever ran — so `bundled` is the one
+// strategy and the build forks are gone. The ADR-0087 D2 conversion
+// `manifest-packaging-manifest-deps-removed` (`conversions/registry.ts`)
+// strips the value from existing stack sources and stored artifacts, which
+// lands them on `bundled`, the build's only behaviour.
+const PACKAGING_RETIRED = {
+  'manifest-deps':
+    "`packaging: 'manifest-deps'` was removed in @objectstack/spec 18.3.0 (ADR-0025 v2 §3.3, ADR-0049 "
+    + 'enforce-or-remove) — nothing ever installed the dependencies it left out of the bundle, so a plugin '
+    + 'built with it could not load them. Delete the key: `bundled` is the default and the only strategy, '
+    + 'and `os plugin build` inlines every dependency except the host-provided `@objectstack/*` packages. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for the stack manifest case; `--write` '
+    + 'applies the ones it can prove, and an `objectstack.plugin.json` is not a source it reads: delete the '
+    + 'key there by hand.',
+} as const;
+
 /**
- * Dependency packaging strategy (ADR-0025 §3.3):
- * - `bundled`      — deps pre-bundled into the artifact, no install-time npm
- * - `manifest-deps`— deps resolved at install (`pnpm install`, opt-in)
+ * Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled` — every
+ * dependency except the host-provided `@objectstack/*` packages is inlined
+ * into `dist/index.mjs`, so install is unpack + verify with no npm or
+ * toolchain at install time, and a native (`.node`) addon is refused by
+ * `os plugin build`. It is the one strategy and the default, so the key is
+ * optional and an absent one means the same. The former `manifest-deps`
+ * member was retired (#27123) and is refused at parse with its prescription.
  */
-export const PluginPackagingSchema = z
-  .enum(['bundled', 'manifest-deps'])
-  .describe('Dependency packaging strategy (ADR-0025 §3.3)');
+export const PluginPackagingSchema = enumWithRetiredValues(['bundled'], PACKAGING_RETIRED)
+  .describe(
+    'Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled` is the only one and the default — every '
+    + 'dependency except the host-provided `@objectstack/*` packages is inlined into the artifact, and '
+    + '`os plugin build` refuses a native (`.node`) addon',
+  );
 
 export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
 
@@ -242,18 +275,13 @@ export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
  * not declare (#13464). An absent map is a permissive pass — the field is
  * `.optional()`.
  *
- * NOT RE-VERIFIED AT UNPACK. That leg is **not implemented** — nothing in
- * this repo unpacks an installed artifact at all: there is no
- * `os plugin install`, and the archive reader's only production caller is the
- * publish preflight reading back its own output. Re-verification is owned by
- * the **future runtime loader** — ADR-0025 §3.5 steps 4–7 (download + verify,
- * materialize, register, load + activate), the install flow that ADR's own
- * status line records as unimplemented. It is NOT the cloud control plane's
- * obligation; the control plane stores the artifact blob opaquely.
- *
- * So a present `integrity` map is evidence that the publisher checked its own
- * bytes, never that anything re-checked them after publish. The enforce leg
- * is unbuilt, and belongs to that future runtime loader.
+ * RE-VERIFIED AT UNPACK BY `os plugin install`. The local install loop
+ * (ADR-0025 §3.5 M1) re-hashes the unpacked files against the map before it
+ * materializes anything, and refuses the install by name on the same three
+ * findings; an absent map is the same permissive pass there. This check sits
+ * beside the install's signature check over the whole artifact, and neither
+ * replaces the other. The cloud control plane stores the artifact blob
+ * opaquely and checks nothing against the map.
  */
 export const PluginIntegritySchema = z
   .record(z.string(), z.string())
@@ -1019,27 +1047,37 @@ export const ManifestSchema = strictObject({
 
   /**
    * Trust / isolation tier the plugin DECLARES (ADR-0025 §3.6).
-   * Unset implies a pure-metadata package (no executable code).
+   * Unset implies a pure-metadata package (no executable code). An artifact
+   * `os plugin build` produces carries code, so on one an unset tier is an
+   * omission, not that declaration; the boot-time loader refuses an installed
+   * plugin with no tier either way (`runtime_undeclared`, default-deny), and
+   * one with no entry module too.
    *
-   * ⚠️ Enforced at the cloud marketplace **publish gate** only — an unverified
+   * ⚠️ Enforced at the cloud marketplace **publish gate** — an unverified
    * publisher requesting the `node` tier is hard-rejected (HTTP 422) and forced
-   * to manual review. **Load-side enforcement is not implemented**: a locally
-   * installed plugin is not isolated by the tier it declares. See
+   * to manual review — and **at boot for a plugin `os plugin install`
+   * installed**: only `node` is loaded (in process, not isolated); `sandbox`
+   * and `worker` are refused until ADR-0025 M3 routes them. See
    * {@link PluginRuntimeSchema} for the full split.
    */
   runtime: PluginRuntimeSchema.optional()
     .describe(
       'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
       + 'marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual '
-      + 'review); load-side enforcement is NOT implemented, so a locally installed plugin is '
-      + 'not isolated by the tier it declares',
+      + 'review) and at boot for a plugin `os plugin install` installed: only `node` is loaded '
+      + '(in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them',
     ),
 
   /**
-   * Dependency packaging strategy for code-bearing plugins (ADR-0025 §3.3).
+   * Dependency packaging strategy for code-bearing plugins (ADR-0025 v2 §3.3).
+   * `bundled` is the only strategy and the default, so omitting the key means
+   * the same; see {@link PluginPackagingSchema}.
    */
   packaging: PluginPackagingSchema.optional()
-    .describe('Dependency packaging strategy (ADR-0025 §3.3)'),
+    .describe(
+      'Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key '
+      + 'or write `bundled`',
+    ),
 
   /**
    * Entry module of a code-bearing plugin, relative to the plugin root
@@ -1060,10 +1098,9 @@ export const ManifestSchema = strictObject({
 
   /**
    * Per-file content digests of the packaged artifact (ADR-0025 §3.2).
-   * Computed at build and self-checked at the `os plugin publish` preflight
-   * (#13464); unpack-time re-verification is NOT implemented and is owned by
-   * the future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
-   * control plane. The enforce leg is unbuilt.
+   * Computed at build, self-checked at the `os plugin publish` preflight
+   * (#13464), and re-verified at unpack by `os plugin install` (ADR-0025 §3.5
+   * M1). The cloud control plane stores the blob opaquely.
    * See {@link PluginIntegritySchema}.
    */
   integrity: PluginIntegritySchema.optional()

@@ -385,6 +385,13 @@ export * from './injected-system-column-provenance';
 // that writes `controlled_by_parent` asks the spec instead of restating it.
 export * from './controlled-by-parent-master';
 
+// related-list body-table predicate (#27478, ruling B on #27055) — the single
+// source for "is this inbound relationship a body table of its parent's record
+// page", and the refusal a field group's `relatedList` earns for naming one that
+// is not. Read by `defineStack`, `@objectstack/lint` and the objectui record page
+// and Studio, so the four cannot drift.
+export * from './related-list-body-table';
+
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).
 export * from './feed.zod';

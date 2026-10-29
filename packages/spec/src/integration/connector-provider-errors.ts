@@ -62,3 +62,54 @@ export function isConnectorUpstreamUnavailable(err: unknown): boolean {
     (err as { code?: unknown }).code === CONNECTOR_UPSTREAM_UNAVAILABLE
   );
 }
+
+/**
+ * Marker `code` for a credential the upstream refused (HTTP 401 / 403) — #27237,
+ * ruling on #27237 (comment 6470087293).
+ *
+ * A third outcome beside the two above: neither an authoring fault (the
+ * instance is well-formed and its `credentialRef` resolved) nor an operational
+ * one (the upstream answered, and retrying the same value cannot change its
+ * answer). The materializer **degrades** the instance naming the refusal, as it
+ * does for an upstream outage. When the value is a stored one (the credential
+ * store) or written in the declaration, it does not retry it on a timer: the
+ * next attempt is the next change of the credential or the declaration, or a
+ * restart, and a stored value's row is marked `rejected` with the upstream's
+ * message — never the value. A value from an environment variable or the
+ * host's resolver can change where the process cannot see it, so its instance
+ * is retried on the backoff.
+ */
+export const CONNECTOR_CREDENTIAL_REJECTED = 'CONNECTOR_CREDENTIAL_REJECTED' as const;
+
+/**
+ * Thrown by a connector provider factory when the upstream it contacted to
+ * materialize an instance refused the credential it sent (HTTP 401 / 403).
+ * Carries {@link CONNECTOR_CREDENTIAL_REJECTED} as its `code` and the HTTP
+ * status. ⛔ The message must not carry the credential.
+ */
+export class ConnectorCredentialRejectedError extends Error {
+  readonly code = CONNECTOR_CREDENTIAL_REJECTED;
+  /** The upstream's HTTP status: 401 or 403. */
+  readonly status: number;
+  /** The underlying failure, kept for diagnostics. */
+  readonly cause?: unknown;
+  constructor(message: string, status: number, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'ConnectorCredentialRejectedError';
+    this.status = status;
+    if (options && 'cause' in options) this.cause = options.cause;
+  }
+}
+
+/**
+ * Structural check for the {@link CONNECTOR_CREDENTIAL_REJECTED} marker — reads
+ * `code`, never `instanceof`, for the reason {@link isConnectorUpstreamUnavailable}
+ * gives.
+ */
+export function isConnectorCredentialRejected(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === CONNECTOR_CREDENTIAL_REJECTED
+  );
+}

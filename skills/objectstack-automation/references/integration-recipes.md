@@ -4,9 +4,9 @@ The rule is `SKILL.md` § Integrations are declared, not coded; this file is the
 shapes. Each recipe is what the **app author** declares (a `connectors:` entry,
 the fields the answer lands in, a flow dispatching `connector_action`) and the
 one thing the **customer's administrator** supplies: the value behind
-`auth.credentialRef` — today an environment variable of that name on the
-deployment (a credential object filled in the running app is a platform card in
-flight); an unset ref is a hard boot error naming the entry. A spec is not a
+`auth.credentialRef` — an environment variable of that name (wins), or a
+value set in the running app at `PUT /api/v1/automation/connectors/credential-refs/:ref`;
+an unset ref leaves its instance degraded until set. A spec is not a
 secret and ships in the package; an `api` flow's hook secret goes to the
 deployment and to the sender. Scaffolded apps list the three executors in
 `plugins:`; keep `automation` in `requires` whenever a connector is declared. Full guide: https://objectstack.ai/docs/automation/connectors.

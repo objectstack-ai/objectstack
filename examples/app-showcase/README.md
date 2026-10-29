@@ -16,7 +16,7 @@ suite checks against the protocol's own Zod enums.
 Demonstration and verification pull in opposite directions:
 
 - **Demo** wants a believable, connected app — but a realistic app never
-  naturally uses all 49 field types, all 8 view types, or all 38 chart types.
+  naturally uses every field type, every view type, or every chart type.
 - **Verify** wants every variant present and *asserted* — which a single
   realistic domain can't provide.
 
@@ -69,7 +69,7 @@ stable across restarts of the same database.
 ## What it covers
 
 ### Data layer (ObjectQL)
-- **All 49 field types** — `src/data/objects/field-zoo.object.ts` carries one
+- **All field types** — `src/data/objects/field-zoo.object.ts` carries one
   field of every `FieldType`, with the remainder appearing naturally on the
   backbone objects.
 - **Every relationship kind** — `lookup` (project → account, category → self),
@@ -156,7 +156,7 @@ served publicly via the library portal.
 
 ## Directory layout
 
-`src/` mirrors the six protocol domains of the metadata registry
+`src/` mirrors the protocol domains of the metadata registry
 (`DEFAULT_METADATA_TYPE_REGISTRY`), with per-type directories inside each:
 
 ```

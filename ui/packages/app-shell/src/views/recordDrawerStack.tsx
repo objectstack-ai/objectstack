@@ -40,7 +40,9 @@
 
 import {
   Fragment,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -50,7 +52,10 @@ import {
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Minimize2 } from 'lucide-react';
 import { NavigationOverlay, type NavigationOverlayMode } from '@object-ui/components';
+import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
+import { useFilterScope } from '@object-ui/react';
 import {
   RECORD_DETAIL_TAB_PARAM,
   RECORD_TRAIL_PARAM,
@@ -116,6 +121,59 @@ function withoutRestore(state: unknown): unknown {
 
 const levelKey = (level: { objectName: string; recordId: string } | null | undefined) =>
   level ? `${level.objectName}:${level.recordId}` : null;
+
+/** A record the drawer can show next. */
+export interface RecordDrawerUpcoming {
+  objectName: string;
+  recordId: string;
+}
+
+/**
+ * The record a `↑` / `↓` press would show next (objectstack#27056, Target 4):
+ * the current level's sibling in the direction of the last step (`↓` before
+ * any), or the other way at the end of the set. `null` with no stepper, and
+ * outside a drawer. The record drawn in the drawer reads it to warm that
+ * record's related counts while the reader looks at this one.
+ */
+export const RecordDrawerUpcomingContext = createContext<RecordDrawerUpcoming | null>(null);
+
+/**
+ * Warms the related counts of the record a drawer step would show next
+ * (objectstack#27056, Target 4): the related lists of `page` — the page drawn
+ * now, which the next record of the same object draws too — counted for that
+ * record, so its tab badges and cards draw from the store. Renders nothing.
+ * Waits for `ready` (the record drawn now has loaded), so the warm-up never
+ * competes with the reads of the record on screen.
+ */
+export function PrefetchUpcomingRelatedCounts({
+  page,
+  objectName,
+  dataSource,
+  fieldsOf,
+  ready,
+}: {
+  page: unknown;
+  objectName: string | undefined;
+  dataSource: unknown;
+  fieldsOf?: (objectName: string) => FieldContainerLike;
+  ready: boolean;
+}) {
+  const upcoming = useContext(RecordDrawerUpcomingContext);
+  const scope = useFilterScope();
+  const targets = relatedCountTargetsIn(page);
+  const parentId = ready && upcoming && upcoming.objectName === objectName ? upcoming.recordId : null;
+  const key = parentId && targets.length > 0 ? JSON.stringify([parentId, targets]) : '';
+  const latest = useRef({ targets, dataSource, fieldsOf, scope });
+  latest.current = { targets, dataSource, fieldsOf, scope };
+  useEffect(() => {
+    if (!key || !parentId) return;
+    const { targets: warm, dataSource: ds, fieldsOf: fields, scope: session } = latest.current;
+    void prefetchRelatedCounts(warm, { parentId, dataSource: ds, fieldsOf: fields }, session);
+    // `key` is the content of the targets and the record (AGENTS.md #10).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return null;
+}
 
 /**
  * The `?tab=` reader and writer the stack saves and restores levels through.
@@ -227,13 +285,18 @@ export function useRecordDrawerStack({
     [depth, path, tabParam],
   );
 
+  // The direction of the last ↑ / ↓ step: the record after the current one
+  // in that direction is the one prefetched (`upcoming` below).
+  const [stepDirection, setStepDirection] = useState<1 | -1>(1);
+
   /** The current level's previous / next sibling, when it has a set. */
   const stepper = useMemo(() => {
     if (!current?.siblings || current.siblings.length === 0) return undefined;
     if (depth === 0 && !onRootStep) return undefined;
     const index = current.siblings.indexOf(current.recordId);
     if (index < 0) return undefined;
-    const go = (recordId: string) => () => {
+    const go = (recordId: string, direction: 1 | -1) => () => {
+      setStepDirection(direction);
       if (depth === 0) {
         onRootStep?.(recordId);
         return;
@@ -246,12 +309,27 @@ export function useRecordDrawerStack({
       });
     };
     return {
-      onPrevious: index > 0 ? go(current.siblings[index - 1]) : undefined,
-      onNext: index < current.siblings.length - 1 ? go(current.siblings[index + 1]) : undefined,
+      onPrevious: index > 0 ? go(current.siblings[index - 1], -1) : undefined,
+      onNext: index < current.siblings.length - 1 ? go(current.siblings[index + 1], 1) : undefined,
     };
   }, [current, depth, onRootStep]);
 
-  return { path, depth, current, push, popTo, stepper, tabParam };
+  // The record the next step shows: onward in the last step's direction, or
+  // back the other way at the end of the set.
+  const upcomingId =
+    stepper && current?.siblings
+      ? (() => {
+          const index = current.siblings.indexOf(current.recordId);
+          return current.siblings[index + stepDirection] ?? current.siblings[index - stepDirection] ?? null;
+        })()
+      : null;
+  const upcomingObject = current?.objectName ?? null;
+  const upcoming = useMemo<RecordDrawerUpcoming | null>(
+    () => (upcomingId && upcomingObject ? { objectName: upcomingObject, recordId: upcomingId } : null),
+    [upcomingId, upcomingObject],
+  );
+
+  return { path, depth, current, push, popTo, stepper, upcoming, tabParam };
 }
 
 export type RecordDrawerStack = ReturnType<typeof useRecordDrawerStack>;
@@ -287,7 +365,7 @@ export function RecordStackDrawer({
   renderRecord: (level: RecordDrawerLevel) => ReactNode;
 }) {
   const { objectLabel } = useObjectLabel();
-  const { path, depth, current, push, popTo, stepper } = stack;
+  const { path, depth, current, push, popTo, stepper, upcoming } = stack;
   const api = useMemo<RecordDrawerApi>(() => ({ open: push }), [push]);
   const labelOf = (objectName: string) => {
     const def = objects.find((o) => (o as { name?: unknown } | null)?.name === objectName);
@@ -334,12 +412,14 @@ export function RecordStackDrawer({
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
-          {/* Keyed by level and object: a step to a sibling swaps the record
-              in place (the view follows `recordIdOverride`), while a level
-              change is a different record page. */}
-          <Fragment key={`${depth}:${current?.objectName}`}>
-            {current ? renderRecord(current) : null}
-          </Fragment>
+          <RecordDrawerUpcomingContext.Provider value={upcoming}>
+            {/* Keyed by level and object: a step to a sibling swaps the record
+                in place (the view follows `recordIdOverride`), while a level
+                change is a different record page. */}
+            <Fragment key={`${depth}:${current?.objectName}`}>
+              {current ? renderRecord(current) : null}
+            </Fragment>
+          </RecordDrawerUpcomingContext.Provider>
         </RecordDrawerContext.Provider>
       )}
     </NavigationOverlay>

@@ -5,13 +5,12 @@ import {
   FieldType,
   SelectOptionSchema,
   CurrencyConfigSchema,
-  CurrencyValueSchema,
   Field,
   BOUNDED_STRING_FIELD_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
+  summaryFunctionReadsField,
   type SelectOption,
   type CurrencyConfig,
-  type CurrencyValue,
 } from './field.zod';
 import { ObjectSchema } from './object.zod';
 import { MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, isMultiValueField } from './field-value.zod';
@@ -130,46 +129,6 @@ describe('CurrencyConfigSchema', () => {
     invalidCodes.forEach(code => {
       expect(() => CurrencyConfigSchema.parse({ defaultCurrency: code })).toThrow();
     });
-  });
-});
-
-describe('CurrencyValueSchema', () => {
-  it('should accept valid currency value', () => {
-    const validValue: CurrencyValue = {
-      value: 1000.50,
-      currency: 'USD',
-    };
-
-    expect(() => CurrencyValueSchema.parse(validValue)).not.toThrow();
-  });
-
-  it('should accept zero value', () => {
-    const zeroValue: CurrencyValue = {
-      value: 0,
-      currency: 'CNY',
-    };
-
-    expect(() => CurrencyValueSchema.parse(zeroValue)).not.toThrow();
-  });
-
-  it('should accept negative values', () => {
-    const negativeValue: CurrencyValue = {
-      value: -500.00,
-      currency: 'EUR',
-    };
-
-    expect(() => CurrencyValueSchema.parse(negativeValue)).not.toThrow();
-  });
-
-  it('should reject invalid currency codes', () => {
-    expect(() => CurrencyValueSchema.parse({ value: 100, currency: 'US' })).toThrow();
-    expect(() => CurrencyValueSchema.parse({ value: 100, currency: 'USDD' })).toThrow();
-  });
-
-  it('should reject missing required fields', () => {
-    expect(() => CurrencyValueSchema.parse({ value: 100 })).toThrow();
-    expect(() => CurrencyValueSchema.parse({ currency: 'USD' })).toThrow();
-    expect(() => CurrencyValueSchema.parse({})).toThrow();
   });
 });
 
@@ -1353,6 +1312,40 @@ describe('FieldSchema', () => {
       };
 
       expect(() => FieldSchema.parse(field)).not.toThrow();
+    });
+
+    // [#27462] The describe always said `field` is ignored for count; the
+    // schema now agrees: a count may omit it, every other function needs it.
+    it('accepts a count with no summaryOperations.field, and parses it unchanged', () => {
+      const parsed = FieldSchema.parse({
+        name: 'child_count',
+        type: 'summary',
+        summaryOperations: { object: 'child_object', function: 'count' },
+      });
+      expect(parsed.summaryOperations).toEqual({ object: 'child_object', function: 'count' });
+    });
+
+    it.each(['sum', 'min', 'max', 'avg'] as const)(
+      'refuses %s with no summaryOperations.field, at that path, naming the function and the fix',
+      (fn) => {
+        const result = FieldSchema.safeParse({
+          name: 'child_total',
+          type: 'summary',
+          summaryOperations: { object: 'child_object', function: fn },
+        });
+        expect(result.success).toBe(false);
+        const issues = result.error!.issues;
+        expect(issues).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ code: 'custom', path: ['summaryOperations', 'field'] });
+        expect(issues[0].message).toContain(`\`summaryOperations.function: '${fn}'\` needs \`summaryOperations.field\``);
+        expect(issues[0].message).toContain("`function: 'count'`");
+      },
+    );
+
+    it('summaryFunctionReadsField: only count reads no child field; an unset function still does', () => {
+      expect(summaryFunctionReadsField('count')).toBe(false);
+      for (const fn of ['sum', 'min', 'max', 'avg']) expect(summaryFunctionReadsField(fn)).toBe(true);
+      expect(summaryFunctionReadsField(undefined)).toBe(true);
     });
   });
 

@@ -282,7 +282,7 @@ async function openPage(meta: any, object: Record<string, any>, viewId?: string)
 async function reload(meta: any, object: Record<string, any>, viewId: string) {
   cleanup();
   await openPage(meta, object, viewId);
-  await waitFor(() => expect(listSchema?.options).toBeTruthy());
+  await waitFor(() => expect(listSchema?.kanban).toBeTruthy());
   return (normalizeListViewSchema(listSchema) as { rowHeight?: unknown }).rowHeight;
 }
 

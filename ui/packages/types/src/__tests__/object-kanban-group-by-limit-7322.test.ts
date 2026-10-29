@@ -90,7 +90,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
 const READER = 'packages/plugin-kanban/src/ObjectKanban.tsx';
 const MIRROR = 'packages/types/src/zod/objectql.zod.ts';
-const DOC = 'content/docs/plugins/plugin-kanban.mdx';
 
 const DECLARED = ['groupBy', 'limit'] as const;
 type Declared = (typeof DECLARED)[number];
@@ -148,7 +147,8 @@ const RETIRED_VIEW_LEVEL_ALIAS_SITES: ReadonlyArray<readonly [file: string, reti
   [
     'packages/plugin-list/src/ListView.tsx',
     'schema.options?.kanban?.groupField',
-    'if (schema.kanban?.groupByField || schema.options?.kanban?.groupByField) {',
+    // objectstack#25923 retired the bag leg of this gate: the block is read alone.
+    'if (schema.kanban?.groupByField) {',
   ],
   ['packages/plugin-view/src/ObjectView.tsx', 'kanbanCfg.groupField ||', 'kanbanCfg.groupByField ||'],
 ];
@@ -473,23 +473,8 @@ describe('objectui#7322 — the tombstone is NODE-LOCAL; the view-level `groupFi
 
 /* ── The doc page — triage's completion signal ────────────────────────────── */
 
-describe('objectui#7322 — the row-cap block on the plugin docs page is annotated `ObjectKanbanSchema`', () => {
-  const src = readRepo(DOC);
-
-  it('carries the annotation and its import, in a `tsx` fence the doc-snippet gate compiles against the built dist', () => {
-    expect(src).toContain("import type { ObjectKanbanSchema } from '@object-ui/types'");
-    expect(src).toContain('const board: ObjectKanbanSchema = {');
-    expect(src).not.toContain('const board = {');
-  });
-
-  it('the block still authors the documented shape — `groupBy` and `limit`, never `groupField`', () => {
-    const start = src.indexOf('const board: ObjectKanbanSchema = {');
-    const end = src.indexOf('```', start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const block = src.slice(start, end);
-    expect(block).toContain("groupBy: 'stage'");
-    expect(block).toMatch(/^\s+limit: 250,/m);
-    expect(block).not.toContain(RETIRED);
-  });
-});
+// ⛔ Retired with the section it read. The plugin page's row-cap block
+// (`const board: ObjectKanbanSchema = { …, limit: 250 }`) was trimmed when the
+// page moved into the monorepo docs as `content/docs/frontend/plugins/plugin-kanban.mdx`
+// (objectstack#27145); `check:doc-snippets` still compiles the page's remaining
+// `ObjectKanbanSchema` fences against the built dist.
