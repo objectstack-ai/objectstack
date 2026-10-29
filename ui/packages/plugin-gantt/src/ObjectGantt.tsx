@@ -1314,7 +1314,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
     // render the same data: select options resolve to their label, lookups to
     // the embedded record's name, dates/numbers/currency/percent through the
     // shared @object-ui/fields formatters.
-    const formatFieldValue = (value: unknown, fieldName: string): string => {
+    const formatFieldValue = (value: unknown, fieldName: string, record?: Record<string, unknown>): string => {
       if (value == null || value === '') return '—';
       const def = fieldDefs[fieldName] ?? fieldDefs[fieldName.split('.')[0]];
       const type: string | undefined = def?.type;
@@ -1385,7 +1385,8 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
           // watch it); the locale that renders that code is what was missing.
           return formatCurrency(
             Number(value),
-            resolveFieldCurrency(def as any, tenantCurrency),
+            // A `record`-mode amount (ADR-0144 D2) reads its row's code field.
+            resolveFieldCurrency(def as any, tenantCurrency, record),
             displayLocale,
           );
         // `percent` completes the switch (objectui#4553 phase 2). It could not
@@ -1461,7 +1462,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         if (raw == null || raw === '' || (Array.isArray(raw) && raw.length === 0)) continue;
         rows.push({
           label: resolveFieldLabel(fieldName, explicitLabel),
-          value: formatFieldValue(raw, fieldName),
+          value: formatFieldValue(raw, fieldName, record),
         });
       }
       return rows.length ? rows : undefined;

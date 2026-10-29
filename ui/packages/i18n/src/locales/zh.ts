@@ -388,6 +388,14 @@ const zh = {
       postalCode: '邮政编码',
       country: '国家 / 地区',
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '选择币种',
+      search: '搜索币种…',
+      noResults: '未找到币种',
+      available: '可用',
+      all: '全部币种（ISO 4217）',
+    },
     boolean: {
       offBadge: '{{label}} — 已关闭',
       completed: '已完成',
@@ -4492,6 +4500,8 @@ const zh = {
     daysAgo_other: '{{count}} 天前',
   },
   filterBuilder: {
+    currency: '币种',
+    currencyNeedsAnd: '只有在「全部条件都满足（AND）」时，币种金额才按所选币种比较。',
     where: '其中',
     and: '且',
     or: '或',
