@@ -19,6 +19,8 @@
  *    selection: closing the inspector (Close, Escape, another field, another
  *    tab) keeps the hold while the draft still carries the text it judged, and
  *    a switch to another object asks before it drops the held edit. The
+ *    maintainer's ruling on #27485 (comment 6500685972, 2026-10-29T15:17Z)
+ *    replaced sub-decision A's reset-on-close mechanism with this hold; the
  *    objectui#4306 ruling's sub-decision A stands as its two invariants:
  *    writability never depends on a child's teardown running (the kept verdict
  *    is read off the draft, and an edit, the field's removal or a load ends
