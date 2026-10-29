@@ -45,9 +45,35 @@
  * profile page's. That re-read starts after the write has settled, and it does
  * not join a request still in flight from before it (the shared in-flight
  * registry would hand back the stale answer), so it is the one that lands.
+ *
+ * ## State the device's chosen language (objectstack#27625)
+ *
+ * Every other console API call carries the active UI language as its
+ * `Accept-Language` (`createAuthenticatedFetch` stamps `<html lang>`), but this
+ * read goes through `sharedGetJson`'s bare `fetch`, so it carried the BROWSER's
+ * header instead. A user with no `sys_user.locale` who picked 中文 on the
+ * sign-in page therefore got the `Accept-Language` rung answered in the
+ * browser's language, and every date cell said `Nov 18` under Chinese headers,
+ * on every load.
+ *
+ * So when the device holds an explicit language choice, this read states that
+ * language. The server's rungs are unchanged: a stored `sys_user.locale` still
+ * answers first, and the header only decides the rung below it. Without a
+ * choice the browser's header stays: that is exactly the boot on which
+ * `seedTenantLanguage()` asks this endpoint too, and the two share one request
+ * only while their headers match (objectui#5544). The stated language is part
+ * of the request, so a change of it reads again, and the new read cannot join
+ * one still in flight under the old language: the in-flight key includes the
+ * headers.
  */
 import { useEffect, useState } from 'react';
-import { LocalizationProvider, cacheLanguageSeed, type LocalizationValue } from '@object-ui/i18n';
+import {
+  LocalizationProvider,
+  cacheLanguageSeed,
+  readStoredLanguage,
+  useObjectTranslation,
+  type LocalizationValue,
+} from '@object-ui/i18n';
 import { getSessionOwnerChangeCount, useAuth } from '@object-ui/auth';
 import { useDataInvalidation } from '@object-ui/react';
 import {
@@ -87,6 +113,10 @@ export function LocalizationFetchProvider({
   const userId = user?.id ? String(user.id) : undefined;
   // Bumps on every write to the signed-in user's own row (objectstack#27498).
   const userRowWrites = useDataInvalidation(userId ? 'sys_user' : undefined, userId);
+  // The device's chosen UI language, stated as this read's `Accept-Language`;
+  // none chosen, the browser's own header goes out (objectstack#27625).
+  const { language } = useObjectTranslation();
+  const statedLanguage = readStoredLanguage() ? language : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -113,7 +143,10 @@ export function LocalizationFetchProvider({
           // resolving one of them empty.
           const json = await sharedGetJson<MeLocalizationResponse>(endpoint, {
             credentials: 'include',
-            headers: { Accept: 'application/json' },
+            headers: {
+              Accept: 'application/json',
+              ...(statedLanguage ? { 'Accept-Language': statedLanguage } : {}),
+            },
             signal: reread?.signal,
           });
           // Refresh the UI-language seed cache (objectui#4035) — the
@@ -164,7 +197,7 @@ export function LocalizationFetchProvider({
       cancelled = true;
       reread?.abort();
     };
-  }, [endpoint, userRowWrites]);
+  }, [endpoint, userRowWrites, statedLanguage]);
 
   return <LocalizationProvider value={value}>{children}</LocalizationProvider>;
 }
