@@ -6,7 +6,9 @@
 // their lines. `showcase_contributor` scopes invoice SELECT to
 // `owner == current_user.email` (`invoice_own_rows`) and refuses an UPDATE whose
 // post-image moves the owner off the caller (`invoice_owner_immutable`,
-// ADR-0058 D4). `showcase_invoice_line` is `controlled_by_parent`, so a line is
+// ADR-0058 D4), and the same check on INSERT refuses a create — clone included —
+// whose new row is owned by anyone but the caller (`invoice_owner_on_create`).
+// `showcase_invoice_line` is `controlled_by_parent`, so a line is
 // read and written only through its master invoice.
 //
 // This boots the REAL showcase app with its own `isDefault` baseline and grants
@@ -91,10 +93,20 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
     expect(line, `a seed line under invoice ${invoiceId} must exist`).toBeTruthy();
     return line as { id: string; quantity: number };
   };
+  /** A seeded account that is not churned — an invoice against a churned one is refused 400. */
+  const activeAccount = async (): Promise<string> => {
+    const rows = (await ql.find('showcase_account', { context: SYS })) as Array<{ id: string; status?: string }>;
+    const acct = rows.find((a) => a.status !== 'churned');
+    expect(acct?.id, 'a non-churned seed account must exist').toBeTruthy();
+    return acct!.id;
+  };
+  const countNamed = async (name: string): Promise<number> =>
+    ((await ql.find('showcase_invoice', { where: { name }, context: SYS })) ?? []).length;
+  let adminToken = '';
 
   beforeAll(async () => {
     stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
-    await stack.signIn();
+    adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
     const set = await catalogPermissionSet(ql, SET);
@@ -241,6 +253,62 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
         expect(((await r.json()) as any)?.code).toBe('PERMISSION_DENIED');
         expect((await invoice(p.ownUnpaidInvoice)).owner, 'owner unchanged').toBe(p.email);
       });
+
+      // `invoice_owner_on_create` — the update-time ownership check above, on
+      // insert. Both halves per holder shape: the admitted create proves the
+      // refusal is the row check, not a missing object grant.
+      it('creates an invoice it owns (create-time check admits)', async () => {
+        const r = await stack.apiAs(tok(), 'POST', '/data/showcase_invoice', {
+          name: `INV-OWN-${p.route}`,
+          owner: p.email,
+          account: await activeAccount(),
+        });
+        expect(r.status, 'own-owner create').toBe(201);
+        const id = String(idOf(await r.json()));
+        const back = await stack.apiAs(tok(), 'GET', `/data/showcase_invoice/${id}`);
+        expect(back.status, 'the creator reads its new invoice').toBe(200);
+      });
+
+      it('cannot create an invoice owned by someone else (create-time check)', async () => {
+        const name = `INV-FOREIGN-${p.route}`;
+        const r = await stack.apiAs(tok(), 'POST', '/data/showcase_invoice', {
+          name,
+          owner: 'grace@example.com',
+          account: await activeAccount(),
+        });
+        expect(r.status).toBe(403);
+        expect(((await r.json()) as any)?.code).toBe('PERMISSION_DENIED');
+        expect(await countNamed(name), 'nothing written').toBe(0);
+      });
+
+      it("cannot clone an invoice into someone else's ownership; a same-owner clone is admitted", async () => {
+        const own = await invoice(p.ownUnpaidInvoice);
+        const foreignName = `INV-CLONE-FOREIGN-${p.route}`;
+        const refused = await stack.apiAs(tok(), 'POST', `/data/showcase_invoice/${own.id}/clone`, {
+          overrides: { name: foreignName, owner: 'grace@example.com' },
+        });
+        expect(refused.status, 'foreign-owner clone').toBe(403);
+        expect(((await refused.json()) as any)?.code).toBe('PERMISSION_DENIED');
+        expect(await countNamed(foreignName), 'nothing written').toBe(0);
+
+        const ownName = `INV-CLONE-OWN-${p.route}`;
+        const admitted = await stack.apiAs(tok(), 'POST', `/data/showcase_invoice/${own.id}/clone`, {
+          overrides: { name: ownName },
+        });
+        expect(admitted.status, 'same-owner clone').toBe(201);
+        expect(await countNamed(ownName)).toBe(1);
+      });
     });
   }
+
+  it('the create-time check does not bind the admin: an admin creates an invoice for any owner', async () => {
+    const name = 'INV-ADMIN-FOR-GRACE';
+    const r = await stack.apiAs(adminToken, 'POST', '/data/showcase_invoice', {
+      name,
+      owner: 'grace@example.com',
+      account: await activeAccount(),
+    });
+    expect(r.status).toBe(201);
+    expect(await countNamed(name)).toBe(1);
+  });
 });
