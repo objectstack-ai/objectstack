@@ -17,7 +17,7 @@ import {
     resolveNamedMapping, applyMappingToRows, refuseUnknownMappingTargets, type MappingArtifactLike,
 } from './import-mapping.js';
 import { asXlsxLoadInput, loadExcelJs } from './xlsx-module.js';
-import { isBlank } from '@objectstack/core';
+import { isBlank, multiValueMatchKeyRefusal } from '@objectstack/core';
 import { isMatchKeySets } from '@objectstack/spec/api';
 
 /**
@@ -541,6 +541,9 @@ export async function prepareImportRequest(
     const readMatchFields = readMatchFieldsBody(body?.matchFields);
     if (!readMatchFields.ok) return readMatchFields;
     let matchFields: string[] | string[][] = readMatchFields.matchFields;
+    // What a refusal of the key names it by: the request's own key, or the
+    // named mapping's `upsertKey` when that supplied it (below).
+    let matchFieldsFrom = 'matchFields';
     // The two control flags, read where the door's gate reads them (#24348):
     // the import doors refuse either opt-out from any caller but the system
     // principal BEFORE this parse (`importControlOptOutRefusal`), so a value
@@ -587,6 +590,7 @@ export async function prepareImportRequest(
         }
         if (matchFields.length === 0 && Array.isArray(mappingArtifact.upsertKey)) {
             matchFields = mappingArtifact.upsertKey.filter((f) => typeof f === 'string' && f.length > 0);
+            matchFieldsFrom = `Mapping "${mappingName}" upsertKey`;
         }
     }
 
@@ -707,6 +711,16 @@ export async function prepareImportRequest(
             } catch { /* authored-only option matching */ }
         }
     } catch { /* pass-through coercion */ }
+
+    // [#27465] A key naming a field that holds a list or a structured value
+    // (a `multiple: true` lookup, a multiselect, a json field) can match no
+    // row: refused here, before any row, on the dry run and the commit alike,
+    // by the runner's one rule. Judged against the map resolved above; a name
+    // it does not carry is judged by nobody. Insert matches nothing.
+    if (writeMode !== 'insert') {
+        const refusedKey = multiValueMatchKeyRefusal(matchFields, metaMap, matchFieldsFrom);
+        if (refusedKey) return { ok: false, status: 400, code: 'INVALID_REQUEST', error: refusedKey.message };
+    }
 
     if (mappingArtifact) {
         // [#20150] A target that names no field of the object is refused HERE,

@@ -243,7 +243,7 @@ import { recordAdvisoryHit } from '@objectstack/core';
 // reports it unconditionally, even under `systemFields: false`), and the
 // engine's whole by-id addressing reads that key (`idAddressesThisRow`,
 // `addressKey: 'id'`).
-import { SystemFieldName, objectValidationMessageKey } from '@objectstack/spec/system';
+import { SystemFieldName, objectValidationMessageKey, scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -3759,6 +3759,17 @@ export function emitValidationAdvisories(
  *
  * `rule.name` is the address — including a nested `conditional` branch's own
  * name, since the branch is the rule whose message the caller sees.
+ *
+ * ## The catalog loses to a tenant's rewrite — ADR-0029 D9.2a
+ *
+ * The catalog entry translates the PACKAGED rule. A message that diverged from
+ * the packaged rule of the same name (`messages.packagedRule`) is a tenant's
+ * rewrite and is returned as written, in every locale. The test is
+ * `scalarOverridesPackagedBase`, the one comparison `/meta`'s
+ * `translateObjectValidations` judges the same message by (⛔ never a second
+ * one here), so the served rule and the refusal of the same write keep
+ * showing one sentence. A rule the packaged declaration does not carry, or no
+ * lookup at all, has nothing to diverge from: the catalog applies.
  */
 function authoredRuleMessage(
   rule: Pick<BaseRule, 'name' | 'message'>,
@@ -3766,6 +3777,9 @@ function authoredRuleMessage(
 ): string {
   if (messages?.translate && messages.objectName && messages.locale
       && typeof rule.name === 'string' && rule.name.length > 0) {
+    if (scalarOverridesPackagedBase(messages.packagedRule?.(rule.name), 'message', rule.message)) {
+      return rule.message;
+    }
     const key = objectValidationMessageKey(messages.objectName, rule.name);
     try {
       const translated = messages.translate(key, messages.locale);

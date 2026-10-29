@@ -480,6 +480,32 @@ export function formatMeasure(
 }
 
 /**
+ * The currency one measure CELL displays in.
+ *
+ * A column the answer marks with `currencyField` — a grouped answer over a
+ * `record`-mode amount (ADR-0144 D9) — has no currency of its own: each row's
+ * is the code in the result column `currencyField` names. So `row` is the RAW
+ * row (before `relabelDimensions`), and a row with no code there renders a plain
+ * number, never another row's symbol nor a column-wide one. Every other column
+ * keeps its declared `currency`, byte for byte.
+ *
+ * A cell with no row of its own (a total, a cross-tab cell) passes none and so
+ * gets no symbol on such a column: it may add amounts in several currencies.
+ *
+ * `currencyField` is read structurally: it is objectstack#27338's addition to
+ * `AnalyticsResult.fields[]`, which the spec type here does not carry yet.
+ */
+export function measureCellCurrency(
+  field: DatasetResultField | undefined,
+  row?: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const codeColumn = (field as { currencyField?: unknown } | undefined)?.currencyField;
+  if (typeof codeColumn !== 'string' || codeColumn === '') return field?.currency;
+  const code = row?.[codeColumn];
+  return typeof code === 'string' && code !== '' ? code : undefined;
+}
+
+/**
  * Format a non-measure (dimension / label) value — the server already resolves
  * dimension display labels, so this only tidies numbers and nulls.
  *
