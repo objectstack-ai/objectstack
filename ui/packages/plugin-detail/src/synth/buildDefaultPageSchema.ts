@@ -272,7 +272,7 @@ export interface BuildPageOptions {
    *   path). The override fires even when neither auto-emission
    *   condition is met.
    * - `details` — replaces the Details tab body (the `record:details`
-   *   node). Other tabs (Related / Activity / History) are unaffected.
+   *   node). Other tabs (Timeline / Related / Approvals) are unaffected.
    *   There is no `tabs` slot (objectstack#27053): the strip is composed
    *   from the object's roles and relationship flags, and a page that
    *   needs its own strip is a `kind: 'full'` page, drawn as authored.
@@ -1014,8 +1014,11 @@ export function bodyTablePlacement(
 }
 
 /**
- * Sub-builder: the `page:tabs` node. Emits Details / Related /
- * Activity / History tabs in stable order based on the options.
+ * Sub-builder: the `page:tabs` node. Emits the Details tab, then the
+ * Timeline tab (the one stream, objectstack#27055: field changes join it
+ * under its Changes filter, so there is no History tab), the Related tab and
+ * the Approvals tab, each only when the options give it content, in stable
+ * order: Timeline sits second for a worked object and last otherwise.
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into

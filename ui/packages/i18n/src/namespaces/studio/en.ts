@@ -2188,9 +2188,9 @@ const STUDIO_EN: Record<string, string> = {
     'Record visibility is inherited from the parent (master) record through its master-detail relationship.',
   'engine.studio.settings.capabilities': 'Capabilities (enable.*)',
   'engine.studio.settings.capabilitiesHint': 'Record-page features — every switch here is enforced by the runtime',
-  'engine.studio.settings.capTrackHistory': 'History tab (trackHistory)',
+  'engine.studio.settings.capTrackHistory': 'Field change history (trackHistory)',
   'engine.studio.settings.capTrackHistoryDesc':
-    'Shows the read-only History tab (audit trail) on record pages. Pair with per-field history tracking for human-readable diffs; audit capture itself is always on for compliance.',
+    "Shows the record's field changes: on the default record page they join the record's one timeline stream, under its Changes filter. Pair with per-field history tracking to pick which field diffs are summarized; audit capture itself is always on for compliance.",
   'engine.studio.settings.capFiles': 'Attachments (files)',
   'engine.studio.settings.capFilesDesc':
     'Generic Attachments panel on record pages (upload/download/delete). Off = the server also rejects new attachments targeting this object.',
