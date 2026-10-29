@@ -4271,6 +4271,7 @@ setFieldReadFaceResolver(resolveDeclaredFieldFace);
 // `mapFieldTypeToFormType` moved to './field-type-alias' (re-exported below) so
 // FieldEditWidget can resolve spec aliases without importing this barrel.
 export { mapFieldTypeToFormType } from './field-type-alias.js';
+export { resolveBooleanControl, type BooleanControl } from './widgets/booleanControl.js';
 import { mapFieldTypeToFormType } from './field-type-alias.js';
 // `isRetiredFieldType` is the gate the maintainer ruled onto THIS package's
 // surface (objectui#4914, ruling B) — "export a single `isRetiredFieldType(t)`

@@ -38,6 +38,7 @@ import { GripVertical, Plus, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, Pan
 import { cn } from '@object-ui/components';
 import { inferColumns, containerGridColsFor, isWideFieldType } from '@object-ui/plugin-form';
 import { toFormFieldType } from './formFieldType.js';
+import { resolveBooleanControl } from '@object-ui/fields';
 import {
   readFields,
   writeFields,
@@ -310,14 +311,23 @@ function FieldControlPreview({ type }: { type: string }): React.ReactElement {
     case 'json':
     case 'code':
       return <div className={`${box} h-14`} />;
+    // objectstack#27519 — the runtime form's own answer, not a canvas copy:
+    // `boolean` previews a checkbox and `toggle` a switch, as the type picker
+    // promises. `toggle` used to fall to the text box below, and `boolean`
+    // drew the switch pill.
     case 'boolean':
+    case 'toggle':
     case 'checkbox':
-    case 'switch':
+    case 'switch': {
+      const control = resolveBooleanControl({ type });
       return (
-        <div className="flex h-8 items-center">
-          <span className="h-4 w-7 rounded-full bg-muted" />
+        <div className="flex h-8 items-center" data-boolean-control={control}>
+          {control === 'checkbox'
+            ? <span className="h-4 w-4 rounded-sm border border-muted-foreground/40" />
+            : <span className="h-4 w-7 rounded-full bg-muted" />}
         </div>
       );
+    }
     case 'number':
     case 'currency':
     case 'percent':
