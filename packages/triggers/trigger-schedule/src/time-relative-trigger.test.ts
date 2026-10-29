@@ -403,24 +403,76 @@ describe('TimeRelativeTrigger', () => {
         );
 
         // Neither withinDays nor offsetDays → invalid.
-        trigger.start(binding({ object: 'contracts', dateField: 'end_date' }), async () => {});
+        expect(() => trigger.start(binding({ object: 'contracts', dateField: 'end_date' }), async () => {}))
+            .toThrow(/flow 'renewal_alert' has no valid `timeRelative` descriptor/);
         await flush();
 
         expect(job.jobs.size).toBe(0);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('no valid `timeRelative` descriptor'));
     });
 
-    it('does not bind when both windowing modes are set (mutually exclusive)', async () => {
-        const job = fakeJobService();
-        const { engine } = fakeDataEngine([]);
-        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+    // A descriptor refusal THROWS, so the engine's catch records the flow as
+    // unbound instead of marking it bound after a "not bound" log line — the
+    // `_status` row then reads `bound: false`, never `bound: true` beside a
+    // refusal. Each invalid shape is refused the same way; the valid case is
+    // the control that `start` still returns on a descriptor it accepts.
+    describe('an invalid descriptor is a binding failure the host can see', () => {
+        const INVALID: Array<[string, Record<string, unknown>]> = [
+            ['both windowing modes (mutually exclusive)', { object: 'contracts', dateField: 'end_date', withinDays: 30, offsetDays: [7] }],
+            ['an unknown key', { object: 'contracts', dateField: 'end_date', withinDays: 30, bogus_key: 1 }],
+            ['`schedule` nested inside the descriptor', { object: 'contracts', dateField: 'end_date', withinDays: 30, schedule: { type: 'cron', expression: '0 8 * * *' } }],
+        ];
 
-        trigger.start(
-            binding({ object: 'contracts', dateField: 'end_date', withinDays: 30, offsetDays: [7] }),
-            async () => {},
-        );
-        await flush();
-        expect(job.jobs.size).toBe(0);
+        for (const [label, desc] of INVALID) {
+            it(`${label}: start throws, names the flow, arms nothing`, async () => {
+                const job = fakeJobService();
+                const { engine } = fakeDataEngine([]);
+                const warns: string[] = [];
+                const trigger = new TimeRelativeTrigger(
+                    () => job.service,
+                    () => engine,
+                    { info: () => {}, debug: () => {}, warn: (m: string) => void warns.push(String(m)) },
+                    NOW,
+                );
+
+                expect(() => trigger.start(binding(desc), async () => {}))
+                    .toThrow(/flow 'renewal_alert' has no valid `timeRelative` descriptor — not bound/);
+                await flush();
+                expect(job.jobs.size, 'no sweep armed').toBe(0);
+                expect(warns.filter((w) => w.includes('no valid `timeRelative` descriptor')), 'said once').toHaveLength(1);
+            });
+        }
+
+        it('a re-bind with a broken descriptor drops the sweep the previous bind armed', async () => {
+            const job = fakeJobService();
+            const { engine } = fakeDataEngine([]);
+            const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+
+            trigger.start(binding({ object: 'contracts', dateField: 'end_date', withinDays: 30 }), async () => {});
+            await flush();
+            expect(job.jobs.size, 'control: the valid bind armed a sweep').toBe(1);
+
+            expect(() =>
+                trigger.start(
+                    binding({ object: 'contracts', dateField: 'end_date', withinDays: 30, offsetDays: [7] }),
+                    async () => {},
+                ),
+            ).toThrow(/no valid `timeRelative` descriptor/);
+            await flush();
+            expect(job.jobs.size, 'the refused re-bind left no sweep armed').toBe(0);
+        });
+
+        it('control: a valid descriptor returns without throwing and arms its sweep', async () => {
+            const job = fakeJobService();
+            const { engine } = fakeDataEngine([]);
+            const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+
+            expect(() =>
+                trigger.start(binding({ object: 'contracts', dateField: 'end_date', withinDays: 30 }), async () => {}),
+            ).not.toThrow();
+            await flush();
+            expect(job.jobs.size).toBe(1);
+        });
     });
 
     it('warns (but still binds) when the swept object is unknown', async () => {

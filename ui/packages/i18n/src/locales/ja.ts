@@ -379,6 +379,14 @@ const ja = {
       postalCode: "郵便番号",
       country: "国",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '通貨を選択',
+      search: '通貨を検索…',
+      noResults: '通貨が見つかりません',
+      available: '利用可能',
+      all: 'すべての通貨（ISO 4217）',
+    },
     boolean: {
       offBadge: "{{label}} — オフ",
       completed: "完了",
@@ -2600,6 +2608,9 @@ const ja = {
       invitationPreviewTitle: "{{inviter}} さんから {{organization}} への招待が届いています",
       invitationPreviewTitleNoInviter: "{{organization}} への招待が届いています",
       invitationPreviewDescription: "招待を受け取ったメールアドレス（{{email}}）をご利用ください。",
+      invitationGoneTitle: "この招待リンクは無効になりました",
+      invitationGoneDescription: "招待の期限切れ、使用済み、または取り消しの可能性があります。招待した方に新しい招待の送信を依頼してください。",
+      invitationGoneSignIn: "サインインへ",
       showPasswordText: "パスワードを表示",
       hidePasswordText: "パスワードを非表示",
       footer: {
@@ -2633,6 +2644,8 @@ const ja = {
         userExists: "このメールアドレスのアカウントはすでに存在します。代わりにサインインしてください。",
         selfRegistrationClosed: "このシステムではセルフ登録を受け付けていません。管理者に招待を依頼してください。",
         emailDomainNotAllowed: "このメールアドレスのドメインはここでの登録が許可されていません。組織のメールアドレスを使用するか、管理者に招待を依頼してください。",
+        invitationSentTo: "この招待は {{email}} 宛てに送信されました。招待を承諾するには、そのアドレスで登録してください。",
+        invitationAddressOnly: "この招待は送信先のアドレスでのみ承諾できます。そのアドレスで登録してください。",
       },
       verifyInbox: {
         title: "受信箱を確認してください",
@@ -3749,6 +3762,13 @@ const ja = {
       countSeedData: "サンプルデータ",
       extendTarget: "既存のアプリに追加：{{app}}",
       awaitingConfirm: "確認待ち",
+      iterateOrNew: {
+        question: "このプランは既存のアプリ「{{app}}」と重なっています。このアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
+        questionUnnamed: "このプランは既存のアプリと重なっています。そのアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
+        extend: "「{{app}}」を引き続き改善",
+        buildNew: "別のアプリを作成",
+        replyHint: "どちらにするか返信してください。",
+      },
       objectsAndFields: "オブジェクトとフィールド",
       views: "ビュー",
       suggestedField: "追加提案",
@@ -4150,6 +4170,7 @@ const ja = {
     progressBar: '承認の進捗',
     declaredActions: 'アクション',
     decisionPanelOffRequestPage: '承認の決定パネルは承認リクエストのページでのみ機能します。',
+    snapshotAsSubmitted: '申請時の内容',
     attachmentChip: '添付ファイル',
     attachmentOpenFailed: '添付ファイルを開けませんでした。もう一度お試しください',
     approveOneTitle: '「{{title}}」を承認しますか？',
@@ -4337,6 +4358,7 @@ const ja = {
       detailLoading: '詳細を読み込み中…',
       detailLoadFailed: '変更の詳細を読み込めませんでした：',
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
+      fieldOrderChanged: 'フィールドの順序が変更されました',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'AI コパイロットが下書きした変更を含みます',
       draftedByMcpClient: 'MCP クライアント「{{client}}」が下書きした変更を含みます',
@@ -4438,6 +4460,8 @@ const ja = {
     },
   },
   filterBuilder: {
+    currency: '通貨',
+    currencyNeedsAnd: '通貨金額は、すべての条件を満たす必要がある場合（AND）にのみ、選択した通貨で比較されます。',
     where: "条件",
     and: "かつ",
     or: "または",

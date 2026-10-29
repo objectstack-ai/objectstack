@@ -387,6 +387,14 @@ const es = {
       postalCode: "Código postal",
       country: "País",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Seleccionar moneda',
+      search: 'Buscar moneda…',
+      noResults: 'No se encontró ninguna moneda',
+      available: 'Disponibles',
+      all: 'Todas las monedas (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Desactivado",
       completed: "Completado",
@@ -2657,6 +2665,9 @@ const es = {
       invitationPreviewTitle: "{{inviter}} te invitó a unirte a {{organization}}",
       invitationPreviewTitleNoInviter: "Te invitaron a unirte a {{organization}}",
       invitationPreviewDescription: "Usa el correo al que se envió la invitación ({{email}}).",
+      invitationGoneTitle: "Este enlace de invitación ya no es válido",
+      invitationGoneDescription: "Es posible que haya caducado, que ya se haya usado o que se haya retirado. Pide a quien te invitó que te envíe una nueva invitación.",
+      invitationGoneSignIn: "Ir a iniciar sesión",
       showPasswordText: "Mostrar contraseña",
       hidePasswordText: "Ocultar contraseña",
       footer: {
@@ -2690,6 +2701,8 @@ const es = {
         userExists: "Ya existe una cuenta con ese correo. Intente iniciar sesión.",
         selfRegistrationClosed: "El registro por cuenta propia no está abierto en este sistema. Solicite una invitación a un administrador.",
         emailDomainNotAllowed: "El dominio de este correo no está autorizado para registrarse aquí. Use el correo de su organización o solicite una invitación a un administrador.",
+        invitationSentTo: "Esta invitación se envió a {{email}}. Regístrate con esa dirección para aceptarla.",
+        invitationAddressOnly: "Esta invitación solo puede aceptarse con la dirección a la que se envió. Regístrate con esa dirección.",
       },
       verifyInbox: {
         title: "Revise su bandeja de entrada",
@@ -3823,6 +3836,13 @@ const es = {
       countSeedData: "datos de ejemplo",
       extendTarget: "Se añade a la app existente: {{app}}",
       awaitingConfirm: "Pendiente de confirmación",
+      iterateOrNew: {
+        question: "Esto se solapa con «{{app}}», una app que ya tiene. ¿Seguir mejorándola o crear una app independiente?",
+        questionUnnamed: "Esto se solapa con una app que ya tiene. ¿Seguir mejorando esa app o crear una independiente?",
+        extend: "Seguir mejorando «{{app}}»",
+        buildNew: "Crear una app independiente",
+        replyHint: "Responda para indicar cuál prefiere.",
+      },
       objectsAndFields: "Objetos y campos",
       views: "Vistas",
       suggestedField: "sugerido",
@@ -4233,6 +4253,7 @@ const es = {
     progressBar: 'Progreso de la decisión',
     declaredActions: 'Acciones',
     decisionPanelOffRequestPage: 'El panel de decisión de aprobación solo funciona en las páginas de solicitudes de aprobación.',
+    snapshotAsSubmitted: 'Tal como se envió',
     attachmentChip: 'Adjunto',
     attachmentOpenFailed: 'No se pudo abrir el archivo adjunto: inténtalo de nuevo',
     approveOneTitle: '¿Aprobar «{{title}}»?',
@@ -4430,6 +4451,7 @@ const es = {
       detailLoading: 'Cargando detalles…',
       detailLoadFailed: 'No se pudieron cargar los detalles del cambio:',
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
+      fieldOrderChanged: 'Orden de los campos cambiado',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Incluye cambios redactados por el copiloto de IA',
       draftedByMcpClient: 'Incluye cambios redactados por el cliente MCP «{{client}}»',
@@ -4547,6 +4569,8 @@ const es = {
     },
   },
   filterBuilder: {
+    currency: 'Moneda',
+    currencyNeedsAnd: 'Un importe en moneda solo se compara en la moneda elegida cuando deben cumplirse todas las condiciones (Y).',
     where: "Donde",
     and: "Y",
     or: "O",

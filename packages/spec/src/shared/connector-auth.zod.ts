@@ -120,7 +120,7 @@ export const ConnectorInstanceNoAuthSchema = lazySchema(() => z.object({
 }));
 export type ConnectorInstanceNoAuth = z.input<typeof ConnectorInstanceNoAuthSchema>;
 
-/** Bearer-token auth; the token is resolved from `credentialRef` at boot. */
+/** Bearer-token auth; the token is resolved from `credentialRef` when the instance materializes. */
 export const ConnectorInstanceBearerAuthSchema = lazySchema(() => z.object({
   type: z.literal('bearer'),
   credentialRef: z.string().min(1).describe(
@@ -129,7 +129,7 @@ export const ConnectorInstanceBearerAuthSchema = lazySchema(() => z.object({
 }));
 export type ConnectorInstanceBearerAuth = z.input<typeof ConnectorInstanceBearerAuthSchema>;
 
-/** API-key auth; the key is resolved from `credentialRef` at boot. */
+/** API-key auth; the key is resolved from `credentialRef` when the instance materializes. */
 export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => z.object({
   type: z.literal('api-key'),
   credentialRef: z.string().min(1).describe(
@@ -140,7 +140,7 @@ export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => z.object({
 }));
 export type ConnectorInstanceAPIKeyAuth = z.input<typeof ConnectorInstanceAPIKeyAuthSchema>;
 
-/** Basic auth; the password is resolved from `credentialRef` at boot. */
+/** Basic auth; the password is resolved from `credentialRef` when the instance materializes. */
 export const ConnectorInstanceBasicAuthSchema = lazySchema(() => z.object({
   type: z.literal('basic'),
   username: z.string().describe('Username (not a secret; safe to keep in metadata).'),

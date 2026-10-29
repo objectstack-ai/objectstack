@@ -404,6 +404,21 @@ export interface ValidationMessageContext {
   translate?: ValidationMessageTranslator;
   /** Object name — needed to address the field's label in the bundle. */
   objectName?: string;
+  /**
+   * [ADR-0029 D9.2a] The PACKAGED (code-shipped) declaration of the rule of
+   * this name on `objectName` — a `conditional` branch addressed by its own
+   * name — read from the packaged owner's declaration, the base `/meta` hands
+   * its translator as `packagedBase`. An authored `rule.message` that diverged
+   * from it is a tenant's rewrite, and the catalog (the packaged rule's
+   * translation) is not applied to it.
+   *
+   * Absent when no packaged owner is registered for the object (a
+   * runtime-authored object, a registry-less host), and `undefined` for a rule
+   * the packaged declaration does not carry (one an `objectExtensions` entry
+   * folds on, translated under its own name): either way there is nothing to
+   * diverge from, and the catalog applies, as on `/meta`.
+   */
+  packagedRule?: (ruleName: string) => unknown;
 }
 
 /**
@@ -1958,6 +1973,52 @@ export function validateRecord(
   options: ValidateRecordOptions = {},
 ): void {
   validateRecordInScope(objectSchema, data, mode, 'skip', options);
+}
+
+/**
+ * [#27259] The insert write's verdict on the values a row SUPPLIES — what
+ * `ObjectQL.insert()` refuses about a value whatever defaults, hooks and the
+ * store go on to add. `os validate` and `os build` ask it about each seed
+ * record, so a seed value the load would refuse is refused at authoring time
+ * with the same code and the same sentence.
+ *
+ * ⛔ One judge, not a second one: the door's own two rewrites
+ * ({@link normalizeBlankTypedValues}, {@link normalizeNumericStringValues}),
+ * the multi-value wrap ({@link normalizeMultiValueFields}) and then
+ * {@link validateRecordInScope} with the insert path's `'include'` scope, in
+ * the insert path's order. A value the load accepts after a rewrite (a numeric
+ * string on a number field, a scalar on a multi-value one) passes here too.
+ *
+ * What it leaves to the load, by construction:
+ *  - a missing value (`undefined`, `null`, blank): whether the row needs one is
+ *    `required`, which a `defaultValue` or a hook may still satisfy. A
+ *    SUPPLIED empty array on a required multi-value field is not missing: it
+ *    is refused `required` here, as the insert path refuses it;
+ *  - a name the schema does not declare: the undeclared-field refusal is
+ *    another door's;
+ *  - every non-value rule: validation rules, references resolving, permissions.
+ *
+ * Messages render as {@link validateRecord}'s do (`en` and the declared
+ * labels unless `options.messages` says otherwise). ADR-0104 value shapes keep
+ * the deployment's posture, so with the default options they warn, never
+ * refuse. Throws `ValidationError` on failure; never mutates `data`.
+ */
+export function validateInsertValues(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  options: ValidateRecordOptions = {},
+): void {
+  const fields = objectSchema?.fields;
+  if (!fields || !data) return;
+  const row = { ...normalizeNumericStringValues(objectSchema, normalizeBlankTypedValues(objectSchema, data)) };
+  normalizeMultiValueFields(objectSchema, row, 'include');
+  const supplied: Record<string, FieldDef> = {};
+  for (const [name, value] of Object.entries(row)) {
+    // Own-property: a field name may be `constructor` / `valueOf`.
+    if (isMissing(value) || !Object.prototype.hasOwnProperty.call(fields, name)) continue;
+    supplied[name] = fields[name];
+  }
+  validateRecordInScope({ fields: supplied }, row, 'insert', 'include', options);
 }
 
 /**

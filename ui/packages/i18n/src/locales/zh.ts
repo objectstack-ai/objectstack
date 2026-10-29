@@ -388,6 +388,14 @@ const zh = {
       postalCode: '邮政编码',
       country: '国家 / 地区',
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '选择币种',
+      search: '搜索币种…',
+      noResults: '未找到币种',
+      available: '可用',
+      all: '全部币种（ISO 4217）',
+    },
     boolean: {
       offBadge: '{{label}} — 已关闭',
       completed: '已完成',
@@ -2088,6 +2096,8 @@ const zh = {
       planApproveMessage: '确认，开始搭建。',
       planApproveDefaultsMessage: '确认搭建，未决问题按你的合理假设和默认处理。',
       planAnswerMessage: '关于「{{question}}」，我选择「{{option}}」。',
+      planExtendExistingMessage: '在「{{app}}」上继续完善，不另建应用。',
+      planBuildNewAppMessage: '另建一个独立应用。',
       changesTitle: '确认改动',
       changesConfirmed: '已确认',
       changesConfirm: '确认修改',
@@ -2659,6 +2669,9 @@ const zh = {
       invitationPreviewTitle: '{{inviter}} 邀请你加入 {{organization}}',
       invitationPreviewTitleNoInviter: '你受邀加入 {{organization}}',
       invitationPreviewDescription: '请使用收到邀请的邮箱（{{email}}）。',
+      invitationGoneTitle: '此邀请链接已失效',
+      invitationGoneDescription: '邀请可能已过期、已被使用或已被撤回。请联系邀请你的人重新发送邀请。',
+      invitationGoneSignIn: '前往登录',
       showPasswordText: '显示密码',
       hidePasswordText: '隐藏密码',
       footer: {
@@ -2692,6 +2705,8 @@ const zh = {
         userExists: '该邮箱已被注册，请直接登录或更换邮箱。',
         selfRegistrationClosed: '本系统未开放自助注册，请联系管理员获取邀请。',
         emailDomainNotAllowed: '该邮箱的域名不允许在此注册，请使用组织邮箱，或联系管理员获取邀请。',
+        invitationSentTo: '此邀请发送至 {{email}}，请使用该邮箱注册以接受邀请。',
+        invitationAddressOnly: '此邀请只能由收到邀请的邮箱接受，请使用该邮箱注册。',
       },
       verifyInbox: {
         title: '请检查您的邮箱',
@@ -3277,6 +3292,7 @@ const zh = {
       detailLoading: '正在加载详情…',
       detailLoadFailed: '无法加载变更详情：',
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
+      fieldOrderChanged: '字段顺序已变更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: '包含由 AI 副驾起草的更改',
       draftedByMcpClient: '包含由 MCP 客户端「{{client}}」起草的更改',
@@ -3933,6 +3949,13 @@ const zh = {
       countSeedData: '示例数据',
       extendTarget: '添加到现有应用：{{app}}',
       awaitingConfirm: '等待确认',
+      iterateOrNew: {
+        question: '这个方案和你已有的应用「{{app}}」重叠。要在它上面继续完善，还是另建一个独立应用？',
+        questionUnnamed: '这个方案和你已有的一个应用重叠。要在那个应用上继续完善，还是另建一个独立应用？',
+        extend: '在「{{app}}」上继续完善',
+        buildNew: '另建一个独立应用',
+        replyHint: '回复告诉我选哪一个。',
+      },
       objectsAndFields: '对象与字段',
       views: '视图',
       suggestedField: '补充',
@@ -4338,6 +4361,7 @@ const zh = {
     progressBar: '决策进度',
     declaredActions: '操作',
     decisionPanelOffRequestPage: '审批决策面板仅在审批请求页面上可用。',
+    snapshotAsSubmitted: '提交时的内容',
     attachmentChip: '附件',
     attachmentOpenFailed: '无法打开附件，请重试',
     approveOneTitle: '通过“{{title}}”？',
@@ -4492,6 +4516,8 @@ const zh = {
     daysAgo_other: '{{count}} 天前',
   },
   filterBuilder: {
+    currency: '币种',
+    currencyNeedsAnd: '只有在「全部条件都满足（AND）」时，币种金额才按所选币种比较。',
     where: '其中',
     and: '且',
     or: '或',

@@ -210,11 +210,16 @@ export type DocTargetChecker = (target: DocNavTarget) => boolean;
  * labelled, else the object's / dashboard's label. These are the three targets
  * that sentence names; `resolveNavItemLabel` walks them in that order and asks a
  * {@link NavTargetLabelResolver} about each one.
+ *
+ * `reportIndex` is the fourth: a `report` entry with no `reportName` opens the
+ * app's report index, which no metadata record names, so the host answers its
+ * own wording for that page (objectstack#27525).
  */
 export type NavLabelTarget =
   | { kind: 'view'; objectName: string; viewName: string }
   | { kind: 'object'; objectName: string }
-  | { kind: 'dashboard'; dashboardName: string };
+  | { kind: 'dashboard'; dashboardName: string }
+  | { kind: 'reportIndex' };
 
 /**
  * Answers the CURRENT display label of a nav target from the host's metadata —
@@ -569,7 +574,9 @@ function isKeyedLabel(label: unknown): label is KeyedI18nLabel {
  * `componentRef`, `actionDef.actionName`, a `doc` entry's `doc` else its
  * `book` — and an entry with no target of its
  * own (a `group`), or with its target missing, shows its `id`, which the
- * validator requires of every entry.
+ * validator requires of every entry. A `report` entry with no `reportName` is
+ * the app's report index: it shows the host's `reportIndex` answer, else its
+ * `id`.
  */
 function inheritedNavItemLabel(
   item: Exclude<NavigationItem, { type: 'separator' }>,
@@ -598,7 +605,8 @@ function inheritedNavItemLabel(
       break;
     case 'report':
       if (item.reportName) return item.reportName;
-      break;
+      // No `reportName`: the app's report index (objectstack#27525).
+      return ask({ kind: 'reportIndex' }) ?? item.id;
     case 'url':
       if (item.url) return item.url;
       break;
@@ -1000,7 +1008,9 @@ export function resolveHref(
       return { href: url, external: false };
     }
     case 'report':
-      return { href: item.reportName ? `${basePath}/report/${item.reportName}` : '#', external: false };
+      // No `reportName` is the app's report index (objectstack#27525), the
+      // `reports` route; a named report its own route.
+      return { href: item.reportName ? `${basePath}/report/${item.reportName}` : `${basePath}/reports`, external: false };
     case 'url':
       return { href: item.url ?? '#', external: item.target === '_blank' };
     case 'component': {

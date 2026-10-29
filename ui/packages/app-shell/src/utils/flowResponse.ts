@@ -125,6 +125,13 @@
  * `errorMessage` and `message`, and render the inner refusal by the record
  * form's rule. `message` itself is untouched on the wire.
  *
+ * The `type: 'api'` action door reads the same carriers (objectstack#27487).
+ * A declared `type: 'flow'` endpoint answers a run that failed with the
+ * trigger door's `400 FLOW_FAILED`, details included, and a flow-backed api
+ * action reached the user as that envelope's `message`, the node chain.
+ * {@link apiActionFailureMessage} is that door's reading: both api handlers
+ * (`useConsoleActionRuntime`'s and `RecordDetailView`'s) call it on a non-2xx.
+ *
  * ## A LAUNCH is judged here too, not just interpreted (objectui#9973)
  *
  * Classifying the response was never the whole rule. The two launch handlers
@@ -363,7 +370,9 @@ function permissionDeniedLine(locale: string | undefined): string {
  * `flows.FLOW.errorMessage` (objectui#12075) — then the producer-marked
  * `userMessage`, then the refusal the run's write node met (`innerRefusal`,
  * whose `message` the spec serves without the node and operation prefixes),
- * then the run's own `message`.
+ * then the run's own `message`. `locale` is the language the permission line
+ * is read in: the flow's own (`copy.locale`) on a launch or resume, the
+ * host's active language on the api action door, which knows no flow.
  *
  * The inner refusal is rendered exactly as the record form renders the same
  * refusal on a save: a permission denial (`isPermissionError`) becomes the
@@ -373,7 +382,12 @@ function permissionDeniedLine(locale: string | undefined): string {
  * permission check exactly as the form asks it (objectstack#26059, Q3). `message` stays the last rung, so a
  * run that met no refusal still says something, never nothing.
  */
-function flowFailureMessage(failure: FlowFailureCarriers, message: string, copy: FlowCopyLocale | undefined): string {
+function flowFailureMessage(
+    failure: FlowFailureCarriers,
+    message: string,
+    copy: FlowCopyLocale | undefined,
+    locale: string | undefined,
+): string {
     const friendly = failure.errorMessage;
     if (typeof friendly === 'string' && friendly.length > 0) return translatedFlowMessage('errorMessage', friendly, copy);
     if (failure.userMessage) return failure.userMessage;
@@ -382,7 +396,7 @@ function flowFailureMessage(failure: FlowFailureCarriers, message: string, copy:
         const refusal = { code: inner.code, message: typeof inner.message === 'string' ? inner.message : '' };
         const scopeReason = delegationScopeMessage(refusal);
         if (scopeReason) return scopeReason;
-        if (isPermissionError(refusal)) return permissionDeniedLine(copy?.locale);
+        if (isPermissionError(refusal)) return permissionDeniedLine(locale);
         if (refusal.message.trim()) return refusal.message;
     }
     return message;
@@ -412,6 +426,50 @@ function errorEnvelopeDetails(json: unknown): FlowRunResult {
 }
 
 /**
+ * The message of a `400 FLOW_FAILED` error envelope, by
+ * {@link flowFailureMessage}: the carriers are `error.details`' `errorMessage`
+ * and `innerRefusal` and the envelope's top-level `userMessage`, and the last
+ * rung is the envelope's own message (`fallback` when it has none).
+ */
+function flowFailedEnvelopeMessage(
+    json: unknown,
+    fallback: string,
+    copy: FlowCopyLocale | undefined,
+    locale: string | undefined,
+): string {
+    const details = errorEnvelopeDetails(json);
+    return flowFailureMessage(
+        {
+            errorMessage: details.errorMessage,
+            userMessage: declaredUserMessage((json as { error?: unknown } | null | undefined)?.error),
+            innerRefusal: details.innerRefusal,
+        },
+        actionErrorDetail(json, fallback),
+        copy,
+        locale,
+    );
+}
+
+/**
+ * The error a `type: 'api'` action shows for a non-2xx answer (objectstack#27487
+ * — see the header). A `400 FLOW_FAILED` is a flow the endpoint ran, and reads
+ * the run's refusal by the failed arm's rule; `locale` is the host's active
+ * language, since the door knows no flow to translate an `errorMessage` for.
+ * Every other answer reads `actionErrorDetail`, as the door always has.
+ */
+export function apiActionFailureMessage(
+    res: { status: number },
+    json: unknown,
+    fallback: string,
+    locale: string | undefined,
+): string {
+    if (res.status === 400 && errorCodeIs((json as { error?: unknown } | null | undefined)?.error, 'FLOW_FAILED')) {
+        return flowFailedEnvelopeMessage(json, fallback, undefined, locale);
+    }
+    return actionErrorDetail(json, fallback);
+}
+
+/**
  * Classify a `POST /api/v1/automation/{flow}/trigger` or
  * `.../runs/{runId}/resume` response.
  *
@@ -432,18 +490,9 @@ export function interpretFlowResponse<S = unknown>(
         // authorable `errorMessage` stays preferred for it; the envelope's own
         // `message` is the fallback. See the header note.
         if (res.status === 400 && errorCodeIs(json?.error, 'FLOW_FAILED')) {
-            const details = errorEnvelopeDetails(json);
             return {
                 kind: 'failed',
-                error: flowFailureMessage(
-                    {
-                        errorMessage: details.errorMessage,
-                        userMessage: declaredUserMessage(json?.error),
-                        innerRefusal: details.innerRefusal,
-                    },
-                    actionErrorDetail(json, `${label} failed`),
-                    copy,
-                ),
+                error: flowFailedEnvelopeMessage(json, `${label} failed`, copy, copy?.locale),
                 retryable: false,
             };
         }
@@ -492,6 +541,7 @@ export function interpretFlowResponse<S = unknown>(
                 },
                 actionErrorDetail(data, `${label} failed`),
                 copy,
+                copy?.locale,
             ),
             retryable: false,
         };

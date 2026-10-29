@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { CurrencyField } from './widgets/CurrencyField';
 import { NumberField } from './widgets/NumberField';
@@ -296,6 +296,7 @@ describe('Standard Field Widgets', () => {
     const fieldMock = { type: 'boolean' };
 
     it('should render checkbox/switch', () => {
+      // `boolean` draws a checkbox, `toggle` a switch (objectstack#27519).
       render(
         <BooleanField
           value={true}
@@ -303,19 +304,30 @@ describe('Standard Field Widgets', () => {
           field={fieldMock as any}
         />
       );
-      // Ensure we can find the switch role (Shadcn switch uses role="switch")
+      expect(screen.getByRole('checkbox')).toBeChecked();
+      cleanup();
+      render(
+        <BooleanField
+          value={true}
+          onChange={mockOnChange}
+          field={{ type: 'toggle' } as any}
+        />
+      );
       expect(screen.getByRole('switch')).toBeChecked();
     });
 
-    it('should toggle value', () => {
+    it.each([
+      ['boolean', 'checkbox'],
+      ['toggle', 'switch'],
+    ] as const)('should toggle value (%s draws a %s)', (type, role) => {
       render(
         <BooleanField
           value={false}
           onChange={mockOnChange}
-          field={fieldMock as any}
+          field={{ type } as any}
         />
       );
-      const toggle = screen.getByRole('switch');
+      const toggle = screen.getByRole(role);
       fireEvent.click(toggle);
       expect(mockOnChange).toHaveBeenCalledWith(true);
     });

@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { FieldSchema } from '@objectstack/spec/data';
 import { renderValidationMessage } from '@objectstack/spec/system';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './record-validator.js';
+import { validateRecord, validateInsertValues, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './record-validator.js';
 
 /**
  * Required-field validation, with the autonumber exemption (#1603).
@@ -1418,6 +1418,72 @@ describe('[#27236] validateRecord — a currency value written as an object name
     expect(refusalOf(number, { amount: { value: 10, currency: 'USD' } })).toEqual([
       { field: 'amount', code: 'invalid_number', message: plain, label: 'Amount' },
     ]);
+  });
+});
+
+/**
+ * [#27259] `validateInsertValues` — the insert write's verdict on the values a
+ * row SUPPLIES, which `os validate` / `os build` ask about each seed record. It
+ * answers what `validateRecord(…, 'insert')` answers about a supplied value,
+ * after the door's own rewrites, and nothing about what the row omits or what
+ * the schema does not declare.
+ */
+describe('[#27259] validateInsertValues — the insert verdict on the values a row supplies', () => {
+  const schema = {
+    fields: {
+      name: { type: 'text', label: 'Name', required: true },
+      amount: { type: 'currency', label: 'Amount' },
+      hours: { type: 'number', label: 'Hours', min: 0 },
+      tags: { type: 'multiselect', label: 'Tags', options: [{ label: 'Alpha', value: 'alpha' }] },
+      due: { type: 'date', label: 'Due' },
+      stamp: { type: 'datetime', label: 'Stamp', readonly: true },
+    },
+  };
+  const refusalOf = (fn: () => void) => {
+    try {
+      fn();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      return (e as ValidationError).fields;
+    }
+    return null;
+  };
+  const lesson = renderValidationMessage({ messageKey: 'invalid_number_currency_object', label: 'Amount', field: 'amount' });
+
+  it('refuses a currency written as an object with the same fields validateRecord gives on insert', () => {
+    const row = { name: 'A', amount: { value: 10, currency: 'USD' } };
+    const expected = [{ field: 'amount', code: 'invalid_number', message: lesson, label: 'Amount' }];
+    expect(refusalOf(() => validateInsertValues(schema, row))).toEqual(expected);
+    expect(refusalOf(() => validateRecord(schema, row, 'insert'))).toEqual(expected);
+  });
+
+  it('passes a bare number', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { amount: 10 }))).toBeNull();
+  });
+
+  it('passes what the insert door rewrites into an accepted value: a numeric string, a blank, a scalar on a multi-value field', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { amount: '10', hours: '2.5', due: '', tags: 'alpha' }))).toBeNull();
+  });
+
+  it('does not judge `required` on what the row omits or leaves empty: the load\'s defaults and hooks may fill it', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { amount: 5 }))).toBeNull();
+    expect(refusalOf(() => validateInsertValues(schema, { name: null, amount: 5 }))).toBeNull();
+    // CONTROL — validateRecord on insert does refuse the omission.
+    expect(refusalOf(() => validateRecord(schema, { amount: 5 }, 'insert'))?.map((f) => f.code)).toEqual(['required']);
+  });
+
+  it('CONTROL — a name the schema does not declare gets no answer here', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { no_such_field: { value: 1 } }))).toBeNull();
+  });
+
+  it('judges a readonly value\'s shape, as the insert path does after its strip (a system writer\'s value is stored)', () => {
+    expect(refusalOf(() => validateInsertValues(schema, { stamp: 'yesterday' }))?.map((f) => [f.field, f.code])).toEqual([['stamp', 'invalid_date']]);
+  });
+
+  it('never mutates the row it is handed', () => {
+    const row = { amount: '10', tags: 'alpha', due: '' };
+    validateInsertValues(schema, row);
+    expect(row).toEqual({ amount: '10', tags: 'alpha', due: '' });
   });
 });
 

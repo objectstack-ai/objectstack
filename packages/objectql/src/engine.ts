@@ -108,15 +108,23 @@ import { publishBulkDataEvent, publishDataEvent } from './engine-realtime-publis
 // [#25522 cut 5] The secret and internal-field bodies; the methods of the same
 // names below hand each body the members it reads (`SecretInternalFieldsHost`).
 import {
+  deletedSecretColumns,
+  deletedSecretSlots,
   encryptSecretFields,
   maskSecretFields,
   omitInternalFields,
+  persistSecretRows,
   privilegedReadDriverOptions,
   refuseEmptyPasswordFields,
+  releaseSecretHandles,
   resolveInternalField,
   resolveSecret,
   resolveSecretField,
+  retiredSecretSlots,
+  secretFieldsWritten,
   stripSearchCompanionFromRead,
+  type PendingSecretRow,
+  type SecretHandleSlot,
 } from './engine-secret-internal-fields.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
@@ -301,8 +309,11 @@ import {
 // (`rejectCredentialAggregation`); the methods of the same names below hand
 // each body the members it reads (`CountAggregateHost`).
 import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
+// ADR-0100: the credential-column guard's filter / sort half, beside the
+// aggregate half above — one collector, one envelope.
+import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
-import { assertProjectionNamesAField } from './empty-projection-door.js';
+import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
 import { assertRecordCurrencyCodes, touchesRecordCurrency } from './validation/record-currency-code.js';
@@ -335,7 +346,7 @@ import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, isScannableValueShapeField } from './validation/record-validator.js';
-import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
+import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink, ValidationMessageContext } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -9542,11 +9553,13 @@ export class ObjectQL implements IObjectQLEngine {
     // Only `locale` is read — narrower than `ExecutionContext` so both the
     // resolved and the input-shaped envelope satisfy it.
     context?: { locale?: string },
-  ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
+  ): ValidationMessageContext & { objectName: string } {
     // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
     const readI18nService = () => this.i18nService;
+    const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof validationMessageContext> = {
       get i18nService() { return readI18nService(); },
+      get registry() { return readRegistry(); },
       negotiatedMessageLocale: (...a) => this.negotiatedMessageLocale(...a),
     };
     return validationMessageContext.call(host, objectName, context);
@@ -10536,9 +10549,12 @@ export class ObjectQL implements IObjectQLEngine {
    * Two channels share the read mask ({@link SECRET_MASK}) but differ on write
    * (see ADR-0100):
    *
-   *  - **`secret`** — encrypted: each plaintext is wrapped by the ICryptoProvider,
-   *    persisted as a `sys_secret` row, and replaced on `row` by an opaque ref.
-   *    Cleartext never reaches the business table.
+   *  - **`secret`** — encrypted: each plaintext is wrapped by the ICryptoProvider
+   *    and replaced on `row` by an opaque ref. Cleartext never reaches the
+   *    business table. [#27495] The `sys_secret` row is SEALED here and handed
+   *    back, not written: the caller writes it with {@link persistSecretRows}
+   *    immediately before the record's own driver write, so a write refused
+   *    after this pass (validation, the post-image seam) leaves no row behind.
    *  - **`password`** (generic, non-`better-auth`) — plaintext at rest: stored
    *    verbatim, no encryption and no `sys_secret` row. Only the echoed-mask drop
    *    below applies to it.
@@ -10569,7 +10585,7 @@ export class ObjectQL implements IObjectQLEngine {
     row: Record<string, unknown>,
     context: ExecutionContext | undefined,
     driverOptions: unknown,
-  ): Promise<void> {
+  ): Promise<PendingSecretRow[]> {
     // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
     const readRegistry = () => this._registry;
     const readCryptoProvider = () => this.cryptoProvider;
@@ -10579,6 +10595,75 @@ export class ObjectQL implements IObjectQLEngine {
       getDriver: (...a) => this.getDriver(...a),
     };
     return encryptSecretFields.call(host, object, row, context, driverOptions);
+  }
+
+  /**
+   * [#27495] Write the `sys_secret` rows {@link encryptSecretFields} sealed for
+   * one record write. Called immediately before that record's driver write and
+   * after every pass that can refuse it, so the credential row is written only
+   * with the record that names it. Each row lands on `written` as it is
+   * written, which is what the write's failure path hands to
+   * {@link releaseSecretHandles} when the record write does not land.
+   */
+  private async persistSecretRows(pending: readonly PendingSecretRow[], written: PendingSecretRow[]): Promise<void> {
+    // [#27495] The body lives in `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const host: ThisParameterType<typeof persistSecretRows> = {
+      getDriver: (...a) => this.getDriver(...a),
+    };
+    return persistSecretRows.call(host, pending, written);
+  }
+
+  /**
+   * [#27495] Remove each `sys_secret` row in `slots` that the column it was
+   * minted for no longer names — best-effort, and never a throw.
+   *
+   * Two occasions reach it. `'refused'`: a write that sealed and wrote a row
+   * did not complete, so the row may name nothing. `'retired'`: a committed
+   * update cleared the field (`null`) or replaced its value, so the handle the
+   * column named before may name nothing; [#27581] a committed delete reaches
+   * it the same way, for every handle the removed rows held. The same three
+   * checks decide both,
+   * and every one that cannot pass KEEPS the row, the recoverable direction
+   * (deleting a handle a row still names destroys that credential, and nothing
+   * can name what was lost):
+   *
+   *  - **Verified, never inferred.** No row of `object` may still name the
+   *    handle in that column: a predicate write seals ONE handle for every row
+   *    it matches, so clearing one of them leaves the handle in force for the
+   *    rest; a write that did land after all (a partially applied batch) still
+   *    names its row.
+   *  - **This column's own handle.** The `sys_secret` row's `namespace`/`key`
+   *    must be this object and field; a ref a system writer copied onto another
+   *    column is not released through that column.
+   *  - **Inside the record's unit.** The count and the delete ride the open
+   *    transaction where it covers their drivers, so they see the write's own
+   *    state and roll back with it; a record write in a unit that does not
+   *    cover the `sys_secret` store keeps the row, since the delete could
+   *    outlive a rollback of the record.
+   *
+   * A row kept for a failure (not for being in use) is reported once at
+   * `error`, naming the column and the remedy: the caller's answer does not
+   * change, and the stored ciphertext is exactly what the operator believes
+   * gone. Legacy orphans written before this existed are not swept here; the
+   * orphan report lists them.
+   */
+  private async releaseSecretHandles(
+    object: string,
+    slots: readonly SecretHandleSlot[],
+    context: ExecutionContext | undefined,
+    occasion: 'refused' | 'retired',
+  ): Promise<void> {
+    // [#27495] The body lives in `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readTxStore = () => this.txStore;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof releaseSecretHandles> = {
+      get txStore() { return readTxStore(); },
+      get logger() { return readLogger(); },
+      getDriver: (...a) => this.getDriver(...a),
+      transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+    };
+    return releaseSecretHandles.call(host, object, slots, context, occasion);
   }
 
   /**
@@ -13317,7 +13402,12 @@ export class ObjectQL implements IObjectQLEngine {
       // narrowing must be a 400, not a silent widening. A direct engine caller
       // naming one has it intersected away here, the engine's existing tolerant
       // posture for an unknown requested search field.
-      const internalFields = collectInternalReadFields(schema);
+      // [ADR-0100] …and never a `secret` / `password` column either, by the
+      // collector the credential guards read: the auto-default already skips
+      // those types, and an author-declared `searchableFields` naming one is
+      // withheld here the same way, so a search term is never evaluated over
+      // a value the read path masks.
+      const internalFields = [...new Set([...collectInternalReadFields(schema), ...collectCredentialFields(schema)])];
       const scanFields = internalFields.length === 0
         ? (schema.fields as any)
         : Object.fromEntries(
@@ -13580,6 +13670,11 @@ export class ObjectQL implements IObjectQLEngine {
     // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
+    // [ADR-0100] A `secret` / `password` column is never a filter or sort key
+    // for a non-system caller — judged on the caller's own `where` / `orderBy`
+    // / `expand`, before the search term is expanded into `where` and before
+    // the middlewares inject their server-authored filters.
+    rejectCredentialEvaluation(object, 'find', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -13634,10 +13729,10 @@ export class ObjectQL implements IObjectQLEngine {
       // Whole names, no head-splitting: only plain entries reach here (the
       // dotted refusal above fired on anything carrying a '.').
       const filtered = ast.fields.filter(f => known.has(f));
-      // Guard against an empty projection — fall back to `*` so the
-      // request still returns rows. An empty SELECT list would either
-      // 400 in Postgres or silently project nothing.
-      ast.fields = filtered.length > 0 ? filtered : undefined;
+      // [#27165] Nothing left is an empty projection, refused as `fields: []`
+      // is — never read as every column.
+      if (filtered.length === 0) refuseProjectionOfUnknownColumns(object, 'find', ast.fields);
+      ast.fields = filtered;
     }
 
     const opCtx: OperationContext = {
@@ -13905,6 +14000,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
+    // [ADR-0100] Same credential-column refusal as `find`, same position.
+    rejectCredentialEvaluation(objectName, 'findOne', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -13940,7 +14037,9 @@ export class ObjectQL implements IObjectQLEngine {
       // in schema.fields (matches `find()` behavior, one list).
       const known = new Set<string>([...Object.keys(_findOneSchema.fields), ...PLATFORM_PROVISIONED_COLUMNS]);
       const filtered = ast.fields.filter(f => known.has(f));
-      ast.fields = filtered.length > 0 ? filtered : undefined;
+      // [#27165] Same refusal as `find`.
+      if (filtered.length === 0) refuseProjectionOfUnknownColumns(objectName, 'findOne', ast.fields);
+      ast.fields = filtered;
     }
 
     const opCtx: OperationContext = {
@@ -14893,7 +14992,7 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // #8682's rule applied one step in — a refusal must cost nothing — so
       // this runs before `resolveSystemInsertOrganization`, before the
-      // credential channel (`encryptSecretFields` writes a `sys_secret` row),
+      // credential channel (`encryptSecretFields` seals a `sys_secret` row),
       // before validation and before `applyAutonumbers`. Pre-statement, so the
       // driver is never reached: that is also what puts #8682's Half B
       // statement-and-values leak out of reach on this path, since both SQL
@@ -14949,7 +15048,7 @@ export class ObjectQL implements IObjectQLEngine {
       // [#8682] Rows the declared-field door refused are already dead on
       // arrival — seeded before the strips, before the seam, and so before
       // the credential loop further down, which is the first pass with a
-      // real side effect (`encryptSecretFields` writes a `sys_secret` row):
+      // real side effect (`encryptSecretFields` seals a `sys_secret` row):
       // a culled row is neither stripped, nor judged, nor able to mint a
       // secret for a write that will never happen.
       const rowErrors: (unknown | undefined)[] = new Array(rows.length);
@@ -15127,7 +15226,7 @@ export class ObjectQL implements IObjectQLEngine {
       // Placement obeys the rule #8682 wrote for the declared-field door and
       // commit b003cf2e8 restated for its post-hook half: a refusal must cost nothing.
       // This sits after that door and BEFORE every producer —
-      // `resolveSystemInsertOrganization`, `encryptSecretFields` (which writes
+      // `resolveSystemInsertOrganization`, `encryptSecretFields` (which seals
       // a `sys_secret` row), `applyAutonumbers` (which CONSUMES a sequence
       // number), validation and the statement.
       //
@@ -15250,6 +15349,10 @@ export class ObjectQL implements IObjectQLEngine {
       for (const rowCtx of rowHookContexts) {
         rowCtx.input.options = driverOptions;
       }
+      // [#27495] The credential rows each row's secret fields are sealed into,
+      // and the ones this write has actually written to `sys_secret`.
+      const sealedSecrets: PendingSecretRow[][] = rows.map(() => []);
+      const writtenSecrets: PendingSecretRow[] = [];
 
       try {
         let result: any;
@@ -15271,7 +15374,7 @@ export class ObjectQL implements IObjectQLEngine {
             // carries the secret-arm refusal). Same try, so partial mode
             // reports either refusal per-row instead of killing the batch.
             this.refuseEmptyPasswordFields(object, rows[i]);
-            await this.encryptSecretFields(object, rows[i], opCtx.context, driverOptions);
+            sealedSecrets[i] = await this.encryptSecretFields(object, rows[i], opCtx.context, driverOptions);
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -15506,6 +15609,11 @@ export class ObjectQL implements IObjectQLEngine {
         const liveIndexes: number[] = [];
         for (let i = 0; i < rows.length; i++) if (rowErrors[i] === undefined) liveIndexes.push(i);
         const liveRows = liveIndexes.map((i) => rows[i]);
+        // [#27495] The live rows' credential rows, and only theirs, written now:
+        // every pass that can refuse a row has run, so a refused write or a
+        // culled row never reaches `sys_secret`. A statement that then fails
+        // takes them back in the `catch` below.
+        await this.persistSecretRows(liveIndexes.flatMap((i) => sealedSecrets[i]), writtenSecrets);
         if (isBatch) {
           if (liveRows.length === 0) {
                result = [];
@@ -15761,6 +15869,10 @@ export class ObjectQL implements IObjectQLEngine {
           'Insert operation failed',
           writeFailureLogMeta(redactBoundStatement(logged), { object }),
         );
+        // [#27495] A write that did not complete takes back the credential rows
+        // it wrote; one a stored row names after all (a batch the driver
+        // partially applied, an after-hook refusal of a landed row) is kept.
+        await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
         throw e;
       }
     });
@@ -15860,6 +15972,9 @@ export class ObjectQL implements IObjectQLEngine {
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
      options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
+     // [ADR-0100] A predicate write is judged like a read: a non-system
+     // caller's `where` evaluates no `secret` / `password` column.
+     rejectCredentialEvaluation(object, 'update', options, options?.context, this.relatedSchemaOf);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -16796,6 +16911,12 @@ export class ObjectQL implements IObjectQLEngine {
        reportDroppedFields(preComputedPayload, computedStripUpdate.rows[0] as Record<string, unknown> | null | undefined, 'computed');
 
        hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+       // [#27495] The credential rows this write seals, the ones it has written
+       // to `sys_secret`, and the handles its committed statement moved the
+       // secret columns off.
+       let sealedSecrets: PendingSecretRow[] = [];
+       const writtenSecrets: PendingSecretRow[] = [];
+       let retiredSecrets: SecretHandleSlot[] = [];
 
        try {
            let result;
@@ -16908,7 +17029,7 @@ export class ObjectQL implements IObjectQLEngine {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
-               await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a
@@ -17220,6 +17341,10 @@ export class ObjectQL implements IObjectQLEngine {
                // dispatch and the roll-up recompute, so an envelope applied
                // there would attribute a violation raised by a nested driver
                // call inside a hook to THIS object.
+               // [#27495] The credential row is written now, after every pass that
+               // can refuse this write and immediately before the statement; a
+               // statement that fails takes it back (the outer `catch`).
+               await this.persistSecretRows(sealedSecrets, writtenSecrets);
                try {
                    // [ADR-0142 D4] A write under a precondition is the driver's
                    // conditional update plus a readback — see
@@ -17240,6 +17365,9 @@ export class ObjectQL implements IObjectQLEngine {
                // `data.record.updated` event and the door's ingress strip. A
                // `null` readback (the row left the caller's scope) stays `null`.
                result = withDeclaredColumnsOnly(result, declaredColumnSet(updateSchema));
+               // [#27495] The handle the stored row named before, where this
+               // statement cleared or replaced it.
+               retiredSecrets = retiredSecretSlots(updateSchema, [priorRecord], hookContext.input.data);
            } else {
                // [#6262] A bulk SET clause must not carry `id`. Reaching this
                // branch AT ALL means `resolveEngineUpdateDispatch` returned
@@ -17298,7 +17426,7 @@ export class ObjectQL implements IObjectQLEngine {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
-               await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a
@@ -17520,11 +17648,11 @@ export class ObjectQL implements IObjectQLEngine {
                // changes a value before the statement. The seam judges the rows
                // that will be stored, which is the rule the insert seam was
                // held to. The credential channel (`encryptSecretFields`) runs
-               // above on this branch, so a refused write that carried a secret
-               // field has already minted its `sys_secret` row. A validation
-               // refusal two lines down already pays the same cost here, and
-               // moving that channel is a separate change. A `check` naming a
-               // secret field judges the stored reference.
+               // above on this branch and only SEALS the `sys_secret` row there;
+               // the row is written immediately before the statement (#27495),
+               // so a write this seam or the validation below refuses leaves
+               // none. A `check` naming a secret field judges the stored
+               // reference.
                //
                // `honoured` is set BEFORE `evaluate`, exactly as on the insert
                // path: it answers "did the seam run", never "did the write
@@ -17620,12 +17748,25 @@ export class ObjectQL implements IObjectQLEngine {
                    const payload = hookContext.input.data as Record<string, unknown>;
                    summaryRows = { previous, next: previous.map((row) => ({ ...row, ...payload })) };
                }
+               // [#27495] The handles the matched rows hold in the secret columns
+               // this payload moves, read BEFORE the statement replaces them:
+               // the D7 memo when a consumer above already made it, otherwise
+               // only those columns, through this write's own AST and options.
+               // A payload that moves no secret column reads nothing here.
+               const movedSecretColumns = secretFieldsWritten(updateSchema, hookContext.input.data);
+               const priorSecretRows = movedSecretColumns.length === 0
+                 ? []
+                 : priorRowsRead
+                   ? ((await readPriorRows()) ?? [])
+                   : (((await driver.find(object, { ...ast, fields: ['id', ...movedSecretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
+               await this.persistSecretRows(sealedSecrets, writtenSecrets);
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
                isPredicateWrite = true;
+               retiredSecrets = retiredSecretSlots(updateSchema, priorSecretRows, hookContext.input.data);
            }
 
            hookContext.event = 'afterUpdate';
@@ -17766,6 +17907,12 @@ export class ObjectQL implements IObjectQLEngine {
            // reason as the insert path: a strip HERE also fired on writes no
            // external caller ever sees). The generic READ path is unchanged:
            // {@link omitInternalFields} still runs on every find/findOne.
+           // [#27495] The write is complete: release the handles its statement
+           // moved the secret columns off, each only once storage confirms no
+           // row of its column still names it. After the `afterUpdate` chain, so
+           // a refusal that rolls the record back never reaches here, and before
+           // the roll-up verdict below, which reports a write that did land.
+           await this.releaseSecretHandles(object, retiredSecrets, opCtx.context, 'retired');
            // The record IS updated; a summary that could not recompute after
            // retries must surface, not stay silent (framework#3147).
            if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);
@@ -17792,6 +17939,9 @@ export class ObjectQL implements IObjectQLEngine {
             'Update operation failed',
             writeFailureLogMeta(redactBoundStatement(logged), { object }),
           );
+          // [#27495] The insert door's twin: a write that did not complete takes
+          // back the credential row it wrote, unless a stored row names it.
+          await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
           throw e;
        }
      });
@@ -19461,6 +19611,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [#5158] Same ordering reason as update(): the dispatch decision below
     // reads `where.id`, which an unlowered array never carries.
     options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf);
+    // [ADR-0100] Same credential-column refusal as update().
+    rejectCredentialEvaluation(object, 'delete', options, options?.context, this.relatedSchemaOf);
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
@@ -19683,6 +19835,11 @@ export class ObjectQL implements IObjectQLEngine {
       // delete (`null` when no roll-up aggregates this object).
       let predicateMatchedRows: Record<string, unknown>[] | null = null;
       let summaryPriorRows: Record<string, unknown>[] | null = null;
+      // [#27581] The `secret` columns this object declares, and the handles the
+      // removed rows held in them: the by-id pre-image, or the predicate
+      // path's matched rows, read before the statement takes them away.
+      const secretColumns = deletedSecretColumns(deleteSchema);
+      let deletedSecrets: SecretHandleSlot[] = [];
 
       // [#5574] The dispatch ladder, resolved BEFORE the before phase — see
       // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
@@ -19904,6 +20061,8 @@ export class ObjectQL implements IObjectQLEngine {
                   if (plan === 'split') this.warnCascadeNotAtomic(object);
                   result = await runByIdDelete(opCtx.context);
               }
+              // [#27581] The handles the removed row held, off its pre-image.
+              deletedSecrets = deletedSecretSlots(deleteSchema, [priorRecord]);
           } else {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
@@ -19938,6 +20097,14 @@ export class ObjectQL implements IObjectQLEngine {
                    summaryPriorRows = predicateMatchedRows
                      ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
                  }
+                 // [#27581] The handles the matched rows hold, read BEFORE the
+                 // statement removes them: the per-row hook read when it was
+                 // made, otherwise only `id` and the secret columns, through
+                 // this write's AST and options. No secret column, no read.
+                 if (secretColumns.length > 0) {
+                   deletedSecrets = deletedSecretSlots(deleteSchema, predicateMatchedRows
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...secretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]));
+                 }
                  result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
                } else {
                  // Otherwise: resolve the matched rows through the composed,
@@ -19953,9 +20120,12 @@ export class ObjectQL implements IObjectQLEngine {
                  // branch's, for the same reasons (#7413).
                  const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
                    const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
-                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   // [#27581] The same read carries the secret columns, so the
+                   // handles released are those of the rows deleted.
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns, ...secretColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
+                   deletedSecrets = deletedSecretSlots(deleteSchema, matched);
                    // [#27004] One walk, rooted at the whole matched set.
                    await this.cascadeDeleteRelations(object, matchedIds, writeContext);
                    // The id set rides an `$in`; batched so one statement never
@@ -20017,6 +20187,14 @@ export class ObjectQL implements IObjectQLEngine {
               result: hookContext.result,
             });
           }
+
+          // [#27581] The delete is complete: release the handles the removed
+          // rows held, through the release a committed update uses, so each one
+          // goes only once storage confirms no row of its column still names it,
+          // inside this write's unit. After the `afterDelete` chain, so a hook
+          // can still dereference the value and a refusal that rolls the delete
+          // back never reaches here.
+          await this.releaseSecretHandles(object, deletedSecrets, opCtx.context, 'retired');
 
           // Roll-up: recompute the parent summary now that the child is gone,
           // from the row's FK values captured BEFORE deletion. [#5272] That
@@ -20167,6 +20345,10 @@ export class ObjectQL implements IObjectQLEngine {
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
       query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object), this.relatedSchemaOf);
+      // [ADR-0100] The filter half of the credential-column guard — `where`
+      // and every `aggregations[i].filter` — before the search term joins
+      // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
+      rejectCredentialEvaluation(object, 'aggregate', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).

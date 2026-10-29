@@ -1735,6 +1735,37 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     }
                 });
 
+                // [#27237] The connector credential door (ruling A on #27230),
+                // registered before `/automation/:name` for the reason above.
+                // The reference is re-encoded into the dispatched path, so one
+                // that carries a `/` stays one segment; the domain decodes it.
+                server!.get(`${base}/automation/connectors/credential-refs`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/connectors/credential-refs', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server!.put(`${base}/automation/connectors/credential-refs/:ref`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('PUT', `/automation/connectors/credential-refs/${encodeURIComponent(req.params.ref)}`, deferRequestBody(req), req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server!.delete(`${base}/automation/connectors/credential-refs/:ref`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('DELETE', `/automation/connectors/credential-refs/${encodeURIComponent(req.params.ref)}`, undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
                 server!.get(`${base}/automation/_status`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('GET', '/automation/_status', undefined, req.query, { request: req });

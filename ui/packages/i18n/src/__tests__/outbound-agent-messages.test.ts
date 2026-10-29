@@ -4,8 +4,9 @@
  * Guard: the strings the console SENDS to the AI agent must not be translated
  * into arbitrary locales.
  *
- * Most `console.ai.*` keys are labels and should be localized everywhere. Four
- * are not labels — they are the message text a button transmits to the agent,
+ * Most `console.ai.*` keys are labels and should be localized everywhere. The
+ * ones in `OUTBOUND_KEYS` below are not labels — they are the message text a
+ * button transmits to the agent,
  * and the cloud confirm gate (`service-ai-studio` `confirm-gate.ts`
  * `APPROVAL_RE`) decides whether that text counts as approval. It recognises
  * Chinese and English. Nothing else.
@@ -13,7 +14,7 @@
  * So `AiChatPage` picks them by the language of the CONVERSATION, not the UI —
  * since objectui#3896 through one resolver
  * (`packages/app-shell/src/console/ai/outboundAgentText.ts`) that reads the two
- * gate packs directly and never calls `t()` for these four keys:
+ * gate packs directly and never calls `t()` for these keys:
  *
  *     zh conversation -> the `zh` pack's value        // matches the gate
  *     anything else   -> the `en` pack's value        // matches the gate
@@ -46,6 +47,8 @@ const OUTBOUND_KEYS = [
   'console.ai.planApproveMessage',
   'console.ai.planApproveDefaultsMessage',
   'console.ai.planAnswerMessage',
+  'console.ai.planExtendExistingMessage',
+  'console.ai.planBuildNewAppMessage',
   'console.ai.changesConfirmMessage',
 ] as const;
 

@@ -212,15 +212,25 @@ function navTarget(it: RawNav): string | undefined {
 }
 
 /**
+ * The target-bearing branches whose target key the spec makes optional, with
+ * a meaning for its absence: a `report` entry with no `reportName` opens the
+ * app's report index (objectstack#27525). Such an entry names a target, so a
+ * save sends it.
+ */
+const NAV_TARGET_OPTIONAL: ReadonlySet<string> = new Set(['report']);
+
+/**
  * Whether a save leaves this entry out (objectui#11776): it has no `type` (the
  * placeholder an unbind leaves behind), or its `type` is a target-bearing
  * branch and none of that branch's target keys holds a string — the entry the
  * spec refuses for want of a target ("navigation.N.objectName — expected
  * string, received undefined"). A key that holds a string is a target the
- * spec takes, so the save sends it and the server judges it.
+ * spec takes, so the save sends it and the server judges it. A branch in
+ * {@link NAV_TARGET_OPTIONAL} is never left out for want of its key.
  */
 function namesNoTarget(it: RawNav): boolean {
   if (typeof it.type !== 'string') return true;
+  if (NAV_TARGET_OPTIONAL.has(it.type)) return false;
   const reads = NAV_TARGET_READS.get(it.type);
   return !!reads && !reads.some((read) => typeof read(it) === 'string');
 }

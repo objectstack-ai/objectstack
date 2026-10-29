@@ -3,15 +3,19 @@ import { Switch, Checkbox, Label, EmptyValue } from '@object-ui/components';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { useBooleanValueLabel } from './booleanValueLabel.js';
+import { resolveBooleanControl } from './booleanControl.js';
 
 /**
- * BooleanField - Toggle input supporting switch and checkbox variants
- * Renders as Switch or Checkbox based on field widget configuration
+ * BooleanField - the two-state input for the `boolean` and `toggle` types.
+ * Which control it draws is {@link resolveBooleanControl}'s answer: `boolean`
+ * a checkbox, `toggle` a switch, an explicit boolean `widget` over either.
  */
 export function BooleanField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<boolean>) {
   const config = field as any;
-  // Use simple type assertion for arbitrary custom properties not in BaseFieldMetadata
-  const widget = config?.widget;
+  // The one type-to-widget map the Studio canvas reads too (objectstack#27519).
+  // This used to draw a switch unless `widget === 'checkbox'`, so a field
+  // authored as `boolean` ("shown as a checkbox") drew the `toggle` face.
+  const control = resolveBooleanControl(config);
   // Generate unique ID using React's useId hook - must be before early returns (rules of hooks)
   const generatedId = useId();
   // Before the readonly early return for the same reason: the hook count must
@@ -110,7 +114,7 @@ export function BooleanField({ value, onChange, field, readonly, error, ...props
    * `"false"` so a valid field says so rather than staying mute. MARKING only:
    * the message TEXT stays with the host.
    */
-  if (widget === 'checkbox') {
+  if (control === 'checkbox') {
      return (
         <div className="flex items-center space-x-2">
             <Checkbox

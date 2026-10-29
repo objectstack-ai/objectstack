@@ -38,10 +38,11 @@ import { useObjectTranslation, useDisplayLocale } from '@object-ui/i18n';
 import type { ActivityFeedReading } from '../hooks/sharedUserFeeds.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { resolveHostAppSegment, resolveNotificationTarget } from '../utils/appRoute.js';
+import { resolveHostAppSegment } from '../utils/appRoute.js';
 import { timeAgo } from '../utils/relativeTime.js';
 import { groupNotifications } from './inboxGrouping.js';
 import type { InboxNotification, NotificationGroup } from './inboxGrouping.js';
+import { openInboxNotification } from './openInboxNotification.js';
 import { ActivityObjectLabel } from './ActivityObjectLabel.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 
@@ -279,46 +280,43 @@ export function InboxPopover({
     leaveTo(`/apps/${hostAppSegment}/sys_activity`);
   };
 
-  const handleNotificationClick = (n: InboxNotification) => {
-    onMarkRead(n.id);
-    // Prefer the materialization's action_url (ADR-0030). The messaging
-    // pipeline synthesizes an app-relative `/{object}/{id}` link from the
-    // event's source when a producer didn't set an explicit url — so it names
-    // a RECORD, and `hostAppSegment` (already resolved above for the two "see
-    // all" drills) is what turns it into a route.
-    //
-    // This used to host it under a raw `currentAppName ?? params.appName` and
-    // navigate BARE when neither named an app — which is the state on every
-    // surface outside `/apps/:appName/*` that mounts this bell (`/home`,
-    // `/organizations`, the full-page AI screen). The bare path matched no
-    // route, the console catch-all forwarded it to `/`, and the landing
-    // resolver dropped the user on the default app's home: objectui#5179.
-    // Reusing the drills' own resolver also stops an unchecked remembered app
-    // from addressing a link into an app that has since been deactivated.
-    const target = resolveNotificationTarget(n.action_url, hostAppSegment);
-    if (!target) {
-      // No link at all — a real state, not a defect: the producer leaves
-      // `action_url` undefined when an emit carries neither a `payload.url` nor
-      // a `source`. `onMarkRead` above has already consumed the row, so
-      // returning here spent the notification and left the popover sitting open
-      // on it, having navigated nowhere (objectui#5190).
-      //
-      // Home's action centre answers this by opening the full inbox
-      // (objectui#4074), and that is the ruled behaviour — so the bell reuses
-      // the drill it already has one screen up rather than writing a second
-      // answer to the same question. `goToAllNotifications` closes the popover
-      // and lands on the same `?view=mine` page the row came from, which is
-      // where a linkless notification can still be read in full.
-      goToAllNotifications();
-      return;
-    }
-    setOpen(false);
-    if (target.kind === 'external') {
-      window.open(target.url, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    leaveTo(target.path);
-  };
+  // Opening a row is `openInboxNotification`, the ONE open action — Home's
+  // "My work → Notifications" row is the other door onto it, so the two
+  // cannot disagree about what opening a notification does: mark it read
+  // first, then follow its link.
+  //
+  // The link is the materialization's action_url (ADR-0030). The messaging
+  // pipeline synthesizes an app-relative `/{object}/{id}` link from the
+  // event's source when a producer didn't set an explicit url — so it names
+  // a RECORD, and `hostAppSegment` (already resolved above for the two "see
+  // all" drills) is what turns it into a route.
+  //
+  // This used to host it under a raw `currentAppName ?? params.appName` and
+  // navigate BARE when neither named an app — which is the state on every
+  // surface outside `/apps/:appName/*` that mounts this bell (`/home`,
+  // `/organizations`, the full-page AI screen). The bare path matched no
+  // route, the console catch-all forwarded it to `/`, and the landing
+  // resolver dropped the user on the default app's home: objectui#5179.
+  // Reusing the drills' own resolver also stops an unchecked remembered app
+  // from addressing a link into an app that has since been deactivated.
+  //
+  // No link at all is a real state, not a defect: the producer leaves
+  // `action_url` undefined when an emit carries neither a `payload.url` nor a
+  // `source`. The row is already spent by then, and stopping there left the
+  // popover sitting open on it, having navigated nowhere (objectui#5190).
+  // Home's action centre answers this by opening the full inbox
+  // (objectui#4074), and that is the ruled behaviour — so the bell reuses the
+  // drill it already has one screen up rather than writing a second answer to
+  // the same question. `goToAllNotifications` closes the popover and lands on
+  // the same `?view=mine` page the row came from, which is where a linkless
+  // notification can still be read in full.
+  const handleNotificationClick = (n: InboxNotification) =>
+    openInboxNotification({ id: n.id, actionUrl: n.action_url }, hostAppSegment, {
+      markRead: onMarkRead,
+      goTo: leaveTo,
+      openInbox: goToAllNotifications,
+      beforeFollow: () => setOpen(false),
+    });
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {

@@ -322,6 +322,10 @@ This object form of a field node isn't wired up for top-level `fields` projectio
 object's schema is registered, the engine's unknown-field filter compares each entry against
 the schema's field names via `String(f)`, so an object entry never matches and is silently
 dropped from the projection — the aliased field is simply missing from results, no error.
+That holds only while some other entry is known: when **every** top-level `fields` entry is
+unknown (object-form entries included), `engine.find()` / `findOne()` refuse the read with
+`400 VALIDATION_ERROR` naming the requested columns, instead of reading every column. A mix of
+known and unknown entries still drops the unknown ones and projects the rest.
 
 Dotted relationship paths (`'owner.name'`) fare no better: the unknown-field filter validates
 only the **head** segment and keeps the path, but there is no populate step anywhere in the

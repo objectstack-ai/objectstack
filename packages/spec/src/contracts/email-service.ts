@@ -404,4 +404,22 @@ export interface IEmailService {
    * reopens the #15587 black hole (a fake success with no mail).
    */
   isConfigured?(): boolean;
+
+  /**
+   * The deployment's configured sender — the `from` {@link send} applies when
+   * the input names none (`defaultFrom` on the constructor channel, or
+   * Settings → Mail → From address on the settings channel). Read at call
+   * time, so it follows a sender changed in the `mail` settings namespace;
+   * `undefined` when no sender is configured.
+   *
+   * Read by the REST send door (`POST {base}/email/send`), which bounds an
+   * HTTP caller's `from` to this address. Server-internal senders (flows,
+   * notifications, auth mail) call {@link send} directly and are not bounded
+   * by it.
+   *
+   * Optional so existing implementations stay valid. A consumer MUST treat an
+   * absent member as UNKNOWN: a bound that cannot read the configured sender
+   * refuses a caller-chosen `from` rather than admitting it.
+   */
+  getDefaultFrom?(): EmailAddress | undefined;
 }

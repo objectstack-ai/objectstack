@@ -26,6 +26,11 @@
  *  - Draws `/login`'s footer under the form — the locale switch and the
  *    privacy / terms links the server's auth config serves, from the same
  *    reader (#25885): sign-up is where a visitor accepts the terms.
+ *  - Opened from an invitation the server no longer knows, draws app-shell's
+ *    `InvitationGoneNotice` in place of the form; a sign-up refused with
+ *    `SELF_REGISTRATION_CLOSED` re-reads the preview, so an invitation that
+ *    went away meanwhile ends the same way and a live one names the address
+ *    it was sent to (#27509).
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -40,8 +45,9 @@ import {
   isInvitationRedirect,
   needsBootstrapProbe,
   useBootstrapStatus,
+  InvitationGoneNotice,
   invitationArrivalCopy,
-  useInvitationPreview,
+  useInvitationArrival,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
@@ -140,10 +146,11 @@ export function RegisterPage() {
       needsBootstrapProbe(authConfig, invitationRedirect),
   );
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
-  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
-  const invitationPreview = useInvitationPreview(redirect);
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic
+  // copy. #27509 — `gone` when the server no longer knows the invitation.
+  const invitationArrival = useInvitationArrival(redirect);
   const invitationCopy = invitationRedirect
-    ? invitationArrivalCopy('register', invitationPreview, t)
+    ? invitationArrivalCopy('register', invitationArrival.preview, t)
     : null;
 
   // Sign-up switched off — bounce to /login.
@@ -235,6 +242,18 @@ export function RegisterPage() {
     ? withConsoleBaseRootRelative(redirect)
     : undefined;
 
+  // #27509 — the server no longer knows this invitation: no form to fill.
+  if (invitationRedirect && invitationArrival.gone) {
+    return (
+      <AuthLayout formWidth="md">
+        <Card className="border-border/60 px-4 py-8 shadow-sm shadow-primary/5 backdrop-blur supports-[backdrop-filter]:bg-card/95">
+          <InvitationGoneNotice />
+        </Card>
+        <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
+      </AuthLayout>
+    );
+  }
+
   // objectui#11691 — registration here is by invitation only. Say so BEFORE
   // the form instead of refusing the finished form with
   // `SELF_REGISTRATION_CLOSED`; the sentence is that refusal's own copy.
@@ -290,7 +309,17 @@ export function RegisterPage() {
         linkComponent={RouterLink}
         // Server refusal `code` → localized end-user text: the one map both
         // register pages pass, owned by `@object-ui/app-shell` (objectui#11030).
-        errorMessages={signUpRefusalMessages(t)}
+        errorMessages={signUpRefusalMessages(
+          t,
+          invitationRedirect ? { preview: invitationArrival.preview } : undefined,
+        )}
+        // #27509 — a refused invitee re-reads the preview: the invitation may
+        // have gone away since the page opened.
+        onError={(error) => {
+          if (invitationRedirect && (error as Error & { code?: string }).code === 'SELF_REGISTRATION_CLOSED') {
+            invitationArrival.recheck();
+          }
+        }}
         onVerificationRequired={(email) => {
           const sp = new URLSearchParams();
           sp.set('email', email);

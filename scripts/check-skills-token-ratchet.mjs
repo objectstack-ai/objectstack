@@ -1175,7 +1175,22 @@ export const CEILINGS = new Map([
   ['skills/objectui/evals/data-integration.json', 471],
   ['skills/objectui/evals/i18n.json', 439],
   ['skills/objectui/evals/mobile.json', 452],
-  ['skills/objectui/evals/page-builder.json', 560],
+  // 560 -> 684 (card #27243, the `Skills-docs: follow-up owed` of the
+  // `destructive` -> `danger` rename on the action blocks): eval 4, the first
+  // case in the bundle to exercise an action block's `variant` — a 'Delete
+  // product' button that must read as destructive and confirm first; the ideal
+  // answer writes `"variant": "danger"` with a `confirmText` on an
+  // `action:button`, and `"variant": "destructive"` (the Button primitive's
+  // word, refused on an action block at save) is a `must_not_contain`, spelled
+  // as the JSON key-value so a correct answer naming the primitive's word still
+  // passes. PAID DOWN FIRST: the three existing prompts and rubrics tightened,
+  // every `must_contain` token and fact kept (1206 -> 914 prose bytes, -292).
+  // Arithmetic in priced bytes: 2238 -> 2735 (+789 added, -292 cut, +497 net)
+  // -> ceil(2735 / 4) = 684; headroom was 2 bytes, 0 tokens, so the ceiling
+  // moves +124, pinned AT the measurement. Maintainer ruling 2026-10-27 on the
+  // seat's decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // tap A verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectui/evals/page-builder.json', 684],
   ['skills/objectui/evals/plugin-development.json', 492],
   ['skills/objectui/evals/project-setup.json', 786],
   ['skills/objectui/evals/protocol.json', 761],

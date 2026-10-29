@@ -36,6 +36,8 @@ import type { AutomationResult, IAutomationService, ISecurityService } from '@ob
 // [#23501] The served list read's contract — the facts a package refusal names.
 import type { MetadataProtocol } from '@objectstack/spec/api';
 import { isServiceServeable } from '../service-serveable.js';
+// [#27237] Route rule 5 — the connector credential door's closed query set.
+import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
@@ -699,6 +701,195 @@ async function refuseWalledFlowDefinitionWrite(
         handled: true,
         response: deps.error(verdict.message, FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
     };
+}
+
+/**
+ * [#27237] The connector credential door's segment under `/connectors`:
+ * `GET /connectors/credential-refs`, `PUT` and `DELETE
+ * /connectors/credential-refs/:ref` (ruling A on #27230).
+ */
+const CONNECTOR_CREDENTIAL_REFS_SEGMENT = 'credential-refs';
+
+/**
+ * [#27237] Which routes are the connector credential door. Matched exactly as
+ * the route arms below match, for the reason the toggle arm of
+ * {@link isFlowAuthoringWrite} gives: a gate narrower than its route is a
+ * bypass, and a wider one over-blocks.
+ */
+function isConnectorCredentialDoor(parts: string[], method: string): boolean {
+    if (parts[0] !== 'connectors' || parts[1] !== CONNECTOR_CREDENTIAL_REFS_SEGMENT) return false;
+    if (method === 'GET') return parts.length === 2;
+    if (method === 'PUT' || method === 'DELETE') return parts.length === 3;
+    return false;
+}
+
+/**
+ * [#27237] Route rule 5: the door's closed query-parameter set, the same for
+ * all three verbs — none. The listing has no filter, and a write names its
+ * reference in the path and its value in the body.
+ */
+export const CONNECTOR_CREDENTIAL_DOOR_QUERY_PARAMS: readonly string[] = Object.freeze([]);
+
+/**
+ * [#27237] The PUT body's closed key set. A misspelled key is refused naming
+ * the key, never answered as "a value is required" and never echoed with what
+ * it carried.
+ */
+const CONNECTOR_CREDENTIAL_PUT_BODY_KEYS: readonly string[] = Object.freeze(['value']);
+
+const CONNECTOR_CREDENTIAL_DENY_MESSAGE =
+    `Managing connector credentials requires the \`${FLOW_AUTHORING_CAPABILITY}\` capability.`;
+
+/**
+ * [#27237] The capability gate — `manage_metadata`, the capability a
+ * connector instance's declaration already requires on every metadata door,
+ * and the one the flow authoring gate above asks. Same shape, same envelope,
+ * and placed with those gates ahead of the service probe for their reasons: a
+ * refused caller learns neither whether automation is mounted here nor which
+ * references this environment declares.
+ */
+function refuseUngrantedConnectorCredentialAccess(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): HttpDispatcherResult | undefined {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return undefined;
+    if (new Set<string>(ec?.systemPermissions ?? []).has(FLOW_AUTHORING_CAPABILITY)) return undefined;
+    return {
+        handled: true,
+        response: deps.error(CONNECTOR_CREDENTIAL_DENY_MESSAGE, FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
+    };
+}
+
+/** [#27237] The walled refusal's sentence, naming the posture it was refused under. */
+export function connectorCredentialWalledMessage(posture: TenancyPosture): string {
+    return (
+        `Connector credentials are environment-level, and this environment runs the '${posture}' tenancy posture, `
+        + 'where several organizations share it, so this door does not store or list them here. A declarative '
+        + "connector's credentialRef still resolves from a server environment variable of the same name."
+    );
+}
+
+/**
+ * [#27237] The walled refusal — S1 on #27230: an environment that several
+ * organizations live in is not supported by the credential store, so under
+ * `group` / `isolated` all three verbs refuse, for every caller, naming the
+ * posture. ⛔ Not {@link walledCatalogWriteVerdict}: that admits the platform
+ * operator, and the ruling admits nobody. Engine self-invocation (`isSystem`,
+ * never settable from the wire) is the one bypass, as at every gate here.
+ */
+async function refuseWalledConnectorCredentialAccess(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult | undefined> {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return undefined;
+    const posture = await readEffectiveTenancyPosture(deps, context);
+    if (posture === undefined || !postureEnforcesWall(posture)) return undefined;
+    return {
+        handled: true,
+        response: deps.error(connectorCredentialWalledMessage(posture), FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
+    };
+}
+
+/** [#27237] The verbs the mounted service must implement, named in the door's 501. */
+const CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE = (member: string): string =>
+    'Connector credentials are not supported by the automation service this deployment mounts — it does not '
+    + `implement \`${member}\`, an optional member of \`IAutomationService\`. Nothing was read or changed.`;
+
+/**
+ * [#27237] The service's own refusals — `400` / `403` / `404` / `409` / `503`,
+ * each carrying an ADR-0112 standard code — answered as they were raised. The
+ * `403` is the service's own walled refusal, which the gate above normally
+ * answers first. Anything else is not a refusal this door knows, and
+ * propagates to the transport's error exit.
+ */
+function connectorCredentialRefusal(deps: DomainHandlerDeps, err: unknown): HttpDispatcherResult | undefined {
+    const e = err as { status?: unknown; code?: unknown; message?: unknown } | null;
+    if (!e || typeof e.code !== 'string' || typeof e.message !== 'string') return undefined;
+    if (e.status !== 400 && e.status !== 403 && e.status !== 404 && e.status !== 409 && e.status !== 503) return undefined;
+    return { handled: true, response: deps.error(e.message, e.status, { code: e.code }) };
+}
+
+/**
+ * [#27237] The connector credential door's three arms. Reached only past the
+ * capability gate and the walled refusal above. ⛔ The value never leaves
+ * here: the PUT hands it to the service and answers the reference's entry,
+ * which carries none.
+ */
+async function respondToConnectorCredentialDoor(
+    deps: DomainHandlerDeps,
+    automationService: unknown,
+    parts: string[],
+    method: string,
+    body: unknown,
+    context: HttpProtocolContext,
+    query: unknown,
+): Promise<HttpDispatcherResult> {
+    const queryRefusal = unknownQueryParamRefusalMessage(query, CONNECTOR_CREDENTIAL_DOOR_QUERY_PARAMS);
+    if (queryRefusal !== undefined) {
+        return { handled: true, response: deps.error(queryRefusal, 400, { code: 'VALIDATION_ERROR' }) };
+    }
+    const svc = automationService as Pick<
+        IAutomationService,
+        'listConnectorCredentialRefs' | 'setConnectorCredential' | 'clearConnectorCredential'
+    >;
+    const executionContext = (context as any)?.executionContext;
+    try {
+        if (method === 'GET') {
+            if (typeof svc.listConnectorCredentialRefs !== 'function') {
+                return { handled: true, response: deps.error(CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE('listConnectorCredentialRefs'), 501) };
+            }
+            const credentialRefs = await svc.listConnectorCredentialRefs();
+            return { handled: true, response: deps.success({ credentialRefs, total: credentialRefs.length }) };
+        }
+        let ref: string;
+        try {
+            ref = decodeURIComponent(parts[2]);
+        } catch {
+            return {
+                handled: true,
+                response: deps.error('The connector credential reference in the path is not a valid URL-encoded segment.', 400, { code: 'VALIDATION_ERROR' }),
+            };
+        }
+        if (method === 'DELETE') {
+            if (typeof svc.clearConnectorCredential !== 'function') {
+                return { handled: true, response: deps.error(CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE('clearConnectorCredential'), 501) };
+            }
+            const entry = await svc.clearConnectorCredential({ ref, context: executionContext });
+            return { handled: true, response: deps.success(entry) };
+        }
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+            return {
+                handled: true,
+                response: deps.error(`Setting credential '${ref}' needs a JSON object body: { "value": "<the credential>" }.`, 400, { code: 'VALIDATION_ERROR' }),
+            };
+        }
+        const unknownKeys = Object.keys(body).filter((k) => !CONNECTOR_CREDENTIAL_PUT_BODY_KEYS.includes(k)).sort();
+        if (unknownKeys.length > 0) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Setting credential '${ref}' takes only \`value\` in the body; unrecognised: ${unknownKeys.map((k) => `\`${k}\``).join(', ')}.`,
+                    400,
+                    { code: 'VALIDATION_ERROR' },
+                ),
+            };
+        }
+        if (typeof svc.setConnectorCredential !== 'function') {
+            return { handled: true, response: deps.error(CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE('setConnectorCredential'), 501) };
+        }
+        const entry = await svc.setConnectorCredential({
+            ref,
+            value: (body as { value?: unknown }).value as string,
+            context: executionContext,
+        });
+        return { handled: true, response: deps.success(entry) };
+    } catch (err) {
+        const refusal = connectorCredentialRefusal(deps, err);
+        if (refusal) return refusal;
+        throw err;
+    }
 }
 
 /** [#13953] The path segment naming the cancel door (ADR-0044's operator verb). */
@@ -1916,6 +2107,8 @@ async function flowWriteRefusal(
  * What is saved is the definition as the caller's door built it — never the
  * engine's parsed copy, whose materialized schema defaults would freeze on
  * disk (the save canonicalizes it the way it does every `/meta` flow write).
+ * It is saved under the caller's user id as `actor` [#27414], as the `/meta`
+ * door's save is.
  */
 async function registerAndSaveFlow(
     deps: DomainHandlerDeps,
@@ -1938,8 +2131,16 @@ async function registerAndSaveFlow(
         };
     }
     if (typeof store?.saveMetaItem === 'function') {
+        // [#27414, ADR-0073 D3] The save names who asked: the caller's user id
+        // as the save's `actor`, which the store records in
+        // `sys_metadata.created_by` / `updated_by` and the row's history. Read
+        // through the toggle door's `activationCaller`: the signed-in user's
+        // id off the execution context and nothing else, never off the body,
+        // so the flow doors cannot disagree about who a write names. A context
+        // with no user passes no actor, an unattributed write as before.
+        const { userId: actor } = activationCaller(context);
         try {
-            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition });
+            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition, ...(actor ? { actor } : {}) });
         } catch (e) {
             restoreFlowRegistration(automationService, name, held);
             return {
@@ -2738,6 +2939,15 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (refusal) return refusal;
     }
 
+    // [#27237] CONNECTOR CREDENTIAL GATES — `manage_metadata`, then the walled
+    // refusal (S1 on #27230), both ahead of the service probe and of any body
+    // or query check, for the reasons the two gates above give.
+    if (isConnectorCredentialDoor(parts, m)) {
+        const refusal = refuseUngrantedConnectorCredentialAccess(deps, context)
+            ?? await refuseWalledConnectorCredentialAccess(deps, context);
+        if (refusal) return refusal;
+    }
+
     // [ADR-0126 §5] ACTIVATION-WRITE GATE — the install-wide enable/disable
     // switch needs the platform operator in a walled posture. Placed directly
     // AFTER the authoring gate and BEFORE the service probe / body checks, for
@@ -2948,6 +3158,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // `connector_action` connector/action/input pickers; the registry is
     // empty in baseline and populated by connector plugins (e.g.
     // @objectstack/connector-rest, @objectstack/connector-slack).
+    // [#27237] The connector credential door — GET the references, PUT or
+    // DELETE one. Ahead of `/:name` for the reason `/connectors` is.
+    if (isConnectorCredentialDoor(parts, m)) {
+        return respondToConnectorCredentialDoor(deps, automationService, parts, m, body, context, query);
+    }
+
     if (parts[0] === 'connectors' && parts.length === 1 && m === 'GET') {
         // [#7360] The `/actions` note above applies verbatim to this filter:
         // `?type=rest&type=slack` arrived as an array, matched no connector,

@@ -121,6 +121,15 @@ Reversible, encrypted-at-rest value (DB password, API key, token). Unlike `passw
 { name: 'api_key', label: 'API Key', type: 'secret' }
 ```
 
+**Querying a `password` or `secret` field.** Neither type is a filter, sort or aggregation key.
+Only a has-a-value check is accepted on one: `{ "$null": true | false }`, `{ "$exists": … }`,
+`{ "$empty": … }`, or equality with `null`. Any other operator in `where` or `filter` (equality
+with a value, a range, `$startsWith` / `$contains`, `$in`, a `{ "$field": … }` comparand), an
+`orderBy` entry, a group-by or a min / max over one is refused with `400 INVALID_FIELD` before
+the query runs. That holds for every caller, administrators included. A search also never scans
+such a column, even one listed in `searchableFields`. Only server-side code running as the
+system context may match on the stored value (ADR-0100).
+
 ---
 
 ## Rich Content Types
@@ -206,16 +215,19 @@ The input is a native number box, so the browser filters what is typed. See
 [What a number input silently rewrites](#what-a-number-input-silently-rewrites).
 
 ### `currency`
-Monetary value. The stored value is a bare number in both modes; the currency
-code lives in `currencyConfig`, never in the value.
+Monetary value. The stored value is a bare number in every mode; the currency
+code lives in `currencyConfig`, or under `record` in a sibling code field, never in
+the value. See [Currency fields](/docs/data-modeling/currency) for the three modes and
+what a record-currency amount refuses.
 
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `precision` | `number` | — | Total digits |
 | `min` | `number` | — | Minimum value |
 | `max` | `number` | — | Maximum value |
-| `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether the column is pinned to `defaultCurrency` (`fixed`) or displays in the tenant default currency, the `localization.currency` setting (`dynamic`); the value is a bare number either way |
-| `currencyConfig.defaultCurrency` | `string` | — | The column's currency code under `fixed`, where it is required; not the displayed currency under `dynamic` |
+| `currencyConfig.currencyMode` | `'dynamic' \| 'fixed' \| 'record'` | `'dynamic'` | Whether the column is pinned to `defaultCurrency` (`fixed`), displays in the tenant default currency, the `localization.currency` setting (`dynamic`), or takes each record's own code from the field `currencyField` names (`record`); the value is a bare number in every mode |
+| `currencyConfig.defaultCurrency` | `string` | — | The column's currency code under `fixed`, where it is required; not the displayed currency under `dynamic`; refused under `record` |
+| `currencyConfig.currencyField` | `string` | — | `record` only, and required there: the field on the same object holding each record's ISO 4217 code, a `text` field with `valueDomain: 'iso_4217_currency'` (conventionally `currency_code`); refused under `dynamic` and `fixed` |
 
 ```typescript
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }
@@ -233,7 +245,8 @@ amount declares `precision: 18` — and is never compared with the currency.
 **In the Console:** a numeric input with the currency's symbol. The read-only display, the
 grid cell, the input's `step` and the rounding applied when the input loses focus all use the
 currency's minor unit, so a JPY amount shows no decimals and a KWD amount shows three. With no
-currency resolved at all, an amount shows two decimals. A field-level `currency` key is
+currency resolved at all, an amount shows two decimals. A `record`-mode amount resolves only
+its own record's code, never the tenant default. A field-level `currency` key is
 refused: the currency is `currencyConfig`. The input is a native number box; see
 [What a number input silently rewrites](#what-a-number-input-silently-rewrites).
 
@@ -671,7 +684,7 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `expression` | `string \| Expression` | **required** | CEL calculation expression |
-| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'` | — | Declared value type of the computed result. `currency`: an amount of money, in the currency the formula's own `currencyConfig` declares (none: dynamic) |
+| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'` | — | Declared value type of the computed result. `currency`: an amount of money, in the currency the formula's own `currencyConfig` declares (none: dynamic; over record-mode amounts, `record` with their `currencyField`) |
 
 ```typescript
 { name: 'total', label: 'Total', type: 'formula', expression: 'record.quantity * record.unit_price', returnType: 'number' }
@@ -703,6 +716,11 @@ Roll-up summary from child records.
 | `summaryOperations.function` | `enum` | **required** | `count`, `sum`, `avg`, `min`, or `max` |
 | `summaryOperations.relationshipField` | `string` | auto | Child FK back to the parent when it cannot be inferred |
 | `summaryOperations.filter` | `FilterCondition` | — | Only child rows matching this `where` predicate are aggregated |
+
+A `sum`, `avg`, `min` or `max` over a child amount declared `currencyMode: 'record'` is
+refused when the object registers (`INVALID_METADATA` / 422): child rows in different
+currencies would be added into one number. A `count` is served
+([Currency fields](/docs/data-modeling/currency#roll-ups-and-datasets)).
 
 ```typescript
 {

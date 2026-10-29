@@ -382,6 +382,14 @@ const pt = {
       postalCode: "Código postal",
       country: "País",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Selecionar moeda',
+      search: 'Pesquisar moeda…',
+      noResults: 'Nenhuma moeda encontrada',
+      available: 'Disponíveis',
+      all: 'Todas as moedas (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Desativado",
       completed: "Concluído",
@@ -2652,6 +2660,9 @@ const pt = {
       invitationPreviewTitle: "{{inviter}} convidou você para participar de {{organization}}",
       invitationPreviewTitleNoInviter: "Você foi convidado para participar de {{organization}}",
       invitationPreviewDescription: "Use o e-mail para o qual o convite foi enviado ({{email}}).",
+      invitationGoneTitle: "Este link de convite não é mais válido",
+      invitationGoneDescription: "Ele pode ter expirado, já ter sido usado ou ter sido retirado. Peça a quem convidou você para enviar um novo convite.",
+      invitationGoneSignIn: "Ir para o login",
       showPasswordText: "Mostrar senha",
       hidePasswordText: "Ocultar senha",
       footer: {
@@ -2685,6 +2696,8 @@ const pt = {
         userExists: "Já existe uma conta com esse e-mail. Tente fazer login.",
         selfRegistrationClosed: "O cadastro por conta própria não está aberto neste sistema. Peça um convite a um administrador.",
         emailDomainNotAllowed: "O domínio deste e-mail não tem permissão para se cadastrar aqui. Use o e-mail da sua organização ou peça um convite a um administrador.",
+        invitationSentTo: "Este convite foi enviado para {{email}}. Cadastre-se com esse endereço para aceitá-lo.",
+        invitationAddressOnly: "Este convite só pode ser aceito com o endereço para o qual foi enviado. Cadastre-se com esse endereço.",
       },
       verifyInbox: {
         title: "Verifique sua caixa de entrada",
@@ -3818,6 +3831,13 @@ const pt = {
       countSeedData: "dados de exemplo",
       extendTarget: "Adicionando ao app existente: {{app}}",
       awaitingConfirm: "Aguardando confirmação",
+      iterateOrNew: {
+        question: "Isto se sobrepõe a “{{app}}”, um app que você já tem. Continuar melhorando esse app ou criar um app separado?",
+        questionUnnamed: "Isto se sobrepõe a um app que você já tem. Continuar melhorando esse app ou criar um separado?",
+        extend: "Continuar melhorando “{{app}}”",
+        buildNew: "Criar um app separado",
+        replyHint: "Responda indicando qual prefere.",
+      },
       objectsAndFields: "Objetos e campos",
       views: "Visões",
       suggestedField: "sugerido",
@@ -4228,6 +4248,7 @@ const pt = {
     progressBar: 'Progresso da decisão',
     declaredActions: 'Ações',
     decisionPanelOffRequestPage: 'O painel de decisão de aprovação só funciona nas páginas de solicitações de aprovação.',
+    snapshotAsSubmitted: 'Conforme enviado',
     attachmentChip: 'Anexo',
     attachmentOpenFailed: 'Não foi possível abrir o anexo — tente novamente',
     approveOneTitle: 'Aprovar "{{title}}"?',
@@ -4425,6 +4446,7 @@ const pt = {
       detailLoading: 'Carregando detalhes…',
       detailLoadFailed: 'Não foi possível carregar os detalhes da alteração:',
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
+      fieldOrderChanged: 'Ordem dos campos alterada',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Inclui alterações rascunhadas pelo copiloto de IA',
       draftedByMcpClient: 'Inclui alterações rascunhadas pelo cliente MCP “{{client}}”',
@@ -4542,6 +4564,8 @@ const pt = {
     },
   },
   filterBuilder: {
+    currency: 'Moeda',
+    currencyNeedsAnd: 'Um valor em moeda só é comparado na moeda escolhida quando todas as condições devem ser atendidas (E).',
     where: "Onde",
     and: "E",
     or: "OU",

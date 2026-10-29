@@ -12,7 +12,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
-import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
+import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { ConnectorMcpPlugin } from './connector-mcp-plugin.js';
 import { createMcpConnector, MCP_TOOLS_LIST_MAX_PAGES } from './mcp-connector.js';
@@ -136,7 +136,7 @@ describe('tools/list pagination — real Streamable-HTTP server', () => {
 
 describe('credential rejection — real Streamable-HTTP server', () => {
     it.each([401, 403])(
-        'an HTTP %i on the handshake is a plain configuration fault (not upstream-unavailable), sent once',
+        'an HTTP %i on the handshake is a credential rejection (not upstream-unavailable), sent once',
         async (status) => {
             const server = await startServer({ reject: status });
             const factory = createMcpProviderFactory();
@@ -153,15 +153,19 @@ describe('credential rejection — real Streamable-HTTP server', () => {
             );
             expect(err).toBeInstanceOf(Error);
             expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+            expect(isConnectorCredentialRejected(err)).toBe(true);
             expect((err as Error).message).toContain(
                 `connector-mcp provider: connector 'vendor' was refused by its MCP server (HTTP ${status})`,
             );
-            expect((err as Error).message).toContain('is not retried');
+            expect((err as Error).message).toContain('This is a configuration fault — fix the credential.');
             expect(server.requests).toEqual(['POST']);
         },
     );
 
-    it('a declarative instance answered 401 fails the boot instead of degrading into a retry loop', async () => {
+    // [#27237] Ruling on #27237 (comment 6470087293): a refused credential
+    // degrades the instance, naming the refusal — not a failed boot — and the
+    // instance is held, never retried against the same credential.
+    it('a declarative instance answered 401 degrades, naming the refusal, and is not retried', async () => {
         const server = await startServer({ reject: 401 });
         const declared = [
             {
@@ -188,9 +192,9 @@ describe('credential rejection — real Streamable-HTTP server', () => {
         } as never);
         kernel.use(new ConnectorMcpPlugin());
         try {
-            await expect(kernel.bootstrap()).rejects.toThrow(/was refused by its MCP server \(HTTP 401\)/);
+            await kernel.bootstrap();
             const engine = kernel.getService('automation') as AutomationEngine;
-            expect(engine.getConnectorDegradedReason('vendor_mcp')).toBeUndefined();
+            expect(engine.getConnectorDegradedReason('vendor_mcp')).toMatch(/was refused by its MCP server \(HTTP 401\)/);
             // Give a (wrongly) scheduled retry the chance to fire: none does.
             await new Promise((r) => setTimeout(r, 300));
             expect(server.requests).toEqual(['POST']);

@@ -397,6 +397,14 @@ const ar = {
       postalCode: "الرمز البريدي",
       country: "الدولة",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'اختر عملة',
+      search: 'ابحث عن عملة…',
+      noResults: 'لم يتم العثور على عملة',
+      available: 'المتاحة',
+      all: 'كل العملات (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — إيقاف",
       completed: "مكتمل",
@@ -2828,6 +2836,9 @@ const ar = {
       invitationPreviewTitle: "دعاك {{inviter}} للانضمام إلى {{organization}}",
       invitationPreviewTitleNoInviter: "أنت مدعو للانضمام إلى {{organization}}",
       invitationPreviewDescription: "استخدم البريد الإلكتروني الذي أُرسلت إليه الدعوة ({{email}}).",
+      invitationGoneTitle: "رابط الدعوة هذا لم يعد صالحًا",
+      invitationGoneDescription: "ربما انتهت صلاحية الدعوة أو استُخدمت أو سُحبت. اطلب من الشخص الذي دعاك إرسال دعوة جديدة.",
+      invitationGoneSignIn: "الانتقال إلى تسجيل الدخول",
       showPasswordText: "إظهار كلمة المرور",
       hidePasswordText: "إخفاء كلمة المرور",
       footer: {
@@ -2861,6 +2872,8 @@ const ar = {
         userExists: "يوجد حساب بهذا البريد الإلكتروني بالفعل. حاول تسجيل الدخول.",
         selfRegistrationClosed: "التسجيل الذاتي غير متاح في هذا النظام. اطلب دعوة من المسؤول.",
         emailDomainNotAllowed: "نطاق هذا البريد الإلكتروني غير مسموح له بالتسجيل هنا. استخدم البريد الإلكتروني لمؤسستك أو اطلب دعوة من المسؤول.",
+        invitationSentTo: "أُرسلت هذه الدعوة إلى {{email}}. سجّل بهذا العنوان لقبولها.",
+        invitationAddressOnly: "لا يمكن قبول هذه الدعوة إلا بالعنوان الذي أُرسلت إليه. سجّل بهذا العنوان.",
       },
       verifyInbox: {
         title: "تحقق من صندوق الوارد",
@@ -4048,6 +4061,13 @@ const ar = {
       countSeedData: "بيانات تجريبية",
       extendTarget: "إضافة إلى التطبيق الحالي: {{app}}",
       awaitingConfirm: "بانتظار التأكيد",
+      iterateOrNew: {
+        question: "يتداخل هذا مع «{{app}}»، وهو تطبيق لديك بالفعل. هل تريد مواصلة تحسينه أم إنشاء تطبيق منفصل؟",
+        questionUnnamed: "يتداخل هذا مع تطبيق لديك بالفعل. هل تريد مواصلة تحسين ذلك التطبيق أم إنشاء تطبيق منفصل؟",
+        extend: "مواصلة تحسين «{{app}}»",
+        buildNew: "إنشاء تطبيق منفصل",
+        replyHint: "أجب لتحديد اختيارك.",
+      },
       objectsAndFields: "الكائنات والحقول",
       views: "طرق العرض",
       suggestedField: "مقترح",
@@ -4485,6 +4505,7 @@ const ar = {
     progressBar: 'تقدم القرار',
     declaredActions: 'الإجراءات',
     decisionPanelOffRequestPage: 'لوحة قرار الموافقة تعمل فقط في صفحات طلبات الموافقة.',
+    snapshotAsSubmitted: 'كما قُدِّم',
     attachmentChip: 'مرفق',
     attachmentOpenFailed: 'تعذّر فتح المرفق — يرجى المحاولة مرة أخرى',
     approveOneTitle: 'الموافقة على "{{title}}"؟',
@@ -4712,6 +4733,7 @@ const ar = {
       detailLoading: 'جارٍ تحميل التفاصيل…',
       detailLoadFailed: 'تعذر تحميل تفاصيل التغيير:',
       detailNone: 'لم يتم اكتشاف اختلافات — المسودة مطابقة للنسخة المنشورة.',
+      fieldOrderChanged: 'تغيّر ترتيب الحقول',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'يتضمن تغييرات صاغها مساعد الذكاء الاصطناعي',
       draftedByMcpClient: 'يتضمن تغييرات صاغها عميل MCP «{{client}}»',
@@ -4877,6 +4899,8 @@ const ar = {
     },
   },
   filterBuilder: {
+    currency: 'العملة',
+    currencyNeedsAnd: 'لا تُقارن المبالغ بالعملة المختارة إلا عندما يجب تحقق كل الشروط (AND).',
     where: "حيث",
     and: "و",
     or: "أو",

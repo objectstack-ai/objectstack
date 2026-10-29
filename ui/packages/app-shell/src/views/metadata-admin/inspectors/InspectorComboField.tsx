@@ -125,6 +125,15 @@ export type InspectorComboFieldProps = InspectorComboFieldNaming & {
   allowCustom?: boolean;
   /** Render the trigger value in a monospace font. */
   mono?: boolean;
+  /**
+   * The face of the empty value, for a target whose absence means something
+   * (a `report` nav item with no `reportName` opens the report index,
+   * objectstack#27525). Given, the list leads with a row of this text that
+   * commits `''`, and the trigger shows it while the value is empty; the
+   * caller decides what `''` writes. Omitted, the combo offers no way back to
+   * empty, as before.
+   */
+  emptyLabel?: string;
   /** Override the trigger label for the currently-selected custom value. */
   className?: string;
 };
@@ -153,6 +162,7 @@ export function InspectorComboField({
   loading,
   allowCustom = true,
   mono,
+  emptyLabel,
   className,
 }: InspectorComboFieldProps) {
   const [open, setOpen] = React.useState(false);
@@ -177,7 +187,9 @@ export function InspectorComboField({
   const triggerId = label ? autoId : id;
 
   const selected = options.find((o) => o.value === value);
-  const triggerText = selected ? selected.label : value || (loading ? t('engine.inspector.combo.loading', locale) : placeholder);
+  const triggerText = selected
+    ? selected.label
+    : value || (emptyLabel ?? (loading ? t('engine.inspector.combo.loading', locale) : placeholder));
   // A chosen option with a label of its own shows that label in the body
   // font; only a raw value takes the caller's `mono` (objectui#12303).
   const selectedLabelled = !!selected && !!selected.label && selected.label !== selected.value;
@@ -241,7 +253,15 @@ export function InspectorComboField({
         <Command shouldFilter={false}>
           <CommandInput value={search} onValueChange={setSearch} placeholder={searchPlaceholder} />
           <CommandList>
-            {!showCustom && filtered.length === 0 && <CommandEmpty>{emptyText}</CommandEmpty>}
+            {!showCustom && filtered.length === 0 && !emptyLabel && <CommandEmpty>{emptyText}</CommandEmpty>}
+            {emptyLabel && !trimmed && (
+              <CommandGroup>
+                <CommandItem value="__empty__" onSelect={() => commit('')}>
+                  <Check className={cn('h-3.5 w-3.5', value === '' ? 'opacity-100' : 'opacity-0')} />
+                  <span className="truncate">{emptyLabel}</span>
+                </CommandItem>
+              </CommandGroup>
+            )}
             {showCustom && (
               <CommandGroup>
                 <CommandItem value={`__custom__${trimmed}`} onSelect={() => commit(trimmed)}>

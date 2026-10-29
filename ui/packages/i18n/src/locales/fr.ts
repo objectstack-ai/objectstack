@@ -382,6 +382,14 @@ const fr = {
       postalCode: "Code postal",
       country: "Pays",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Sélectionner une devise',
+      search: 'Rechercher une devise…',
+      noResults: 'Aucune devise trouvée',
+      available: 'Disponibles',
+      all: 'Toutes les devises (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Désactivé",
       completed: "Terminé",
@@ -2653,6 +2661,9 @@ const fr = {
       invitationPreviewTitle: "{{inviter}} vous invite à rejoindre {{organization}}",
       invitationPreviewTitleNoInviter: "Vous êtes invité à rejoindre {{organization}}",
       invitationPreviewDescription: "Utilisez l'adresse e-mail à laquelle l'invitation a été envoyée ({{email}}).",
+      invitationGoneTitle: "Ce lien d'invitation n'est plus valide",
+      invitationGoneDescription: "Il a peut-être expiré, déjà été utilisé ou été retiré. Demandez à la personne qui vous a invité de vous envoyer une nouvelle invitation.",
+      invitationGoneSignIn: "Aller à la connexion",
       showPasswordText: "Afficher le mot de passe",
       hidePasswordText: "Masquer le mot de passe",
       footer: {
@@ -2686,6 +2697,8 @@ const fr = {
         userExists: "Un compte avec cet e-mail existe déjà. Essayez de vous connecter.",
         selfRegistrationClosed: "L'inscription libre n'est pas ouverte sur ce système. Demandez une invitation à un administrateur.",
         emailDomainNotAllowed: "Le domaine de cet e-mail n'est pas autorisé à s'inscrire ici. Utilisez l'e-mail de votre organisation ou demandez une invitation à un administrateur.",
+        invitationSentTo: "Cette invitation a été envoyée à {{email}}. Inscrivez-vous avec cette adresse pour l'accepter.",
+        invitationAddressOnly: "Cette invitation ne peut être acceptée qu'avec l'adresse à laquelle elle a été envoyée. Inscrivez-vous avec cette adresse.",
       },
       verifyInbox: {
         title: "Vérifiez votre boîte de réception",
@@ -3819,6 +3832,13 @@ const fr = {
       countSeedData: "données d’exemple",
       extendTarget: "Ajout à l’app existante : {{app}}",
       awaitingConfirm: "En attente de confirmation",
+      iterateOrNew: {
+        question: "Ce plan recoupe « {{app}} », une app que vous avez déjà. Continuer à l’améliorer, ou créer une app distincte ?",
+        questionUnnamed: "Ce plan recoupe une app que vous avez déjà. Continuer à améliorer cette app, ou en créer une distincte ?",
+        extend: "Continuer à améliorer « {{app}} »",
+        buildNew: "Créer une app distincte",
+        replyHint: "Répondez pour indiquer votre choix.",
+      },
       objectsAndFields: "Objets et champs",
       views: "Vues",
       suggestedField: "suggéré",
@@ -4229,6 +4249,7 @@ const fr = {
     progressBar: 'Avancement de la décision',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'Le panneau de décision d\'approbation ne fonctionne que sur les pages de demande d\'approbation.',
+    snapshotAsSubmitted: 'Tel que soumis',
     attachmentChip: 'Pièce jointe',
     attachmentOpenFailed: "Impossible d'ouvrir la pièce jointe — veuillez réessayer",
     approveOneTitle: 'Approuver « {{title}} » ?',
@@ -4426,6 +4447,7 @@ const fr = {
       detailLoading: 'Chargement des détails…',
       detailLoadFailed: 'Impossible de charger les détails de la modification :',
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
+      fieldOrderChanged: 'Ordre des champs modifié',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Inclut des modifications rédigées par le copilote IA',
       draftedByMcpClient: 'Inclut des modifications rédigées par le client MCP « {{client}} »',
@@ -4543,6 +4565,8 @@ const fr = {
     },
   },
   filterBuilder: {
+    currency: 'Devise',
+    currencyNeedsAnd: "Un montant en devise n'est comparé dans la devise choisie que lorsque toutes les conditions doivent être remplies (ET).",
     where: "Où",
     and: "ET",
     or: "OU",

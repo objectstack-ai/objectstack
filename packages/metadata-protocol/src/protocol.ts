@@ -24,25 +24,18 @@ import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
     SDUI_MANIFEST_SERVICE,
-    isUsableSduiManifest,
     stampHtmlPageRequires,
-    findPageRequiresAbsentFromManifest,
     type RuntimePendingDeclarations,
 } from './runtime-authoring-gate.js';
-// [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
-// lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
-import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import {
     backfillOverlayBundleMembers,
-    ensureMetadataOverlayIndexes,
     overlayMemberOfBody,
     overlayMemberValue,
     overlayMemberWhere,
 } from './migrations/overlay-index.js';
-import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import {
     DraftConflictError,
     SysMetadataRepository,
@@ -132,9 +125,6 @@ import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-u
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
-// [#23183] The app item read's package-id key — the one spelling of the arm
-// `GetMetaItemRequestSchema.name` declares ({@link resolveAppPackageIdKey}).
-import { isAppPackageIdKey } from '@objectstack/spec/api';
 // [#24395] The save's authoring surface, and the draft row's per-key
 // provenance read back for the strict draft read.
 import { MetadataAuthoringSurfaceSchema, type MetadataAuthoringClient, type MetadataAuthoringSurface } from '@objectstack/spec/api';
@@ -339,6 +329,7 @@ import {
     externalBindingSaveRefusal,
     objectNamespacePrefixViolation,
     objectsBoundExternallyTo,
+    permissionSetNameCollisionRefusal,
     refuseUngrammaticalMetaItemName,
     saveWriteBinding,
     unknownDatasourceSaveRefusal,
@@ -429,6 +420,22 @@ import { foldObjectExtendersFromRegistry } from './protocol-object-extender-fold
 import { readMetaItemFace } from './protocol-meta-item-face.js';
 // [#25467 cut 32] A stored commit row's `items` column read back as its revert plan.
 import { parseCommitItems } from './protocol-commit-items.js';
+// [#25467 cut 33] What a stored overlay row binds: the lock layer, the package binding, the external datasource.
+import { overlayLockLayerAt, resolveOverlayPackageBinding, storedRowKnownDatasources } from './protocol-stored-row-bindings.js';
+// [#25467 cut 33] Two degradations said out loud: the MetadataService 503 and the batch closure's once-per-process warn.
+import { throwMetadataServiceUnavailable, warnClosureReadUnavailable } from './protocol-loud-degradations.js';
+// [#25467 cut 33] The overlay-uniqueness indexes and the bundle-member backfill, once per process.
+import { ensureOverlayIndex, ensureOverlayMembersBackfilled } from './protocol-overlay-index.js';
+// [#25467 cut 33] The registry and view-container predicates: stored container expansion, binding, ownership, registry scope, overlaid views.
+import { copiesOwnShippedViewContainer, expandStoredViewContainers, isAnotherPackagesObject, overlaidShippedContainerViewNames, registryTakesStoredRows, runtimeViewContainerObject } from './protocol-registry-view-predicates.js';
+// [#25467 cut 33] The ADR-0067 commit row of a publish or revert turn, and its named INSERT.
+import { persistPackageCommitRow, recordPackageCommit } from './protocol-package-commit-record.js';
+// [#25467 cut 33] Package scope: the writable base, the named-base rule, storage teardown, the app package-id key.
+import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstalledNamedBaseRefusal } from './protocol-package-scope.js';
+// [#25467 cut 33] The /meta save door's refusal of a `:type` that is no metadata type at all.
+import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
+// [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
+import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2849,7 +2856,7 @@ function servedOverlayRowCandidates(address: {
  * candidates, the package-less binding and the lock's scope): every key equal,
  * and `null` matching an absent value as the store's IS NULL does.
  */
-function rowMatchesOverlayWhere(row: object, where: Readonly<Record<string, unknown>>): boolean {
+export function rowMatchesOverlayWhere(row: object, where: Readonly<Record<string, unknown>>): boolean {
     const stored = row as Readonly<Record<string, unknown>>;
     return Object.entries(where).every(([key, value]) => (stored[key] ?? null) === value);
 }
@@ -4169,7 +4176,7 @@ const METADATA_STORE_UNAVAILABLE_MESSAGE =
  * invented string, and no new ledger vocabulary for a distinction no consumer
  * measures today.
  */
-function metadataStoreUnavailableError(cause: unknown): Error {
+export function metadataStoreUnavailableError(cause: unknown): Error {
     const err = new Error(METADATA_STORE_UNAVAILABLE_MESSAGE) as Error & {
         code?: string;
         status?: number;
@@ -6556,12 +6563,11 @@ export class ObjectStackProtocolImplementation implements
         singularType: string,
         body: unknown,
     ): Promise<ReadonlyMap<string, { readonly schemaMode?: unknown }> | undefined> {
-        if (singularType !== 'object' || !body || typeof body !== 'object' || Array.isArray(body)) return undefined;
-        const { external, datasource } = body as { external?: unknown; datasource?: unknown };
-        if (external === undefined || external === null) return undefined;
-        if (typeof datasource !== 'string' || datasource === '') return undefined;
-        const definition = await this.externalBindingDatasourceDefinition(datasource);
-        return definition ? new Map([[datasource, definition]]) : undefined;
+        // [#25467 cut 33] The body moved to `protocol-stored-row-bindings.ts` (see `StoredRowBindingsHost`).
+        const host: ThisParameterType<typeof storedRowKnownDatasources> = {
+            externalBindingDatasourceDefinition: (...a) => this.externalBindingDatasourceDefinition(...a),
+        };
+        return storedRowKnownDatasources.call(host, singularType, body);
     }
 
     /**
@@ -6748,18 +6754,16 @@ export class ObjectStackProtocolImplementation implements
      * warned about once and read as nothing, never compiled against.
      */
     private resolveSduiManifest(): unknown {
-        const value = this.getServicesRegistry?.().get(SDUI_MANIFEST_SERVICE);
-        if (value === undefined || isUsableSduiManifest(value)) return value;
-        if (!this.unusableSduiManifestWarned) {
-            this.unusableSduiManifestWarned = true;
-            console.warn(
-                `[Protocol] the '${SDUI_MANIFEST_SERVICE}' service is not an SDUI component manifest `
-                + `(a JSON object with a \`components\` map) — html page sources are saved without being `
-                + `compiled against it, and a page's \`requires\` is not validated. Register the parsed `
-                + `sdui.manifest.json of the console this deployment serves.`,
-            );
-        }
-        return undefined;
+        // [#25467 cut 33] The body moved to `protocol-sdui-manifest.ts` (see `SduiManifestHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const readUnusableSduiManifestWarned = () => this.unusableSduiManifestWarned;
+        const writeUnusableSduiManifestWarned = (value: ObjectStackProtocolImplementation['unusableSduiManifestWarned']) => { this.unusableSduiManifestWarned = value; };
+        const host: ThisParameterType<typeof resolveSduiManifest> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+            get unusableSduiManifestWarned() { return readUnusableSduiManifestWarned(); },
+            set unusableSduiManifestWarned(value) { writeUnusableSduiManifestWarned(value); },
+        };
+        return resolveSduiManifest.call(host);
     }
 
     /** [#20312] One warn per process for an unusable registered manifest — see {@link resolveSduiManifest}. */
@@ -6988,6 +6992,15 @@ export class ObjectStackProtocolImplementation implements
      * judge, with its envelope, in the save door's order, ⛔ never a copy of a
      * rule:
      *
+     *  - [harden] a permission set whose name a different owner already holds
+     *    ({@link permissionSetNameCollisionRefusal}, `NAMESPACE_CONFLICT` /
+     *    422), judged against `binding` — the binding the restore lands in:
+     *    `restoreVersion` → `put` keeps the active row's `package_id`, and with
+     *    no active row it writes the package-unbound row, which `null` names.
+     *    The save door asks it before its schema gate, so it is asked first
+     *    here. A version restored after another owner took the name — its set
+     *    deleted, then a package declaring the name installed — is refused
+     *    rather than made a second holder;
      *  - a hook with no `body` ({@link runtimeHookWithoutBodyRefusal});
      *  - a second default record page of an object
      *    ({@link defaultRecordPageSaveRefusal});
@@ -7053,6 +7066,7 @@ export class ObjectStackProtocolImplementation implements
             credentialChannelFor: (...a) => this.credentialChannelFor(...a),
             defaultRecordPageSaveRefusal: (...a) => this.defaultRecordPageSaveRefusal(...a),
             externalBindingSaveRefusal: (...a) => this.externalBindingSaveRefusal(...a),
+            permissionSetNameCollisionRefusal: (...a) => this.permissionSetNameCollisionRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
         };
@@ -8015,43 +8029,17 @@ export class ObjectStackProtocolImplementation implements
      */
     private overlayIndexEnsured = false;
     private async ensureOverlayIndex(): Promise<void> {
-        if (this.overlayIndexEnsured) return;
-        this.overlayIndexEnsured = true;
-        // [#22877] Rows stored before the member column existed get their
-        // body's member before the first write can address them.
-        await this.ensureOverlayMembersBackfilled();
-        try {
-            const engineAny = this.engine as any;
-            let driver: any = engineAny?.driver ?? engineAny?.getDriver?.();
-            if (!driver && engineAny?.drivers instanceof Map) {
-                for (const candidate of engineAny.drivers.values()) {
-                    if (driverCanRunSql(candidate)) {
-                        driver = candidate;
-                        break;
-                    }
-                }
-            }
-            if (!driver) return;
-            const resolved = resolveDriverExec(driver);
-            // The refusal stays INSIDE the seam rather than becoming an early
-            // return: a driver taken from `engineAny?.driver` is not
-            // capability-checked above, and when it offers neither surface it is
-            // the migration that classifies and reports the failure — an early
-            // return here would put that back into the silent `catch` below.
-            const exec = async (sql: string): Promise<void> => {
-                if (!resolved) throw new Error('driver has neither raw nor execute');
-                await resolved(sql);
-            };
-            // `console` satisfies the logger surface structurally; this class
-            // carries no injected logger, and its own diagnostics go to
-            // `console.warn` throughout (see `emitMetadataMutation`).
-            await ensureMetadataOverlayIndexes(exec, console);
-        } catch {
-            // A boot must never fail over an index. Note this arm is now only
-            // reachable for driver RESOLUTION failures: every DDL failure past
-            // this point is classified and reported by the migration itself,
-            // instead of vanishing into an empty catch (#6418).
-        }
+        // [#25467 cut 33] The body moved to `protocol-overlay-index.ts` (see `OverlayIndexHost`).
+        const readEngine = () => this.engine;
+        const readOverlayIndexEnsured = () => this.overlayIndexEnsured;
+        const writeOverlayIndexEnsured = (value: ObjectStackProtocolImplementation['overlayIndexEnsured']) => { this.overlayIndexEnsured = value; };
+        const host: ThisParameterType<typeof ensureOverlayIndex> = {
+            get engine() { return readEngine(); },
+            ensureOverlayMembersBackfilled: (...a) => this.ensureOverlayMembersBackfilled(...a),
+            get overlayIndexEnsured() { return readOverlayIndexEnsured(); },
+            set overlayIndexEnsured(value) { writeOverlayIndexEnsured(value); },
+        };
+        return ensureOverlayIndex.call(host);
     }
 
     /**
@@ -8070,9 +8058,16 @@ export class ObjectStackProtocolImplementation implements
      */
     private overlayMembersBackfilled = false;
     private async ensureOverlayMembersBackfilled(): Promise<void> {
-        if (this.overlayMembersBackfilled) return;
-        this.overlayMembersBackfilled = true;
-        await backfillOverlayBundleMembers(this.engine as any, console);
+        // [#25467 cut 33] The body moved to `protocol-overlay-index.ts` (see `OverlayIndexHost`).
+        const readEngine = () => this.engine;
+        const readOverlayMembersBackfilled = () => this.overlayMembersBackfilled;
+        const writeOverlayMembersBackfilled = (value: ObjectStackProtocolImplementation['overlayMembersBackfilled']) => { this.overlayMembersBackfilled = value; };
+        const host: ThisParameterType<typeof ensureOverlayMembersBackfilled> = {
+            get engine() { return readEngine(); },
+            get overlayMembersBackfilled() { return readOverlayMembersBackfilled(); },
+            set overlayMembersBackfilled(value) { writeOverlayMembersBackfilled(value); },
+        };
+        return ensureOverlayMembersBackfilled.call(host);
     }
 
     /**
@@ -9405,13 +9400,8 @@ export class ObjectStackProtocolImplementation implements
      * `handleRouteError` / `logWithheldServerFault`.
      */
     private throwMetadataServiceUnavailable(errors: string[]): never {
-        throw metadataStoreUnavailableError(
-            new Error(
-                `The metadata service could not read every loader: ${
-                    errors.length > 0 ? errors.join('; ') : 'no loader detail reported'
-                }`,
-            ),
-        );
+        // [#25467 cut 33] The body moved to `protocol-loud-degradations.ts`; it reads no member.
+        return throwMetadataServiceUnavailable(errors);
     }
 
     async getMetaItems(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
@@ -10278,13 +10268,11 @@ export class ObjectStackProtocolImplementation implements
         type: string,
         overlays: readonly E[],
     ): Array<{ item: Record<string, unknown>; container: E }> {
-        const out: Array<{ item: Record<string, unknown>; container: E }> = [];
-        for (const container of overlays) {
-            for (const item of this.expandRuntimeViewContainer(type, container.data, { packageId: container.packageId })) {
-                out.push({ item, container });
-            }
-        }
-        return out;
+        // [#25467 cut 33] The body moved to `protocol-registry-view-predicates.ts` (see `RegistryViewPredicatesHost`).
+        const host: ThisParameterType<typeof expandStoredViewContainers> = {
+            expandRuntimeViewContainer: (...a) => this.expandRuntimeViewContainer(...a),
+        };
+        return (expandStoredViewContainers<E>).call(host, type, overlays);
     }
 
     /**
@@ -10480,19 +10468,11 @@ export class ObjectStackProtocolImplementation implements
         options: { readonly otherSpelling: boolean },
         activeRows?: readonly StoredOverlayRow[],
     ): Promise<unknown> {
-        const other = PLURAL_TO_SINGULAR[address.type] ?? SINGULAR_TO_PLURAL[address.type];
-        return resolveOverlayLockLayer(address, async (spelling) => {
-            const type = spelling === 'canonical' ? address.type : other;
-            if (type === undefined) return [];
-            const where = { type, name: address.name, state: 'active' };
-            if (activeRows !== undefined) return activeRows.filter((row) => rowMatchesOverlayWhere(row, where));
-            // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
-                where,
-                context: { isSystem: true },
-            });
-            return rows ?? [];
-        }, options);
+        // [#25467 cut 33] The body moved to `protocol-stored-row-bindings.ts` (see `StoredRowBindingsHost`).
+        const host: ThisParameterType<typeof overlayLockLayerAt> = {
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+        };
+        return overlayLockLayerAt.call(host, address, options, activeRows);
     }
 
     /**
@@ -10582,44 +10562,13 @@ export class ObjectStackProtocolImplementation implements
     private async resolveAppPackageIdKey<R extends {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
     }>(request: R): Promise<R> {
-        if (!isAppPackageIdKey(request.type, request.name)) return request;
-        const packageId = request.name;
-        if (request.packageId !== undefined && request.packageId !== packageId) {
-            const err: any = new Error(
-                `The app read's key '${packageId}' is a package id, and it names a different package `
-                + `than packageId '${request.packageId}'. Name the package once: read the app by its `
-                + `package id alone, or by its own app name with packageId as its scope.`,
-            );
-            err.code = 'INVALID_REQUEST';
-            err.status = 400;
-            throw err;
-        }
-        const readsDrafts = request.state === 'draft' || request.previewDrafts === true;
-        const listed = await this.getMetaItems({
-            type: 'app',
-            packageId,
-            ...(readsDrafts ? { previewDrafts: true } : {}),
-        });
-        const names = [...new Set(
-            ((listed as { items?: unknown[] } | undefined)?.items ?? [])
-                .map((app) => (app as { name?: unknown } | null)?.name)
-                .filter((name): name is string => typeof name === 'string' && name.length > 0),
-        )];
-        if (names.length === 1) return { ...request, name: names[0], packageId };
-        if (names.length > 1) {
-            const key = `${packageId}|${[...names].sort().join(',')}`;
-            if (!this.reportedMultiAppPackages.has(key)) {
-                this.reportedMultiAppPackages.add(key);
-                console.warn(
-                    `[metadata-protocol] Package '${packageId}' holds ${names.length} apps `
-                    + `(${[...names].sort().join(', ')}), so reading the app by its package id answers `
-                    + `"not found": with one app per package the app is the package container `
-                    + `(ADR-0048 §3.1), and a package may define at most one app (ADR-0019 D3). `
-                    + `Fold them into one app, or move all but one into packages of their own.`,
-                );
-            }
-        }
-        return request;
+        // [#25467 cut 33] The body moved to `protocol-package-scope.ts` (see `PackageScopeHost`).
+        const readReportedMultiAppPackages = () => this.reportedMultiAppPackages;
+        const host: ThisParameterType<typeof resolveAppPackageIdKey> = {
+            getMetaItems: (...a) => this.getMetaItems(...a),
+            get reportedMultiAppPackages() { return readReportedMultiAppPackages(); },
+        };
+        return (resolveAppPackageIdKey<R>).call(host, request);
     }
 
     /**
@@ -16237,34 +16186,11 @@ export class ObjectStackProtocolImplementation implements
         request: { type: string; name: string; packageId?: string | null },
         how: { verb?: 'save' | 'publish'; inherited?: boolean } = {},
     ): Error | null {
-        const namedBase = request.packageId;
-        if (!namedBase || namedBase === 'sys_metadata') return null;
-        if (this.resolveWritePackageScope(namedBase) !== undefined) return null;
-        const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-        // Kept under the REST door's client-message bound (`truncateClientMessage`)
-        // for ordinary names, so the last sentence reaches the caller.
-        const storedWayOut = `Create a package with that id first, or remove the rows bound to it (a delete naming `
-            + `that package; discard-drafts for drafts) and save again, into an installed writable package or with `
-            + `no package.`;
-        const err = new Error(
-            how.verb === 'publish'
-                ? `Cannot publish ${type} '${request.name}' into package '${namedBase}': no package with that id `
-                    + `is installed in this deployment, so the ${type} would go live bound to a package that does `
-                    + `not exist. ${storedWayOut} Nothing was published.`
-                : how.inherited
-                    ? `Cannot save ${type} '${request.name}' without naming a package: its stored rows are bound to `
-                        + `package '${namedBase}', which is not installed in this deployment, and this save would `
-                        + `extend that binding. ${storedWayOut} Nothing was written.`
-                    : `Cannot save ${type} '${request.name}' into package '${namedBase}': no package with that id is `
-                        + `installed in this deployment, so the ${type} would be stored bound to a package that does not `
-                        + `exist. Name an installed writable package as the ${type}'s base (or create one first), or save `
-                        + `the ${type} without naming a package. Nothing was written.`,
-        );
-        (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
-        (err as any).status = 422;
-        (err as any).packageId = namedBase;
-        (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
-        return err;
+        // [#25467 cut 33] The body moved to `protocol-package-scope.ts` (see `PackageScopeHost`).
+        const host: ThisParameterType<typeof uninstalledNamedBaseRefusal> = {
+            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
+        };
+        return uninstalledNamedBaseRefusal.call(host, request, how);
     }
 
     /**
@@ -16575,7 +16501,12 @@ export class ObjectStackProtocolImplementation implements
      * definition, and its doc comment carries the reasoning.
      */
     private isWritablePackage(packageId: string | null | undefined): boolean {
-        return isWritablePackageShared(this.engine, packageId);
+        // [#25467 cut 33] The body moved to `protocol-package-scope.ts` (see `PackageScopeHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof isWritablePackage> = {
+            get engine() { return readEngine(); },
+        };
+        return isWritablePackage.call(host, packageId);
     }
 
     /**
@@ -18207,10 +18138,8 @@ export class ObjectStackProtocolImplementation implements
      * derivation".
      */
     private runtimeViewContainerObject(container: Record<string, any>): string | undefined {
-        return (typeof container.object === 'string' && container.object ? container.object : undefined)
-            ?? container?.list?.data?.object
-            ?? container?.form?.data?.object
-            ?? (typeof container.name === 'string' ? container.name : undefined);
+        // [#25467 cut 33] The body moved to `protocol-registry-view-predicates.ts`; it reads no member.
+        return runtimeViewContainerObject(container);
     }
 
     /**
@@ -18244,8 +18173,12 @@ export class ObjectStackProtocolImplementation implements
         container: Record<string, any>,
         ownPackageId: string | undefined,
     ): boolean {
-        const shipped = this.shippedViewContainerOf(type, container.name, ownPackageId);
-        return shipped !== undefined && this.runtimeViewContainerObject(shipped) === object;
+        // [#25467 cut 33] The body moved to `protocol-registry-view-predicates.ts` (see `RegistryViewPredicatesHost`).
+        const host: ThisParameterType<typeof copiesOwnShippedViewContainer> = {
+            runtimeViewContainerObject: (...a) => this.runtimeViewContainerObject(...a),
+            shippedViewContainerOf: (...a) => this.shippedViewContainerOf(...a),
+        };
+        return copiesOwnShippedViewContainer.call(host, type, object, container, ownPackageId);
     }
 
     /**
@@ -18293,12 +18226,12 @@ export class ObjectStackProtocolImplementation implements
      * answer.
      */
     private isAnotherPackagesObject(object: string, ownPackageId: string | undefined): boolean {
-        const registry: any = (this.engine as any)?.registry;
-        const owner = typeof registry?.getPackagedObjectOwner === 'function'
-            ? registry.getPackagedObjectOwner(object)
-            : undefined;
-        const ownerPackageId: unknown = owner?.packageId;
-        return typeof ownerPackageId === 'string' && ownerPackageId !== '' && ownerPackageId !== ownPackageId;
+        // [#25467 cut 33] The body moved to `protocol-registry-view-predicates.ts` (see `RegistryViewPredicatesHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof isAnotherPackagesObject> = {
+            get engine() { return readEngine(); },
+        };
+        return isAnotherPackagesObject.call(host, object, ownPackageId);
     }
 
     /**
@@ -18645,7 +18578,14 @@ export class ObjectStackProtocolImplementation implements
      * set's wider grant included.
      */
     private registryTakesStoredRows(): boolean {
-        return this.environmentId === undefined || this.storeHydratedIntoRegistry;
+        // [#25467 cut 33] The body moved to `protocol-registry-view-predicates.ts` (see `RegistryViewPredicatesHost`).
+        const readEnvironmentId = () => this.environmentId;
+        const readStoreHydratedIntoRegistry = () => this.storeHydratedIntoRegistry;
+        const host: ThisParameterType<typeof registryTakesStoredRows> = {
+            get environmentId() { return readEnvironmentId(); },
+            get storeHydratedIntoRegistry() { return readStoreHydratedIntoRegistry(); },
+        };
+        return registryTakesStoredRows.call(host);
     }
 
     /**
@@ -19278,17 +19218,11 @@ export class ObjectStackProtocolImplementation implements
          */
         member?: string,
     ): Promise<string | null> {
-        // [#21911] The explicit system opt-in — see findServedOverlayRow.
-        const row = await this.findEnvironmentRow('sys_metadata', {
-            where: {
-                type,
-                name,
-                state: 'active',
-                ...overlayMemberWhere(type, member),
-            },
-            context: { isSystem: true },
-        });
-        return (row as { package_id?: string | null } | null)?.package_id ?? null;
+        // [#25467 cut 33] The body moved to `protocol-stored-row-bindings.ts` (see `StoredRowBindingsHost`).
+        const host: ThisParameterType<typeof resolveOverlayPackageBinding> = {
+            findEnvironmentRow: (...a) => this.findEnvironmentRow(...a),
+        };
+        return resolveOverlayPackageBinding.call(host, type, name, member);
     }
 
     /**
@@ -19323,12 +19257,8 @@ export class ObjectStackProtocolImplementation implements
      * `sys_`-prefixed platform table.
      */
     private shouldDropStorage(type: string, name: string, dropStorage: boolean | undefined, state: 'active' | 'draft'): boolean {
-        if (!dropStorage) return false;
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (singular !== 'object') return false;
-        if (state !== 'active') return false;
-        if (name.startsWith('sys_')) return false;
-        return true;
+        // [#25467 cut 33] The body moved to `protocol-package-scope.ts`; it reads no member.
+        return shouldDropStorage(type, name, dropStorage, state);
     }
 
     /**
@@ -19493,23 +19423,11 @@ export class ObjectStackProtocolImplementation implements
      * existence claim (see {@link metaTypeNamespaceExists}).
      */
     private async refuseUnmintableMetaType(request: { type: string, name: string }): Promise<void> {
-        const unrecognised = unrecognisedMetaTypeRefusal(request.type);
-        if (!unrecognised) return;
-        // The old exemption 1 (skip when the name contains a slash) was
-        // removed by commit 311433f6b — the grammar verdict upstream refuses every
-        // slash-bearing name before this probe runs. See the header.
-        // Exemption 2 — the namespace predates this write.
-        if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
-        const err = new Error(
-            `'${unrecognised.type}' is not a metadata type. The platform declares `
-            + `no such type, and a plugin cannot declare one either: 'additionalTypes' was retired because `
-            + `nothing ever read it — so this write would mint a sys_metadata namespace under `
-            + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
-            + `metadata type; GET /api/v1/meta/types lists the ones this deployment carries.`,
-        );
-        (err as any).code = 'INVALID_REQUEST';
-        (err as any).status = 400;
-        throw err;
+        // [#25467 cut 33] The body moved to `protocol-unmintable-meta-type.ts` (see `UnmintableMetaTypeHost`).
+        const host: ThisParameterType<typeof refuseUnmintableMetaType> = {
+            metaTypeNamespaceExists: (...a) => this.metaTypeNamespaceExists(...a),
+        };
+        return refuseUnmintableMetaType.call(host, request);
     }
 
     /**
@@ -19606,6 +19524,50 @@ export class ObjectStackProtocolImplementation implements
             storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
         };
         return defaultRecordPageSaveRefusal.call(host, type, item, saveName, verb);
+    }
+
+    /**
+     * The `NAMESPACE_CONFLICT` / 422 a permission-set write is refused with when
+     * its name is already held by a DIFFERENT owner — the security catalog's
+     * "one name, one holder" (maintainer rulings Q4 = A on #15196, record
+     * 6050490870, and A on #22307, record 6063176077) at every door a body
+     * reaches `active` through: the save door ({@link saveMetaItem}, draft and
+     * publish mode), the draft→active promotion ({@link promoteDraftForPublish},
+     * shared by the per-item publish and {@link publishPackageDrafts}) and the
+     * restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}, under
+     * `rollbackMetaItem` and `revertCommit`). The faces that write through the
+     * save door meet it there too: {@link duplicatePackage} reports a copied
+     * set's refusal in `failed[]`, and {@link migrateStoredMetadata} records it
+     * as the re-saved row's failure.
+     *
+     * `owner` is the binding the write LANDS IN, which each door resolves for
+     * itself: the save door's {@link packagelessDraftAddress} for a draft that
+     * names no package, the #23165 address for a publish-mode save; the
+     * promotion's `promoteInto`; the restore's active-row binding. See
+     * {@link permissionSetNameCollisionRefusal} for the two holder readings it
+     * meets (the stored rows, and the registry's own package-held reading,
+     * ruling letter B on #22371, record 6074838935), the package-less row it
+     * reads as a package's, and why a same-owner re-author is untouched.
+     *
+     * `NAMESPACE_CONFLICT` / 422 with the registry's words, because the rulings
+     * fix the rule's envelope at that code and status on every path: the code
+     * is `@objectstack/objectql`'s, co-registered under this package in the
+     * error-code ledger (ADR-0112). No code is minted.
+     */
+    private permissionSetNameCollisionRefusal(
+        singularType: string,
+        name: string,
+        owner: string | null | undefined,
+        verb: 'save' | 'publish' | 'restore',
+    ): Promise<(Error & { code: 'NAMESPACE_CONFLICT'; status: 422 }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof permissionSetNameCollisionRefusal> = {
+            get engine() { return readEngine(); },
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
+        };
+        return permissionSetNameCollisionRefusal.call(host, singularType, name, owner, verb);
     }
 
     /**
@@ -20020,12 +19982,13 @@ export class ObjectStackProtocolImplementation implements
         container: Record<string, unknown>,
         packageId: string | null | undefined,
     ): ReadonlySet<string> {
-        const ownPackageId = this.runtimeViewContainerPackage(type, container, { packageId });
-        const shipped = this.shippedViewContainerOf(type, container.name, ownPackageId);
-        if (shipped === undefined) return new Set();
-        return new Set(
-            this.expandRuntimeViewContainer(type, shipped, { packageId: ownPackageId }).map((view) => String(view.name)),
-        );
+        // [#25467 cut 33] The body moved to `protocol-registry-view-predicates.ts` (see `RegistryViewPredicatesHost`).
+        const host: ThisParameterType<typeof overlaidShippedContainerViewNames> = {
+            expandRuntimeViewContainer: (...a) => this.expandRuntimeViewContainer(...a),
+            runtimeViewContainerPackage: (...a) => this.runtimeViewContainerPackage(...a),
+            shippedViewContainerOf: (...a) => this.shippedViewContainerOf(...a),
+        };
+        return overlaidShippedContainerViewNames.call(host, type, container, packageId);
     }
 
     /**
@@ -20969,6 +20932,46 @@ export class ObjectStackProtocolImplementation implements
                     'save',
                 );
                 if (ownerRefusal) throw ownerRefusal;
+            }
+            // [harden] …and a permission set whose NAME another owner already
+            // holds, with `NAMESPACE_CONFLICT` / 422: a set's name is its
+            // identity across the deployment, and a grant resolves it by that
+            // name alone. See {@link permissionSetNameCollisionRefusal}.
+            //
+            // Judged against the binding the write LANDS IN — ⛔ not
+            // {@link saveWriteBinding}'s answer, which is the owner judge's: it
+            // reads the store only when the body carries a `packageId`, so for a
+            // body without one it named no package while the write went into
+            // one. A save that names a package writes that package's row (for a
+            // publish-mode save naming none, the package the #23165 address
+            // above resolved, already on `request`); a publish-mode save that
+            // names none and resolved none writes the package-unbound row. A
+            // draft save that names none writes the draft
+            // {@link packagelessDraftAddress} names — the address #23712 read
+            // above, read here for the server-stated rewrites it is not read
+            // for — whose `into` is the binding the repository stamps (#11087,
+            // `SysMetadataRepository.resolveWriteHead`): over package `P`'s
+            // active set it is `P`'s draft, the owning package's own edit
+            // through the console's plain `?mode=draft` save. An ambiguous
+            // address has no row to land in, and is refused with the refusal
+            // the repository answers it with.
+            if (singularType === 'permission') {
+                let landsIn: string | null = null;
+                if (typeof request.packageId === 'string' && request.packageId !== '') {
+                    landsIn = request.packageId;
+                } else if (mode === 'draft' && request.packageId == null) {
+                    const address = draftAddress ?? await this.packagelessDraftAddress(
+                        singularType, request.name, itemDiscriminator(singularType, request.item),
+                    );
+                    if (address.kind === 'ambiguous') {
+                        throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
+                    }
+                    landsIn = address.into;
+                }
+                const nameCollision = await this.permissionSetNameCollisionRefusal(
+                    singularType, request.name, landsIn, 'save',
+                );
+                if (nameCollision) throw nameCollision;
             }
             // [#21639] …and a view container whose save name, or any name its
             // expansion produces, is a name already served from elsewhere —
@@ -23029,6 +23032,21 @@ export class ObjectStackProtocolImplementation implements
             );
             if (ownerRefusal) throw ownerRefusal;
         }
+        // [harden] …and a permission-set draft whose name a DIFFERENT owner
+        // already holds by the time it is published: a draft save judged the
+        // holders of its moment, and another owner may have taken that name
+        // since (or the draft was addressed to a second package in the first
+        // place). Judged again here, with the save door's own predicate and
+        // envelope, against the package promoted into (`promoteInto`, the
+        // binding the active row is written under), before `repo.promoteDraft`
+        // writes — so a batch publish aborts on it as it aborts on the owner
+        // refusal above. See {@link permissionSetNameCollisionRefusal}.
+        {
+            const nameCollision = await this.permissionSetNameCollisionRefusal(
+                singularType, request.name, promoteInto, 'publish',
+            );
+            if (nameCollision) throw nameCollision;
+        }
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet
         // one by the time it is published, since the save door judged only the
@@ -23512,15 +23530,14 @@ export class ObjectStackProtocolImplementation implements
      * carries the whole fact, and the hundredth adds nothing.
      */
     private warnClosureReadUnavailable(type: string, name: string): void {
-        if (this.closureReadWarned) return;
-        this.closureReadWarned = true;
-        console.warn(
-            `[Protocol] publishPackageDrafts: this overlay repository declares no 'get', so the batch's own `
-            + `pending drafts cannot be read (first reached at ${type}/${name}). Author-time validation falls `
-            + `back to the LIVE declarations only, without this batch's own drafts in the closure, so a draft that references a `
-            + `sibling drafted in the SAME batch may be refused as unresolved. Nothing is published unchecked: `
-            + `the gate still runs, with strictly less resolution context.`,
-        );
+        // [#25467 cut 33] The body moved to `protocol-loud-degradations.ts` (see `LoudDegradationsHost`).
+        const readClosureReadWarned = () => this.closureReadWarned;
+        const writeClosureReadWarned = (value: ObjectStackProtocolImplementation['closureReadWarned']) => { this.closureReadWarned = value; };
+        const host: ThisParameterType<typeof warnClosureReadUnavailable> = {
+            get closureReadWarned() { return readClosureReadWarned(); },
+            set closureReadWarned(value) { writeClosureReadWarned(value); },
+        };
+        return warnClosureReadUnavailable.call(host, type, name);
     }
 
     /** One warn per process for the {@link warnClosureReadUnavailable} degrade. */
@@ -26367,8 +26384,12 @@ export class ObjectStackProtocolImplementation implements
      * again — which is precisely how the seam this repairs was born.
      */
     private async persistPackageCommitRow(row: Record<string, unknown>): Promise<void> {
-        // [#21911] The explicit system opt-in — see recordMetadataAudit.
-        await this.engine.insert('sys_metadata_commit', row, { context: { isSystem: true } });
+        // [#25467 cut 33] The body moved to `protocol-package-commit-record.ts` (see `PackageCommitRecordHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof persistPackageCommitRow> = {
+            get engine() { return readEngine(); },
+        };
+        return persistPackageCommitRow.call(host, row);
     }
 
     /**
@@ -26405,77 +26426,15 @@ export class ObjectStackProtocolImplementation implements
         eventSeqStart?: number;
         eventSeqEnd?: number;
     }): Promise<{ commitId: string } | null> {
-        try {
-            const commitId = 'cmt_' + (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-                ? crypto.randomUUID()
-                : `${args.eventSeqEnd ?? 0}-${args.items.length}-${args.packageId}`);
-            await this.persistPackageCommitRow({
-                id: commitId,
-                package_id: args.packageId,
-                operation: args.operation,
-                ...(args.message ? { message: args.message } : {}),
-                ...(args.actor ? { actor: args.actor } : {}),
-                ...(args.aiModel ? { ai_model: args.aiModel } : {}),
-                ...(args.parentCommitId ? { parent_commit_id: args.parentCommitId } : {}),
-                ...(args.eventSeqStart !== undefined ? { event_seq_start: args.eventSeqStart } : {}),
-                ...(args.eventSeqEnd !== undefined ? { event_seq_end: args.eventSeqEnd } : {}),
-                items: JSON.stringify(args.items),
-                item_count: args.items.length,
-                created_at: new Date().toISOString(),
-            });
-            return { commitId };
-        } catch (error) {
-            // [#9066] The publish keeps its outcome — `null` still comes back
-            // and the caller still reports success — but the silence is over.
-            //
-            // BENIGN: `sys_metadata_commit` was never provisioned. That is a
-            // real deployment state (a first boot, or an env kernel composed
-            // without the commit log — the exact case
-            // `@objectstack/metadata`'s plugin note records), and it is a
-            // CONFIGURATION fact, not a store that broke: it is the same on
-            // every publish and it is fixed in one place. Stated once per
-            // instance, at `info`, per this card's ruling that an unprovisioned
-            // commit store stays silent or informational.
-            //
-            // EVERYTHING ELSE — a connection drop, a timeout, a permission
-            // denial, schema drift on that one table — is a write that was
-            // supposed to land and did not, while the publish it describes DID.
-            // `error`, per AGENTS.md "Degradation log levels", and the line
-            // owes the two things that rule requires: the CONSEQUENCE (this
-            // turn is not revertible, and the system will keep looking healthy)
-            // and the FIX (repair write access to the commit store).
-            //
-            // NOT rethrown, and not surfaced to the caller: the artifacts are
-            // already live and unwinding them over a missing history row would
-            // be strictly worse than losing the row. Telling the CALLER that
-            // the turn is unrevertible is a separate question (a response-field
-            // change the #8896 ruling forbids for this family) and deliberately
-            // NOT decided here.
-            if (isMissingTableError(error, 'sys_metadata_commit')) {
-                if (!this.commitStoreUnprovisionedNoted) {
-                    this.commitStoreUnprovisionedNoted = true;
-                    console.info(
-                        '[Protocol] sys_metadata_commit is not provisioned — publishes and reverts '
-                        + 'succeed but record no ADR-0067 commit row, so no turn can be reverted '
-                        + '(the revert plan of every turn is dropped). Fix: provision the commit '
-                        + 'store — it is registered alongside sys_metadata_history by '
-                        + "@objectstack/metadata's plugin; run schema sync. Said once per protocol instance.",
-                    );
-                }
-                return null;
-            }
-            const reason = (error as { message?: string } | undefined)?.message ?? String(error);
-            console.error(
-                `[Protocol] sys_metadata_commit write FAILED for package '${args.packageId}' `
-                + `(${args.operation}, ${args.items.length} item(s)): ${reason}. `
-                + 'The publish itself SUCCEEDED and reports success, so nothing looks broken — but '
-                + "this turn's revert plan was not persisted: the turn is absent from the package "
-                + 'commit timeline and can never be reverted, and every further publish loses its '
-                + 'own the same way until this is repaired. Fix: restore write access to '
-                + 'sys_metadata_commit (connectivity, permissions, or schema drift on that table).',
-            );
-            return null;
-        }
+        // [#25467 cut 33] The body moved to `protocol-package-commit-record.ts` (see `PackageCommitRecordHost`).
+        const readCommitStoreUnprovisionedNoted = () => this.commitStoreUnprovisionedNoted;
+        const writeCommitStoreUnprovisionedNoted = (value: ObjectStackProtocolImplementation['commitStoreUnprovisionedNoted']) => { this.commitStoreUnprovisionedNoted = value; };
+        const host: ThisParameterType<typeof recordPackageCommit> = {
+            get commitStoreUnprovisionedNoted() { return readCommitStoreUnprovisionedNoted(); },
+            set commitStoreUnprovisionedNoted(value) { writeCommitStoreUnprovisionedNoted(value); },
+            persistPackageCommitRow: (...a) => this.persistPackageCommitRow(...a),
+        };
+        return recordPackageCommit.call(host, args);
     }
 
     private parseCommitItems(
@@ -28935,19 +28894,8 @@ export class ObjectStackProtocolImplementation implements
      * that registered no manifest.
      */
     private reportPageRequiresAbsentAtLoad(name: string, body: unknown, sduiManifest: unknown): void {
-        const absent = findPageRequiresAbsentFromManifest('page', body, sduiManifest);
-        if (!absent || absent.length === 0) return;
-        const one = absent.length === 1;
-        const named = absent.map((ns) => `'${ns}'`).join(', ');
-        console.warn(
-            `[Protocol] [page_requires_plugin_absent] stored page/${name} requires ${named}, `
-            + `${one ? 'a namespace' : 'namespaces'} no component in this deployment's SDUI component manifest `
-            + `carries: the plugin${one ? ' that provides it is' : 's that provide them are'} not loaded in the `
-            + `console this deployment serves. The page is loaded and served anyway, and what its source draws `
-            + `from ${one ? 'that plugin' : 'those plugins'} will not render. Install ${one ? 'it' : 'them'} in `
-            + `that console, or take ${one ? 'its' : 'their'} components out of the page's source and save the `
-            + `page without \`requires\` — it is derived from the source at save.`,
-        );
+        // [#25467 cut 33] The body moved to `protocol-sdui-manifest.ts`; it reads no member.
+        return reportPageRequiresAbsentAtLoad(name, body, sduiManifest);
     }
 
 

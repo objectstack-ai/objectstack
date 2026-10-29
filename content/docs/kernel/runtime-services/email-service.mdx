@@ -15,6 +15,19 @@ services.email.send(input: SendEmailInput): Promise<SendEmailResult>
 services.email.sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>
 ```
 
+`services.email.getDefaultFrom?.()` returns the configured sender, the `from` that `send()` uses when the input names none. It is `undefined` when no sender is configured.
+
+## Over HTTP
+
+`POST /api/v1/email/send` (`client.email.send`) hands a message to `send()`. Plugins and flows call `send()` directly and are not affected by what follows. The HTTP door checks four things first, and refuses a failure with `403 PERMISSION_DENIED` before anything is sent:
+
+- The caller must hold the `manage_platform_settings` capability.
+- `sentBy` is always the authenticated caller. A body that names another user is refused.
+- The sender is the deployment's configured sender. A `from` naming another address is refused. A `from` naming the configured address is replaced by the configured value. Omit `from` to send as the configured sender. `headers`, when sent, must be a plain object that maps each header name to a single-line string value. Any other shape is refused, and so are custom `From`, `Sender` and `Return-Path` headers.
+- The message is recorded under the caller's active organization, which the door sets as `organizationId`. A body that names another organization is refused, and so is one that names an organization when the caller has none. `identityMail` is refused: identity mail (verification, password reset, invitations) is sent by the server itself. Omit both.
+
+`replyTo` is not bounded. It is the caller's choice of Reply-To address and makes no claim about the sender.
+
 ## Returns
 
 `SendEmailResult`:

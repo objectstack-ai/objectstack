@@ -379,6 +379,14 @@ const ko = {
       postalCode: "우편번호",
       country: "국가",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '통화 선택',
+      search: '통화 검색…',
+      noResults: '통화를 찾을 수 없음',
+      available: '사용 가능',
+      all: '모든 통화 (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — 꺼짐",
       completed: "완료됨",
@@ -2598,6 +2606,9 @@ const ko = {
       invitationPreviewTitle: "{{inviter}} 님이 {{organization}}에 초대했습니다",
       invitationPreviewTitleNoInviter: "{{organization}}에 초대되었습니다",
       invitationPreviewDescription: "초대를 받은 이메일 주소({{email}})를 사용하세요.",
+      invitationGoneTitle: "이 초대 링크는 더 이상 유효하지 않습니다",
+      invitationGoneDescription: "초대가 만료되었거나, 이미 사용되었거나, 철회되었을 수 있습니다. 초대한 사람에게 새 초대를 요청하세요.",
+      invitationGoneSignIn: "로그인으로 이동",
       showPasswordText: "비밀번호 표시",
       hidePasswordText: "비밀번호 숨기기",
       footer: {
@@ -2631,6 +2642,8 @@ const ko = {
         userExists: "해당 이메일로 이미 계정이 존재합니다. 로그인해 보세요.",
         selfRegistrationClosed: "이 시스템에서는 직접 가입을 받지 않습니다. 관리자에게 초대를 요청하세요.",
         emailDomainNotAllowed: "이 이메일의 도메인으로는 여기에서 가입할 수 없습니다. 조직 이메일을 사용하거나 관리자에게 초대를 요청하세요.",
+        invitationSentTo: "이 초대는 {{email}}(으)로 전송되었습니다. 초대를 수락하려면 해당 주소로 가입하세요.",
+        invitationAddressOnly: "이 초대는 초대를 받은 주소로만 수락할 수 있습니다. 해당 주소로 가입하세요.",
       },
       verifyInbox: {
         title: "받은 편지함을 확인하세요",
@@ -3746,6 +3759,13 @@ const ko = {
       countSeedData: "샘플 데이터",
       extendTarget: "기존 앱에 추가: {{app}}",
       awaitingConfirm: "확인 대기 중",
+      iterateOrNew: {
+        question: "이 계획은 이미 있는 앱 “{{app}}”과(와) 겹칩니다. 이 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
+        questionUnnamed: "이 계획은 이미 있는 앱과 겹칩니다. 그 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
+        extend: "“{{app}}” 계속 개선",
+        buildNew: "별도의 앱 만들기",
+        replyHint: "어느 쪽인지 회신해 주세요.",
+      },
       objectsAndFields: "개체 및 필드",
       views: "뷰",
       suggestedField: "추가 제안",
@@ -4147,6 +4167,7 @@ const ko = {
     progressBar: '결정 진행 상황',
     declaredActions: '작업',
     decisionPanelOffRequestPage: '승인 결정 패널은 승인 요청 페이지에서만 작동합니다.',
+    snapshotAsSubmitted: '제출 당시 내용',
     attachmentChip: '첨부 파일',
     attachmentOpenFailed: '첨부 파일을 열 수 없습니다. 다시 시도해 주세요',
     approveOneTitle: '"{{title}}"을(를) 승인할까요?',
@@ -4334,6 +4355,7 @@ const ko = {
       detailLoading: '상세 정보 로드 중…',
       detailLoadFailed: '변경 상세 정보를 불러오지 못했습니다:',
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
+      fieldOrderChanged: '필드 순서가 변경됨',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
       draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',
@@ -4435,6 +4457,8 @@ const ko = {
     },
   },
   filterBuilder: {
+    currency: '통화',
+    currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
     where: "조건",
     and: "그리고",
     or: "또는",

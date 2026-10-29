@@ -145,6 +145,10 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     const text = explanation!.paragraphs.join('\n');
     expect(text).toContain('ADR-0090 D1');
     expect(text).toContain("read and edit every other user's records");
+    // [#27472] The writable-external exception to the 'private' recommendation, and the rule it defers to.
+    expect(text).toContain('external.writable: true');
+    expect(text).toContain('os explain security-external-owner-unmapped');
+    expect(text).toContain("is told to declare 'public_read' instead");
     expect(finding.message).not.toContain('incident');
   });
 
@@ -1792,6 +1796,8 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'cbpDetails', // #26591: the resolving details by name — JS Map methods.
       'policies', // one set's `rowLevelSecurity` records — `.length`, a JS property.
       'predicate', // a policy's `using` / `check` text, a string — `.trim`.
+      // #27472: `externalOwnershipGap`'s answer — `.column`, a field of that helper's own return value.
+      'ownershipGap',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

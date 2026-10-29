@@ -1461,9 +1461,29 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
   // file, so seeing the status proves the file was read. The end-to-end half
   // of this verdict — and why `os lint` still cannot produce it — is the
   // `#16094` block at the bottom of this file.
-  it('REAL LEDGER: the live-elsewhere row exists and is warned without an opt-in (the fuse, lit)', () => {
-    expect(shippedLedgerStatuses().has('live-elsewhere')).toBe(true);
-    expect(authorWarnedProperties('manifest').has('runtime')).toBe(true);
+  //
+  // #27123 emptied that population: `manifest.runtime` flipped to `live` when
+  // the boot-time loader for installed plugins began dispatching on the tier,
+  // and no other row carries the verdict. So the shipped half now pins the
+  // flip (the row is `live` and silent), and the fuse is shown lit on a
+  // PLANTED row instead: a `live-elsewhere` row with no `authorWarn`, in a copy
+  // of the shipped ledgers, read by the walk itself.
+  it('REAL LEDGER: manifest.runtime left the verdict on #27123 — live, and not warned', () => {
+    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'manifest.json'), 'utf8'));
+    expect(ledger.props.runtime.status).toBe('live');
+    // Anti-vacuity: the manifest ledger was read, so its `dead` rows warn.
+    expect(authorWarnedProperties('manifest').size).toBeGreaterThan(0);
+    expect(authorWarnedProperties('manifest').has('runtime')).toBe(false);
+  });
+
+  it('PLANTED: a live-elsewhere row with no opt-in is warned, under its own rule id (the fuse, lit)', () => {
+    const dir = ledgerDirWith((d) => writeLedger(d, 'field', { props: { synthElsewhereSlot: { status: 'live-elsewhere' } } }));
+    expect(ledgerStatusesIn(dir).has('live-elsewhere')).toBe(true);
+    const findings = lintLivenessPropertiesFromLedgerDir(dir, {
+      objects: [{ name: 'widget', fields: [{ name: 'a', synthElsewhereSlot: true }] }],
+    });
+    expect(findings.map((f) => f.rule)).toEqual([LIVENESS_LIVE_ELSEWHERE_PROPERTY]);
+    expect(findings[0].message).not.toContain('liveness: dead');
   });
 
   // ── COVERAGE (#14057): describe() answers for every status the ledgers ship.
@@ -1480,11 +1500,14 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
   // a user error)". A mistake in our own shipped data is exactly what the
   // sentinel is for, so `live` is asserted LOUD here rather than handled.
   it('COVERAGE: every status the shipped ledgers carry is answered by describe() — or is loud by design', () => {
-    const statuses = [...shippedLedgerStatuses()].sort();
+    const shipped = shippedLedgerStatuses();
     // Anti-vacuity: an unreadable ledger dir returns the empty set, which would
     // pass every assertion below without measuring anything.
-    expect(statuses.length).toBeGreaterThanOrEqual(4);
-    expect(statuses).toContain('live-elsewhere');
+    expect(shipped.size).toBeGreaterThanOrEqual(4);
+    // The verdicts `describe()` grades ride along with the shipped census: one
+    // no shipped row carries today (`live-elsewhere`, since #27123) is still
+    // answered here, so the day a row takes it again it cannot crash an author.
+    const statuses = [...new Set([...shipped, 'dead', 'experimental', 'planned', 'live-elsewhere'])].sort();
 
     const rulesByStatus = new Map<string, string>();
     for (const status of statuses) {
@@ -1927,14 +1950,13 @@ describe('the dead and live-elsewhere verdicts warn on their own (#16094)', () =
     expect(parsed.error?.issues.map((i) => i.path.join('.'))).toContain('list.filterableFields');
   });
 
-  // `manifest.runtime` is the one `live-elsewhere` row. The verdict now admits
-  // it and `describe()` maps it to its own rule id with a keep-it reading — both
-  // asserted on the SHIPPED row, read from the directory the rule itself reads.
-  it('the shipped live-elsewhere row is admitted and graded liveness-live-elsewhere-property', () => {
-    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'manifest.json'), 'utf8'));
-    const row = ledger.props.runtime;
-    expect(row.status).toBe('live-elsewhere');
-    expect(authorWarnedProperties('manifest').has('runtime')).toBe(true);
+  // `manifest.runtime` was the one `live-elsewhere` row until #27123 flipped
+  // it to `live` (pinned in the #14057 block above, beside the PLANTED row
+  // that shows the verdict admitted without an opt-in). `describe()` mapping
+  // the verdict to its own rule id with a keep-it reading is asserted here on
+  // a row of the shape that row had.
+  it('a live-elsewhere row is graded liveness-live-elsewhere-property', () => {
+    const row = { status: 'live-elsewhere' };
     const findings = checkItemAgainstWarnMap('manifest', { runtime: 'sandbox' }, 'manifest', [['runtime', row]]);
     expect(findings.map((f) => f.rule)).toEqual([LIVENESS_LIVE_ELSEWHERE_PROPERTY]);
     expect(findings[0].message).not.toContain('liveness: dead');
@@ -2010,10 +2032,12 @@ describe('the hint a warned row shows an author (#16094, #21096)', () => {
     const triggered = shippedRows().filter(
       (r) => r.entry.authorWarn !== true && (r.entry.status === 'dead' || r.entry.status === 'live-elsewhere'),
     );
-    // Anti-vacuity: both verdicts are present, and at least one of these notes
-    // DOES carry a tracker id — so the leak this pin forbids is a real one.
+    // Anti-vacuity: the `dead` verdict is present, and at least one of these
+    // notes DOES carry a tracker id — so the leak this pin forbids is a real
+    // one. No shipped row is `live-elsewhere` since #27123; such a row joins
+    // this loop the day one ships, and the verdict's hint precedence is pinned
+    // SYNTHETIC in the #14057 block.
     expect(triggered.some((r) => r.entry.status === 'dead')).toBe(true);
-    expect(triggered.some((r) => r.entry.status === 'live-elsewhere')).toBe(true);
     expect(triggered.some((r) => typeof r.entry.note === 'string' && TRACKER_ID.test(r.entry.note))).toBe(true);
     for (const row of triggered) {
       const hint = hintFor(row);

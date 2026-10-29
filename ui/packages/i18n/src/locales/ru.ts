@@ -388,6 +388,14 @@ const ru = {
       postalCode: "Почтовый индекс",
       country: "Страна",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Выберите валюту',
+      search: 'Поиск валюты…',
+      noResults: 'Валюта не найдена',
+      available: 'Доступные',
+      all: 'Все валюты (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Выкл.",
       completed: "Выполнено",
@@ -2721,6 +2729,9 @@ const ru = {
       invitationPreviewTitle: "{{inviter}} приглашает вас в {{organization}}",
       invitationPreviewTitleNoInviter: "Вас приглашают в {{organization}}",
       invitationPreviewDescription: "Используйте адрес электронной почты, на который пришло приглашение ({{email}}).",
+      invitationGoneTitle: "Эта ссылка-приглашение больше недействительна",
+      invitationGoneDescription: "Возможно, срок действия приглашения истёк, оно уже было использовано или отозвано. Попросите пригласившего вас человека отправить новое приглашение.",
+      invitationGoneSignIn: "Перейти ко входу",
       showPasswordText: "Показать пароль",
       hidePasswordText: "Скрыть пароль",
       footer: {
@@ -2754,6 +2765,8 @@ const ru = {
         userExists: "Аккаунт с таким email уже существует. Попробуйте войти.",
         selfRegistrationClosed: "Самостоятельная регистрация в этой системе закрыта. Обратитесь к администратору за приглашением.",
         emailDomainNotAllowed: "Регистрация с адресами этого домена здесь не разрешена. Используйте email вашей организации или обратитесь к администратору за приглашением.",
+        invitationSentTo: "Это приглашение было отправлено на {{email}}. Зарегистрируйтесь с этим адресом, чтобы принять его.",
+        invitationAddressOnly: "Это приглашение можно принять только с адресом, на который оно было отправлено. Зарегистрируйтесь с этим адресом.",
       },
       verifyInbox: {
         title: "Проверьте входящие",
@@ -3908,6 +3921,13 @@ const ru = {
       countSeedData: "демоданные",
       extendTarget: "Добавление в существующее приложение: {{app}}",
       awaitingConfirm: "Ожидает подтверждения",
+      iterateOrNew: {
+        question: "Это пересекается с «{{app}}» — приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
+        questionUnnamed: "Это пересекается с приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
+        extend: "Продолжить улучшать «{{app}}»",
+        buildNew: "Создать отдельное приложение",
+        replyHint: "Ответьте, какой вариант выбрать.",
+      },
       objectsAndFields: "Объекты и поля",
       views: "Представления",
       suggestedField: "предложено",
@@ -4327,6 +4347,7 @@ const ru = {
     progressBar: 'Ход решения',
     declaredActions: 'Действия',
     decisionPanelOffRequestPage: 'Панель решения по согласованию работает только на страницах запросов на согласование.',
+    snapshotAsSubmitted: 'На момент подачи',
     attachmentChip: 'Вложение',
     attachmentOpenFailed: 'Не удалось открыть вложение — попробуйте ещё раз',
     approveOneTitle: 'Согласовать «{{title}}»?',
@@ -4534,6 +4555,7 @@ const ru = {
       detailLoading: 'Загрузка деталей…',
       detailLoadFailed: 'Не удалось загрузить детали изменения:',
       detailNone: 'Различий не обнаружено — черновик совпадает с опубликованной версией.',
+      fieldOrderChanged: 'Порядок полей изменён',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Включает изменения, подготовленные ИИ-копилотом',
       draftedByMcpClient: 'Включает изменения, подготовленные MCP-клиентом «{{client}}»',
@@ -4667,6 +4689,8 @@ const ru = {
     },
   },
   filterBuilder: {
+    currency: 'Валюта',
+    currencyNeedsAnd: 'Денежная сумма сравнивается в выбранной валюте, только когда должны выполняться все условия (И).',
     where: "Где",
     and: "И",
     or: "ИЛИ",

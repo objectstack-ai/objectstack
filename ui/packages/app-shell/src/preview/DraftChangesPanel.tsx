@@ -85,7 +85,12 @@ import { MetadataProtectionFields, stripReadDecorations } from '@objectstack/spe
 // objectui#12929 — the ONE discriminator of an authored default's shape, the
 // same function the batch door's backfill judgement calls. Moves nothing onto
 // the eager graph for the reason recorded above (`vendor-objectstack`).
-import { discriminateDefaultValueShape, provisionPrimary } from '@objectstack/spec/data';
+import {
+  discriminateDefaultValueShape,
+  injectedSystemColumnDefs,
+  isInjectedColumnDefinition,
+  provisionPrimary,
+} from '@objectstack/spec/data';
 import { diffFields, readFields } from '../views/metadata-admin/previews/object-fields-io.js';
 // objectui#13125 — the Data pillar's rule for a column the platform injected
 // and hides (objectui#11780), reused rather than restated. A leaf module with
@@ -313,6 +318,13 @@ export interface EntryChangeDetail {
      * A Map, never a plain object: `__proto__` is a legal field name.
      */
     labels: ReadonlyMap<string, string>;
+    /**
+     * objectstack#27516 — publishing changes the order of the fields both
+     * bodies declare. An `object`'s field order is content (the spec declares
+     * it the display order), so a pure reorder publishes a new version; see
+     * {@link fieldOrderChanged}.
+     */
+    reordered: boolean;
   } | null;
   /**
    * Node-level diff of a flow's `nodes` (objectstack#27356): each node is
@@ -368,7 +380,9 @@ export interface FlowNodeRow {
 /** True when the detail lists nothing: no field row, no node row, no key row and no generated row. */
 function isEmptyChangeDetail(detail: EntryChangeDetail): boolean {
   const { fields, nodes, keys, generated } = detail;
-  const fieldRows = fields ? fields.added.length + fields.changed.length + fields.removed.length : 0;
+  const fieldRows = fields
+    ? fields.added.length + fields.changed.length + fields.removed.length + (fields.reordered ? 1 : 0)
+    : 0;
   const nodeRows = nodes ? nodes.added.length + nodes.changed.length + nodes.removed.length : 0;
   return fieldRows + nodeRows + keys.added.length + keys.changed.length + keys.removed.length + generated.length === 0;
 }
@@ -497,6 +511,50 @@ function withoutProtectionEnvelope(body: Record<string, unknown>): Record<string
   return rest;
 }
 
+/**
+ * objectstack#27516 — does publishing `cur` over `pub` change the order of the
+ * object's fields? The publish door already says yes: its no-op test compares
+ * content hashes under `canonicalize(body, type)` (`@objectstack/metadata-core`),
+ * whose `ORDERED_MAPS` table keeps the key order of exactly one map, an
+ * `object`'s `fields`, so a pure reorder publishes. That module hashes with
+ * `node:crypto` and is not a dependency of this package, so the comparison is
+ * restated here for that one row, gated on the same type; a row added to that
+ * table owes a row here.
+ *
+ * The door compares the bodies it STORES, and the `/meta` reads this drill-in
+ * diffs add what the write strips again, so those fields are left out on
+ * either side before the orders are compared:
+ *
+ * - a column the platform injects, while its definition is byte-for-byte the
+ *   platform's (`isInjectedColumnDefinition` over `injectedSystemColumnDefs`,
+ *   `@objectstack/spec/data`): the read puts it ahead of the declared fields
+ *   (`applyInjectedSystemColumns`) and the write takes it out
+ *   (`stripInjectedSystemColumns`), so its place is never the author's;
+ * - a column the platform injects and hides (`isStudioHiddenSystemField`,
+ *   the search companion among them), which the registry materializes on read.
+ *
+ * Only fields both bodies declare are compared: an added or a removed field is
+ * already a row of its own.
+ */
+function fieldOrderChanged(pub: Record<string, unknown>, cur: Record<string, unknown>): boolean {
+  const storedOrder = (body: Record<string, unknown>): string[] => {
+    const injected = injectedSystemColumnDefs(body);
+    return readFields(body.fields)
+      .entries.filter(({ name, def }) => {
+        if (isStudioHiddenSystemField(def)) return false;
+        const platform = Object.prototype.hasOwnProperty.call(injected, name) ? injected[name] : undefined;
+        return !(platform && isInjectedColumnDefinition(def, platform));
+      })
+      .map((e) => e.name);
+  };
+  const before = storedOrder(pub);
+  const after = storedOrder(cur);
+  const inBefore = new Set(before);
+  const inAfter = new Set(after);
+  const kept = after.filter((name) => inBefore.has(name));
+  return before.filter((name) => inAfter.has(name)).some((name, i) => name !== kept[i]);
+}
+
 /** Each field's definition by name, in either `fields` shape the diff reads. */
 function fieldDefsByName(fieldsInput: unknown): Map<string, Record<string, unknown>> {
   return new Map(readFields(fieldsInput).entries.map((e) => [e.name, e.def] as const));
@@ -592,7 +650,9 @@ export function computeChangeDetail(
       const label = fieldLabelOf(curDefs.get(name) ?? pubDefs.get(name));
       if (label !== undefined) labels.set(name, label);
     }
-    fields = { added, changed, removed, labels };
+    // objectstack#27516 — the order the publish door hashes, for an `object` only.
+    const reordered = type === 'object' && fieldOrderChanged(pub, cur);
+    fields = { added, changed, removed, labels, reordered };
   }
   const isNew = published === null;
   const names = new Set([...Object.keys(pub), ...Object.keys(cur)]);
@@ -987,6 +1047,12 @@ function EntryDetail({
       {fields?.removed.map((name) => (
         <FieldRow key={`-${name}`} kind="removed" name={name} label={fields.labels.get(name)} />
       ))}
+      {fields?.reordered && (
+        // objectstack#27516 — a pure reorder publishes a new version, so it is a row.
+        <p className={`text-xs ${FIELD_ROW_TONE.changed}`} data-testid="draft-field-order-row">
+          {FIELD_ROW_MARK.changed} {t('preview.changes.fieldOrderChanged', { defaultValue: 'Field order changed' })}
+        </p>
+      )}
       {/* objectstack#27356 — a flow's nodes, each by its label, in the field rows' shape. */}
       {nodes?.added.map((n) => (
         <FieldRow key={`n+${n.id}`} kind="added" name={n.id} label={n.label} testId="draft-node-row" />
