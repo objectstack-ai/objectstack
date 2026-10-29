@@ -30,11 +30,11 @@ interface Boot {
   ctx: Record<string, unknown> | undefined;
 }
 
-function emailDouble(defaultFrom: EmailAddress | undefined = CONFIGURED, withAccessor = true) {
+function emailDouble(defaultFrom: EmailAddress | null = CONFIGURED, withAccessor = true) {
   const send = vi.fn(async (_input: SendEmailInput) => ({ id: 'eml_1', status: 'sent' as const, messageId: 'm1' }));
   const service: Partial<IEmailService> = {
     send,
-    ...(withAccessor ? { getDefaultFrom: () => defaultFrom } : {}),
+    ...(withAccessor ? { getDefaultFrom: () => defaultFrom ?? undefined } : {}),
   };
   return { service, send };
 }
@@ -124,7 +124,7 @@ describe('POST /api/v1/email/send — the capability', () => {
     const out = await post(MESSAGE);
 
     expect(out.status).toBe(401);
-    expect(out.body.error.code).toBe('UNAUTHENTICATED');
+    expect(out.body.code).toBe('UNAUTHENTICATED');
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -200,7 +200,7 @@ describe('POST /api/v1/email/send — the sender is the configured sender', () =
   });
 
   it('with no configured sender, a caller `from` is refused — unknown is not permission', async () => {
-    const { service, send } = emailDouble(undefined);
+    const { service, send } = emailDouble(null);
     const { post } = boot({ service, ctx: ADMIN });
     const out = await post({ ...MESSAGE, from: 'no-reply@acme.example' });
 
