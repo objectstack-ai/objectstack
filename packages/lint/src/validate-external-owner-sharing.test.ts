@@ -5,6 +5,7 @@ import { defineStack } from '@objectstack/spec';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import {
   PUBLIC_READ_WRITE_WAY_OUT,
+  READ_ONLY_EXTERNAL_WAY_OUT,
   SECURITY_EXTERNAL_OWNER_UNMAPPED,
   declareOwnershipColumnWayOut,
   validateExternalOwnerSharing,
@@ -265,13 +266,35 @@ describe("security-owd-unset's fix line on a writable external object", () => {
     expect(hint).not.toContain('recommended');
   });
 
-  it('keeps the private recommendation where this rule judges nothing', () => {
-    const ownerField = { ...NAME_FIELD, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner' } };
+  it('words the mapped case as this rule does: only the declaration is missing', () => {
+    const hint = owdUnsetHint({ objects: [ext({}, { columnMap: { assignee: 'owner_id' } })] }, 'object "remote_row"');
+    expect(hint).toContain(declareOwnershipColumnWayOut('owner_id', true));
+    expect(hint).toContain(PUBLIC_READ_WRITE_WAY_OUT);
+    expect(hint).not.toContain('recommended');
+  });
+
+  // [#27425] On 'private', an external object whose owner_id is the platform's unprovable anchor
+  // reads no row for a member, whatever its writability: a read-only binding is told 'public_read'.
+  it("recommends 'public_read' on a read-only binding with an unprovable owner", () => {
     const readOnlyDatasource = { name: 'remote', schemaMode: 'external', external: { allowWrites: false } };
+    const { writable: _writable, ...noWritable } = ext().external;
     for (const [label, stack] of [
-      ['read-only binding', { objects: [ext({}, { writable: false })] }],
-      ['declared owner_id', { objects: [ext({ fields: ownerField })] }],
+      ['writable: false', { objects: [ext({}, { writable: false })] }],
+      ['writable unset', { objects: [{ ...ext(), external: noWritable }] }],
       ['allowWrites: false', { datasources: [readOnlyDatasource], objects: [ext()] }],
+    ] as const) {
+      const hint = owdUnsetHint(stack, 'object "remote_row"');
+      expect(hint, label).toBe(READ_ONLY_EXTERNAL_WAY_OUT);
+      expect(hint, label).not.toContain('recommended');
+    }
+  });
+
+  it('keeps the private recommendation where the owner is provable', () => {
+    const ownerField = { ...NAME_FIELD, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner' } };
+    for (const [label, stack] of [
+      ['declared owner_id, writable', { objects: [ext({ fields: ownerField })] }],
+      ['declared owner_id, read-only', { objects: [ext({ fields: ownerField }, { writable: false })] }],
+      ['columnMap onto owner_id, read-only', { objects: [ext({}, { writable: false, columnMap: { assignee: 'owner_id' } })] }],
     ] as const) {
       expect(owdUnsetHint(stack, 'object "remote_row"'), label).toBe(OLD_HINT);
     }

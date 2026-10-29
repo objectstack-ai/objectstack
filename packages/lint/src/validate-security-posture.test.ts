@@ -148,6 +148,7 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     // [#27472] The writable-external exception to the 'private' recommendation, and the rule it defers to.
     expect(text).toContain('external.writable: true');
     expect(text).toContain('os explain security-external-owner-unmapped');
+    expect(text).toContain("is told to declare 'public_read' instead");
     expect(finding.message).not.toContain('incident');
   });
 

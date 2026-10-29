@@ -127,8 +127,10 @@ import { indexObjectGraph, nearestName, packagesOf, recordsOf, type ObjectGraph 
 import { injectedColumnsFor } from './system-fields.js';
 import {
   PUBLIC_READ_WRITE_WAY_OUT,
+  READ_ONLY_EXTERNAL_WAY_OUT,
   declareOwnershipColumnWayOut,
   externalOwnershipGap,
+  hasUnprovableOwnerAnchor,
   readOnlyExternalDatasources,
 } from './validate-external-owner-sharing.js';
 
@@ -810,12 +812,17 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
 
     if (!isSystemObject(obj)) {
       if (owd == null) {
-        // [#27472] On a writable external object whose ownership column no
-        // remote row serves, 'private' is the shape that refuses every member
-        // edit (`security-external-owner-unmapped`), so the fix line names that
-        // rule's ways out instead of recommending it. Every other object —
-        // an external one that declares its owner column included — keeps the
-        // 'private' recommendation.
+        // [#27472] 'private' is never recommended where it refuses the member:
+        //  - a writable external binding whose ownership column no remote row
+        //    serves gets `security-external-owner-unmapped`'s two ways out;
+        //  - any other external object whose owner anchor is unprovable (a
+        //    read-only binding, or one on a datasource that lets no write
+        //    through) gets 'public_read': on 'private' a member reads no row
+        //    (#27425), whatever the binding's writability. The publish gate
+        //    sees no datasources, so there an allowWrites: false datasource
+        //    reads as writable; both doors still never say 'private'.
+        // Every other object, an external one that declares its owner
+        // included, keeps the 'private' recommendation.
         const ownershipGap = externalOwnershipGap(obj, readOnlyDatasources);
         findings.push({
           severity: 'error',
@@ -830,10 +837,13 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
             `custom object declares no sharingModel (OWD); the runtime falls back to 'private', ` +
             `but the baseline must be an authored decision`,
           hint: ownershipGap
-            ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ${declareOwnershipColumnWayOut(ownershipGap.column)} ` +
+            ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ` +
+              `${declareOwnershipColumnWayOut(ownershipGap.column, ownershipGap.mapped)} ` +
               `and declare sharingModel: 'private' or 'public_read'; 'controlled_by_parent' for master-detail children`
-            : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
-              `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
+            : hasUnprovableOwnerAnchor(obj)
+              ? READ_ONLY_EXTERNAL_WAY_OUT
+              : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
+                `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
         });
       } else if (typeof owd === 'string' && OWD_ALIAS_FIX[owd]) {
         // Reachable ONLY through the unparsed doors (`os lint` on a raw
