@@ -379,6 +379,14 @@ const de = {
       postalCode: "Postleitzahl",
       country: "Land",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Währung auswählen',
+      search: 'Währung suchen…',
+      noResults: 'Keine Währung gefunden',
+      available: 'Verfügbar',
+      all: 'Alle Währungen (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Aus",
       completed: "Abgeschlossen",
@@ -4445,6 +4453,8 @@ const de = {
     },
   },
   filterBuilder: {
+    currency: 'Währung',
+    currencyNeedsAnd: 'Ein Währungsbetrag wird nur dann in der gewählten Währung verglichen, wenn alle Bedingungen zutreffen müssen (UND).',
     where: "Wo",
     and: "UND",
     or: "ODER",

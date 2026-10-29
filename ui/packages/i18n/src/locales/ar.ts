@@ -397,6 +397,14 @@ const ar = {
       postalCode: "الرمز البريدي",
       country: "الدولة",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'اختر عملة',
+      search: 'ابحث عن عملة…',
+      noResults: 'لم يتم العثور على عملة',
+      available: 'المتاحة',
+      all: 'كل العملات (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — إيقاف",
       completed: "مكتمل",
@@ -4886,6 +4894,8 @@ const ar = {
     },
   },
   filterBuilder: {
+    currency: 'العملة',
+    currencyNeedsAnd: 'لا تُقارن المبالغ بالعملة المختارة إلا عندما يجب تحقق كل الشروط (AND).',
     where: "حيث",
     and: "و",
     or: "أو",

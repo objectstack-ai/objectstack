@@ -379,6 +379,14 @@ const ko = {
       postalCode: "우편번호",
       country: "국가",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '통화 선택',
+      search: '통화 검색…',
+      noResults: '통화를 찾을 수 없음',
+      available: '사용 가능',
+      all: '모든 통화 (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — 꺼짐",
       completed: "완료됨",
@@ -4444,6 +4452,8 @@ const ko = {
     },
   },
   filterBuilder: {
+    currency: '통화',
+    currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
     where: "조건",
     and: "그리고",
     or: "또는",

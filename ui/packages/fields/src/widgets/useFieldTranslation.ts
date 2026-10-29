@@ -20,6 +20,12 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // "LABEL — Off" badge (`{{label}}` is the column label the face is handed)
   // and the completion indicator's two accessible names. Same values as the
   // `en` pack, so a provider-less render reads what the literals did.
+  // ADR-0144 D2 — `CurrencyCodeField`, the record-currency code select.
+  'fields.currencyCode.placeholder': 'Select currency',
+  'fields.currencyCode.search': 'Search currency…',
+  'fields.currencyCode.noResults': 'No currency found',
+  'fields.currencyCode.available': 'Available',
+  'fields.currencyCode.all': 'All currencies (ISO 4217)',
   'fields.boolean.offBadge': '{{label}} — Off',
   'fields.boolean.completed': 'Completed',
   'fields.boolean.notCompleted': 'Not completed',

@@ -374,6 +374,17 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.maxLength': '最大长度',
   'designer.field.valueDomain': '值域',
   'designer.field.valueDomainNone': '— 无 —',
+  // ADR-0144 D2 — the currency section (`CurrencyConfigField`).
+  'designer.field.currency.mode': '币种模式',
+  'designer.field.currency.modeDynamic': '动态 — 组织币种',
+  'designer.field.currency.modeFixed': '固定 — 本字段一种币种',
+  'designer.field.currency.modeRecord': '按记录 — 每条记录自带币种',
+  'designer.field.currency.defaultCurrency': '币种（ISO 4217 代码）',
+  'designer.field.currency.currencyField': '币种字段',
+  'designer.field.currency.currencyFieldNone': '— 选择币种字段 —',
+  'designer.field.currency.createCodeField': '创建币种字段',
+  'designer.field.currency.codeFieldLabel': '币种',
+  'designer.field.currency.recordHint': '列出本对象中值域为 ISO 4217 币种的文本字段。每条记录在其中保存自己的币种代码，金额按该币种显示。',
   // Object basics (no-selection default inspector)
   'designer.object.kind': '对象',
   'designer.object.section.basic': '基础信息',

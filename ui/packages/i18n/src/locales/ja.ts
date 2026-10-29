@@ -379,6 +379,14 @@ const ja = {
       postalCode: "郵便番号",
       country: "国",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '通貨を選択',
+      search: '通貨を検索…',
+      noResults: '通貨が見つかりません',
+      available: '利用可能',
+      all: 'すべての通貨（ISO 4217）',
+    },
     boolean: {
       offBadge: "{{label}} — オフ",
       completed: "完了",
@@ -4447,6 +4455,8 @@ const ja = {
     },
   },
   filterBuilder: {
+    currency: '通貨',
+    currencyNeedsAnd: '通貨金額は、すべての条件を満たす必要がある場合（AND）にのみ、選択した通貨で比較されます。',
     where: "条件",
     and: "かつ",
     or: "または",
