@@ -1154,12 +1154,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       revoke_api_key: {
         label: "Revoke API Key",
         confirmText: "Revoke this API key? Any clients using it will immediately lose access.",
-        successMessage: "API key revoked"
+        successMessage: "API key \"{{ record.name }}\" revoked"
       },
       restore_api_key: {
         label: "Restore API Key",
         confirmText: "Restore this revoked API key? Existing clients holding the key will regain access.",
-        successMessage: "API key restored"
+        successMessage: "API key \"{{ record.name }}\" restored"
       }
     }
   },
