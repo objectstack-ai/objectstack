@@ -4382,11 +4382,13 @@ describe('AuthManager', () => {
       expect((m as any).parseHashes('["a","b"]')).toEqual(['a', 'b']);
     });
 
-    it('is a no-op when history depth is 0', async () => {
+    it('is a no-op when history depth is 0 and no forced change is outstanding', async () => {
       const engine = makeEngine(acct());
       const m = mgr(engine, { passwordHistoryCount: 0 });
       await expect((m as any).assertPasswordNotReused('u1', 'current', stubVerify)).resolves.toBeUndefined();
-      expect(engine.findOne).not.toHaveBeenCalled();
+      // The one read is the forced-change flag on `sys_user`; with none
+      // outstanding the credential row is never read.
+      expect(engine.findOne.mock.calls.map((c: any[]) => c[0])).toEqual(['sys_user']);
     });
 
     it('rejects reuse of the CURRENT password', async () => {
