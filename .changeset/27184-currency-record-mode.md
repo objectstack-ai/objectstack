@@ -1,6 +1,7 @@
 ---
 '@objectstack/spec': minor
 '@object-ui/i18n': minor
+'@objectstack/platform-objects': minor
 ---
 
 feat(spec): `currencyMode: 'record'` + `currencyField` — a record-mode amount points at a sibling ISO 4217 code field (ADR-0144 D2)
@@ -17,7 +18,7 @@ fields: {
 }
 ```
 
-- `currencyField` is required under `record` and refused under `dynamic` and `fixed`.
+- `currencyField` is required under `record`, refused under `dynamic` and `fixed`, and never empty; `defaultCurrency` is refused under `record`.
 - The object refuses a `currencyField` that names no other declared field, a field that is not `text`, or a `text` field without `valueDomain: 'iso_4217_currency'`. Each refusal is located at `fields.FIELD.currencyConfig.currencyField` and lists the object's candidate code fields.
 - `dynamic` and `fixed` configs parse exactly as before; an app that never writes `record` sees no change.
 
