@@ -317,9 +317,17 @@ export const FORCED_ROTATION_REUSE_MESSAGE =
  * issued by the admin create-user, set-user-password and import-users doors)
  * outstanding for `userId`? Read as the system; the column is `readonly`, not
  * `internal`, so the row carries it. Fails open (false) on a lookup error, as
- * every read in `assertPasswordNotReused` does.
+ * every read in `assertPasswordNotReused` does, but never silently: the
+ * failure is reported through the host's durability-degradation channel (the
+ * one `stampPasswordChangedAt` reports its write through), because the
+ * request then looks normal while a security control did not run.
  */
-async function isForcedRotationPending(engine: any, userId: string, context: unknown): Promise<boolean> {
+async function isForcedRotationPending(
+  host: Pick<PasswordSessionPolicyHost, 'logDurabilityDegradation'>,
+  engine: any,
+  userId: string,
+  context: unknown,
+): Promise<boolean> {
   try {
     const u = await engine.findOne('sys_user', {
       where: { id: userId },
@@ -327,14 +335,23 @@ async function isForcedRotationPending(engine: any, userId: string, context: unk
       context,
     });
     return u?.must_change_password === true || u?.must_change_password === 1;
-  } catch {
+  } catch (e) {
+    host.logDurabilityDegradation(
+      'AuthManager: the sys_user forced-change flag (must_change_password) could NOT be read '
+        + 'for a password change or reset — the request goes on as though no forced change were '
+        + 'outstanding, so the check that a forced change moves the user to a new password did not '
+        + 'run for it, and nothing else looks wrong. Remedy: make the sys_user read succeed; the '
+        + 'next change or reset reads the flag again.',
+      e,
+      { object: 'sys_user', fields: ['must_change_password'] },
+    );
     return false;
   }
 }
 
 /** The body of `AuthManager#assertPasswordNotReused`; the method's docblock there is its contract. */
 export async function assertPasswordNotReused(
-  this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'parseHashes'>,
+  this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation' | 'parseHashes'>,
   userId: string,
   candidate: string,
   verify?: (data: { password: string; hash: string }) => Promise<boolean>,
@@ -351,7 +368,7 @@ export async function assertPasswordNotReused(
   // Every door that clears the flag (`stampPasswordChangedAt`, from the
   // after-hook on `/change-password` and `/reset-password`) passes through
   // here first.
-  const forced = await isForcedRotationPending(engine, userId, SYSTEM_CTX);
+  const forced = await isForcedRotationPending(this, engine, userId, SYSTEM_CTX);
   if (count <= 0 && !forced) return undefined;
   let account: any;
   try {

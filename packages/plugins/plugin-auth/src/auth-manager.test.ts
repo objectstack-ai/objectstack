@@ -4391,6 +4391,26 @@ describe('AuthManager', () => {
       expect(engine.findOne.mock.calls.map((c: any[]) => c[0])).toEqual(['sys_user']);
     });
 
+    it('reports a failed forced-change flag read through the durability channel and fails open', async () => {
+      const engine = makeEngine(acct());
+      engine.findOne.mockImplementation(async (o: string) => {
+        if (o === 'sys_user') throw new Error('sys_user read refused');
+        return null;
+      });
+      const logger = { warn: vi.fn(), info: vi.fn() };
+      const m = mgr(engine, { passwordHistoryCount: 0, logger });
+      logger.warn.mockClear();
+      // Fail open: treated as no forced change, so depth 0 accepts.
+      await expect((m as any).assertPasswordNotReused('u1', 'current', stubVerify)).resolves.toBeUndefined();
+      // ...but never silently: exactly one report naming the unread flag.
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn.mock.calls[0][1]).toMatchObject({
+        object: 'sys_user',
+        fields: ['must_change_password'],
+        error: 'sys_user read refused',
+      });
+    });
+
     it('rejects reuse of the CURRENT password', async () => {
       const m = mgr(makeEngine(acct()), { passwordHistoryCount: 5 });
       await expect((m as any).assertPasswordNotReused('u1', 'current', stubVerify)).rejects.toMatchObject({
