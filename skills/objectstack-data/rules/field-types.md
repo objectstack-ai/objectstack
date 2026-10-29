@@ -181,7 +181,7 @@ Stored as JSON on the parent row — no separate table / FK:
 `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
 (default), the tenant `localization.currency`, else a plain number (never
 `$`); `'record'`, each record's code in the `text` field `currencyField`
-names, declaring `valueDomain: 'iso_4217_currency'`. Under
+names (by convention `currency_code`), with `valueDomain: 'iso_4217_currency'`. Under
 `'fixed'`/`'dynamic'` a measure's own `currency` wins.
 
 ### Select with Default
