@@ -82,14 +82,14 @@ const oneDimension = (rows: Array<Record<string, unknown>>) =>
 
 const renderChart = (
   chartType: string,
-  chart: { data: Array<Record<string, unknown>>; xAxisKey: string; series: unknown[] },
+  chart: { data: Array<Record<string, unknown>>; xAxisKey: string | undefined; series: unknown[] },
   extra: Record<string, unknown> = {},
 ) =>
   render(
     <AdvancedChartImpl
       chartType={chartType as any}
       data={chart.data as any}
-      xAxisKey={chart.xAxisKey}
+      xAxisKey={chart.xAxisKey ?? 'stage'}
       series={chart.series as any}
       isAnimationActive={false}
       {...extra}
