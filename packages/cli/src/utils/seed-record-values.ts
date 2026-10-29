@@ -41,6 +41,20 @@
  *
  * A field the object does not declare is left to the answer it already has
  * (`defineSeed` refuses it at load of the config).
+ *
+ * ## Known limits
+ *
+ *  - A `beforeInsert` hook is not run here. The seed write runs object hooks
+ *    (the seed context skips automation triggers, not hooks), and they run
+ *    BEFORE the record validator, so a hook that rewrites a seed value into an
+ *    accepted shape lets the load store it while this walk refuses it as
+ *    written. The authoring door has no hook runtime by design; a refusal of
+ *    a value a hook would have fixed comes from here.
+ *  - Coverage is the folded stack's: `authoringRuleUnionStack` folds the
+ *    stack's own collections and its `packages[]` bodies. A dataset under
+ *    `manifest.data` whose object is declared only under `manifest.objects`
+ *    (outside `packages[]`) finds no field map and goes unjudged, by the
+ *    dataset clause above: fail-open, never a false refusal.
  */
 
 import { createLogger } from '@objectstack/core';

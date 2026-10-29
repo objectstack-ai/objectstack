@@ -1976,7 +1976,9 @@ export function validateRecord(
  *
  * What it leaves to the load, by construction:
  *  - a missing value (`undefined`, `null`, blank): whether the row needs one is
- *    `required`, which a `defaultValue` or a hook may still satisfy;
+ *    `required`, which a `defaultValue` or a hook may still satisfy. A
+ *    SUPPLIED empty array on a required multi-value field is not missing: it
+ *    is refused `required` here, as the insert path refuses it;
  *  - a name the schema does not declare: the undeclared-field refusal is
  *    another door's;
  *  - every non-value rule: validation rules, references resolving, permissions.
