@@ -331,6 +331,12 @@ describe('ObjectApiPanel example body: no record id to look up (objectstack#2749
     expect(screen.getByText(/owner_id/)).toBeInTheDocument();
   });
 
+  it('still names the fields it left out when none of them is shown', () => {
+    const body = shownBody(served({ account: { type: 'lookup', label: 'Account', reference: 'showcase_account' } }));
+    expect(body).toEqual({});
+    expect(screen.getByText(/Optional fields not shown: owner_id, account/)).toBeInTheDocument();
+  });
+
   it('leaves every optional reference out (showcase Account and field zoo)', () => {
     expectAcceptedAsItStands(served(ACCOUNT_FIELDS));
     cleanup();

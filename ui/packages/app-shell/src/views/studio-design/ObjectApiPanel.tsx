@@ -293,7 +293,7 @@ export function ObjectApiPanel({
         ))}
       </div>
 
-      {Object.keys(exampleBody).length > 0 && (
+      {(Object.keys(exampleBody).length > 0 || omitted.length > 0) && (
         <div className="rounded-lg border">
           <header className="border-b px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
             {t('engine.studio.api.body', locale)}
