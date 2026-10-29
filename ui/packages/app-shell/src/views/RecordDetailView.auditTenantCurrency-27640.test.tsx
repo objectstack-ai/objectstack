@@ -143,7 +143,7 @@ function makeMetadata() {
 }
 
 /**
- * The rendered diff lines, keyed by field label, with `currency` as the
+ * The rendered diff parts, keyed by field label, with `currency` as the
  * tenant default (none when undefined) and `en-US` as the display locale.
  */
 async function diffLines(currency: string | undefined): Promise<Record<string, string>> {
@@ -165,14 +165,19 @@ async function diffLines(currency: string | undefined): Promise<Record<string, s
       </LocalizationProvider>
     </I18nProvider>,
   );
+  // One audit entry draws its changes as one compact line (`data-stream-change`),
+  // joined with `; `, so each field's part is split out and keyed by label.
   const lines: Record<string, string> = {};
   await waitFor(() => {
+    const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
+      (el.textContent ?? '').includes('Amount'),
+    );
+    expect(line, 'no History diff line').toBeTruthy();
+    const parts = (line!.textContent ?? '').replace(/\s+/g, ' ').trim().split('; ');
     for (const label of ['Amount', 'List price']) {
-      const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
-        (el.textContent ?? '').startsWith(label),
-      );
-      expect(line, `no diff line for ${label}`).toBeTruthy();
-      lines[label] = (line!.textContent ?? '').replace(/\s+/g, ' ').trim();
+      const part = parts.find((p) => p.startsWith(`${label} `));
+      expect(part, `no change for ${label} in: ${parts.join(' | ')}`).toBeTruthy();
+      lines[label] = part!;
     }
   });
   cleanup();
