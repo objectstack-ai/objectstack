@@ -94,6 +94,8 @@ describe('suite 1 — each retired literal is REFUSED, by name (objectstack#2592
     expect(issue?.message).toContain(`\`${node.type}\` is a RETIRED node type`);
     expect(issue?.message).toContain('@object-ui/plugin-ai');
     expect(issue?.message).toContain('Remove the node from the page');
+    // Runtime refusal prose carries no tracker number (root AGENTS.md).
+    expect(issue?.message).not.toMatch(/#\d/);
   });
 });
 
@@ -131,7 +133,10 @@ describe('suite 4 — the published zod names are `never` tombstones', () => {
     for (const value of [{}, { type: 'ai-form-assist' }, 'x']) {
       const result = schema.safeParse(value);
       expect(result.success).toBe(false);
-      expect(result.error?.issues[0]?.message).toContain('objectstack#25921');
+      const message = result.error?.issues[0]?.message;
+      expect(message).toContain(`\`${name}\` mirrored a node type of \`@object-ui/plugin-ai\`, which retired`);
+      expect(message).toContain('Remove the reference');
+      expect(message).not.toMatch(/#\d/);
     }
   });
 

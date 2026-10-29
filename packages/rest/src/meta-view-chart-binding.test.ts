@@ -9,7 +9,8 @@
  *
  * Before the change (measured on `origin/main` @ `e148ca98`): the flattened
  * list overlay member accepted `type: 'chart'` with no `chart` block, and an
- * `options.chart` bag holding only `chartType`.
+ * `options.chart` bag holding only `chartType`. (#25923 retired the bag: it is
+ * refused at `options` whatever it holds.)
  *
  * #26847 extends the file one binding deeper: a chart whose `dataset` names no
  * declared dataset, or whose `values` names no measure of it, is refused too.
@@ -151,7 +152,7 @@ describe("#22491 PUT /api/v1/meta/view refuses a `type: 'chart'` list view that 
         expect(hit!.message!.startsWith(NO_BLOCK_VERDICT)).toBe(true);
     });
 
-    it('an `options.chart` bag holding only `chartType`: 422 INVALID_METADATA at the bag\'s missing keys, and nothing is stored', async () => {
+    it('an `options.chart` bag holding only `chartType`: 422 INVALID_METADATA at `options` (the retired bag), and nothing is stored', async () => {
         const { put, storedRows } = await boot();
         const res = await put(
             'crm_lead.pipeline_chart',
@@ -162,8 +163,8 @@ describe("#22491 PUT /api/v1/meta/view refuses a `type: 'chart'` list view that 
         expect(res._json?.code).toBe('INVALID_METADATA');
         expect(await storedRows('crm_lead.pipeline_chart')).toEqual([]);
         const paths = issuesOf(res).map((i) => i.path);
-        expect(paths, JSON.stringify(res._json)).toContain('options.chart.dataset');
-        expect(paths).toContain('options.chart.values');
+        expect(paths, JSON.stringify(res._json)).toContain('options');
+        expect(paths).not.toContain('options.chart.dataset');
     });
 
     it('the control: a chart view that binds a dataset and a measure answers 200 and is stored with its binding', async () => {

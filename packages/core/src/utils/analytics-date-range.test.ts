@@ -42,6 +42,7 @@ import {
   resolveAnalyticsDateRangePreset,
   resolveAnalyticsDateRangeString,
   analyticsDateRangeUnrecognizedError,
+  dateRangeWindowBounds,
 } from './analytics-date-range.js';
 
 /** A frozen reference instant, deliberately mid-week, mid-month, mid-quarter. */
@@ -367,5 +368,29 @@ describe('#17341 — the END of every window is one CALENDAR day after the presc
         const end = Date.parse(resolveAnalyticsDateRangePreset('this_week', { now, timezone: tz }).end);
         expect(end - lastDayStart).toBe(25 * 60 * 60 * 1000);
         expect(end - lastDayStart).not.toBe(24 * 60 * 60 * 1000);
+    });
+});
+
+describe('dateRangeWindowBounds — ADR-0053\'s one window rule (#27172, #27272)', () => {
+    const now = new Date('2026-09-09T12:00:00Z');
+
+    for (const timezone of ['America/Los_Angeles', 'UTC', 'Asia/Shanghai']) {
+        it(`${timezone}: this_quarter on a date column is Jul 1 through Sep 30`, () => {
+            const window = resolveAnalyticsDateRangePreset('this_quarter', { now, timezone });
+            expect(dateRangeWindowBounds(window, timezone, true)).toEqual({ $gte: '2026-07-01', $lte: '2026-09-30' });
+        });
+    }
+
+    it('a preset on any other column keeps its instants and stops before its end', () => {
+        const window = resolveAnalyticsDateRangePreset('this_quarter', { now, timezone: 'America/Los_Angeles' });
+        expect(dateRangeWindowBounds(window, 'America/Los_Angeles', false)).toEqual({
+            $gte: '2026-07-01T07:00:00.000Z',
+            $lt: '2026-10-01T07:00:00.000Z',
+        });
+    });
+
+    it('a caller\'s explicit window is handed back bound for bound, inclusive', () => {
+        const window = { start: '2026-07-01', end: '2026-09-30', endExclusive: false };
+        expect(dateRangeWindowBounds(window, 'America/Los_Angeles', true)).toEqual({ $gte: '2026-07-01', $lte: '2026-09-30' });
     });
 });

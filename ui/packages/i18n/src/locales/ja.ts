@@ -165,6 +165,7 @@ const ja = {
     noPermissionToSave: "このレコードを保存する権限がありません。",
     noPermissionToCreate: "{{object}}を作成する権限がありません。フィールドは読み取り専用です。",
     noPermissionToEdit: "{{object}}を編集する権限がありません。フィールドは読み取り専用です。",
+    noPermissionToEditRecord: "このレコードを編集する権限がありません。フィールドは読み取り専用です。",
     submitFailed: "保存できませんでした。もう一度お試しください。",
     uploadInFlight: "アップロードが完了してから保存してください。",
     clearedOnHide: "現在の値に該当しなくなった項目をクリアしました: {{fields}}",

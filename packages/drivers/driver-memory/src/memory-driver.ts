@@ -2360,6 +2360,20 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
+   * [#27272] Is `field` on `object` declared `date`? For the analytics (cube)
+   * face's `dateRange` window, which compares a `date` column by CALENDAR DAYS
+   * and every other column by instants (ADR-0053, `dateRangeWindowBounds`).
+   *
+   * Keyed on the DECLARED kind ({@link temporalFields}, populated by
+   * {@link syncSchema}) for the reason {@link filterComparandStorageForm} is:
+   * only the driver holds it. An object never declared answers `false` — the
+   * driver does not guess types from values.
+   */
+  isDeclaredDateField(object: string | undefined, field: string): boolean {
+    return this.temporalKind(object, field) === 'date';
+  }
+
+  /**
    * [#5374] The pattern a `$contains` / `$notContains` comparand becomes — the
    * substring rule itself, for the analytics (cube) face.
    *

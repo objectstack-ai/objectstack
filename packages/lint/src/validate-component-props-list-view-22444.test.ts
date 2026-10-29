@@ -8,9 +8,11 @@
  * a bag holding `kanban.groupField` or `options.grid` — refused at every list
  * view door — drew no finding at all (the census on the card measured 0). The
  * row needs no dispatch change here: the rule reads `ComponentPropsMap` by
- * type. The pins are the ruling's list, at this door: `kanban.groupField` and
- * `options.grid` flagged naming the key; contract keys only pass; the retired
- * `objectName` / `viewType` flagged with the react tier's prescription. The
+ * type. The pins are the ruling's list, at this door: `kanban.groupField`
+ * flagged naming the key; an `options` bag flagged as the retired key it is
+ * since #25923 (the list overlay's tombstone, with its prescription); contract
+ * keys only pass; the retired `objectName` / `viewType` flagged with the react
+ * tier's prescription. The
  * schema half is pinned in `@objectstack/spec`
  * (`ui/component-list-view-row.test.ts`).
  *
@@ -21,7 +23,7 @@ import { REACT_RETIRED_OVERLAY_PROPS } from '@objectstack/spec/ui';
 import { describe, expect, it } from 'vitest';
 
 import { runAuthoringRules } from './authoring-rules.js';
-import { COMPONENT_PROPS_UNKNOWN_KEY, validateComponentProps } from './validate-component-props.js';
+import { COMPONENT_PROPS_INVALID, COMPONENT_PROPS_UNKNOWN_KEY, validateComponentProps } from './validate-component-props.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -45,9 +47,11 @@ describe('a page `list-view` node is judged as a list view (#22444)', () => {
     expect(shape(findings)).toEqual([[COMPONENT_PROPS_UNKNOWN_KEY, 'error', `${AT}.properties.kanban.groupField`]]);
   });
 
-  it('`options.grid` is flagged, naming the key', () => {
+  it('an `options` bag is flagged as the retired key, with the list overlay\'s prescription', () => {
     const findings = judge({ ...BOUND, options: { grid: { pageSize: 10 } } });
-    expect(shape(findings)).toEqual([[COMPONENT_PROPS_UNKNOWN_KEY, 'error', `${AT}.properties.options.grid`]]);
+    expect(shape(findings)).toEqual([[COMPONENT_PROPS_INVALID, 'error', `${AT}.properties.options`]]);
+    expect(findings[0]!.message).toContain("A list view's `options` bag was removed in @objectstack/spec 18.3.0");
+    expect(findings[0]!.message).toContain('a retired key is refused');
   });
 
   it.each([
@@ -75,7 +79,7 @@ describe('a page `list-view` node is judged as a list view (#22444)', () => {
     expect(mine.map((f) => [f.rule, f.path]).sort()).toEqual(
       [
         [COMPONENT_PROPS_UNKNOWN_KEY, `${AT}.properties.objectName`],
-        [COMPONENT_PROPS_UNKNOWN_KEY, `${AT}.properties.options.grid`],
+        [COMPONENT_PROPS_INVALID, `${AT}.properties.options`],
       ].sort(),
     );
   });

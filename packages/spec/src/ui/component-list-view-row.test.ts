@@ -13,7 +13,8 @@ import { LIST_VIEW_RETIRED_ALIASES } from './list-view-retired-aliases';
  * a page is judged as a list view.
  *
  * Pins the ruling's own list: a page `list-view` carrying `kanban.groupField`
- * or `options.grid` is flagged naming the key; one with contract keys only
+ * is flagged naming the key, and an `options` bag is flagged whole (#25923);
+ * one with contract keys only
  * passes; the old spellings `objectName` / `viewType` are flagged with the
  * react tier's prescription. Plus what the row is built from — the list view's
  * members and checks by reference, and the list overlay member's two
@@ -37,23 +38,22 @@ describe("ComponentPropsMap['list-view'] (#22444)", () => {
       expect(issues).toEqual([{ code: 'unrecognized_keys', path: 'kanban', keys: ['groupField'] }]);
     });
 
-    it('`options.grid` is flagged, naming the key on the `options` bag', () => {
-      expect(issuesOf({ options: { grid: { pageSize: 10 } } })).toEqual([
-        { code: 'unrecognized_keys', path: 'options', keys: ['grid'] },
-      ]);
-    });
-
-    it('`options.KIND` is judged by the kind\'s own block: an unknown key under it is flagged by name', () => {
-      expect(issuesOf({ options: { kanban: { groupField: 'owner' } } })).toEqual([
-        { code: 'unrecognized_keys', path: 'options.kanban', keys: ['groupField'] },
-      ]);
+    // [#25923] The bag is retired on the list overlay, whose member this row
+    // shares: any `options` is flagged at `options`, with the tombstone's text.
+    it.each([
+      ['`options.grid`', { grid: { pageSize: 10 } }],
+      ['an `options.KIND` block', { kanban: { groupField: 'owner' } }],
+      ['an empty bag', {}],
+    ])('%s is flagged whole at `options`, with the move-to-the-top-level prescription', (_label, options) => {
+      expect(issuesOf({ options })).toEqual([{ code: 'invalid_type', path: 'options', keys: undefined }]);
+      const r = row.safeParse({ options });
+      expect(r.success ? '' : r.error.issues[0]!.message).toMatch(/^A list view's `options` bag was removed in @objectstack\/spec 18\.3\.0/);
     });
 
     it.each([
       ['an object-bound kanban', { data: { provider: 'object', object: 'deal' }, type: 'kanban', columns: ['name'], kanban: { groupByField: 'stage', columns: ['name'] } }],
       ['a column-less node (bound by a saved view, or drawing the object\'s fields)', { data: { provider: 'object', object: 'deal' } }],
       ['an empty bag (the node binds through `dataSource`)', {}],
-      ['the legacy per-kind underlay, partial', { type: 'kanban', options: { kanban: { titleField: 'name' } } }],
       ['the shipped page node shape in the spec spelling', {
         data: { provider: 'object', object: 'crm_lead' },
         type: 'grid',
@@ -90,7 +90,7 @@ describe("ComponentPropsMap['list-view'] (#22444)", () => {
       }
     });
 
-    it('the two overlay-member differences: `columns` optional, `options` the overlay member\'s own judged bag', () => {
+    it('the two overlay-member differences: `columns` optional, `options` the overlay member\'s own tombstone', () => {
       expect((shape.columns as { unwrap: () => unknown }).unwrap()).toBe(ListViewSchema.shape.columns);
       expect(shape.options).toBe(VIEW_METADATA_MEMBERS.listOverlay.shape.options);
       // And nothing else: the row's keys are the list view's plus `options`.

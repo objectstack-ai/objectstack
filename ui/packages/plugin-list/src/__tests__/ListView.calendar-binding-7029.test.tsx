@@ -145,12 +145,13 @@ describe('ListView calendar branch — only ever restates a DECLARED binding (ob
     expect(props.titleField).toBe('name');
   });
 
-  it('CONTROL: forwards the legacy `options.calendar` nesting unchanged', async () => {
-    // The nesting app-shell's object page emits. A correctly configured view
-    // renders exactly as it did before this card.
+  it('CONTROL: forwards the block app-shell\'s object page relays unchanged', async () => {
+    // The block that page emits: under the legacy `options.calendar` nesting
+    // until objectstack#25923 retired the bag, at the top level since. A
+    // correctly configured view renders exactly as it did before this card.
     const props = await calendarProps({
       ...BASE,
-      options: { calendar: { startDateField: 'start_date', endDateField: 'end_date', colorField: 'status' } },
+      calendar: { startDateField: 'start_date', endDateField: 'end_date', colorField: 'status' },
     });
     expect(props.startDateField).toBe('start_date');
     expect(props.endDateField).toBe('end_date');
@@ -197,7 +198,7 @@ describe('ListView capability gate — the Calendar toggle follows the binding (
 
   it('does NOT offer Calendar to a view that declared no calendar binding', async () => {
     // ADR-0047: offered only when the binding resolves. Before this card the
-    // object page's fabricated `options.calendar.startDateField` resolved for
+    // object page's fabricated `calendar.startDateField` (then under `options`) resolved for
     // every view in the product, so this toggle was always live — the "disable
     // the calendar toggle for such views" half of the ruling, obtained here by
     // deleting the fabrication rather than by adding a second mechanism.

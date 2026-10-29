@@ -52,7 +52,7 @@ import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
-import { useRecordApprovals, recordLockedByApproval, isSubmitterOf } from '../hooks/useRecordApprovals.js';
+import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
@@ -1860,9 +1860,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const lockedForReader = !approvals.pendingRequest && approvals.recordLock?.locked === true;
   const { pending: approvalPending, locked: approvalLocked } = resolveApprovalLock({
     readAnswered: approvals.answered,
-    openApproval: approvals.pendingRequest
-      ? { locked: recordLockedByApproval(approvals.pendingRequest) }
-      : lockedForReader ? { locked: true } : null,
+    openApproval: openApprovalOf(approvals),
     recordStatus: (pageRecord as any)?.approval_status,
   });
   // How far the pending node's tally has got (objectstack#4478). Multi-approver

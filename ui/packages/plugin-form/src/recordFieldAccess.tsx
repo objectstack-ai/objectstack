@@ -36,6 +36,15 @@
  * signal the form re-reads its record on). A save that moves the row into the
  * state a `when` names therefore locks the field again, rather than leaving
  * the earlier answer standing.
+ *
+ * The same answer carries the row's own verdict (objectstack#27138): on
+ * `writable: false` the scope refuses every field of the record and the
+ * record's update, so the form draws read-only, says why and offers no Save.
+ * A host that reads a lock the projection leaves out — a pending approval
+ * that locks the record — passes it as `lockedBy`, and it reaches the same
+ * gates the same way. A form edits a stored record under that lock even on a
+ * data source without the projection: the scope then has no answer to ask
+ * for, and only the host's lock narrows the row.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -46,17 +55,22 @@ import type { DataSource } from '@object-ui/types';
 export interface RecordFieldAccessForFormProps {
   schema: { objectName?: string; mode?: string; recordId?: string | number | null };
   dataSource?: DataSource | null;
+  /** A lock the host reads on the record and the projection leaves out (`RecordFieldAccessScope`'s `lockedBy`). */
+  lockedBy?: 'approval';
   children: React.ReactNode;
 }
 
-export function RecordFieldAccessForForm({ schema, dataSource, children }: RecordFieldAccessForFormProps) {
+const NO_PROJECTION = () => Promise.resolve(null);
+
+export function RecordFieldAccessForForm({ schema, dataSource, lockedBy, children }: RecordFieldAccessForFormProps) {
   const objectName = schema?.objectName;
   const recordId = schema?.recordId;
   const load = dataSource?.getRecordFieldAccess;
-  const asks = schema?.mode === 'edit'
+  const editsStored = schema?.mode === 'edit'
     && !!objectName
-    && recordId !== undefined && recordId !== null && recordId !== ''
-    && typeof load === 'function';
+    && recordId !== undefined && recordId !== null && recordId !== '';
+  const asks = editsStored && typeof load === 'function';
+  const scopes = asks || (editsStored && !!lockedBy);
   const id = asks ? String(recordId) : undefined;
   const busRevision = useDataInvalidation(asks ? objectName : undefined, id);
   const [writeRevision, setWriteRevision] = useState(0);
@@ -69,15 +83,18 @@ export function RecordFieldAccessForForm({ schema, dataSource, children }: Recor
       setWriteRevision((n) => n + 1);
     });
   }, [asks, dataSource, objectName, id]);
-  if (!asks) {
+  if (!scopes) {
     return <>{children}</>;
   }
   return (
     <RecordFieldAccessScope
       object={objectName as string}
-      recordId={id as string}
-      load={(object, recordKey) => (load as NonNullable<typeof load>).call(dataSource, object, recordKey)}
+      recordId={String(recordId)}
+      load={asks
+        ? (object, recordKey) => (load as NonNullable<typeof load>).call(dataSource, object, recordKey)
+        : NO_PROJECTION}
       revision={busRevision + writeRevision}
+      lockedBy={lockedBy}
     >
       {children}
     </RecordFieldAccessScope>

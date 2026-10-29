@@ -276,7 +276,7 @@ describe('the census stays re-runnable', () => {
 });
 
 describe('the `body` consumers the ruling does not enumerate', () => {
-  it('three generic readers outside the renderer tree read `children` ALONE — step 2 reached them', () => {
+  it('the generic reader outside the renderer tree reads `children` ALONE — step 2 reached it', () => {
     // Recorded because ruling steps 2-5 name renderers, the published type and
     // the tier — and these three are none of those. They read `body` for ANY
     // node type, so they outlive the per-registration convergence and would
@@ -301,10 +301,11 @@ describe('the `body` consumers the ruling does not enumerate', () => {
     // readers even deferred it to that card BY NUMBER in their own comments.
     // The lit control stays FIRST, because "does not contain `body`" holds just
     // as well over a file that was renamed, emptied or moved.
+    //
+    // The two vscode readers left this list with their package: objectstack#25910
+    // removed the VS Code extension from the workspace, so core is the one left.
     for (const reader of [
       'packages/core/src/validation/schema-validator.ts',
-      'packages/vscode-extension/src/providers/SchemaValidator.ts',
-      'packages/vscode-extension/src/providers/PreviewProvider.ts',
     ]) {
       const text = readCode(reader);
       expect(text, `${reader} — lit control: this reader still resolves a child list`)
@@ -335,11 +336,11 @@ describe('the `body` consumers the ruling does not enumerate', () => {
     const migrated = [
       'packages/cli/src/commands/init.ts',
       'packages/cli/src/commands/generate.ts',
-      'packages/vscode-extension/src/extension.ts',
       'packages/components/src/renderers/complex/carousel.tsx',
       'packages/components/src/renderers/complex/resizable.tsx',
       'packages/components/src/renderers/complex/scroll-area.tsx',
       // packages/runner/src/App.tsx left this list: objectui#11450 deleted the runner's fallback page, so that producer is gone.
+      // packages/vscode-extension/src/extension.ts left it too: objectstack#25910 removed the extension from the workspace.
     ];
 
     for (const producer of migrated) {
@@ -504,19 +505,11 @@ describe('the `body` consumers the ruling does not enumerate', () => {
         'spelling into an author document again; ⛔ do not relax this to a range.'
     ).toBe(0);
 
-    // ⭐ THE SUBJECT THAT ZERO IS ABOUT, pinned BY NAME — because a shape
-    // assertion cannot say WHICH site left, and naming it is the handoff
-    // objectui#9871's prose asks for. A completion snippet is the most direct
-    // form a producer takes: it is inserted into the author's own document the
-    // moment the completion is accepted, so the author never types the spelling.
-    // The lit control stays and stays FIRST: "does not contain" is satisfied by
-    // a file that was renamed, emptied or moved.
-    const completion = readCode('packages/vscode-extension/src/providers/CompletionProvider.ts');
-    expect(completion, 'lit control — the snippet table is being read at all').toContain(
-      '"className": "$1"'
-    );
-    expect(completion).not.toContain('"body": {');
-    expect(completion).toContain('"children": {');
+    // ⭐ THE SUBJECT THAT ZERO WAS ABOUT used to be pinned here BY NAME: the
+    // VS Code extension's `CompletionProvider` snippets, read for `children`
+    // and not `body`. objectstack#25910 removed the extension from the
+    // workspace, so the named subject is gone with it; the population zero and
+    // its two lit controls above still hold every literal-carried producer.
 
     // ⭐ And the family question is RULED — it no longer stays open in the
     // instrument, and ⛔ nothing here awaits a seat. Director seat, summon #25

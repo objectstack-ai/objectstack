@@ -287,7 +287,7 @@ use as a few-shot corpus. Neither declares a `dev` script.
 
 | Path | Purpose |
 | --- | --- |
-| `ui/packages/*` | The published `@object-ui/*` packages, plus the private `vscode-extension`, `test-support` (test-only, never released), `runner` (workspace demo app, never released) and `app-shell` (the Console's shell and views, no longer published after 18.2.0) |
+| `ui/packages/*` | The published `@object-ui/*` packages, plus the private `test-support` (test-only, never released), `runner` (workspace demo app, never released) and `app-shell` (the Console's shell and views, no longer published after 18.2.0) |
 | `ui/apps/console` | The Console app (Vite + React), which `pnpm console:build` builds into the `@objectstack/console` package |
 | `ui/examples/*` | The snippet and the schema catalog, see [UI examples](#ui-examples) |
 | `ui/docs/` | Internal engineering material (ADRs, audits, design records); not part of the docs site |
@@ -511,7 +511,6 @@ Atoms and fields stay light; heavy widgets live in lazy-loaded plugins.
 | [`@object-ui/create-plugin`](ui/packages/create-plugin) | Scaffold a new Object UI plugin |
 | [`@object-ui/runner`](ui/packages/runner) | Universal application runner for testing schemas (private workspace app, not published) |
 | [`@object-ui/react-runtime`](ui/packages/react-runtime) | Trusted runtime execution for `kind: 'react'` pages |
-| [`vscode-extension`](ui/packages/vscode-extension) | IntelliSense and live preview for schema files |
 
 </details>
 

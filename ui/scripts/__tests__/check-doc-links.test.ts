@@ -554,7 +554,10 @@ describe('the repo it guards', () => {
     // the packages/* population from 12 to 11. The floor moves down by exactly
     // that one deliberate deletion — it still fails if the scanner itself
     // stops walking the tree, which is what this row guards.
-    expect(scanned['packages/*']).toBeGreaterThanOrEqual(11);
+    // objectstack#25910 removed the whole VS Code extension package and its
+    // three remaining documents with it (`DESIGN.md`, `ICON.md`,
+    // `PUBLISHING.md`), taking the population from 11 to 8 by the same rule.
+    expect(scanned['packages/*']).toBeGreaterThanOrEqual(8);
     expect(scanned['apps/*']).toBeGreaterThanOrEqual(3);
     // objectui#6026. Four nested READMEs today, all under `packages/*`; the
     // `apps/*` side of the pair is deliberately empty, which is why it gets NO
@@ -1417,7 +1420,9 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
     // fixtures. objectui#3622 took the total to 58 by adding a surface that
     // writes 47 of them; the floors below stay at #3603's measurement, since
     // they exist to pin THAT card's minimum and the new root has its own floor
-    // in the last describe.
+    // in the last describe. objectstack#25910 deleted one of the six
+    // `content/docs` ones with the VS Code extension's page, so that floor
+    // moves down by exactly that deletion, to 5.
     const seen: { root: string; route: string }[] = [];
     for (const root of SCAN_ROOTS as { path: string }[]) {
       for (const file of collectFiles(path.join(repoRoot, root.path)) as string[]) {
@@ -1578,8 +1583,12 @@ describe('packages/*/README.md joined the disk surface — objectui#3622', () =>
     // from the archived objectui repository's CONTRIBUTING.md / ROADMAP.md (a
     // self-repo URL this gate resolves) to the objectstack repository's, which
     // it cannot resolve offline, so they left the decidable count.
-    expect(decidable.length).toBeGreaterThanOrEqual(135);
-    expect(siteAbsolute.length).toBeGreaterThanOrEqual(40);
+    // 126 / 39 measured on objectstack#25910's merge of main: that card removed
+    // the VS Code extension package, whose README carried 12 / 8 of them, and
+    // objectstack#27042 (c59b1bfa) retired `@object-ui/plugin-ai`, whose README
+    // carried 3 / 1 more. Both floors move down by exactly those deletions.
+    expect(decidable.length).toBeGreaterThanOrEqual(126);
+    expect(siteAbsolute.length).toBeGreaterThanOrEqual(39);
   });
 });
 
@@ -1810,8 +1819,10 @@ describe('objectui#4938 — the rest of each package/app directory', () => {
     ];
     // objectui#5965 removed `packages/vscode-extension/SUMMARY.md`, so the
     // combined population is 14 (11 + 3) rather than the 15 measured when the
-    // row landed. Still a floor, for the reasoning above.
-    expect(files.length).toBeGreaterThanOrEqual(14);
+    // row landed. Still a floor, for the reasoning above. objectstack#25910
+    // removed the VS Code extension package and its three documents, so 11
+    // (8 + 3).
+    expect(files.length).toBeGreaterThanOrEqual(11);
 
     let decidable = 0;
     for (const file of files) {
@@ -1826,7 +1837,9 @@ describe('objectui#4938 — the rest of each package/app directory', () => {
     // `packages/vscode-extension/DESIGN.md` carried into the tree's folded
     // ROADMAP.md / CONTRIBUTING.md at the repository root's, which a relative
     // path cannot reach from inside `ui/`, so they are URLs this gate does not judge.
-    expect(decidable).toBeGreaterThanOrEqual(2);
+    // 1 after objectstack#25910 deleted the VS Code extension package, whose
+    // `DESIGN.md` carried the other.
+    expect(decidable).toBeGreaterThanOrEqual(1);
   });
 });
 

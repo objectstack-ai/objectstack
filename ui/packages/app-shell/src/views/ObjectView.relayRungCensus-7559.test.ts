@@ -175,7 +175,7 @@ const MEMBERS: string[] = [...new Set([...MIRROR_MEMBERS, ...RUNTIME_MEMBERS])].
 // ---------------------------------------------------------------------------
 
 interface Written {
-  /** `rowColor`, `options.kanban` — spreads of object literals are transparent. */
+  /** `rowColor`, or `a.b` for a key of a nested literal — spreads of object literals are transparent. */
   path: string;
   /** Identifiers appearing anywhere in the value expression. */
   reads: string[];
@@ -397,14 +397,12 @@ type Absence =
 const ABSENCES: Record<string, Absence> = {
   // ── The per-view-type blocks: no entry, they have top-level rungs ─────────
   // `kanban`, `calendar`, `gallery`, `gantt`, `timeline`, `tree`, `map` and
-  // `chart` used to sit here as `relayed-nested`: the relay writes each one into
-  // `options.KIND`, where `ListView` reads it. objectui#10380 gave each of them a
-  // conditional TOP-LEVEL rung as well. When the stored row's legacy `options`
-  // bag carries a kind, the view's own block for that kind is written at the top
-  // level, so `ListView` lays it over the bag per key. The census therefore
-  // counts all eight as relayed, and an entry here would contradict it. Their
-  // nested paths are still written for every row and still asserted, by name,
-  // in the derivation checks below (`options.kanban`, `options.chart`).
+  // `chart` used to sit here as `relayed-nested`: the relay wrote each one into
+  // `options.KIND`, where `ListView` read it, and objectui#10380 added a
+  // conditional top-level rung beside it. objectstack#25923 retired the bag:
+  // each block now has one unconditional TOP-LEVEL rung (held by value per key,
+  // objectui#10046), so the census counts all eight as relayed and an entry
+  // here would contradict it.
 
   // ── Supplied by the caller, from the active view, via `...listSchema` ─────
   // `plugin-view`'s ObjectView composes the list schema this relay spreads. For
@@ -478,6 +476,7 @@ const ABSENCES: Record<string, Absence> = {
   performance: { kind: 'unread', reason: 'Retired at spec 17.0.0 with no reader in either repo; declared only as the console\'s own refusal since the 18.2 age-out (objectstack#25767).' },
   requiredPermissions: { kind: 'unread', reason: 'The ADR-0066 audience gate `@objectstack/spec` 18 adds to a list view (objectui#12030). The SERVER enforces it before the view is served: a user who lacks the capabilities is never listed the view and is refused it by name, so nothing on the ListView path has a value to consume.' },
   filterableFields: { kind: 'unread', reason: 'Retired by objectstack#24640 (maintainer ruling C, pulled into 18.0): no per-view Filter-panel whitelist replaces it. objectui#13118 removed its one reader, the whitelist branch of `ListView`\'s Filter-panel field list, and this relay\'s rung with it. Present only as the spec import that carries its tombstone from the pin bump that takes the retirement.' },
+  options: { kind: 'unread', reason: "Retired by objectstack#25923: the list view's `options` bag is the spec list overlay's tombstone, taken by reference, so every door refuses it by name. A stored bag is folded onto the top-level blocks by the server before the row is served, and objectstack#25923 removed every `ListView` read of it along with this relay's `options` rung." },
   pageName: { kind: 'unread', reason: 'Page-context key with no reader on the list path.' },
   tabs: { kind: 'unread', reason: "Spec view-tab list. ListView has no reader — the object page's tab bar is `ViewTabBar`, driven by `buildViewTabs`, and the `tabs` readers in the tree belong to `plugin-detail`'s DetailView." },
   dataSource: { kind: 'unread', reason: "The spec's per-element binding (declared on the list-view arm by objectui#11070). `ListView` has no read of `schema.dataSource`: the binding is resolved one layer up, by the registered `list-view` renderer `ListViewBlock` through `ElementDataSourceGate`, and `renderListView` bypasses that layer. It renders `ListView` directly with `schema={fullSchema}` and takes the ADAPTER as its separate `dataSource` argument (`ds`), not off the node." },
@@ -553,12 +552,14 @@ describe('objectui#7559 — the population is derived, never written down', () =
   it('re-derives the relay rung set from the literal, and finds it reading the active view', () => {
     expect(WRITTEN.length).toBeGreaterThan(40);
     expect(RELAYED.length).toBeGreaterThan(30);
-    // The nested paths are part of the reading, so the derivation must reach them.
-    expect(WRITTEN.map((w) => w.path)).toEqual(expect.arrayContaining(['options.kanban', 'options.chart']));
+    // The per-kind blocks are top-level rungs since objectstack#25923 (they
+    // were the `options.KIND` paths), so the derivation must reach them there.
+    expect(WRITTEN.map((w) => w.path)).toEqual(expect.arrayContaining(['kanban', 'chart']));
+    expect(RELAYED).toEqual(expect.arrayContaining(['kanban', 'calendar', 'timeline', 'map', 'gallery', 'gantt', 'tree', 'chart']));
   });
 
   it('collects view-derived locals from the relay callback only', () => {
-    // `calendarOptions` is the one the reading needs (`options.calendar` is
+    // `calendarOptions` is the one the reading needs (`calendar` is
     // written from it). `lane` is a local of `kanbanViewOptions`, further down
     // the file, whose own parameter is also called `viewDef` — it must NOT be
     // here, or the census would accept an unrelated local as the view's value.

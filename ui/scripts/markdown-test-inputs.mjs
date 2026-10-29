@@ -575,12 +575,6 @@ export const ADJUDICATED = new Map([
     'packages/types/src/__tests__/zod-readme-examples-9522.test.ts',
     { reads: ['packages/types/src/zod/README.md'] },
   ],
-  [
-    'packages/vscode-extension/src/__tests__/export-to-react-compiles.test.ts',
-    {
-      reads: ['packages/vscode-extension/DESIGN.md'],
-    },
-  ],
 
   // ---------------------------------------------------------------------------
   // objectui#9096 -- the `scripts/__tests__/**` surface.

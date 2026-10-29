@@ -2,7 +2,8 @@
  * ObjectForm structured `buttons` / `defaults` fold (framework#1894 / #2998).
  *
  * `@objectstack/spec` FormViewSchema declares the structured
- * `buttons.{submit,cancel,reset}.{show,label}` + `defaults` authoring surface,
+ * `buttons.{submit,cancel}.{show,label}` + `defaults` authoring surface
+ * (`buttons.reset` is retired, objectstack-ai/objectstack#27153),
  * but ObjectForm reads flat `showSubmit`/`submitText`/…/`initialValues`. These
  * tests lock in the fold that reconciles the two — the objectui-side consumer
  * that lets the two spec keys flip `experimental → live` in the liveness ledger

@@ -32,8 +32,8 @@
  * It used to live in `@object-ui/i18n`, and that home cost the repo a real
  * defect. `@object-ui/core`'s `utils/dataset-format.ts` could not import it —
  * `core` is the React-free engine (AGENTS.md §3: "No UI-lib deps. Logic only.")
- * and is a runtime dependency of React-FREE consumers (the `object-ui` VS Code
- * extension, `@object-ui/data-objectstack`), while `i18n` depends on
+ * and is a runtime dependency of React-FREE consumers (`@object-ui/data-objectstack`,
+ * and then the VS Code extension too), while `i18n` depends on
  * `i18next`/`react-i18next` and peer-depends on React. So `formatMeasure` kept
  * a parallel `Intl` implementation, the two drifted, and a German session read
  * `1.234,5 %` from a list cell beside `1.234,5%` from a dashboard measure
