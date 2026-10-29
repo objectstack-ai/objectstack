@@ -137,6 +137,7 @@ import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
 import { validateSecurityPosture, validateSecurityRoleWord } from './validate-security-posture.js';
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
+import { validateExternalOwnerSharing } from './validate-external-owner-sharing.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import {
   validateMembershipKeyDeclarations,
@@ -2329,6 +2330,22 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'entry claimed the door. Recorded as pending rather than done, because a rule that has '
       + 'never run at a door should not claim it.',
     run: (stack) => validateSharingRuleEnforceability(stack),
+  },
+  // A writable ADR-0015 external object on an owner-keyed sharing model whose
+  // owner column no remote row serves: record sharing reads `owner_id`, the
+  // platform ownership floor reads `created_by == caller`, neither has storage,
+  // so every member edit and delete is refused (403). Advisory: the stack is
+  // valid and an administrator still writes; a refusal would narrow the
+  // published accept set.
+  {
+    name: 'validateExternalOwnerSharing',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-external-owner-sharing.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
+    run: (stack) => validateExternalOwnerSharing(stack),
   },
   // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,
   // which had never been wired to anything: `isSupportedRlsExpression` existed

@@ -2,7 +2,8 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * RecordDetailView — the PRODUCER for the header's manual ⟳ (objectui#3460).
+ * RecordDetailView — the PRODUCER for the header's manual refresh (objectui#3460),
+ * the first item of the header's `⋯` menu since objectstack#27055.
  *
  * `RecordContextValue.refresh` has been declared (and consumed nowhere) since
  * the context was introduced: a field the types, the memo dep list and lint all
@@ -136,7 +137,19 @@ function renderDetail(dataSource: any, opts?: { embedded?: boolean }) {
   );
 }
 
-const refreshButton = () => document.querySelector('[data-page-refresh]') as HTMLButtonElement | null;
+const moreTrigger = () => document.querySelector('header [aria-label="More actions"]') as HTMLElement | null;
+
+/** Open the header's `⋯` and answer its Refresh item (objectstack#27055). */
+async function openRefreshItem(): Promise<HTMLElement> {
+  await waitFor(() => expect(moreTrigger()).toBeTruthy());
+  fireEvent.pointerDown(moreTrigger()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  let item: HTMLElement | null = null;
+  await waitFor(() => {
+    item = document.querySelector('[data-page-refresh]') as HTMLElement | null;
+    expect(item).toBeTruthy();
+  });
+  return item!;
+}
 
 beforeEach(() => {
   cleanup();
@@ -160,11 +173,11 @@ afterEach(() => {
 });
 
 describe('RecordDetailView — the header ⟳ refetches in place (objectui#3460)', () => {
-  it('renders the ⟳ on the standalone record route', async () => {
+  it('offers Refresh in the header ⋯ on the standalone record route', async () => {
     const dataSource = makeDataSource();
     renderDetail(dataSource);
 
-    await waitFor(() => expect(refreshButton()).toBeTruthy());
+    expect(await openRefreshItem()).toBeTruthy();
   });
 
   it('publishes the WILDCARD scope on the invalidation bus, not this record', async () => {
@@ -173,11 +186,11 @@ describe('RecordDetailView — the header ⟳ refetches in place (objectui#3460)
     const unsubscribe = subscribeDataChanges((c) => changes.push(c));
     try {
       renderDetail(dataSource);
-      await waitFor(() => expect(refreshButton()).toBeTruthy());
+      const item = await openRefreshItem();
 
-      fireEvent.click(refreshButton()!);
+      fireEvent.click(item);
 
-      expect(changes).toEqual([{ objectName: '*' }]);
+      await waitFor(() => expect(changes).toEqual([{ objectName: '*' }]));
       // Explicitly NOT the record scope: that would refresh the main record and
       // leave every related list and count badge stale.
       expect(changes[0]).not.toHaveProperty('recordId', RECORD_ID);
@@ -190,12 +203,11 @@ describe('RecordDetailView — the header ⟳ refetches in place (objectui#3460)
     const dataSource = makeDataSource();
     renderDetail(dataSource);
 
-    await waitFor(() => expect(refreshButton()).toBeTruthy());
     await waitFor(() => expect(dataSource.findOne).toHaveBeenCalledTimes(1));
     const headerBefore = document.querySelector('header');
     expect(headerBefore).toBeTruthy();
 
-    fireEvent.click(refreshButton()!);
+    fireEvent.click(await openRefreshItem());
 
     // The bus re-runs the SAME load effect…
     await waitFor(() => expect(dataSource.findOne).toHaveBeenCalledTimes(2));
@@ -203,7 +215,6 @@ describe('RecordDetailView — the header ⟳ refetches in place (objectui#3460)
     // bump would have refetched too, while throwing away tab/scroll/inline-edit
     // state (AGENTS.md #8).
     expect(document.querySelector('header')).toBe(headerBefore);
-    expect(refreshButton()).toBeTruthy();
   });
 });
 
@@ -216,7 +227,13 @@ describe('RecordDetailView — embedded hosts opt out of the ⟳ (objectui#3460 
     // has no ⟳", not "the header hasn't rendered yet".
     await waitFor(() => expect(dataSource.findOne).toHaveBeenCalled());
     await waitFor(() => expect(document.querySelector('header')).toBeTruthy());
-    expect(refreshButton()).toBeNull();
+    // The ⋯ may still hold the host's other system actions; Refresh is not one.
+    const trigger = moreTrigger();
+    if (trigger) {
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      await waitFor(() => expect(document.querySelector('[role="menu"]')).toBeTruthy());
+    }
+    expect(document.querySelector('[data-page-refresh]')).toBeNull();
   });
 
   it('publishes nothing on the bus for an embedded host', async () => {

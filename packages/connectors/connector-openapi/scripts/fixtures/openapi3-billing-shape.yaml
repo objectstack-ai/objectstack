@@ -1,0 +1,139 @@
+# Shaped like Stripe's spec3 document, trimmed: OpenAPI 3.0 in YAML, component
+# schemas that refer to each other (customer <-> subscription is recursive), a
+# vendor extension carrying $refs, a shared default error response, a shared
+# parameter, and one schema in a second file reached by an external $ref.
+openapi: 3.0.0
+info:
+  title: Billing API (trimmed fixture)
+  version: '2026-10-01'
+servers:
+  - url: https://api.example.com/
+paths:
+  /v1/customers:
+    get:
+      operationId: GetCustomers
+      summary: List customers
+      parameters:
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/customer'
+        default:
+          $ref: '#/components/responses/error'
+    post:
+      operationId: PostCustomers
+      summary: Create a customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/customer_create'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/customer'
+        default:
+          $ref: '#/components/responses/error'
+  /v1/customers/{customer}:
+    get:
+      operationId: GetCustomersCustomer
+      parameters:
+        - name: customer
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/customer'
+  /v1/balance:
+    get:
+      summary: Retrieve the balance (no operationId -- keyed get_v1_balance)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './billing-shared.yaml#/components/schemas/balance'
+components:
+  parameters:
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+  responses:
+    error:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error'
+  schemas:
+    customer:
+      type: object
+      description: A customer.
+      properties:
+        id:
+          type: string
+        default:
+          description: A property NAMED default is a schema, not a literal.
+          $ref: '#/components/schemas/address'
+        subscriptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/subscription'
+    subscription:
+      type: object
+      description: A subscription.
+      properties:
+        id:
+          type: string
+        customer:
+          anyOf:
+            - type: string
+            - $ref: '#/components/schemas/customer'
+          x-expansionResources:
+            oneOf:
+              - $ref: '#/components/schemas/customer'
+    customer_create:
+      type: object
+      properties:
+        email:
+          type: string
+          default: someone@example.com
+        address:
+          $ref: '#/components/schemas/address'
+    address:
+      type: object
+      properties:
+        city:
+          type: string
+    error:
+      type: object
+      properties:
+        message:
+          type: string
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

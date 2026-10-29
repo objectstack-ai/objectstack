@@ -34,6 +34,7 @@
 // author can see it.
 
 import { configDefaults, defineConfig } from 'vitest/config';
+import { memoryBackedTmpEnv } from '../../scripts/vitest-memory-tmp.mjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseCLI } from 'vitest/node';
@@ -231,6 +232,15 @@ export default defineConfig({
     // Each project re-declares the root block's test options: a ROOT-level
     // value is inert for a project run (measured on vitest 4.1.10, see
     // check-registry-log-declared / check-console-intercept-disarm).
+    //
+    // Each project's `env` also moves `os.tmpdir()` onto /dev/shm when it is
+    // writable (#27306; scripts/vitest-memory-tmp.mjs): the package-lifecycle
+    // integration tests keep their SQLite databases in an `mkdtemp` under it.
+    // Measured on the 51 test files that do, beside four `dd … conv=fsync`
+    // writers on the same disk: 25 of 685 cases timed out across 7 files
+    // (package revert, uninstall, duplicate-adopt, list-commits) and the run
+    // took 501 s, against all green in 102 s idle; with TMPDIR there, under the
+    // same writers, all green in 110 s. Assertions and budgets are untouched.
     projects: [
       {
         extends: true,
@@ -242,7 +252,9 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          // TMPDIR on a memory-backed directory (#27306): see the note above
+          // `projects`.
+          env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
           // A late console.* must not redden a green suite (#10374); see the root
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
@@ -258,7 +270,9 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          // TMPDIR on a memory-backed directory (#27306): see the note above
+          // `projects`.
+          env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
           // A late console.* must not redden a green suite (#10374); see the root
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).

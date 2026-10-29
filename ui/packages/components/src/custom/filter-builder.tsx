@@ -18,9 +18,13 @@ import {
 } from "@objectstack/spec/ui"
 import { expandEmptyOperator } from "@objectstack/spec/data"
 import { SchemaRendererContext } from "@object-ui/react"
-import type {
-  FilterBuilderCondition as AuthoredFilterBuilderCondition,
-  FilterGroup as AuthoredFilterGroup,
+import {
+  FILTER_DATE_LIKE_TYPES,
+  FILTER_LOOKUP_LIKE_TYPES,
+  FILTER_NUMBER_LIKE_TYPES,
+  FILTER_SELECT_LIKE_TYPES,
+  type FilterBuilderCondition as AuthoredFilterBuilderCondition,
+  type FilterGroup as AuthoredFilterGroup,
 } from "@object-ui/types"
 // The retirement gate (objectui#4914, ruling B). Read from
 // `@object-ui/core` rather than from `@object-ui/fields` — which is where
@@ -1224,24 +1228,18 @@ const dateOperators: readonly FilterBuilderOperator[] = ["equals", "not_equals",
 const selectOperators: readonly FilterBuilderOperator[] = ["equals", "not_equals", "in", "not_in", "is_empty", "is_not_empty", ...NULLNESS_OPERATORS]
 const lookupOperators: readonly FilterBuilderOperator[] = ["equals", "not_equals", "in", "not_in", "is_empty", "is_not_empty", ...NULLNESS_OPERATORS]
 
-/** Field types that share the same operator/input behavior as number (numeric comparison operators, number input) */
-const numberLikeTypes = ["number", "currency", "percent", "rating"]
-/** Field types that share the same operator/input behavior as date (before/after operators, date/datetime/time input) */
-const dateLikeTypes = ["date", "datetime", "time"]
-/** Field types that use select operators (equals/in/not_in) and render dropdown or checkbox list when options provided */
-const selectLikeTypes = ["select", "status"]
-/**
- * Relational/reference field types that use lookup operators (equals/in/not_in)
- * and render dropdown or checkbox list when options provided.
- *
- * `owner` left this list with objectui#4914: it is a RETIRED spelling, and
- * the gate below answers for it before this membership test is ever reached.
- * The deletion is lockstep hygiene rather than the behavioural half — a list
- * that still named a retired spelling would be a second, contradicting
- * authority on what is live — and it is exactly the shape PR #4932 used when
- * it retired the same word from `INLINE_ROUTED_FIELD_TYPES`.
- */
-const lookupLikeTypes = ["lookup", "master_detail", "user"]
+// The four behaviour buckets are declared once, in `@object-ui/types`
+// (`filter-field-types.ts`), where `FilterFieldSchema.type` and
+// `FilterField['type']` take the same members — so a spelling cannot be
+// validated without a branch here, or drawn here without being validated.
+// Widened to `readonly string[]` because every test below asks about an
+// authored, unchecked `type` string. `owner` is in none of them: it is a
+// RETIRED spelling (objectui#4914), answered by the gate in
+// `operatorsForFieldType` before any membership test is reached.
+const numberLikeTypes: readonly string[] = FILTER_NUMBER_LIKE_TYPES
+const dateLikeTypes: readonly string[] = FILTER_DATE_LIKE_TYPES
+const selectLikeTypes: readonly string[] = FILTER_SELECT_LIKE_TYPES
+const lookupLikeTypes: readonly string[] = FILTER_LOOKUP_LIKE_TYPES
 
 /**
  * The operators a row on a field of `fieldType` can HOLD, given the opt-in ids

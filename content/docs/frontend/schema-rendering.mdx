@@ -145,6 +145,7 @@ Use expression syntax `${}` to reference the scope, by the name you published it
 
 The schema renderer uses a component registry to map schema types to React components:
 
+{/* doc-snippet: fragment — MyComponent is the reader's own React component, named here to show what register() takes as its second argument */}
 ```tsx
 import { ComponentRegistry } from '@object-ui/core'
 
@@ -294,6 +295,7 @@ author it as a literal.
 
 Components can emit events that you handle in React:
 
+{/* doc-snippet: fragment — prop excerpt: the JSX call is shown alone to isolate onAction and onSubmit; schema and SchemaRenderer come from the first example on this page */}
 ```tsx
 <SchemaRenderer 
   schema={schema}
@@ -394,6 +396,7 @@ The renderer automatically memoizes components to prevent unnecessary re-renders
 
 Use dynamic imports for heavy components:
 
+{/* doc-snippet: fragment — code-splitting excerpt: ./HeavyChart is the reader's own component file, and registry is whichever registry instance the host already holds */}
 ```tsx
 import { lazy } from 'react'
 
@@ -406,6 +409,7 @@ registry.register('heavy-chart', HeavyChart)
 
 The renderer includes built-in error boundaries:
 
+{/* doc-snippet: fragment — prop excerpt: the JSX call is shown alone to isolate onError; schema and SchemaRenderer come from the first example on this page */}
 ```tsx
 <SchemaRenderer 
   schema={schema}
@@ -572,6 +576,7 @@ function Dashboard() {
 
 Move logic to expressions instead of creating conditional schemas:
 
+{/* doc-snippet: fragment — a bad/good contrast pair in one fence: schema is deliberately declared twice so the two spellings sit side by side, and user, adminSchema and userSchema are the reader's own values */}
 ```tsx
 // ❌ Bad
 const schema = user.isAdmin ? adminSchema : userSchema

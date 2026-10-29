@@ -70,7 +70,7 @@ import {
 import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2 } from 'lucide-react';
 import { useRowColor } from './useRowColor';
 import { GroupRow } from './GroupRow';
-import { resolveRowCrudAffordances } from './rowCrudAffordances';
+import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
@@ -1007,10 +1007,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     )),
     [data],
   );
+  // objectstack#27365 — the inline cells ask the same `update` question about
+  // the same rows, so an editable grid whose kebab offers no Edit still asks
+  // it: one batched probe, read by both, never a second one.
   const recordVerdict = useRecordCrudVerdicts({
     objectName,
     recordIds: pageRecordIds,
-    update: canEdit,
+    update: canEdit || inlineEditable,
     delete: canDelete,
   });
 
@@ -2546,6 +2549,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     reorderableColumns: schema.reorderableColumns ?? false,
     // [#5143] The authored key ∧ this principal's write verdict on the object.
     editable: inlineEditable,
+    // objectstack#27365 — …∧ the server's record-grained `update` verdict for
+    // THIS row, read through the very accessor the row kebab reads
+    // (`resolveRowRecordCrudAffordance` over `recordVerdict`), so the cells and
+    // the kebab give one answer for one row. Unknown (no answer yet, a failed
+    // probe, a row with no id) keeps the object-level answer: fail open, never
+    // over-hide. `editable` above is still the gate, so this only narrows.
+    isRowEditable: inlineEditable
+      ? (row: any) => resolveRowRecordCrudAffordance(inlineEditable, recordVerdict(rowRecordId(row), 'update'))
+      : undefined,
     // In-place cell editor: render the dedicated @object-ui/fields widget for
     // the field's type — the SAME control the form uses (select→dropdown,
     // boolean→checkbox, date→date picker, multi-select, …). Returning null lets

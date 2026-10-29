@@ -16,11 +16,12 @@ import {
   type DisplayNumberFormatOptions,
 } from '@object-ui/i18n';
 import type { I18nLabel } from '@object-ui/types';
+import type { ObjectMetricProps } from '@objectstack/spec/ui';
 import { ArrowDownIcon, ArrowUpIcon, MinusIcon, AlertCircle, Loader2 } from 'lucide-react';
 import { VARIANT_ICON_CLASSES, VARIANT_TEXT_CLASSES, type MetricColorVariant } from './colorVariants';
 import { hostDomProps, type SchemaHostProps } from './schemaHostProps';
 import { METRIC_TILE_CONTAINER_CLASS, METRIC_TILE_TITLE_CLASS, metricTileValueClass, metricTileValueTitle } from './metricTile';
-import { formatMetricDeltaPercent, type MetricDelta } from './utils';
+import { formatMetricDeltaPercent, deltaToneClass, type MetricDelta } from './utils';
 
 const TREND_LABEL_DEFAULTS: Record<string, string> = {
   'dashboard.trend.vsLastQuarter': 'vs last quarter',
@@ -280,6 +281,16 @@ export interface MetricWidgetProps extends React.HTMLAttributes<HTMLDivElement> 
    * `trend.value` stays the number the spec declares.
    */
   derivedTrend?: MetricDelta & { label?: string };
+  /**
+   * Which direction of change is good news for this number, BY REFERENCE to
+   * the `object-metric` row's own key (`ObjectMetricProps['polarity']` in
+   * `@objectstack/spec/ui`, the dataset measure's vocabulary). It colours the
+   * badge drawn, `derivedTrend ?? trend`, by the rule the dataset-bound tile
+   * applies (`deltaToneClass` in `./utils`): `lower` draws a rise red and a
+   * fall green, `neutral` draws both muted. Undeclared keeps rise green, fall
+   * red. The arrow always follows the number (objectstack#27347).
+   */
+  polarity?: ObjectMetricProps['polarity'];
   icon?: React.ReactNode | string;
   className?: string;
   description?: string | I18nLabel;
@@ -328,6 +339,7 @@ export const MetricWidget = ({
   value,
   trend,
   derivedTrend,
+  polarity,
   icon,
   className,
   description,
@@ -486,9 +498,8 @@ export const MetricWidget = ({
                 {shownTrend && (
                   <span className={cn(
                     "flex items-center shrink-0 font-medium",
-                    shownTrend.direction === 'up' && "text-emerald-600 dark:text-emerald-400",
-                    shownTrend.direction === 'down' && "text-rose-600 dark:text-rose-400",
-                    shownTrend.direction === 'neutral' && "text-muted-foreground"
+                    deltaToneClass(shownTrend.direction, polarity),
+                    (shownTrend.direction === 'neutral' || polarity === 'neutral') && "text-muted-foreground"
                   )}>
                     {shownTrend.direction === 'up' && <ArrowUpIcon className="h-3 w-3 mr-1" />}
                     {shownTrend.direction === 'down' && <ArrowDownIcon className="h-3 w-3 mr-1" />}

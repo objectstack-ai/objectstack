@@ -8,7 +8,7 @@
 
 /**
  * `maxWidth` and `padding` on a `page` NODE are refused at parse, by name and
- * with the door that works, and `content/docs/guide/layout.md` teaches those
+ * with the door that works, and `content/docs/frontend/layout.mdx` teaches those
  * doors instead (objectui#11318, ADR-0049 enforce-or-remove).
  *
  * ## The defect
@@ -47,7 +47,7 @@ import { safeValidateSchema, StrictAnyComponentSchema } from '../zod/index.zod.j
 import type { PageNodeSchema as TsPageNodeSchema } from '../layout.js';
 
 const REPO_ROOT = resolve(__dirname, '../../../..');
-const GUIDE_PATH = resolve(REPO_ROOT, 'content/docs/guide/layout.md');
+const GUIDE_PATH = resolve(REPO_ROOT, '../content/docs/frontend/layout.mdx');
 
 interface Issue {
   code: string;

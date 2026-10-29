@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Markdown rendering plugin for Object UI, powered by react-markdown",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-markdown",
+  "description": "Markdown rendering plugin for ObjectUI, powered by react-markdown",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-markdown",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

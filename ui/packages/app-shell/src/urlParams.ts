@@ -97,6 +97,13 @@ export const RECORD_FORM_LINK_PARAM = 'formLink';
 /** Active record-detail tab (objectui#2257; stable semantic values). */
 export const RECORD_DETAIL_TAB_PARAM = 'tab';
 
+/**
+ * The record page's enlarged related list, `object.field` — the child object
+ * and its FK field (objectstack#27055): the list drawn as a full-width table
+ * over the page body. Read by `RecordDetailView` in the column tiers.
+ */
+export const RECORD_RELATED_ENLARGE_PARAM = 'related';
+
 /** Command palette overlay (ADR-0054 Phase 1; alias `cmdk`). */
 export const COMMAND_PALETTE_PARAM = 'palette';
 
@@ -138,6 +145,7 @@ export const RESERVED_URL_PARAMS: readonly string[] = [
   RECORD_FORM_OBJECT_PARAM,
   RECORD_FORM_LINK_PARAM,
   RECORD_DETAIL_TAB_PARAM,
+  RECORD_RELATED_ENLARGE_PARAM,
   COMMAND_PALETTE_PARAM,
   KEYBOARD_SHORTCUTS_PARAM,
   RECORD_TRAIL_PARAM,

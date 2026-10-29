@@ -38,9 +38,6 @@ import {
 import { TabbedForm } from './TabbedForm';
 import { WizardForm } from './WizardForm';
 import { useFormChromeTranslation } from './formChrome';
-import { SplitForm } from './SplitForm';
-import { DrawerForm } from './DrawerForm';
-import { ModalForm } from './ModalForm';
 import { MasterDetailForm } from './MasterDetailForm';
 import {
   applyAutoLayout,
@@ -224,10 +221,23 @@ export const ObjectForm: React.FC<ObjectFormComponentProps> = ({ schema, ...rest
   </RecordFieldAccessForForm>
 );
 
-const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
-  schema: rawSchema,
-  dataSource,
-}) => {
+/**
+ * The schema every layout reads, prepared ONCE above the layout fork: the
+ * structured `buttons` / `defaults` folded onto the flat keys, the seven
+ * `I18nLabel` members resolved, legacy `groups` normalised to `sections`,
+ * field-level permissions applied and `{ group }` sections resolved — plus the
+ * section-label translator every section map uses.
+ *
+ * A hook of its own because two renderers prepare the same schema: this file's
+ * `ObjectForm` (the `simple` / `tabbed` / `wizard` layouts) and
+ * `ObjectFormContainer`, which supplies the drawer or modal container an
+ * `object-form` block asks for with `formType` (ADR-0050 Decision 4 — the
+ * container is the caller's, never the form's).
+ */
+export function usePreparedFormSchema(
+  rawSchema: ObjectFormComponentProps['schema'],
+  dataSource: ObjectFormComponentProps['dataSource'],
+) {
   const perms = usePermissions();
 
   // ── `sections[].group` — the ADR-0085 §5 REFERENCE form (objectui#7051) ───
@@ -235,7 +245,7 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
   // A section may point `group` at one of the object's declared `fieldGroups`
   // instead of enumerating members (`@objectstack/spec` 17.3.0,
   // objectstack#13855). Resolving it needs the OBJECT definition, and this
-  // dispatcher — unlike the six bodies below it — has never loaded one.
+  // preparation — unlike the layout bodies it feeds — has never loaded one.
   //
   // It is resolved HERE, above the routing, on purpose: every variant's
   // `sections` prop is rebuilt key by key in the maps below, so a `group` left
@@ -272,7 +282,8 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
 
   // Apply field-level permissions to the entire schema (sections + flat
   // fields) BEFORE dispatching to any variant. This way all variants
-  // (Tabbed/Wizard/Split/Drawer/Modal/Simple) transparently honour FLS.
+  // (Tabbed/Wizard/Simple here, Drawer/Modal through `ObjectFormContainer`)
+  // transparently honour FLS.
   // Fail-open when no provider mounted (perms.isLoaded false).
   const schema = useMemo<LocalizedObjectFormSchema>(() => {
     // framework#1894 / objectstack-ai/objectstack#2998 (ADR-0078): the authored @objectstack/spec
@@ -339,15 +350,23 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
   const { sectionLabel } = useSafeFieldLabel();
   const tSec = (s: any) =>
     s?.name ? sectionLabel(schema.objectName, s.name, s.label || s.name) : s?.label;
+  return { schema, tSec };
+}
+
+const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
+  schema: rawSchema,
+  dataSource,
+}) => {
+  const { schema, tSec } = usePreparedFormSchema(rawSchema, dataSource);
 
   // Master-detail: when the schema declares inline child collections, render as
   // a master-detail form (parent fields + child grids, persisted atomically).
   // This lets a plain form view become master-detail by config — no bespoke
   // page. Skipped in view mode (read-only detail uses related lists instead).
-  // For drawer/modal formTypes we fall through to DrawerForm/ModalForm, which
-  // host the master-detail form INSIDE their envelope.
-  const routesToMasterDetail = !!(schema as any).subforms?.length && schema.mode !== 'view'
-      && schema.formType !== 'drawer' && schema.formType !== 'modal';
+  // A drawer or modal container never reaches here: `ObjectFormContainer`
+  // hands it to DrawerForm/ModalForm, which host the master-detail form INSIDE
+  // their envelope.
+  const routesToMasterDetail = !!(schema as any).subforms?.length && schema.mode !== 'view';
 
   // ── objectui#6237 diagnostic, now scoped to the ONE arm still inert ────────
   // The interim diagnostic ruled on 2026-08-29 covered `tabbed` AND `wizard`,
@@ -445,10 +464,10 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
             // ADR-0089 section predicate (objectui#6237) — key-by-key rebuild,
             // so an uncopied key is silently dropped before TabbedForm ever
             // sees it, exactly as it was on this route until this card. The
-            // split/drawer/modal maps below have carried it since #6111; this
-            // is the tabbed arm joining them.
+            // drawer/modal maps (`ObjectFormContainer`) have carried it since
+            // #6111; this is the tabbed arm joining them.
             //
-            // Read WITHOUT an `as any` cast on purpose, unlike those three:
+            // Read WITHOUT an `as any` cast on purpose, unlike those two:
             // `ObjectFormSection.visibleWhen` is declared, so the compiler is
             // able to catch a rename here. Through a cast it would keep
             // compiling and silently copy `undefined` — the exact silent-drop
@@ -523,115 +542,6 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
           nextText: schema.nextText,
           prevText: schema.prevText,
           onStepChange: schema.onStepChange,
-        }}
-        dataSource={dataSource}
-        className={schema.className}
-      />
-    );
-  }
-
-  if (schema.formType === 'split' && schema.sections?.length) {
-    return (
-      <SplitForm
-        schema={{
-          ...schema,
-          formType: 'split',
-          sections: schema.sections.map(s => ({
-            name: s.name,
-            label: tSec(s),
-            description: s.description,
-            columns: s.columns,
-            // `?? []` — see the tabbed arm above (objectui#7051).
-            fields: s.fields ?? [],
-            // Explicit pane placement (spec FormSection.pane). This mapping
-            // rebuilds each section key by key, so a key it doesn't copy is
-            // silently dropped — exactly how `visibleOn` once vanished here.
-            pane: s.pane,
-            // ADR-0089 section predicate (#6111) — same reason as `pane` above:
-            // a key this map does not copy never reaches the layout at all.
-            visibleWhen: (s as any).visibleWhen,
-            visibleWhenFault: s.visibleWhenFault,
-            // `className` / `gridClassName`: deliberately not copied — see the
-            // tabbed arm above (objectstack#13626, ruled 2026-09-01).
-          })),
-          splitDirection: schema.splitDirection,
-          splitSize: schema.splitSize,
-          splitResizable: schema.splitResizable,
-        }}
-        dataSource={dataSource}
-        className={schema.className}
-      />
-    );
-  }
-
-  if (schema.formType === 'drawer') {
-    // `layout` passes through unfolded: it is `vertical | horizontal` on both
-    // faces since objectui#11168 slice 3 (objectui#7759 group C), and the fold
-    // that mapped `inline` / `grid` away here is retired with them.
-    return (
-      <DrawerForm
-        schema={{
-          ...schema,
-          formType: 'drawer',
-          sections: schema.sections?.map(s => ({
-            name: s.name,
-            label: tSec(s),
-            description: s.description,
-            columns: s.columns,
-            // `?? []` — see the tabbed arm above (objectui#7051).
-            fields: s.fields ?? [],
-            collapsible: (s as any).collapsible,
-            collapsed: (s as any).collapsed,
-            // ADR-0089 section predicate (#6111) — key-by-key rebuild, so an
-            // uncopied key is silently dropped before DrawerForm ever sees it.
-            visibleWhen: (s as any).visibleWhen,
-            visibleWhenFault: s.visibleWhenFault,
-            // `className`: deliberately not copied — see the tabbed arm above
-            // (objectstack#13626, ruled 2026-09-01). DrawerForm's own divider
-            // site stops reading it in the same pass.
-          })),
-          open: schema.open,
-          onOpenChange: schema.onOpenChange,
-          drawerSide: schema.drawerSide,
-          drawerWidth: schema.drawerWidth,
-        }}
-        dataSource={dataSource}
-        className={schema.className}
-      />
-    );
-  }
-
-  if (schema.formType === 'modal') {
-    // `layout` passes through unfolded — see the drawer branch above.
-    return (
-      <ModalForm
-        schema={{
-          ...schema,
-          formType: 'modal',
-          sections: schema.sections?.map(s => ({
-            name: s.name,
-            label: tSec(s),
-            description: s.description,
-            columns: s.columns,
-            // `?? []` — see the tabbed arm above (objectui#7051).
-            fields: s.fields ?? [],
-            // The collapse pair (objectui#9849 step two — director ruling
-            // letter E, item 1: group semantics attach 「on every arm」). The
-            // spec declares both on `sections[]`; this map used to copy
-            // neither, so the modal silently ignored a declared collapse.
-            collapsible: s.collapsible,
-            collapsed: s.collapsed,
-            // ADR-0089 section predicate (#6111) — key-by-key rebuild, so an
-            // uncopied key is silently dropped before ModalForm ever sees it.
-            visibleWhen: (s as any).visibleWhen,
-            visibleWhenFault: s.visibleWhenFault,
-            // `className` / `gridClassName`: deliberately not copied — see the
-            // tabbed arm above (objectstack#13626, ruled 2026-09-01).
-          })),
-          open: schema.open,
-          onOpenChange: schema.onOpenChange,
-          modalSize: schema.modalSize,
-          modalCloseButton: schema.modalCloseButton,
         }}
         dataSource={dataSource}
         className={schema.className}
@@ -1343,7 +1253,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     }
 
     // What this save writes — the ONE outbound sequence, shared with the
-    // `tabbed`, `split` and `wizard` layouts (objectui#10563): strip what a form never
+    // `tabbed` and `wizard` layouts (objectui#10563): strip what a form never
     // writes (server-owned, computed, read-only, unknown to the object, and
     // refused by the caller's field-level security through `fieldWriteGate`,
     // objectui#10108 / `80c54122e`), omit the producer-owned defaults on a

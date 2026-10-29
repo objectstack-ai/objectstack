@@ -93,7 +93,7 @@ import { AlertTriangle, ShieldAlert, Download, ArrowUpIcon, ArrowDownIcon, Minus
 // surface (see that component's header for why it is dashboard-local).
 import { WidgetEmptyState } from './WidgetEmptyState';
 import { useFilterScope } from '@object-ui/react';
-import { resolveFilterPlaceholders, computeMetricDelta, formatMetricDeltaPercent, type MetricDelta } from './utils';
+import { resolveFilterPlaceholders, computeMetricDelta, formatMetricDeltaPercent, deltaToneClass } from './utils';
 import { metricAccentTextClass } from './colorVariants';
 import {
   METRIC_TILE_CONTAINER_CLASS,
@@ -266,31 +266,9 @@ const COMPARE_KIND_TREND_KEY = {
   previousYear: 'vsLastYear',
 } as const satisfies Record<CompareToConfig['kind'], string>;
 
-/**
- * The good/bad colour of a period-over-period delta, judged by the measure's
- * declared polarity (objectstack#26602). The dataset measure's `polarity`
- * reaches this widget on the answer's column descriptor (`fields[].polarity`),
- * relayed by the server like `format` and `currency`.
- *
- * - `lower`: a fall is good news (green) and a rise is bad (red). Turnaround
- *   days, overdue counts, cost: a slower approval no longer reads as a win.
- * - `neutral`: neither direction is good or bad, so no tone at all.
- * - `higher`, and an UNDECLARED polarity: a rise green, a fall red, the
- *   colours every delta had before the key existed. Nothing here guesses a
- *   polarity from the measure's name or unit.
- *
- * The arrow is not this function's business: it always shows which way the
- * number moved. A flat delta (`direction: 'neutral'`) takes no tone under any
- * polarity, as before.
- */
-function deltaToneClass(
-  direction: MetricDelta['direction'],
-  polarity: DatasetResultField['polarity'],
-): string | undefined {
-  if (direction === 'neutral' || polarity === 'neutral') return undefined;
-  const good = polarity === 'lower' ? direction === 'down' : direction === 'up';
-  return good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
-}
+// The good/bad colour of a delta by the measure's declared polarity is
+// `deltaToneClass` in `./utils` (objectstack#26602): one rule shared with the
+// inline `object-metric` tile's badge (objectstack#27347).
 
 /**
  * ISO calendar date, optionally carrying a time part — `2026-01-15`,

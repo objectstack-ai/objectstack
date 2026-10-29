@@ -53,6 +53,7 @@ ObjectUI follows the Shadcn convention. Design tokens are defined as HSL channel
 
 Components reference these tokens through Tailwind:
 
+{/* doc-snippet: fragment — two sibling elements shown without a parent: the fence deliberately holds two JSX roots because the point is the Tailwind class names, not a renderable tree */}
 ```tsx
 <div className="bg-background text-foreground border-border" />
 <button className="bg-primary text-primary-foreground" />
@@ -94,6 +95,7 @@ To recolour ObjectUI, override the token values rather than the utilities — ei
 
 ObjectUI uses [class-variance-authority](https://cva.style) to define type-safe component variants. Each component exports a `*Variants` function alongside the component itself:
 
+{/* doc-snippet: fragment — quotes the published Badge source: it imports class-variance-authority, which the reader installs in their own app but which is not a dependency of this repository's root, so the specifier does not resolve here */}
 ```tsx
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@object-ui/components";
@@ -126,6 +128,7 @@ function Badge({ className, variant, ...props }: BadgeProps) {
 
 To add a custom variant to an existing component, wrap it:
 
+{/* doc-snippet: fragment — continues the block above — cva, Badge and cn are already imported there; this block shows only the wrapper */}
 ```tsx
 const statusVariants = cva("", {
   variants: {
@@ -146,6 +149,7 @@ function StatusBadge({ status, className, ...props }: { status: "active" | "pend
 
 The `cn()` utility from `@object-ui/components` combines `clsx` and `tailwind-merge` so that later classes win over earlier ones without producing duplicate utilities:
 
+{/* doc-snippet: fragment — usage excerpt for cn(): isActive and className are the reader's own values, shown bare so the merge behaviour is the only thing on screen */}
 ```tsx
 import { cn } from "@object-ui/components";
 
@@ -159,6 +163,7 @@ cn("base-class", isActive && "bg-primary", className);
 
 Every ObjectUI component accepts a `className` prop that is merged via `cn()`, so consumers can always override styles:
 
+{/* doc-snippet: fragment — prop excerpt: a single Button usage, shown to demonstrate that className is merged; Button comes from the reader's own import of @object-ui/components */}
 ```tsx
 <Button className="rounded-full px-8" variant="outline">
   Custom Shape
@@ -169,6 +174,7 @@ Every ObjectUI component accepts a `className` prop that is merged via `cn()`, s
 
 ObjectUI supports three modes: `light`, `dark`, and `auto` (follows system preference). The `ThemeProvider` applies a `light` or `dark` class to the root element and listens for `prefers-color-scheme` changes.
 
+{/* doc-snippet: fragment — MyApp is the reader's own root component — the block shows where ThemeProvider goes, not what it wraps */}
 ```tsx
 import { ThemeProvider } from "@object-ui/react";
 
@@ -203,6 +209,7 @@ There is no `darkMode` option to set on your side. ObjectUI declares the class-b
 
 Register one or more theme definitions with `ThemeProvider`. Each theme is a plain JSON object:
 
+{/* doc-snippet: fragment — App is the reader's own root component; the trailing ThemeProvider usage is shown in place so the theme object and its consumer read as one unit */}
 ```tsx
 import type { Theme } from "@object-ui/types";
 
@@ -238,6 +245,7 @@ const corporateTheme: Theme = {
 
 Themes support **inheritance** via the `extends` field. A child theme only needs to declare its overrides:
 
+{/* doc-snippet: fragment — continues the block above — corporateTheme is declared there; App is the reader's own root component */}
 ```tsx
 const darkCorporate: Theme = {
   name: "corporate-dark",
@@ -317,6 +325,7 @@ function ThemeSwitcher() {
 
 Enable **persistence** so the user's choice survives page reloads:
 
+{/* doc-snippet: fragment — persistence excerpt: lightTheme, darkTheme and brandTheme are the reader's own theme objects and App is their root component */}
 ```tsx
 <ThemeProvider
   themes={[lightTheme, darkTheme, brandTheme]}
@@ -336,6 +345,7 @@ ObjectUI components use **logical CSS properties** (`ms-`, `me-`, `ps-`, `pe-`) 
 
 1. Set the `dir` attribute on your root element:
 
+{/* doc-snippet: fragment — an opening tag on its own, shown to isolate the dir and lang attributes — it is deliberately unclosed because the reader's document supplies the rest */}
 ```tsx
 <html dir="rtl" lang="ar">
 ```

@@ -204,6 +204,12 @@ const DOC_EXTENSIONS = ['.mdx', '.md'];
  * to catch a walk that broke, not to pin figures that move every day. Measured
  * when this landed: 1 / 1 / 18 / 184 files, 12 / 2 / 235 / 1056 fences.
  *
+ * objectstack#27145 retired the ui workspace's own docs tree with its site; its SDK
+ * pages live on in `content/docs/frontend`, so the docs row reads that tree from
+ * the repo root (`../content/docs/frontend`). Its floor moved with it: 34 files
+ * and 451 fences when re-measured, so `minFiles: 25` keeps a collapse floor
+ * with room, as the original 100 did under 184.
+ *
  * ## ⭐ objectui#7403 -- a per-root floor measures the roots that are DECLARED,
  * never the tree that walked out of them
  *
@@ -261,7 +267,7 @@ export const SCAN_ROOTS = Object.freeze([
   { spec: 'CLAUDE.md', kind: 'file', minFiles: 1 },
   { spec: 'skills', kind: 'dir', minFiles: 5 },
   { spec: '.claude/skills', kind: 'dir', minFiles: 3 },
-  { spec: 'content/docs', kind: 'dir', minFiles: 100 },
+  { spec: '../content/docs/frontend', kind: 'dir', minFiles: 25 },
 ]);
 
 /**

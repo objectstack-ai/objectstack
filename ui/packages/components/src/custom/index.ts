@@ -23,7 +23,6 @@ export * from './spinner';
 export * from './sort-builder';
 export * from './grouping-editor';
 export * from './view-skeleton';
-export * from './shimmer-skeleton';
 export * from './RecordTitleChip';
 export * from './refresh-indicator';
 export * from './view-states';

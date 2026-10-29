@@ -116,7 +116,7 @@ pnpm build
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-editor)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-editor)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-editor)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

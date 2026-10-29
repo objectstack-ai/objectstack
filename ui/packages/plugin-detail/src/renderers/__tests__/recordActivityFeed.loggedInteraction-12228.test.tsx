@@ -45,7 +45,7 @@ import {
   type SysActivityRow,
 } from '../recordActivityFeed';
 import { RecordActivityRenderer } from '../record-activity';
-import { buildDefaultPageSchema, type ObjectDefLike } from '../../synth/buildDefaultPageSchema';
+import { buildDefaultPageSchema, buildDefaultTimeline, type ObjectDefLike } from '../../synth/buildDefaultPageSchema';
 import '../../index';
 
 /** `log_call` on a contact: a held `crm_event`, then the timeline pointer. */
@@ -195,11 +195,11 @@ describe('an authored page with `showCompleted: true` is unchanged (objectui#122
 });
 
 /**
- * The default record page. The synthesizer is NOT changed: its
- * `record:discussion` node still carries no `feed`, so the block runs the
- * pipeline on spec defaults. The console page feeds that block through the
- * discussion context with rows it maps through `activityRowToFeedItem`, which
- * is what this mount does.
+ * The default record page. Since objectstack#27055 its feed is the Timeline
+ * tab's `record:activity` block (the discussion footer is retired); the block
+ * carries no `feed`, so it runs the pipeline on its declared props. The
+ * console page feeds that block through the discussion context with rows it
+ * maps through `activityRowToFeedItem`, which is what this mount does.
  */
 describe('the synthesized default record page shows a logged call (objectui#12228)', () => {
   beforeEach(() => {
@@ -215,16 +215,20 @@ describe('the synthesized default record page shows a logged call (objectui#1222
     },
   };
 
-  it('renders the logged call, meeting and email, and not the finished task', () => {
+  it('renders the logged call, meeting and email — and, as the record\'s stream of what happened, the finished task', () => {
     const page = buildDefaultPageSchema(contactDef);
-    const discussion = page.regions[0].components.find((c: { type: string }) => c.type === 'record:discussion');
-    // The synthesizer's node is the bare block: no `feed`, no properties.
-    expect(discussion).toEqual({ type: 'record:discussion' });
+    const tabs = page.regions[0].components.find((c: { type: string }) => c.type === 'page:tabs');
+    const timelineTab = tabs.properties.items.find((item: { value: string }) => item.value === 'timeline');
+    const discussion = timelineTab.children[0];
+    // The synthesizer's node: no `feed`, and completed items declared shown —
+    // the merged timeline records what happened (objectstack#27055).
+    expect(discussion).toEqual(buildDefaultTimeline());
+    expect(discussion.properties.showCompleted).toBe(true);
 
-    const Renderer = ComponentRegistry.get('record:discussion') as
+    const Renderer = ComponentRegistry.get('record:activity') as
       | React.ComponentType<{ schema: Record<string, unknown> }>
       | undefined;
-    if (!Renderer) throw new Error('no renderer registered for record:discussion');
+    if (!Renderer) throw new Error('no renderer registered for record:activity');
     // The discussion context keys its items on a string id.
     const items = mapAll(ALL_ROWS).map((i) => ({ ...i, id: String(i.id) }));
     render(
@@ -236,7 +240,7 @@ describe('the synthesized default record page shows a logged call (objectui#1222
     for (const row of LOGGED) {
       expect(screen.queryAllByText(String(row.summary)).length, String(row.id)).toBeGreaterThan(0);
     }
-    expect(screen.queryByText(String(FINISHED_TASK.summary))).toBeNull();
+    expect(screen.queryAllByText(String(FINISHED_TASK.summary)).length).toBeGreaterThan(0);
   });
 });
 

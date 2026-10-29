@@ -1618,6 +1618,22 @@ export interface DataTableSchema extends BaseSchema {
     cancel: () => void;
   }) => React.ReactNode;
   /**
+   * Host-supplied per-row answer to "may this row be edited in place?"
+   * (objectstack#27365).
+   *
+   * RUNTIME SLOT (the objectui#6124 shape) — a host-supplied function, NOT
+   * authorable metadata: JSON has no function value, so the zod twin refuses
+   * this key by name. `data-table` reads `schema.isRowEditable` and calls it;
+   * `ObjectGrid` supplies it from the server's record-grained write verdict
+   * (`useRecordCrudVerdicts`), the same answer its row kebab reads.
+   *
+   * It only ever NARROWS `editable`: a row it answers `false` for opens no cell
+   * editor on any trigger (click, double-click, Enter), and its cells take no
+   * edit cursor. Absent, every row follows `editable` and the per-column locks
+   * exactly as before. Selection, navigation and the row menu are untouched.
+   */
+  isRowEditable?: (row: any) => boolean;
+  /**
    * Group bands (objectui#12620): draw the table as ONE table, with one header,
    * whose body is a band row per group followed by that group's rows.
    *
@@ -1854,7 +1870,7 @@ export interface DataTableSchema extends BaseSchema {
    * `packages/plugin-chatbot/src/renderer.tsx` is the kind of prefix hit grep
    * scores. Every read is filed under the TYPE of the object it is read from;
    * this declaration carries none. What the renderer DOES read off this node:
-   * `emptyAction`, `onAddRecord`, `onBatchSave`, `onCellChange`,
+   * `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`,
    * `onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`,
    * `onRowDelete`, `onRowEdit`, `onRowSave`, `onSelectionChange`,
    * `renderCellEditor`, `rowActionDefs`, `rowDeletePredicates`,
@@ -1885,7 +1901,7 @@ export interface DataTableSchema extends BaseSchema {
    * `packages/plugin-chatbot/src/renderer.tsx` is the kind of prefix hit grep
    * scores. Every read is filed under the TYPE of the object it is read from;
    * this declaration carries none. What the renderer DOES read off this node:
-   * `emptyAction`, `onAddRecord`, `onBatchSave`, `onCellChange`,
+   * `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`,
    * `onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`,
    * `onRowDelete`, `onRowEdit`, `onRowSave`, `onSelectionChange`,
    * `renderCellEditor`, `rowActionDefs`, `rowDeletePredicates`,

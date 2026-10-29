@@ -67,7 +67,9 @@ import { render, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import { PredicateScopeProvider } from '@object-ui/react';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { DrawerForm } from '../DrawerForm';
 
 registerAllFields();
@@ -116,7 +118,7 @@ async function drawerForm(node: React.ReactElement): Promise<HTMLElement> {
 /** Route A — the real `ObjectForm`, routed to the drawer by `formType`. */
 const viaObjectForm = (schema: Record<string, unknown>): Promise<HTMLElement> =>
   drawerForm(
-    <ObjectForm
+    <ObjectFormContainer
       schema={
         {
           type: 'object-form',

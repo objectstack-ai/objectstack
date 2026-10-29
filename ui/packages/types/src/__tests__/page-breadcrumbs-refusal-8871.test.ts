@@ -8,7 +8,7 @@
 
 /**
  * `breadcrumbs` on a `page` NODE is refused at parse, and
- * `content/docs/guide/layout.md` no longer teaches it (objectui#8871, ADR-0049
+ * `content/docs/frontend/layout.mdx` no longer teaches it (objectui#8871, ADR-0049
  * enforce-or-remove).
  *
  * ## What this is, and what it deliberately is NOT
@@ -76,7 +76,7 @@ import { PageNodeSchema } from '../zod/layout.zod.js';
 import type { PageNodeSchema as TsPageNodeSchema } from '../layout.js';
 
 const REPO_ROOT = resolve(__dirname, '../../../..');
-const GUIDE_PATH = resolve(REPO_ROOT, 'content/docs/guide/layout.md');
+const GUIDE_PATH = resolve(REPO_ROOT, '../content/docs/frontend/layout.mdx');
 
 /** The document the guide used to teach, verbatim in shape. */
 const RETIRED_DOC = {
@@ -251,7 +251,7 @@ describe('objectui#8871 — the key is gone from the tree, not just from the gui
    *    retirement, which must keep naming the key;
    *  - this pin and its sibling `page-actions-refusal-7926.test.ts`, which assert
    *    the refusal and must therefore write the key to trip it;
-   *  - `content/docs/guide/layout.md`, whose refusal callout names the key to
+   *  - `content/docs/frontend/layout.mdx`, whose refusal callout names the key to
    *    steer authors off it (that the key is not AUTHORED there is asserted
    *    above, by a scan shaped for prose);
    *  - the two DECLARATION files, `zod/layout.zod.ts` and `layout.ts`. The
@@ -273,7 +273,7 @@ describe('objectui#8871 — the key is gone from the tree, not just from the gui
     ':!packages/types/src/__tests__/page-breadcrumbs-refusal-8871.test.ts',
     ':!packages/types/src/__tests__/page-actions-refusal-7926.test.ts',
     ':!packages/types/src/__tests__/page-app-dashboard-spec-parity.test.ts',
-    ':!content/docs/guide/layout.md',
+    ':!content/docs/frontend/layout.mdx',
     ':!packages/types/src/zod/layout.zod.ts',
     ':!packages/types/src/layout.ts',
   ];

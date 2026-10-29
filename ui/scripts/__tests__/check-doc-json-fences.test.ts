@@ -85,8 +85,13 @@ afterAll(() => {
 });
 
 function tempTree(files: Record<string, string>): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-json-gate-'));
-  tempRoots.push(root);
+  // The root is a `ui/` inside the temp dir: the gate reads its pages from
+  // `../content/docs/frontend` (objectstack#27145), one level above the root,
+  // so a fixture page keyed that way lands beside the root and inside the tree.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-json-gate-'));
+  tempRoots.push(base);
+  const root = path.join(base, 'ui');
+  fs.mkdirSync(root);
   for (const [rel, content] of Object.entries(files)) {
     const full = path.join(root, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -204,44 +209,44 @@ describe('classifyFence — the node-document predicate', () => {
 
 describe('analyze — the verdicts, against the real face', () => {
   it('RED: refuses a node document carrying an undeclared key, and names the key', () => {
-    const r = run({ 'content/docs/a.mdx': fence('json', { type: 'button', label: 'Go', action: { type: 'submit' } }) });
+    const r = run({ '../content/docs/frontend/a.mdx': fence('json', { type: 'button', label: 'Go', action: { type: 'submit' } }) });
     expect(reasons(r)).toEqual(['refused']);
     // fixture-address: a page in the temp fixture tree this test writes, as the gate under test reports it
-    expect(r.findings[0].site).toBe('content/docs/a.mdx:1');
+    expect(r.findings[0].site).toBe('../content/docs/frontend/a.mdx:1');
     expect(r.findings[0].detail).toMatch(/tolerant face accepts it/);
     expect(r.findings[0].issues).toEqual(['at (root): undeclared key "action"']);
   });
 
   it('accepts a declared-only node document', () => {
-    const r = run({ 'content/docs/a.md': fence('json', { type: 'button', label: 'Go' }) });
+    const r = run({ '../content/docs/frontend/a.md': fence('json', { type: 'button', label: 'Go' }) });
     expect(r.findings).toEqual([]);
     expect(r.accepted).toHaveLength(1);
     expect(r.judged).toHaveLength(1);
   });
 
   it('takes a declaration only where the face refuses the fence', () => {
-    const declared = run({ 'content/docs/a.mdx': [FRAGMENT_MARKER_EXAMPLES[0], fence('json', { type: 'button', nonsense: 1 })].join('\n') });
+    const declared = run({ '../content/docs/frontend/a.mdx': [FRAGMENT_MARKER_EXAMPLES[0], fence('json', { type: 'button', nonsense: 1 })].join('\n') });
     expect(declared.findings).toEqual([]);
     expect(declared.declared).toHaveLength(1);
 
-    const onAccepted = run({ 'content/docs/a.md': [FRAGMENT_MARKER_EXAMPLES[1], fence('json', { type: 'button', label: 'Go' })].join('\n') });
+    const onAccepted = run({ '../content/docs/frontend/a.md': [FRAGMENT_MARKER_EXAMPLES[1], fence('json', { type: 'button', label: 'Go' })].join('\n') });
     expect(reasons(onAccepted)).toEqual(['stale-fragment-marker']);
 
-    const onNonDocument = run({ 'content/docs/a.md': [FRAGMENT_MARKER_EXAMPLES[1], fence('json', { name: 'amount' })].join('\n') });
+    const onNonDocument = run({ '../content/docs/frontend/a.md': [FRAGMENT_MARKER_EXAMPLES[1], fence('json', { name: 'amount' })].join('\n') });
     expect(reasons(onNonDocument)).toEqual(['stale-fragment-marker']);
   });
 
   it('reports a marker that declares nothing, a reason too short to be one, and a verification claim', () => {
-    expect(reasons(run({ 'content/docs/a.mdx': [FRAGMENT_MARKER_EXAMPLES[0], '', 'Just prose.'].join('\n') }))).toEqual([
+    expect(reasons(run({ '../content/docs/frontend/a.mdx': [FRAGMENT_MARKER_EXAMPLES[0], '', 'Just prose.'].join('\n') }))).toEqual([
       'dangling-fragment-marker',
     ]);
     expect(
-      reasons(run({ 'content/docs/a.mdx': ['{/* doc-json: fragment — short */}', fence('json', { type: 'button', nonsense: 1 })].join('\n') })),
+      reasons(run({ '../content/docs/frontend/a.mdx': ['{/* doc-json: fragment — short */}', fence('json', { type: 'button', nonsense: 1 })].join('\n') })),
     ).toEqual(['unexplained-fragment']);
     expect(
       reasons(
         run({
-          'content/docs/a.mdx': [
+          '../content/docs/frontend/a.mdx': [
             '{/* doc-json: fragment — an excerpt, verified against the renderer by hand */}',
             fence('json', { type: 'button', nonsense: 1 }),
           ].join('\n'),
@@ -251,14 +256,14 @@ describe('analyze — the verdicts, against the real face', () => {
   });
 
   it('reads past the first issue of a union to the arm the value nearly fits', () => {
-    const r = run({ 'content/docs/a.mdx': fence('json', { type: 'card', title: 'T', children: [{ type: 'button', label: 'Go', nonsense: 1 }] }) });
+    const r = run({ '../content/docs/frontend/a.mdx': fence('json', { type: 'card', title: 'T', children: [{ type: 'button', label: 'Go', nonsense: 1 }] }) });
     expect(reasons(r)).toEqual(['refused']);
     expect((r.findings[0].issues ?? []).join('\n')).toMatch(/undeclared key "nonsense"/);
   });
 
   it('ANTI-IDLE: an enumeration that judged nothing, or lost its anchor, is a precondition, never a green', () => {
-    expect(run({ 'content/docs/a.mdx': fence('json', { name: 'not a node' }) }).preconditions.map((p) => p.reason)).toEqual(['nothing-judged']);
-    expect(run({ 'content/docs/a.mdx': fence('json', { type: 'button', label: 'Go' }) }, ['content/docs/anchor.mdx']).preconditions.map((p) => p.reason)).toEqual([
+    expect(run({ '../content/docs/frontend/a.mdx': fence('json', { name: 'not a node' }) }).preconditions.map((p) => p.reason)).toEqual(['nothing-judged']);
+    expect(run({ '../content/docs/frontend/a.mdx': fence('json', { type: 'button', label: 'Go' }) }, ['../content/docs/frontend/anchor.mdx']).preconditions.map((p) => p.reason)).toEqual([
       'anchor-unread',
     ]);
     // Only pages OFF the surface (objectui#12131, objectui#12204): a record, a
@@ -293,11 +298,11 @@ describe('the scan surface — the published READMEs (objectui#12131)', () => {
   const acceptedDoc = fence('json', { type: 'button', label: 'Go' });
 
   // The root `README.md` was the second README leg until objectstack#26080 moved
-  // its examples into `content/docs/guide/quick-start.md`, on the first leg; a
+  // its examples into `content/docs/frontend/quick-start.mdx`, on the first leg; a
   // root README in a fixture is off the surface now, and the refusal below says so.
   it('RED: refuses a node document in each package\'s own README, and names each — never a root README', () => {
     const r = run({
-      'content/docs/a.mdx': acceptedDoc,
+      '../content/docs/frontend/a.mdx': acceptedDoc,
       'packages/demo/README.md': refusedDoc,
       'packages/other/README.md': refusedDoc,
       'README.md': refusedDoc,
@@ -309,12 +314,12 @@ describe('the scan surface — the published READMEs (objectui#12131)', () => {
   });
 
   it('walks the legs in their declared order and counts each leg\'s pages', () => {
-    const r = run({ 'content/docs/a.mdx': acceptedDoc, 'packages/demo/README.md': acceptedDoc, 'README.md': acceptedDoc });
+    const r = run({ '../content/docs/frontend/a.mdx': acceptedDoc, 'packages/demo/README.md': acceptedDoc, 'README.md': acceptedDoc });
     expect(r.legs.map((l) => l.leg)).toEqual(SCAN_SURFACE.map((l) => l.leg));
     // The skills leg (objectui#12204) walks last and collects nothing in this fixture;
     // the root README is on no leg (objectstack#26080).
-    expect(r.legs.map((l) => l.pages)).toEqual([['content/docs/a.mdx'], ['packages/demo/README.md'], []]);
-    expect(r.documents).toEqual(['content/docs/a.mdx', 'packages/demo/README.md']);
+    expect(r.legs.map((l) => l.pages)).toEqual([['../content/docs/frontend/a.mdx'], ['packages/demo/README.md'], []]);
+    expect(r.documents).toEqual(['../content/docs/frontend/a.mdx', 'packages/demo/README.md']);
     expect(r.accepted).toHaveLength(2);
   });
 
@@ -505,7 +510,7 @@ describe('main — exit codes', () => {
   it('exits 2, could not run, when the face is not built', async () => {
     const root = tempTree({
       'packages/types/package.json': JSON.stringify({ exports: { './zod': { import: './dist/zod/index.zod.js' } } }),
-      'content/docs/a.mdx': fence('json', { type: 'button', label: 'Go' }),
+      '../content/docs/frontend/a.mdx': fence('json', { type: 'button', label: 'Go' }),
     });
     expect(await main([], root)).toBe(EXIT_CODES.couldNotRun);
   });

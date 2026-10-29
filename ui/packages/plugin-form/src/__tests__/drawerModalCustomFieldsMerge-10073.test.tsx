@@ -40,7 +40,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 
 registerAllFields();
 
@@ -87,7 +89,7 @@ const labelOf = (name: string): string | null =>
 
 async function mount(arm: Arm, schema: Record<string, unknown>, adapter: any = makeDataSource()) {
   const utils = render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={
         {
           type: 'object-form',

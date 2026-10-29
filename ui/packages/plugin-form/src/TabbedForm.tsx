@@ -94,10 +94,10 @@ export interface FormSectionConfig {
    * `Omit<FormSectionConfig, 'visibleWhen'>` — a derivation that defended the
    * one key it named while every FUTURE key added here still reached a wizard
    * step by default. `WizardStepConfig` is now declared independently, exactly
-   * as `SplitFormSectionConfig` / `ModalFormSectionConfig` /
-   * `DrawerFormSectionConfig` already are, so this type and the wizard's share
-   * nothing: a key is authorable on a wizard step only if someone writes it
-   * there, on the type whose renderer has to honour it.
+   * as `ModalFormSectionConfig` / `DrawerFormSectionConfig` already are, so
+   * this type and the wizard's share nothing: a key is authorable on a wizard
+   * step only if someone writes it there, on the type whose renderer has to
+   * honour it.
    */
   visibleWhen?: string | { dialect?: string; source: string };
   /**

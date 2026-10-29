@@ -281,6 +281,7 @@ package produces one:
 GET  /api/v1/security/suggested-bindings?status=pending   # list (reconciles first)
 POST /api/v1/security/suggested-bindings/:id/confirm      # accept: everyone carries the set
 POST /api/v1/security/suggested-bindings/:id/dismiss      # decline, or revoke an acceptance
+POST /api/v1/security/suggested-bindings/:id/reopen       # take a dismissal back: pending again
 ```
 
 `status` accepts `pending`, `confirmed` or `dismissed`, and may be omitted to
@@ -288,7 +289,14 @@ list every suggestion. Any other value is rejected with a `400` naming the
 accepted set — it previously reached the query as a filter nothing matched, so
 a mistyped status returned an empty list that read as "no suggestions".
 
-All three require the `manage_metadata` capability, and under a walled
+Re-opening is how an admin changes their mind about a dismissal or a revoke:
+the row returns to `pending`, exactly as if it had never been answered. It
+grants nothing by itself. A revoked set stays out of `everyone` until `confirm`
+accepts it again, and that accept runs the high-risk gate as any other does.
+Only a `dismissed` row can be re-opened (`409` otherwise), and only while its
+package still suggests the set.
+
+All four require the `manage_metadata` capability, and under a walled
 tenancy posture the platform operator: the decision reaches every member of
 every organization, so a tenant administrator cannot make it. An acceptance
 takes effect at once. What `everyone` grants is the `permissionSets` its

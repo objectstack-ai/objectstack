@@ -216,10 +216,11 @@ describe('the guarded surface follows .changeset/config.json, not a hand-written
   it('does not guard what changesets ignores', () => {
     const config = readReleaseConfig(repoRoot);
     const packages = discoverPackages(repoRoot, config);
-    const site = packages.get('apps/site');
-    expect(site?.name).toBe('@object-ui/site');
-    expect(site?.versioned, '@object-ui/site is in `ignore` — no release covers it').toBe(false);
-    expect(site?.ignored).toBe(true);
+    // `@object-ui/site` stood here until objectstack#27145 deleted the site.
+    const runner = packages.get('packages/runner');
+    expect(runner?.name).toBe('@object-ui/runner');
+    expect(runner?.versioned, '@object-ui/runner is in `ignore` — no release covers it').toBe(false);
+    expect(runner?.ignored).toBe(true);
   });
 
   it('would guard nothing only if the release configuration said so — and refuses to', () => {

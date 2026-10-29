@@ -93,11 +93,19 @@ describe('recordPageArrangementFor — a switched-off column frees its room (obj
     });
   });
 
-  it('three columns, related off: details | timeline, the related column in the rail', () => {
+  it('three columns, related off: details | timeline, and no rail (objectstack#27241)', () => {
     expect(recordPageArrangementFor('three-column', { timeline: true, related: false })).toEqual({
       columns: ['details', 'timeline'],
       timelineFolded: false,
-      relatedRail: true,
+      relatedRail: false,
+    });
+  });
+
+  it('two columns, related off: details | timeline, and no rail — the switch decides whether the column exists (objectstack#27241)', () => {
+    expect(recordPageArrangementFor('two-column', { timeline: true, related: false })).toEqual({
+      columns: ['details', 'timeline'],
+      timelineFolded: false,
+      relatedRail: false,
     });
   });
 
@@ -114,11 +122,12 @@ describe('recordPageArrangementFor — a switched-off column frees its room (obj
     });
   });
 
-  it('both off: details alone, the related column (timeline folded in) in the rail', () => {
+  it('both off: details alone, and no rail (objectstack#27241)', () => {
     expect(recordPageArrangementFor('three-column', { timeline: false, related: false })).toEqual({
       columns: ['details'],
       timelineFolded: true,
-      relatedRail: true,
+      relatedRail: false,
     });
+    expect(recordPageArrangementFor('two-column', { timeline: false, related: false }).relatedRail).toBe(false);
   });
 });

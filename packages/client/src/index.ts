@@ -6228,6 +6228,15 @@ export class ObjectStackClient {
               );
               return this.unwrapResponse(res);
           },
+
+          /** Re-open a dismissed or revoked suggestion: pending again, nothing granted until `confirm` accepts it. */
+          reopen: async (id: string): Promise<{ suggestion: AudienceBindingSuggestion }> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/suggested-bindings/${encodeURIComponent(id)}/reopen`,
+                  { method: 'POST' },
+              );
+              return this.unwrapResponse(res);
+          },
       },
   };
 

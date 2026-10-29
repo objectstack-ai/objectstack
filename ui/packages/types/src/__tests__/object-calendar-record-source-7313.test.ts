@@ -17,7 +17,7 @@
  * `objectName`, `null` when none is present. The published interface REQUIRED
  * `objectName` and declared neither `data` nor `staticData`; the mirror did the
  * same (no `requireRecordSource`). So the two static-data examples
- * `content/docs/plugins/plugin-calendar.mdx` teaches rendered correctly, were
+ * `content/docs/frontend/plugins/plugin-calendar.mdx` teaches rendered correctly, were
  * refused by `safeValidateSchema`, and could not be annotated with their own
  * type (`TS2741: Property 'objectName' is missing`).
  *
@@ -68,7 +68,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
 const RENDERER = 'packages/plugin-calendar/src/ObjectCalendar.tsx';
 const LADDER = 'packages/core/src/utils/record-source.ts';
-const DOC_PAGE = 'content/docs/plugins/plugin-calendar.mdx';
+const DOC_PAGE = '../content/docs/frontend/plugins/plugin-calendar.mdx';
 
 /* ── Type-level pins (invariant equality, house form) ─────────────────────── */
 
@@ -642,10 +642,11 @@ describe('objectui#7313 — the declaration names a live read, in the declared o
     expect(body).toContain('authoredDataIsOnTheDeclaredArm(schema.data, dataArm)');
   });
 
-  it('the two static-data examples on the plugin page carry the annotation (the card\'s completion signal)', () => {
+  it('the static-data example on the plugin page carries the annotation (the card\'s completion signal)', () => {
     const page = readFileSync(join(REPO_ROOT, DOC_PAGE), 'utf8');
     expect(page).toContain("const schema: ObjectCalendarSchema = {\n  type: 'object-calendar',\n  staticData: [");
-    expect(page).toContain("const valueProviderCalendar: ObjectCalendarSchema = {\n  type: 'object-calendar',\n  staticData: [");
+    // The second one, `valueProviderCalendar`, left with a section that was trimmed
+    // when the page moved into the monorepo docs (objectstack#27145).
     // These two rows name two specific consts and verify those two — that is the
     // whole of what they claim. The TOTAL property that used to be asserted here
     // alongside them lives in its own row below (objectui#9676), because the
@@ -672,16 +673,16 @@ describe('objectui#7313 — the declaration names a live read, in the declared o
     // population means anything — `every()` over an empty set is exactly the
     // silent green this card was filed for. Named subjects, not a count: a count
     // moves every time the page grows an example, and then gets relaxed.
+    // `fieldMappedCalendar`, `objectProviderCalendar`, `valueProviderCalendar`,
+    // `appointmentCalendar`, `eventCalendar` and `taskCalendar` left with the
+    // sections trimmed when the page moved into the monorepo docs
+    // (objectstack#27145); the four below are what the page still declares.
     expect(calendar.map((d) => d.name)).toEqual(
       expect.arrayContaining([
-        'fieldMappedCalendar',
-        'objectProviderCalendar',
-        'valueProviderCalendar',
+        'schema',
         'eventClickCalendar',
         'dateClickCalendar',
-        'appointmentCalendar',
-        'eventCalendar',
-        'taskCalendar',
+        'objectCalendarSchema',
       ]),
     );
 

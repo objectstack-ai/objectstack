@@ -40,7 +40,6 @@ import type { DataSource } from '@object-ui/types';
 import { ModalForm } from './ModalForm';
 import { DrawerForm } from './DrawerForm';
 import { TabbedForm } from './TabbedForm';
-import { SplitForm } from './SplitForm';
 import { WizardForm, type WizardFormSchema } from './WizardForm';
 
 registerAllFields();
@@ -115,13 +114,12 @@ type SectionedFormContainer = React.ComponentType<{
 }>;
 
 /** The `formType` discriminants these containers are pinned to, spelled once. */
-type SectionedFormType = 'modal' | 'drawer' | 'tabbed' | 'split' | 'wizard';
+type SectionedFormType = 'modal' | 'drawer' | 'tabbed' | 'wizard';
 
 const CONTAINERS: ReadonlyArray<readonly [string, SectionedFormContainer, SectionedFormType]> = [
   ['ModalForm', ModalForm, 'modal'],
   ['DrawerForm', DrawerForm, 'drawer'],
   ['TabbedForm', TabbedForm, 'tabbed'],
-  ['SplitForm', SplitForm, 'split'],
   // objectui#10726. A wizard step is a section, so `SECTIONS` is its one step.
   ['WizardForm', WizardForm, 'wizard'],
 ];

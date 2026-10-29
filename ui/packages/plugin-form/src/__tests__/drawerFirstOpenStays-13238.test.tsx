@@ -56,6 +56,9 @@ import { ComponentRegistry } from '@object-ui/core';
 import { registerAllFields } from '@object-ui/fields';
 import type { DataSource } from '@object-ui/types';
 import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 
 registerAllFields();
 afterEach(() => cleanup());
@@ -120,7 +123,7 @@ function mountTaskDesk() {
       <div>
         <button type="button" onClick={() => setEditId('T1')}>Warehouse schema</button>
         {editId != null ? (
-          <ObjectForm
+          <ObjectFormContainer
             schema={{
               type: 'object-form',
               formType: 'drawer',

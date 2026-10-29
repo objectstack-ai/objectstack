@@ -129,7 +129,7 @@ pnpm build
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-markdown)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-markdown)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-markdown)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

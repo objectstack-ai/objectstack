@@ -123,11 +123,14 @@ describe('markdown fence scanning has one authority (objectui#9194)', () => {
     ].join('\n');
 
     const withFixture = <T,>(run: (root: string) => T): T => {
+      // The gates read their pages from `../content/docs/frontend`, one level
+      // above the root (objectstack#27145), so the root is a `ui/` in the temp dir.
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'objectui-9194-'));
       try {
-        fs.mkdirSync(path.join(dir, 'content', 'docs'), { recursive: true });
-        fs.writeFileSync(path.join(dir, 'content', 'docs', 'odd.mdx'), source, 'utf8');
-        return run(dir);
+        fs.mkdirSync(path.join(dir, 'content', 'docs', 'frontend'), { recursive: true });
+        fs.mkdirSync(path.join(dir, 'ui'));
+        fs.writeFileSync(path.join(dir, 'content', 'docs', 'frontend', 'odd.mdx'), source, 'utf8');
+        return run(path.join(dir, 'ui'));
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
       }
@@ -173,7 +176,7 @@ describe('markdown fence scanning has one authority (objectui#9194)', () => {
     });
 
     it('reads a page that teaches nested fences as one fence, not three', () => {
-      const page = 'content/docs/plugins/plugin-markdown.mdx';
+      const page = '../content/docs/frontend/plugins/plugin-markdown.mdx';
       const fences = scanFences(ROOT).fences.filter((f) => f.file === page);
       const nested = fences.filter((f) => f.body.some((line) => line.trim().startsWith('```')));
       // Whatever else the page grows, a block quoted INSIDE a longer fence is

@@ -32,6 +32,7 @@ import {
 import { BaseSchema, SchemaNodeSchema, specFieldsExcept } from './base.zod.js';
 import { DASHBOARD_COLOR_VARIANTS, DASHBOARD_WIDGET_TYPES } from '../designer.js';
 import { DASHBOARD_COMPONENT_WIDGET_TYPES, DASHBOARD_WIDGET_TYPE_EXTENSIONS } from '../complex.js';
+import { FILTER_FIELD_TYPES } from '../filter-field-types.js';
 import { stripImportedDefaults } from './imported-defaults.js';
 import { closeStrictUnionArms } from './node-derivation.js';
 
@@ -528,67 +529,55 @@ export const FilterGroupSchema: z.ZodType<any> = z.lazy(() => FilterGroupObject)
  * `…Clear allRemove condition…`, and the three value inputs degrade from
  * `text`/`number`/`number` to three `text` boxes.
  *
- * ## The type vocabulary — the FOURTEEN the published doc declares
+ * ## The type vocabulary — `FILTER_FIELD_TYPES`, one list for three readers
  *
- * Ruled on objectui#7562 (director seat, decision batch #88, 2026-09-08): of
- * the three declarations of this one authoring surface — the published doc
- * (`content/docs/components/complex/filter-builder.mdx`), the component, and
- * this mirror — the DOC is the authority. The component already follows it,
- * and a contract does not retract what it published to authors. So the enum
- * below is the doc's fourteen in the doc's order, and `type` is OPTIONAL
- * because the doc publishes `type?:` and the renderer reads `fieldType ||
- * "text"` (`custom/filter-builder.tsx`: `valueFamilyForFieldType`, and again
- * in `operatorsForFieldType` for operators).
+ * The enum is built from `FILTER_FIELD_TYPES` (`../filter-field-types.ts`),
+ * the same list `FilterField['type']` is typed from and the renderer's
+ * behaviour buckets are spread from, so the validator, the interface and the
+ * renderer cannot drift apart. Before that list existed each kept its own
+ * copy, and objectui#6939, #7562 and #8774 each found the copies apart.
  *
- * ⛔ The ruling carried a PRECONDITION, measured before this enum moved:
- * every one of the fourteen has a renderer branch, because a key declared that
- * nothing draws would have had to come OUT of the doc instead. Measured on
- * `e3fb3b6` by driving one condition row per member through the real
- * `FilterBuilder` and reading both the value control and the operator bucket.
- * All fourteen passed and nothing was removed from the doc. The branches, in
- * `custom/filter-builder.tsx`:
+ * The fourteen members were first the published doc's: objectui#7562
+ * (decision batch #88) ruled the doc
+ * (`content/docs/components/complex/filter-builder.mdx`) the authority for
+ * this surface, on the precondition that every member has a renderer branch.
+ * That doc retired with the ObjectUI docs site (objectstack#27145); the shared
+ * list kept its members and order, and the precondition is now asserted per
+ * member by the render half of `filter-builder-mirror-6939`. `type` is
+ * OPTIONAL because the renderer reads `fieldType || "text"`
+ * (`custom/filter-builder.tsx`: `valueFamilyForFieldType`, and again in
+ * `operatorsForFieldType` for operators).
  *
- *   - `numberLikeTypes:931` — `number`, `currency`, `percent`, `rating`
- *     ⇒ `<input type="number">` and the numeric bucket (`greaterThan` /
- *     `lessThan` / `greaterOrEqual` / `lessOrEqual`).
- *   - `dateLikeTypes:933`, plus the three equality tests at 411-413 — `date`,
- *     `datetime`, `time` ⇒ `<input type>` `date` / `datetime-local` / `time`
- *     and `before` / `after` / `between`.
- *   - `boolean` is its own family (line 410) ⇒ no `<input>` at all but a
- *     two-item Select, and a two-operator bucket nothing else has.
- *   - `selectLikeTypes:935` — `select`, `status`; `lookupLikeTypes:947` —
- *     `lookup`, `master_detail`, `user` ⇒ the option-driven Select (a THIRD
- *     combobox on the row, no `<input>`) and the relational `in` / `notIn`
- *     bucket. With no static option domain but a `referenceTo` — or
- *     `type: 'user'`, which defaults its own — all three lookup-like members
- *     draw the remote search picker instead (line 1277).
+ * The branches, by bucket:
  *
- * ⚠ `text` is the fourteenth and its branch is BY NAME, not by a distinct
+ *   - `FILTER_NUMBER_LIKE_TYPES` — `number`, `currency`, `percent`, `rating`
+ *     ⇒ `<input type="number">` and the numeric operator bucket.
+ *   - `FILTER_DATE_LIKE_TYPES` — `date`, `datetime`, `time` ⇒ `<input type>`
+ *     `date` / `datetime-local` / `time` and `before` / `after` / `between`.
+ *   - `boolean` is its own family ⇒ no `<input>` at all but a two-item
+ *     Select, and a two-operator bucket nothing else has.
+ *   - `FILTER_SELECT_LIKE_TYPES` — `select`, `status`;
+ *     `FILTER_LOOKUP_LIKE_TYPES` — `lookup`, `master_detail`, `user` ⇒ the
+ *     option-driven Select (a THIRD combobox on the row, no `<input>`) and the
+ *     relational `in` / `not_in` bucket. With no static option domain but a
+ *     `referenceTo` — or `type: 'user'`, which defaults its own — the three
+ *     lookup-like members draw the remote search picker instead.
+ *
+ * ⚠ `text` is in no bucket and its branch is BY NAME, not by a distinct
  * control: it IS the unrecognised-word fallthrough target, so a `text` column
- * measures identical to a nonsense spelling AND to an absent `type` — same 35
- * elements, same `<input type="text">`, same operator bucket, all three. What
- * makes it READ rather than phantom is that the renderer names it: line 408 is
- * where an absent `type` acquires the family called `text`, and `text` is a
- * `FilterValueFamily` member (line 405) and a `FILTER_INPUT_TYPE_BY_FAMILY`
- * key (line 431). The ruling says the same from the other side — "`text` when
- * absent, as the renderer already reads it" — so its optional half cannot land
- * while `text` is deleted.
+ * measures identical to a nonsense spelling AND to an absent `type`. What makes
+ * it READ rather than phantom is that the renderer names it: an absent `type`
+ * acquires the family called `text`, and `text` is a `FilterValueFamily` member
+ * and a `FILTER_INPUT_TYPE_BY_FAMILY` key.
  *
  * `string` stays OUT, and that is the contrast the paragraph above turns on:
  * it is named NOWHERE in the renderer, so it reaches the text control only by
- * the fallthrough. A phantom, removed by `d4493fdbc` and not restored here;
- * the published doc does not offer it either, so the two faces agree.
+ * the fallthrough. A phantom, removed by `d4493fdbc` and not restored here.
  */
 export const FilterFieldSchema = z.looseObject({
   value: z.string().describe('Field key — the identity every read site matches on'),
   label: z.string().describe('Field label'),
-  type: z.enum([
-    'text', 'number', 'currency', 'percent', 'rating',
-    'date', 'datetime', 'time',
-    'boolean',
-    'select', 'status',
-    'lookup', 'master_detail', 'user',
-  ]).optional().describe('Field type — the published doc\'s fourteen; `text` when absent'),
+  type: z.enum(FILTER_FIELD_TYPES).optional().describe('Field type — the value family the column is edited in; `text` when absent'),
   // The spec's canonical filter vocabulary, `VIEW_FILTER_OPERATORS` in
   // `@objectstack/spec/ui` (objectui#10286, the objectui#7759 ruling: where the
   // spec declares it, both faces align to the spec). This key used to take
