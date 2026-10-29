@@ -42,7 +42,7 @@ This matrix is generated from actual codebase analysis and represents the curren
 **Notes:**
 - Core package provides complete microkernel implementation
 - Plugin system supports the `init`/`start`/`destroy` lifecycle, dependency resolution, and service injection — the `onInstall`/`onEnable`-style hook family was retired in v17 as never-implemented (#4212)
-- Event bus enables inter-plugin communication; `IPluginLifecycleEvents` registers the 14 lifecycle events that actually fire, and `LifecycleEventName` soft-types `hook`/`trigger` (#4241)
+- Event bus enables inter-plugin communication; `IPluginLifecycleEvents` registers the lifecycle events that actually fire, and `LifecycleEventName` soft-types `hook`/`trigger` (#4241)
 - ObjectQL serves as the **example kernel** — a reference implementation that will be modularized into plugins
 
 ### Data Infrastructure

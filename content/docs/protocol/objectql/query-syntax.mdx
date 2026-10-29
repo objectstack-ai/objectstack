@@ -347,7 +347,7 @@ metacharacters — `{ name: { $icontains: 'a.b' } }` matches `a.b` and not `axb`
   **If you were relying on `$contains` being loose on the in-memory driver, that
   is a row-set change: write `$icontains` when you want a fold.** The shared
   standard both halves are measured against is `FILTER_TEXT_CASES`
-  (`@objectstack/spec/data`), which all five drivers now run.
+  (`@objectstack/spec/data`), which every driver now runs.
 </Callout>
 
 ### `$regex` — removed
@@ -1038,7 +1038,7 @@ const query: QueryAST = {
 **Schema enum:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`.
 
 <Callout type="info">
-All six functions are computed on every backend. `count_distinct` lowers to
+All of them are computed on every backend. `count_distinct` lowers to
 `COUNT(DISTINCT field)` on `SqlDriver` and on the Turso driver (both transports), and is
 computed by the MongoDB driver, the in-memory driver and the engine's in-memory
 aggregation fallback. A function the schema enum never declared (`median`) is
@@ -1214,7 +1214,7 @@ label→value mapping in the expansion rather than by the operator.
   `driver-memory` used on its query and analytics faces. **On CASE** — this callout's
   subject — the divergence it warned about is closed: running your tests on the
   in-memory double no longer returns rows a SQL or MongoDB deployment would not
-  because of a fold, and `FILTER_TEXT_CASES` holds all five drivers to that rule.
+  because of a fold, and `FILTER_TEXT_CASES` holds every driver to that rule.
   ⚠️ **One axis is NOT aligned, it is not a case question, and which answer you see
   depends on how you reach the data.** **Through the engine** — `ql.find()` and every
   surface above it (REST `where` / `$filter`, flow node filters, list views) — a text

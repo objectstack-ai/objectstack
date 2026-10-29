@@ -235,7 +235,7 @@ rule and the pitfalls are **[pagination rules](./rules/pagination.md)**.
 
 ## Aggregation
 
-The six functions (`count`, `sum`, `avg`, `min`, `max`, `count_distinct`), date
+The functions (`count`, `sum`, `avg`, `min`, `max`, `count_distinct`), date
 bucketing, `having`, and the per-measure `filter` are
 **[aggregation rules](./rules/aggregation.md)**. The call shape:
 

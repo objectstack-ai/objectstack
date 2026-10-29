@@ -1,10 +1,10 @@
 # @object-ui/i18n
 
-Internationalization for Object UI — 10 built-in locales, RTL support, and date/currency formatting.
+Internationalization for Object UI — built-in locales, RTL support, and date/currency formatting.
 
 ## Features
 
-- 🌍 **10 Built-in Locales** - English, Chinese, Japanese, Korean, German, French, Spanish, Portuguese, Russian, Arabic
+- 🌍 **Built-in Locales** - English, Chinese, Japanese, Korean, German, French, Spanish, Portuguese, Russian, Arabic
 - 🔄 **RTL Support** - Automatic right-to-left layout for Arabic and other RTL languages
 - 📅 **Date Formatting** - Locale-aware date, datetime, and relative time formatting
 - 💰 **Currency & Number Formatting** - Locale-aware currency and number formatting
@@ -356,7 +356,7 @@ isRTL('en'); // false
 Server-driven metadata types a label as a plain string **or** an inline
 per-locale map (`{ en: 'Pricing', 'zh-CN': '定价' }`). An authoring surface that
 shows one locale in one text input has to answer three separate questions, so
-there are three functions and each answers exactly one:
+there is one function per question:
 
 ```tsx
 import { pickLocalized, setLocalized, clearLocalized } from '@object-ui/i18n';
