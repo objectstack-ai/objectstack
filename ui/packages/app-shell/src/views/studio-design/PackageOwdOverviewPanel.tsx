@@ -38,12 +38,21 @@ import type { MetadataClient, MetadataLayered } from '@object-ui/data-objectstac
 // picklist-bound field (objectui#10202, objectui#11692).
 import { dropServedPicklistOptions, extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
 import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@object-ui/components';
+import { errorCodeIs } from '@object-ui/types';
+import { readFields } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { deriveMasterObject, requireCbpMasterDetails } from './owd-sharing.js';
 import { toast } from 'sonner';
@@ -116,6 +125,24 @@ function owdLabel(value: string, locale: SupportedLocale): string {
   if (!value) return t('engine.studio.settings.sharingUnset', locale);
   const hit = OWD_OPTION_KEYS.find((o) => o.value === value);
   return hit ? t(hit.key, locale) : value;
+}
+
+/**
+ * objectstack#27458 — the prerequisite a `controlled_by_parent` save brings
+ * with it: each `master_detail` field it makes required, as `field → master`.
+ * Empty when the save makes none required.
+ */
+function cbpPrerequisite(fields: unknown): string[] {
+  return readFields(fields)
+    .entries.filter((e) => e.def.type === 'master_detail' && e.def.required !== true)
+    .map((e) => `${e.name} → ${typeof e.def.reference === 'string' ? e.def.reference : '?'}`);
+}
+
+/** The confirm a refused prerequisite opens: what becomes required, and what the server said. */
+interface CbpPrereq {
+  object: string;
+  relations: string[];
+  issues: string[];
 }
 
 /** The item a stored value none of a dial's options carries is shown by. */
@@ -217,6 +244,7 @@ export function PackageOwdOverviewPanel({
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
+  const [prereq, setPrereq] = React.useState<CbpPrereq | null>(null);
 
   const load = React.useCallback(async () => {
     setLoaded(false);
@@ -341,11 +369,12 @@ export function PackageOwdOverviewPanel({
     if (!isDirty) setSaveError(null);
   }, [isDirty]);
 
-  const doSave = React.useCallback(async () => {
+  const doSave = React.useCallback(async (force = false) => {
     const changed = rowState.filter((s) => s.dirty);
     if (changed.length === 0) return;
     setSaving(true);
     setSaveError(null);
+    setPrereq(null);
     try {
       // Each changed row lands as that object's package-scoped DRAFT: read the
       // fresh body (below), apply just `sharingModel` (unset → drop the key), and
@@ -368,7 +397,9 @@ export function PackageOwdOverviewPanel({
         // objectui#12326 — switching to `controlled_by_parent` sets
         // `required: true` on every `master_detail` field, as the per-object
         // Settings tab does: the save door refuses an omitted one there.
+        let relations: string[] = [];
         if (s.edit.internal === 'controlled_by_parent' && next.fields !== undefined) {
+          relations = cbpPrerequisite(next.fields);
           next.fields = requireCbpMasterDetails(next.fields);
         }
         // objectui#11692 — `next` is seeded from a SERVED object read, where a
@@ -376,7 +407,33 @@ export function PackageOwdOverviewPanel({
         // runtime resolved from the list; the authoring door refuses the two
         // together, for the whole object. So the resolved `options` stay out of
         // the body, on every bound field and on nothing else.
-        await client.save('object', s.row.name, dropServedPicklistOptions(next), { mode: 'draft', packageId, surface: 'studio' });
+        try {
+          await client.save('object', s.row.name, dropServedPicklistOptions(next), {
+            mode: 'draft',
+            packageId,
+            surface: 'studio',
+            // objectstack#27458 — forced only after the author confirmed the
+            // prerequisite below, and only on the rows that carry one.
+            ...(force && relations.length > 0 ? { force: true } : {}),
+          });
+        } catch (e) {
+          // objectstack#27458 — making the relationship required is a change
+          // the server's destructive-change guard asks to confirm (409). Name
+          // the prerequisite and offer it, instead of a dead-end banner. The
+          // guard stands: nothing is forced until the author confirms.
+          if (!force && relations.length > 0 && (e as { status?: number })?.status === 409 && errorCodeIs(e, 'DESTRUCTIVE_CHANGE')) {
+            const issues = (e as { issues?: unknown }).issues;
+            setPrereq({
+              object: s.row.label,
+              relations,
+              issues: (Array.isArray(issues) ? issues : [])
+                .map((i) => String((i as { message?: unknown })?.message ?? ''))
+                .filter(Boolean),
+            });
+            return;
+          }
+          throw e;
+        }
       }
       toast.success(tFormat('engine.studio.owd.saved', locale, { count: changed.length }));
       onDraftSaved?.();
@@ -424,6 +481,35 @@ export function PackageOwdOverviewPanel({
           </button>
         )}
       </div>
+
+      <Dialog open={!!prereq} onOpenChange={(open) => !open && setPrereq(null)}>
+        <DialogContent data-testid="owd-cbp-prereq">
+          <DialogHeader>
+            <DialogTitle>{t('engine.studio.owd.cbpPrereqTitle', locale)}</DialogTitle>
+            <DialogDescription>
+              {tFormat('engine.studio.owd.cbpPrereqDesc', locale, { object: prereq?.object ?? '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="space-y-1 text-sm">
+            {prereq?.relations.map((r) => (
+              <li key={r} className="font-mono text-xs">{r}</li>
+            ))}
+          </ul>
+          {prereq && prereq.issues.length > 0 && (
+            <ul className="max-h-48 space-y-1 overflow-auto text-xs text-muted-foreground">
+              {prereq.issues.map((m, i) => (
+                <li key={i} className="border-l-2 border-amber-500 pl-2">{m}</li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPrereq(null)}>{t('engine.cancel', locale)}</Button>
+            <Button data-testid="owd-cbp-prereq-confirm" onClick={() => void doSave(true)} disabled={saving}>
+              {t('engine.studio.owd.cbpPrereqConfirm', locale)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {saveError && (
         <p className="border-b bg-destructive/10 px-4 py-2 text-[11px] text-destructive">{saveError}</p>
