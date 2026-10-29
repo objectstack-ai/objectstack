@@ -258,17 +258,21 @@ async function tryLoadTemplateManifest(
 
 /**
  * Keys `objectstack.manifest.json` accepts that this command does NOT carry to
- * the control plane. `tags`, `publisher`, `isStarter` and `visibility` are
- * inherited from `CreatePackageRequestSchema`; `preview` is a scaffold-side
- * extra (publish has no screenshot upload path).
+ * the control plane. `publisher`, `isStarter` and `visibility` are inherited
+ * from `CreatePackageRequestSchema`; `preview` is a scaffold-side extra
+ * (publish has no screenshot upload path).
  *
- * They are not sent because nothing in this repo shows the hosted
- * `POST /cloud/packages` route writes them: the request schema declares them,
- * but the read-side row stores `tags` as a string, and `publisher` is a trust
- * tier that gates listing privileges, so a value self-declared in an author's
- * file is a privilege claim only the control plane can judge. ⛔ Do not start
- * sending them before {@link CATALOG_SEND_ISSUE} answers what the hosted side
- * accepts. `visibility` is flag-only on purpose (see the `--visibility` flag).
+ * - `publisher` and `isStarter` are {@link PLATFORM_DECIDED_MANIFEST_KEYS}:
+ *   the hosted control plane decides both and never reads an author's value
+ *   (`publisher` is a trust tier that gates listing privileges; `isStarter` is
+ *   honoured only for a first-party seed). ⛔ Never send them: a value
+ *   self-declared in an author's file is a claim only the platform can judge.
+ * - `preview` is not carried by the hosted catalog yet; that is tracked at
+ *   {@link CATALOG_SEND_ISSUE}.
+ * - `visibility` is flag-only on purpose (see the `--visibility` flag).
+ *
+ * `tags` is not here: the hosted route validates and stores it, so it is sent
+ * (see the request body in `run()`).
  *
  * Dropping an authored key silently is the defect, so each one the file
  * declares is named in a warning. The warning does not fail the publish: the
@@ -279,9 +283,12 @@ async function tryLoadTemplateManifest(
  * `test/package-publish-uncarried-manifest-keys.test.ts`, so a key the schema
  * gains later goes red there until publish either sends it or lists it here.
  */
-export const UNCARRIED_MANIFEST_KEYS = ['tags', 'publisher', 'isStarter', 'preview', 'visibility'] as const;
+export const UNCARRIED_MANIFEST_KEYS = ['publisher', 'isStarter', 'preview', 'visibility'] as const;
 
-/** Where carrying the catalog keys to the hosted control plane is tracked. */
+/** The {@link UNCARRIED_MANIFEST_KEYS} the platform decides, whatever the file says. */
+const PLATFORM_DECIDED_MANIFEST_KEYS: readonly string[] = ['publisher', 'isStarter'];
+
+/** Where carrying the remaining catalog keys to the hosted control plane is tracked. */
 export const CATALOG_SEND_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/27348';
 
 /** The {@link UNCARRIED_MANIFEST_KEYS} that `manifest` declares, in list order. */
@@ -291,19 +298,30 @@ export function uncarriedManifestKeys(manifest: Record<string, unknown>): string
 
 /**
  * The warnings for the {@link uncarriedManifestKeys} a manifest declares: one
- * for the catalog keys (declared, not yet carried by the hosted catalog) and
- * one for `visibility` (carried by the flag instead). Empty when none.
+ * for the platform-decided keys (an author's value has no effect), one for the
+ * catalog keys the hosted side does not carry yet, and one for `visibility`
+ * (carried by the flag instead). Empty when none.
  */
 export function uncarriedManifestWarnings(manifest: Record<string, unknown>): string[] {
   const declared = uncarriedManifestKeys(manifest);
-  const catalog = declared.filter((key) => key !== 'visibility');
+  const named = (keys: string[]) => keys.map((key) => `\`${key}\``).join(', ');
+  const platform = declared.filter((key) => PLATFORM_DECIDED_MANIFEST_KEYS.includes(key));
+  const catalog = declared.filter((key) => key !== 'visibility' && !PLATFORM_DECIDED_MANIFEST_KEYS.includes(key));
   const warnings: string[] = [];
-  if (catalog.length > 0) {
+  if (platform.length > 0) {
+    const one = platform.length === 1;
     warnings.push(
-      `objectstack.manifest.json declares ${catalog.map((key) => `\`${key}\``).join(', ')}, which the `
+      `objectstack.manifest.json declares ${named(platform)}, which ${one ? 'is' : 'are'} decided by the `
+      + `platform: an author's value has no effect, so \`os package publish\` does not send ${one ? 'it' : 'them'}.`,
+    );
+  }
+  if (catalog.length > 0) {
+    const one = catalog.length === 1;
+    warnings.push(
+      `objectstack.manifest.json declares ${named(catalog)}, which the `
       + 'hosted catalog does not carry yet: `os package publish` does not send '
-      + (catalog.length === 1 ? 'it' : 'them')
-      + `, so the published package will not show ${catalog.length === 1 ? 'it' : 'them'}. See ${CATALOG_SEND_ISSUE}.`,
+      + (one ? 'it' : 'them')
+      + `, so the published package will not show ${one ? 'it' : 'them'}. See ${CATALOG_SEND_ISSUE}.`,
     );
   }
   if (declared.includes('visibility')) {
@@ -599,11 +617,33 @@ export default class PackagePublish extends Command {
       // `''` would turn "declares no namespace" into a value the gate has to
       // interpret.
       if (namespace) pkgBody.namespace = namespace;
+      // A top-level `tagline` has no column on the hosted side: `description`
+      // is the catalog's short listing text. So a tagline stands in for the
+      // description only when neither the flag nor the file gives one, and is
+      // otherwise not sent — and the author is told, not dropped silently.
+      // The per-locale `translations.*.tagline` below is a different path.
+      const tagline = typeof m.tagline === 'string' && m.tagline.trim() ? m.tagline.trim() : undefined;
       const desc = flags.description ?? (typeof m.description === 'string' ? m.description : undefined);
-      if (desc) pkgBody.description = desc;
+      if (desc) {
+        pkgBody.description = desc;
+        if (tagline) {
+          printWarning(
+            'objectstack.manifest.json declares a top-level `tagline`, which the hosted catalog does not store, '
+            + 'and a description is already given, so `os package publish` does not send it. The catalog\'s '
+            + 'short listing text is `description`.',
+          );
+        }
+      } else if (tagline) {
+        pkgBody.description = tagline;
+      }
       const cat = flags.category ?? (typeof m.category === 'string' ? m.category : undefined);
       if (cat) pkgBody.category = cat;
-      if (typeof m.tagline === 'string' && m.tagline.trim()) pkgBody.tagline = m.tagline.trim();
+      // Listing tags, as the author wrote them. The hosted route owns the
+      // shape and the bounds (it trims, de-duplicates and caps them) and
+      // answers a 400 that is printed as it is; this command keeps no copy of
+      // those numbers. An absent key leaves the stored tags alone; `[]` clears
+      // them.
+      if (m.tags !== undefined) pkgBody.tags = m.tags;
       if (flags.org) pkgBody.owner_org_id = flags.org;
       if (flags['icon-url'] && flags['icon-file']) {
         printError('Pass either --icon-url or --icon-file, not both.');
