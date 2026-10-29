@@ -3336,6 +3336,7 @@ const en = {
         submit: 'Change password & continue',
         submitting: 'Updating…',
         mismatch: 'New passwords do not match.',
+        sameAsTemporary: 'Choose a new password that is different from your temporary password.',
         failed: 'Could not change password.',
       },
       mfa: {

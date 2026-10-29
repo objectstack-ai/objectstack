@@ -230,12 +230,14 @@ export interface BuildPageOptions {
      */
     isPrimary?: boolean;
     /**
-     * The list is the record's own body (objectstack#27055, Target 8): a
-     * `master_detail` FK declaring `inlineEdit`, or `relatedList: 'primary'`.
-     * Drawn as a full-width table section in the Details tab, right after the
-     * first field section, instead of in the Related tab / related column.
-     * Absent: `isPrimary` decides. The host computes it from the FK (no spec
-     * key of its own).
+     * The list is the record's own body (objectstack#27055, Target 8):
+     * `relatedList: 'primary'`, or a `master_detail` FK declaring `inlineEdit`
+     * and no `relatedList`. Drawn as a full-width table section in the Details
+     * tab, right after the first field section, instead of in the Related tab /
+     * related column. Absent: `isPrimary` decides. The host computes it from
+     * the FK with `@objectstack/spec`'s `isBodyTableRelationship`
+     * (objectstack#27478) — the one predicate, which the spec's refusal of a
+     * field group naming a side card reads too (no spec key of its own).
      */
     isBody?: boolean;
   }>;
@@ -920,7 +922,10 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    among the object's `fieldGroups`: after the sections of the groups
  *    declared before it, before those declared after it. Such a group holds
  *    no fields (the spec refuses one that does), so it is a position, never a
- *    section of its own;
+ *    section of its own. A group only POSITIONS a body table: only the
+ *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
+ *    the spec refuses a group naming a side card or a hidden list, by the same
+ *    `isBodyTableRelationship` the host computes `isBody` with);
  *  - every other body table goes right after the FIRST field section
  *    (conventionally 基本信息), stacked in the order given; with one section
  *    or none, after the details.

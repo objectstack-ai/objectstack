@@ -1250,12 +1250,20 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * everywhere; a child that exists nowhere is refused at `defineStack` (save a
    * platform-prefixed name, left to the runtime) and by a metadata write that
    * names no package, and a write into a package stores it, placing nothing.
-   * Body tables no group places keep the record page's default position. `relatedList: false` on the FK
-   * still hides the table.
+   * It names a BODY TABLE only (`isBodyTableRelationship`, #27478): an inbound
+   * FK declaring `relatedList: 'primary'`, or a `master_detail` FK that sets
+   * `inlineEdit` and declares no `relatedList`. Body-ness is the FK's to
+   * decide; the group only positions it. A group naming a side card, or a list
+   * its FK hides with `relatedList: false`, draws nothing at the group, so it
+   * is refused wherever the child's fields are known: at `defineStack` and at
+   * the runtime metadata write door (`related-list-group-not-body`), naming
+   * each FK and the remedy (mark it `relatedList: 'primary'`, name only the
+   * body table as `object.field`, or remove the group's `relatedList`).
+   * Body tables no group places keep the record page's default position.
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. relatedList: false on the relationship still hides the table.').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that sets inlineEdit and declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical

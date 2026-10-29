@@ -2841,6 +2841,7 @@ const es = {
         submit: "Cambiar contraseña y continuar",
         submitting: "Actualizando…",
         mismatch: "Las nuevas contraseñas no coinciden.",
+        sameAsTemporary: "Elija una nueva contraseña distinta de su contraseña temporal.",
         failed: "No se pudo cambiar la contraseña.",
       },
       mfa: {

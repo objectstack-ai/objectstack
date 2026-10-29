@@ -2836,6 +2836,7 @@ const pt = {
         submit: "Alterar senha e continuar",
         submitting: "Atualizando…",
         mismatch: "As novas senhas não coincidem.",
+        sameAsTemporary: "Escolha uma nova senha diferente da sua senha temporária.",
         failed: "Não foi possível alterar a senha.",
       },
       mfa: {
