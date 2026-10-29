@@ -60,7 +60,7 @@ interface BootKernel {
  */
 function thrownMessage(error: unknown): string {
   try {
-    return error instanceof Error ? error.message : String(error);
+    return String(error instanceof Error ? error.message : error);
   } catch {
     return 'a value that cannot be printed';
   }

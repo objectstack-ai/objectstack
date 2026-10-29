@@ -312,7 +312,7 @@ const dbPlugin: PluginMetadata = {
 
 ObjectStack supports plugin security features:
 
-- **Signature Verification**: a plugin `os plugin install` installed is verified against the environment's trusted keys at install and again at every boot, before any of its code is imported.
+- **Signature Verification**: a signed plugin `os plugin install` installed is verified against the environment's trusted keys at install and again at every boot, before any of its code is imported. One installed with `--trust-unsigned` has no signature to verify: at boot its kept artifact is checked against the hash recorded at install, and its files against that artifact.
 - **Permission Enforcement**: Fine-grained access control for plugin operations
 
 A `signature` field on a plugin object is not a verification by itself. The

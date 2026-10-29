@@ -11,9 +11,11 @@
  * writer, and another thread of this process holding it is live; a lock judged
  * stale and replaced by a live writer before it is cleared is left alone (the
  * two-writer steal race), and a steal lock a crashed writer left is cleared
- * while a live writer's is kept, however long it has been held, and waited
- * for without spinning; a lock path that is there and cannot be read (a
- * directory, an unreadable file) is refused by name at once, never retried;
+ * while a live writer's is kept up to the stale bound, and waited for without
+ * spinning; a lock path that is there and is not a lock file (a directory, a
+ * dangling symbolic link) or cannot be read is refused by name at once, never
+ * retried; a lock gone each time it is read is waited out and refused at the
+ * deadline, with a pause between tries;
  * the lock is re-entrant and always released, and a release never removes a
  * lock that is no longer the holder's; two processes writing at once both land
  * every record; and another project's records keep their directories out of
@@ -22,7 +24,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -48,8 +50,11 @@ import { loadDisabledPackageIds, packageStateFileName } from './package-state-st
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** A file read the test makes throw, by its path; every other call is the real one. */
-const fsFaults = vi.hoisted(() => ({ failRead: null as ((path: string) => string | null) | null }));
+/** A file read or `lstat` the test makes throw, by its path; every other call is the real one. */
+const fsFaults = vi.hoisted(() => ({
+  failRead: null as ((path: string) => string | null) | null,
+  failLstat: null as ((path: string) => string | null) | null,
+}));
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
@@ -59,6 +64,11 @@ vi.mock('node:fs', async (importOriginal) => {
       if (code) throw Object.assign(new Error(`${code}: read refused by the test, '${String(args[0])}'`), { code });
       return actual.readFileSync(...args);
     }) as typeof actual.readFileSync,
+    lstatSync: ((...args: Parameters<typeof actual.lstatSync>) => {
+      const code = fsFaults.failLstat?.(String(args[0]));
+      if (code) throw Object.assign(new Error(`${code}: lstat refused by the test, '${String(args[0])}'`), { code });
+      return actual.lstatSync(...args);
+    }) as typeof actual.lstatSync,
   };
 });
 
@@ -74,6 +84,7 @@ beforeEach(() => {
 
 afterEach(() => {
   fsFaults.failRead = null;
+  fsFaults.failLstat = null;
   installationsLockTestHooks.afterStaleJudged = undefined;
   if (saved.OS_HOME === undefined) delete process.env.OS_HOME;
   else process.env.OS_HOME = saved.OS_HOME;
@@ -200,13 +211,14 @@ describe('the installations lock', () => {
     expect(existsSync(`${lock}.steal`)).toBe(false);
   });
 
-  it('keeps a steal lock a live writer holds, however long it has held it, and waits for it without spinning', () => {
+  it('keeps a steal lock a live writer holds, inside the stale bound, and waits for it without spinning', () => {
     const lock = lockFile();
     const stale = JSON.stringify({ pid: deadPid(), at: 'then' });
     const clearing = JSON.stringify({ pid: process.ppid, token: 'slow-writer', at: 'then' });
     writeFileSync(lock, stale);
     writeFileSync(`${lock}.steal`, clearing);
-    // Held for a minute: age alone does not make a live writer's steal lock stale.
+    // A minute old, well inside the stale bound: a live writer's steal lock
+    // is not stale by its age until it passes that bound.
     const then = new Date(Date.now() - 60_000);
     utimesSync(`${lock}.steal`, then, then);
     let judged = 0;
@@ -221,24 +233,61 @@ describe('the installations lock', () => {
     expect(readFileSync(`${lock}.steal`, 'utf8')).toBe(clearing);
   });
 
+  it('clears a steal lock a live pid holds once it is older than the stale bound', () => {
+    const lock = lockFile();
+    writeFileSync(lock, JSON.stringify({ pid: deadPid(), at: 'then' }));
+    // The pid is live, so only the age makes it stale: a pid the operating
+    // system reused after the writer that took it died.
+    writeFileSync(`${lock}.steal`, JSON.stringify({ pid: process.ppid, token: 'reused-pid', at: 'then' }));
+    const then = new Date(Date.now() - INSTALLATIONS_LOCK_STALE_MS - 60_000);
+    utimesSync(`${lock}.steal`, then, then);
+    expect(withPluginInstallationsLock('env_local', () => 'ran', { waitMs: 1_000 })).toBe('ran');
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.steal`)).toBe(false);
+  });
+
   it.each([
-    ['a directory', (lock: string) => mkdirSync(lock), 'EISDIR'],
+    ['a directory', (lock: string) => mkdirSync(lock), 'it is a directory', 'directory'],
+    // The exclusive create fails on the link (EEXIST) and a followed read
+    // finds nothing (ENOENT), so taken for "released" it was retried forever.
+    ['a dangling symbolic link', (lock: string) => symlinkSync(join(dirname(lock), 'nowhere'), lock), 'it is a symbolic link', 'link'],
     ['a file this user may not read', (lock: string) => {
       writeFileSync(lock, JSON.stringify({ pid: process.ppid, at: 'now' }));
       fsFaults.failRead = (path) => (path === lock ? 'EACCES' : null);
-    }, 'EACCES'],
-  ])('refuses a lock path that is there and cannot be read, naming it, at once and without retrying: %s', (_label, plant, code) => {
+    }, 'EACCES', 'file'],
+  ] as const)('refuses a lock path that is there and cannot be read, naming it, at once and without retrying: %s', (_label, plant, why, kind) => {
     const lock = lockFile();
     plant(lock);
     let ran = false;
     const t0 = Date.now();
     expect(() => withPluginInstallationsLock('env_local', () => { ran = true; }, { waitMs: 5_000 }))
-      .toThrow(new RegExp(`installations lock ${escapeRe(lock)} cannot be read \\(${code}.*remove it`));
+      .toThrow(new RegExp(`installations lock ${escapeRe(lock)} cannot be read \\(${why}.*remove it`));
     expect(Date.now() - t0).toBeLessThan(2_000);
     expect(ran).toBe(false);
     fsFaults.failRead = null;
+    const left = lstatSync(lock);
+    expect({ directory: left.isDirectory(), link: left.isSymbolicLink(), file: left.isFile() }[kind]).toBe(true);
+  });
+
+  it('waits out, with a pause between tries, a lock that is there to create and gone each time it is read, then refuses naming it', () => {
+    const lock = lockFile();
+    writeFileSync(lock, JSON.stringify({ pid: process.ppid, at: 'now' }));
+    let reads = 0;
+    fsFaults.failLstat = (path) => {
+      if (path !== lock) return null;
+      reads += 1;
+      return 'ENOENT';
+    };
+    let ran = false;
+    const t0 = Date.now();
+    expect(() => withPluginInstallationsLock('env_local', () => { ran = true; }, { waitMs: 300 }))
+      .toThrow(new RegExp(`could not be locked in 0\\.3s: ${escapeRe(lock)} was there .*remove ${escapeRe(lock)}\\.$`));
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(300);
+    // About one read per 50 ms pause; a spin makes thousands.
+    expect(reads).toBeLessThan(20);
+    expect(ran).toBe(false);
+    fsFaults.failLstat = null;
     expect(existsSync(lock)).toBe(true);
-    expect(statSync(lock).isDirectory()).toBe(code === 'EISDIR');
   });
 
   it('never removes, on release, a lock that is no longer the holder\'s', () => {

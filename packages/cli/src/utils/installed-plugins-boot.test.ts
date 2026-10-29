@@ -72,6 +72,7 @@ describe('the serve wiring of installed plugins', () => {
     ['an Error', new Error('the records walk broke'), 'the records walk broke'],
     ['undefined', undefined, 'undefined'],
     ['null', null, 'null'],
+    ['an Error whose message is a Symbol', Object.assign(new Error(), { message: Symbol('odd') as unknown as string }), 'Symbol(odd)'],
   ])('a loader that throws %s is one loader_failed refusal, and nothing is registered', async (_label, thrown, said) => {
     stub.load = async () => { throw thrown; };
     const k = kernel();

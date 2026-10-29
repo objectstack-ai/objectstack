@@ -425,6 +425,8 @@ describe('what the import answers', () => {
     ['reading the export throws', 'not_a_plugin', 'export default { name: "x", init() {}, get signature() { throw new Error("getter"); } };\n'],
     ['the import throws undefined', 'import_failed', 'throw undefined;\n'],
     ['reading the export throws null', 'not_a_plugin', 'export default { name: "x", init() {}, get signature() { throw null; } };\n'],
+    // A template literal throws on a Symbol, so the message is converted too.
+    ['the import throws an Error whose message is a Symbol', 'import_failed', 'throw Object.assign(new Error(), { message: Symbol("odd") });\n'],
   ])('%s → %s', async (_label, error, entry) => {
     install({ entry });
     const out = await load();

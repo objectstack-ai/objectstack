@@ -69,15 +69,17 @@
  * crashed writer left is judged as the lock is (its pid, its age) and cleared
  * the same way; a writer that finds a live one waits, as for the lock.
  *
- * A lock file that is there and cannot be read (a directory, or a file this
- * user may not read) is never taken for none: the writer refuses, naming it,
- * rather than trying again.
+ * A lock path that is there and is not a lock file this store could have made
+ * (a directory, a symbolic link, dangling or not), or a file this user may not
+ * read, is never taken for none: the writer refuses, naming it, rather than
+ * trying again. A lock that is gone by the time it is read was released, and
+ * is tried again under the same wait and with the same pause between tries.
  *
  * Exported from the package index for the CLI, which writes it; the runtime's
  * boot-time loader is its reader.
  */
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, type Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { threadId } from 'node:worker_threads';
 
@@ -248,19 +250,30 @@ interface LockFile {
 
 /**
  * The lock file at `path` now, or `null` when there is none (or it vanished
- * while being read). One that is there and cannot be read throws, naming it:
- * taken for none, the writer would retry it forever.
+ * while being read). A path that is there and is not a regular file, or cannot
+ * be read, throws, naming it: taken for none, the writer would retry it
+ * forever. It is judged by `lstat`, so a symbolic link is the link itself: one
+ * that dangles makes the exclusive create fail and a followed read find
+ * nothing, every time.
  */
 function readLockFile(path: string): (LockFile & { ageMs: number }) | null {
+  const unreadable = (why: string) =>
+    new Error(`The plugin installations lock ${path} cannot be read (${why}). If no \`os plugin\` command is running, remove it.`);
+  let stat: Stats;
   try {
-    const stat = statSync(path);
+    stat = lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw unreadable((error as Error).message);
+  }
+  if (!stat.isFile()) {
+    throw unreadable(stat.isDirectory() ? 'it is a directory, not a lock file' : stat.isSymbolicLink() ? 'it is a symbolic link, not a lock file' : 'it is not a regular file');
+  }
+  try {
     return { ino: stat.ino, raw: readFileSync(path, 'utf8'), ageMs: Date.now() - stat.mtimeMs };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw new Error(
-      `The plugin installations lock ${path} cannot be read (${(error as Error).message}). `
-        + 'If no `os plugin` command is running, remove it.',
-    );
+    throw unreadable((error as Error).message);
   }
 }
 
@@ -324,7 +337,8 @@ export const installationsLockTestHooks: { afterStaleJudged?: (lock: string) => 
  * clears at the same time, and only while it is still that file. Answers
  * `false` when another writer holds the steal lock: it is clearing now, and
  * the caller waits. A steal lock a dead writer left is cleared here, judged as
- * the lock is, so a live writer slow inside its clear keeps it.
+ * the lock is, so a live writer slow inside its clear keeps it, up to the
+ * lock's stale bound.
  */
 function clearStaleLock(lock: string, judged: LockFile): boolean {
   const steal = `${lock}.steal`;
@@ -378,20 +392,24 @@ export function withPluginInstallationsLock<T>(
   for (;;) {
     mine = createLockFile(lock);
     if (mine) break;
+    // Absent: released between the two calls, and tried again like any other
+    // wait, under the deadline and after the pause.
     const present = readLockFile(lock);
-    if (!present) continue; // released between the two calls
-    const { stale, holder } = judgeLock(present);
-    if (stale) {
+    const judged = present ? judgeLock(present) : null;
+    if (present && judged?.stale) {
       installationsLockTestHooks.afterStaleJudged?.(lock);
       if (clearStaleLock(lock, present)) continue;
     }
     if (Date.now() >= deadline) {
       throw new PluginInstallationsLockedError(
-        stale
-          ? `The plugin installations file ${file} has a stale lock (${holder}) that another writer was still `
-            + `clearing after ${waitMs / 1000}s. If no \`os plugin\` command is running, remove ${lock} and ${lock}.steal.`
-          : `The plugin installations file ${file} is locked by ${holder}, still running after `
-            + `${waitMs / 1000}s. Let that command finish; if no \`os plugin\` command is running, remove ${lock}.`,
+        !judged
+          ? `The plugin installations file ${file} could not be locked in ${waitMs / 1000}s: ${lock} was there when `
+            + `this writer tried to create it and gone when it read it. If no \`os plugin\` command is running, remove ${lock}.`
+          : judged.stale
+            ? `The plugin installations file ${file} has a stale lock (${judged.holder}) that another writer was still `
+              + `clearing after ${waitMs / 1000}s. If no \`os plugin\` command is running, remove ${lock} and ${lock}.steal.`
+            : `The plugin installations file ${file} is locked by ${judged.holder}, still running after `
+              + `${waitMs / 1000}s. Let that command finish; if no \`os plugin\` command is running, remove ${lock}.`,
       );
     }
     sleepSync(50);
