@@ -65,7 +65,8 @@ a{color:var(--primary);text-decoration:none}
 .pnl .h .act{display:none;gap:2px;margin-left:auto}
 .pnl.hover .h .act{display:inline-flex}
 .pnl .h .chev{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-fg);font-size:10px;margin-left:-2px}
-.pnl .h .cnt{margin-left:auto}
+.pnl .h .cnt{margin-left:0}
+.pnl .h .act{margin-left:auto}
 .pnl.hover{border-color:#c7d2fe;box-shadow:0 0 0 2px var(--primary-soft)}
 .pnl .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:32px;padding:0 10px;border-top:1px solid var(--border);font-size:12.5px}
 .pnl .r a{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -128,7 +129,7 @@ a{color:var(--primary);text-decoration:none}
 
         <div class="col" style="position:relative">
           <div class="coltitle">关联</div>
-          <div class="pnl tlp"><div class="h">时间线 <span class="chev">▾</span><span class="chip cnt">14</span><button type="button" class="iconbtn" title="作为独立列" aria-label="作为独立列" style="width:22px;height:22px">⊞</button></div>
+          <div class="pnl tlp"><div class="h">时间线 <span class="chip cnt">14</span><span class="chev">▾</span><button type="button" class="iconbtn" title="作为独立列" aria-label="作为独立列" style="width:22px;height:22px;margin-left:auto">⊞</button></div>
             <div style="padding:8px 10px 0"><div style="display:flex;gap:8px;align-items:center;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;color:var(--muted-fg);font-size:12px">留下评论… <span class="k" style="margin-left:auto">Enter</span></div></div>
             <div class="r" style="border-top:0;height:auto;padding:8px 10px;align-items:flex-start"><div><div><strong style="font-weight:500">记录通话</strong> · 讨论价格区间</div><div class="m" style="font-size:11px;color:var(--muted-fg)">Dev Admin · 今天 10:20</div></div></div>
             <div class="r" style="height:auto;padding:6px 10px;color:var(--muted-fg);font-size:12px">✎ 状态 新建 → 已联系 · 昨天</div>
@@ -136,9 +137,9 @@ a{color:var(--primary);text-decoration:none}
             <div class="r" style="height:28px;font-size:12px"><a href="#">查看全部 14 条 →</a></div>
             <span class="ann" style="right:8px;top:-8px">时间线默认是右栏最上面的面板；⊞ 升格为独立列（工作型对象在三栏层默认升格）</span>
           </div>
-          <div class="pnl"><div class="h">任务 <span class="chev">▾</span><span class="chip cnt">2</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div>
-          <div class="pnl"><div class="h">活动 <span class="chev">▾</span><span class="chip cnt">1</span></div><div class="r"><a href="#">发现会议</a><span class="k">10月24日</span></div></div>
-          <div class="pnl"><div class="h">营销活动 <span class="chev">▸</span><span class="chip cnt">1</span></div></div>
+          <div class="pnl"><div class="h">任务 <span class="chip cnt">2</span><span class="chev">▾</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div>
+          <div class="pnl"><div class="h">活动 <span class="chip cnt">1</span><span class="chev">▾</span></div><div class="r"><a href="#">发现会议</a><span class="k">10月24日</span></div></div>
+          <div class="pnl"><div class="h">营销活动 <span class="chip cnt">1</span><span class="chev">▸</span></div></div>
           <div class="pnl empty"><div class="h">还有 3 个空关联 </div></div>
           <div class="foot"><span>审批 · 无需审批</span><span>·</span><span>附件 · 0</span></div>
           <span class="ann" style="left:0;bottom:-6px">两栏层没有「相关 N」栏开关：右栏常驻，时间线折成面板</span>
