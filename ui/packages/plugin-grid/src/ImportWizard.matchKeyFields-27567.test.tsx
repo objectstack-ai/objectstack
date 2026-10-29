@@ -18,10 +18,10 @@ import { ImportWizard } from './ImportWizard';
 beforeAll(() => {
   // Radix Select reads these on open; happy-dom lacks them.
   if (!Element.prototype.hasPointerCapture) {
-    Element.prototype.hasPointerCapture = vi.fn(() => false) as any;
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
   }
   if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = vi.fn() as any;
+    Element.prototype.scrollIntoView = vi.fn();
   }
 });
 
