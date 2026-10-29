@@ -5,8 +5,12 @@
 
 fix(service-datasource): a plugin-driver datasource connected or reconnected through the connection service keeps the engine's correctness floor (#27666)
 
-Clause-②: yes
+Clause-②: yes (narrowing) — `EngineDatasourceDef` (`@objectstack/spec/contracts`) gains an optional `driver` key, and a plugin-driver datasource connected through the datasource-connection service is now held behind the #27277 floor, so its accepted reads and writes narrow as that floor's changeset describes
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any authored schema is added, removed, renamed or re-shaped; the new key is on an engine-facing contract that the connection service fills itself. A datasource that now gets the floor needs no metadata change, so there is nothing for a migration to rewrite. -->
+
+**BREAKING** for a host whose datasource-driver factory builds plugin drivers: those datasources are now floored (a read matching more than 1000 rows answers 422 `EXTERNAL_ROW_CAP_EXCEEDED`, predicate bulk writes and `aggregate` are refused by name), as manifest-declared ones already were.
 
 The engine holds a plugin driver on a non-managed datasource behind a correctness floor (row cap, the query re-applied in memory, remote write refusals mapped) when the datasource definition it stores names a driver id that is not built in. Only the engine's own manifest install path carried that id. The datasource-connection service registered the definition without it, and `EngineDatasourceDef` had no such key, so a datasource created at runtime through datasource management was never floored, and one edited and reconnected lost the floor (the eviction drops the stored definition, and the connect that follows had no id to keep). Nothing said so: a driver that ignored `where` could answer rows outside the caller's sharing or row-level scope.
 
