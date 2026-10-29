@@ -112,7 +112,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
     "test:e2e:live:ci": "playwright test --config=playwright.live.config.ts screen-flow.spec.ts action-modal.spec.ts master-detail.spec.ts saved-view-filter.spec.ts",
-    "test:e2e:live:nightly": "playwright test --config=playwright.live.config.ts cascading-options.spec.ts declared-sharing-rules-reach-13091.spec.ts field-conditional-rules.spec.ts form-view-subforms.spec.ts grid-conditional-rules.spec.ts grid-file-upload.spec.ts grid-parent-rules.spec.ts inline-edit-polish-2572.spec.ts list-row-action-cel.spec.ts record-history-display.spec.ts required-when-submit.spec.ts studio-editor.spec.ts studio-object-designer.spec.ts summary-rollup.spec.ts user-filters.spec.ts",
+    "test:e2e:live:nightly": "playwright test --config=playwright.live.config.ts cascading-options.spec.ts declared-sharing-rules-reach-13091.spec.ts field-conditional-rules.spec.ts form-view-subforms.spec.ts grid-conditional-rules.spec.ts grid-file-upload.spec.ts grid-parent-rules.spec.ts inline-edit-polish-2572.spec.ts list-row-action-cel.spec.ts read-only-member-record.spec.ts record-history-display.spec.ts required-when-submit.spec.ts studio-editor.spec.ts studio-object-designer.spec.ts summary-rollup.spec.ts user-filters.spec.ts",
     "test:e2e:import-harness": "playwright test --config=playwright.import-harness.config.ts",
     "test:e2e:import-console": "playwright test --config=playwright.import-console.config.ts"
   },
