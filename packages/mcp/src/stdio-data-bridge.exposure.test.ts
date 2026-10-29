@@ -568,10 +568,4 @@ describe('stdio data bridge: a sys_api_key write is refused 403 PERMISSION_DENIE
     expect(engine.update).toHaveBeenCalledTimes(1);
     expect(engine.update.mock.calls[0][0]).toBe('task');
   });
-
-  it('leaves a system context alone, as the exposure gate does', async () => {
-    const { bridge, engine } = makeBridge(UNRESTRICTED, { context: SYSTEM });
-    await bridge.update('sys_api_key', 'r1', { revoked: true });
-    expect(engine.update).toHaveBeenCalledTimes(1);
-  });
 });

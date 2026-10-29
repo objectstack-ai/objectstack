@@ -865,12 +865,12 @@ export function serveStoredMetadataRows(
  * The credential is `'api_key'` by construction: this transport admits its
  * principal from `OS_MCP_STDIO_API_KEY` and from nothing else (ADR-0101,
  * `resolveStdioExecutionContext` in `plugin.ts`), and the envelope carries no
- * credential to read. A system context skips it, as the exposure gate does.
- * Asked after the exposure gate, so an operation the object does not expose
- * keeps its `405`, and before the engine is asked anything.
+ * credential to read. That principal is never the system context, so the rule
+ * reads no elevation flag: it has none to grant. Asked after the exposure
+ * gate, so an operation the object does not expose keeps its `405`, and before
+ * the engine is asked anything.
  */
-function enforceApiKeyManagementCredential(object: string, action: string, context: ExecutionContext): void {
-  if (context?.isSystem) return;
+function enforceApiKeyManagementCredential(object: string, action: string): void {
   const refusal = apiKeyManagementCredentialRefusal({ object, operation: action, credential: 'api_key' });
   if (refusal) throw refusal;
 }
@@ -988,7 +988,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async create(object, data) {
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.create, context);
-      enforceApiKeyManagementCredential(object, GATED_ACTIONS.create, context);
+      enforceApiKeyManagementCredential(object, GATED_ACTIONS.create);
       const written = (await engine.insert(object, data, { context })) as
         | Record<string, unknown>
         | undefined;
@@ -1012,7 +1012,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // miss is an observable difference, so gating second would answer "that
       // id names no row" for an object the author declared unexposed.
       await enforceApiExposure(reads, object, GATED_ACTIONS.update, context);
-      enforceApiKeyManagementCredential(object, GATED_ACTIONS.update, context);
+      enforceApiKeyManagementCredential(object, GATED_ACTIONS.update);
       const existing = await findById(engine, object, id, context);
       // The "this id names no row" refusal, raised BEFORE the write is
       // attempted — a write path that answered success for an id that matched
@@ -1043,7 +1043,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const context = await resolvePrincipal();
       // Gated before the probe, for the reason `update` states.
       await enforceApiExposure(reads, object, GATED_ACTIONS.remove, context);
-      enforceApiKeyManagementCredential(object, GATED_ACTIONS.remove, context);
+      enforceApiKeyManagementCredential(object, GATED_ACTIONS.remove);
       const existing = await findById(engine, object, id, context);
       // Same shared envelope as `update`, above.
       if (!existing) throw recordNotFoundError(object, id);
