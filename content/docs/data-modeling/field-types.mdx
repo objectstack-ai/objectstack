@@ -699,7 +699,7 @@ Roll-up summary from child records.
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `summaryOperations.object` | `string` | **required** | Child object to aggregate |
-| `summaryOperations.field` | `string` | **required** | Child field to aggregate; ignored for `count` |
+| `summaryOperations.field` | `string` | **required** for `sum`, `avg`, `min`, `max` | Child field to aggregate; a `count` counts the child rows and reads no field, so it may omit it |
 | `summaryOperations.function` | `enum` | **required** | `count`, `sum`, `avg`, `min`, or `max` |
 | `summaryOperations.relationshipField` | `string` | auto | Child FK back to the parent when it cannot be inferred |
 | `summaryOperations.filter` | `FilterCondition` | — | Only child rows matching this `where` predicate are aggregated |
@@ -711,7 +711,6 @@ Roll-up summary from child records.
   type: 'summary',
   summaryOperations: {
     object: 'task',
-    field: 'id',
     function: 'count',
     relationshipField: 'project',
   },

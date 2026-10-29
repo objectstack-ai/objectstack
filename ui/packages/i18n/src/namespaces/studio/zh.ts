@@ -357,7 +357,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.summary.field': '汇总的子字段',
   'designer.field.summary.relationshipField': '子关系字段(可选)',
   'designer.field.summary.setObjectFirst': '请先选择子对象',
-  'designer.field.summary.countFieldHint': '计数时不参与计算,但规范要求必填——任选一个子字段即可。',
+  'designer.field.summary.countFieldHint': '计数统计子记录条数,无需选择子字段。',
   'designer.field.summary.filterSection': '筛选(参与汇总的子记录)',
   'designer.field.summary.addFilter': '添加条件',
   'designer.field.summary.noFilter': '未设筛选 — 所有子记录都参与汇总。',

@@ -54,6 +54,7 @@ import {
   NUMERIC_VALUE_TYPES,
   SelectOptionSchema,
   SINGLE_OPTION_TYPES,
+  summaryFunctionReadsField,
   VALUE_DOMAIN_FIELD_TYPES,
   type SelectOptionKind,
 } from '@objectstack/spec/data';
@@ -2451,22 +2452,25 @@ function SummaryConfigFields({
         onCommit={(v) => patchOps({ function: v || undefined })}
         disabled={readOnly}
       />
-      {/* The spec requires `field` even for `count` (documented as ignored),
-          so it stays visible — hiding it would trap the author with an
-          unfixable "required" issue in the draft banner. */}
-      <InspectorComboField
-        label={tr('designer.field.summary.field')}
-        value={typeof ops.field === 'string' ? ops.field : ''}
-        onCommit={(v) => patchOps({ field: v || undefined })}
-        options={aggregateOptions}
-        loading={loading}
-        placeholder={fieldPlaceholder}
-        searchPlaceholder={tr('designer.field.lookup.searchFields')}
-        disabled={readOnly}
-        mono
-      />
-      {fn === 'count' && (
-        <p className="text-[11px] text-muted-foreground/70 px-0.5 -mt-1">
+      {/* Whether the function reads a child field is the spec's rule
+          (`summaryFunctionReadsField`), not a copy of it: `count` counts the
+          child rows and reads none, so its control is not offered and the
+          roll-up saves without `field`. A `field` already stored on a count
+          is left as it is (ignored), so switching back keeps it. */}
+      {summaryFunctionReadsField(fn || undefined) ? (
+        <InspectorComboField
+          label={tr('designer.field.summary.field')}
+          value={typeof ops.field === 'string' ? ops.field : ''}
+          onCommit={(v) => patchOps({ field: v || undefined })}
+          options={aggregateOptions}
+          loading={loading}
+          placeholder={fieldPlaceholder}
+          searchPlaceholder={tr('designer.field.lookup.searchFields')}
+          disabled={readOnly}
+          mono
+        />
+      ) : (
+        <p className="text-[11px] text-muted-foreground/70 px-0.5">
           {tr('designer.field.summary.countFieldHint')}
         </p>
       )}

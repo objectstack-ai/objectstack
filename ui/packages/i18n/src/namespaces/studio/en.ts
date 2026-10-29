@@ -422,7 +422,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.summary.field': 'Child field to aggregate',
   'designer.field.summary.relationshipField': 'Child relationship field (optional)',
   'designer.field.summary.setObjectFirst': 'Set the child object first',
-  'designer.field.summary.countFieldHint': 'Ignored for count, but still required — pick any child field.',
+  'designer.field.summary.countFieldHint': 'Count counts the child rows, so it needs no child field.',
   'designer.field.summary.filterSection': 'Filter (rows to aggregate)',
   'designer.field.summary.addFilter': 'Add condition',
   'designer.field.summary.noFilter': 'No filter — every child row is aggregated.',

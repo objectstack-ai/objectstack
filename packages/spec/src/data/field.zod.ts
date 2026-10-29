@@ -556,6 +556,36 @@ function refuseFixedCurrencyWithoutCode(
 }
 
 /**
+ * Does a roll-up with this `summaryOperations.function` read a child field?
+ *
+ * `count` counts the matching child rows and reads no field, so it needs no
+ * `summaryOperations.field`; `sum`, `min`, `max` and `avg` aggregate one, so
+ * they do. This is the ONE place that rule is written: the schema's refusal
+ * below and Studio's roll-up editor (which hides the child-field control for
+ * `count`) both read it. An unset function answers `true`, so an editor still
+ * offers the control before a function is picked.
+ */
+export function summaryFunctionReadsField(fn: string | undefined): boolean {
+  return fn !== 'count';
+}
+
+/** The refusal a non-`count` roll-up without `summaryOperations.field` meets, naming its function. */
+const summaryWithoutFieldMessage = (fn: string): string =>
+  `\`summaryOperations.function: '${fn}'\` needs \`summaryOperations.field\`, the child field the ${fn} `
+  + 'aggregates: name it (e.g. `field: \'amount\'`), or use `function: \'count\'`, which counts the '
+  + 'child rows and reads no field.';
+
+/** `sum`/`min`/`max`/`avg` ⇒ an authored `field`; `count` reads none, so it needs none. */
+function refuseSummaryWithoutField(
+  ops: { function: string; field?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (summaryFunctionReadsField(ops.function) && ops.field === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['field'], message: summaryWithoutFieldMessage(ops.function) });
+  }
+}
+
+/**
  * Currency Configuration Schema
  * Configuration for currency field type supporting multi-currency — and, in the
  * same shape, for a `formula` field whose `returnType` is `currency` (#22727).
@@ -1918,7 +1948,10 @@ export const FieldSchema = lazySchema(() => {
     },
   }, {
     object: z.string().describe('Source child object name for roll-up'),
-    field: z.string().describe('Field on child object to aggregate (ignored for count)'),
+    // Required for every function but `count` (`summaryFunctionReadsField`):
+    // the `.superRefine` at the end of this object refuses its absence there.
+    // A `count` may still carry one, and it stays ignored, as it always was.
+    field: z.string().optional().describe('Field on the child object to aggregate. Required for sum, min, max and avg; count counts the child rows and reads no field, so a count may omit it (ignored when given).'),
     function: z.enum(['count', 'sum', 'min', 'max', 'avg']).describe('Aggregation function to apply'),
     relationshipField: z.string().optional().describe('FK field on the child pointing back to this parent. Auto-detected from the child\'s lookup/master_detail field referencing this object when omitted; set explicitly only when the child has more than one such reference.'),
     /**
@@ -1934,7 +1967,7 @@ export const FieldSchema = lazySchema(() => {
      * parent on its next write like any other child update.
      */
     filter: FilterConditionSchema.optional().describe("Predicate restricting which child rows are aggregated (a query `where` FilterCondition, e.g. { status: 'received' } or { type: { $in: ['signup','trial'] } }). Omit to aggregate all children. Lets one child object feed multiple filtered roll-ups."),
-  }).optional().describe('Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted.'),
+  }).superRefine(refuseSummaryWithoutField).optional().describe('Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted.'),
 
   /** Enhanced Field Type Configurations */
   // Pruned 2026-06 — per-type *display* knobs that were dead in both layers (no
