@@ -233,6 +233,13 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.canvas.removeSectionHint': '删除分组（字段移至未分组）',
   'designer.canvas.renameHint': '双击重命名',
   'designer.canvas.sectionN': '分组 {n}',
+  // External (ADR-0015) objects: field source and write state
+  'designer.external.from': '来自 {datasource}',
+  'designer.external.readOnly': '只读',
+  'designer.external.writable': '可写',
+  'designer.external.unconfirmed': '写入未确认',
+  'designer.external.unconfirmedHint': '写入需要数据源 {datasource} 开启 allowWrites，且本对象开启 writable；未能读取该数据源。',
+  'designer.external.notice': '外部对象：字段映射数据源 {datasource} 中的表，不能在此添加、删除、重命名字段或更改字段类型。',
   // Field stubs (disabled runtime-preview placeholders)
   'designer.stub.pickDate': '选择日期…',
   'designer.stub.off': '关闭',
@@ -270,7 +277,6 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.description': '描述',
   'designer.field.readonly': '只读',
   'designer.field.hidden': '隐藏',
-  'designer.field.externalId': '外部 ID',
   'designer.field.trackHistory': '记录历史',
   'designer.field.placeholder': '占位符',
   'designer.field.group': '分组',

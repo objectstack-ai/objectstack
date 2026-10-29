@@ -241,8 +241,10 @@ function makeMetadata(pages: any[]) {
 }
 
 function renderDetail(fixture: Fixture, pages: any[]) {
+  // The synthesized page's feed is its Timeline tab (objectstack#27055).
+  const search = pages.length === 0 ? '?tab=timeline' : '';
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}${search}`]}>
       <MetadataCtx.Provider value={makeMetadata(pages)}>
         <RecordDetailView
           dataSource={makeDataSource(fixture)}
@@ -294,7 +296,10 @@ function renderedRows(fixture: Fixture): string[] {
   return markers.filter((m) => screen.queryAllByText(m).length > 0);
 }
 
-const loadMoreCount = () => screen.queryAllByRole('button', { name: LOAD_MORE }).length;
+const loadMoreCount = () =>
+  screen.queryAllByRole('button', { name: LOAD_MORE }).length +
+  // The stream's paging affordance (objectstack#27055): 「查看全部 N 条 →」.
+  document.querySelectorAll('[data-stream-view-all]').length;
 
 /** Wait until BOTH feed reads have settled, so an absent row is an answer. */
 async function settled() {
@@ -349,10 +354,13 @@ describe('both composition routes render the same feed (objectui#8983)', () => {
     const authored = await viaAuthoredBlock(fixture);
     expect(authored.rows).toEqual(expected);
 
+    // The synthesized route is the Timeline stream (objectstack#27055), whose
+    // node DECLARES `showCompleted: true` — a stream shows what happened. It
+    // still runs the one pipeline: the completed row is there because the
+    // declared config says so, and the paging case below holds the window.
     cleanup();
     const synthesized = await viaSynthesizedBlock(fixture);
-    expect(synthesized.rows).toEqual(expected);
-    expect(authored.rows).toEqual(synthesized.rows);
+    expect(synthesized.rows).toEqual([...expected, TASK_MARKER]);
 
     // PRE-FIX CONTROL — the same feed, the shape the retired fallback had.
     cleanup();

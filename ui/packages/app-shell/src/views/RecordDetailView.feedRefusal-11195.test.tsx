@@ -66,7 +66,9 @@ vi.mock('./MetadataInspector', () => ({
 
 import { RecordDetailView } from './RecordDetailView';
 
-const EMPTY_COMMENTS = 'No comments yet';
+// The record page's feed is the Timeline tab's one stream (objectstack#27055);
+// its empty copy is the stream's.
+const EMPTY_COMMENTS = 'No activity recorded';
 const ACTIVITY_DENIED = "You don't have permission to view activity on this record.";
 const COMMENTS_DENIED = "You don't have permission to view comments on this record.";
 const OBJECT_NAME = 'crm_account';
@@ -127,7 +129,7 @@ function makeMetadata() {
 
 function renderDetail(dataSource: any) {
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
       <MetadataCtx.Provider value={makeMetadata()}>
         <RecordDetailView
           dataSource={dataSource}

@@ -9,11 +9,19 @@
 import * as React from 'react';
 import { cn, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@object-ui/components';
 import { getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
+import { SystemFieldName } from '@objectstack/spec/system';
 import { AUDIT_FIELD_BY_ROLE } from '@object-ui/types';
 import type { FieldMetadata } from '@object-ui/types';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
+import { useDefaultRecordPage } from './defaultRecordPage';
+
+/**
+ * The record's reassignable owner column — the canonical injected
+ * `owner_id`, read from `@objectstack/spec`'s `SystemFieldName`.
+ */
+const OWNER_FIELD = SystemFieldName.OWNER_ID;
 
 /**
  * Audit field names auto-injected by the framework's `applySystemFields` —
@@ -217,6 +225,10 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
   // The BCP-47 tag the hover tooltip's absolute date formats with
   // (objectui#9786). Read before the early return so hook order never varies.
   const displayLocale = useDisplayLocale();
+  // objectstack#27055 — on the synthesized default record page the line also
+  // names the record's owner and its id (the v3 meta line: created · updated
+  // · owner · id), at the foot of the details column.
+  const v3MetaLine = useDefaultRecordPage();
   if (!data) return null;
 
   const createdAt = toDate(data[AUDIT_FIELDS.createdAt]);
@@ -234,7 +246,10 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
   const hasUpdated =
     !!(updatedAt || updatedBy) && !(updateIsSameAsCreate && (sameUser || !updatedBy));
 
-  if (!hasCreated && !hasUpdated) return null;
+  const owner = v3MetaLine ? actorOrNone(data[OWNER_FIELD]) : undefined;
+  const recordId = v3MetaLine && hasCellValue(data.id) ? String(data.id) : undefined;
+
+  if (!hasCreated && !hasUpdated && !owner && !recordId) return null;
 
   return (
     <div
@@ -269,6 +284,17 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
           t={t}
           locale={displayLocale}
         />
+      )}
+      {owner && (
+        <span className="inline-flex items-center gap-1.5" data-record-meta-owner="">
+          <span className="text-muted-foreground/70">{t('detail.owner', { defaultValue: 'Owner' })}</span>
+          <UserRef value={owner} objectSchema={objectSchema} fieldName={OWNER_FIELD} />
+        </span>
+      )}
+      {recordId && (
+        <span className="font-mono text-[11px] text-muted-foreground/80" data-record-meta-id="">
+          {recordId}
+        </span>
       )}
     </div>
   );

@@ -7,18 +7,19 @@
  */
 
 /**
- * objectstack#26678 — a related list in the record page's related column
- * (`RelatedListCompactContext`, set by `RecordPageColumns`) draws as a card
- * that names its first rows: the identity column alone, since a second column
- * does not fit beside it in a ~20rem rail. Anywhere else the list keeps every
- * column. Pinned through the REAL `data-table`'s rendered headers.
+ * objectstack#26678 / objectstack#27055 — a related list in the record page's
+ * related column (`RelatedListCompactContext`, set by `RecordPageColumns`)
+ * draws as the v3 compact card: title + count + ＋ in one row, NO table
+ * header, up to three rows of the record's name and one status / date chip,
+ * no 「查看全部」 footer. Anywhere else the list keeps every column, pinned
+ * through the REAL `data-table`'s rendered headers.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { RelatedList } from '../RelatedList';
-import { RelatedListCompactContext } from '../relatedListCompact';
+import { RelatedCardChromeContext, RelatedListCompactContext, type RelatedCardChrome } from '../relatedListCompact';
 
 // Desktop, pinned rather than inherited: below 768 px a table list renders as a gallery.
 beforeAll(() => {
@@ -27,18 +28,27 @@ beforeAll(() => {
 
 const fields = {
   name: { type: 'text', label: 'Name' },
-  status: { type: 'text', label: 'Status' },
+  status: {
+    type: 'select',
+    label: 'Status',
+    options: [
+      { value: 'open', label: 'Open' },
+      { value: 'done', label: 'Done' },
+    ],
+  },
 };
 const rows = [
   { id: 't1', name: 'Call Ada', status: 'open' },
   { id: 't2', name: 'Send deck', status: 'done' },
+  { id: 't3', name: 'Book demo', status: 'open' },
+  { id: 't4', name: 'Fourth task', status: 'open' },
 ];
 const columns = [
   { field: 'name', label: 'Name' },
   { field: 'status', label: 'Status' },
 ];
 
-function renderList(compact: boolean) {
+function renderList(compact: boolean, extra: { chrome?: RelatedCardChrome; onViewAll?: () => void } = {}) {
   const list = (
     <RelatedList
       title="Tasks"
@@ -47,10 +57,14 @@ function renderList(compact: boolean) {
       objectName="task"
       columns={columns}
       data={rows}
+      onViewAll={extra.onViewAll}
       dataSource={{ find: vi.fn(async () => rows), getObjectSchema: vi.fn(async () => ({ name: 'task', fields })) } as any}
     />
   );
-  return render(compact ? <RelatedListCompactContext.Provider value>{list}</RelatedListCompactContext.Provider> : list);
+  const withChrome = extra.chrome ? (
+    <RelatedCardChromeContext.Provider value={extra.chrome}>{list}</RelatedCardChromeContext.Provider>
+  ) : list;
+  return render(compact ? <RelatedListCompactContext.Provider value>{withChrome}</RelatedListCompactContext.Provider> : withChrome);
 }
 
 const headers = () =>
@@ -61,16 +75,42 @@ describe('RelatedList in the related column (objectstack#26678)', () => {
     renderList(false);
     await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
     expect(headers()).toEqual(['Name', 'Status']);
-    expect(screen.getByText('open')).toBeInTheDocument();
+    expect(screen.getAllByText('Open').length).toBeGreaterThan(0);
   });
 
-  it('names its rows by the identity column alone inside it', async () => {
+  it('draws the compact card inside it: no table header, three named rows, one chip each', async () => {
     renderList(true);
     await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
-    expect(headers()).toEqual(['Name']);
-    expect(screen.queryByText('open')).not.toBeInTheDocument();
-    // Still the card: its title and its count.
+    expect(document.querySelector('thead')).toBeNull();
+    const cardRows = Array.from(document.querySelectorAll('[data-related-card-row]'));
+    expect(cardRows.map((row) => row.firstElementChild?.textContent)).toEqual(['Call Ada', 'Send deck', 'Book demo']);
+    expect(screen.queryByText('Fourth task')).not.toBeInTheDocument();
+    // ONE chip per row: the status, by its option label.
+    expect(cardRows.map((row) => row.querySelector('[data-related-card-chip]')?.textContent)).toEqual(['Open', 'Done', 'Open']);
+    // Title and count in the one header row.
     expect(screen.getByText('Tasks')).toBeInTheDocument();
-    expect(screen.getByLabelText('2 records')).toBeInTheDocument();
+    expect(document.querySelector('[data-related-card-count]')?.textContent).toBe('4');
+  });
+
+  it('draws no 「查看全部」 footer, even with a View All host hook (one path: ⤢)', async () => {
+    renderList(true, { onViewAll: vi.fn() });
+    await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
+    expect(screen.queryByText(/View all/i)).not.toBeInTheDocument();
+  });
+
+  it('offers ⤢ and the ⋯ menu only with the arranged stack\'s chrome, and ⤢ enlarges', async () => {
+    renderList(true);
+    await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
+    expect(document.querySelector('[data-related-card-enlarge]')).toBeNull();
+    expect(document.querySelector('[data-related-card-menu]')).toBeNull();
+    document.body.innerHTML = '';
+    const onEnlarge = vi.fn();
+    renderList(true, { chrome: { id: 'task.lead_id', fresh: true, onCollapse: vi.fn(), onHide: vi.fn(), onEnlarge } });
+    await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
+    (document.querySelector('[data-related-card-enlarge]') as HTMLButtonElement).click();
+    (document.querySelector('[data-related-card-count]') as HTMLButtonElement).click();
+    expect(onEnlarge).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-related-card-menu]')).not.toBeNull();
+    expect(document.querySelector('[data-related-card-new]')).not.toBeNull();
   });
 });

@@ -813,10 +813,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "フィルター",
         helpText: "この述語に一致する子行のみが集計されます（例: status == received）"
       },
-      externalId: {
-        label: "外部 ID",
-        helpText: "upsert 操作用の外部 ID としてマーク"
-      },
       storage: {
         label: "ストレージ制約",
         helpText: "物理ストレージの制約（ADR-0113）。書き込み契約があえて含めていない DDL を指定します。未設定の場合、制約は要求されません。"
