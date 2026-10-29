@@ -528,7 +528,10 @@ describe('AnalyticsService', () => {
       // resolution; this harness has no object registry to resolve against, so
       // only the guard's half is pinned here: the rule is minLength 1, no trim.
       const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
-      const err = await service.query({ cube: '   ', measures: ['count'] }).catch((e: unknown) => e as Error & { code?: string });
+      const err: Error & { code?: string } = await service.query({ cube: '   ', measures: ['count'] }).then(
+        () => { throw new Error('expected a rejection'); },
+        (e: unknown) => e as Error & { code?: string },
+      );
       expect(err).toBeInstanceOf(Error);
       expect(err.code).not.toBe('VALIDATION_FAILED');
       expect(err.message).not.toMatch(/^Name the cube to query/);
