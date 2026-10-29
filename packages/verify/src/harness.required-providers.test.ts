@@ -29,6 +29,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CAPABILITY_PROVIDERS } from '@objectstack/core';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
+
+// The boot's first load, paid during collection rather than in the first
+// case's clock (see `boot-warm-up.testkit.ts`). The first boot below requires
+// `approvals`, so its provider is loaded here too.
+await warmUpBoot({}, { requires: ['approvals'] });
 
 const APPROVALS = 'com.objectstack.service.approvals';
 const REALTIME = 'com.objectstack.service.realtime';
