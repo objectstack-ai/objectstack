@@ -294,7 +294,8 @@ describe('the source schemas still declare their full member sets', () => {
 
   // 71 since objectstack#25923 (work item 4) declared `contentLayout` and
   // `confirmOnDiscard` by reference to `ComponentPropsMap['object-form']`; the
-  // `form` slot carries both.
+  // `form` slot carries both. (objectstack#27159 kept the three split-only
+  // members as by-reference tombstones, so the count did not move.)
   it('ObjectFormSchema declares 71 members and no longer carries the #5155 index signature', () => {
     const form = exportedType('ObjectFormSchema');
     expect(memberNames(form)).toHaveLength(71);

@@ -37,6 +37,9 @@ import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
 import type { DataSource } from '@object-ui/types';
 import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { DrawerForm } from '../DrawerForm';
 
 registerAllFields();
@@ -66,7 +69,7 @@ function dataSource(overrides: Partial<Record<string, unknown>> = {}) {
 
 function renderDrawer(extra: Record<string, unknown>, ds: DataSource = dataSource()) {
   return render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={{
         type: 'object-form',
         objectName: 'task',

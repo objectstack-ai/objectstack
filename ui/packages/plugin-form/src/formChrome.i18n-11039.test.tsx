@@ -116,7 +116,6 @@ const SECTIONS = [{ name: 'main', label: 'Main', fields: ['name'] }];
 const LAYOUTS = {
   simple: {},
   tabbed: { formType: 'tabbed', sections: SECTIONS },
-  split: { formType: 'split', sections: SECTIONS },
   wizard: { formType: 'wizard', sections: SECTIONS },
   drawer: { formType: 'drawer' },
   modal: { formType: 'modal' },
@@ -209,7 +208,7 @@ afterEach(() => {
 });
 
 describe('form chrome resolves through the i18n catalogue (objectui#11039)', () => {
-  it.each(['simple', 'tabbed', 'split', 'wizard', 'drawer'] as const)(
+  it.each(['simple', 'tabbed', 'wizard', 'drawer'] as const)(
     'zh %s: the loading line is the zh pack\'s',
     async (layout: Layout) => {
       mount('zh', LAYOUTS[layout], pendingDataSource());
@@ -220,7 +219,7 @@ describe('form chrome resolves through the i18n catalogue (objectui#11039)', () 
     },
   );
 
-  it.each(['simple', 'tabbed', 'split', 'wizard', 'drawer', 'modal'] as const)(
+  it.each(['simple', 'tabbed', 'wizard', 'drawer', 'modal'] as const)(
     'zh %s: the load-failure heading is the zh pack\'s, above the error itself',
     async (layout: Layout) => {
       mount('zh', LAYOUTS[layout], failingDataSource());
@@ -232,7 +231,7 @@ describe('form chrome resolves through the i18n catalogue (objectui#11039)', () 
     },
   );
 
-  it.each(['simple', 'tabbed', 'split', 'drawer', 'modal'] as const)(
+  it.each(['simple', 'tabbed', 'drawer', 'modal'] as const)(
     'zh %s: the default submit label is 创建 on a create and 更新 on an edit',
     async (layout: Layout) => {
       const create = mount('zh', LAYOUTS[layout], okDataSource());

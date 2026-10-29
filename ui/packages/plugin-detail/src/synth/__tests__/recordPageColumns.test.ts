@@ -60,16 +60,26 @@ const maximal = {
 };
 
 describe('recordPageTierFor (objectstack#26678)', () => {
-  it('three columns from 1280 px, two from 1024 px, the tabs below', () => {
-    expect(RECORD_PAGE_THREE_COLUMN_MIN_WIDTH).toBe(1280);
-    expect(RECORD_PAGE_TWO_COLUMN_MIN_WIDTH).toBe(1024);
+  it('three columns from 1120 px, two from 760 px, the tabs below (objectstack#27241)', () => {
+    expect(RECORD_PAGE_THREE_COLUMN_MIN_WIDTH).toBe(1120);
+    expect(RECORD_PAGE_TWO_COLUMN_MIN_WIDTH).toBe(760);
     expect(recordPageTierFor(1440)).toBe('three-column');
-    expect(recordPageTierFor(1280)).toBe('three-column');
-    expect(recordPageTierFor(1279.5)).toBe('two-column');
-    expect(recordPageTierFor(1100)).toBe('two-column');
-    expect(recordPageTierFor(1024)).toBe('two-column');
-    expect(recordPageTierFor(1023)).toBe('tabs');
-    expect(recordPageTierFor(900)).toBe('tabs');
+    expect(recordPageTierFor(1120)).toBe('three-column');
+    expect(recordPageTierFor(1119.5)).toBe('two-column');
+    expect(recordPageTierFor(900)).toBe('two-column');
+    expect(recordPageTierFor(760)).toBe('two-column');
+    expect(recordPageTierFor(759)).toBe('tabs');
+    expect(recordPageTierFor(600)).toBe('tabs');
+  });
+
+  it('the windows the thresholds serve, with the 256 px sidebar expanded (objectstack#27241)', () => {
+    const SIDEBAR = 256;
+    // 「1440 窗口（含侧栏）即三栏」 — the record page root measured 1184 px there.
+    expect(recordPageTierFor(1440 - SIDEBAR)).toBe('three-column');
+    // A 1024 px window with the sidebar stays two columns (768 px of container).
+    expect(recordPageTierFor(1024 - SIDEBAR)).toBe('two-column');
+    // A 1280 px window with the sidebar: 1024 px of container, two columns.
+    expect(recordPageTierFor(1280 - SIDEBAR)).toBe('two-column');
   });
 
   it('an embedded page is tabbed at every width', () => {

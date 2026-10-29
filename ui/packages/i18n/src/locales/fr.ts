@@ -1362,6 +1362,7 @@ const fr = {
     relatedCardCount_other: "{{count}} enregistrements · agrandir",
     relatedDefaultChanged: "Ordre par défaut mis à jour",
     relatedRestoreDefault: "Rétablir par défaut",
+    relatedRestoreDefaultOrder: "Rétablir l'ordre par défaut",
     relatedHiddenCount: "{{count}} masquées",
     relatedHiddenCount_one: "{{count}} masquée",
     relatedHiddenCount_many: "{{count}} masquées",

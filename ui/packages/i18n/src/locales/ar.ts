@@ -1485,6 +1485,7 @@ const ar = {
     relatedCardCount_other: "السجلات: {{count}} · تكبير",
     relatedDefaultChanged: "تم تحديث الترتيب الافتراضي",
     relatedRestoreDefault: "استعادة الافتراضي",
+    relatedRestoreDefaultOrder: "استعادة الترتيب الافتراضي",
     relatedHiddenCount: "المخفية: {{count}}",
     relatedHiddenCount_zero: "المخفية: {{count}}",
     relatedHiddenCount_one: "المخفية: {{count}}",

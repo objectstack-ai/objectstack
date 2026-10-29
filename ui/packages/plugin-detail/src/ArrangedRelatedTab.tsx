@@ -18,7 +18,8 @@ import { useRelatedArrangement } from './useRelatedArrangement';
  * the tabbed tier's 关联 tab」). Read by the `record:related_list` renderer: a
  * collapsed list draws as its title + count (no rows read), every other list
  * gets its chrome (the ⋯ menu), and the tab's LAST list draws the column's
- * two lines after itself — the changed-default hint and 「已隐藏 N 张 · 显示」.
+ * two lines after itself — the changed-default hint and the foot line
+ * (「已隐藏 N 张 · 显示」 · 「恢复默认顺序」).
  */
 export interface RelatedArrangementScope {
   chromeOf: (id: RelatedCardId) => RelatedCardChrome | null;
@@ -30,6 +31,9 @@ export interface RelatedArrangementScope {
   showHidden: () => void;
   defaultChanged: boolean;
   restoreDefault: () => void;
+  /** The reader moved or hid a card: the foot offers 「恢复默认顺序」 (objectstack#27241). */
+  rearranged: boolean;
+  restoreDefaultArrangement: () => void;
 }
 
 export const RelatedArrangementScopeContext = React.createContext<RelatedArrangementScope | null>(null);
@@ -111,6 +115,8 @@ export const ArrangedRelatedTab: React.FC<{
     showHidden: () => edit({ kind: 'show-hidden' }),
     defaultChanged: resolved.defaultChanged,
     restoreDefault: () => edit({ kind: 'restore-default-order' }),
+    rearranged: resolved.rearranged,
+    restoreDefaultArrangement: () => edit({ kind: 'restore-default-arrangement' }),
   };
   return (
     <RelatedArrangementScopeContext.Provider value={scope}>{children(arrangedPage)}</RelatedArrangementScopeContext.Provider>

@@ -1323,6 +1323,7 @@ const ko = {
     relatedCardCount_other: "{{count}}개 레코드 · 확대",
     relatedDefaultChanged: "기본 순서가 업데이트됨",
     relatedRestoreDefault: "기본값 복원",
+    relatedRestoreDefaultOrder: "기본 순서 복원",
     relatedHiddenCount: "{{count}}개 숨김",
     relatedHiddenCount_one: "{{count}}개 숨김",
     relatedHiddenCount_other: "{{count}}개 숨김",

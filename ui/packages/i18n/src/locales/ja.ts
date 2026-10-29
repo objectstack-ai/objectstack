@@ -1166,6 +1166,7 @@ const ja = {
     relatedCardCount_other: "{{count}} 件 · 拡大",
     relatedDefaultChanged: "既定の順序が更新されました",
     relatedRestoreDefault: "既定に戻す",
+    relatedRestoreDefaultOrder: "既定の順序に戻す",
     relatedHiddenCount: "{{count}} 件非表示",
     relatedHiddenCount_one: "{{count}} 件非表示",
     relatedHiddenCount_other: "{{count}} 件非表示",

@@ -123,6 +123,13 @@ export interface ResolvedRelatedArrangement {
   defaultChanged: boolean;
   /** The reader has dragged (their order is not the default's). */
   dragged: boolean;
+  /**
+   * The column the reader sees is not the default one: the cards stand in
+   * another order than the default, or some are hidden. The column's foot
+   * then offers 「恢复默认顺序」 (objectstack#27241, a standing entry beside
+   * 「已隐藏 N 张 · 显示」).
+   */
+  rearranged: boolean;
 }
 
 /**
@@ -190,15 +197,17 @@ export function resolveRelatedArrangement(
   for (const [id, at] of Object.entries(seen)) {
     if (exists.has(id) && now - at < RELATED_CARD_NEW_BADGE_MS) fresh.add(id);
   }
+  const hidden = fullOrder.filter((id) => hiddenSet.has(id));
   return {
     order: fullOrder.filter((id) => !hiddenSet.has(id)),
     fullOrder,
     collapsed,
-    hidden: fullOrder.filter((id) => hiddenSet.has(id)),
+    hidden,
     fresh,
     unseen,
     defaultChanged: dragged && stored!.basedOn !== relatedDefaultOrderHash(defaultOrder),
     dragged,
+    rearranged: hidden.length > 0 || fullOrder.some((id, index) => id !== defaultOrder[index]),
   };
 }
 
@@ -211,6 +220,12 @@ export type RelatedArrangementEdit =
   | { kind: 'hide'; id: RelatedCardId }
   | { kind: 'show-hidden' }
   | { kind: 'restore-default-order' }
+  /**
+   * 「恢复默认顺序」 (objectstack#27241): the default order with every card
+   * shown — the column a reader who never arranged it sees; collapsed state
+   * stays the reader's.
+   */
+  | { kind: 'restore-default-arrangement' }
   | { kind: 'mark-seen'; ids: RelatedCardId[]; at: number };
 
 /**
@@ -286,6 +301,8 @@ export function editRelatedArrangement(
       return finish({ ...base, hidden: [] });
     case 'restore-default-order':
       return finish({ ...base, order: [], basedOn: hash, seen: {} });
+    case 'restore-default-arrangement':
+      return finish({ ...base, order: [], hidden: [], basedOn: hash, seen: {} });
     case 'mark-seen': {
       const seen = { ...(base.seen ?? {}) };
       for (const id of edit.ids) if (exists.has(id) && typeof seen[id] !== 'number') seen[id] = edit.at;

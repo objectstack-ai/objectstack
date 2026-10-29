@@ -261,8 +261,12 @@ interface ObjectFieldDef {
   requiredWhen?: FieldRulePredicate;
 }
 
-/** Visualization types the form renderer understands (FormViewSpec.type). */
-const FORM_SPEC_TYPES = new Set(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']);
+/**
+ * The form layouts a form view declares (FormViewSpec.type) — `simple`,
+ * `tabbed` and `wizard` since ADR-0050 (#27155 / #27159): `split`, `drawer`
+ * and `modal` left the enum, and the spec refuses each at parse.
+ */
+const FORM_SPEC_TYPES = new Set(['simple', 'tabbed', 'wizard']);
 
 /**
  * The form CONFIG plus the view identity that travels beside it (objectui#5596).
