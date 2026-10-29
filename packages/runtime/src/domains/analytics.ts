@@ -69,7 +69,12 @@ function assertAnalyticsQueryBody(body: unknown): void {
     }
     const parsed = AnalyticsQueryRequestSchema.safeParse(body);
     if (!parsed.success) {
-        const fields = fieldsFromZodIssues(parsed.error.issues);
+        // The body rides along so the ADR-0114 D3 split fires: an ABSENT
+        // required key (`cube` left out) is reported as `required`, not the
+        // `invalid_type` Zod spells it as — the code the engine's own guard
+        // answers for the same input in-process (`cube-name-refusal.ts`,
+        // service-analytics), so one condition reads one code on both sides.
+        const fields = fieldsFromZodIssues(parsed.error.issues, body);
         const message = `Invalid AnalyticsQuery body: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
         // [#16041] The closed-vocabulary refusal of `timeDimensions[].dateRange`
         // answers its own registered code, `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`
