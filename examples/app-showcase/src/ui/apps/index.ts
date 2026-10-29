@@ -103,6 +103,11 @@ export const ShowcaseApp = App.create({
         { id: 'nav_report_chart', type: 'report', reportName: 'showcase_hours_by_status_chart', label: 'Hours by Status (Chart)', icon: 'bar-chart-3' },
         { id: 'nav_report_matrix', type: 'report', reportName: 'showcase_status_priority_matrix', label: 'Status × Priority', icon: 'grid-3x3' },
         { id: 'nav_report_joined', type: 'report', reportName: 'showcase_task_overview', label: 'Task Overview', icon: 'layers' },
+        // A `report` entry with no `reportName` is the app's report index
+        // (objectstack#27525): the console injects no index row of its own, so
+        // the app declares it. No `label`: it shows the console's own name for
+        // that page.
+        { id: 'nav_report_index', type: 'report', icon: 'bar-chart-3' },
       ],
     },
     {

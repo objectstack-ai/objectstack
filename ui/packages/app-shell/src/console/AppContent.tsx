@@ -1693,6 +1693,34 @@ function resolveLandingRoute(navigation: NavigationItem[], ctx?: NavTemplateCont
 }
 
 /**
+ * objectstack-ai/objectstack#27450 — the landing target with the search and
+ * hash the app-root URL arrived with carried onto it. The URL overlays
+ * (`?palette=1`, `?recordId=`, `?form=`, `urlParams.ts`) live in the query, so
+ * a redirect that rebuilt the URL from the landing alone dropped the overlay a
+ * deep link asked for before anything read it.
+ *
+ * A landing that has a query of its own (a `page` entry's `params`, an
+ * `object` entry's `filters`) keeps it, and the two MERGE: a key the arriving
+ * URL names replaces the landing's values for that key, never doubles them —
+ * the link is the more specific ask. With nothing arriving the target is
+ * returned untouched; with no query on the landing the arriving search is
+ * appended as written.
+ */
+function carryQueryOntoLanding(target: string, search: string, hash: string): string {
+  const hashAt = target.indexOf('#');
+  const beforeHash = hashAt >= 0 ? target.slice(0, hashAt) : target;
+  const carriedHash = hash || (hashAt >= 0 ? target.slice(hashAt) : '');
+  if (!search || search === '?') return `${beforeHash}${carriedHash}`;
+  const queryAt = beforeHash.indexOf('?');
+  if (queryAt < 0) return `${beforeHash}${search}${carriedHash}`;
+  const params = new URLSearchParams(beforeHash.slice(queryAt + 1));
+  const arriving = new URLSearchParams(search);
+  for (const key of new Set(arriving.keys())) params.delete(key);
+  arriving.forEach((value, key) => params.append(key, value));
+  return `${beforeHash.slice(0, queryAt)}?${params.toString()}${carriedHash}`;
+}
+
+/**
  * The app root (`/apps/:appName`): navigates to the app's landing, or says the
  * member has nothing here.
  *
@@ -1731,6 +1759,7 @@ function AppRootLanding({
   setupPath: string | null;
 }) {
   const gates = useNavMemberGates();
+  const location = useLocation();
   // objectstack#25338 — an app that names objects, none of which this member
   // may read, has nothing for them: its dashboards and pages would answer a
   // grid of "You don't have access" tiles. Say so once, before any landing is
@@ -1763,7 +1792,9 @@ function AppRootLanding({
       </div>
     );
   }
-  if (landing) return <Navigate to={landing} replace />;
+  // objectstack-ai/objectstack#27450 — search and hash carry over, as on the
+  // other URL-rewrite redirects in this file.
+  if (landing) return <Navigate to={carryQueryOntoLanding(landing, location.search, location.hash)} replace />;
   // objectui#12079 — an app that shows this member NO navigation (every entry
   // gated away from them, or none served at all) is an app they have no access
   // in yet. Say so, and offer Setup to a caller who can grant access: the

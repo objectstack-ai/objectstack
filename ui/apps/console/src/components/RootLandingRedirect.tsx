@@ -34,6 +34,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   useMetadata,
   LoadingFallback,
@@ -181,6 +182,7 @@ const APP_LIST_RETRY_DELAY_MS = 1500;
 
 export function RootLandingRedirect() {
   const { apps, loading, getTypeStatus, refresh } = useMetadata();
+  const location = useLocation();
 
   // "Not yet" (`loading`) and "asked and failed" (`status === 'error'`) are
   // both "no answer" — they differ only in whether waiting will help.
@@ -210,5 +212,11 @@ export function RootLandingRedirect() {
   // while the app list loads, and handing off to a null-rendering redirect left
   // `#root` empty for 147 ms while `/home` rendered at transition priority. The
   // splash is unchanged across the handoff, so the boot reads as one screen.
-  return <RedirectWithSplash to={resolveLandingPath(apps as LandingApp[] | undefined)} replace />;
+  //
+  // Search and hash carry over (objectstack-ai/objectstack#27450): the URL
+  // overlays (`?palette=1`, `?recordId=`) live in the query, and the landing is
+  // a bare `/apps/<segment>` or `/home`, so there is nothing to merge with. The
+  // app root it lands on carries them on to the app's own landing in turn.
+  const landing = resolveLandingPath(apps as LandingApp[] | undefined);
+  return <RedirectWithSplash to={`${landing}${location.search}${location.hash}`} replace />;
 }
