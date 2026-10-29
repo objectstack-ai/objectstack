@@ -451,7 +451,7 @@ jobs:
               # spelled it, exactly as the two narrower `skills/` entries were.
               - 'docs/**'
             # The objectui tree, the root files the ui jobs build from, and the
-            # four roots outside ui/ that the ui jobs' gates and tests read
+            # five paths outside ui/ that the ui jobs' gates and tests read
             # (objectstack#25712):
             #   - every root workflow, not ci.yml alone: Lint UI's pre-install
             #     import graph check scans all of `.github/workflows/` for ui

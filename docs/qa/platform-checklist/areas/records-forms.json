@@ -5001,7 +5001,7 @@
       },
       "source": [
         "packages/spec/src/data/field.zod.ts#deleteBehavior (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
-        "packages/objectql/src/engine.ts#required (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
+        "packages/objectql/src/engine-delete-cascade.ts#required (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
         "examples/app-showcase/src/data/objects/invoice.object.ts#InvoiceLine (its invoice master_detail, deleteBehavior 'cascade') + examples/app-showcase/src/data/objects/invoice.object.ts#Invoice (its required account lookup, the required-FK escalation); contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
       ],
       "history": [
