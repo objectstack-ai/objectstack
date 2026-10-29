@@ -57,8 +57,6 @@ const RELATED = [
 const maximal = {
   related: RELATED,
   approvals: { count: 2, node: { requests: [] } },
-  showActivity: true,
-  history: { entries: [], loading: false },
 };
 
 describe('recordPageTierFor (objectstack#26678)', () => {
@@ -87,14 +85,12 @@ describe('recordPageTierFor (objectstack#26678)', () => {
 });
 
 describe('recordPageColumnOfTab — every synthesized tab has a column', () => {
-  it.each(['default', 'stack', 'tabs'] as const)('relatedLayout %s', (layout) => {
-    const tabs = buildDefaultTabs(leadDef, {
-      ...maximal,
-      ...(layout === 'default' ? {} : { relatedLayout: layout }),
-    });
+  it('from a maximal synthesis', () => {
+    const tabs = buildDefaultTabs(leadDef, maximal);
     const values = tabs.properties.items.map((item: any) => item.value);
     // The maximal synthesis really emitted the whole strip.
-    expect(values).toEqual(expect.arrayContaining(['details', 'approvals', 'attachments', 'activity', 'history']));
+    // `attachments` rides the Related tab now (objectstack#27055).
+    expect(values).toEqual(expect.arrayContaining(['details', 'related', 'approvals', 'timeline']));
     for (const value of values) expect(recordPageColumnOfTab(value)).not.toBeNull();
   });
 
@@ -115,23 +111,24 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
     const tabIndex = main.components.findIndex((n: any) => n.type === 'page:tabs');
     expect(columns!.header).toEqual(main.components.slice(0, tabIndex));
     expect(types(columns!.header)[0]).toBe('page:header');
-    expect(types(columns!.details)).toEqual(['record:details']);
-    // The discussion footer first (its composer on top), then Activity, History.
-    expect(types(columns!.timeline)).toEqual(['record:discussion', 'record:activity', 'record:history']);
-    // The strip's order: the primary list's own tab, the stacked rest, Approvals, Attachments.
+    // The primary list is the record's body: a table in the details column
+    // (objectstack#27055, Target 8).
+    expect(types(columns!.details)).toEqual(['record:details', 'record:related_list']);
+    // The one stream (objectstack#27055): a record:activity.
+    expect(types(columns!.timeline)).toEqual(['record:activity']);
+    // The Related tab (side lists, attachments at its foot), then Approvals.
     expect(types(columns!.related)).toEqual([
       'record:related_list',
       'record:related_list',
-      'record:related_list',
-      'record:approvals',
       'record:attachments',
+      'record:approvals',
     ]);
-    expect(columns!.related.slice(0, 3).map((n: any) => n.properties.objectName)).toEqual(['task', 'note', 'call']);
-    expect(columns!.relatedCount).toBe(3);
+    expect(columns!.related.slice(0, 2).map((n: any) => n.properties.objectName)).toEqual(['note', 'call']);
+    expect(columns!.relatedCount).toBe(2);
   });
 
   it('places every node the page holds exactly once', () => {
-    const page = buildDefaultPageSchema(leadDef, { ...maximal, relatedLayout: 'tabs' });
+    const page = buildDefaultPageSchema(leadDef, maximal);
     const columns = buildDefaultPageColumns(page)!;
     const placed = [...columns.header, ...columns.details, ...columns.timeline, ...columns.related];
     const main = page.regions.find((r: any) => r.name === 'main');
@@ -144,20 +141,11 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
     for (const node of expected) expect(placed.filter((n) => n === node)).toHaveLength(1);
   });
 
-  it('folds the opt-in reference rail into the related column — one rail, not two', () => {
-    const page = buildDefaultPageSchema(leadDef, {
-      showReferenceRail: true,
-      related: RELATED,
-      slots: { rightRail: { type: 'card', title: 'Watchers' } },
-    });
-    // The tabbed page keeps today's aside, and the rail suppresses the Related tab.
-    expect(page.regions.map((r: any) => r.name)).toEqual(['main', 'aside']);
-    const columns = buildDefaultPageColumns(page)!;
-    // The rail and the `rightRail` slot, then the Attachments tab (`enable.files`).
-    expect(types(columns.related)).toEqual(['record:reference_rail', 'card', 'record:attachments']);
-    expect(columns.relatedCount).toBe(RELATED.length);
-    // No related list is drawn twice: the rail stands in for the suppressed tab.
-    expect(types(columns.related)).not.toContain('record:related_list');
+  it('answers null for a page with a region besides `main` — the synthesizer emits none (objectstack#27055)', () => {
+    const page = buildDefaultPageSchema(leadDef, { related: RELATED });
+    expect(page.regions.map((r: any) => r.name)).toEqual(['main']);
+    const withAside = { ...page, regions: [...page.regions, { name: 'aside', components: [{ type: 'record:reference_rail' }] }] };
+    expect(buildDefaultPageColumns(withAside)).toBeNull();
   });
 
   it('a slotted details body lands in the details column', () => {

@@ -117,7 +117,6 @@ describe('buildDefaultTabs — related-list sort carriage (objectui#5795)', () =
 
   it('carries a per-list sort, not a page-wide one', () => {
     const tabs = buildDefaultTabs(checkItemDef, {
-      relatedLayout: 'stack',
       related: [
         { objectName: 'check_item', relationshipField: 'task_version', sort: SORT },
         { objectName: 'attachment_note', relationshipField: 'task_version' },
@@ -148,31 +147,5 @@ describe('buildDefaultTabs — related-list sort carriage (objectui#5795)', () =
       ...(Array.isArray(synth.regions) && synth.regions.length ? { regions: synth.regions } : {}),
     };
     expect(issuesOf(PageSchema.safeParse(body) as any)).toEqual([]);
-  });
-
-  it('THE THIRD SITE — reference-rail entries do NOT gain a sort', () => {
-    // The rail is opt-in and needs at least two related lists (it also
-    // suppresses the Related tab), so this is the branch where the SAME
-    // `related[]` array reaches the rail's own strict entry shape.
-    const synth = buildDefaultPageSchema(checkItemDef, {
-      showReferenceRail: true,
-      related: [
-        { objectName: 'check_item', relationshipField: 'task_version', sort: SORT },
-        { objectName: 'attachment_note', relationshipField: 'task_version', sort: SORT },
-      ],
-    });
-    const aside = (synth.regions as any[]).find((r) => r.name === 'aside');
-    const rail = aside?.components?.find((c: any) => c.type === 'record:reference_rail');
-    expect(rail).toBeTruthy();
-    for (const entry of propsOf(rail).entries) {
-      expect('sort' in entry).toBe(false);
-    }
-    // Deliberately NOT a whole-page `PageSchema` parse here, unlike the leg
-    // above: a Reference Rail page is already unpersistable for an unrelated,
-    // pre-existing reason — the synthesized `aside` region carries a
-    // `className` that `PageRegionSchema` refuses (objectui#4286, open).
-    // Measured on this branch with NO `sort` anywhere, so it is not this
-    // change; asserting a clean parse here would fail on someone else's
-    // defect and asserting the failure would pin it in place.
   });
 });

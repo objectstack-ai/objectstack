@@ -126,9 +126,9 @@ export default class PluginPublish extends Command {
     // bytes against the manifest's own declared per-file digests before
     // upload. Absent map = permissive by contract (the field is
     // `.optional()`; artifacts built before integrity computation stay
-    // publishable). Unpack-time re-verification is owned by the
-    // future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
-    // control plane (#11331) — this preflight does not discharge it.
+    // publishable). The installing side re-verifies at unpack
+    // (`os plugin install`, ADR-0025 §3.5 M1); this preflight is the
+    // publisher's own check, and the cloud control plane runs none.
     const declaredIntegrity = manifest.integrity;
     if (
       declaredIntegrity !== undefined && declaredIntegrity !== null

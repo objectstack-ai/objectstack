@@ -143,7 +143,7 @@ describe('(a) a declared kind decides the terminus, whatever the spelling (objec
   });
 
   it('the synthesized default page node carries the terminal itself, with no object definition bound', () => {
-    const [node] = buildDefaultHighlights(LOAN_DECLARED, { statusField: 'status', hideHighlights: true });
+    const [node] = buildDefaultHighlights(LOAN_DECLARED, { statusField: 'status', highlightFields: [] });
     expect(node.properties.stages).toEqual([
       { value: 'borrowed', label: '借出' },
       { value: 'returned', label: '已还', terminal: 'won' },
@@ -169,7 +169,7 @@ describe('(b) a declared open beats a terminal-sounding spelling (objectui#12907
   });
 
   it('the same holds for the synthesized default page node, read against the bound definition', () => {
-    const [node] = buildDefaultHighlights(DECLARED_OPEN, { statusField: 'status', hideHighlights: true });
+    const [node] = buildDefaultHighlights(DECLARED_OPEN, { statusField: 'status', highlightFields: [] });
     const [desktop] = rowsOf(mount(node, DECLARED_OPEN, 'prospecting'));
     expect(desktopGroups(desktop).separated).toEqual([]);
     expect(terminalsOf(desktop)).toEqual([null, null, null, 'won']);

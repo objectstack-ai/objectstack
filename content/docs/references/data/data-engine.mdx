@@ -22,8 +22,8 @@ The Data Engine acts as the "Driver" layer in the Hexagonal Architecture.
 ## TypeScript Usage
 
 ```typescript
-import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryPageWindowSchema, QueryPageWindowParamSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '@objectstack/spec/data';
-import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineExecuteRequest, DataEngineFilter, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryPageWindow, QueryPageWindowParam, QueryTransportParams, QueryWithTransport, ValidationAdvisoryEvent } from '@objectstack/spec/data';
+import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineCountOptionsSchema, DataEngineDeleteOptionsSchema, DataEngineFilterSchema, DataEngineInsertOptionsSchema, DataEngineQueryOptionsSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryPageWindowSchema, QueryPageWindowParamSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineFilter, DataEngineInsertOptions, DataEngineQueryOptions, DataEngineSort, DataEngineUpdateOptions, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryPageWindow, QueryPageWindowParam, QueryTransportParams, QueryWithTransport, ValidationAdvisoryEvent } from '@objectstack/spec/data';
 
 // Validate data
 const result = BaseEngineOptionsSchema.parse(data);
@@ -134,33 +134,6 @@ Options for DataEngine.aggregate operations
 
 ---
 
-## DataEngineAggregateRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'aggregate'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
-
-### Nested Shape: `DataEngineAggregateRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
-| **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
-| **timezone** | `string` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
-
----
-
 ## DataEngineCountOptions
 
 Options for DataEngine.count operations
@@ -209,29 +182,6 @@ Options for DataEngine.count operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineCountRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'count'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; search?: string \| object; searchFields?: string[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineCountRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
 ---
@@ -289,42 +239,6 @@ Options for DataEngine.delete operations
 
 ---
 
-## DataEngineDeleteRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'delete'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single delete, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
-
-### Nested Shape: `DataEngineDeleteRequest.options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
-
----
-
-## DataEngineExecuteRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'execute'` | ✅ |  |
-| **command** | `any` | ✅ |  |
-| **options** | `Record<string, any>` | optional |  |
-
-
----
-
 ## DataEngineFilter
 
 Data Engine query filter conditions
@@ -344,76 +258,6 @@ Type: `Record<string, any>`
 Reference: any
 
 ---
-
-
----
-
-## DataEngineFindOneRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'findOne'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineFindOneRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
-
-
----
-
-## DataEngineFindRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'find'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineFindRequest.query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
 
 
 ---
@@ -466,20 +310,6 @@ Options for DataEngine.insert operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineInsertRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'insert'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any> \| Record<string, any>[]` | ✅ |  |
-| **options** | `{ context?: object; returning?: boolean }` | optional | Options for DataEngine.insert operations |
 
 
 ---
@@ -538,221 +368,6 @@ Query options for IDataEngine.find() operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineRequest
-
-Virtual ObjectQL Request Protocol
-
-### Union Options
-
-This schema accepts one of the following structures:
-
-#### Option 1
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'find'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='find'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
-
----
-
-#### Option 2
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'findOne'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='findOne'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
-| **top** | `number` | optional |  |
-| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
-| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
-| **skip** | `integer` | optional |  |
-| **populate** | `string[]` | optional |  |
-
----
-
-#### Option 3
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'insert'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any> \| Record<string, any>[]` | ✅ |  |
-| **options** | `{ context?: object; returning?: boolean }` | optional | Options for DataEngine.insert operations |
-
----
-
-#### Option 4
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'update'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any>` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single update, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; returning?: boolean; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='update'].options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **returning** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 5
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'delete'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single delete, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='delete'].options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 6
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'count'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; search?: string \| object; searchFields?: string[]; … }` | optional |  |
-
-### Nested Shape: `DataEngineRequest[method='count'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 7
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'aggregate'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
-
-### Nested Shape: `DataEngineRequest[method='aggregate'].query`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
-| **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
-| **timezone** | `string` | optional |  |
-| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
-| **searchFields** | `string[]` | optional |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
----
-
-#### Option 8
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'execute'` | ✅ |  |
-| **command** | `any` | ✅ |  |
-| **options** | `Record<string, any>` | optional |  |
-
----
-
-#### Option 9
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'vectorFind'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **vector** | `number[]` | ✅ |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **limit** | `integer` | optional (default: `5`) |  |
-| **threshold** | `number` | optional |  |
-
----
 
 
 ---
@@ -837,49 +452,6 @@ Options for DataEngine.update operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
-
-
----
-
-## DataEngineUpdateRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'update'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **data** | `Record<string, any>` | ✅ |  |
-| **id** | `string \| number` | optional | ID for single update, or use where in options |
-| **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; returning?: boolean; … }` | optional |  |
-
-### Nested Shape: `DataEngineUpdateRequest.options`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
-| **multi** | `boolean` | optional (default: `false`) |  |
-| **returning** | `boolean` | optional (default: `false`) |  |
-| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-
-
----
-
-## DataEngineVectorFindRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'vectorFind'` | ✅ |  |
-| **object** | `string` | ✅ |  |
-| **vector** | `number[]` | ✅ |  |
-| **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string[]` | optional |  |
-| **limit** | `integer` | optional (default: `5`) |  |
-| **threshold** | `number` | optional |  |
 
 
 ---

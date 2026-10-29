@@ -813,10 +813,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filtro",
         helpText: "Solo se agregan las filas hijas que coinciden con este predicado (p. ej. status == received)"
       },
-      externalId: {
-        label: "ID externo",
-        helpText: "Marca como ID externo para operaciones upsert"
-      },
       storage: {
         label: "Almacenamiento",
         helpText: "Restricciones físicas de almacenamiento (ADR-0113): el DDL que el contrato de escritura deliberadamente no implica. Sin definir: no se solicita ninguna."

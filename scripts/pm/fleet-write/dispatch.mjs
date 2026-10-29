@@ -251,6 +251,15 @@
  *     (`scripts/pm/rerun-failed.mjs`) reads the new attempt's job ids after,
  *     as a reading for its note. A run that failed (a fence refused it, or
  *     the re-run did not read back) is exit 5 like any failed run;
+ *   - `sub_issue_add` and `sub_issue_remove` carry no body and are confirmed
+ *     INSIDE the run too: the executor judges the fences on the two cards
+ *     before the write and lands the action only when the parent's own
+ *     sub-issue list reads the child back, or no longer does
+ *     (`execute.mjs`, `confirmSubIssue`). So a `success` run IS that
+ *     confirmation and this file reads nothing back; a run that failed (a
+ *     fence refused it, or the list did not settle) is exit 5 like any
+ *     failed run. Neither creates content, so a stroke linking an epic's
+ *     children is paced at rule ①'s gap, never batched;
  *   - a `pr_create` carrying `assignees` is read back at its body's locator
  *     as before, and its row ALSO carries the pull's `assignees` as the
  *     platform lists them (`assigneesReading`; `--json` carries them too) —
@@ -1509,9 +1518,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
   "the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone": 13,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
+  "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
 });
-// Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 23;
+// Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
+// hierarchy link seat battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 24;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2293,6 +2304,32 @@ export async function selfTest() {
       t('a success run: ONE dispatch carrying the action as judged, and no read beyond the relay run\'s own — nothing read back at the target, the executor\'s read-back landed it — exit 0', [sent.length, sent[0]?.body?.client_payload?.actions, landed.state, landed.readBack?.state, landed.runs?.state, beyondTheRelayRun.map((s) => s.call), exitForResult(landed)], [1, [RERUN], 'success', 'none', 'none', [], EXIT_OK], landed.logs.join(' | '));
       const fenced = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: packed.payload });
       t('⛔ a run that failed — the relay refused at a fence, or the re-run did not read back — is exit 5 after ONE dispatch, never re-sent and never a direct write', [fenced.state, exitForResult(fenced), fenced.seen.filter((s) => s.call === DISPATCH).length, fenced.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length], ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]);
+    }
+
+    // ── the hierarchy link at the seat ──────────────────────────────────────
+    battery("the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const PARENT = 27293;
+      const children = [26702, 26709, 26710];
+      const links = children.map((n) => ({ op: 'sub_issue_add', issue: PARENT, sub_issue: n }));
+      const pack = (actions) => packRequest({ repo: REPO, session: SESSION, actions, requestId: 'fw-test-1' });
+      const packed = pack([...links, { op: 'sub_issue_remove', issue: PARENT, sub_issue: 26711 }, { op: 'comment', issue: PARENT, body: 'linked' }]);
+      t("an epic's links pack in ONE stroke beside a remove and a comment — no alone — each action op, issue and sub_issue alone", [packed.ok, packed.payload?.actions.slice(0, 4).map((a) => Object.keys(a)), packed.payload?.actions.length], [true, [['op', 'issue', 'sub_issue'], ['op', 'issue', 'sub_issue'], ['op', 'issue', 'sub_issue'], ['op', 'issue', 'sub_issue']], 5], packed.errors.join(' | '));
+      const refusedFor = (actions, needle) => {
+        const p = pack(actions);
+        return !p.ok && p.payload === null && p.errors.some((e) => e.includes(needle));
+      };
+      t('⛔ refused at the packer, before anything is sent: a parent named as its own child, a sub_issue_id beside the numbers, and the replace_parent flag', [refusedFor([{ op: 'sub_issue_add', issue: PARENT, sub_issue: PARENT }], 'the same as issue'), refusedFor([{ ...links[0], sub_issue_id: 6060051871 }], 'actions[0].sub_issue_id is not a key `sub_issue_add` takes'), refusedFor([{ ...links[0], replace_parent: true }], 'actions[0].replace_parent is not a key `sub_issue_add` takes')], [true, true, true]);
+      const pacing = strokePacing(pack(links).payload);
+      t("derived from the table: neither row is a body op, a run op, a content-creating op or an annotated op, and three links are three writes at rule ①'s gap, never batched", [['sub_issue_add', 'sub_issue_remove'].map((op) => [BODY_OPS.includes(op), RUN_OPS.includes(op), CONTENT_CREATING_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), op in READ_BACK_LOCATORS]), pacing.writes, pacing.batched, pacing.pacingMs], [[[false, false, false, false, false], [false, false, false, false, false]], 3, false, 0]);
+      const linkStroke = pack(links).payload;
+      const landed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: linkStroke });
+      const sent = landed.seen.filter((s) => s.call === DISPATCH);
+      const beyondTheRelayRun = landed.seen.filter((s) => s.call !== DISPATCH && s.call !== RUNS && s.call !== `GET /repos/${RELAY_REPO}/actions/runs/42`);
+      t("a success run: ONE dispatch carrying the links as judged, and no read beyond the relay run's own — the executor's list read-back landed them — exit 0", [sent.length, sent[0]?.body?.client_payload?.actions, landed.state, landed.readBack?.state, beyondTheRelayRun.map((s) => s.call), exitForResult(landed)], [1, links, 'success', 'none', [], EXIT_OK], landed.logs.join(' | '));
+      const fenced = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: linkStroke });
+      t('⛔ a run that failed — a fence refused a card, or the list did not settle — is exit 5 after ONE dispatch, never re-sent and never a direct write', [fenced.state, exitForResult(fenced), fenced.seen.filter((s) => s.call === DISPATCH).length, fenced.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length], ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]);
     }
 
     // ── the issue_create re-list ────────────────────────────────────────────

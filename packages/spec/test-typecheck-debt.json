@@ -95,9 +95,8 @@
       "TS6133: 'key' is declared but its value is never read.": 1
     },
     "src/data/data-engine.test.ts": {
-      "TS18046: 'request.command' is of type 'unknown'.": 1,
       "TS2339: Property 'created_at' does not exist on type '…'.": 2,
-      "TS2339: Property 'name' does not exist on type '…'.": 3
+      "TS2339: Property 'name' does not exist on type '…'.": 2
     },
     "src/data/display-name.test.ts": {
       "TS2339: Property 'fields' does not exist on type '…'.": 1,

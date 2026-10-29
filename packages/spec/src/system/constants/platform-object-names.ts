@@ -89,6 +89,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_sso_provider',
     'sys_team',
     'sys_team_member',
+    'sys_trusted_key',
     'sys_two_factor',
     'sys_user',
     'sys_user_preference',

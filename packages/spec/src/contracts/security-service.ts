@@ -1170,6 +1170,26 @@ export interface ISecurityService {
   ): Promise<{ suggestion: AudienceBindingSuggestion }>;
 
   /**
+   * Re-open a dismissed suggestion — a declined one or a revoked acceptance —
+   * so the admin can decide it again: the row returns to `pending`, exactly as
+   * if it had never been answered. Re-opening is not an acceptance: a pending
+   * row grants nothing, so a revoked set stays out of the `everyone` definition
+   * until `confirmAudienceBindingSuggestion` accepts it, high-risk gate
+   * included. Gated like the list. Throws when the suggestion is unknown, is
+   * not dismissed, or its set is no longer suggested by its package.
+   *
+   * **OPTIONAL, and absence is a defined state.** A security service without
+   * the door omits it; callers feature-detect
+   * (`typeof svc.reopenAudienceBindingSuggestion === 'function'`) and answer
+   * that the door is not served. Absence leaves every dismissal standing, so
+   * nothing is granted.
+   */
+  reopenAudienceBindingSuggestion?(
+    callerContext: SecurityContext,
+    id: string,
+  ): Promise<{ suggestion: AudienceBindingSuggestion }>;
+
+  /**
    * Contribute alternate matches to the platform's row-level write ownership
    * floor. The floor is the `created_by == current_user.id` update and delete
    * policies `member_default` ships. A plugin that installs a tighter row gate

@@ -16,7 +16,6 @@
     "data/DataEngineInsertOptions:returning = true",
     "data/DataEngineUpdateOptions:multi = false",
     "data/DataEngineUpdateOptions:returning = false",
-    "data/DataEngineVectorFindRequest:limit = 5",
     "data/Datasource:active = true",
     "data/Datasource:autoConnect = false",
     "data/Datasource:origin = \"code\"",
