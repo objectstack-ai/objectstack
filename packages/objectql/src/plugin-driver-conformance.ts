@@ -77,7 +77,6 @@ import {
 } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { applyDriverQueryInMemory } from './driver-query-in-memory.js';
-import { declaredFieldClasses } from './having-filter.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import { createExternalDriverFloor } from './external-driver-floor.js';
 import {
@@ -633,7 +632,7 @@ async function shapeCase(id: string, session: Session): Promise<PluginDriverConf
   const query = { object: session.object, limit: ROW_LIMIT };
   let rows: unknown;
   try {
-    rows = await session.driver.find(session.object, query as DriverQuery);
+    rows = await session.driver.find(session.object, query as unknown as DriverQuery);
   } catch (error) {
     throw new PluginDriverConformanceFailure(id,
       `find('${session.object}', ${show(query)}) threw ${describeThrow(error)} for the plainest read the engine sends: `
@@ -696,7 +695,7 @@ async function flooredRead<T>(
 async function floorFilterCase(id: string, session: Session, c: FilterCase): Promise<PluginDriverConformanceOutcome> {
   const query = { object: session.object, where: c.where };
   const read = await flooredRead(id, session, { ...query, limit: ROW_LIMIT }, c.expected,
-    (driver) => driver.find(session.object, query as DriverQuery));
+    (driver) => driver.find(session.object, query as unknown as DriverQuery));
   if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
   const got = sorted(read.value.map((r) => r.id as string));
   if (show(got) !== show(sorted(c.expected))) {
@@ -712,7 +711,7 @@ async function floorCountCase(
 ): Promise<PluginDriverConformanceOutcome> {
   const query = { object: session.object, where };
   const read = await flooredRead(id, session, { ...query, limit: ROW_LIMIT }, expected,
-    (driver) => driver.count(session.object, query as DriverQuery));
+    (driver) => driver.count(session.object, query as unknown as DriverQuery));
   if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
   if (read.value !== expected.length) {
     throw new PluginDriverConformanceFailure(id,
@@ -775,7 +774,7 @@ async function floorOrderCase(
   let honoured = true;
   for (let offset = 0; offset < all.length; offset += pageSize) {
     const query = { object: session.object, orderBy, limit: pageSize, offset };
-    const read = await flooredRead(id, session, sent, all, (driver) => driver.find(session.object, query as DriverQuery));
+    const read = await flooredRead(id, session, sent, all, (driver) => driver.find(session.object, query as unknown as DriverQuery));
     if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
     const driverRows = read.ids.map((rowId) => session.fixture.rows.find((r) => r.id === rowId)!);
     if (!inOrder(driverRows, orderBy)) honoured = false;
@@ -824,7 +823,7 @@ async function outageCase(
   id: string, session: Session, verb: 'find' | 'findOne' | 'count',
 ): Promise<PluginDriverConformanceOutcome> {
   const { driver, answers } = floored(session);
-  const query = { object: session.object, where: { status: 'active' } } as DriverQuery;
+  const query = { object: session.object, where: { status: 'active' } } as unknown as DriverQuery;
   let answer: unknown;
   try {
     answer = await (driver[verb] as (o: string, q: DriverQuery) => Promise<unknown>)(session.object, query);
@@ -902,7 +901,7 @@ async function directRead<T>(
 
 async function directFilterCase(id: string, session: Session, c: FilterCase): Promise<PluginDriverConformanceOutcome> {
   const query = { object: session.object, where: c.where };
-  const read = await directRead(id, session, 'find', query, () => session.driver.find(session.object, query as DriverQuery));
+  const read = await directRead(id, session, 'find', query, () => session.driver.find(session.object, query as unknown as DriverQuery));
   if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
   const ids = judgeRows(id, session, query, read.value, c.expected);
   if (ids.length !== c.expected.length) {
@@ -918,7 +917,7 @@ async function directCountCase(
   id: string, session: Session, where: FilterCondition, expected: number,
 ): Promise<PluginDriverConformanceOutcome> {
   const query = { object: session.object, where };
-  const read = await directRead(id, session, 'count', query, () => session.driver.count(session.object, query as DriverQuery));
+  const read = await directRead(id, session, 'count', query, () => session.driver.count(session.object, query as unknown as DriverQuery));
   if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
   if (read.value !== expected) {
     throw new PluginDriverConformanceFailure(id,
@@ -931,7 +930,7 @@ async function directFindOneCase(
   id: string, session: Session, where: FilterCondition, expected: readonly string[],
 ): Promise<PluginDriverConformanceOutcome> {
   const query = { object: session.object, where, limit: 1 };
-  const read = await directRead(id, session, 'findOne', query, () => session.driver.findOne(session.object, query as DriverQuery));
+  const read = await directRead(id, session, 'findOne', query, () => session.driver.findOne(session.object, query as unknown as DriverQuery));
   if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
   const row = read.value as Row | null | undefined;
   if (expected.length === 0) {
@@ -954,7 +953,7 @@ async function directPagingCase(
   const visited: Row[] = [];
   for (let offset = 0; offset < session.fixture.rows.length; offset += pageSize) {
     const query = { object: session.object, ...(orderBy ? { orderBy } : {}), limit: pageSize, offset };
-    const read = await directRead(id, session, 'find', query, () => session.driver.find(session.object, query as DriverQuery));
+    const read = await directRead(id, session, 'find', query, () => session.driver.find(session.object, query as unknown as DriverQuery));
     if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
     judgeRows(id, session, query, read.value, []);
     const page = read.value as Row[];
@@ -973,7 +972,7 @@ async function directZeroLimitCase(
   id: string, session: Session, shape: { limit?: number; offset?: number }, expected: number,
 ): Promise<PluginDriverConformanceOutcome> {
   const query = { object: session.object, ...shape };
-  const read = await directRead(id, session, 'find', query, () => session.driver.find(session.object, query as DriverQuery));
+  const read = await directRead(id, session, 'find', query, () => session.driver.find(session.object, query as unknown as DriverQuery));
   if ('refused' in read) return { status: 'pass', pushdown: 'refused' };
   judgeRows(id, session, query, read.value, []);
   const length = (read.value as Row[]).length;
