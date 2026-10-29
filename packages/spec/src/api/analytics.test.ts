@@ -117,13 +117,18 @@ describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape', () => 
       expect(ANALYTICS_CUBE_NAME_REQUIRED).toMatch(/^Name the cube to query/);
     });
 
-    it('a missing cube keeps its own refusal: invalid_type at `cube`, not the empty-name sentence', () => {
+    it('a missing cube keeps its own issue code (invalid_type at `cube`) and reads the same prescription', () => {
+      // The member carries a type-level `error` beside its `.min(1)`: the key
+      // left out, the most common client mistake, gets the one sentence too,
+      // while the issue code (and so the ADR-0114 field code, `required` once
+      // the mapper sees the input) still tells the cases apart.
       const parsed = AnalyticsQueryRequestSchema.safeParse({ measures: ['x'] });
       expect(parsed.success).toBe(false);
       if (parsed.success) return;
       const cubeIssues = parsed.error.issues.filter((issue) => issue.path[0] === 'cube');
       expect(cubeIssues).toHaveLength(1);
       expect(cubeIssues[0].code).toBe('invalid_type');
+      expect(cubeIssues[0].message).toBe(ANALYTICS_CUBE_NAME_REQUIRED);
     });
 
     it('a one-character name and a whitespace-only name still parse: the rule is minLength 1, nothing wider', () => {

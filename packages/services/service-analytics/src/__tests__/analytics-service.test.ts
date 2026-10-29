@@ -488,7 +488,7 @@ describe('AnalyticsService', () => {
   // and the sentence's head.
   describe('a query that names no cube is the typed VALIDATION_FAILED refusal, in-process', () => {
     const refused = { code: 'VALIDATION_FAILED', status: 400, name: 'ValidationError', message: ANALYTICS_CUBE_NAME_REQUIRED };
-    const missing = { ...refused, fields: [{ field: 'cube', code: 'required' }] };
+    const missing = { ...refused, fields: [{ field: 'cube', code: 'required', message: ANALYTICS_CUBE_NAME_REQUIRED }] };
     const empty = { ...refused, fields: [{ field: 'cube', code: 'min_length', message: ANALYTICS_CUBE_NAME_REQUIRED }] };
 
     it('query(): a missing cube', async () => {
@@ -511,7 +511,7 @@ describe('AnalyticsService', () => {
       const service = new AnalyticsService({ logger: silentLogger });
       await expect(service.query({ cube: null as unknown as string, measures: ['count'] })).rejects.toMatchObject({
         ...refused,
-        fields: [{ field: 'cube', code: 'invalid_type' }],
+        fields: [{ field: 'cube', code: 'invalid_type', message: ANALYTICS_CUBE_NAME_REQUIRED }],
       });
     });
 
@@ -527,10 +527,13 @@ describe('AnalyticsService', () => {
       // resolution; this harness has no object registry to resolve against, so
       // only the guard's half is pinned here: the rule is minLength 1, no trim.
       const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
-      const query = () => service.query({ cube: '   ', measures: ['count'] });
-      await expect(query()).rejects.toThrow();
-      await expect(query()).rejects.not.toMatchObject({ code: 'VALIDATION_FAILED' });
-      await expect(query()).rejects.not.toMatchObject({ message: expect.stringMatching(/^Name the cube to query/) });
+      const err: unknown = await service.query({ cube: '   ', measures: ['count'] }).then(
+        () => { throw new Error('expected a rejection'); },
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(err).not.toMatchObject({ message: expect.stringMatching(/^Name the cube to query/) });
     });
   });
 

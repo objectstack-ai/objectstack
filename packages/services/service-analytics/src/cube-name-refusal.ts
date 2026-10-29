@@ -36,7 +36,9 @@ import { fieldsFromZodIssues, validationFailure, VALIDATION_FAILED_STATUS } from
  * call the door makes on the whole body. So the entry's code is whatever the
  * door answers for the same value — `required` for an absent key, `min_length`
  * for the empty string, `invalid_type` for a `null` an untyped caller slipped
- * past `!queryInput.cube` — and its message is the member's own. ⛔ No
+ * past `!queryInput.cube` — and its message is the member's own, which is the
+ * one prescription for every arm (the member carries a type-level `error`
+ * beside its `.min(1)`). ⛔ No
  * hand-rolled `typeof` split here: a second copy of that table is the drift
  * the ADR exists to prevent, and it disagreed with the door on `null` once.
  * `analytics-empty-cube-refusal.test.ts` (runtime) pins the door's half,
@@ -46,11 +48,23 @@ import { fieldsFromZodIssues, validationFailure, VALIDATION_FAILED_STATUS } from
  * carries, and the engine's cube resolution answers it `CUBE_NOT_FOUND` / 404.
  * Refusing it would be a second rule beside the schema's `.min(1)`.
  */
+/**
+ * The schema's `cube` member, resolved on the first refusal and kept: reading
+ * it at module load would resolve the lazy request schema for every importer
+ * of the service, which is the allocation `lazySchema` exists to defer.
+ */
+let cubeMember: typeof AnalyticsQueryRequestSchema.shape.cube | undefined;
+
 export function cubeNameRequiredError(cube: unknown): Error & { code: string; status: number } {
-  const verdict = AnalyticsQueryRequestSchema.shape.cube.safeParse(cube);
-  const issues = verdict.success
-    ? []
-    : verdict.error.issues.map((issue) => ({ ...issue, path: ['cube', ...issue.path] }));
+  cubeMember ??= AnalyticsQueryRequestSchema.shape.cube;
+  const verdict = cubeMember.safeParse(cube);
+  if (verdict.success) {
+    // Both call sites guard with `!queryInput.cube`, and every falsy value
+    // fails `z.string().min(1)`; a caller reaching here with an accepted name
+    // would mint a refusal naming no field and prescribing a fix that is false.
+    throw new Error('cubeNameRequiredError: called with a cube name the schema accepts');
+  }
+  const issues = verdict.error.issues.map((issue) => ({ ...issue, path: ['cube', ...issue.path] }));
   const err = validationFailure(ANALYTICS_CUBE_NAME_REQUIRED, fieldsFromZodIssues(issues, { cube })) as Error & {
     code: string;
     status: number;

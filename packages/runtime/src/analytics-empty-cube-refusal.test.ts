@@ -120,11 +120,33 @@ describe.each<Door>(['/analytics/query', '/analytics/sql'])('%s — an empty cub
         // the body to the mapper now; it used to answer Zod's `invalid_type`
         // for the same body. The same code the engine's in-process guard
         // answers (service-analytics `cube-name-refusal.ts`), so one condition
-        // reads one code on both sides. The empty-name sentence is not
-        // borrowed for the missing case.
-        expect(res.body.error.details.fields[0]).toMatchObject({ field: 'cube', code: 'required' });
-        expect(res.body.error.details.fields[0].message).not.toBe(ANALYTICS_CUBE_NAME_REQUIRED);
+        // reads one code on both sides; and the one prescription, carried by
+        // the member's type-level `error`, not Zod's generic words.
+        expect(res.body.error.details.fields[0]).toEqual({ field: 'cube', code: 'required', message: ANALYTICS_CUBE_NAME_REQUIRED });
+        expect(res.body.error.message).toContain('cube: Name the cube to query');
         expect(serviceCalls(calls)).toEqual([]);
+    });
+
+    it('the `required` code covers every absent required key of the body, and an absent body', async () => {
+        // The door hands the body to the mapper, so the D3 split reports every
+        // missing key as `required` (it used to read `invalid_type`): pinned
+        // beyond `cube` because the changeset says so for `measures` and for
+        // a bodiless request.
+        const noMeasures = await post(door, { cube: 'orders' });
+        expect(noMeasures.res.statusCode).toBe(400);
+        expect(noMeasures.res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(noMeasures.res.body.error.details.fields).toEqual([
+            expect.objectContaining({ field: 'measures', code: 'required' }),
+        ]);
+
+        const noBody = await post(door, undefined);
+        expect(noBody.res.statusCode).toBe(400);
+        expect(noBody.res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(noBody.res.body.error.details.fields).toEqual([
+            expect.objectContaining({ field: '(body)', code: 'required' }),
+        ]);
+        expect(serviceCalls(noMeasures.calls)).toEqual([]);
+        expect(serviceCalls(noBody.calls)).toEqual([]);
     });
 
     it('preservation: a named cube reaches the service with the body untouched', async () => {
