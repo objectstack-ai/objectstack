@@ -12,6 +12,8 @@
  * a side card"); the page used to draw it as a body table.
  */
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
+import { ObjectFieldGroupSchema } from './object.zod';
 import {
   fieldGroupBodyTableRefusal,
   isBodyTableRelationship,
@@ -77,5 +79,22 @@ describe('fieldGroupBodyTableRefusal — the sentence both surfaces write', () =
     ]);
     expect(msg).toContain("'event.who_id' is a side card, 'event.what_id' is hidden (relatedList: false).");
     expect(msg).toContain("Set relatedList: 'primary' on those FKs, name only the body table as object.field ('event.related_to'), or remove");
+  });
+});
+
+describe('fieldGroups[i].relatedList describes the body-table rule it enforces', () => {
+  const root = z.toJSONSchema(ObjectFieldGroupSchema as z.ZodType, { unrepresentable: 'any', io: 'input' }) as {
+    properties?: Record<string, { description?: string }>;
+  };
+  const text = root.properties?.relatedList?.description ?? '';
+
+  it('says it names a body table only, and that any other list is refused with the remedy', () => {
+    expect(text).toContain("It names a body table only (a FK declaring relatedList: 'primary', or a master_detail FK that sets inlineEdit and declares no relatedList)");
+    expect(text).toContain('a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused');
+    expect(text).toContain("set relatedList: 'primary' on it, or remove the group's relatedList");
+  });
+
+  it('no longer says relatedList: false still hides a placed table', () => {
+    expect(text).not.toContain('still hides the table');
   });
 });
