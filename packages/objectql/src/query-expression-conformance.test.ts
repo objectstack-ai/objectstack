@@ -2271,12 +2271,29 @@ describe('#4254 — searchFields / groupBy / aggregations on the list path (real
         })).rejects.toThrow(/scans this object's own columns/);
     });
 
-    it('an empty override is ABSENT, not malformed', async () => {
-        for (const searchFields of ['', []]) {
-            expect(titles(await protocol.findData({
-                object: 'showcase_task', query: { search: 'a', searchFields },
-            }))).toEqual(['A', 'B']);
+    // [#27484] Flipped on purpose (triage ruling 6500648325, option A). This
+    // pin read an empty override as ABSENT; the door now refuses it in the
+    // projection's envelope (#26644), as `$select` refuses a projection naming
+    // no field. Read as absent, the search scanned the default set: a caller who
+    // wrote the parameter meant to narrow, and got the widest scan instead.
+    it('an override naming no field is refused, not read as absent', async () => {
+        const named = [
+            [{ searchFields: '' }, 'searchFields'],
+            [{ searchFields: ',' }, 'searchFields'],
+            [{ searchFields: ' , ' }, 'searchFields'],
+            [{ searchFields: [] }, 'searchFields'],
+            [{ $searchFields: '' }, '$searchFields'],
+            [{ search: { query: 'a', fields: [] } }, 'search'],
+            [{ search: { query: 'a', fields: '' } }, 'search'],
+        ] as const;
+        for (const [query, param] of named) {
+            await expect(protocol.findData({
+                object: 'showcase_task', query: { search: 'a', ...query },
+            }), JSON.stringify(query)).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR', param });
         }
+        // …and a search with no override at all is untouched: absent is absent.
+        expect(titles(await protocol.findData({ object: 'showcase_task', query: { search: 'a' } })))
+            .toEqual(['A', 'B']);
     });
 
     // ─────────────────────────────────────────────────────────────
