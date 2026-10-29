@@ -111,6 +111,15 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
         code: 'NOT_IMPLEMENTED',
         message: 'Approvals service is not configured on this deployment',
     });
+    // One request read as the caller, and one `404 REQUEST_NOT_FOUND`, for
+    // every door that answers about a single request: `getRequest` answers
+    // `null` alike for an id it does not hold and for a request outside the
+    // caller's visibility, so the doors leak nothing about existence.
+    const readableRequestOr404 = async (svc: any, id: string, context: any, res: any) => {
+        const row = await svc.getRequest(id, context ?? {});
+        if (!row) res.status(404).json({ code: 'REQUEST_NOT_FOUND', error: `Approval request '${id}' not found` });
+        return row;
+    };
     const handleApprovalError = (res: any, err: any): boolean => {
         const msg = String(err?.message ?? err ?? '');
         const mapping: Array<[RegExp, number, string]> = [
@@ -325,11 +334,8 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 if (this.enforceAuth(req, res, context)) return;
                 const svc = await resolveService(environmentId);
                 if (!svc) return respond501(res);
-                const row = await svc.getRequest(req.params.id, context ?? {});
-                if (!row) {
-                    res.status(404).json({ code: 'REQUEST_NOT_FOUND', error: `Approval request '${req.params.id}' not found` });
-                    return;
-                }
+                const row = await readableRequestOr404(svc, req.params.id, context, res);
+                if (!row) return;
                 res.json(row);
             } catch (error: any) {
                 logError('[REST] Get approval request error:', error);
@@ -581,6 +587,9 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 if (this.enforceAuth(req, res, context)) return;
                 const svc = await resolveService(environmentId);
                 if (!svc) return respond501(res);
+                // The parent door's lookup and 404 first: an unknown id and a
+                // request the caller cannot see are not an empty audit trail.
+                if (!(await readableRequestOr404(svc, req.params.id, context, res))) return;
                 const rows = await svc.listActions(req.params.id, context ?? {});
                 res.json({ data: rows });
             } catch (error: any) {
