@@ -34,7 +34,7 @@ model: opus
    - 同批 agents 共用一个 scratchpad 目录,自然命名的文件会被彼此静默覆盖。
 2. **卡 assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
-   - 恒不写卡的 assignee(空也开工,报 `summary`);PR assignee = 卡的:`pr_create` 带 `assignees: [LOGIN]`。
+   - 恒不写卡的 assignee(空也开工,报 `summary`);PR ⛔ 不带 `assignees`,人经席位交棒才见 PR。
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
@@ -57,7 +57,7 @@ model: opus
    - 写工具自读所需变量;⛔ 永不打印环境变量的值,转录是 AGENTS.md 禁落令牌的日志行。
    - 拼法不限于 `env`、`printenv`、`set`、`export -p`、`echo $VAR`、`cat /proc/*/environ`。
    - 判存在只用不印值形式 `[ -n "${X+x}" ] && echo set`;已印出 ⇒ `deviations` 只点名变量名。
-   - 写预算三笔:`git push`、`pr_create`(draft,含 assignee 与 labels)、`os-dev-report` 评论。
+   - 写预算三笔:`git push`、`pr_create`(draft,含 labels、⛔ 无 assignees)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
