@@ -58,7 +58,8 @@ export const RecordPageRelatedRequestSchema = lazySchema(() => z.object({
   ),
   filter: z.unknown().optional().describe(
     'The list\'s own declared scope, in the filter syntax `GET /data/{object}` accepts. AND-composed with the '
-    + 'parent condition, so it can only narrow the list.',
+    + 'parent condition, so it can only narrow the list. A filter that syntax refuses refuses the whole request '
+    + '(a located 400 at `related.N.filter`) before anything is read.',
   ),
   top: z.number().int().min(0).max(RECORD_PAGE_MAX_RELATED_ROWS).describe(
     'How many of the list\'s first rows to return with its count; 0 returns the count alone.',
@@ -111,25 +112,39 @@ export const RecordPagePartErrorSchema = lazySchema(() => z.object({
 export type RecordPagePartError = z.input<typeof RecordPagePartErrorSchema>;
 export type RecordPagePartErrorParsed = z.infer<typeof RecordPagePartErrorSchema>;
 
-/** One related list's answer, in the order the request named the lists. */
-export const RecordPageRelatedAnswerSchema = lazySchema(() => z.object({
+/** A related list the caller may read: its count and first rows. */
+export const RecordPageRelatedRowsSchema = lazySchema(() => z.object({
   object: z.string().describe('The child object, as the request named it.'),
   field: z.string().describe('The relationship field, as the request named it.'),
-  total: z.number().int().optional().describe('How many child records the list holds for this caller. Absent on a refused list.'),
-  records: z.array(z.record(z.string(), z.unknown())).optional().describe(
-    'The list\'s first rows, as the caller may read them. Absent on a refused list.',
-  ),
-  error: RecordPagePartRefusalSchema.optional().describe(
-    'The refusal of the list\'s read. A refused list carries no count and no rows.',
-  ),
-}));
+  total: z.number().int().describe('How many child records the list holds for this caller.'),
+  records: z.array(z.record(z.string(), z.unknown())).describe('The list\'s first rows, as the caller may read them.'),
+}).strict());
+export type RecordPageRelatedRows = z.input<typeof RecordPageRelatedRowsSchema>;
+export type RecordPageRelatedRowsParsed = z.infer<typeof RecordPageRelatedRowsSchema>;
+
+/** A related list whose read refused: the refusal, and neither a count nor rows. */
+export const RecordPageRelatedRefusalSchema = lazySchema(() => z.object({
+  object: z.string().describe('The child object, as the request named it.'),
+  field: z.string().describe('The relationship field, as the request named it.'),
+  error: RecordPagePartRefusalSchema.describe('The refusal of the list\'s read.'),
+}).strict());
+export type RecordPageRelatedRefusal = z.input<typeof RecordPageRelatedRefusalSchema>;
+export type RecordPageRelatedRefusalParsed = z.infer<typeof RecordPageRelatedRefusalSchema>;
+
+/**
+ * One related list's answer, in the order the request named the lists: its
+ * count and rows, or its refusal. Never both, and never neither, so a refused
+ * list cannot be read as an empty one.
+ */
+export const RecordPageRelatedAnswerSchema = lazySchema(() => z.union([RecordPageRelatedRowsSchema, RecordPageRelatedRefusalSchema]));
 export type RecordPageRelatedAnswer = z.input<typeof RecordPageRelatedAnswerSchema>;
 export type RecordPageRelatedAnswerParsed = z.infer<typeof RecordPageRelatedAnswerSchema>;
 
 /** The approval part: the record's requests and its lock. */
 export const RecordPageApprovalsSchema = lazySchema(() => z.object({
   requests: z.array(z.record(z.string(), z.unknown())).describe(
-    'The record\'s approval requests the caller may see, as `GET /approvals/requests` lists them for the record.',
+    'The record\'s approval requests the caller may see, as `GET /approvals/requests` lists them for the record; '
+    + 'empty when the deployment runs no approval service.',
   ),
   lock: z.object({ locked: z.boolean() }).nullable().describe(
     'Whether a locking approval holds the record; null when the deployment answers no lock.',
@@ -139,7 +154,17 @@ export type RecordPageApprovals = z.input<typeof RecordPageApprovalsSchema>;
 export type RecordPageApprovalsParsed = z.infer<typeof RecordPageApprovalsSchema>;
 
 /** One requested operation's access decision, or the refusal of the explain read. */
-const RecordPageExplainAnswerSchema = lazySchema(() => z.union([ExplainDecisionSchema, RecordPagePartErrorSchema]));
+export const RecordPageExplainAnswerSchema = lazySchema(() => z.union([ExplainDecisionSchema, RecordPagePartErrorSchema]));
+export type RecordPageExplainAnswer = z.input<typeof RecordPageExplainAnswerSchema>;
+export type RecordPageExplainAnswerParsed = z.infer<typeof RecordPageExplainAnswerSchema>;
+
+/**
+ * The explain part's keys are the request enum's own options, so an operation
+ * the request admits is always one the answer can carry.
+ */
+const explainAnswerShape = () => Object.fromEntries(
+  RecordPageExplainOperationSchema.options.map((operation) => [operation, RecordPageExplainAnswerSchema.optional()]),
+) as { [K in z.infer<typeof RecordPageExplainOperationSchema>]: z.ZodOptional<typeof RecordPageExplainAnswerSchema> };
 
 /** The `data` of the answer to `POST /data/{object}/{id}/page`. */
 export const RecordPageResponseSchema = lazySchema(() => z.object({
@@ -150,11 +175,7 @@ export const RecordPageResponseSchema = lazySchema(() => z.object({
   fieldAccess: z.union([GetRecordFieldAccessResponseSchema, RecordPagePartErrorSchema]).optional().describe(
     'The field projection, when the request asked for it.',
   ),
-  explain: z.object({
-    update: RecordPageExplainAnswerSchema.optional(),
-    delete: RecordPageExplainAnswerSchema.optional(),
-    transfer: RecordPageExplainAnswerSchema.optional(),
-  }).optional().describe('One access decision per requested operation, keyed by operation, when the request asked for any.'),
+  explain: z.object(explainAnswerShape()).optional().describe('One access decision per requested operation, keyed by operation, when the request asked for any.'),
   approvals: z.union([RecordPageApprovalsSchema, RecordPagePartErrorSchema]).optional().describe(
     'The approval part, when the request asked for it.',
   ),
