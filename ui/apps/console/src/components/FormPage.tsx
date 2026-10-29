@@ -148,7 +148,17 @@ import {
   mapFieldTypeToFormType,
   resolveFormWidgetType,
 } from '@object-ui/fields';
-import { Tabs, TabsContent, TabsList, TabsTrigger, cn } from '@object-ui/components';
+import {
+  Button,
+  Empty,
+  EmptyDescription,
+  EmptyTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  cn,
+} from '@object-ui/components';
 import {
   SchemaRendererContext,
   extractFieldErrors,
@@ -1710,6 +1720,24 @@ export function resolveInternalForm(
 }
 
 /**
+ * The internal route's "no such form" (objectstack-ai/objectstack#27446): the
+ * `/meta/view` read answered 404. The metadata route answers 404 both for a
+ * view that does not exist and for one the caller may not read, on purpose, so
+ * the page says the one thing both mean — nothing here by that name.
+ *
+ * A type of its own, not a message to match, so {@link FormPage} can tell it
+ * from every other load failure and draw the console's shared localized
+ * not-found state for it instead of this English text. The message is kept
+ * for anyone who logs the error; the page never renders it.
+ */
+class FormNotFoundError extends Error {
+  constructor(name: string) {
+    super(`Form metadata not found: view/${name}`);
+    this.name = 'FormNotFoundError';
+  }
+}
+
+/**
  * Internal mode: pull the FormView metadata directly + the target object's
  * schema, and — when the URL names a record (objectui#4278) — that record.
  *
@@ -1733,8 +1761,9 @@ async function loadInternalForm(
   channel?: ApiFetch,
 ): Promise<LoadedForm> {
   const viewRes = await apiFetch(`/meta/view/${encodeURIComponent(name)}`, undefined, channel);
+  if (viewRes.status === 404) throw new FormNotFoundError(name);
   if (!viewRes.ok) {
-    throw new Error(`Form metadata not found: view/${name}`);
+    throw new Error(`Could not load form metadata (${viewRes.status}): view/${name}`);
   }
   const viewBody = await viewRes.json();
   const { label, object: objectName, form } = resolveInternalForm(name, viewBody);
@@ -2337,6 +2366,12 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /**
+   * The load answered "no such form" ({@link FormNotFoundError}). Its own flag
+   * rather than a string in `error`, because the page draws a localized state
+   * for it and never shows the thrown text (objectstack-ai/objectstack#27446).
+   */
+  const [notFound, setNotFound] = useState(false);
+  /**
    * The rows the last submit refused, by field name (objectstack-ai/objectstack#27417).
    * The `error` banner and the outcome toast still say the whole refusal; this
    * marks WHICH inputs it names. A string is the reason drawn under the row's
@@ -2421,6 +2456,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setNotFound(false);
     setFieldErrors({});
     // A `?recordId=` we cannot make sense of never reaches a loader: it is an
     // edit intent this route cannot honour, and #4278 ruling point 2 says
@@ -2446,7 +2482,8 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // Clear any previously loaded form: a refusal must not leave an
           // editable form on screen behind the error.
           setLoaded(null);
-          setError(e?.message ?? String(e));
+          if (e instanceof FormNotFoundError) setNotFound(true);
+          else setError(e?.message ?? String(e));
         }
       })
       .finally(() => {
@@ -2815,6 +2852,24 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
+      </div>
+    );
+  }
+  if (notFound && !loaded) {
+    // The console's shared not-found state, the one its catch-all route
+    // (`RouteNotFound` in app-shell's `AppContent`) draws, with the same pack
+    // keys: a form is a view, and a missing one is a URL that matches none.
+    return (
+      <div className="flex min-h-[60vh] w-full items-center justify-center p-8" data-testid="form-not-found">
+        <Empty>
+          <EmptyTitle>{t('console.notFound.title')}</EmptyTitle>
+          <EmptyDescription>{t('console.notFound.description')}</EmptyDescription>
+          <div className="mt-4">
+            <Button variant="outline" onClick={() => navigate(-1)}>
+              {t('console.notFound.back')}
+            </Button>
+          </div>
+        </Empty>
       </div>
     );
   }
