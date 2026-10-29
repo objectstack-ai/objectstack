@@ -165,6 +165,21 @@ import {
  */
 export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
 
+/** [#27500] The formats `GET /data/:object/export` serves, csv first as the default. */
+const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
+type ExportFormatServed = typeof EXPORT_FORMATS[number];
+
+/**
+ * [#27500] The export's `?format=`: absent is csv, a served format is itself,
+ * anything else (the empty value included) is `undefined`, which the route
+ * refuses.
+ */
+function readExportFormat(raw: unknown): ExportFormatServed | undefined {
+    if (raw === undefined) return 'csv';
+    const value = String(raw).trim().toLowerCase();
+    return (EXPORT_FORMATS as readonly string[]).includes(value) ? value as ExportFormatServed : undefined;
+}
+
 /**
  * [#24183] One export row as a json object carrying exactly `fields`, in that
  * order — the json arm's counterpart of the column list `formatRowCells` writes
@@ -945,7 +960,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // GET /data/:object/export  — streaming export (M10.21 / C.21)
     //
     // Query params:
-    //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
+    //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.
+    //                        Any other value, empty included, is a 400.)
     //   fields=a,b,c        (every format. csv / xlsx write exactly these columns and
     //                        json rows carry exactly these keys, in list order; a key
     //                        the read did not return is absent from a json row.
@@ -1071,9 +1087,22 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     await this.answerImportTemplate(req, res, p, environmentId, objectName, context, q);
                     return;
                 }
-                const fmtRaw = String(q.format ?? 'csv').toLowerCase();
-                const format: 'csv' | 'json' | 'xlsx' =
-                    fmtRaw === 'json' ? 'json' : fmtRaw === 'xlsx' ? 'xlsx' : 'csv';
+                // [#27500] Read, not coerced: a value outside the set this door
+                // serves used to fall through to csv, so `format=pdf`,
+                // `format=xml` and `format=` answered `200` with a csv file the
+                // caller never asked for. An ABSENT `format` is still csv; a
+                // present one must name a served format, the empty value
+                // included (as `limit=` above is refused rather than read as
+                // absent). Trimmed and case-insensitive, the reading the
+                // template mode above gives the same parameter. The set is the
+                // one this route serves, not the spec's wider `ExportFormat`.
+                const format = readExportFormat(q.format);
+                if (format === undefined) {
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR',
+                        `The "format" query parameter takes ${EXPORT_FORMATS.join(', ')}, got `
+                        + `${JSON.stringify(q.format)}. Omit it for csv.`);
+                    return;
+                }
                 // Header row toggle (csv / xlsx). Default on; `header=false` omits it.
                 const includeHeader = String(q.header ?? 'true').toLowerCase() !== 'false';
                 const HARD_CAP = 50_000;
