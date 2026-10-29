@@ -104,7 +104,7 @@ describe('a hot reloaded declared email template is what the next send renders',
     const send = async () => {
       const res = await mail.sendTemplate({ template: 'mr_task_done', to: 'ann@example.com', data: { title: 'Ship it' } });
       expect(res.status).toBe('sent');
-      return transport.subjects.at(-1);
+      return transport.subjects[transport.subjects.length - 1];
     };
     const listed = async () => ((await protocol.getMetaItems({ type: 'email_template' })).items ?? [])
       .filter((i: any) => i?.name === 'mr_task_done')
