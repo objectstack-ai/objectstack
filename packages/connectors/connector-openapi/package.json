@@ -32,6 +32,8 @@
     },
     "devDependencies": {
         "@objectstack/service-automation": "workspace:*",
+        "@scalar/json-magic": "^0.17.0",
+        "@scalar/openapi-upgrader": "^0.4.6",
         "@types/node": "^26.6.5",
         "typescript": "^6.0.3",
         "vitest": "^4.1.11"
