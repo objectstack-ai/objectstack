@@ -2643,15 +2643,13 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   };
 
   /**
-   * A submit the browser blocks (objectstack-ai/objectstack#27496): a control
-   * the browser judges invalid, such as a malformed `type="email"`, stops the
-   * submit before `handleSubmit` runs, so the banner would keep describing an
-   * earlier attempt ("Required: Name, Email" after both were filled). The
-   * banner describes the CURRENT attempt instead: this page's own checks are
-   * judged again over the rows the submit would judge, and when they refuse
-   * nothing the banner clears; each control the browser refused is marked
+   * A submit the browser blocks (objectstack-ai/objectstack#27496), such as a
+   * malformed `type="email"`, never reaches `handleSubmit`, so the banner kept
+   * an earlier attempt's text. It describes the current attempt instead: this
+   * page's own checks run again over the rows the submit would judge (nothing
+   * refused clears the banner), and each control the browser refused is marked
    * with the browser's own message. `invalid` fires once per refused control,
-   * so the marks are re-read from the whole form each time, not accumulated.
+   * so the marks are re-read from the whole form each time.
    */
   const handleNativeInvalid = (e: FormEvent<HTMLFormElement>) => {
     if (!loaded) return;

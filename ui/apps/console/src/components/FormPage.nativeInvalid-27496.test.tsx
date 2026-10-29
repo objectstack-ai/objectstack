@@ -1,16 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack-ai/objectstack#27496 — the banner describes the current attempt
- * when the browser blocks the submit.
- *
- * An `email` row renders `type="email"`, so a malformed address stops the
- * submit in the browser before the page's own submit handler runs. The banner
- * used to keep the previous attempt's "Required: Name, Email, Message" after
- * all three were filled. The page now judges the blocked attempt again: its own
- * checks refuse nothing, so the banner clears, and the email row is marked with
- * the browser's own reason. A fixed address then submits, and a server refusal
- * still shows its banner.
+ * objectstack-ai/objectstack#27496 — an `email` row renders `type="email"`, so
+ * the browser blocks a malformed address before the page's submit handler
+ * runs. The banner used to keep "Required: Name, Email, Message" after all
+ * three were filled; it now describes that blocked attempt, a fixed address
+ * submits, and a server refusal still shows its banner.
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
@@ -28,13 +23,7 @@ const PAYLOAD = {
   label: 'Contact us',
   form: {
     type: 'simple',
-    sections: [{
-      fields: [
-        { field: 'name', required: true },
-        { field: 'email', required: true },
-        { field: 'message', required: true },
-      ],
-    }],
+    sections: [{ fields: ['name', 'email', 'message'].map((field) => ({ field, required: true })) }],
   },
   objectSchema: {
     name: 'showcase_inquiry',
@@ -48,39 +37,28 @@ const PAYLOAD = {
 
 let posts: unknown[] = [];
 
-function stubPublic(answer: { ok: boolean; status: number; body: unknown }) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string, init?: RequestInit) => {
-      const reply = (ok: boolean, status: number, body: unknown) =>
-        ({
-          ok,
-          status,
-          statusText: ok ? 'OK' : 'Refused',
-          json: async () => body,
-          text: async () => JSON.stringify(body),
-        }) as unknown as Response;
-      if (init?.method === 'POST') {
-        posts.push(JSON.parse(String(init.body)));
-        return reply(answer.ok, answer.status, answer.body);
-      }
-      if (!String(url).includes('/forms/')) throw new Error(`unstubbed fetch: ${url}`);
-      return reply(true, 200, PAYLOAD);
-    }),
-  );
-  return render(
+function stubPublic(ok: boolean, status: number, body: unknown) {
+  const reply = (o: boolean, s: number, b: unknown) =>
+    ({ ok: o, status: s, statusText: '', json: async () => b, text: async () => JSON.stringify(b) }) as unknown as Response;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      posts.push(JSON.parse(String(init.body)));
+      return reply(ok, status, body);
+    }
+    if (!String(url).includes('/forms/')) throw new Error(`unstubbed fetch: ${url}`);
+    return reply(true, 200, PAYLOAD);
+  }));
+  render(
     <MemoryRouter initialEntries={['/f/contact-us']}>
-      <Routes>
-        <Route path="/f/:slug" element={<FormPage mode="public" />} />
-      </Routes>
+      <Routes><Route path="/f/:slug" element={<FormPage mode="public" />} /></Routes>
     </MemoryRouter>,
   );
 }
 
 const submit = () => userEvent.click(screen.getByRole('button', { name: /Submit/ }));
 
-/** Empty submit, then all three filled with a malformed address. */
-async function refuseThenFillWithBadEmail() {
+/** Empty submit, then all three filled with a malformed address and submitted. */
+async function refuseThenSubmitBadEmail() {
   await screen.findByLabelText(/^Name/);
   await submit();
   expect(await screen.findByText('Required: Name, Email, Message')).toBeInTheDocument();
@@ -90,20 +68,24 @@ async function refuseThenFillWithBadEmail() {
   await submit();
 }
 
+async function fixEmailAndSubmit() {
+  const email = screen.getByLabelText(/^Email/);
+  await userEvent.clear(email);
+  await userEvent.type(email, 'ada@example.com');
+  await submit();
+}
+
 beforeEach(() => {
   posts = [];
   createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+afterEach(() => vi.unstubAllGlobals());
 
 describe('#27496 — a submit the browser blocks replaces the stale banner', () => {
-  it('clears "Required: …" and marks the email row with the browser reason', async () => {
-    stubPublic({ ok: true, status: 201, body: { id: 'r1' } });
-    await refuseThenFillWithBadEmail();
-
+  it('clears "Required: …" and marks only the email row', async () => {
+    stubPublic(true, 201, { id: 'r1' });
+    await refuseThenSubmitBadEmail();
     const email = screen.getByLabelText(/^Email/) as HTMLInputElement;
     expect(email.validity.valid).toBe(false);
     await waitFor(() => expect(screen.queryByText(/^Required:/)).toBeNull());
@@ -114,25 +96,17 @@ describe('#27496 — a submit the browser blocks replaces the stale banner', () 
   });
 
   it('a fixed address then submits', async () => {
-    stubPublic({ ok: true, status: 201, body: { id: 'r1' } });
-    await refuseThenFillWithBadEmail();
-
-    const email = screen.getByLabelText(/^Email/);
-    await userEvent.clear(email);
-    await userEvent.type(email, 'ada@example.com');
-    await submit();
+    stubPublic(true, 201, { id: 'r1' });
+    await refuseThenSubmitBadEmail();
+    await fixEmailAndSubmit();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toMatchObject({ email: 'ada@example.com' });
   });
 
   it('a server refusal after the fix still shows its banner', async () => {
-    stubPublic({ ok: false, status: 400, body: { error: 'Validation failed', code: 'VALIDATION_FAILED' } });
-    await refuseThenFillWithBadEmail();
-
-    const email = screen.getByLabelText(/^Email/);
-    await userEvent.clear(email);
-    await userEvent.type(email, 'ada@example.com');
-    await submit();
+    stubPublic(false, 400, { error: 'Validation failed', code: 'VALIDATION_FAILED' });
+    await refuseThenSubmitBadEmail();
+    await fixEmailAndSubmit();
     expect(await screen.findByText(/Submit failed \(400\)/)).toBeInTheDocument();
     expect(posts).toHaveLength(1);
   });
