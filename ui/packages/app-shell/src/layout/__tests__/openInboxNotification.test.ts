@@ -25,7 +25,7 @@ function recordingDoor(withBeforeFollow = true): { door: NotificationDoor; steps
 }
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('openInboxNotification', () => {
@@ -42,7 +42,9 @@ describe('openInboxNotification', () => {
   });
 
   it('marks read, then opens an external link in a new tab instead of routing', () => {
-    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    // This file runs in the node project: no DOM, so `window` is stubbed.
+    const open = vi.fn(() => null);
+    vi.stubGlobal('window', { open });
     const { door, steps } = recordingDoor();
     openInboxNotification({ id: 'ibx_1', actionUrl: 'https://example.com/x' }, 'crm', door);
     expect(steps).toEqual(['markRead ibx_1', 'beforeFollow']);
