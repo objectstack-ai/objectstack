@@ -830,10 +830,11 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
                 if (!actionExec.isHeadlessInvokableAction(deps, action, hasAutomation)) continue;
                 // The script arm — every action `invokeBusinessAction` sends to
-                // the handler registry, i.e. neither the declarative update nor
-                // a flow (its branch order, read the same way). The other two
-                // arms have their own dispatchers and keep their own predicates.
-                if (!actionExec.isDeclarativeUpdateAction(action) && action?.type !== 'flow'
+                // the handler registry, i.e. neither the declarative update, nor
+                // a flow, nor a same-origin `api` action (its branch order, read
+                // the same way; #27506 added the api forward). The other arms
+                // have their own dispatchers and keep their own predicates.
+                if (!actionExec.isDeclarativeUpdateAction(action) && action?.type !== 'flow' && action?.type !== 'api'
                     && !hasHandler(objectName, actionExec.resolveActionHandlerKeys(action))) continue;
                 // [#2849 / ADR-0011] MCP is an AI surface: only actions the
                 // author explicitly opted in via `ai.exposed` are listed.

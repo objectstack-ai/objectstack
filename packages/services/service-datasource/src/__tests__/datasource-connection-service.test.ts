@@ -195,8 +195,13 @@ describe('DatasourceConnectionService.connect', () => {
     // Driver registered under the DATASOURCE name (engine routes by driver.name).
     expect(engine!.drivers.has('warehouse')).toBe(true);
     expect(engine!.drivers.get('warehouse')!.name).toBe('warehouse');
-    // Datasource definition recorded for the write gate.
-    expect(engine!.defs).toEqual([{ name: 'warehouse', schemaMode: 'external', external: externalDs.external }]);
+    // Datasource definition recorded for the write gate — and, [#27666], with
+    // the driver id the engine keys its plugin-driver floor on: for a
+    // runtime-origin datasource this registration is the only one the engine
+    // ever sees, so a def without `driver` would serve a plugin driver unfloored.
+    expect(engine!.defs).toEqual([
+      { name: 'warehouse', driver: 'sqlite', schemaMode: 'external', external: externalDs.external },
+    ]);
     // Bound external objects got read metadata synced (DDL-free).
     expect(engine!.synced).toEqual(['ext_customer']);
   });

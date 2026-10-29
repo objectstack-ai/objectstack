@@ -3891,6 +3891,34 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     });
   });
 
+  // [#27442] An explicit empty `userId` names nobody, so it is never read as
+  // "explain me": it goes through the other-user arm, where it is refused like
+  // any id no `sys_user` row has. The REST door refuses it 400 before this; the
+  // engine holds the same line for a caller that reaches it directly.
+  describe('[#27442] an explicit empty userId', () => {
+    it('is never answered as the caller: manage_users gets 404, a plain member 403', async () => {
+      const { plugin } = await boot();
+      const hr = { userId: 'u_hr', positions: [], permissions: ['hr_admin'] };
+      const admin: any = await plugin
+        .explainAccessForCaller({ object: 'task', operation: 'read', userId: '' }, hr)
+        .then((d) => d, (e) => e);
+      expect(admin, 'refused, not an explanation of the caller').toMatchObject({
+        name: 'ExplainUserNotFoundError', code: 'RECORD_NOT_FOUND', status: 404, userId: '',
+      });
+      const plain = { userId: 'u_east_1', positions: [], permissions: [] };
+      await expect(
+        plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: '' }, plain),
+      ).rejects.toMatchObject({ name: 'PermissionDeniedError', code: 'PERMISSION_DENIED' });
+    });
+
+    it('an omitted userId still explains the caller', async () => {
+      const { plugin } = await boot();
+      const plain = { userId: 'u_east_1', positions: [], permissions: [] };
+      const self = await plugin.explainAccessForCaller({ object: 'task', operation: 'read' }, plain);
+      expect(self.principal.userId).toBe('u_east_1');
+    });
+  });
+
   // [#20515] Explaining ANOTHER user resolves that user's grants in the CALLER's
   // organization — the one the explain right was checked in. A grant scoped to
   // an organization applies only while that organization is the one resolved

@@ -757,11 +757,23 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     );
   };
 
+  /**
+   * One dispatcher header onto the Hono context. A `string[]` value is one
+   * header line per element (`HttpDispatcherResult.response.headers` declares
+   * it, #27506): `Set-Cookie` is the header that needs it — a comma-joined
+   * string is one unparseable cookie to a browser — and `c.header` with
+   * `append` is Hono's spelling of a repeated line.
+   */
+  const setResponseHeader = (c: any, name: string, value: unknown) => {
+    if (Array.isArray(value)) for (const line of value) c.header(name, String(line), { append: true });
+    else c.header(name, value as string);
+  };
+
   const toResponse = (c: any, result: HttpDispatcherResult) => {
     if (result.handled) {
       if (result.response) {
         if (result.response.headers) {
-          Object.entries(result.response.headers).forEach(([k, v]) => c.header(k, v as string));
+          Object.entries(result.response.headers).forEach(([k, v]) => setResponseHeader(c, k, v));
         }
         return c.json(result.response.body, result.response.status);
       }
@@ -834,7 +846,10 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
           });
-          for (const [k, v] of Object.entries(res.headers || {})) headers.set(k, String(v));
+          for (const [k, v] of Object.entries(res.headers || {})) {
+            if (Array.isArray(v)) for (const line of v) headers.append(k, String(line));
+            else headers.set(k, String(v));
+          }
           const stream = new ReadableStream({
             async start(controller) {
               try {
@@ -858,7 +873,7 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         }
         if (res.type === 'stream' && res.stream) {
           if (res.headers) {
-            Object.entries(res.headers).forEach(([k, v]) => c.header(k, v as string));
+            Object.entries(res.headers).forEach(([k, v]) => setResponseHeader(c, k, v));
           }
           return new Response(res.stream, { status: 200 });
         }
