@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>记录页 v4 · 子表放大态 · 顶行即面包屑（线索 › Mira Costa › 任务 · 2 + 子表动作）· 保留 4 格要点 · 表格占满</title>
+<title>记录页 v4 · 子表放大态 = 「任务」页签激活 · 头部原样 · 表格占满 · 不做 modal</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -77,6 +77,11 @@ a{color:var(--primary);text-decoration:none}
 .seg.on{background:var(--primary-soft);color:var(--primary);border-color:#c7d2fe}
 .cursor{position:absolute;font-size:16px;line-height:1;pointer-events:none}
 .ann{position:absolute;font:10.5px/14px var(--mono);padding:2px 6px;border-radius:4px;background:#fde68a;color:#78350f;white-space:nowrap}
+
+.rtabs{display:flex;align-items:center;gap:18px;margin-top:12px;border-top:1px solid var(--border);position:relative}
+.rtab{height:36px;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted-fg);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.rtab.on{color:var(--fg);border-bottom-color:var(--primary);font-weight:500}
+.rtab .chip{height:16px;padding:0 5px;font-size:10.5px}
 </style>
 </helmet>
 <div style="width:100%;min-height:900px;display:grid;grid-template-rows:48px 1fr;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.45;--primary:{{accent}}">
@@ -95,10 +100,29 @@ a{color:var(--primary);text-decoration:none}
       <div class="nav">我的任务</div><div class="nav">我的商机</div>
     </aside>
     <main style="min-width:0;display:flex;flex-direction:column">
-      <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 12px 0 20px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg);position:relative"><span style="display:inline-flex;align-items:center;gap:6px;min-width:0"><a href="#" style="color:var(--muted-fg)">线索</a><span class="k">›</span><a href="#" style="color:var(--muted-fg)" title="返回记录 · Esc">Mira Costa</a><span class="k">›</span><span style="color:var(--fg);font-weight:600">任务</span><span class="chip" style="height:18px">2</span></span><span style="display:inline-flex;gap:2px;align-items:center"><button type="button" class="btn-outline" style="height:26px">新建任务</button><button type="button" class="btn-outline" style="height:26px">导出</button><button type="button" class="iconbtn" aria-label="更多" style="width:24px;height:24px">⋯</button></span><span class="ann" style="right:12px;top:40px">放大 = 轨迹往下一层：顶行左端是面包屑，点「Mira Costa」或 Esc 回记录；整页无 ✕（与 ‹ 重复）、无 ↑↓、无 ⊟；?related=crm_task.lead_id；表格占满其余高度</span></div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:10px 24px;border-bottom:1px solid var(--border);position:relative"><div class="hl"><span class="l">状态</span><span class="v"><span class="chip warn">已联系</span></span></div><div class="hl"><span class="l">公司</span><span class="v" style="color:var(--primary)">Atlas Construction</span></div><div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div><div class="hl"><span class="l">最近活动</span><span class="v">2 小时前</span></div><span class="ann" style="right:24px;top:-8px">放大态保留要点条前 4 格（Linear 项目页的 Issues 页签保留项目头部）</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 12px 0 20px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg);position:relative"><span style="display:inline-flex;align-items:center;gap:6px;min-width:0"><a href="#" style="color:var(--muted-fg)">线索</a><span class="k">›</span><span style="color:var(--fg);font-weight:600">Mira Costa</span></span><span style="display:inline-flex;gap:2px;align-items:center"><span class="k" style="margin-right:4px">3 / 21</span><button type="button" class="iconbtn" aria-label="下一条 · J" title="下一条 · J" style="width:24px;height:24px">↓</button><button type="button" class="iconbtn" aria-label="上一条 · K" title="上一条 · K" style="width:24px;height:24px">↑</button><span style="width:1px;height:16px;background:var(--border);margin:0 6px"></span><button type="button" class="iconbtn" aria-label="右栏 · ⌘⇧," title="右栏 · ⌘⇧," style="width:24px;height:24px;background:var(--primary-soft);color:var(--primary)">⊟</button><button type="button" class="iconbtn" aria-label="收为抽屉" title="收为抽屉" style="width:24px;height:24px">⤡</button></span><span class="ann" style="right:12px;top:40px">从列表行 ↗ 进来（带轨迹）：顶行右端 3 / 21 · ↓ ↑ · ⊟ · ⤡ 收为抽屉；点「线索」回列表并选中最后看的那条</span></div>
+      <div style="padding:16px 24px 12px;border-bottom:1px solid var(--border);position:relative">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+          <div style="min-width:0"><div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;width:36px;height:36px;align-items:center;justify-content:center;border-radius:18px;background:var(--primary-soft);color:var(--primary);font-weight:600">MC</span><span style="font-size:22px;font-weight:600">Mira Costa</span><span class="chip">线索</span><button type="button" class="iconbtn" aria-label="复制记录 ID" style="width:22px;height:22px">⧉</button></div><div style="color:var(--muted-fg);margin-left:46px">Atlas Construction · Director of Sales</div></div>
+          <div style="display:flex;gap:6px;flex:none;align-items:center"><button type="button" class="btn-primary">转化线索</button><button type="button" class="btn-outline">记录通话</button><button type="button" class="btn-outline">安排跟进</button><button type="button" class="btn-outline">编辑</button><button type="button" class="iconbtn" aria-label="更多：刷新、克隆、共享、删除">⋯</button></div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div class="hl"><span class="l">状态</span><span class="v"><span class="chip warn">已联系</span></span></div>
+          <div class="hl"><span class="l">线索评分</span><span class="v">★★★★★</span></div>
+          <div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div>
+          <div class="hl"><span class="l">来源</span><span class="v">陌生拜访</span></div>
+          <div class="hl"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">mira.costa@atlasconstruction.example.com</span></div>
+          <div class="hl"><span class="l">最近联系</span><span class="v">2026/10/27</span></div>
+        </div>
+        <div style="margin-top:14px;display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center">
+          <div><div class="stage"><span class="done"></span><span class="cur"></span><span></span><span></span></div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted-fg);margin-top:4px"><span style="color:var(--green)">✓ 新建</span><span style="color:var(--fg);font-weight:500">已联系 · 第 3 天</span><span>已确认</span><span>已转化</span></div></div>
+          <span class="chip" style="background:var(--red-soft);color:var(--red)">✗ 未通过 · 终止态</span>
+        </div>
+        <div class="rtabs"><span class="rtab">概览</span><span class="rtab">动态 <span class="chip">6</span></span><span class="rtab on">任务 <span class="chip">2</span></span><span class="rtab">营销活动 <span class="chip">1</span></span><span class="rtab" style="color:var(--muted-fg)" title="商机 0 · 转化联系人 0 · 重复联系人 0">+3 ▾</span><span class="ann" style="right:0;top:-10px">放大态 = 「任务」页签激活：头部原样，表格占满其余高度；URL ?related=crm_task.lead_id；Esc / 点「概览」回</span></div>
+      </div>
       <div style="padding:12px 24px 24px;display:flex;flex-direction:column;min-height:0;flex:1">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><button type="button" style="display:inline-flex;align-items:center;gap:8px;width:260px;height:30px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:12.5px">🔍 筛选任务…</button><span class="chip">全部 2</span><span class="chip">我的</span><span class="chip">逾期</span><span class="k" style="margin-left:auto">2 条 · 第 1 / 1 页</span></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><button type="button" style="display:inline-flex;align-items:center;gap:8px;width:260px;height:30px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:12.5px">🔍 筛选任务…</button><span class="chip">全部 2</span><span class="chip">我的</span><span class="chip">逾期</span><button type="button" class="btn-outline" style="height:28px;margin-left:8px">＋ 新建任务</button><button type="button" class="btn-outline" style="height:28px">导出</button><button type="button" class="btn-outline" style="height:28px;margin-left:8px">＋ 新建任务</button><button type="button" class="btn-outline" style="height:28px">导出</button><span class="k" style="margin-left:auto">2 条 · 第 1 / 1 页</span></div>
         <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;flex:1">
           <div style="display:grid;grid-template-columns:28px 2fr 1fr 1fr 1fr 1fr 1fr 1fr;height:34px;align-items:center;padding:0 12px;background:var(--sidebar);font-size:11px;font-weight:600;color:var(--muted-fg);border-bottom:1px solid var(--border)"><span>☐</span><span>主题</span><span>状态</span><span>优先级</span><span>截止</span><span>负责人</span><span>关联</span><span>更新于</span></div>
           <div style="display:grid;grid-template-columns:28px 2fr 1fr 1fr 1fr 1fr 1fr 1fr;height:40px;align-items:center;padding:0 12px;border-bottom:1px solid var(--border);font-size:12.5px"><span>☐</span><a href="#">跟进报价</a><span><span class="chip warn">进行中</span></span><span>高</span><span>明天</span><span style="color:var(--primary)">Dev Admin</span><span>线索 · Mira Costa</span><span class="k">今天 10:20</span></div>

@@ -54,6 +54,11 @@ td.a{color:var(--primary)}
 .ann{position:absolute;padding:4px 8px;border-radius:6px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;font-size:11px;line-height:1.3;white-space:nowrap;z-index:5}
 tr.hov td{background:var(--sidebar)}
 .coltitle{display:flex;align-items:center;justify-content:space-between;height:34px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--border);margin-bottom:8px}
+
+.rtabs{display:flex;align-items:center;gap:18px;margin-top:12px;border-top:1px solid var(--border);position:relative}
+.rtab{height:36px;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted-fg);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.rtab.on{color:var(--fg);border-bottom-color:var(--primary);font-weight:500}
+.rtab .chip{height:16px;padding:0 5px;font-size:10.5px}
 </style>
 </helmet>
 <div style="width:100%;min-height:900px;display:grid;grid-template-rows:48px 1fr;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.45;--primary:{{accent}}">
@@ -110,6 +115,7 @@ tr.hov td{background:var(--sidebar)}
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px">
           <div class="hl"><span class="l">状态</span><span class="v"><span class="chip ok">活跃</span></span></div><div class="hl"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">john.smith@acme.com</span></div><div class="hl"><span class="l">电话</span><span class="v">+1 555 0100</span></div><div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div>
         </div>
+        <div class="rtabs"><span class="rtab on">概览</span><span class="rtab">动态 <span class="chip">12</span></span><span class="rtab">任务 <span class="chip">2</span></span><span class="rtab" style="color:var(--muted-fg)" title="商机 1 · 案例 0 · 报价 0 · 合同 0">+4 ▾</span><span class="ann" style="right:0;top:-10px">720 里放 3 个页签 + 「+4」下拉（带计数）</span></div>
       </div>
 
       <div style="overflow:auto;padding:4px 16px 16px;position:relative">
