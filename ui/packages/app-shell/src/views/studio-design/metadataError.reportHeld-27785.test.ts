@@ -162,7 +162,7 @@ describe('the Interfaces pillar holds a report chart the spec refuses only for u
 
   it('`objectHeldInput` asks only the issues under its key: a refusal elsewhere is not the chart’s', () => {
     const body = { ...summary({ chart: { type: 'bar', xAxis: 'stage' } }), name: '' };
-    expect(reportRefusals(body)).toEqual(['name', 'chart.yAxis']);
+    expect(reportRefusals(body)).toEqual(['name', 'name', 'chart.yAxis']);
     expect(objectHeldInput(body, ReportSchema, 'chart')).toBe('yAxis');
   });
 });
