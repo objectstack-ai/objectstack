@@ -21,7 +21,9 @@
  * above the form in place of the small "Sign up" link (#25886). The console's
  * own login page does the same. The greeting names the organization and the
  * inviter when the signed-out invitation preview answers (#26473,
- * `useInvitationPreview`), and keeps the generic copy when it does not.
+ * `useInvitationArrival`), and keeps the generic copy when it does not. For an
+ * invitation the server no longer knows it draws `InvitationGoneNotice` alone:
+ * no prompt and no form (#27509).
  */
 
 import { useEffect, useState } from 'react';
@@ -42,9 +44,10 @@ import { signInRefusalMessages } from './signInRefusalMessages.js';
 import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './signUpOffer.js';
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import {
+  InvitationGoneNotice,
   InvitationSignUpPrompt,
   invitationArrivalCopy,
-  useInvitationPreview,
+  useInvitationArrival,
 } from './invitationArrival.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
@@ -126,8 +129,9 @@ export function LoginPage() {
   // did not come from an invitation; see `./signUpOffer`.
   const invitationRedirect = isInvitationRedirect(redirect);
   const bootstrap = useBootstrapStatus(!user && needsBootstrapProbe(authConfig, invitationRedirect));
-  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
-  const invitationPreview = useInvitationPreview(redirect);
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic
+  // copy. #27509 — `gone` when the server no longer knows the invitation.
+  const invitationArrival = useInvitationArrival(redirect);
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
 
   // Carry `?redirect=` into the sign-up link: it is how `/register` knows the
@@ -203,7 +207,15 @@ export function LoginPage() {
 
   if (!invitationRedirect) return <AuthPageLayout>{form}</AuthPageLayout>;
 
-  const invitationCopy = invitationArrivalCopy('login', invitationPreview, t);
+  if (invitationArrival.gone) {
+    return (
+      <AuthPageLayout>
+        <InvitationGoneNotice />
+      </AuthPageLayout>
+    );
+  }
+
+  const invitationCopy = invitationArrivalCopy('login', invitationArrival.preview, t);
 
   return (
     <AuthPageLayout>

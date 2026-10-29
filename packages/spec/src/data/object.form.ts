@@ -396,7 +396,8 @@ export const objectForm = defineForm({
               visibleWhen: "data.type == 'summary'",
               fields: [
                 { field: 'object', type: 'text', required: true, helpText: 'Source child object name' },
-                { field: 'field', type: 'text', required: true, helpText: 'Field on the child object to aggregate (ignored for count)' },
+                // Not `required`: a `count` saves without it (see field.form.ts).
+                { field: 'field', type: 'text', helpText: 'Field on the child object to aggregate (ignored for count)' },
                 { field: 'function', type: 'select', required: true, helpText: 'Aggregation function', options: [
                   { label: 'Count', value: 'count' }, { label: 'Sum', value: 'sum' }, { label: 'Avg', value: 'avg' },
                   { label: 'Min', value: 'min' }, { label: 'Max', value: 'max' },

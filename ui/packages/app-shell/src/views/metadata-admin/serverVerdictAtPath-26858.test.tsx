@@ -30,7 +30,7 @@ vi.mock('./previews/useObjectFields', () => ({
 
 import { PermissionAdvancedFacets } from './PermissionAdvancedFacets';
 import { FlowEdgeInspector } from './inspectors/FlowEdgeInspector';
-import { DraftVerdictContext, serverErrorsAt, type ServerDiagnostics } from './draftVerdict';
+import { DraftVerdictBodyContext, DraftVerdictContext, serverErrorsAt, type ServerDiagnostics } from './draftVerdict';
 import type { MetadataSelection } from './preview-registry';
 
 afterEach(cleanup);
@@ -69,7 +69,17 @@ async function renderRls(served: ServerDiagnostics | undefined, policies = 1) {
       } as unknown as React.ComponentProps<typeof PermissionAdvancedFacets>)}
     />
   );
-  render(served === undefined ? facets : <DraftVerdictContext.Provider value={served}>{facets}</DraftVerdictContext.Provider>);
+  // The page provides the body its verdict judged, the draft on screen
+  // (objectstack#27452: the field shows a verdict only on the text it judged).
+  render(
+    served === undefined ? (
+      facets
+    ) : (
+      <DraftVerdictContext.Provider value={served}>
+        <DraftVerdictBodyContext.Provider value={{ rowLevelSecurity: rows }}>{facets}</DraftVerdictBodyContext.Provider>
+      </DraftVerdictContext.Provider>
+    ),
+  );
   await user.click(screen.getByText('perm.rls.title'));
 }
 

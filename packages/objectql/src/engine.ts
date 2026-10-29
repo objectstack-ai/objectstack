@@ -108,6 +108,8 @@ import { publishBulkDataEvent, publishDataEvent } from './engine-realtime-publis
 // [#25522 cut 5] The secret and internal-field bodies; the methods of the same
 // names below hand each body the members it reads (`SecretInternalFieldsHost`).
 import {
+  deletedSecretColumns,
+  deletedSecretSlots,
   encryptSecretFields,
   maskSecretFields,
   omitInternalFields,
@@ -307,6 +309,9 @@ import {
 // (`rejectCredentialAggregation`); the methods of the same names below hand
 // each body the members it reads (`CountAggregateHost`).
 import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
+// ADR-0100: the credential-column guard's filter / sort half, beside the
+// aggregate half above — one collector, one envelope.
+import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
@@ -10615,7 +10620,9 @@ export class ObjectQL implements IObjectQLEngine {
    * Two occasions reach it. `'refused'`: a write that sealed and wrote a row
    * did not complete, so the row may name nothing. `'retired'`: a committed
    * update cleared the field (`null`) or replaced its value, so the handle the
-   * column named before may name nothing. The same three checks decide both,
+   * column named before may name nothing; [#27581] a committed delete reaches
+   * it the same way, for every handle the removed rows held. The same three
+   * checks decide both,
    * and every one that cannot pass KEEPS the row, the recoverable direction
    * (deleting a handle a row still names destroys that credential, and nothing
    * can name what was lost):
@@ -13395,7 +13402,12 @@ export class ObjectQL implements IObjectQLEngine {
       // narrowing must be a 400, not a silent widening. A direct engine caller
       // naming one has it intersected away here, the engine's existing tolerant
       // posture for an unknown requested search field.
-      const internalFields = collectInternalReadFields(schema);
+      // [ADR-0100] …and never a `secret` / `password` column either, by the
+      // collector the credential guards read: the auto-default already skips
+      // those types, and an author-declared `searchableFields` naming one is
+      // withheld here the same way, so a search term is never evaluated over
+      // a value the read path masks.
+      const internalFields = [...new Set([...collectInternalReadFields(schema), ...collectCredentialFields(schema)])];
       const scanFields = internalFields.length === 0
         ? (schema.fields as any)
         : Object.fromEntries(
@@ -13658,6 +13670,11 @@ export class ObjectQL implements IObjectQLEngine {
     // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
+    // [ADR-0100] A `secret` / `password` column is never a filter or sort key
+    // for a non-system caller — judged on the caller's own `where` / `orderBy`
+    // / `expand`, before the search term is expanded into `where` and before
+    // the middlewares inject their server-authored filters.
+    rejectCredentialEvaluation(object, 'find', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -13983,6 +14000,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
+    // [ADR-0100] Same credential-column refusal as `find`, same position.
+    rejectCredentialEvaluation(objectName, 'findOne', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -15953,6 +15972,9 @@ export class ObjectQL implements IObjectQLEngine {
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
      options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
+     // [ADR-0100] A predicate write is judged like a read: a non-system
+     // caller's `where` evaluates no `secret` / `password` column.
+     rejectCredentialEvaluation(object, 'update', options, options?.context, this.relatedSchemaOf);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -19589,6 +19611,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [#5158] Same ordering reason as update(): the dispatch decision below
     // reads `where.id`, which an unlowered array never carries.
     options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf);
+    // [ADR-0100] Same credential-column refusal as update().
+    rejectCredentialEvaluation(object, 'delete', options, options?.context, this.relatedSchemaOf);
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
@@ -19811,6 +19835,11 @@ export class ObjectQL implements IObjectQLEngine {
       // delete (`null` when no roll-up aggregates this object).
       let predicateMatchedRows: Record<string, unknown>[] | null = null;
       let summaryPriorRows: Record<string, unknown>[] | null = null;
+      // [#27581] The `secret` columns this object declares, and the handles the
+      // removed rows held in them: the by-id pre-image, or the predicate
+      // path's matched rows, read before the statement takes them away.
+      const secretColumns = deletedSecretColumns(deleteSchema);
+      let deletedSecrets: SecretHandleSlot[] = [];
 
       // [#5574] The dispatch ladder, resolved BEFORE the before phase — see
       // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
@@ -20032,6 +20061,8 @@ export class ObjectQL implements IObjectQLEngine {
                   if (plan === 'split') this.warnCascadeNotAtomic(object);
                   result = await runByIdDelete(opCtx.context);
               }
+              // [#27581] The handles the removed row held, off its pre-image.
+              deletedSecrets = deletedSecretSlots(deleteSchema, [priorRecord]);
           } else {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
@@ -20066,6 +20097,14 @@ export class ObjectQL implements IObjectQLEngine {
                    summaryPriorRows = predicateMatchedRows
                      ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
                  }
+                 // [#27581] The handles the matched rows hold, read BEFORE the
+                 // statement removes them: the per-row hook read when it was
+                 // made, otherwise only `id` and the secret columns, through
+                 // this write's AST and options. No secret column, no read.
+                 if (secretColumns.length > 0) {
+                   deletedSecrets = deletedSecretSlots(deleteSchema, predicateMatchedRows
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...secretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]));
+                 }
                  result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
                } else {
                  // Otherwise: resolve the matched rows through the composed,
@@ -20081,9 +20120,12 @@ export class ObjectQL implements IObjectQLEngine {
                  // branch's, for the same reasons (#7413).
                  const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
                    const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
-                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   // [#27581] The same read carries the secret columns, so the
+                   // handles released are those of the rows deleted.
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns, ...secretColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
+                   deletedSecrets = deletedSecretSlots(deleteSchema, matched);
                    // [#27004] One walk, rooted at the whole matched set.
                    await this.cascadeDeleteRelations(object, matchedIds, writeContext);
                    // The id set rides an `$in`; batched so one statement never
@@ -20145,6 +20187,14 @@ export class ObjectQL implements IObjectQLEngine {
               result: hookContext.result,
             });
           }
+
+          // [#27581] The delete is complete: release the handles the removed
+          // rows held, through the release a committed update uses, so each one
+          // goes only once storage confirms no row of its column still names it,
+          // inside this write's unit. After the `afterDelete` chain, so a hook
+          // can still dereference the value and a refusal that rolls the delete
+          // back never reaches here.
+          await this.releaseSecretHandles(object, deletedSecrets, opCtx.context, 'retired');
 
           // Roll-up: recompute the parent summary now that the child is gone,
           // from the row's FK values captured BEFORE deletion. [#5272] That
@@ -20295,6 +20345,10 @@ export class ObjectQL implements IObjectQLEngine {
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
       query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object), this.relatedSchemaOf);
+      // [ADR-0100] The filter half of the credential-column guard — `where`
+      // and every `aggregations[i].filter` — before the search term joins
+      // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
+      rejectCredentialEvaluation(object, 'aggregate', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).

@@ -1002,6 +1002,7 @@
     "stripLegacyApiMethods (function)",
     "suggestDefaultValueToken (function)",
     "suggestFieldTypeForSqlType (function)",
+    "summaryFunctionReadsField (function)",
     "textComparandRefusalReason (function)",
     "textOperatorDoorVerdict (function)",
     "undeclaredHookRefusalAtRun (function)",

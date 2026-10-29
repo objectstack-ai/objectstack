@@ -20,7 +20,8 @@
  * bodies joined it — `persistSecretRows` writes the sealed rows immediately
  * before the record's own driver write, and `releaseSecretHandles` removes a
  * handle once a write that did not land, or a committed one that moved the
- * column off it, has left it unreferenced.
+ * column off it, has left it unreferenced. [#27581] A committed delete hands
+ * the same release every handle the deleted rows held (`deletedSecretSlots`).
  *
  * ## How the moved bodies reach the class
  *
@@ -226,6 +227,30 @@ export function retiredSecretSlots(
     }
   }
   return out;
+}
+
+/**
+ * [#27581] The `secret` columns a delete reads off the rows it removes, before
+ * its statement takes them away; empty for an object that declares none, so a
+ * delete anywhere else reads nothing more.
+ */
+export function deletedSecretColumns(schema: Parameters<typeof collectSecretFields>[0]): string[] {
+  return collectSecretFields(schema);
+}
+
+/**
+ * [#27581] The handles a committed delete let go of: every handle the deleted
+ * rows held in a `secret` column. A delete lets go of each column's value at
+ * once, so the candidates are exactly what a `null` clear of every one of
+ * those columns retires ({@link retiredSecretSlots}), and the same
+ * `releaseSecretHandles` checks decide each one: there is one release rule.
+ */
+export function deletedSecretSlots(
+  schema: Parameters<typeof collectSecretFields>[0],
+  deletedRows: readonly (Record<string, unknown> | null | undefined)[],
+): SecretHandleSlot[] {
+  const clearEvery = Object.fromEntries(deletedSecretColumns(schema).map((field) => [field, null]));
+  return retiredSecretSlots(schema, deletedRows, clearEvery);
 }
 
 /** The body of `ObjectQL#persistSecretRows`; the method's docblock there is its contract. */

@@ -377,7 +377,10 @@ export const fieldForm = defineForm({
               ],
               helpText: 'Aggregation function',
             },
-            { field: 'field', required: true, helpText: 'Child field to aggregate (ignored for count)' },
+            // Not `required`: a `count` reads no child field and saves without one
+            // (`summaryFunctionReadsField` in field.zod.ts); the schema refuses a
+            // missing `field` on every other function, naming it.
+            { field: 'field', helpText: 'Child field to aggregate (ignored for count)' },
             { field: 'relationshipField', helpText: 'Child FK back to this parent (auto-detected when omitted)' },
             { field: 'filter', widget: 'filter-condition', helpText: 'Only child rows matching this predicate are aggregated (e.g. status == received)' },
           ],
