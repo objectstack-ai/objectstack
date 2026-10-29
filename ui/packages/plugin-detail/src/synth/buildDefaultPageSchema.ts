@@ -33,6 +33,7 @@ import { detectStatusField } from '@object-ui/types';
 import { isRetiredFieldType, reportRetiredFieldType, resolveNameField } from '@object-ui/core';
 import { inferDetailColumns } from '../autoLayout';
 import { recordTimelineDefaultReason } from './recordPageColumns';
+import { relatedListEntryNames } from './relatedListEntry';
 
 /** Minimal shape of an object definition we read here. We deliberately
  *  duck-type so this helper has zero hard dependency on a specific
@@ -911,17 +912,23 @@ export const BODY_TABLE_PAGE_SIZE = 10;
 
 /**
  * The Details tab's body with the record's body tables placed in it
- * (objectstack#27055, Target 8): every body table right after the FIRST field
- * section (conventionally 基本信息), stacked in the order given, and the
- * remaining sections after them — the details node split in two around the
- * tables. With one section or none, the tables follow the details.
+ * (objectstack#27055, Target 8; objectstack#27069):
  *
- * ⛔ FENCE (objectstack#27069): an author who needs a table elsewhere will
- * place it through a `fieldGroups` entry that references the relationship.
- * That entry is not in the spec yet, so it is not read here; when it lands,
- * THIS function is the one read point: place each table at the group entry
- * that references it, and fall back to "after the first section" for the
- * rest.
+ *  - a body table some field group places — the group's `relatedList` names
+ *    its relationship (a child object name, or `object.field`; the ONE
+ *    reading is `relatedListEntryNames`) — is drawn at that group's position
+ *    among the object's `fieldGroups`: after the sections of the groups
+ *    declared before it, before those declared after it. Such a group holds
+ *    no fields (the spec refuses one that does), so it is a position, never a
+ *    section of its own;
+ *  - every other body table goes right after the FIRST field section
+ *    (conventionally 基本信息), stacked in the order given; with one section
+ *    or none, after the details.
+ *
+ * The details node is split around the tables: each run of consecutive
+ * sections is one `record:details`. A section names its group by `group` (the
+ * spec's reference form) or by `name` (a resolved section); the ungrouped
+ * bucket names none and stays after every declared group.
  */
 export function bodyTablePlacement(
   def: ObjectDefLike | undefined,
@@ -930,13 +937,75 @@ export function bodyTablePlacement(
   bodies: any[],
 ): any[] {
   if (bodies.length === 0) return [buildDefaultDetails(def, sections, hideFields)];
-  const resolved = resolveDetailSections(def, sections);
-  if (!resolved || resolved.length <= 1) return [buildDefaultDetails(def, sections, hideFields), ...bodies];
-  return [
-    buildDefaultDetails(def, resolved.slice(0, 1), hideFields),
-    ...bodies,
-    buildDefaultDetails(def, resolved.slice(1), hideFields),
-  ];
+  const resolved = resolveDetailSections(def, sections) ?? [];
+
+  // The declared groups in order, and the position of each group that places
+  // a body table.
+  const groups = Array.isArray(def?.fieldGroups) ? def!.fieldGroups : [];
+  const groupIndex = new Map<string, number>();
+  const placingGroups: Array<{ index: number; entry: string }> = [];
+  groups.forEach((group, index) => {
+    if (!group || typeof group.key !== 'string') return;
+    if (!groupIndex.has(group.key)) groupIndex.set(group.key, index);
+    const entry = (group as { relatedList?: unknown }).relatedList;
+    if (typeof entry === 'string' && entry.length > 0) placingGroups.push({ index, entry });
+  });
+  const placedAt = (node: any): number | null => {
+    const p = { ...node, ...(node?.properties ?? {}) };
+    if (typeof p.objectName !== 'string' || typeof p.relationshipField !== 'string') return null;
+    const list = { childObject: p.objectName, referenceField: p.relationshipField };
+    const group = placingGroups.find(({ entry }) => relatedListEntryNames(entry, list));
+    return group ? group.index : null;
+  };
+  const placed = bodies
+    .map((node, order) => ({ node, order, at: placedAt(node) }))
+    .filter((b): b is { node: any; order: number; at: number } => b.at !== null)
+    .sort((a, b) => a.at - b.at || a.order - b.order);
+  const unplaced = bodies.filter((node) => placedAt(node) === null);
+  const sectionGroupIndex = (section: Record<string, any>): number => {
+    const key = typeof section?.group === 'string' ? section.group : typeof section?.name === 'string' ? section.name : undefined;
+    const index = key !== undefined ? groupIndex.get(key) : undefined;
+    return index ?? Number.POSITIVE_INFINITY;
+  };
+
+  if (placed.length === 0 && resolved.length <= 1) {
+    return [buildDefaultDetails(def, sections, hideFields), ...bodies];
+  }
+
+  // Lay the sections and the tables out in one sequence, then fold each run
+  // of consecutive sections into one details node.
+  type Slot = { section: Record<string, any> } | { table: any };
+  const slots: Slot[] = [];
+  let next = 0;
+  const flushPlacedBefore = (index: number) => {
+    while (next < placed.length && placed[next].at < index) slots.push({ table: placed[next++].node });
+  };
+  resolved.forEach((section, i) => {
+    flushPlacedBefore(sectionGroupIndex(section));
+    slots.push({ section });
+    if (i === 0) for (const node of unplaced) slots.push({ table: node });
+  });
+  if (resolved.length === 0) for (const node of unplaced) slots.push({ table: node });
+  while (next < placed.length) slots.push({ table: placed[next++].node });
+
+  const out: any[] = [];
+  let run: Array<Record<string, any>> = [];
+  const closeRun = () => {
+    if (run.length > 0) out.push(buildDefaultDetails(def, run, hideFields));
+    run = [];
+  };
+  for (const slot of slots) {
+    if ('section' in slot) run.push(slot.section);
+    else {
+      closeRun();
+      out.push(slot.table);
+    }
+  }
+  closeRun();
+  // No section at all: the details node still leads (it draws the object's
+  // highlight fields, `resolveDetailSections`' rule 3).
+  if (resolved.length === 0) out.unshift(buildDefaultDetails(def, sections, hideFields));
+  return out;
 }
 
 /**
@@ -989,8 +1058,9 @@ export function buildDefaultTabs(
   // objectstack#27055, Target 8 — a list that is the record's own body
   // (`isBody`, else `isPrimary`) is a table section of the Details tab; every
   // other list is a side card in the one `Related` tab. Body tables keep the
-  // order the host passed (the derived order — the authored `relatedLists`
-  // order waits for objectstack#27069, see `bodyTablePlacement`).
+  // order the host passed (the object's `relatedLists`, then the derived
+  // order — objectstack#27069), unless a field group places one
+  // (`bodyTablePlacement`).
   const related = Array.isArray(options.related) ? options.related : [];
   const isBody = (rel: (typeof related)[number]) => rel.isBody ?? rel.isPrimary === true;
   const bodies = related.filter(isBody).map((rel) => relatedNode(rel, BODY_TABLE_PAGE_SIZE));

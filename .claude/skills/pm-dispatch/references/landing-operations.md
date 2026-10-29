@@ -9,7 +9,8 @@
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
-- PASS ⇒ ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
+- PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒请审;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
+- 落地后才见欠复核 ⇒ 按 `contract-review.md` 复审落地 head、发现立新卡,⛔ 不修已关 PR。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
 - diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head 复核。
 - 其余(含改代码)照全套:同 head 达档复核 PASS 记录即确认,记录逐句判改写句。
@@ -51,7 +52,6 @@
 - undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
 - 落地遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法、不退回 ccr 绕过。
 - 落地评论 = 两个读数的探针表 + 一行状态变更(摘标/关卡/收口),⛔ 不复述 `## 席位核对`。
-- 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>3000 行(含生成物)照 Tier H。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。

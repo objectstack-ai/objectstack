@@ -1608,16 +1608,6 @@ export interface ObjectFormSection {
   columns?: 1 | 2 | 3 | 4;
 
   /**
-   * Which panel of a split form this section renders in. Aligns with
-   * @objectstack/spec FormSection.pane (split forms only — the spec rejects the
-   * key on other form types at parse). Explicit per-section placement, so
-   * reordering sections never silently moves them across the divider.
-   * Omitted → the legacy positional rule: first section 'primary', every
-   * other section 'secondary'.
-   */
-  pane?: 'primary' | 'secondary';
-
-  /**
    * The section's fields, in order. Each entry is one of three shapes, the
    * three `buildSectionFields` (`@object-ui/plugin-form`) draws on every
    * `formType`:
@@ -1661,8 +1651,8 @@ export interface ObjectFormSection {
    * group itself declares (`name`, `label`, `description`, `collapsible`,
    * `collapsed`, `visibleWhen`) — the spec grants no override semantics, so a
    * restated key would be a second writable spelling of one fact. What a
-   * section keeps beside `group` is how THIS form lays it out: `columns` and
-   * `pane`. Refused outright on a wizard step (`formType: 'wizard'`), which
+   * section keeps beside `group` is how THIS form lays it out: `columns`.
+   * Refused outright on a wizard step (`formType: 'wizard'`), which
    * has no slot for a group's `collapse` or `visibleWhen`.
    *
    * The aliases `fieldGroup` / `groupKey` are NOT accepted spellings: the spec
@@ -1741,7 +1731,7 @@ export interface ObjectFormSection {
   // now fails at the authoring site instead of type-checking into a no-op.
   //
   // The per-layout config types in @object-ui/plugin-form
-  // (`ModalFormSectionConfig`, `SplitFormSectionConfig`, TabbedForm's
+  // (`ModalFormSectionConfig`, TabbedForm's
   // `FormSectionConfig`, `WizardStepConfig`, `DrawerFormSectionConfig`) keep
   // their own members: those are read for programmatic React mounts, which the
   // authorable boundary does not govern. Pinned at the type level in
@@ -1755,13 +1745,12 @@ export interface ObjectFormSection {
  * A smart form component that generates forms from ObjectQL object schemas.
  * It automatically creates form fields based on object metadata.
  * 
- * Supports multiple form variants aligned with @objectstack/spec FormView:
- * - `simple`  – Flat field list (default)
- * - `tabbed`  – Fields organized in tabs
- * - `wizard`  – Multi-step form with navigation
- * - `split`   – Side-by-side panels (reserved)
- * - `drawer`  – Slide-out form panel (reserved)
- * - `modal`   – Dialog-based form (reserved)
+ * Its `formType` is a layout aligned with @objectstack/spec FormView.type —
+ * `simple` (flat field list, the default), `tabbed` (fields organized in tabs)
+ * or `wizard` (multi-step form with navigation) — or, on the `object-form`
+ * block only, the container the block opens the form in: `drawer` (slide-out
+ * panel) or `modal` (dialog). ADR-0050: `ObjectForm` renders the layouts, and
+ * the block renderer supplies the two containers.
  */
 
 /**
@@ -1780,8 +1769,7 @@ export type SubmitBehavior =
  *
  * - **[spec-aligned]** — same name & semantics as `@objectstack/spec`
  *   `FormViewSchema` (`title`, `description`, `layout`, `columns`, `sections`,
- *   `defaultTab`, `tabPosition`, `allowSkip`, `showStepIndicator`,
- *   `splitDirection`/`splitSize`/`splitResizable`, `drawerSide`/`drawerWidth`,
+ *   `defaultTab`, `tabPosition`, `allowSkip`, `showStepIndicator`, `drawerSide`/`drawerWidth`,
  *   `modalSize`, `subforms`, `submitBehavior`; `formType` ↔ spec `type`).
  * - **[ObjectUI extension]** — serializable renderer extras with no spec
  *   backing yet (button visibility/labels, `className`, `initialValues`,
@@ -1818,19 +1806,22 @@ export interface ObjectFormSchema extends BaseSchema {
   dataSource?: ElementDataSource;
   
   /**
-   * Form variant type.
-   * Aligns with @objectstack/spec FormView.type
-   * 
+   * Form layout, or the container the `object-form` block opens it in.
+   * The layouts align with @objectstack/spec FormView.type:
+   *
    * - `simple`  – Standard flat form (default)
    * - `tabbed`  – Sections as tabs
    * - `wizard`  – Multi-step wizard with progress indicator
-   * - `split`   – Side-by-side panel layout (reserved)
-   * - `drawer`  – Slide-out form (reserved)
-   * - `modal`   – Dialog form (reserved)
+   * - `drawer`  – The block opens the form in a slide-out drawer
+   * - `modal`   – The block opens the form in a dialog
+   *
+   * `split` was removed with its renderer (ADR-0050, objectstack#27159).
+   * `ObjectForm` itself renders the three layouts; `drawer` / `modal` are
+   * read by the block renderer, which hands the node to `ObjectFormContainer`.
    *
    * @default 'simple'
    */
-  formType?: 'simple' | 'tabbed' | 'wizard' | 'split' | 'drawer' | 'modal';
+  formType?: 'simple' | 'tabbed' | 'wizard' | 'drawer' | 'modal';
   
   /**
    * ObjectQL object name (e.g., 'users', 'accounts', 'contacts')
@@ -2132,7 +2123,7 @@ export interface ObjectFormSchema extends BaseSchema {
    * returned record is passed on to `onSuccess`.
    *
    * In `edit` mode, for a record the form read itself, every layout — the
-   * simple form, `tabbed`, `wizard`, `split`, `modal` and `drawer`, and a
+   * simple form, `tabbed`, `wizard`, `modal` and `drawer`, and a
    * simple form that the mobile `stepper` option routes through the wizard —
    * hands over what the form would have written (objectui#10156,
    * objectui#10563): the fields that differ from the record it read, or the
@@ -2206,27 +2197,6 @@ export interface ObjectFormSchema extends BaseSchema {
    */
   className?: string;
 
-  // ─── Split Form Props ──────────────────────────────────
-  
-  /**
-   * Split panel direction. Only used when formType is 'split'.
-   * @default 'horizontal'
-   */
-  splitDirection?: 'horizontal' | 'vertical';
-  
-  /**
-   * Size of the left/top panel in the split layout (percentage 1-99).
-   * Only used when formType is 'split'.
-   * @default 50
-   */
-  splitSize?: number;
-  
-  /**
-   * Whether the split panels can be resized. Only used when formType is 'split'.
-   * @default true
-   */
-  splitResizable?: boolean;
-
   // ─── Drawer Form Props ─────────────────────────────────
   
   /**
@@ -2242,13 +2212,29 @@ export interface ObjectFormSchema extends BaseSchema {
    * function, NOT authorable metadata: JSON has no function value, so the zod
    * twin refuses this key by name and points at the node-type spelling. Kept
    * callable here because it is READ and RUN by the registered renderer.
-   * The read: `ObjectForm` forwards it onto the drawer / modal node
-   * (`onOpenChange: schema.onOpenChange`). Supplied by `AppContent`
+   * The read: the block's container (`ObjectFormContainer`) forwards it onto
+   * the drawer / modal node (`onOpenChange: schema.onOpenChange`). Supplied by `AppContent`
    * (`if (!open) closeRecordForm()`) in `@object-ui/app-shell` and by
    * `ObjectManager` / `FieldDesigner` (`handleFormClose`) in
    * `@object-ui/plugin-designer`.
    */
   onOpenChange?: (open: boolean) => void;
+
+  // ─── Retired split props (objectstack#27159) ───────────
+
+  /**
+   * RETIRED with `formType: 'split'` (ADR-0050, objectstack#27159): the
+   * `object-form` row's own member BY REFERENCE, a retired-key tombstone that
+   * refuses every value by name, as `ObjectGridSchema.defaultFilters` is. The
+   * split renderer that read it was deleted with the value.
+   */
+  splitDirection?: SpecObjectFormProps['splitDirection'];
+
+  /** RETIRED with `formType: 'split'` — see {@link ObjectFormSchema.splitDirection}. */
+  splitSize?: SpecObjectFormProps['splitSize'];
+
+  /** RETIRED with `formType: 'split'` — see {@link ObjectFormSchema.splitDirection}. */
+  splitResizable?: SpecObjectFormProps['splitResizable'];
   
   /**
    * Drawer slide-in side. Only used when formType is 'drawer'.

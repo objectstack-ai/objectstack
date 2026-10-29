@@ -433,6 +433,20 @@ export {
   DASHBOARD_WIDGET_TYPE_EXTENSIONS,
 } from './complex.js';
 
+/**
+ * The `filter-builder` field-type vocabulary and the renderer's behaviour
+ * buckets — one declaration read by the validator, the interface and the
+ * renderer.
+ */
+export {
+  FILTER_FIELD_TYPES,
+  FILTER_NUMBER_LIKE_TYPES,
+  FILTER_DATE_LIKE_TYPES,
+  FILTER_SELECT_LIKE_TYPES,
+  FILTER_LOOKUP_LIKE_TYPES,
+} from './filter-field-types.js';
+export type { FilterFieldType } from './filter-field-types.js';
+
 // ============================================================================
 // Data Management - Backend Integration
 // ============================================================================

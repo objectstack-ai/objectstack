@@ -8,7 +8,7 @@
  * occSave — Optimistic Concurrency Control for the record edit forms.
  *
  * Every form variant (ObjectForm / ModalForm / DrawerForm / TabbedForm /
- * SplitForm / WizardForm) reads the record with `findOne` and later writes it
+ * WizardForm) reads the record with `findOne` and later writes it
  * back with `dataSource.update`. Without a version token that write is
  * last-write-wins: two users editing the same record both get a 200 and the
  * later save silently erases the earlier one. The server already supports

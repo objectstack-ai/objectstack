@@ -204,37 +204,7 @@ function ChartSkeleton({
   )
 }
 
-// ---------------------------------------------------------------------------
-// ViewSkeleton – convenience wrapper that dispatches by variant
-// ---------------------------------------------------------------------------
-
-export type ViewSkeletonVariant = "grid" | "kanban" | "form" | "list" | "chart"
-
-export interface ViewSkeletonDispatchProps extends ViewSkeletonProps {
-  variant: ViewSkeletonVariant
-  /** Number of columns (grid / kanban) */
-  columns?: number
-  /** Cards per column (kanban only) */
-  cardsPerColumn?: number
-}
-
-function ViewSkeleton({ variant, ...props }: ViewSkeletonDispatchProps) {
-  switch (variant) {
-    case "grid":
-      return <GridSkeleton {...props} />
-    case "kanban":
-      return <KanbanSkeleton {...props} />
-    case "form":
-      return <FormSkeleton {...props} />
-    case "list":
-      return <ListSkeleton {...props} />
-    case "chart":
-      return <ChartSkeleton {...props} />
-  }
-}
-
 export {
-  ViewSkeleton,
   GridSkeleton,
   KanbanSkeleton,
   FormSkeleton,

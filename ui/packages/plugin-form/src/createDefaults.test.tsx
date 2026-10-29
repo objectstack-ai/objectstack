@@ -48,7 +48,6 @@ import { ObjectForm } from './ObjectForm';
 import { ModalForm } from './ModalForm';
 import { DrawerForm } from './DrawerForm';
 import { TabbedForm } from './TabbedForm';
-import { SplitForm } from './SplitForm';
 
 registerAllFields();
 
@@ -102,7 +101,6 @@ const CONTAINERS: Array<[string, React.ComponentType<any>, string]> = [
   ['ModalForm', ModalForm as any, 'modal'],
   ['DrawerForm', DrawerForm as any, 'drawer'],
   ['TabbedForm', TabbedForm as any, 'tabbed'],
-  ['SplitForm', SplitForm as any, 'split'],
 ];
 
 describe.each(CONTAINERS)('%s — create-mode default seeding (#4047)', (_name, Container, formType) => {

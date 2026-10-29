@@ -279,7 +279,7 @@ describe('P1.1 ListView Spec Alignment', () => {
 describe('P1.2 FormView Spec Alignment', () => {
   it('should accept all formType variants', () => {
     const formTypes: Array<ObjectFormSchema['formType']> = [
-      'simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal',
+      'simple', 'tabbed', 'wizard', 'drawer', 'modal',
     ];
     formTypes.forEach((formType) => {
       const schema: ObjectFormSchema = {
@@ -326,10 +326,10 @@ describe('P1.2 FormView Spec Alignment', () => {
     // visibly if the shape is ever silently emptied.
     const sections: ObjectFormSection[] = [
       { group: 'contact_info' },
-      // `columns` and `pane` are the two keys the spec PERMITS beside `group`:
-      // they describe how this form lays the section out, not anything the
-      // group declares.
-      { group: 'billing', columns: 2, pane: 'secondary' },
+      // `columns` is the key the spec PERMITS beside `group`: it describes how
+      // this form lays the section out, not anything the group declares
+      // (`pane` was the other until it left with the split form, objectstack#27159).
+      { group: 'billing', columns: 2 },
       { name: 'audit', label: 'Audit', fields: ['created_at'] },
     ];
     expect(sections).toHaveLength(3);

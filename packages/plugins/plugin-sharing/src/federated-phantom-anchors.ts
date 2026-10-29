@@ -140,12 +140,31 @@ export function isFederatedObject(schema: unknown): boolean {
  * platform's injected anchor on an object whose storage the platform never
  * provisioned?
  *
- * `true` ⇒ record-level ownership scoping must treat the object as carrying NO
- * owner column, because it does not (see the module docs). `false` for every
- * local object (the platform DID provision the column there) and for a
- * federated object whose author declared a real remote `owner_id`.
+ * `true` ⇒ no owner predicate can be proven for the object: nothing declared
+ * says a remote column answers to `owner_id`, even where a driver happens to
+ * return one of its own accord. [#27425] Record-level scoping then NARROWS —
+ * the read and bulk write scopes admit no row by ownership below `org` — and
+ * never widens. `false` for every local object (the platform DID provision the
+ * column there), for a federated object whose author declared a real remote
+ * `owner_id`, and for one whose `external.columnMap` maps a remote column onto
+ * `owner_id` (see {@link mapsRemoteColumnOntoOwner}).
  */
 export function hasPhantomOwnerAnchor(schema: unknown): boolean {
   if (!isFederatedObject(schema)) return false;
+  if (mapsRemoteColumnOntoOwner(schema)) return false;
   return equalsShippedDef(readFieldDef(schema, OWNER_COLUMN), OWNER_FIELD_DEF);
+}
+
+/**
+ * [#27425] Does the object's `external.columnMap` (remote column → local field)
+ * name `owner_id` as a target? That is the author declaring which remote column
+ * carries the owner, so the anchor is not phantom. The built-in SQL drivers
+ * apply the map and serve the column; a driver that does not apply it returns
+ * no `owner_id`, so the owner predicate scoping composes matches no row — the
+ * fail direction stays closed either way.
+ */
+function mapsRemoteColumnOntoOwner(schema: unknown): boolean {
+  const columnMap = (schema as { external?: { columnMap?: unknown } } | null | undefined)?.external?.columnMap;
+  if (!columnMap || typeof columnMap !== 'object' || Array.isArray(columnMap)) return false;
+  return Object.values(columnMap as Record<string, unknown>).includes(OWNER_COLUMN);
 }

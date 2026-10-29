@@ -688,6 +688,9 @@ const BOTH_FILTERS = 'A SCAN_ROOTS row may set `exclude` OR `collect`, never bot
  * A directory row may narrow what the walk keeps, by basename, at every depth:
  * `exclude` names what to leave out, `collect` names the only names to take.
  * They are opposite readings of one list, and a row may carry at most one.
+ *
+ * A `disk` row may also name `diskRoot`, the directory its relative hrefs must
+ * resolve inside; it defaults to this tree's root (objectstack#27369).
  */
 export const SCAN_ROOTS = [
   // The SDK pages, in the monorepo's docs collection since objectstack#27145
@@ -719,6 +722,14 @@ export const SCAN_ROOTS = [
   { path: 'CHANGELOG.md', rule: 'disk' },
   { path: 'CLAUDE.md', rule: 'disk' },
   { path: 'LICENSE-THIRD-PARTY.md', rule: 'disk' },
+  // The objectui skill bundle, at the monorepo root since objectstack#26097
+  // (objectstack#27369). Read on GitHub and by agents, never served by the
+  // site, so its relative hrefs are disk paths; its `objectstack.ai` links are
+  // judged as site routes like everyone else's. It ships to customer projects
+  // as one directory, so a relative href must stay inside the BUNDLE
+  // (`diskRoot`), not merely inside this tree — and the bundle sits outside
+  // this tree anyway.
+  { path: '../skills/objectui', rule: 'disk', diskRoot: '../skills/objectui' },
 ];
 
 const blank = (text) => text.replace(/[^\n]/g, ' ');
@@ -933,9 +944,9 @@ export function siteAbsoluteRoute(href) {
  * Does one `disk`-rule href resolve to something in this repository?
  *
  * @param {string} href
- * @param {{ fromFile: string, repoRoot: string }} context
+ * @param {{ fromFile: string, repoRoot: string, diskRoot?: string }} context
  */
-export function diskPathExists(href, { fromFile, repoRoot }) {
+export function diskPathExists(href, { fromFile, repoRoot, diskRoot = repoRoot }) {
   const cleanHref = hrefPath(href);
   if (!cleanHref) return true; // pure in-page anchor or query
 
@@ -944,7 +955,7 @@ export function diskPathExists(href, { fromFile, repoRoot }) {
   if (cleanHref.startsWith('/')) return false;
 
   const target = path.resolve(path.dirname(fromFile), cleanHref);
-  return isInside(repoRoot, target) && pathExists(target);
+  return isInside(diskRoot, target) && pathExists(target);
 }
 
 /** The extensionless-route spellings of `base`, as fumadocs would serve them. */
@@ -1067,6 +1078,13 @@ export function siteUrlExists(pathname, site) {
  * silently missing its anchor.
  */
 const ATX_HEADING_RE = /^(#{1,6})\s+(.*?)\s*$/;
+/**
+ * The blockquote markers in front of a line. A heading inside a blockquote
+ * (`> ### Title`) is still a heading to both renderers and gets an anchor, so
+ * the markers are stripped before the ATX test (objectstack#27369: the skill
+ * bundle writes one).
+ */
+const BLOCKQUOTE_PREFIX_RE = /^(?: {0,3}>\s?)+/;
 /** A closing sequence of `#`s, which is decoration and not part of the text. */
 const CLOSING_HASHES_RE = /\s+#+\s*$/;
 /** fumadocs' explicit heading id: `## Heading [#custom-id]`. */
@@ -1194,7 +1212,7 @@ export function headingAnchors(source, { customId = false } = {}) {
     }
     if (fence !== null) continue;
 
-    const heading = ATX_HEADING_RE.exec(line);
+    const heading = ATX_HEADING_RE.exec(line.replace(BLOCKQUOTE_PREFIX_RE, ''));
     if (!heading) continue;
     const text = heading[2].replace(CLOSING_HASHES_RE, '');
 
@@ -1243,12 +1261,12 @@ export function resolveDocsFile(href, { fromFile, docsRoot }) {
 }
 
 /** The file a `disk`-rule href names, or `null` — `diskPathExists()`'s half. */
-export function resolveDiskFile(href, { fromFile, repoRoot }) {
+export function resolveDiskFile(href, { fromFile, repoRoot, diskRoot = repoRoot }) {
   const cleanHref = hrefPath(href);
   if (!cleanHref) return fromFile; // a pure in-page anchor names THIS document
   if (cleanHref.startsWith('/')) return null; // github.com's root, not ours
   const target = path.resolve(path.dirname(fromFile), cleanHref);
-  return isInside(repoRoot, target) && isFile(target) ? target : null;
+  return isInside(diskRoot, target) && isFile(target) ? target : null;
 }
 
 /** The anchor an href asks for, decoded, or `null` when it names none. */
@@ -1417,6 +1435,7 @@ export function collectBrokenLinks(repoRoot) {
   for (const scanRoot of SCAN_ROOTS) {
     const exclude = scanRoot.exclude ? new Set(scanRoot.exclude) : undefined;
     const collect = scanRoot.collect ? new Set(scanRoot.collect) : undefined;
+    const diskRoot = scanRoot.diskRoot ? path.join(repoRoot, scanRoot.diskRoot) : repoRoot;
     for (const file of collectFiles(path.join(repoRoot, scanRoot.path), exclude, collect)) {
       const source = stripCode(readFileSync(file, 'utf8'));
       MARKDOWN_LINK_RE.lastIndex = 0;
@@ -1424,7 +1443,7 @@ export function collectBrokenLinks(repoRoot) {
 
       while ((match = MARKDOWN_LINK_RE.exec(source)) !== null) {
         const href = match[1].trim();
-        const reason = judgeHref(href, { fromFile: file, docsRoot, repoRoot, site, anchorCache, rule: scanRoot.rule });
+        const reason = judgeHref(href, { fromFile: file, docsRoot, repoRoot, diskRoot, site, anchorCache, rule: scanRoot.rule });
         if (reason === null) continue;
 
         broken.push({ file, href, line: source.slice(0, match.index).split('\n').length, reason });

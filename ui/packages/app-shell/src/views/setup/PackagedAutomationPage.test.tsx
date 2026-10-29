@@ -37,7 +37,10 @@
  *      row the engine reports enabled but unarmed (it carries an
  *      `unboundCause`) keeps its switch on and reads "Not running here", never
  *      "On". Bound flows and flows with no trigger read "On" exactly as
- *      before, and a toggle re-reads what the engine armed.
+ *      before, and a toggle re-reads what the engine armed. Since
+ *      objectstack#27378 such a row's switch draws a muted on-track, and a
+ *      `deployment_policy` row says what that policy is in plain words; the
+ *      platform's sentence stays behind Details.
  *   8. **the clone result's next steps** (objectui#13270) — a clone runs
  *      beside its source, so the result offers to switch the source off
  *      through the SAME toggle as its row, and links the clone's Studio scope.
@@ -622,6 +625,13 @@ describe('the Activation cell says whether the flow runs', () => {
     return cell as HTMLElement;
   }
 
+  /** The words a `deployment_policy` row reads in place of the badge (objectstack#27378). */
+  const POLICY_LINE = 'On, but this deployment does not run scheduled work';
+  /** The muted checked track a not-running row's switch draws (objectstack#27378). */
+  const MUTED_TRACK = 'data-[state=checked]:bg-muted-foreground/60';
+  /** The primitive's own checked track, which `cn()` drops when the muted one is passed. */
+  const PRIMARY_TRACK = 'data-[state=checked]:bg-primary';
+
   /** A packaged schedule flow the deployment's policy left unarmed, flag on. */
   function withPolicyRow() {
     fixture.runtime = [
@@ -646,11 +656,28 @@ describe('the Activation cell says whether the flow runs', () => {
     // The switch keeps the author's flag: on, and still a live control.
     const toggle = within(cell).getByRole('switch', { name: 'Activation for Daily digest' });
     expect(toggle).toBeChecked();
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(toggle).toBeEnabled();
-    // The badge says the flow does not run, and nothing in the cell says "On".
-    expect(within(cell).getByText('Not running here')).toBeInTheDocument();
+    // Its on-track is muted, not the primary fill a running flow draws
+    // (objectstack#27378).
+    expect(toggle).toHaveClass(MUTED_TRACK);
+    expect(toggle).not.toHaveClass(PRIMARY_TRACK);
+    // The cell says in plain words that the deployment does not run scheduled
+    // work, and names no operator switch; there is no bare "On" badge.
+    expect(cell.textContent).toBe(POLICY_LINE);
     expect(within(cell).queryByText('On')).toBeNull();
-    expect(cell.textContent).toBe('Not running here');
+    expect(cell.textContent).not.toContain('OS_AUTOMATION_SCHEDULED_WORK_ENABLED');
+    expect(within(cell).getByTestId('packaged-flow-activation')).toHaveClass('text-muted-foreground');
+  });
+
+  it('keeps the platform sentence, variable name and all, behind Details on a deployment-policy row', async () => {
+    withPolicyRow();
+    await renderPage();
+
+    const chip = within(screen.getByTestId('packaged-flow-pkg_digest')).getByRole('button', { name: 'Details' });
+    fireEvent.click(chip);
+    const disclosure = await screen.findByRole('dialog', { name: 'Details' });
+    expect(disclosure.textContent).toBe(POLICY_REASON);
   });
 
   it('keeps a bound flow, a flow with no trigger and a disabled flow exactly as before (controls)', async () => {
@@ -659,46 +686,65 @@ describe('the Activation cell says whether the flow runs', () => {
     withPolicyRow();
     await renderPage();
 
-    // Bound to its trigger: "On".
+    // Bound to its trigger: "On", on the primary track.
     expect(activationCell('pkg_notify').textContent).toBe('On');
     // No declared trigger, so `bound: false` and no cause: it runs when
     // invoked, and is never called "not running".
     expect(activationCell('pkg_manual').textContent).toBe('On');
     // Switched off: "Off".
     expect(activationCell('pkg_escalate').textContent).toBe('Off');
+    for (const name of ['pkg_notify', 'pkg_manual', 'pkg_escalate']) {
+      const toggle = within(activationCell(name)).getByRole('switch');
+      expect(toggle).toHaveClass(PRIMARY_TRACK);
+      expect(toggle).not.toHaveClass(MUTED_TRACK);
+    }
     // The policy row beside them is the only one that reads otherwise.
-    expect(activationCell('pkg_digest').textContent).toBe('Not running here');
+    expect(activationCell('pkg_digest').textContent).toBe(POLICY_LINE);
+    expect(within(activationCell('pkg_digest')).getByRole('switch')).toHaveClass(MUTED_TRACK);
   });
 
-  it('reads every unbound cause the same way, and styles none of them as an error', async () => {
+  it('reads every other unbound cause "Not running here", mutes every not-running track, and styles none as an error', async () => {
     withPolicyRow();
+    const others = [
+      ['pkg_sync', 'Sync accounts', 'binding_failure'],
+      ['pkg_chain', 'Chain step', 'disabled_subflow'],
+      ['pkg_hook', 'Webhook in', 'missing_trigger'],
+    ] as const;
     fixture.runtime = [
       ...fixture.runtime,
-      {
-        name: 'pkg_sync',
+      ...others.map(([name, , unboundCause]) => ({
+        name,
         enabled: true,
         bound: false,
         triggerType: 'record_change',
         reason: BINDING_FAILED_REASON,
-        unboundCause: 'binding_failure',
-      },
+        unboundCause,
+      })),
     ];
-    fixture.meta = [...fixture.meta, packagedItem('pkg_sync', 'Sync accounts')];
+    fixture.meta = [...fixture.meta, ...others.map(([name, label]) => packagedItem(name, label))];
     await renderPage();
 
-    const policy = within(activationCell('pkg_digest')).getByText('Not running here');
-    const failure = within(activationCell('pkg_sync')).getByText('Not running here');
-    // The badge names no cause: the Details chip carries the platform's words.
-    expect(failure.className).toBe(policy.className);
-    for (const badge of [policy, failure]) {
-      expect(badge.className).not.toMatch(/destructive/);
-      expect(badge).not.toHaveAttribute('role', 'alert');
+    // Only `deployment_policy` gets its plain line; the other causes keep the
+    // one badge, which names no cause — the Details chip carries the words.
+    const badges = others.map(([name]) => within(activationCell(name)).getByText('Not running here'));
+    for (const badge of badges) expect(badge.className).toBe(badges[0].className);
+    const policy = within(activationCell('pkg_digest')).getByText(POLICY_LINE);
+    for (const shown of [policy, ...badges]) {
+      expect(shown.className).not.toMatch(/destructive/);
+      expect(shown).not.toHaveAttribute('role', 'alert');
+    }
+    for (const name of ['pkg_digest', ...others.map(([n]) => n)]) {
+      const toggle = within(activationCell(name)).getByRole('switch');
+      expect(toggle).toBeChecked();
+      expect(toggle).toHaveClass(MUTED_TRACK);
     }
   });
 
   it('still writes the flag from a row that is not running', async () => {
     withPolicyRow();
     await renderPage();
+    // Muted, and still the live control: the colour is the only change.
+    expect(screen.getByRole('switch', { name: 'Activation for Daily digest' })).toHaveClass(MUTED_TRACK);
 
     fireEvent.click(screen.getByRole('switch', { name: 'Activation for Daily digest' }));
     await waitFor(() => expect(toggleCalls()).toHaveLength(1));
@@ -730,7 +776,7 @@ describe('the Activation cell says whether the flow runs', () => {
     await waitFor(() => expect(toggleCalls()).toHaveLength(1));
     expect(toggleCalls()[0].body).toEqual({ enabled: true });
 
-    await waitFor(() => expect(activationCell('pkg_digest').textContent).toBe('Not running here'));
+    await waitFor(() => expect(activationCell('pkg_digest').textContent).toBe(POLICY_LINE));
     expect(statusReads()).toBe(readsBefore + 1);
     expect(screen.getByRole('switch', { name: 'Activation for Daily digest' })).toBeChecked();
   });

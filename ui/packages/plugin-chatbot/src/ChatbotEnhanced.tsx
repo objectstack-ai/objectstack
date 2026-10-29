@@ -5058,9 +5058,10 @@ const BUILD_GROUP_ORDER = ['object', 'view', 'dashboard', 'app', 'seed'];
  *
  * The lookup stays a STATIC switch rather than `t('chatbot.build.group.' + type)`:
  * a computed key is invisible to `check-i18n-call-site-keys`, which is the gate
- * that proves each key exists in the `en` pack. The `default` arm keeps the old
- * `?? type` behaviour verbatim — an unknown artifact type renders its raw type,
- * which is honest, and never a raw i18n key.
+ * that proves each key exists in the `en` pack. The `default` arm answers a
+ * neutral "Other" heading: a raw type id (`dataset`, `permission`) read as an
+ * untranslated word, or as an error, in the middle of a localized sentence
+ * (objectstack#27419). Never a raw type id, never a raw i18n key.
  */
 function useBuildGroupLabel(): (type: string) => string {
   const { t } = useObjectTranslation();
@@ -5077,8 +5078,12 @@ function useBuildGroupLabel(): (type: string) => string {
           return t('chatbot.build.group.app', { defaultValue: 'App' });
         case 'seed':
           return t('chatbot.build.group.seed', { defaultValue: 'Sample data' });
+        case 'dataset':
+          return t('chatbot.build.group.dataset', { defaultValue: 'Datasets' });
+        case 'permission':
+          return t('chatbot.build.group.permission', { defaultValue: 'Permissions' });
         default:
-          return type;
+          return t('chatbot.build.group.other', { defaultValue: 'Other' });
       }
     },
     [t],

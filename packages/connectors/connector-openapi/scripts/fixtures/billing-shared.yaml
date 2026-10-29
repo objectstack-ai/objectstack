@@ -1,0 +1,18 @@
+# The second file of the openapi3-billing-shape fixture: reached only by an
+# external $ref, so the bundler has to load it.
+components:
+  schemas:
+    balance:
+      type: object
+      properties:
+        available:
+          type: array
+          items:
+            $ref: '#/components/schemas/money'
+    money:
+      type: object
+      properties:
+        amount:
+          type: integer
+        currency:
+          type: string

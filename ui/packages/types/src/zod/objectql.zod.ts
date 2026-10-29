@@ -902,7 +902,6 @@ const ObjectFormSectionEntrySchema = z.looseObject({
   collapsible: z.boolean().optional().describe('Whether the section can be collapsed (dropped on a wizard step)'),
   collapsed: z.boolean().optional().describe('Whether the section starts collapsed (dropped on a wizard step)'),
   columns: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional().describe('Field columns in this section'),
-  pane: z.enum(['primary', 'secondary']).optional().describe('Split-form panel this section renders in (split forms only)'),
   fields: z.array(z.any()).optional().describe('Field names or inline field configurations; the other way to declare members is `group`'),
   group: z.string().optional().describe('Key of a declared object field group whose members and presentation this section inherits'),
   visibleWhen: z
@@ -1014,8 +1013,8 @@ export const ObjectFormSchema = BaseSchema.extend({
   // dialect out, so it is never mirrored as a string) and `open` (a boolean that
   // only in-code hosts write). Their routes are open on objectui#6152, and the
   // pair's `UnmirroredDeclared` entry keeps both.
-  formType: z.enum(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']).optional()
-    .describe('Form variant: simple (default), tabbed, wizard, split, drawer or modal'),
+  formType: z.enum(['simple', 'tabbed', 'wizard', 'drawer', 'modal']).optional()
+    .describe('Form layout — simple (default), tabbed or wizard — or the block container it opens in: drawer or modal'),
   sections: z.array(ObjectFormSectionEntrySchema).optional()
     .describe('Form sections: tabs of a tabbed form, steps of a wizard (array order is step order), groups of a simple form'),
   defaultTab: z.string().optional().describe('Initially active tab (section name); tabbed forms only'),
@@ -1026,9 +1025,13 @@ export const ObjectFormSchema = BaseSchema.extend({
     .describe('Next-step button label; wizard forms only. @objectstack/spec I18nLabel, a plain string or an inline locale map'),
   prevText: stripImportedDefaults(SpecI18nLabelSchema).optional()
     .describe('Previous-step button label; wizard forms only. @objectstack/spec I18nLabel, a plain string or an inline locale map'),
-  splitDirection: z.enum(['horizontal', 'vertical']).optional().describe('Split panel direction; split forms only'),
-  splitSize: z.number().optional().describe('Size of the first panel as a percentage; split forms only'),
-  splitResizable: z.boolean().optional().describe('Whether the split panels can be resized; split forms only'),
+  // RETIRED with `formType: 'split'` (ADR-0050, objectstack#27159): the
+  // `object-form` row's own members BY REFERENCE — retired-key tombstones that
+  // refuse every value by name, as `ObjectGridSchema.defaultFilters` is. The
+  // split renderer that read them was deleted with the value.
+  splitDirection: stripImportedDefaults(SpecObjectFormPropsSchema).shape.splitDirection,
+  splitSize: stripImportedDefaults(SpecObjectFormPropsSchema).shape.splitSize,
+  splitResizable: stripImportedDefaults(SpecObjectFormPropsSchema).shape.splitResizable,
   drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Drawer slide-in side; drawer forms only'),
   drawerWidth: z.string().optional().describe('Drawer width as a CSS value; drawer forms only'),
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal dialog size; modal forms only'),
