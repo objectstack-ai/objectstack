@@ -1316,10 +1316,14 @@ export interface IAutomationService {
      * store and re-materialize every instance naming it, without a restart;
      * resolves to the reference's listing entry after that reconcile. Rejects
      * with an ADR-0112 `code` + `status`, before anything is written: a
-     * reference no installed package declares (`404 RESOURCE_NOT_FOUND`), one
-     * an environment variable supplies (`409 RESOURCE_CONFLICT` — env wins, so
-     * a stored value would never be read), an empty or oversized reference or
-     * value (`400 VALIDATION_ERROR`), a deployment that cannot encrypt it
+     * walled tenancy posture, `group` or `isolated`, where the store is not
+     * used (`403 PERMISSION_DENIED`, naming the posture); a reference no
+     * installed package declares (`404 RESOURCE_NOT_FOUND`); one an environment
+     * variable supplies (`409 RESOURCE_CONFLICT` — env wins, so a stored value
+     * would never be read), or a first write another replica made at the same
+     * moment (`409`); an empty or oversized reference or value, or a value
+     * starting with `secret:` (`400 VALIDATION_ERROR`); a deployment that
+     * cannot encrypt it, or whose tenancy posture cannot be read
      * (`503 SERVICE_UNAVAILABLE`).
      */
     setConnectorCredential?(request: ConnectorCredentialSetRequest): Promise<ConnectorCredentialRef>;
@@ -1328,7 +1332,8 @@ export interface IAutomationService {
      * Remove the stored value for one reference; every instance naming it is
      * torn down and registered degraded, naming the reference. Resolves to the
      * reference's listing entry after that reconcile. Rejects `404
-     * RESOURCE_NOT_FOUND` when nothing is stored for it.
+     * RESOURCE_NOT_FOUND` when nothing is stored for it, and `403
+     * PERMISSION_DENIED` under a walled tenancy posture, as a set does.
      */
     clearConnectorCredential?(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef>;
 

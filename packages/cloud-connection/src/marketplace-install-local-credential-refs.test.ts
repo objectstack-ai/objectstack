@@ -117,6 +117,18 @@ describe('[#27237] the install answer names the connector credentials the packag
         expect(res.payload.data.credentialNote).not.toContain('BILLING_SET_REF');
     });
 
+    it('under a walled posture (the listing says nothing is writable) the note does not send anyone to the PUT route', async () => {
+        const listConnectorCredentialRefs = vi.fn(async () => [
+            { ref: 'BILLING_MISSING_REF', status: 'missing', source: null, writable: false, declared: true, connectors: [] },
+        ]);
+        const install = await bootPlugin({ listConnectorCredentialRefs });
+        const res = await install([bearer('billing', 'BILLING_MISSING_REF')]);
+        expect(res.payload?.success, JSON.stringify(res.payload)).toBe(true);
+        expect(res.payload.data.credentialNote).toBe(installedCredentialNote(['BILLING_MISSING_REF'], { door: false }));
+        expect(res.payload.data.credentialNote).not.toContain('credential-refs');
+        expect(res.payload.data.credentialNote).toContain('server environment variable of the same name');
+    });
+
     it('with no automation service to ask, each reference is `unknown`, never assumed set', async () => {
         const install = await bootPlugin();
         const res = await install([bearer('billing', 'BILLING_SET_REF')]);

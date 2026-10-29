@@ -309,7 +309,7 @@ export class ConnectorCredentialStore {
                 );
             }
             // Whatever else refused the write answers without the value it was handed.
-            throw withoutCredentialThrown(err, args.value);
+            throw withoutCredentialThrown(err, credentialForms(args.value));
         }
         return { created: !existing, revision };
     }
@@ -384,32 +384,72 @@ export class ConnectorCredentialStore {
     }
 }
 
+/** What a scrub withholds: one value, or every spelling of it ({@link credentialForms}). */
+export type WithheldCredential = string | readonly string[] | undefined;
+
+/** The shortest spelling a scrub withholds — a shorter one would blank ordinary words. */
+const MIN_WITHHELD_LENGTH = 4;
+
+function base64Of(text: string): string {
+    const bytes = new TextEncoder().encode(text);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+}
+
 /**
- * `message` with every occurrence of `secret` replaced. A provider's message
- * is foreign text; an upstream that echoes the credential back must not carry
- * it into a log line, a husk's reason or a stored status.
+ * Every spelling of `value` an upstream or a client library may echo back:
+ * the value itself; URL-encoded, as an api-key sent as a query parameter
+ * travels in the request URL; base64; and, given the `basic` `username`,
+ * base64(`username:value`), the `Authorization: Basic` header. A base64 form
+ * is kept without its `=` padding, so an echo that drops the padding is
+ * withheld too. Longest first, so a longer form is replaced before a shorter
+ * one inside it.
  */
-export function withoutCredential(message: string, secret: string | undefined): string {
-    if (!secret || secret.length < 4) return message;
-    return message.split(secret).join('[credential withheld]');
+export function credentialForms(value: string | undefined, username?: string): string[] {
+    if (!value) return [];
+    const forms = new Set<string>([value, encodeURIComponent(value), base64Of(value).replace(/=+$/, '')]);
+    if (username !== undefined) forms.add(base64Of(`${username}:${value}`).replace(/=+$/, ''));
+    return [...forms].filter((f) => f.length >= MIN_WITHHELD_LENGTH).sort((a, b) => b.length - a.length);
+}
+
+function withheldForms(secret: WithheldCredential): readonly string[] {
+    if (secret === undefined) return [];
+    if (typeof secret === 'string') return secret.length >= MIN_WITHHELD_LENGTH ? [secret] : [];
+    return secret.filter((f) => f.length >= MIN_WITHHELD_LENGTH);
+}
+
+/**
+ * `message` with every occurrence of `secret` replaced — one value, or every
+ * spelling {@link credentialForms} lists. A provider's message is foreign
+ * text; an upstream that echoes the credential back, in any of those
+ * spellings, must not carry it into a log line, a husk's reason or a stored
+ * status.
+ */
+export function withoutCredential(message: string, secret: WithheldCredential): string {
+    let out = message;
+    for (const form of withheldForms(secret)) out = out.split(form).join('[credential withheld]');
+    return out;
 }
 
 /**
  * `err` with `secret` withheld from its message, keeping the structural marks
- * a caller branches on (`code`, `status`, `name`). Returned unchanged when the
- * secret appears nowhere in its message chain; otherwise rebuilt without its
- * stack and cause, which carry the same text.
+ * a caller branches on (`code`, `status`, `name`). Returned unchanged when no
+ * spelling of the secret appears in its message chain; otherwise rebuilt
+ * without its stack and cause, which carry the same text.
  */
-export function withoutCredentialThrown(err: unknown, secret: string | undefined): unknown {
-    if (!secret || secret.length < 4 || !(err instanceof Error)) return err;
+export function withoutCredentialThrown(err: unknown, secret: WithheldCredential): unknown {
+    const forms = withheldForms(secret);
+    if (forms.length === 0 || !(err instanceof Error)) return err;
     let leaks = false;
     let cur: unknown = err;
     for (let depth = 0; depth < 8 && cur instanceof Error; depth++) {
-        if (cur.message.includes(secret) || (cur.stack ?? '').includes(secret)) leaks = true;
+        const text = `${cur.message}\n${cur.stack ?? ''}`;
+        if (forms.some((f) => text.includes(f))) leaks = true;
         cur = (cur as { cause?: unknown }).cause;
     }
     if (!leaks) return err;
-    const scrubbed = new Error(withoutCredential(err.message, secret));
+    const scrubbed = new Error(withoutCredential(err.message, forms));
     scrubbed.name = err.name;
     scrubbed.stack = undefined;
     const marks = err as { code?: unknown; status?: unknown };
@@ -562,7 +602,7 @@ export const UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH = 500;
  * `secret` withheld BEFORE the bound is applied, so a cut can never leave part
  * of it behind.
  */
-export function upstreamRefusalMessage(body: unknown, secret: string | undefined): string | undefined {
+export function upstreamRefusalMessage(body: unknown, secret: WithheldCredential): string | undefined {
     let text: unknown;
     if (typeof body === 'string') {
         text = body;

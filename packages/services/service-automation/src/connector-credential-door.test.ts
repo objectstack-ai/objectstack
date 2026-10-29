@@ -45,7 +45,14 @@ import { AutomationServicePlugin, type CredentialResolver } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
 import { SysConnectorCredential } from './sys-connector-credential.object.js';
 import { SysFlowCredential } from './sys-flow-credential.object.js';
-import { CONNECTOR_CREDENTIAL_OBJECT, ConnectorCredentialStore } from './connector-credentials.js';
+import {
+    CONNECTOR_CREDENTIAL_OBJECT,
+    ConnectorCredentialStore,
+    credentialForms,
+    upstreamRefusalMessage,
+    withoutCredential,
+    withoutCredentialThrown,
+} from './connector-credentials.js';
 
 const REF = 'DUMMY_BILLING_TOKEN_27237';
 const DUMMY_VALUE = 'dummy-value-aaaa-0001';
@@ -608,5 +615,71 @@ describe('[#27237] seat review r1: under a walled posture the store is not in th
         const { engine, provider } = await boot([billing()], { posture: 'isolated' });
         expect(provider.tokenOf(provider.state.materialized[0])).toBe(DUMMY_ENV_VALUE);
         expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ source: 'env', status: 'set', writable: false });
+    });
+});
+
+describe('[#27237] contract review: an encoded spelling of the value is withheld too', () => {
+    const USERNAME = 'svc_dummy_27237';
+    // Characters that URL-encode, so the encoded spelling differs from the raw one.
+    const ENCODABLE = 'dummy/value+eeee 0010';
+    const b64 = (text: string) => Buffer.from(text, 'utf8').toString('base64');
+
+    it('lists the raw, URL-encoded and base64 spellings, and base64(`user:value`) for basic auth', () => {
+        const forms = credentialForms(ENCODABLE, USERNAME);
+        expect(forms).toContain(ENCODABLE);
+        expect(forms).toContain(encodeURIComponent(ENCODABLE));
+        expect(forms).toContain(b64(ENCODABLE).replace(/=+$/, ''));
+        expect(forms).toContain(b64(`${USERNAME}:${ENCODABLE}`).replace(/=+$/, ''));
+        const echoed = `Authorization: Basic ${b64(`${USERNAME}:${ENCODABLE}`)} url ?key=${encodeURIComponent(ENCODABLE)}`;
+        const scrubbed = withoutCredential(echoed, forms);
+        for (const form of forms) expect(scrubbed.includes(form), form.length.toString()).toBe(false);
+        expect(scrubbed).toContain('[credential withheld]');
+        const thrown = withoutCredentialThrown(Object.assign(new Error('outer'), { cause: new Error(echoed) }), forms) as Error;
+        expect(String(thrown.message)).toBe('outer');
+        expect((thrown as { cause?: unknown }).cause).toBeUndefined();
+        expect(upstreamRefusalMessage({ message: echoed }, forms)).not.toContain(encodeURIComponent(ENCODABLE));
+    });
+
+    it('a basic-auth instance whose upstream echoes the encoded header and URL: no spelling reaches the reason, the row or a log', async () => {
+        const out = captureOutput();
+        const header = b64(`${USERNAME}:${ENCODABLE}`);
+        const provider = fakeProvider();
+        const factory: ConnectorProviderFactory = (ctx) => {
+            provider.state.materialized.push(ctx);
+            const password = ctx.auth?.type === 'basic' ? ctx.auth.password : '';
+            const echo = `sent Authorization: Basic ${b64(`${USERNAME}:${password}`)} to https://erp.example/?key=${encodeURIComponent(password)}`;
+            if (provider.state.rejectAtMaterialization) throw new ConnectorCredentialRejectedError(`refused (HTTP 401): ${echo}`, 401);
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', actions: [{ key: 'request', label: 'Request' }] } as unknown as Connector,
+                handlers: { request: async () => ({ status: 401, ok: false, body: { message: echo } }) },
+            };
+        };
+        const erp = { ...billing('erp'), auth: { type: 'basic', username: USERNAME, credentialRef: REF } };
+        const { engine, call } = await boot([erp], { provider: { ...provider, factory } });
+
+        // On a call (the rest / openapi shape).
+        await engine.setConnectorCredential({ ref: REF, value: ENCODABLE, context: ADMIN });
+        expect(await call('erp')).toMatchObject({ status: 401 });
+        const onCall = engine.getConnectorDegradedReason('erp') ?? '';
+        expect(onCall).toContain('[credential withheld]');
+        const listedOnCall = JSON.stringify(await engine.listConnectorCredentialRefs());
+
+        // At materialization (the mcp shape).
+        provider.state.rejectAtMaterialization = true;
+        await engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN });
+        const atMaterialization = engine.getConnectorDegradedReason('erp') ?? '';
+        expect(atMaterialization).toContain('[credential withheld]');
+
+        for (const [where, text] of [
+            ['reason on a call', onCall],
+            ['listing after the call', listedOnCall],
+            ['reason at materialization', atMaterialization],
+            ['listing after materialization', JSON.stringify(await engine.listConnectorCredentialRefs())],
+            ['logs', out.text()],
+        ] as const) {
+            for (const form of [header, encodeURIComponent(ENCODABLE), ENCODABLE, b64(`${USERNAME}:${DUMMY_VALUE_2}`).replace(/=+$/, '')]) {
+                expect(text.includes(form), `${where}: a spelling of the value`).toBe(false);
+            }
+        }
     });
 });

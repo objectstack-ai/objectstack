@@ -71,10 +71,13 @@ export function isConnectorUpstreamUnavailable(err: unknown): boolean {
  * instance is well-formed and its `credentialRef` resolved) nor an operational
  * one (the upstream answered, and retrying the same value cannot change its
  * answer). The materializer **degrades** the instance naming the refusal, as it
- * does for an upstream outage, but does not retry it on a timer: the next
- * attempt is the next change of the credential. When the value came from the
- * credential store, its row is marked `rejected` with the upstream's message —
- * never the value.
+ * does for an upstream outage. When the value is a stored one (the credential
+ * store) or written in the declaration, it does not retry it on a timer: the
+ * next attempt is the next change of the credential or the declaration, or a
+ * restart, and a stored value's row is marked `rejected` with the upstream's
+ * message — never the value. A value from an environment variable or the
+ * host's resolver can change where the process cannot see it, so its instance
+ * is retried on the backoff.
  */
 export const CONNECTOR_CREDENTIAL_REJECTED = 'CONNECTOR_CREDENTIAL_REJECTED' as const;
 

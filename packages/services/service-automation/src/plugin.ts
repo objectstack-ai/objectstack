@@ -40,6 +40,7 @@ import {
     SECRET_HANDLE_PREFIX,
     connectorCredentialFingerprint,
     credentialDoorRefusal,
+    credentialForms,
     credentialRejectedOnCallReason,
     credentialRejectionStatusOf,
     isAcceptedCallResult,
@@ -387,6 +388,11 @@ function holdsFlowDefinition(engine: AutomationEngine, name: string, held: unkno
 function credentialRefOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
     if (!auth || auth.type === 'none') return undefined;
     return auth.credentialRef;
+}
+
+/** The `basic` username an instance sends beside its secret — what its `Authorization` header encodes with it. */
+function basicUsernameOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
+    return auth?.type === 'basic' ? auth.username : undefined;
 }
 
 /**
@@ -2275,7 +2281,7 @@ export class AutomationServicePlugin implements Plugin {
                 // [#27237] A provider's message is foreign text: an upstream that
                 // echoes the credential back must not carry it into the husk's
                 // reason, a log record or the thrown boot error.
-                const thrown = withoutCredentialThrown(err, credential?.value);
+                const thrown = withoutCredentialThrown(err, credentialForms(credential?.value, basicUsernameOf(entry.auth)));
                 // [#27237] The upstream refused the credential (ruling on
                 // #27237, comment 6470087293): degrade the instance and mark a
                 // stored credential `rejected` — never a failed boot, never a
@@ -3036,7 +3042,10 @@ export class AutomationServicePlugin implements Plugin {
                     info.name,
                     info.ref,
                     status,
-                    upstreamRefusalMessage((result as { body?: unknown }).body, info.credential.value),
+                    upstreamRefusalMessage(
+                        (result as { body?: unknown }).body,
+                        credentialForms(info.credential.value, basicUsernameOf(info.entry.auth)),
+                    ),
                     info.credential.source === 'object',
                 );
                 try {

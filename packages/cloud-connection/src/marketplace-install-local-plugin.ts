@@ -748,14 +748,23 @@ export interface InstalledCredentialRef {
     source: ConnectorCredentialRef['source'];
 }
 
-/** [#27237] The install answer's sentence for the credentials not set yet. */
-export function installedCredentialNote(refs: readonly string[]): string {
+/**
+ * [#27237] The install answer's sentence for the credentials not set yet.
+ * `door: false` when the credential door cannot store any of them — the
+ * automation service's listing says none is `writable`, as under the `group` /
+ * `isolated` postures, where the door refuses — so the sentence does not send
+ * an administrator to a route that will refuse.
+ */
+export function installedCredentialNote(refs: readonly string[], opts: { door?: boolean } = {}): string {
     const list = refs.map((r) => `'${r}'`).join(', ');
     return (
         `Connector credential${refs.length === 1 ? '' : 's'} ${list} ${refs.length === 1 ? 'needs' : 'need'} an `
         + "administrator — not set, refused by the upstream, or unreadable now (each entry's `status` says which). The "
         + 'connector instances naming them are installed degraded and materialize once each is set: '
-        + 'PUT /api/v1/automation/connectors/credential-refs/:ref, or a server environment variable of the same name.'
+        + (opts.door === false
+            ? "as a server environment variable of the same name, or in the host's credential resolver. This environment "
+                + 'does not store connector credentials through the credential door.'
+            : 'PUT /api/v1/automation/connectors/credential-refs/:ref, or a server environment variable of the same name.')
     );
 }
 
@@ -1982,8 +1991,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // 7. [#27237] Which connector credentials the package names, and which
         //    are not set yet — after the re-sync above, so the listing reads
         //    what the reconcile it triggered saw.
-        const credentialRefs = await this.describeInstalledCredentialRefs(ctx, converted);
+        const described = await this.describeInstalledCredentialRefs(ctx, converted);
+        const credentialRefs = described?.entries;
         const unsetRefs = (credentialRefs ?? []).filter((r) => r.status !== 'set').map((r) => r.ref);
+        // The door is named only when it can store one of them: a listing that
+        // says none is writable (a walled posture) gets the other places.
+        const door = described?.writable === undefined || unsetRefs.some((r) => described.writable!.has(r));
 
         return c.json({
             success: true,
@@ -2003,7 +2016,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // [#27237] Omitted, not emptied, for a package whose connectors
                 // name no credential, so that answer's key set is unchanged.
                 ...(credentialRefs !== undefined ? { credentialRefs } : {}),
-                ...(unsetRefs.length > 0 ? { credentialNote: installedCredentialNote(unsetRefs) } : {}),
+                ...(unsetRefs.length > 0 ? { credentialNote: installedCredentialNote(unsetRefs, { door }) } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
@@ -3510,11 +3523,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * naming it installs degraded and materializes when an administrator sets
      * it (`PUT /api/v1/automation/connectors/credential-refs/:ref`). With no
      * automation service, or one that cannot list, the status is `unknown`.
+     * `writable` is the references the credential door can store, as the
+     * listing says; `undefined` when there is no listing to say it.
      */
     private describeInstalledCredentialRefs = async (
         ctx: PluginContext,
         converted: unknown,
-    ): Promise<InstalledCredentialRef[] | undefined> => {
+    ): Promise<{ entries: InstalledCredentialRef[]; writable?: ReadonlySet<string> } | undefined> => {
         const connectors = (converted as { connectors?: unknown } | null)?.connectors;
         const declared = new Map<string, string[]>();
         for (const raw of Array.isArray(connectors) ? connectors : []) {
@@ -3537,7 +3552,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 + `each credential the package names as status 'unknown'. Cause: ${err?.message ?? err}`,
             );
         }
-        return [...declared.keys()].sort().map((ref) => {
+        const entries = [...declared.keys()].sort().map((ref): InstalledCredentialRef => {
             const known = listing?.get(ref);
             return {
                 ref,
@@ -3546,6 +3561,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 source: known?.source ?? null,
             };
         });
+        const writable = listing === undefined
+            ? undefined
+            : new Set([...declared.keys()].filter((ref) => listing!.get(ref)?.writable !== false));
+        return { entries, ...(writable ? { writable } : {}) };
     };
 
     /**
