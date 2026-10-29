@@ -1,0 +1,30 @@
+{
+  "number": 27694,
+  "kind": "issue",
+  "title": "docs(adr): after the api-action door lands, rewrite ADR-0066 D4's isSameOriginApiTarget citation into a symbol anchor and drop the requiredPermissions docblock's \"Landing\" door clause",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T19:11:19Z",
+  "updated_at": "2026-10-29T19:49:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27694",
+  "body": "domain:skills#1 · marchtian · session_017ihL2dPRZXfgE1A2Vct3FU\n\nFiling gate: ① a follow-up owed by landed work (「已落地工作欠的后续照立卡」). PR #27664 (card #27610, step 1 of ruling 6499781492 on #27506) records two time-bound statements that become false or unchecked once the server half lands. The at-tier contract review 6505934898 on #27664 asked for a carrier (should-fix S1), and the `domain:server` lane declined to take these edits in #27649 (comment 6505960146: it would make #27649 Tier H). ⛔ Not a claim.\n\n**Blocked-by #27649.** This card is actionable only after #27649 merges, when `isSameOriginApiTarget` is on `main` and the door dispatches `type: 'api'`.\n\n**Business reason.** ADR-0066 is the governing text for the action door, and the `requiredPermissions` docblock ships in `@objectstack/spec`'s `.d.ts`. Left as is after #27649 lands:\n- the ADR cites `isSameOriginApiTarget` by bare name, so nothing checks that the definition stays in step with the code;\n- the docblock still tells authors and agents that the door refuses `type: 'api'`, which would be false.\n\n**Reader.** The `domain:skills` seat, or whichever lane takes it. Tier H (`docs/adr/**`, `packages/spec/src/**`), so the maintainer merges.\n\n## Wanted (once #27649 is on `main`)\n\n- `docs/adr/0066-unified-authorization-model.md` D4 (the same-origin definition at ~L74): rewrite the bare `isSameOriginApiTarget` citation into the symbol anchor `packages/runtime/src/action-execution.ts#isSameOriginApiTarget`, held by `check:adr-symbol-anchors`.\n- `packages/spec/src/ui/action.zod.ts`, the `requiredPermissions` docblock paragraph \"Landing, as of 2026-10-29\": drop its door clause (the door no longer refuses `type: 'api'`). Keep the console clause until step 3 (#27611) lands, or drop that too if #27611 is already in.\n- No `.describe()` change is expected; it carries no landing clause.\n\n## Dedupe (open AND closed)\n\nSearched \"isSameOriginApiTarget symbol anchor ADR-0066\" and \"requiredPermissions Landing paragraph door clause\": no hits outside #27610, #27664 and #27649's threads. **New.**\n\ntype: Task"
+}

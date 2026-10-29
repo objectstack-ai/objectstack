@@ -2,8 +2,8 @@
   "number": 27471,
   "kind": "issue",
   "title": "objectql: a plugin driver's by-name read refusal (the guide's `refuse()`) reaches the caller as 503 \"may clear; retry later\" with its message withheld — the floor maps every `find` throw to ERR_DATASOURCE_UNAVAILABLE (epic #27261, follow-up of #27277)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,24 @@
     "area:api",
     "bug",
     "domain:server",
-    "finding",
     "pm:epic",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T07:41:49Z",
-  "updated_at": "2026-10-29T08:18:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T18:18:04Z",
+  "closed_at": "2026-10-29T18:16:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27471",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① product defect (refusal prose that misleads the author), a follow-up owed by landed work (#27277, PR #27403).\nReader: the epic PM (#27261) dispatches it in the epic subtree after triage; the fix is in `packages/objectql/src/external-driver-floor.ts` (read path) and the guide's failure paragraph.\nDedupe (open AND closed): \"plugin driver read refusal 400 invalid filter reported as 503 datasource unavailable retry later message withheld\" → 17 hits, none this defect (#27173, #21067 are cap/redaction on other doors).\nreach: named producer. The merged guide (`content/docs/data-modeling/virtual-objects.mdx:93`, `refuse()`, used by `toFilter` and `notSupported`) tells every plugin-driver author to throw a by-name refusal for an operator or column the remote cannot run. Under the floor (PR #27403, `86edcaf8`), any `find` throw becomes `ERR_DATASOURCE_UNAVAILABLE` 503, `reason: 'remote'`. Its message is \"…the remote system behind its plugin driver failed, did not respond, or answered with a server error. It may clear; retry later.\" (`driver-connect-errors.ts:266`). The driver's own reason is only in the server log. This was confirmed in the independent review of PR #27403 (finding 5, accepted for P1 and carried).\ntype: Bug\n\n## 维护者速读\n\n- **现象：** 插件 driver 按指南对不支持的筛选「点名拒绝」（抛错），用户和 AI 作者却看到 503「远端故障，稍后重试」，真正原因被藏起来。\n- **原因：** 兜底层把读路径的任何抛错一律映射成数据源不可用（503，消息不外泄）。\n- **影响：** 作者照指南写的拒绝变成误导性的「重试」，重试永远不会好；违背「错了响亮拒收、带处方」。\n- **最小修法：** 读路径区分 driver 的请求型拒绝（带 4xx `status`，或指南约定的拒绝类）与远端故障：前者以 400 带 driver 原话（经既有脱敏通道）返回，后者维持 503。指南同步一句。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] On a floored datasource, a `find` throw that carries a request-shaped 4xx `status` (400/404/422) answers 400 with the driver's message, through the existing refusal-redaction seam, not 503.\n- [ ] Unreachable, 5xx, auth (401/403/407) and rate limits (429) keep `ERR_DATASOURCE_UNAVAILABLE` 503, text withheld, exactly as today.\n- [ ] Pin both with tests. The guide's `refuse()` sets the status the engine reads, and the failure paragraph says what the caller sees.\n\n`Clause-②: no` (no new code; an existing 400 code, chosen by the dev, carries it) · `Metadata-protocol: none`."

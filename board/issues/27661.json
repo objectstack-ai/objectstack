@@ -1,0 +1,33 @@
+{
+  "number": 27661,
+  "kind": "issue",
+  "title": "spec: resolveInjectedColumnProvenance does not know the external.columnMap → owner_id arm plugin-sharing honours since #27425, so the #7858 convergence row and the two columnMap readers diverge (epic #27261)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:spec",
+    "pm:epic",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T16:42:44Z",
+  "updated_at": "2026-10-29T16:42:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27661",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① consistency defect owed by landed work (#27425, PR #27476 `f57eddcf`), from the post-landing contract review 6493803142 (④ should-fix 1) and the seat carry 6493297056.\nReader: the epic PM (#27261) dispatches it in the epic subtree; the fix is in `packages/spec/src/data/injected-system-column-provenance.ts`, `packages/plugins/plugin-sharing/src/federated-phantom-anchors.ts` and `packages/lint/src/validate-external-owner-sharing.ts`.\nDedupe (open AND closed): \"resolveInjectedColumnProvenance columnMap owner_id plugin-sharing convergence\" → 2 hits, none this defect (#8119 is the closed #7858 write-gate twin).\nreach: no runtime exposure; both sides fail closed. Read on `main`: for a federated object that maps a remote column onto `owner_id` through `external.columnMap` without declaring it, `resolveInjectedColumnProvenance(schema, 'owner_id')` answers `injected-unprovisioned`, while plugin-sharing's `hasPhantomOwnerAnchor` answers `false` (`mapsRemoteColumnOntoOwner`) and scopes over the mapped column. The spec module's convergence map still names #7858 as plugin-sharing converging on the helper.\ntype: Bug\n\n## 维护者速读\n\n- **现象：** 「外部对象的 owner 是否可证」有三处判定：spec 的 `resolveInjectedColumnProvenance`、plugin-sharing 的 `hasPhantomOwnerAnchor`、lint 的 `hasUnprovableOwnerAnchor`/`columnMapTargets`。#27425 之后 plugin-sharing 把 `columnMap` 映到 `owner_id` 算作已证，spec 的 helper 不认，收敛表也没记这个例外。\n- **原因：** #27425 在 plugin-sharing 里就地加了 `columnMap` 分支，没回写到 spec 的唯一来源。\n- **影响：** 目前两边都 fail closed，不泄露；但下一个按收敛表对齐 helper 的消费方会悄悄放宽或收窄这类对象。\n- **最小修法：** 让 helper 认 `columnMap` 分支（或在收敛表里写明例外），plugin-sharing 与 lint 改读 helper，删掉重复的 `columnMap` 读取。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] One reader decides \"owner anchor provable from declared metadata\" (a declared `owner_id` field, or an `external.columnMap` value `owner_id`). Either `resolveInjectedColumnProvenance` takes the `columnMap` arm, or the spec module's convergence map records it as a named exception; plugin-sharing (`mapsRemoteColumnOntoOwner`) and lint (`columnMapTargets`, `hasUnprovableOwnerAnchor`) read that one source.\n- [ ] No verdict moves: plugin-sharing's read/write scopes, the lint rules' findings and hints stay byte-identical on the existing pins (federated phantom-scoping suites, `external-owner-anchor-sql-read.test.ts`, `validate-external-owner-sharing.test.ts`).\n- [ ] The convergence row for #7858 in `injected-system-column-provenance.ts` reads the head's behaviour.\n\n`Clause-②:` decided by the dev from the diff (a new exported helper arm in `@objectstack/spec` is a public-surface change) · `Metadata-protocol: none`. Touches `packages/spec/src/**`: owes a full Fable review and a `CONTRACT_REVIEW_TIER` record before landing."
+}

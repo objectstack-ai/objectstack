@@ -1,0 +1,34 @@
+{
+  "number": 27687,
+  "kind": "issue",
+  "title": "datasource: the credential refusals send a code author (defineDatasource) to a Setup form that cannot edit a code-defined datasource; name a binding path a code author can follow",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:spec",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T17:53:58Z",
+  "updated_at": "2026-10-29T19:25:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27687",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiling gate: ② a gap measured beside a ruled card. Triage's contract review of PR #27656 (#27614), comment 6504200509, second should-fix (\"follow-up, shared with the three sibling refusals; not owed by this PR\"). Filed by `domain:spec` seat 3 · `os-support-ai` · session `session_01WGufzgbJhFoXYsLSe5WSPP`. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n**Business reason.** An author who writes a datasource in code (`defineDatasource`) with an inline password is refused, and the refusal tells them to bind a secret on the Setup → Datasources form or to use \"a handle the secret store minted\". A code-defined datasource is read-only to the admin service, so the form cannot bind a secret onto it, and nothing says how a code author mints a `sys_secret:` handle. The author has a correct refusal and no path they can follow.\n\n## Measured (by the review, on PR #27656 head `68b2eec2`)\n\n- The four credential refusals prescribe the same two routes in the same words: `INLINE_CREDENTIAL_REFUSED`, `URL_EMBEDDED_CREDENTIAL_REFUSED`, `refusedInlineCredentialKey().describe()` and the two strings #27656 adds (`packages/spec/src/data/datasource.zod.ts`). The first two were maintainer-ruled in this shape (#7990, #8082).\n- A code-defined datasource is read-only to the admin service (`datasource-admin-service.ts:15`, `:656-658`, `:702`).\n\n## Wanted\n\n- A measured answer to \"how does a code author bind a credential to a `defineDatasource`?\" (for example a CLI or API that mints a `sys_secret:` handle, an env-backed resolver, or binding at deploy), then one prescription that names it, shared by all four refusals and `content/docs/data-modeling/drivers.mdx` / `external-datasources.mdx`. If the answer changes a ruled prescription (#7990, #8082), it goes to the maintainer as a decision card first.\n\n## Dedupe\n\nOpen issues searched for \"defineDatasource credentialsRef code-defined read-only secret\": none the same.\n"
+}

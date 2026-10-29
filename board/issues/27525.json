@@ -2,8 +2,8 @@
   "number": 27525,
   "kind": "issue",
   "title": "spec: a navigation item of type 'report' without reportName targets the app's report index; the console stops injecting the \"All reports\" row; ⌘K finds reports from the report registry",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:reports",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T10:32:20Z",
-  "updated_at": "2026-10-29T13:14:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T16:25:15Z",
+  "closed_at": "2026-10-29T16:23:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27525",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nSeam: `spec:NavigationItemSchema` (`packages/spec/src/ui/app.zod.ts`, the `type: 'report'` variant) → consumer `ui/packages/app-shell/src/layout/UnifiedSidebar.tsx` (the injected 「全部报表」 row, objectui#13020) and the ⌘K command palette's report matching. Clause-②: yes — the variant's accept set widens (a `report` item may omit `reportName`), so the spec seat owes the contract review; the consumer end is claimed with it.\n\n## Source (main `273137d227`; HotCRM `47a0666543`)\n\n- `NavigationItemSchema` variants: `object` / `page` / `url` / `dashboard` / `report` (one report, `reportName` required). No item can target the app's report index at `<app>/reports`.\n- The console therefore injects a static 「全部报表」 row at the bottom of EVERY non-Studio app's sidebar (`UnifiedSidebar.tsx` ~line 598, objectui#13020), apps without reports included (the index then says there are none).\n- ⌘K finds a report only through a navigation entry (HotCRM `crm.app.ts` `group_reports` comment), so HotCRM declares one nav entry per report (ten) in a collapsed group — and gets the injected row as a second entry to the same reports.\n\n## Target (maintainer, 2026-10-29, verbatim: 「报表按这版立两张卡：spec（索引型导航项 + 停止注入 + ⌘K 走注册表）」; on the model: 「报表是否建议配置成一个自定义菜单，加上才有」 — the entry exists only when the author adds it, as Salesforce / Dynamics / Zoho do)\n\n1. `type: 'report'` with `reportName` absent = the app's report index (`<app>/reports`); with `reportName` = that report, as today. The describe says so; `validate-*` refuses nothing new (an absent name is now legal). ADR-0087: a widening, not a retirement; the authorable-surface baseline follows.\n2. The console stops injecting the 「全部报表」 row for every app; it draws the index entry only where the app's navigation declares one. Studio unchanged.\n3. ⌘K matches reports from the report registry the app ships (the member's readable set), not from navigation entries, so an app no longer needs one nav entry per report to make them searchable.\n4. HotCRM follow-up (filed in hotcrm after this lands): replace the ten per-report entries with one index entry.\n\n## Acceptance\n\n- Spec pin: a `report` item with no `reportName` parses and the Studio navigation inspector offers 「报表索引」 as that item's face; the describe and the generated reference say what it does.\n- Console pins: no injected row on an app whose navigation has no report-index item; the index entry drawn where declared; ⌘K finds a report that has no nav entry.\n- Migration note in the changeset for apps relying on the injected row (one line to add to their navigation).\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-29 on the maintainer's instruction; design board `SidebarReports.dc.html` on evidence branch `claude/record-page-v2-evidence-20261027b` @ `72cd481c4a` (the 「加上才有」 model supersedes the board's 「并入组尾」 variant).</sub>"

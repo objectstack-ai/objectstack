@@ -1,0 +1,33 @@
+{
+  "number": 27701,
+  "kind": "issue",
+  "title": "service-datasource: a code object bound to a runtime (Setup-created) managed datasource never gets its table; registerPool connects with no objects, so reads 500 with 42P01 on create and after restart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T19:33:45Z",
+  "updated_at": "2026-10-29T19:59:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27701",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiling gate: ① a product defect with a reproduction, found by the #27687 dev's read-only live measurement (round 2, `/mnt/project-files/seat3-orders/27687-measurement.md`; `origin/main` `bfdaba43`, `os serve --dev`, a real scram-auth Postgres 16). class a, reach: the public data door. Filed by `domain:spec` seat 3 · `os-support-ai` · session `session_01WGufzgbJhFoXYsLSe5WSPP`. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n**Business reason.** An author declares an object in code with `datasource: 'warehouse'`, and an admin creates `warehouse` in Setup → Datasources with its password. The datasource answers `ok`, but the object's table is never created, on create or on restart, so every read is a 500. Nothing at `error` level says the table is missing.\n\n## Reproduction\n\n1. A code object `wh_note` with `datasource: 'warehouse'`, in a stack that declares no `warehouse` datasource. `os validate` and `os build` exit 0.\n2. `os serve --dev`. Boot WARNs `claimSeedOwnership failed for wh_note … Datasource 'warehouse' … is not registered`.\n3. As admin, `POST /api/v1/datasources` (postgres, a secret) → 201, `origin: runtime`, `status: ok`. `pg_stat_activity` shows the bound role's session.\n4. `GET /api/v1/data/wh_note` → 500 `DATABASE_ERROR` (log: Postgres `42P01 relation \"wh_note\" does not exist`). It is the same after a restart.\n5. Control: create the table by hand, and GET and POST work through the bound credential.\n\n## Mechanism (read on `main`)\n\n`registerPool` (`packages/services/service-datasource/src/datasource-admin-plugin.ts:532-536`) calls `connect(record, { context })` with no `objects`, so the schema-sync loop (`datasource-connection-service.ts:696-697`) has nothing to sync. Boot's schema sync skipped the object earlier because the driver did not exist yet.\n\n## Wanted\n\n- Connecting a runtime datasource (create, and rehydrate on boot) syncs the schema of the managed objects already bound to it, as boot does for a declared datasource; or the connect answers a non-`ok` status naming the unsynced objects. The route is the implementer's to measure.\n- A pin: a code object bound to a runtime managed datasource gets its table on create and after a restart.\n\n## Dedupe\n\nSearched for \"registerPool schema sync runtime datasource\" (nearest: #27666, the external-driver floor on the same connect path, a different defect) and \"OBJECT_NOT_FOUND not registered insert missing relation\" (0 hits). **New.** It bears on maintainer decision card #27687 (option 1).\n"
+}

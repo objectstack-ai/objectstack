@@ -1,0 +1,31 @@
+{
+  "number": 27619,
+  "kind": "pull_request",
+  "title": "ci(live-e2e-ui): run on server-only diffs too (|| core), and pin the 2-minute spec budget",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "needs-user-decision",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T14:55:06Z",
+  "updated_at": "2026-10-29T20:11:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27619",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYksGQkx7jCWdPyjy14\n\nFixes #27550\nClause-②: no\nMetadata-protocol: none\n\nRuling (maintainer, quoted on #27550, https://github.com/objectstack-ai/objectstack/issues/27550): 「同意，立卡」\n\n## 维护者速读\n\n- 改了什么：`Live E2E UI` 的 `if:` 在原有 ui / ui_consumers 条件上再 OR 上 `core`，纯后端 PR（objectql、runtime、rest、插件、showcase 等）不再跳过它；job 注释写明「Run the live e2e specs」一步 ≤ 2 分钟的预算。\n- 为什么改：Console 连真实后端时，纯后端改动也会把它弄坏，而这类 PR 过去全部跳过这条检查，问题要到合并后人工 QA 才发现。\n- 风险与回滚：最近 59 次 PR CI 中，运行次数从 35 增至 55（另一方案「只列后端依赖闭包」为 50，差的 5 次全是只改 skills 的 PR）；合并队列里每个条目都会跑它。该步骤实测 14–24 秒，不增加墙钟。回滚 = 还原这一行 `if:`。\n- 先看：`.github/workflows/ci.yml` 的 `live-e2e-ui` job 的 `if:` 一行及其上方注释。\n- 两分钟验证：本 PR 的 CI 运行里 `Live E2E UI` 应是实际运行（非 skipped），之后任一只改 `packages/objectql` 的 PR 同样应运行它。\n- 需要你做的：Tier H，审批本 PR。\n\n## What changes\n\n- `.github/workflows/ci.yml`, job `live-e2e-ui` only: the `if:` gains `|| needs.filter.outputs.core != 'false'` inside the existing OR group. `!cancelled()` and the `ui_tree` guard are unchanged. No retry wrapper, no `continue-on-error`, no other job touched.\n- The job comment: the \"Gated as Build & E2E UI is\" sentence now names the new gate and why it differs from Build & E2E UI (that job builds the Console against the seven packages it compiles from; this one runs it against a real server, which a server-only diff can break). It also records the measurement and the BUDGET: the \"Run the live e2e specs\" step stays under 2 minutes, and a spec that would push it over stays in `test:e2e:live:nightly`.\n\n## Option measurement (Actions API, last 60 completed `pull_request` CI runs, 2026-10-29T06:51Z to 12:26Z)\n\nOne of the 60 was `action_required` (no jobs ran), so 59 are graded.\n\n| gate | runs that start `Live E2E UI` |\n|---|---|\n| today (`ui` or `ui_consumers`) | 35 (24 skipped) |\n| (a) `... or core` | 55 (Build Core's own conclusion on the same run, since Build Core's `if:` is exactly `core`) |\n| (b) a filter naming the backend's closure | 50 |\n\nFor (b), the list is the dependency closure of the two packages the job's backend is built from (`@objectstack/cli...` and `@objectstack/example-showcase...`, the job's own build filters): 67 workspace directories, every one of them reached at runtime by `objectstack dev` serving the showcase app (the drivers, objectql, runtime, rest, metadata, the plugins, services and triggers, the adapters, the showcase app itself). Every narrower list drops a package the server loads, which is a gap.\n\nPicked (a). The 5 runs (a) adds over (b) are two PRs whose diffs touch only `skills/**`, docs and changesets. (b) is not materially cheaper (8% of runs), and it is not gap-free over time: it is a second hand-kept recognizer of the backend's dependency graph, so a package that joins the closure later silently skips the job, the drift that THE FILTER CONTRACT fails open against. It would also need a new filter output and a parity reader. One consequence of (a), stated in the comment: on `merge_group` `core` is always `'true'`, so every queue entry runs this job, which is the queue-side half of the gap the card names.\n\nSpec-step durations over the 35 runs that ran it: 14 s min, 21 s median, 24 s max.\n\n## Tests\n\nNo code or test change. The derived gates are below.\n\n## Acceptance notes\n\n- The filter job's outputs comment still says the three ui outputs are \"read together by the five `* UI` jobs\". That stays true, but Live E2E UI now reads `core` as well. Left as is, because the claim's file surface excludes other jobs.\n- actionlint: NOT MEASURED. The repo and its CI carry no actionlint, and downloading the release binary was refused in this container. `ci.yml` parses as YAML, and `check:workflow-status-functions` / `check-workflow-context-availability` are green over it.\n- Opened by the seat (`session_01QSeKYmTYfaPbLQD4BJfomW`) on the maintainer's authorisation 「授权本席位打开这个草稿 PR」, from the dev's prepared title, body and labels, because the dev session's classifier refused its own `pr_create` (card note 6499253144).\n\n## Verification\n\nHead `a6abd5d9`, base `origin/main` `ad3a640e` (merged, already up to date).\n\nGate list: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` gave 53 commands. Each was run with its exit captured before any pipe.\n\n`--ran` reconciliation: `53 derived famil(ies) accounted for — 49 run, 4 NOT-MEASURED (4 DERIVED from a recorded exit 3)`.\n\n- `pnpm check:required-contexts`: exit 0 (lists `ci.yml:live-e2e-ui → 'Live E2E UI'`).\n- `pnpm check:workflow-status-functions`: exit 0. It prints `check-workflow-status-functions: OK (scanned 30 workflow file(s), 78 job(s), 59 job-level if: expression(s); 30 read needs.*.outputs.*, all naming a status function)` and `check-workflow-context-availability: OK (... judged 1026 expression(s) ...)`.\n- `pnpm check:ci-filter-parity`: exit 0.\n- `pnpm check:pm-expected-skips`: exit 0. The roster is derived from `if:`, and no reader pins the old condition.\n- `pnpm check:pm-dispatch-gates`: exit 0 (fast tier, 1937 cases).\n- The other 44 derived commands: exit 0.\n- `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content`: exit 3, PREREQUISITE NOT MET (no `dist/` locally). These are Build Core's guards, and Build Core runs on this PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYksGQkx7jCWdPyjy14)_\n"
+}

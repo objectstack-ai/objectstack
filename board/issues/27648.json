@@ -1,0 +1,37 @@
+{
+  "number": 27648,
+  "kind": "pull_request",
+  "title": "fix(objectql): a plugin driver's request-shaped read refusal answers 400 INVALID_QUERY with its message, not 503 retry-later",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T16:08:11Z",
+  "updated_at": "2026-10-29T18:16:48Z",
+  "closed_at": "2026-10-29T18:16:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T18:16:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27648",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi2FieswzDA2Ddcee2frV6cP)_\nFixes #27471\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 插件 driver 的外部数据源上，`find` 抛出带请求型状态（`status`/`statusCode` 为 400、404、422）的错误时，调用方现在拿到 `400 INVALID_QUERY`，消息就是 driver 自己的原话；其余失败（5xx、连不上、没声明状态、401/403/407/429）照旧是 `503 ERR_DATASOURCE_UNAVAILABLE`、原文不外泄。指南里的 `refuse()` 现在带 `status: 400`，失败段落逐条写明调用方看到什么。\n- **为什么改：** 之前读路径的任何抛错都变成 503「远端故障，稍后重试」，作者照指南写的「点名拒绝」被说成可以重试，而重试永远不会好，真正原因只在服务器日志里。\n- **风险与回滚：** 低。只动外部插件 driver 兜底层的读路径一个 catch 分支，内置 driver 和受管数据源不受影响；没有新错误码（复用标准 `INVALID_QUERY`）。回滚即还原本 PR。\n- **先看：** `packages/objectql/src/external-driver-floor.ts`（`readCapped` 的 catch 分支）、`packages/objectql/src/external-driver-errors.ts`（`ExternalReadRefusedError` 与状态集合）、`content/docs/data-modeling/virtual-objects.mdx`（`refuse()` 与失败段落）。\n- **两分钟验证：** `pnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2 src/external-driver-floor.test.ts`，预期 45/45 通过，其中 `[#27471]` 一组 14 条。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- `packages/objectql/src/external-driver-errors.ts`: `EXTERNAL_READ_REFUSED_STATUSES` (400, 404, 422) and `ExternalReadRefusedError`, which carries the standard `INVALID_QUERY` code, `status`/`httpStatus` 400, the driver's message, and `details` (`datasource`, `object`, `operation: 'find'`, `remoteStatus`). It has the same shape as `ExternalWriteRefusedError`. No new ledger code: `INVALID_QUERY` is a `StandardErrorCode` member, and REST already treats it as an expected query rejection (no unhandled-error log line).\n- `packages/objectql/src/external-driver-floor.ts`: the floor's `find` catch reads the declared status the same way the write path does (`declaredStatus`: `status`, then `statusCode`). A status in the read set throws the 400 refusal, with the original error as `cause`. Everything else still goes through `remoteFailure`, so it stays 503, reason `remote`, with the text logged at `warn` and withheld from the caller. `findOne` and `count` read through the same `readCapped`, so they get the same answer. The refusal leaves the engine through the existing boundary (`redactPropagatedDriverFault` in the middleware seam), which cuts bound statement text the same way it does for any driver error.\n- `packages/objectql/src/index.ts`: exports `ExternalReadRefusedError` and `EXTERNAL_READ_REFUSED_STATUSES` next to the write-side exports.\n- `content/docs/data-modeling/virtual-objects.mdx`: the guide's `refuse()` now throws with `status: 400`, which is the status the engine reads. The \"Fail when the remote fails\" bullet now lists, per status, what the caller sees: a refused read answers 400 `INVALID_QUERY`, a refused write answers 422 `EXTERNAL_WRITE_REFUSED`, and everything else answers 503. The guide's own driver test also pins `status: 400`.\n- `.changeset/27471-external-read-refusal-400.md`: `@objectstack/objectql` patch.\n\n## Tests\n\n`packages/objectql/src/external-driver-floor.test.ts` has a new `[#27471]` block with 14 cases, run through the real engine:\n\n- The guide-shaped `refuse()` gets `ExternalReadRefusedError` / `INVALID_QUERY` / 400, with the driver's sentence and `details`, on `find`, `findOne` and `count`.\n- 400, 404 and 422, spelled as `status` and as `statusCode`, each answer 400 with the driver's message and `remoteStatus`.\n- 401, 403, 407, 429, 500, 502, 503, 409 and 412 each stay `ERR_DATASOURCE_UNAVAILABLE`, `kind: 'remote'`, with the text withheld. 409 and 412 are write-only refusal statuses and stay 503 on a read.\n- A throw with no status stays 503 with the text withheld.\n\nResults at head 9773776b:\n\n- `pnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2 src/external-driver-floor.test.ts`: 45/45 passed.\n- `pnpm --filter @objectstack/objectql test` (under the verify lock): Test Files 487/487, Tests 9163/9163, VERDICT command-exit 0.\n- `pnpm --filter @objectstack/objectql typecheck`: exit 0, test layer held in `test-typecheck-debt.json`.\n\n<details><summary>Ablation (one-shot, not kept)</summary>\n\n`node scripts/ablation-replace.mjs --file packages/objectql/src/external-driver-floor.ts --anchor \"if (status !== undefined && EXTERNAL_READ_REFUSED_STATUSES.has(status)) {\" --replacement \"if (false && status !== undefined && EXTERNAL_READ_REFUSED_STATUSES.has(status)) {\"`\n\n- The mutation landed: anchor 1 to 0, blob 1957bd34d07c to 993bc75ea06b.\n- Result: 4 failed, 41 passed. The 4 failures were the refuse() case and the 400, 404 and 422 cases.\n- The 503-band cases stayed green, because they pin behaviour that did not change.\n- Restored: blob equals HEAD (1957bd34d07c), and `git diff HEAD` is empty.\n- The test imports `./engine` from source, so no dist rebuild was involved.\n\n</details>\n\n## Acceptance notes\n\n- **The code is reused, not new.** The card left the choice of an existing 400 code to the dev. I picked `INVALID_QUERY` over `INVALID_FILTER` because the guide's `refuse()` also refuses an unmapped object and unsupported operations, not only filter terms.\n- **The triage wording differs from the ruling.** Triage 6491225200 says \"a typed refusal keeps its code and message\". This PR follows the card's ruled Task instead: the floor reads the declared status, and a driver's own `code` on a 400/404/422 throw is replaced by `INVALID_QUERY`. The driver's object is kept as `cause`.\n- **The guide's write stubs change answer too.** They call `notSupported`, which now carries `status: 400` through `refuse()`. So a refused write on that skeleton answers 422 `EXTERNAL_WRITE_REFUSED` with the driver's sentence, where it used to answer 503. The paragraph states this.\n\n## Verification\n\nGates were derived with `node scripts/pm/dispatch-gates.mjs --commands` (no paths) and reconciled with `--ran`; the verdict at head 9773776b: \"91 derived famil(ies) accounted for — 91 run, 0 NOT-MEASURED (a DERIVED zero)\". All 91 exited 0. Four first exited 3 or timed out on prerequisites (a shallow clone missing the teardown fixture commit, `dist/` not yet built, and the 400 s per-gate timeout on `check:type-check-debt`); each was re-run after its prerequisite and exited 0.\n\nCI check-runs on this PR carry every family CI runs; they are cited in the os-dev report, not re-run locally.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ihL2fT4drj3TCsV9G9CPh)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2fT4drj3TCsV9G9CPh\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 27630,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a flow-backed api action reads the run's inner refusal, not the node chain",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T15:21:55Z",
+  "updated_at": "2026-10-29T15:48:23Z",
+  "closed_at": "2026-10-29T15:48:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T15:48:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27630",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgDFH4S5pR1C8YvYCWWsZfXx)_\n\n## 维护者速读\n\n- 改了什么：`api` 类型的动作（记录页 ⋯ 菜单、列表行和工具栏）调用流程端点失败时，不再把引擎的节点堆栈原样弹给用户，改为显示内层拒绝的白话提示（权限拒绝就显示和记录保存一样的本地化权限提示）。\n- 为什么改：成员点「Recalculate Estimate」看到的是 `Node 'recalc_each' failed: map … subflow … update_record(showcase_task) failed: …` 这种开发者文字；流程界面早已有提取规则，api 动作入口没有接上。\n- 风险与回滚：只影响 api 动作收到 `400 FLOW_FAILED` 的分支，其他错误照旧显示原消息；回滚即还原本 PR。\n- 先看：`ui/packages/app-shell/src/utils/flowResponse.ts`（新导出 `apiActionFailureMessage`）、`views/RecordDetailView.tsx`、`hooks/useConsoleActionRuntime.tsx` 的 `!res.ok` 分支。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/utils/__tests__/flowResponse.test.ts`，预期全绿，其中 objectstack#27487 一组 5 例。\n- 需要你做的：无，席位落地。showcase 那条 map → subflow 链要等服务端卡 #27601 落地后才会显示白话提示。\n\nRefs #27487 (item 1: the console action door)\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nA `type: 'api'` action whose target is a declared `type: 'flow'` endpoint (showcase \"Recalculate Estimate\" → `/api/v1/apps/showcase/recalc`) gets the trigger door's `400 FLOW_FAILED` when the run fails, `error.details.innerRefusal` and the top-level `userMessage` included (runtime `endpoint-executor.ts` builds it with the trigger door's own `flowFailureDetails`). Both api handlers answered that envelope's `message`, the engine's node chain:\n\n- `RecordDetailView`'s `apiHandler` (the record header ⋯ menu, the card's repro door) read `error.message`;\n- `useConsoleActionRuntime`'s `apiHandler` (list rows, toolbar, shell) read `actionErrorDetail`.\n\nNeither path goes through `flowLaunch` / `interpretFlowResponse`, so #25938's extraction never ran there.\n\n`flowResponse.ts` now exports `apiActionFailureMessage(res, json, fallback, locale)`. On `400 FLOW_FAILED` it reads the envelope through the failed arm's existing rule (`flowFailureMessage`: authored `errorMessage`, then `userMessage`, then `innerRefusal` rendered as the record form renders it, then `message`). Every other answer reads `actionErrorDetail`, as before. The 400 arm of `interpretFlowResponse` and the new export share one helper (`flowFailedEnvelopeMessage`), and `flowFailureMessage` takes the permission line's locale explicitly, since the api door knows no flow to build a `FlowCopyLocale` for; it passes the host's active `language`. No new message map.\n\nBoth handlers call it on a non-2xx. In `RecordDetailView.tsx` that is the call-site line plus its import and the `language` entry in the handler's dependency list (declared in the report).\n\n## Tests\n\n- `utils/__tests__/flowResponse.test.ts`: new `apiActionFailureMessage` group. One-level and nested map → subflow envelopes (each proven real by `ApiErrorSchema` and `FlowFailureDetailsSchema`) with `innerRefusal: PERMISSION_DENIED` read the form's permission line in `en` and `zh-CN`; a validation refusal reads its sentence; `userMessage` and the authored `errorMessage` outrank it; an envelope with no carriers reads its message; a 403, a non-`FLOW_FAILED` 400 and a bodiless 502 read as before.\n- `hooks/__tests__/useConsoleActionRuntime.apiFlowRefusal-27487.test.tsx`: the hook's `apiHandler` against the nested envelope answers the `zh` permission line from the host's language; control: a 403 reads its message.\n- `views/RecordDetailView.apiFlowRefusal-27487.test.tsx`: the handler set the record page hands its `ActionProvider` sends `recordId` to the endpoint and answers the permission line; control: no carriers → the message.\n\n<details><summary>Local runs (head 3219ed5b)</summary>\n\n- vitest (6 files: the three above plus `apiNewTabUrl-26747`, `headerApiInterpolation`, `flowLaunch.translation-12075`): Test Files 6 passed, Tests 85 passed.\n- `pnpm --filter @object-ui/app-shell run type-check`: exit 0.\n- Ablation (`scripts/ablation-replace.mjs`, marker `!'ABLATED_27487'` short-circuiting the `FLOW_FAILED` test in `apiActionFailureMessage`): 5 tests red (the 3 new flowResponse cases that read carriers, both door cases); every control stayed green; restore verified `git diff HEAD` empty.\n- Derived gates (`dispatch-gates --commands`): 34 derived, 34 run, all exit 0; `--ran` reconciliation: 0 NOT-MEASURED, 0 UNRUN (full lines in the report comment).\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations.\n\n</details>\n\n## Acceptance notes\n\n- This PR is item 1 only. The showcase repro (map item → subflow → `update_record`) still shows the chain after it lands: `service-automation`'s `map-node.ts` and `subflow-node.ts` return a new failure with the child's `error` text and drop the child run's `innerRefusal` / `userMessage`, so the endpoint's envelope carries no `innerRefusal` for that chain. Server half filed as #27601. Once it lands, this door shows the permission line with no further UI change (pinned by the nested-envelope tests).\n- The card's other expectation, not offering the action to someone who cannot perform its write, is not addressed here: the triage scoped this card to the toast copy (the refusal itself is correct).\n- Observed, not changed: on a `200` whose outer envelope is `success: true` but whose `data.success` is `false`, both api handlers report success. The endpoint door keeps that `200` only for an unclassified failure (its own comment says so); no reach measured, so noted only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Ca8en1EvoQ3voL2nWm)_\n"
+}

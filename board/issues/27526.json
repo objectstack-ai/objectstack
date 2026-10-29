@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T10:32:54Z",
-  "updated_at": "2026-10-29T13:15:45Z",
+  "updated_at": "2026-10-29T19:35:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27526",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\n## Source (main `273137d227`)\n\nThe app report index (`AppReportIndexView`, route `<app>/reports`, objectui#13020) lists every report the member may open as one flat list. The report schema carries no grouping key (no `category` / `folder`), and the index has no personal views. Mainstream systems all group (Salesforce folders + 最近 / 我创建的 / 全部; Dynamics categories; Zoho folders by module).\n\n## Target (maintainer, 2026-10-29, verbatim: 「ui（索引页按对象分组 + 最近/我的/全部）」)\n\n1. Group the index by each report's primary object, derived from its dataset / object (no new key): one section per object in the app's navigation order, a 「其它」 section for reports with no object; section headers show the count and collapse.\n2. Three views across the top: 最近（the member's recently opened reports, read from the existing recent-items store）/ 我创建的 / 全部; the choice is a per-user preference through the `workspacePreference` store (#27052), scope `user`.\n3. A row shows the report's label, object, owner and last-opened time; the search box filters within the current view.\n4. No `category` / `folder` key: that is a later card if an app pulls it (cross-object folders).\n\n## File surface\n\n`ui/packages/app-shell/src/console/AppReportIndexView.tsx` and its tests, i18n in all ten packs, changeset; ⛔ `packages/spec/**`.\n\n## Acceptance\n\n- Pins: grouping by object with the 「其它」 fallback; the three views and their persistence; the search filter within a view.\n- Screenshot of HotCRM's index (ten reports across lead / opportunity / case) on a never-merged evidence branch.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-29 on the maintainer's instruction; independent of the spec card for the index navigation item (the index page exists today), so it lands in either order.</sub>"

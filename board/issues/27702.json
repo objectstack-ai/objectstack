@@ -1,0 +1,33 @@
+{
+  "number": 27702,
+  "kind": "issue",
+  "title": "data door: an insert into a registered object whose table is missing answers OBJECT_NOT_FOUND \"is not registered\", while the GET on the same object answers DATABASE_ERROR",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T19:33:48Z",
+  "updated_at": "2026-10-29T19:59:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27702",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiling gate: ① a product defect with a reproduction, found by the #27687 dev's read-only live measurement (round 2, `/mnt/project-files/seat3-orders/27687-measurement.md`; `origin/main` `bfdaba43`, `os serve --dev`, a real scram-auth Postgres 16). class a, reach: the public data door. Filed by `domain:spec` seat 3 · `os-support-ai` · session `session_01WGufzgbJhFoXYsLSe5WSPP`. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n**Business reason.** A client that inserts into an object whose table is missing is told the object \"is not registered\", when the object is registered. The same object's GET answers `DATABASE_ERROR`, so the two doors disagree and the insert's answer sends the caller after the wrong problem.\n\n## Reproduction\n\nThe setup of the sibling card filed with this one (a code object bound to a runtime managed datasource whose table was never created), on `origin/main` `bfdaba43`:\n- `POST /api/v1/data/wh_note` → `OBJECT_NOT_FOUND` \"Object 'wh_note' is not registered\". The server log shows the insert failing on Postgres `42P01 relation \"wh_note\" does not exist`.\n- `GET /api/v1/data/wh_note` → 500 `DATABASE_ERROR`.\n\n## Wanted\n\n- An insert that fails on a missing relation answers the same classified error as the read (or one ledgered code for \"storage missing\"), never `OBJECT_NOT_FOUND` for a registered object. Measure where the 42P01 is mapped to `OBJECT_NOT_FOUND` on the write path.\n- A pin with a registered object whose relation is missing: the POST and GET codes agree.\n\n## Dedupe\n\nSearched for \"OBJECT_NOT_FOUND not registered insert missing relation 42P01\": 0 hits. **New.**\n"
+}

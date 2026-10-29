@@ -1,0 +1,34 @@
+{
+  "number": 27621,
+  "kind": "pull_request",
+  "title": "test(cli): json-stdout-purity drives `os plugin install` and `os plugin trust list` (nightly red)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T14:58:14Z",
+  "updated_at": "2026-10-29T15:39:12Z",
+  "closed_at": "2026-10-29T15:39:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T15:39:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27621",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYoZarrfSp6eFqVaxPo\n\nPart of #27114 (the card stays open until a scheduled `Nightly tiers` run is green)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:夜间测试 `json-stdout-purity` 现在实际驱动 `os plugin install --json` 与 `os plugin trust list --json` 两条新命令,并且命令发现会顺着 `src/utils` 里替命令启动内核的工具模块找成员。\n- 为什么改:两条命令随插件安装功能上线后,这个只在夜间跑的测试把它们识别为新成员却没人驱动,`main` 的夜间检查因此一直是红的。\n- 风险与回滚:只改一个测试文件,不动任何产品代码,不发布任何包;回滚就是撤掉这一个提交。\n- 先看:`packages/cli/test/json-stdout-purity.e2e.test.ts` 里的 `bootingUtils()` 与 `discoverFamily()`,其次是 `PREPARE['plugin install']`。\n- 两分钟验证:`OS_TEST_TIERS=nightly pnpm --filter @objectstack/cli exec vitest run --maxWorkers=2 test/json-stdout-purity.e2e.test.ts`,应看到 `Tests 77 passed (77)`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`packages/cli/test/json-stdout-purity.e2e.test.ts` only. It is a nightly-tier file, so no pull request or queue run executes it.\n\n- **Discovery follows boot utilities.** `bootingUtils()` collects the `src/utils` modules that call `bootSchemaStack(`, plus the modules that import one of them, until nothing new joins. The function's own definition in `schema-migrate.ts` does not count. A command joins the family if it boots directly or imports one of those modules, and it declares `--json`. Before this change, the discovery was a probe of the command's own text. Since #27374, `os plugin install` boots only through `utils/plugin-trust-read.ts`, so that probe had dropped it from the family while it still boots and still has a `--json` face. Today the closure is `plugin-trust-read` and `installed-plugins-boot`. The only commands that import them are `plugin install` and `serve`, and `serve` has no `--json`. The discovered set is 25.\n- **`plugin install` is driven to its full install.** A new `PREPARE` map holds per-member setup. For this member it builds the artifact and signature the way the command's own integration tests do (`createTarGz` + `computeIntegrity`, `generateEd25519KeyPair` + `signPayload`). It then trusts the key in this member's database with `os plugin trust add`, and throws if that exits non-zero. The member runs under an `OS_HOME` inside the fixture directory. The face driven is the `installed` document, emitted after the read-only trusted-key boot has shut down.\n- **`plugin trust list` is driven bare.** It boots read-only against a database file that does not exist yet, so the face driven is its empty listing.\n- `config-miss-stdout-purity.e2e.test.ts` is unchanged. Neither member imports `utils/config.js`, neither refuses before boot, and that file stays green (below).\n\n## Tests\n\n<details><summary>Reproduction on origin/main ad3a640e: red, 1 failed / 70 passed</summary>\n\n`OS_TEST_TIERS=nightly pnpm --filter @objectstack/cli exec vitest run --maxWorkers=2 test/json-stdout-purity.e2e.test.ts`\n\n```\nAssertionError: expected [ 'db orphans', …(23) ] to deeply equal [ 'db orphans', …(22) ]\n+   \"plugin trust list\",\nTests  1 failed | 70 passed (71)\nos-verify-lock: VERDICT command-exit 1\n```\n\nThe 2026-10-29 scheduled run showed `…(24)` vs `…(22)` with `plugin install` too. #27374 landed afterwards, which is why `plugin install` is absent here: its boot moved into the util.\n</details>\n\n<details><summary>After, at merged head b743a631: both files green</summary>\n\n```\njson-stdout-purity.e2e.test.ts     Test Files 1 passed (1) · Tests 77 passed (77) · VERDICT command-exit 0\nconfig-miss-stdout-purity.e2e.test.ts  Test Files 1 passed (1) · Tests 174 passed (174) · VERDICT command-exit 0\n```\n\nThe count goes from 71 to 77: two members, three cases each.\n</details>\n\n<details><summary>Hand probe: install reaches its success face, not a refusal</summary>\n\nI ran the same fixture by hand through `bin/run-dev.js`:\n\n- `plugin trust add` exits 0.\n- `plugin install --json purity.osplugin` exits 0. stdout parses as one document with keys `installed, replaced, integrity, boot`, `installed.signature.keyId = purity-2026` and `boot.loads = true`. stderr carries the boot diagnostics.\n- `plugin trust list --json` exits 0 with one `{\"keys\":[…]}` document.\n</details>\n\n<details><summary>Teeth: one member removed from FAMILY goes red, then restored</summary>\n\n`node scripts/ablation-replace.mjs --file packages/cli/test/json-stdout-purity.e2e.test.ts --anchor \"'plugin trust list': [],\" --delete -- …` (the same nightly invocation):\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob 60a3d4db4207 -> 5cd1f1c7f07f\nAssertionError: expected [ 'db orphans', …(24) ] to deeply equal [ 'db orphans', …(23) ]\n+   \"plugin trust list\",\nTests  1 failed | 73 passed (74)\nablation-replace:   blob after restore  60a3d4db42077a1e9a3a2f1f1bc576e00a22095c\nablation-replace:   blob at HEAD        60a3d4db42077a1e9a3a2f1f1bc576e00a22095c\n```\n\nThe discovery half has its own control: the reproduction on main is that same discovery without the util hop, and it does not find `plugin install`.\n</details>\n\n## Acceptance notes\n\n- `skip-changeset`: tests only. No published file changes.\n- Route taken for `plugin install`: teach the discovery the util, rather than listing the command by hand, which note 6490929251 offered as the other route. A hand-listed member would break the file's own `discovered == FAMILY` equality. It would also leave the next command that boots through a util silently outside the pin.\n- Opened by the seat (`session_01QSeKYmTYfaPbLQD4BJfomW`) on the maintainer's authorisation 「授权本席位打开这个草稿 PR」, from the dev's prepared title, body and labels, because the dev session's classifier refused its own `pr_create` (card note 6499909922).\n\n## Verification\n\nDerived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`) were run locally at b743a631. The readings are in the dev report on #27114. CI runs the required set on this PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYoZarrfSp6eFqVaxPo)_\n"
+}

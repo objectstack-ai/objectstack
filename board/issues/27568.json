@@ -2,9 +2,9 @@
   "number": 27568,
   "kind": "pull_request",
   "title": "fix(metadata-protocol): a metadata save's audit row names the user who saved it",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T13:24:40Z",
-  "updated_at": "2026-10-29T13:25:42Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-10-29T17:17:23Z",
+  "closed_at": "2026-10-29T17:17:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T17:17:21Z",
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27568",
   "body": "Fixes #27539\nPart of #27414\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:元数据保存(`/meta`、`/automation`、删除)写 `sys_audit_log` 时,审计行的 `user_id` / `actor` 现在记下保存人,不再是空。\n- 为什么改:ADR-0073 D3 要求归属必须具体;此前管理员每次保存元数据,审计日志都显示\"无人\"。\n- 风险与回滚:只改 `SysMetadataRepository.put` / `delete` 写入时带的上下文,权限判定仍按系统身份;回滚即还原本 PR 一个文件。\n- 先看:`packages/metadata-protocol/src/sys-metadata-repository.ts` 的 `writeContext` 两处(put 与 delete)。\n- 两分钟验证:`pnpm --filter @objectstack/metadata-protocol exec vitest run src/sys-metadata-repository.recorded-by.test.ts`,预期 15/15 通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`SysMetadataRepository.put` and `delete` ran every `sys_metadata` / `sys_metadata_history` write under `{ ...ctx, isSystem: true }`. That context carries no `session.userId` and no `attributedUserId`, the only two sources the audit writer (`plugin-audit` `audit-writers.ts`) reads for `sys_audit_log.user_id`. So every metadata save's audit row named nobody, on every door, `/meta` included, even though the save's `actor` already reached `created_by` / `updated_by` / `recorded_by`.\n\nBoth verbs now build one `writeContext` per transaction: `isSystem: true` as before, plus `attributedUserId: opts.actor` when the save names an actor. `attributedUserId` is the existing attribution channel (`ExecutionContext.attributedUserId`, copied by the engine into `HookContext.provenance.attributedUserId`). The write is still authorized as the system, and the actor is never placed in `userId`, so no caller-gating hook reads it as the caller. With no actor the key is absent, so engine self-writes and seeds stay unattributed, as before. Reads are unchanged. No new mechanism, no spec change.\n\n## Tests\n\n- New pins in `sys-metadata-repository.recorded-by.test.ts` (the file's existing engine double now records each write verb's context; no new double):\n  - actor case: create, update and delete with three different actors. Every write (`sys_metadata` insert/update/delete plus the history insert) carries `isSystem: true`, `attributedUserId` set to that write's actor, and no `userId`.\n  - control: with no actor, all six writes carry `isSystem: true` and no `attributedUserId` key.\n- A real-store pin with the audit writer installed cannot live in this package. `@objectstack/metadata-protocol` has no driver, objectql or plugin-audit dependency, and objectql depends on this package, so importing it would create a cycle. The engine-to-audit-writer leg was measured end to end instead (Verification below).\n\n<details><summary>Package suite and typecheck at 9bc0b58490</summary>\n\n`pnpm --filter @objectstack/metadata-protocol typecheck && pnpm --filter @objectstack/metadata-protocol test` under the verify lock: `VERDICT command-exit 0`, Test Files 279 passed, 4 skipped (283). Tests 21783 passed, 26 skipped.\n</details>\n\n<details><summary>Ablation (fix committed first, src import so no rebuild needed)</summary>\n\n`scripts/ablation-replace.mjs` removed the `attributedUserId` spread from `put`'s `writeContext`. Anchor 1 -> 0, blob 5b8de92d7583 -> 3ee7c3a8b2eb. Result: 1 failed, 14 passed. The failure was the actor pin; the control stayed green. Restore: blob == HEAD 5b8de92d7583, `git diff HEAD` empty.\n</details>\n\n## Acceptance notes\n\n- The `/automation` doors pass no `actor` until #27538 lands. Before that PR, their audit rows stay null for the same reason their `created_by` does.\n- `pnpm check:system-context-census` passes with no register edit. The change spreads `isSystem: true` exactly as before, and the census does not count that as a new elevation read site.\n\n## Verification\n\n<details><summary>Live, stock showcase, fresh DB, signed in as the seeded admin</summary>\n\nBranch build at this PR's head, plus #27538's one-file runtime change applied locally and not committed. I read `GET /api/v1/data/sys_audit_log` filtered to `object_name = sys_metadata`. Every door answered 200:\n\n- `PUT /api/v1/meta/flow/qa_meta_27539` gave a create row with `user_id` and `actor` set to the admin id.\n- `POST /api/v1/automation` gave a create row with `user_id` and `actor` set to the admin id.\n- `PUT /api/v1/automation/qa_auto_27539` gave an update row with `user_id` and `actor` set to the admin id.\n- `DELETE /api/v1/meta/flow/qa_meta_27539` gave a delete row with `user_id` and `actor` set to the admin id.\n\nEarlier run without #27538's change: the `/meta` create and delete rows held the admin id. The `POST /api/v1/automation` create row had `user_id` null and `actor` null. That door passes no actor yet, so this is the no-actor control.\n</details>\n\n<details><summary>Gates at 9bc0b58490</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 60 families, and all 60 exited 0. Reconciliation `--ran`: \"60 derived, 60 run, 0 NOT-MEASURED, 0 UNRUN\". `test:repo` and repo-wide lint are left to CI.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcScm27Q3R5mkYLPWdB)_\n"

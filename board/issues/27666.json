@@ -1,0 +1,35 @@
+{
+  "number": 27666,
+  "kind": "issue",
+  "title": "service-datasource: a runtime-origin or reconnected plugin-driver datasource loses the #27277 external-driver floor, because the connection service registers the datasource def without its driver id and unregisterDriver drops the stored one (epic #27261)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T16:50:49Z",
+  "updated_at": "2026-10-29T16:53:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27666",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① fail-open of a refusal boundary owed by landed work (#27277, PR #27403 `86edcaf8`), escalated as must-fix class by the post-landing contract review 6502877381 (③). It sharpens the epic body's \"P2 prerequisite\" line, which this card now carries.\nReader: the epic PM (#27261) dispatches it in the epic subtree; the fix is in `packages/spec/src/contracts/data-engine.ts` (`EngineDatasourceDef`), `packages/services/service-datasource/src/datasource-connection-service.ts` (`connect`, `reconnect`'s `restoreOldPool`) and an engine test.\nDedupe (open AND closed): \"datasource reconnect unregisterDriver registerDatasourceDef driver id lost external driver floor\" → 15 hits, none this defect (#12758 widened the def for `credentialsRef`, the same shape of fix).\nreach: read on `main`, not measured live. `needsExternalDriverFloor` reads `def.driver ?? stored.driver`. `DatasourceConnectionService.connect` (~:669) calls `registerDatasourceDef({ name, schemaMode, external })` with no `driver` (`EngineDatasourceDef` has no such key), and `reconnect` (~:829–870, reached from the admin plugin's update door ~:552) first calls `engine.unregisterDriver(name)`, which deletes the stored def (engine.ts ~:9216). So a datasource built through the connection service, whose host-provided `datasource-driver-factory` supports a plugin driver id, is never floored, and nothing says so: a driver that ignores `where` would serve rows outside the caller's sharing/RLS scope, and remote write refusals would not map. Manifest datasources (`registerApp` → `registerDatasourceDef(ds)` with `driver`) keep the floor.\ntype: Bug\n\n## 维护者速读\n\n- **现象：** 通过数据源管理（运行时创建或编辑后重连）接入的插件驱动外部数据源，不会挂上 #27277 的兜底层（行数上限、内存里重新过滤 where、写入拒绝映射），而且没有任何提示。\n- **原因：** 连接服务登记数据源定义时不带驱动 id，重连时引擎又把之前存的定义一起删掉，于是引擎判断「不是插件驱动」。\n- **影响：** 目前仓库内没有为插件驱动提供的驱动工厂，所以只有宿主自己注册了这类工厂时才会触发；一旦触发，忽略 where 的驱动可能越过共享/行级权限返回数据。\n- **最小修法：** `EngineDatasourceDef` 加可选 `driver`，连接服务在 connect 和 restoreOldPool 都把 `record.driver` 传进去；补一个「unregister 再 connect」的引擎测试。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `EngineDatasourceDef` (spec contracts) gains an optional `driver` id; `DatasourceConnectionService.connect` and `reconnect`'s restore path pass `record.driver` / the previous driver id.\n- [ ] Pin: a plugin-driver datasource connected through the connection service is floored; after `reconnect` (unregister, then connect) it is still floored; a built-in driver stays unfloored.\n- [ ] Riders from the same review (6502877381 ④, comment-only): the `EXTERNAL_ROW_CAP_EXCEEDED` ledger row notes that it deliberately differs from the standard `MAX_RECORDS_EXCEEDED` (400, a caller-side limit) because the cap is a 422 on a valid query the remote's size makes unservable (ruling 6487532394); the \"ADR-0015 Tier A\" citations in the ledger row, `external-driver-floor.ts` and `external-driver-errors.ts` cite the epic ruling instead.\n- [ ] The epic body's \"P2 prerequisite\" line points here.\n\n`Clause-②: yes` (an optional key on a published spec contract) · `Metadata-protocol: none`. Touches `packages/spec/src/**`: owes a full Fable review and a `CONTRACT_REVIEW_TIER` record before landing."
+}

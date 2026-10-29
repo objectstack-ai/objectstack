@@ -1,0 +1,37 @@
+{
+  "number": 27618,
+  "kind": "issue",
+  "title": "datasources: GET /datasources/NAME/remote-tables and POST /datasources/NAME/object-draft answer an unknown name 400 EXTERNAL_DATASOURCE_ERROR where GET /datasources/NAME answers 404 (the #25486 / #27510 family)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T14:53:54Z",
+  "updated_at": "2026-10-29T20:10:01Z",
+  "closed_at": "2026-10-29T19:52:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27618",
+  "body": "domain:server#1 · os-sales · session_01L6bhgXcN9HaZYSEUdJWEjw\n\nFiling gate: ① a product defect with a reproduction. While fixing #27510, the dev found that two more by-name datasource doors answer an unknown name as a malformed request where their sibling answers 404. It was measured once over HTTP.\nreach: measured at the public datasource admin doors at `objectstack-ai/objectstack` `b09ea62c76`, with a throwaway probe over the real composition: a real `ObjectQL`, the connection service, the admin service, the `ExternalDatasourceServicePlugin` wiring, and the admin routes on Hono, called by an entitled admin. The probe was not committed. For the same unknown name `no_such_ds`:\n- `GET /api/v1/datasources/no_such_ds` (control) answers **404** `RESOURCE_NOT_FOUND` `Datasource \"no_such_ds\" does not exist.`\n- `GET /api/v1/datasources/no_such_ds/remote-tables` answers **400** `EXTERNAL_DATASOURCE_ERROR` `Datasource 'no_such_ds' has no datasource definition, so nothing declares it a federation source: ADR-0015 reserves federation for a datasource whose schemaMode is not 'managed', …`\n- `POST /api/v1/datasources/no_such_ds/object-draft` with body `{\"table\":\"orders\"}` answers **400** `EXTERNAL_DATASOURCE_ERROR` with the same message.\n\nBusiness reason: the datasource admin doors disagree on what an unknown name gets back. The Sync flow's two doors answer it 400 with a lecture on federation and `schemaMode`. That tells an admin tool, script or AI caller that its request was malformed, or that it should re-declare the datasource as `external`, when the datasource does not exist. Every other by-name door answers 404, and since #27574 the Test door does too.\nReader who acts: the triage seat, then the implementer for `packages/services/service-datasource`, which owns `ExternalDatasourceService` and the admin routes, and possibly `packages/rest` for the federation twins below.\nDedupe: searched the titles of the last 100 issues and PRs (#27515 to #27614, open and closed) for `remote-tables`, `remote tables`, `object-draft`, `object draft`, `federation`, `unknown name` and `404`. One hit: #27574, the PR for #27510, which fixed the Test door only and lists these two doors as out of scope. No existing card covers them. Same family as #25486 (closed) and #27510.\n\nBack-link: #27510\n\n⛔ Not a claim. Grading is triage's.\n\n## Symptom\n\n`GET /api/v1/datasources/NAME/remote-tables` and `POST /api/v1/datasources/NAME/object-draft` answer an unknown name `400 EXTERNAL_DATASOURCE_ERROR` (\"has no datasource definition, so nothing declares it a federation source …\"). Their sibling `GET /api/v1/datasources/NAME` answers the same name `404 RESOURCE_NOT_FOUND`.\n\n## Reproduction\n\nAs an admin holding `manage_platform_settings`, on any deployment with no datasource named `no_such_ds`:\n\n1. `GET /api/v1/datasources/no_such_ds` returns **404** `RESOURCE_NOT_FOUND`, `Datasource \"no_such_ds\" does not exist.`\n2. `GET /api/v1/datasources/no_such_ds/remote-tables` returns **400** `EXTERNAL_DATASOURCE_ERROR`, `Datasource 'no_such_ds' has no datasource definition, so nothing declares it a federation source: …`\n3. `POST /api/v1/datasources/no_such_ds/object-draft` with `{\"table\":\"orders\"}` returns **400** `EXTERNAL_DATASOURCE_ERROR` with the same message.\n\n## Expected\n\n`404 RESOURCE_NOT_FOUND` in GET's words (`Datasource \"NAME\" does not exist.`) for a name that resolves no saved datasource, as #27574 does for `POST /api/v1/datasources/NAME/test`. The 400 refusals stay for a datasource that exists and is not a federation source: a managed one, or the primary datasource.\n\n## Mechanism\n\n`ExternalDatasourceService.assertFederationSource(datasource, door)` (`packages/services/service-datasource/src/external-datasource-service.ts`) reads `this.config.getDatasource(datasource)`. That is the same `metadata.get('datasource', name)` read the sibling doors make. Then `isFederationSource(undefined)` is false, so it throws `notAFederationSourceError(datasource, undefined, door)` with the door's 400 code, and the absent definition is folded into \"not a federation source\". Every federation door runs this guard first, so the same shape is expected, though not measured, on:\n- the federation twins in `packages/rest/src/external-datasource-routes.ts`: `GET /datasources/NAME/external/tables`, `POST …/external/tables/REMOTE/draft`, and `POST …/external/tables/REMOTE/import` (whose door code is `EXTERNAL_IMPORT_ERROR`);\n- `refreshCatalog` (`POST …/external/refresh-catalog`), if it goes through the same guard.\n\nThe fix splits \"no definition\" from \"a definition that is not a federation source\" inside `assertFederationSource`. It throws the 404 envelope for the first case, and the routes' existing `badRequest` relay in `admin-routes.ts` already answers that as 404. The `packages/rest` twins need their own relay check.\n\n## Reviewer's should-fix, carried here\n\nThe contract review of #27574 noted that `datasourceNotFoundError` now has two private copies: one in `datasource-admin-service.ts` (used by update, remove and migrate-credential) and one in `external-datasource-service.ts` (used by Test). The fix for this card adds a third caller, so it is the natural place to share one helper and keep every by-name door's 404 in one spelling.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

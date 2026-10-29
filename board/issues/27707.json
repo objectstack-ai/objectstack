@@ -1,0 +1,31 @@
+{
+  "number": 27707,
+  "kind": "issue",
+  "title": "metadata-protocol, objectql: the two non-blocking contract-review notes on #27535 — guard the promotion door's permission-set name judge with `draftForGate`, and note the metadata-protocol caller on the registry member",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T19:39:42Z",
+  "updated_at": "2026-10-29T19:59:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27707",
+  "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiling gate: **③ a maintainer-directed task.** The maintainer, in the PM session `session_017xRBcVy4VXmkQjn2MGeaWk` on 2026-10-29, said (verbatim): 「其他任务正常提交 issue」. This card carries the two non-blocking notes the record left on PR #27535 (merged), filed as a normal card.\n\nBusiness reason: #27535 landed with two notes its contract review (comment 6501292842, PASS) marked non-blocking and the seat's ACCEPT (comment 6502611799) set aside \"for a follow-up, not held against landing\". One makes the promotion door's refusals follow the order its sibling judges already use; the other makes a future rename of a private registry member fail at its source.\nReader: the dev who takes this card from the queue (`packages/metadata-protocol/src/protocol.ts` and `packages/objectql/src/registry.ts`).\nDedupe: searched the open and closed issues (GitHub issue search scoped to `objectstack-ai/objectstack`) for \"permission set name collision promotion draftForGate registry packageHeldSecurityCatalogNames\" (6 hits) and \"NAMESPACE_CONFLICT permission set publish NO_DRAFT refusal order follow-up 27535\" (24 hits). None covers either note.\n\n## What to change\n\n### Note 2: the promotion-door ordering\n\nThe ACCEPT names it: \"Note 2: the promotion-door ordering, a refusal-for-refusal change with no accept-set effect.\" The contract review (should-fix 2, \"Refusal order at the promotion\"): \"`permissionSetNameCollisionRefusal` at `:23044` runs unguarded, while its three siblings (`permissionSetOwnerBindingRefusal`, `defaultRecordPageSaveRefusal`, the name judge) run under `if (draftForGate)`, and `repo.promoteDraft`'s `NO_DRAFT` (`sys-metadata-repository.ts:1552`) comes after. […] Refusal for refusal, no accept-set effect; guard it with `draftForGate` like the siblings so the first fact the caller is told is the one about its own state, or record in the comment why this judge runs first.\"\n\nAt `origin/main` `a75ddba1`, `packages/metadata-protocol/src/protocol.ts`:\n- `:22935`: `draftForGate` is read.\n- `:23019` (name judge) and `:23031` (`permissionSetOwnerBindingRefusal`): each runs under `if (draftForGate)`.\n- `:23046–23051`: the `permissionSetNameCollisionRefusal` call sits in a bare `{ … }` block, not under `if (draftForGate)`.\n- `:23058`: `defaultRecordPageSaveRefusal` runs under `if (draftForGate)`.\n- `packages/metadata-protocol/src/sys-metadata-repository.ts:1570`: `promoteDraft` sets `NO_DRAFT` (the review cited `:1552` at the PR head).\n\nThe ask: put the `:23046` block under `if (draftForGate)` like its siblings, so a promotion with no draft at the address gets the repository's `NO_DRAFT` answer first. If there is a reason it must run first, record that reason in the comment above it (`:23037–23045`) instead. Either way, add one pin for the order: a per-item publish with no draft answers `NO_DRAFT`, with the existing collision pins still green.\n\n### Note 3: a one-line comment on the registry member\n\nThe ACCEPT names it: \"Note 3: a one-line comment on the registry member.\" The contract review (should-fix 3, \"Private member reached structurally\"): \"`packageHeldSecurityCatalogNames` is `private` on `SchemaRegistry`, and the door reaches it by duck-typing (`read.call(registry)`), as the exported `findPackageHeldSecurityCatalogNames` itself does with bracket access. […] a one-line note on the registry member naming the metadata-protocol caller would make a future rename red at the source as well as in the test.\"\n\nAt `origin/main` `a75ddba1`:\n- `packages/objectql/src/registry.ts:3503`: `private packageHeldSecurityCatalogNames()`; its doc comment (`:3491–3502`) names `findPackageHeldSecurityCatalogNames` (`:2370–2374`) as its exporter but not the metadata-protocol caller.\n- `packages/metadata-protocol/src/protocol-save-door-refusals.ts:283` and `:296–297`: the caller that reads the member by name.\n\nThe ask: add one line to the doc comment at `registry.ts:3491–3502` naming `protocol-save-door-refusals.ts` (`registryPackageHoldersOf`) as a by-name reader, so renaming the member means updating that caller and its objectql test.\n\nOut of scope: any change to what the doors accept or refuse. Both notes are ordering and comment work only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

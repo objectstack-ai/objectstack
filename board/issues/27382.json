@@ -2,8 +2,8 @@
   "number": 27382,
   "kind": "issue",
   "title": "qa(checklist-test, RUNNER rule 2): a security finding met in a QA run gets no GitHub card at all — only a pm-dispatch fix dispatch — and every issue write of a run goes through pm-dispatch (maintainer, 2026-10-29)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:queue",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T04:27:27Z",
-  "updated_at": "2026-10-29T10:15:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T20:04:31Z",
+  "closed_at": "2026-10-29T20:03:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27382",
   "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiling gate: **③ a maintainer-directed task.** The maintainer, in session `session_017xRBcVy4VXmkQjn2MGeaWk` on 2026-10-29, while wave 3 of the 18.3.0 release sweep (#27377) was being dispatched, said, verbatim and in this order:\n1. 「你应该使用 pm-dispatch 技能处理 issue」\n2. 「对于测试中遇到的安全问题，不适合提交issue 的，只是使用pm-dispatch技能派发」\n3. 「这些都应该写到 checklist skills 中」\n\nBusiness reason: an authentication or authorization hole found by a QA run is currently disclosed as a public card. That card carries only `detail withheld pending maintainer`, but it still announces in a public repository that a hole exists on a named item and clause, before the fix lands. The maintainer's ruling removes that card. Only the fix dispatch remains.\nReader: the runner sessions of every future `checklist-test` run. They read `.claude/skills/checklist-test/SKILL.md` and `docs/qa/platform-checklist/RUNNER.md` and nothing else of this conversation. The wave-3 runners already carry the ruling in their dispatch prompts; the next wave would not.\nDedupe (open AND closed): \"checklist-test security finding no issue dispatch fix withheld card rule\" returns 160 hits. None of them is this change. The nearest is #26567 / commit `03e898c1`, which wrote the 2026-10-27 rulings (withheld card + immediate dispatch) into the same two places.\n\n## What changes\n\nToday the rule is one text in two places: RUNNER.md rule 2's carve-out, around lines 81–97 at `c4c515ad`, and checklist-test SKILL.md, in the Guardrails line 「认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方」 and in §4's extraction line 152. It says to file a card carrying only the item id, the clause and `detail withheld pending maintainer`, then dispatch an in-seat `os-dev` whose prompt alone carries the reproduction.\n\nAfter the change:\n1. **No card at all.** An authentication or authorization finding, or any finding whose reproduction is an exploit recipe, is ⛔ never filed as a GitHub issue. That includes the withheld-detail card. Its existence is not posted to a tracking card either.\n2. **The run record** carries only the row `area.item · clause · security finding — detail withheld, fix dispatched`. That row still counts as a completed verdict, and the title counts it as a `FAIL`. The reproduction stays in the runner session.\n3. **The fix is dispatched at once through pm-dispatch:** an in-seat `mode:subagent` `os-dev` whose dispatch prompt alone carries the reproduction, with no waiting on the maintainer. Its PR, commit and changeset text describe the fix as a hardening, without the exploit steps.\n   - The `os-dev` agent is defined for exactly ONE GitHub issue. Here there is no issue, so the dispatch prompt stands in for the card. State how `os-dev` reports in that case: no `Fixes #` line, and the report goes to the dispatching session.\n   - A one-shot runner with no dispatch channel hands the reproduction to the session that dispatched it, as today.\n4. **Every GitHub write of a run goes through pm-dispatch** (ruling 1): issue creation, comments, closes and any defect-card handling, through the `scripts/pm/` doors. The skill already says this for writes (§4). Make the text say that it covers *handling* issues as well — extraction, dedupe and close-out — not only posting them.\n5. Keep \"one rule written in both places, not a precedence claim by either\". Cite the new ruling beside the 2026-08-18 and 2026-10-27 rulings, and record its provenance as a comment on #27377.\n\n## Gates to expect\n\n- `pnpm check:pm-skill-ratchet` / `scripts/pm/check-skill-line-ratchet.mjs`. #26567 had to touch it. A net line increase needs the ruling id in the PR body. The ruling is the maintainer's words in the dispatching session, and the seat will post them on #27377 as a comment id before ACCEPT.\n- `node scripts/check-platform-checklist.mjs` stays green.\n- `skip-changeset`: no package publishes.\n\n## Out of scope\n\n- The wave-3 runs themselves.\n- The QA periodic-testing tooling. That is a separate card.\n- Any change to how non-security failures carry their reproduction. That stays in full.\n\nTier: `.claude/**` is governed Tier S, and `docs/qa/**` is not governed. Clause-②: no. Metadata-protocol: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,33 @@
+{
+  "number": 27607,
+  "kind": "issue",
+  "title": "plugin-webhooks: the sys_webhook object still says declared webhooks are \"materialized into rows on boot\", which ADR-0131 D2 retired",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "documentation",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T14:43:56Z",
+  "updated_at": "2026-10-29T15:17:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27607",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiled by `domain:spec` seat 3 from the triage contract review of PR #27499 (#27448, comment 6496521580), which escalates it as its own card. ⛔ Not a claim. Lane and grade are triage's.\n\n## Observed (on `origin/main`)\n\n`packages/plugins/plugin-webhooks/src/sys-webhook.object.ts:56`, the `sys_webhook` object's `description`, says a webhook is \"Declared in code via defineStack({ webhooks }) / defineWebhook() (materialized into rows on boot) or authored directly in the Studio\". Under ADR-0131 D2 a declared webhook is read from the metadata registry by the `declaredWebhooks` reader and writes no `sys_webhook` row; the dogfood proof `webhook-materialization` pins exactly that. The `managed_by` docblock (:14) and the generated translation of the description in plugin-webhooks carry the same model. PR #27499 corrected the spec's refusal text and the proof registry; this object's text is outside its surface.\n\n## Wanted\n\nThe object's `description`, the `managed_by` text and the generated translations say what a `sys_webhook` row is today (a Studio- or API-authored subscription) and that declared webhooks are not rows. Regenerate translations with the generator. Text only.\n\n## Dedupe words\n\nsys_webhook description materialized into rows on boot declared webhook ADR-0131 D2 managed_by\n"
+}

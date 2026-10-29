@@ -1,0 +1,35 @@
+{
+  "number": 27638,
+  "kind": "pull_request",
+  "title": "fix(app-shell): format currency, number and percent values in the record history Changes entry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T15:45:37Z",
+  "updated_at": "2026-10-29T16:27:27Z",
+  "closed_at": "2026-10-29T16:27:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T16:27:25Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27638",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg54Jh9FAXMnvRAdp2wREPH5)_\n\n## 维护者速读\n\n- 改了什么：记录详情 Activity › Timeline 的 \"Changes\" 条目里，货币、数字、百分比字段不再显示原始存储值（如 `4321000`），改为与记录页同样的格式（如 `$4,321,000.00`）。\n- 为什么改：历史条目与记录头部对同一个值显示两种样子，用户会以为数据有问题；格式化统一走字段渲染器已有的格式化函数，不另写一套。\n- 风险与回滚：只影响历史面板的显示文本，不改存储、不改记录页；回滚即 revert 本 PR。record 模式货币因单次格式化拿不到行上的币种字段，显示为不带符号的数字。\n- 先看：`ui/packages/app-shell/src/utils/auditHistoryDisplay.ts` 的 `formatNumericAmount`；`ui/packages/fields/src/index.tsx` 新增的 `formatNumberFieldValue` 导出。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/utils/__tests__/auditHistoryDisplay.numericAmounts-27486.test.ts`，预期 12 passed。\n- 需要你做的：无，席位落地。\n\nFixes #27486\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- `auditHistoryDisplay.ts` `formatScalar()` gains an arm for `currency`, `number` and `percent` fields. A finite stored value (a JS number, or a decimal column's numeric string) is formatted by the calls the record page's cells make, by reference:\n  - `currency`: `formatCurrency(value, resolveFieldCurrency(def, ctx.tenantCurrency), ctx.locale)`, the pair `CurrencyCellRenderer` uses.\n  - `number`: `formatNumberFieldValue(value, field, ctx.locale)`, the call `NumberCellRenderer` and `NumberField`'s read-only branch make (declared `scale`, `useGrouping`).\n  - `percent`: `formatPercent(value, percentCellScale(def), resolveFieldScale(...), ctx.locale)`, the pair `PercentCellRenderer` uses (declared storage and width).\n  A value that is not a number keeps the existing `String(value)` face.\n- `AuditFieldDef` declares the members those formatters read (`scale`, `max`, `useGrouping`, `currencyConfig`), so the arm needs no cast.\n- `AuditValueFormatContext` gains an optional `tenantCurrency`, the last step of `resolveFieldCurrency`'s precedence.\n- `@object-ui/fields`: `formatNumberFieldValue` is exported from the package entry (it was module-internal), and its `locale` parameter is optional like `formatCurrency`'s and `formatPercent`'s. No rendering change there.\n- `ui/scripts/__tests__/percent-storage-callers-11475.test.ts`: the repo-wide pin over every `formatPercent` caller gains the new call's row (storage `percentCellScale(def)`, field in hand). The pin went red on the first gate run because the population on disk grew by this file, which is its job.\n- Changeset: `patch` for `@object-ui/app-shell` and `@object-ui/fields`.\n\n### Currency modes, measured against `resolveFieldCurrency`\n\n- `fixed`: the declared code. The card's `showcase_account.annual_revenue` is `fixed` USD, so its repro now reads `$4,321,000.00`.\n- `dynamic`: the tenant default when the caller passes `tenantCurrency`; without it, the formatter's no-code face (a plain grouped number at width 2), never a guessed symbol.\n- `record` (ADR-0144 D2): the code lives in a sibling field of the row. `formatAuditValue` is called once per side with no row, so the resolver answers no code, and the amount reads as a plain grouped number. The tenant default is never substituted (the resolver's own rule). No hard-coded code, no second formatter.\n\n## Tests\n\n`ui/packages/app-shell/src/utils/__tests__/auditHistoryDisplay.numericAmounts-27486.test.ts`, 12 cases: currency (fixed USD both sides, JPY width, de-DE locale, numeric string, dynamic with and without a tenant default, record mode), number (declared scale, scale-0 year ungrouped, de-DE, non-numeric value), percent (fraction storage, whole storage via `max`, de-DE). Each states the record page's text as a literal and checks the shared formatter returns the same.\n\n## Acceptance notes\n\n- **Caller wiring, out of this card's file surface.** `RecordDetailView`'s History effect builds the format context as `{ t, locale: displayLocale, lookupLabels }`. It does not pass `tenantCurrency`, so a `dynamic`-mode currency field still reads as a plain number in history while the record page shows the tenant symbol. The one-line fix (`tenantCurrency` from `useLocalization().currency`) is in `RecordDetailView.tsx`, which this card's order puts out of bounds (the record-page chain). Listed for the seat in the report.\n- **Record-mode code.** A per-side code would need each side's payload (`old_value` / `new_value`) handed to the formatter; that is a caller change too. Not attempted.\n- **File surface.** The percent-caller pin row above is outside the order's named surface (`auditHistoryDisplay.ts` and its tests, the `@object-ui/fields` export, the changeset); it is the registration that pin requires of any new `formatPercent` caller, and is declared as a deviation in the report.\n- The scale-0 year case and the non-numeric case also pass with the new arm removed (both equal `String(value)`); they pin that the arm keeps those faces, not that it fires.\n\n## Verification\n\n<details><summary>Local runs, head fded0c5f</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/utils/__tests__/`: Test Files 28 passed, 1 skipped; Tests 433 passed, 8 skipped.\n- `pnpm --filter @object-ui/app-shell run type-check` (both tsconfigs) and `pnpm --filter @object-ui/fields run type-check`: exit 0.\n- Ablation (`scripts/ablation-replace.mjs`): the arm's `return formatNumericAmount(...)` disabled, the new file reads 10 failed, 2 passed; restored, blob equals HEAD and `git diff HEAD` is empty.\n- Derived gate list (`dispatch-gates --commands`, 34 commands, `check-sdui-manifest` included) run on fded0c5f, each exit 0, including `pnpm --dir ui exec vitest run scripts/` (Test Files 169 passed, 2 skipped; Tests 4902 passed, 2 skipped). `dispatch-gates --ran`: 34 derived, 34 run, 0 NOT-MEASURED.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CXcn7RbCYknff87Ke1)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 27480,
   "kind": "issue",
   "title": "ai chat: render a blueprint proposal with decision iterate_or_new as the extend-or-new question, not as a 开始搭建 approval card",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T10:03:14Z",
-  "updated_at": "2026-10-29T13:45:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T15:42:33Z",
+  "closed_at": "2026-10-29T15:42:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27480",
   "body": "Filing gate ②: the ui half of a gap measured on cloud#3368 (GA readiness, Sam 「同意立卡」 2026-10-29 09:46Z). Findings: https://github.com/objectstack-ai/cloud/issues/3368#issuecomment-6493627066. The cloud half is objectstack-ai/cloud#3369. Filed by `repo:cloud` seat 2. ⛔ Not a claim.\n\n## 维护者速读\n\nAI 搭建时，如果新方案和已有应用重叠，cloud 的 propose_blueprint 会返回 `decision: 'iterate_or_new'`，意思是要先问用户「在已有应用上扩展，还是另建」。但聊天界面把它渲染成普通的「开始搭建」批准卡片，用户一点就可能另建一个重复应用。cloud#3369 让服务端不再把它当作可批准的方案。这张卡让界面把它显示成那个问题本身。\n\n## Facts\n\n- objectstack `ui/**` has no reference to `iterate_or_new` (grep at main). `mapMessages` renders every `blueprint_proposed` result as a normal approval card.\n- The result carries `existingAppOverlap` (the app's `name` and `label`, what it contains, and which planned objects duplicate it). See cloud `service-ai-studio/src/tools/blueprint-tools.ts:2136-2138`.\n\n## Work\n\n1. When a `blueprint_proposed` result has `decision: 'iterate_or_new'`, render no 开始搭建 approval button. Show the question naming the existing app, with two choices («在「X」上继续完善» / «另建一个独立应用») that send the matching reply.\n2. Tests: an iterate_or_new result renders the question and no approve button; a plain proposal is unchanged. Include an ablation.\n\n## Done when\n\nNo approve button is shown for an iterate_or_new proposal."

@@ -2,9 +2,9 @@
   "number": 27591,
   "kind": "pull_request",
   "title": "fix(studio): field inspector API name refuses a taken name and drops the trailing underscore",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T14:17:15Z",
-  "updated_at": "2026-10-29T14:18:20Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-10-29T14:51:21Z",
+  "closed_at": "2026-10-29T14:51:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T14:51:18Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27591",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgNbC31RXiaPbk8mUf7e5LXa)_\n\nFixes #27517\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：Studio 字段检查器的「API 名称」输入框改为显示作者实际键入的内容；键入其他字段已用的名称时，给出与「添加字段」弹窗完全相同的拒绝提示，字段保留编辑前的名称；写入的名称按新建对象对话框的规则规范化（末尾标点不再存成下划线）。\n- 为什么改：原来键入已存在的名称会无声吞掉最后一个按键并把半截名称（`statu`）存进草稿；`Estimated Hours!` 会存成 `estimated_hours_`。\n- 风险与回滚：仅 Studio 字段检查器一个输入框与「添加字段」弹窗的一处提示取值（抽成共享函数，行为不变）；不改元数据协议；回滚即 revert 本 PR。\n- 先看：`ObjectFieldInspector.tsx` 的 `FieldApiNameInput`（键入、拒绝回退到编辑前名称、失焦复位）；`AddFieldPopover.tsx` 的 `fieldNameTakenRefusal`；新测试文件。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.apiNameRefusal-27517.test.tsx`，预期 6 个用例全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`ObjectFieldInspector`** — the API name box is now `FieldApiNameInput`, a box that keeps what the author typed as its own text and still writes the field's name on every keystroke, as before:\n  - The text is normalised as the new-object dialog (`CreateItemDialog`) normalises an identifier: `toFieldNameLoose` while typing, so an `_` can be typed mid-word, and the strict rule (`toFieldNameOrEmpty`, which is `toFieldName` without its `field` placeholder) for the name written. `Estimated Hours!` saves `estimated_hours`.\n  - A name another field of the object holds is refused with the Add field popover's own sentence. The box keeps showing what was typed (no keystroke dropped), marks itself `aria-invalid` and points `aria-describedby` at the refusal, and the field is left carrying the name it had when the edit began, not the last free prefix of the refused name. An emptied box writes no name either.\n  - Leaving the box shows the name the field carries (the refusal goes with it).\n  - A name arriving from outside the box (another field selected, the Label deriving one) replaces the text; the box's own write echoing back does not.\n  - `setKey` now receives the already-normalised name; its collision guard reads the same `takenNames` list the box refuses against. The objectui#7615 ownership stamp is unchanged: every keystroke still stamps the author as owner.\n- **`AddFieldPopover`** — the duplicate-name refusal is extracted as the exported `fieldNameTakenRefusal(name, takenNames, locale)` and the popover reads it; its hint logic is otherwise unchanged (same branches, same key `engine.studio.data.addFieldApiNameTaken`). No second validator, no new string.\n- Root changeset: `@object-ui/app-shell` patch.\n\n## Tests\n\n- New `ObjectFieldInspector.apiNameRefusal-27517.test.tsx` (6 cases), typing one character at a time through a host that feeds each patch back and follows the rename with the selection: the refusal equals `fieldNameTakenRefusal` for the same name; the field keeps `estimated_hours`; typing past the refusal (`status_2`) takes the name; blur restores; an emptied box saves nothing; `Estimated Hours!` saves `estimated_hours`; `repair_ticket` still types its underscore.\n- Ablation, one leg per behaviour, each via `scripts/ablation-replace.mjs` (anchor hit 1 → 0, blob changed, restored, `git diff HEAD` empty afterwards); app-shell tests import the source, no build in the path:\n\n| Leg | Mutation | Result |\n|---|---|---|\n| rollback | refused name written instead of the edit-start name | 2 of 6 red (keeps previous name; blur restore) |\n| normaliser | loose text written as the name | 1 of 6 red (`Estimated Hours!`) |\n| display | box shows the stored name, not the typed text | 3 of 6 red (refusal keystroke, emptied box, trailing `_`) |\n\n- Existing inspector, popover, Data pillar and external-object suites green before the main merge (28 files, 297 tests); the full `metadata-admin/` and `studio-design/` directories are in the gate run below.\n\n## Acceptance notes\n\n- The Label → API name derivation has the same prefix shape on a collision: deriving `Status` letter by letter on a new field whose object already has `status` leaves the derived `statu`. That path is `deriveNameFor`, not the API name box, and is outside this card; noted, not changed.\n- The refusal is shown while the author is in the box; leaving the box restores the stored name and drops the refusal, which is the \"previous name kept\" the card's Expected section describes.\n- Docs-driven rule (ui/AGENTS.md #2): no docs page describes the inspector's API name box; nothing to update.\n\n## Verification\n\nGate readings are recorded in the report comment on #27517.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CYtNGSzW4fU2cRSbut)_\n"

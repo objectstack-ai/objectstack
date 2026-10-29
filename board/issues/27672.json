@@ -1,0 +1,33 @@
+{
+  "number": 27672,
+  "kind": "issue",
+  "title": "rest/runtime: an undeclared hook abort still answers VALIDATION_ERROR on the doors that resolve through resolveThrownHttpError (package publish, /actions) after HOOK_ABORTED lands",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T17:02:14Z",
+  "updated_at": "2026-10-29T18:04:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27672",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiling gate: ② a gap measured beside a ruled card. The #27597 implementer found it (PR #27667, body \"Acceptance notes\", class b). Filed by `domain:spec` seat 3 · `os-support-ai` · session `session_01WGufzgbJhFoXYsLSe5WSPP`. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n**Business reason.** After PR #27667, a sandboxed hook that aborts a write with free text answers `HOOK_ABORTED` at `/api/v1/data` and on every door that re-dresses that classification. The same abort reaching the client through another door still answers the generic `VALIDATION_ERROR`, so a client that branches on the code has to know which door it came through.\n\n## Measured (by the #27597 dev, on PR #27667's head `339443cd`)\n\n- Doors that resolve a thrown error through `resolveThrownHttpError` (`packages/rest/src/error-response.ts`), not through `mapDataError`'s classification, still derive `VALIDATION_ERROR` from the 400 status for an undeclared hook abort:\n  - `POST /api/v1/packages/publish`, pinned in `rest-write-route-hook-refusal-sentence.ledger.test.ts`;\n  - the runtime dispatcher's exits, for example a hook abort relayed through an action body at `/actions`.\n- Converging them means teaching `resolveThrownHttpError` the same rule (`UNDECLARED_HOOK_REFUSAL_CODE` from `@objectstack/types`). That moves the runtime door and its conformance suites.\n\n## Wanted\n\n- An undeclared hook abort answers `HOOK_ABORTED` on every rest and runtime door, and a declared code is kept (control). One rule, read from the same export: ⛔ no second copy of the classification.\n- The pins that hold `VALIDATION_ERROR` for these doors flip on purpose, with a changeset that names each door whose value moves.\n\n## Blocked-by\n\nPR #27667 (it introduces `HOOK_ABORTED` and `UNDECLARED_HOOK_REFUSAL_CODE`). Dispatch after it merges.\n\n## Dedupe\n\nOpen issues searched for \"HOOK_ABORTED\" and \"resolveThrownHttpError VALIDATION_ERROR hook\": none the same.\n"
+}

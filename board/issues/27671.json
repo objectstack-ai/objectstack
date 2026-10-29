@@ -1,0 +1,36 @@
+{
+  "number": 27671,
+  "kind": "pull_request",
+  "title": "docs(changeset): declare the #27277 and #27425 changesets as Clause-② yes (narrowing)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T17:01:17Z",
+  "updated_at": "2026-10-29T20:10:21Z",
+  "closed_at": "2026-10-29T20:10:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T20:10:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27671",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiVy7F2atKWpo5rp3YPrqddh)_\n\nEpic #27261 follow-up, owed by two post-landing contract reviews. Both pending changesets get the declaration arm their reviews named, before the next release consumes them.\n\n- `.changeset/27277-plugin-driver-floor.md` (PR #27403): `Clause-②: yes` → `yes (narrowing)`. The diff added two ledger codes (widening) and narrowed the accept set on plugin-driver external datasources. Review record 6502877381, ② should-fix.\n- `.changeset/27425-phantom-owner-anchor-fails-closed.md` (PR #27476): `no (narrowing)` → `yes (narrowing)`, and \"Nothing is widened\" becomes a sentence naming the one widened accept set (`grant()` on a federated object that maps `owner_id` through `external.columnMap`). Review record 6493803142, ② and ④ should-fix 2; seat ruling 6502747580.\n\nOnly changeset prose changes; no code, schema or level changes. Both diffs' faces were reviewed at `CONTRACT_REVIEW_TIER` with PASS on their landed heads.\n\nClause-②: no\nMetadata-protocol: none\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2c5z3q4h8inrn5kwqV\n"
+}

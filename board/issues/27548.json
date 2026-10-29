@@ -2,7 +2,7 @@
   "number": 27548,
   "kind": "pull_request",
   "title": "test(verify): warm the first boot at module scope and declare budgets on the files still over 10 s (#23181 slice 18)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T12:26:16Z",
-  "updated_at": "2026-10-29T14:02:36Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-29T14:21:39Z",
+  "closed_at": "2026-10-29T14:21:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T14:21:37Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27548",
