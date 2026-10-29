@@ -209,7 +209,7 @@ describe('evaluatePlainCondition', () => {
   });
 
   it('gives the verdict evaluateCondition gives for the same string and record', () => {
-    const cases: Array<[string, Record<string, any>]> = [
+    const cases: Array<[string, Record<string, unknown>]> = [
       ["status == 'overdue'", { status: 'overdue' }],
       ["status == 'overdue'", { status: 'active' }],
       ['amount > 1000 && data.amount < 5000', { amount: 2000 }],
