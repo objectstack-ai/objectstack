@@ -1117,6 +1117,13 @@ export const ERROR_CODE_LEDGER = {
     // runner adopts its verdict for each failed row.
     'CONCURRENT_UPDATE',
     'ERR_DATASOURCE_UNAVAILABLE',
+    // [#27597] A sandboxed hook body aborted the operation with free text and
+    // declared no code — no `refusals` catalogue entry, no `code` on its
+    // throw. Answered at the status the body declared, else 400, with the
+    // body's own sentence: `mapDataError`'s sandbox unwrap door and
+    // `@objectstack/rest`'s declared-status passthrough both stamp it
+    // (`UNDECLARED_HOOK_REFUSAL_CODE`). A declared code keeps its own answer.
+    'HOOK_ABORTED',
     // [#22114] The `/meta` item write doors' optimistic-lock refusal, carrying
     // `currentVersion`: the arm `structuredCodeAnswer` stamps for a
     // `METADATA_CONFLICT` whose producer (metadata-protocol's conflict builder)
