@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
+import { memoryBackedTmpEnv } from '../../vitest.memory-tmp.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,5 +39,14 @@ export default defineConfig({
     // its `test` script.
     exclude: [...configDefaults.exclude, 'src/templates/**'],
     environment: 'node',
+    // Every scaffold these tests write lands under `os.tmpdir()`, children
+    // included. Under the disk load of a Test Core shard (#27306), measured
+    // beside four `dd … conv=fsync` writers: all 301 cases still passed, but
+    // the `afterAll` that removes the scaffolded trees in
+    // `created-summary.test.ts` and `scaffold-skills-single-copy.test.ts` ran
+    // past its 10 s hook budget, and a file-level failure with no failed
+    // case is the red main saw (runs 40713919581, 40718500281: `pnpm run
+    // test exited (1)`, no test named). Rationale: vitest.memory-tmp.mts.
+    env: memoryBackedTmpEnv(),
   },
 });
