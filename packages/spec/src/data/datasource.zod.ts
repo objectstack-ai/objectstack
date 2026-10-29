@@ -298,8 +298,8 @@ export const ExternalDatasourceSettingsSchema = strictObject(
         '`password` must never be inlined. Bind the secret instead: the Setup → Datasources '
         + "connection form's secret field encrypts it into `sys_secret` and stores the opaque "
         + 'handle here, or set `credentialsRef` to a handle the secret store minted (e.g. '
-        + '`credentialsRef: "sys_secret:9f2c"`). Only `sys_secret:` handles resolve; a '
-        + 'hand-written path is never dereferenced.',
+        + '`credentialsRef: "sys_secret:9f2c"`). The shipped binder resolves only '
+        + '`sys_secret:` handles; it never dereferences a hand-written path.',
       // #4487 corrected the second half of this line. It used to offer
       // `capabilities.readOnly` as the place to "describe the driver" — a key the
       // liveness audit found has NO reader (liveness/datasource.json), so an

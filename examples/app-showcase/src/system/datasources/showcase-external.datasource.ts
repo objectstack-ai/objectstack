@@ -57,7 +57,8 @@ export const ShowcaseExternalDatasource = defineDatasource({
 //   external: {
 //     allowWrites: false,
 //     // The opaque handle the secret store minted (Setup → Datasources binds
-//     // the password and writes it here); only `sys_secret:` handles resolve.
+//     // the password and writes it here); the shipped binder resolves only
+//     // `sys_secret:` handles.
 //     credentialsRef: 'sys_secret:9f2c…',
 //     validation: { onMismatch: 'fail', checkOnBoot: true },
 //   },
