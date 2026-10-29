@@ -24,7 +24,8 @@
  */
 
 import { toDisplayDate } from '@object-ui/core';
-import type { FieldMetadata } from '@object-ui/types';
+import type { NumberFieldMetadata } from '@object-ui/types';
+import type { FieldCurrencyConfig } from '@object-ui/i18n';
 import {
   formatCurrency,
   formatNumberFieldValue,
@@ -49,6 +50,17 @@ export interface AuditFieldDef {
    * only ever describes an object metadata document.
    */
   reference?: string;
+  /**
+   * The members the field renderer's numeric formatters read
+   * ({@link formatScalar}'s currency / number / percent arm): `scale` the
+   * declared decimal places (`number` / `percent`), `max` the percent storage
+   * hint, `useGrouping` the author's grouping hint, `currencyConfig` the
+   * currency mode and code.
+   */
+  scale?: number;
+  max?: number;
+  useGrouping?: boolean;
+  currencyConfig?: FieldCurrencyConfig;
   [k: string]: unknown;
 }
 
@@ -263,10 +275,18 @@ function formatNumericAmount(type: string, def: AuditFieldDef, value: number, ct
   if (type === 'percent') {
     // The pair `PercentCellRenderer` asks: the declared width through the
     // protocol's resolver, and the declared storage (fraction unless `max` > 1).
-    const scale = resolveFieldScale({ type, scale: def.scale as number | undefined });
+    const scale = resolveFieldScale({ type, scale: def.scale });
     return formatPercent(value, percentCellScale(def), scale, ctx.locale);
   }
-  return formatNumberFieldValue(value, def as FieldMetadata, ctx.locale);
+  // The members `formatNumberFieldValue` reads, handed over by name: an object
+  // metadata document's field carries no `name` of its own (it is the key).
+  const numberField: NumberFieldMetadata = {
+    name: '',
+    type: 'number',
+    scale: def.scale,
+    useGrouping: def.useGrouping,
+  };
+  return formatNumberFieldValue(value, numberField, ctx.locale);
 }
 
 const NUMERIC_AMOUNT_TYPES = new Set(['currency', 'number', 'percent']);

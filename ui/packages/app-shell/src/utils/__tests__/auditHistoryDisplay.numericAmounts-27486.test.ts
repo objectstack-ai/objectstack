@@ -19,7 +19,6 @@ import {
   formatNumberFieldValue,
   formatPercent,
 } from '@object-ui/fields';
-import type { FieldMetadata } from '@object-ui/types';
 import { formatAuditValue, type AuditFieldDef } from '../auditHistoryDisplay';
 
 const annualRevenue: AuditFieldDef = {
@@ -77,7 +76,7 @@ describe('formatAuditValue — number', () => {
     const amount: AuditFieldDef = { type: 'number', scale: 2 };
     const out = formatAuditValue(amount, 1234.5, { locale: 'en-US' });
     expect(out).toBe('1,234.50');
-    expect(out).toBe(formatNumberFieldValue(1234.5, amount as FieldMetadata, 'en-US'));
+    expect(out).toBe(formatNumberFieldValue(1234.5, { name: 'amount', type: 'number', scale: 2 }, 'en-US'));
   });
 
   it('keeps a scale-0 number ungrouped, as the cell does for a year', () => {
