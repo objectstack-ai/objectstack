@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@object-ui/i18n': minor
 ---
 
 feat(spec): `currencyMode: 'record'` + `currencyField` — a record-mode amount points at a sibling ISO 4217 code field (ADR-0144 D2)

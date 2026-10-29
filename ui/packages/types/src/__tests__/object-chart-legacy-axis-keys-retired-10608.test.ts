@@ -200,19 +200,23 @@ describe('objectui#10608 (e) — the list-view carrier refuses these names too (
    * legacy read was not that round's to retire; objectui#6152 round 15 retired
    * it on every route, so a view stored with them binds nothing and
    * `ObjectChart` refuses it on screen.
+   *
+   * objectstack#25923 retired the bag itself (refused whole at `options`, and a
+   * stored one folded onto `chart` on read), so these fixtures moved to the
+   * top-level `chart` block, where the same spec block refuses the same names.
    */
-  it('a `chart` list view authoring `xAxisField` / `yAxisFields` / `aggregation` in `options.chart` is refused, on both doors', () => {
+  it('a `chart` list view authoring `xAxisField` / `yAxisFields` / `aggregation` in its `chart` block is refused, on both doors', () => {
     const view = {
       type: 'list-view',
       objectName: 'task',
       columns: ['name'],
       viewType: 'chart',
-      options: { chart: { chartType: 'bar', xAxisField: 'status', yAxisFields: ['estimate'], aggregation: 'sum' } },
+      chart: { chartType: 'bar', xAxisField: 'status', yAxisFields: ['estimate'], aggregation: 'sum' },
     };
     // The component's props, and the page node the published door judges (objectui#12670).
     for (const r of [ListViewSchema.safeParse(view), safeValidateSchema(asPageListView(view))]) {
       expect(r.success).toBe(false);
-      const issue = (r.error?.issues ?? []).find((i) => bagPath(i.path) === 'options.chart') as
+      const issue = (r.error?.issues ?? []).find((i) => bagPath(i.path) === 'chart') as
         | { code?: string; keys?: string[] }
         | undefined;
       expect(issue?.code).toBe('unrecognized_keys');
@@ -220,13 +224,13 @@ describe('objectui#10608 (e) — the list-view carrier refuses these names too (
     }
   });
 
-  it('CONTROL: the dataset-bound spelling parses in the same bag, on both doors', () => {
+  it('CONTROL: the dataset-bound spelling parses in the same block, on both doors', () => {
     const view = {
       type: 'list-view',
       objectName: 'task',
       columns: ['name'],
       viewType: 'chart',
-      options: { chart: { chartType: 'bar', dataset: 'task_ds', dimensions: ['status'], values: ['total_estimate'] } },
+      chart: { chartType: 'bar', dataset: 'task_ds', dimensions: ['status'], values: ['total_estimate'] },
     };
     expect(issuesOf(ListViewSchema.safeParse(view))).toEqual([]);
     expect(issuesOf(safeValidateSchema(asPageListView(view)))).toEqual([]);

@@ -99,6 +99,7 @@ import { z } from 'zod';
 import { EvaluatedExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { transportProjectionArray } from '../data/projection-names-a-field';
 import { refuseCatchallProtoKey, refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { flowFilterOperands, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 // [#19939] The retirement of the `{…}` template dialect from value slots — the
@@ -622,9 +623,14 @@ export const GetRecordConfigSchema = lazySchema(() => strictObject({
   objectName: z.string().describe('Object to query'),
   /** Field/value pairs to match; each operand an envelope, a query placeholder or a literal ({@link flowFilterSlotSchema}). */
   filter: flowFilterSlotSchema(`Field/value pairs to match: ${FILTER_OPERAND_DESCRIPTION}`).optional(),
-  /** Field projection — only these fields are read (default: all). */
-  fields: z.array(z.string()).optional()
-    .describe('Field projection — only these fields are read (default: all)'),
+  /**
+   * Field projection — only these fields are read; omit it to read all. At
+   * least one name, none blank: the executor hands it to `data.find` /
+   * `findOne` as written, and the engine refuses an empty projection there
+   * (#27166), so the list is refused at save instead of at run.
+   */
+  fields: transportProjectionArray(z.string()).optional()
+    .describe('Field projection — only these fields are read; omit it to read all. An empty list or a blank name is refused'),
   /**
    * Max records — a positive integer; >1 returns a `records` list, otherwise a
    * single `record`. The executor hands it to `data.find` as the query's LIMIT

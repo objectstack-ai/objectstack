@@ -834,6 +834,9 @@ export class SharingServicePlugin implements Plugin {
         const mw = buildSharingMiddleware(this.service, ctx.logger as any, pluginMessageTranslator(ctx));
         if (typeof engine.registerMiddleware === 'function') {
           engine.registerMiddleware(mw, { object: '*' });
+          // [#27175] The by-id write gate now meets every by-id write, so a
+          // reader asking `admitsByIdWrite` is asking a gate that is enforced.
+          this.service.byIdWriteGateInstalled = true;
           ctx.logger.info('SharingServicePlugin: enforcement middleware installed');
         } else {
           ctx.logger.warn('SharingServicePlugin: engine has no registerMiddleware — enforcement not applied');
@@ -1424,56 +1427,44 @@ export function buildSharingMiddleware(
     // verbs). The middleware picks the gate by `op`.
     if (op === 'update' || op === 'delete') {
       const verb: 'update' | 'delete' = op;
-      const gate = (o: string, id: string, c: any) =>
-        verb === 'delete' ? service.canDelete(o, id, c) : service.canEdit(o, id, c);
       const data: any = ctx.data;
       const options: any = ctx.options;
       const id = inferTargetId(data, options);
       if (id != null) {
-        let ok = await gate(ctx.object, String(id), exec ?? {});
-        // [ADR-0090 D10] The delegator must ALSO be able to perform the write —
-        // an on-behalf-of write may only touch rows the delegator could touch.
-        if (ok && exec?.onBehalfOf?.userId) {
-          ok = await gate(ctx.object, String(id), {
-            ...exec,
-            userId: exec.onBehalfOf.userId,
-            onBehalfOf: undefined,
-            __writeScope: exec.__delegatorWriteScope,
-          });
-        }
-        if (!ok) {
-          // [#5493 / maintainer ruling 2026-08-08, issue comment 5226389104]
-          // Row-level write authority is ONE composite determination. Before
-          // this middleware HARD-REFUSES a by-id write, it asks the other half
-          // whether an APP-AUTHORED RLS widener admits this row by declaration.
-          //
-          // The measured defect: on an object where record sharing enforces
-          // (a `private`/`public_read` OWD *and* an `owner_id` field), this
-          // gate answered FORBIDDEN before RLS was ever consulted, so an
-          // app-declared update-widener was never asked. On an object where
-          // sharing ABSTAINS — a `public` model, `controlled_by_parent`, or no
-          // `owner_id` column — `canEdit` already answered `true` and the same
-          // widener worked. Half a mechanism, discriminated by a property no
-          // author declares.
-          //
-          // `admit` does NOT authorize the write: it retracts THIS authority's
-          // refusal and hands the row to the security pre-image gate, which
-          // composes per #6684/#5492 and makes the final row decision. Every
-          // other outcome — `abstain`, no security service, a service without
-          // the method, a throwing probe — leaves the refusal below untouched,
-          // byte for byte.
-          //
-          // By-id only, and deliberately: the bulk path composes a FILTER
-          // rather than a verdict and is tracked separately (#6736). Nothing
-          // here touches it.
-          const authored = await service.probeAuthoredRowWrite(
-            ctx.object,
-            String(id),
-            verb,
-            exec ?? {},
-          );
-          if (authored === 'admit') return next();
-
+        // [#27175] The by-id gate is ONE service method,
+        // `SharingService.admitsByIdWrite`, and this middleware refuses exactly
+        // when it answers `false` — so a reader that must know whether this
+        // write would pass (the record field-access answer's `writable`) asks
+        // the code the write meets. Its calls, in order: the per-verb gate
+        // (`canEdit` / `canDelete`); [ADR-0090 D10] the same gate for the
+        // delegator of an on-behalf-of write, which may only touch rows the
+        // delegator could touch; and, on a refusal, the deferral below.
+        //
+        // [#5493 / maintainer ruling 2026-08-08, issue comment 5226389104]
+        // Row-level write authority is ONE composite determination. Before
+        // this middleware HARD-REFUSES a by-id write, it asks the other half
+        // whether an APP-AUTHORED RLS widener admits this row by declaration.
+        //
+        // The measured defect: on an object where record sharing enforces
+        // (a `private`/`public_read` OWD *and* an `owner_id` field), this
+        // gate answered FORBIDDEN before RLS was ever consulted, so an
+        // app-declared update-widener was never asked. On an object where
+        // sharing ABSTAINS — a `public` model, `controlled_by_parent`, or no
+        // `owner_id` column — `canEdit` already answered `true` and the same
+        // widener worked. Half a mechanism, discriminated by a property no
+        // author declares.
+        //
+        // `admit` does NOT authorize the write: it retracts THIS authority's
+        // refusal and hands the row to the security pre-image gate, which
+        // composes per #6684/#5492 and makes the final row decision. Every
+        // other outcome — `abstain`, no security service, a service without
+        // the method, a throwing probe — leaves the refusal below untouched,
+        // byte for byte.
+        //
+        // By-id only, and deliberately: the bulk path composes a FILTER
+        // rather than a verdict and is tracked separately (#6736). Nothing
+        // here touches it.
+        if (!(await service.admitsByIdWrite(ctx.object, String(id), verb, exec ?? {}))) {
           // [ADR-0111 D10] A fail-closed delete denial gets a specific,
           // greppable reason so the "edit-share does not grant delete"
           // tightening is diagnosable rather than a mystery 403.

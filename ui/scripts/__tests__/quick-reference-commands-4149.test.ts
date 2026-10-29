@@ -384,8 +384,8 @@ describe('the UI workspace guide — the published-package count is not written 
   /**
    * The row used to state the count ("39 published packages", later 36, then 35), and
    * this test derived the true number to hold the prose to it. The first hand-written
-   * figure counted directories and missed that `packages/vscode-extension` (published
-   * to the VS Code marketplace, not to npm) is `private: true` — off by one, in the
+   * figure counted directories and missed that the VS Code extension (published to
+   * the VS Code marketplace, not to npm; removed since, objectstack#25910) was `private: true` — off by one, in the
    * direction that overstates. Holding it exact then cost a doc edit on every package
    * retirement, for a number the manifests already answer (`private` in each one). So
    * the row names the published packages without counting them, and this test keeps it

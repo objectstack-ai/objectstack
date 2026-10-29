@@ -61,13 +61,14 @@ const driver = new InMemoryDriver({
 
 | Export | Kind | Description |
 |:---|:---|:---|
-| `default` | legacy plugin object | Legacy `onEnable` shape — not a kernel `Plugin`; register through `DriverPlugin`. |
 | `InMemoryDriver` | class | Driver instance for direct use. |
 | `InMemoryStrategy` | class | Query execution strategy used by ObjectQL. |
 | `FileSystemPersistenceAdapter` | class | Node-only persistence. |
 | `LocalStoragePersistenceAdapter` | class | Browser-only persistence. |
 | `MemoryAnalyticsService` | class | Adds analytics aggregations backed by memory store. |
 | `InMemoryDriverConfig`, `PersistenceAdapterInterface`, `MemoryAnalyticsConfig` | types | Configuration shapes. |
+
+The package has no default export. Register the driver with a named export, as in Quick Start above.
 
 ## Configuration
 

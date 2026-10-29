@@ -439,17 +439,12 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
     // object so the switcher actually offers (and renders) it. Only derive for
     // whitelisted types — an un-whitelisted viz is never reachable.
     //
-    // objectui#10380 — nor for a kind the stored row's legacy `options` bag
-    // carries. That bag is declared metadata: the view write door judges it
-    // key by key and stores it, and `ListView` lays the top-level block over it
-    // per key. A derived default placed at the top level would therefore
-    // OUTRANK the row's own declaration, and the object page, which derives
-    // nothing, would render the row differently. So a derived default fills a
-    // kind only when the row declares that kind nowhere. That is the rule
-    // `mapCfg` below already follows (`view.options.map ?? derived`).
-    const legacyOptions: Record<string, unknown> =
-      view.options && typeof view.options === 'object' && !Array.isArray(view.options) ? view.options : {};
-    const derives = (kind: string): boolean => allowedSet.has(kind) && legacyOptions[kind] === undefined;
+    // objectui#10380 also held a derivation back for a kind the stored row's
+    // legacy `options` bag carried. #25923 retired the bag: the server serves a
+    // stored row with it folded onto the top-level blocks (the spec's D2
+    // conversion `list-view-options-bag-folded`), so each top-level block
+    // below is the row's whole declaration of its kind.
+    const derives = (kind: string): boolean => allowedSet.has(kind);
     const kanban =
       view.kanban ?? (derives('kanban') ? defaultKanbanFromObject(objectDef) : undefined);
     const calendar =
@@ -460,17 +455,19 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       view.gallery ?? (derives('gallery') ? defaultGalleryFromObject(objectDef) : undefined);
     const gantt =
       view.gantt ?? (derives('gantt') ? defaultGanttFromObject(objectDef) : undefined);
-    // Map binding lives under options.map (locationField); auto-derive when
-    // whitelisted so a map interface page renders without hand-wiring.
+    // Map binding: auto-derive when whitelisted so a map interface page
+    // renders without hand-wiring.
     //
-    // The referenced view's own spec-level `map` block is NOT folded in here —
-    // it is forwarded as `map` on the schema below, so `ListView` merges it
-    // per key over this bag (objectui#5042). Collapsing the two with `??`, the
-    // way the sibling bindings above do, would make a partial authored block
-    // REPLACE the derivation: `map: { titleField: 'title' }` alone would drop
-    // the auto-derived `locationField` and the page would render no markers.
-    const mapCfg =
-      (view.options as any)?.map ?? (allowedSet.has('map') ? defaultMapFromObject(objectDef) : undefined);
+    // The referenced view's own `map` block is laid over the derivation PER
+    // KEY, not collapsed with `??` the way the sibling bindings above are: a
+    // partial authored block must not REPLACE the derivation, or
+    // `map: { titleField: 'title' }` alone would drop the auto-derived
+    // `locationField` and the page would render no markers (objectui#5042).
+    // Until #25923 the derivation rode the `options.map` bag and `ListView`
+    // merged the block over it; the bag is retired, so the merge is made here.
+    const derivedMap = derives('map') ? defaultMapFromObject(objectDef) : undefined;
+    const authoredMap = (view as any).map as Record<string, unknown> | undefined;
+    const mapBlock = derivedMap || authoredMap ? { ...(derivedMap ?? {}), ...(authoredMap ?? {}) } : undefined;
 
     // Data semantics — ADR-0047 (revised): the PAGE owns its view metadata.
     // Precedence everywhere: the page's own config → legacy sourceView view
@@ -535,9 +532,9 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       gallery,
       timeline,
       gantt,
-      // The spec's view-level `map` block (`ListMapConfigSchema`), forwarded
-      // verbatim so `ListView` can merge it over the `options.map` bag below.
-      ...((view as any).map ? { map: (view as any).map } : {}),
+      // The spec's view-level `map` block (`ListMapConfigSchema`) over the
+      // derived default, per key (`mapBlock` above).
+      ...(mapBlock ? { map: mapBlock } : {}),
       // objectui#11572 — the view's declared `tree` and `chart` blocks, carried
       // as the per-kind blocks above are. `appearance.allowedVisualizations`
       // may whitelist either kind, and without its block `ListView`'s tree
@@ -547,11 +544,10 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       // `derives` has nothing to gate: the declared block alone is relayed, and
       // a whitelisted kind with no block reaches `ListView` with none. Each is
       // forwarded whole, a pointer rather than a projection of its keys, as the
-      // object page forwards the chart block (objectui#7823). `ListView` reads
-      // the top-level block first and the `options` bag below only without it.
+      // object page forwards the chart block (objectui#7823). No `options` bag
+      // is relayed: the spec retired it (#25923) and `ListView` reads none.
       ...(view.tree !== undefined ? { tree: view.tree } : {}),
       ...(view.chart !== undefined ? { chart: view.chart } : {}),
-      ...((mapCfg || (view.options as any)) ? { options: { ...((view.options as any) ?? {}), ...(mapCfg ? { map: mapCfg } : {}) } } : {}),
 
       // Presentation policy — the page layer (ADR-0047).
       userFilters: cfg.userFilters ?? view.userFilters,

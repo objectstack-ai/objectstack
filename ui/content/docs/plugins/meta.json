@@ -1,7 +1,6 @@
 {
   "title": "Plugins",
   "pages": [
-    "plugin-ai",
     "plugin-calendar",
     "plugin-calendar-view",
     "plugin-charts",

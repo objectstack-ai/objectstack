@@ -100,6 +100,10 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   'packages/app-shell/src/views/metadata-admin/previews/ScreenPreview.tsx': { kind: 'off', why: "the metadata admin's form-screen preview" },
   'packages/app-shell/src/views/studio-design/ObjectListViewInspector.tsx': { kind: 'off', why: 'Studio' },
   'packages/app-shell/src/views/studio-design/studio-canvas-preview.tsx': { kind: 'off', why: 'Studio' },
+  'packages/app-shell/src/views/studio-design/relatedListVocabulary.ts': {
+    kind: 'off',
+    why: "Studio: an object's inbound relationships, read while its Settings relatedLists editor or a field group's related-table picker is mounted",
+  },
   'packages/plugin-designer/src/pages/CreateAppPage.tsx': { kind: 'off', why: "the app designer's object pickers" },
   'packages/plugin-designer/src/pages/EditAppPage.tsx': { kind: 'off', why: "the app designer's object pickers" },
   'apps/console/src/pages/developer/FlowRunsPage.tsx': { kind: 'off', why: 'the flow runs page' },

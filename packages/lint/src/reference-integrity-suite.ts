@@ -104,6 +104,7 @@ import { validateSearchableFields } from './validate-searchable-fields.js';
 import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { validateObjectFieldRefs } from './validate-object-field-refs.js';
+import { validateRelatedListRefs } from './validate-related-list-refs.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validateActionDispatchContract } from './validate-action-dispatch-contract.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
@@ -387,6 +388,32 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // argued, and this member judges no list view. A view write cannot change
   // an object's own field-name lists.
   { name: 'validateObjectFieldRefs', runtimeTypes: ['flow', 'object'], run: validateObjectFieldRefs },
+  // [#27069] The same object, one question across: the names it gives its
+  // related lists (`relatedLists[i]`, `fieldGroups[i].relatedList`) must match
+  // an inbound lookup / master_detail field of a child. `defineStack` refuses
+  // a miss on the CLI; this member is the object door's copy of that verdict,
+  // because the door runs no `defineStack` and the object parse cannot judge a
+  // cross-object name.
+  //
+  // `object` for that reason, `flow` for the floor. It resolves only against
+  // `stack.objects` (and `objectExtensions`), the collection every per-write
+  // snapshot carries, so a child the snapshot holds is judged on its fields.
+  // A child it does NOT hold is refused only on the whole collection (the
+  // #24668 reading `validateListViewFieldRefs` takes, same predicate): under a
+  // package closure a downstream child that points in is outside the closure
+  // by construction, and on the CLI `defineStack` judges it with the
+  // artifact's scope. MEASURED over the shipped object corpus: the two keys
+  // are new and no shipped object declares either, so 0 findings; the door
+  // controls in `runtime-gate.object-writes.test.ts` are the lit probe.
+  {
+    name: 'validateRelatedListRefs',
+    runtimeTypes: ['flow', 'object'],
+    run: (stack, ctx) =>
+      validateRelatedListRefs(
+        stack,
+        ctx?.runtimeWriteType !== undefined && !ctx?.packageScope ? { wholeCollection: true } : undefined,
+      ),
+  },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   // [#17319] The same action name, one question on: `validateActionNameRefs`
   // asks whether the name a list view's selection bar writes resolves to an
@@ -736,8 +763,9 @@ export interface ReferenceIntegrityRunOptions {
    * `stack.objects` to — spells the same key as
    * `AuthoringRuleContext.packageScope`. Present only when a closure was in
    * force; ABSENT on the CLI commands and on a write that names no package.
-   * Read by `validateListViewFieldRefs` only — which reads its absence beside
-   * a set `runtimeWriteType` as the whole collection (#24668).
+   * Read by `validateListViewFieldRefs` and `validateRelatedListRefs`, which
+   * read its absence beside a set `runtimeWriteType` as the whole collection
+   * (#24668).
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
 }

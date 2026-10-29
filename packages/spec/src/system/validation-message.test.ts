@@ -253,3 +253,30 @@ describe('invalid_date_range / invalid_datetime_range — the years are paramete
     ).toBe('发生时间必须是 UTC 年份在 1000 年至 9999 年之间的日期时间');
   });
 });
+
+/**
+ * #27236 — `invalid_number`'s currency sentence: a `currency` field written as
+ * an object, the retired `{ value, currency }` shape (ADR-0104 D1). Every
+ * locale teaches the same three facts, and none names a currency code: the
+ * field's `currencyConfig` or the tenant default decides the currency, never
+ * the sentence (#27119 Q2 = X).
+ */
+describe('invalid_number_currency_object — the shape lesson, with no currency code of its own', () => {
+  it('every locale names the retired shape, currencyConfig, both modes and ADR-0104', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
+      const template = catalog.invalid_number_currency_object;
+      expect(template, locale).toBeDefined();
+      for (const word of ['{ value, currency }', 'currencyConfig', 'defaultCurrency', 'fixed', 'dynamic', 'ADR-0104']) {
+        expect(template, `${locale}: ${word}`).toContain(word);
+      }
+    }
+  });
+
+  it('no locale spells a currency code', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
+      const prose = catalog.invalid_number_currency_object.replace('ADR-0104', '');
+      expect(prose, locale).not.toMatch(/(?<![A-Za-z])[A-Z]{3}(?![A-Za-z])/);
+      expect(prose, locale).not.toMatch(/[$¥€£]/);
+    }
+  });
+});

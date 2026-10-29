@@ -13,7 +13,9 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import {
   bucketDateKey,
   bucketKeyToCalendarRange,
+  dateRangeWindowBounds,
   filterTokenContextFrom,
+  inclusiveCalendarDayWindow,
   resolveAnalyticsDateRangeString,
   resolveFilterTokens,
   wallClockToUtcMs,
@@ -658,49 +660,12 @@ export function lowerDatasetCompareDateRange(
   return { start, end, endExclusive: false };
 }
 
-/**
- * [#17973] The calendar days a lowered window covers, as the INCLUSIVE
- * `[first, last]` pair every piece of `compareTo` math in this module takes.
- *
- * {@link shiftRange} measures `previousPeriod`'s length as a count of whole
- * days between two day-starts, and {@link alignedCompareBucketKey} reads
- * `currentRange[1]` as the LAST bucket the window contains — so both bounds
- * must name days the window really covers.
- *
- * ⚠️ `endExclusive` is therefore load-bearing, not decoration: every preset
- * reports the first instant AFTER the window (`this_month` ends at the next
- * month's start, and a rolling `last_N_days` window at tomorrow's start), so
- * the last day it covers is the one holding the instant before that bound.
- * Reading that bound as inclusive would make every preset one day too long and
- * shift `previousPeriod` by a day.
- *
- * ## [#18245] ⭐ `timezone` decides WHICH calendar, and it is not optional here
- *
- * The bounds arriving here are INSTANTS, and the ten calendar presets open and
- * close at the reference zone's midnight — `analytics-date-range.ts` renders
- * both through `zonedDateStartToUtcMs` precisely so they do. Reading those
- * instants on the UTC calendar therefore moves a boundary in every zone whose
- * midnight is not UTC's, and it moves it in OPPOSITE directions either side of
- * the meridian. MEASURED on `e0d05538c`, `this_month` + `previousYear` frozen
- * at 2026-09-09: `Asia/Shanghai` opened at `2025-08-31` (its September midnight
- * is the previous UTC day) and `America/New_York` closed at `2025-10-01` (its
- * October midnight is the next UTC day) — each 31 days against a 30-day
- * September, each still an ordinary `200`.
- *
- * ⛔ That is a day-boundary projection, ⛔ not an off-by-one: no constant makes
- * both sides right, which is why the caller threads the SAME zone
- * {@link DatasetExecutor.buildQuery} resolves the primary pass in.
- */
-function inclusiveCalendarDayWindow(
-  window: LoweredDateRangeWindow,
-  timezone?: string,
-): [string, string] {
-  const endMs = boundInstantMs(window.end);
-  return [
-    calendarDayAt(boundInstantMs(window.start), timezone),
-    calendarDayAt(window.endExclusive ? endMs - 1 : endMs, timezone),
-  ];
-}
+// [#17973] [#27172] [#27272] The calendar days a lowered window covers
+// (`inclusiveCalendarDayWindow`) and the bound pair a window filters one column
+// by (`dateRangeWindowBounds`) live in `@objectstack/core`, beside the
+// lowering: `driver-memory`'s cube face filters by the same rule and cannot
+// import this package. Re-exported so this package's faces keep one import.
+export { dateRangeWindowBounds };
 
 /**
  * Resolve which time dimension a `compareTo` shifts (#5011).

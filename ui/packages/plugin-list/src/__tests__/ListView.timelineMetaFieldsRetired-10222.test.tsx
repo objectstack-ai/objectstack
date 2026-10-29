@@ -41,8 +41,10 @@
  *   selected. On the base tree it was both, so this pin goes red if read 1
  *   comes back.
  * - The nested `options.timeline` spelling is the one the bypass actually
- *   delivers, so it is pinned too, with and without a `timeline` block beside
- *   it.
+ *   delivered, so it is pinned too, with and without a `timeline` block beside
+ *   it. Since objectstack#25923 the bag is retired and read by nothing (a
+ *   stored one is folded onto `timeline` by the server), so a bag alone
+ *   projects what no bag projects.
  * - SOURCE: no `metaFields` identifier or string key is left in the non-test
  *   source of this package OR `plugin-timeline`, with firing controls on the
  *   same scanner. `plugin-timeline`'s scan lives here, not in that package,
@@ -161,17 +163,14 @@ describe('ListView — the timeline `metaFields` reads are retired (objectui#102
     expect(select).toEqual(expect.arrayContaining(['status', 'priority']));
   });
 
-  it('PROJECTION, `options.timeline` alone: status / priority are no longer dropped', async () => {
+  it('PROJECTION, `options.timeline` alone: the bag adds nothing — it projects what a view with no timeline block projects (objectstack#25923)', async () => {
     const { select } = await paramsFor({
       timeline: undefined,
       options: { timeline: { ...TIMELINE, metaFields: ['region'] } },
     });
+    const { select: noBlock } = await paramsFor({ timeline: undefined });
     expect(select).not.toContain('region');
-    expect(
-      select,
-      'on the base tree this shape fetched no status / priority at all, so its timeline drew '
-        + 'no chips once the renderer stopped reading the list',
-    ).toEqual(expect.arrayContaining(['status', 'priority']));
+    expect(select, 'the retired bag is read by nothing, so it moves no projected field').toEqual(noBlock);
   });
 
   it('EXPAND: a lookup named only in `metaFields` is neither expanded nor selected', async () => {

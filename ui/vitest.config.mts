@@ -537,7 +537,6 @@ export default defineConfig({
       '@object-ui/plugin-timeline': path.resolve(__dirname, './packages/plugin-timeline/src'),
       '@object-ui/plugin-view': path.resolve(__dirname, './packages/plugin-view/src'),
       '@object-ui/plugin-report': path.resolve(__dirname, './packages/plugin-report/src'),
-      '@object-ui/plugin-ai': path.resolve(__dirname, './packages/plugin-ai/src'),
       '@object-ui/plugin-designer': path.resolve(__dirname, './packages/plugin-designer/src'),
       '@object-ui/runner': path.resolve(__dirname, './packages/runner/src'),
       '@object-ui/auth': path.resolve(__dirname, './packages/auth/src'),

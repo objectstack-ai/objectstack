@@ -242,18 +242,13 @@ export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
  * not declare (#13464). An absent map is a permissive pass — the field is
  * `.optional()`.
  *
- * NOT RE-VERIFIED AT UNPACK. That leg is **not implemented** — nothing in
- * this repo unpacks an installed artifact at all: there is no
- * `os plugin install`, and the archive reader's only production caller is the
- * publish preflight reading back its own output. Re-verification is owned by
- * the **future runtime loader** — ADR-0025 §3.5 steps 4–7 (download + verify,
- * materialize, register, load + activate), the install flow that ADR's own
- * status line records as unimplemented. It is NOT the cloud control plane's
- * obligation; the control plane stores the artifact blob opaquely.
- *
- * So a present `integrity` map is evidence that the publisher checked its own
- * bytes, never that anything re-checked them after publish. The enforce leg
- * is unbuilt, and belongs to that future runtime loader.
+ * RE-VERIFIED AT UNPACK BY `os plugin install`. The local install loop
+ * (ADR-0025 §3.5 M1) re-hashes the unpacked files against the map before it
+ * materializes anything, and refuses the install by name on the same three
+ * findings; an absent map is the same permissive pass there. This check sits
+ * beside the install's signature check over the whole artifact, and neither
+ * replaces the other. The cloud control plane stores the artifact blob
+ * opaquely and checks nothing against the map.
  */
 export const PluginIntegritySchema = z
   .record(z.string(), z.string())
@@ -1060,10 +1055,9 @@ export const ManifestSchema = strictObject({
 
   /**
    * Per-file content digests of the packaged artifact (ADR-0025 §3.2).
-   * Computed at build and self-checked at the `os plugin publish` preflight
-   * (#13464); unpack-time re-verification is NOT implemented and is owned by
-   * the future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
-   * control plane. The enforce leg is unbuilt.
+   * Computed at build, self-checked at the `os plugin publish` preflight
+   * (#13464), and re-verified at unpack by `os plugin install` (ADR-0025 §3.5
+   * M1). The cloud control plane stores the blob opaquely.
    * See {@link PluginIntegritySchema}.
    */
   integrity: PluginIntegritySchema.optional()

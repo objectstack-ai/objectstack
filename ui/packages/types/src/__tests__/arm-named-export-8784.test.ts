@@ -190,6 +190,24 @@ const ABSENT_BY_DECISION: Readonly<Record<string, string>> = {
     + 'retired raw-HTML `html` literal (objectui#13449), in the shape of the `kanban` row above. '
     + 'The decision is written on the barrel beside the `data-display.zod.js` block: "it is '
     + 'deliberately NOT exported — nothing outside this package parses against a refusal arm".',
+  'ai-form-assist':
+    'ai.zod.ts#RetiredAIFormAssistNodeSchema — the same ADR-0049 refusal arm, for a literal `@object-ui/plugin-ai` '
+    + 'registered until it retired (objectstack#25921), in the shape of the `kanban` row above. The '
+    + 'barrel\'s `AIFormAssistSchema`-family names are `z.never()` tombstones, not this arm; the decision '
+    + 'is written beside the `ai.zod.js` block: "deliberately NOT exported — nothing outside this '
+    + 'package parses against a refusal arm".',
+  'ai-recommendations':
+    'ai.zod.ts#RetiredAIRecommendationsNodeSchema — the same ADR-0049 refusal arm, for a literal `@object-ui/plugin-ai` '
+    + 'registered until it retired (objectstack#25921), in the shape of the `kanban` row above. The '
+    + 'barrel\'s `AIFormAssistSchema`-family names are `z.never()` tombstones, not this arm; the decision '
+    + 'is written beside the `ai.zod.js` block: "deliberately NOT exported — nothing outside this '
+    + 'package parses against a refusal arm".',
+  'nl-query':
+    'ai.zod.ts#RetiredNLQueryNodeSchema — the same ADR-0049 refusal arm, for a literal `@object-ui/plugin-ai` '
+    + 'registered until it retired (objectstack#25921), in the shape of the `kanban` row above. The '
+    + 'barrel\'s `AIFormAssistSchema`-family names are `z.never()` tombstones, not this arm; the decision '
+    + 'is written beside the `ai.zod.js` block: "deliberately NOT exported — nothing outside this '
+    + 'package parses against a refusal arm".',
 
   // ⭐ The two rows objectui#9067 moved here out of ABSENT_PENDING_DECISION. They
   // quote `.changeset/8499-node-slot-registered-arms.md` rather than cite it,

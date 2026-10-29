@@ -108,11 +108,17 @@ describe('the in-app template dialect', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('a literal code still formats in that currency, and no argument still formats in USD', () => {
+  it('a literal code still formats in that currency, and no argument formats in the tenant default', () => {
     const eur = evaluate('{{ record.amount | currency:EUR }}', { amount: 1234.5 });
     expect(eur).toEqual({ ok: true, value: '€1,234.50' });
-    const usd = evaluate('{{ record.amount | currency }}', { amount: 1234.5 });
-    expect(usd).toEqual({ ok: true, value: '$1,234.50' });
+    const cny = templateEngine.evaluate<string>(
+      { dialect: 'template', source: '{{ record.amount | currency }}' },
+      { record: { amount: 1234.5 }, locale: 'en-US', currency: 'CNY' },
+    );
+    expect(cny).toEqual({ ok: true, value: 'CN¥1,234.50' });
+    // With no tenant default it is refused, never formatted in USD.
+    const none = evaluate('{{ record.amount | currency }}', { amount: 1234.5 });
+    expect(none.ok).toBe(false);
   });
 });
 
@@ -124,9 +130,10 @@ describe('the formatter itself never substitutes a currency', () => {
     expect(() => formatValue('currency', null, 'currency_code')).toThrow(RangeError);
   });
 
-  it('formats a literal code, and the no-argument default, as before', () => {
+  it('formats a literal code as before, and no argument in the tenant default it is handed', () => {
     expect(formatValue('currency', 1234.5, 'EUR', { locale: 'en-US' })).toBe('€1,234.50');
-    expect(formatValue('currency', 1234.5, undefined, { locale: 'en-US' })).toBe('$1,234.50');
+    expect(formatValue('currency', 1234.5, undefined, { locale: 'en-US', currency: 'CNY' })).toBe('CN¥1,234.50');
+    expect(() => formatValue('currency', 1234.5, undefined, { locale: 'en-US' })).toThrow(RangeError);
   });
 });
 

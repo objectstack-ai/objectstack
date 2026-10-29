@@ -1,0 +1,20 @@
+{
+  "title": "UI plugins",
+  "pages": [
+    "plugin-calendar",
+    "plugin-charts",
+    "plugin-chatbot",
+    "plugin-dashboard",
+    "plugin-detail",
+    "plugin-editor",
+    "plugin-form",
+    "plugin-gantt",
+    "plugin-grid",
+    "plugin-kanban",
+    "plugin-list",
+    "plugin-map",
+    "plugin-markdown",
+    "plugin-timeline",
+    "plugin-view"
+  ]
+}

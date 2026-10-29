@@ -103,6 +103,7 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'fields.recipient.selectTeam': 'Select a team',
   'fields.recipient.selectBusinessUnit': 'Select a business unit',
   'fields.recipient.selectPosition': 'Select a position',
+  'fields.recipient.selectQueue': 'Select a queue',
   'fields.recipient.selectUnitAndSubordinates': 'Select a business unit',
   // objectui#7613 — the `field` recipient kind (maintainer ruling
   // objectstack#14103, executor objectstack#15072). It picks a user-valued

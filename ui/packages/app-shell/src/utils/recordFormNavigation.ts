@@ -402,8 +402,8 @@ function createSeed(
  *
  *   - `buttons.submit` / `buttons.cancel`: an authored `show` over the host's
  *     `true`; an authored `label`, an `I18nLabel` resolved against `language`,
- *     over the host's label. `buttons.reset` is not read: no host draws a
- *     reset button.
+ *     over the host's label. A form has no reset button: the spec refuses
+ *     `buttons.reset` (objectstack-ai/objectstack#27153).
  *   - `layout`: the authored value when the spec's enum allows it, else
  *     `'vertical'`, the renderer default.
  *   - `defaults`, on a create only: the opening values under the ones the host

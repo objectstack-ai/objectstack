@@ -25,8 +25,8 @@ Two canonical forms exist per field (ADR-0104 D1):
 
 "Reality wins": where the deployed stored shape is coherent, the contract
 adopts it — deployed data is a wire contract we don't get to rewrite by
-editing Zod. This is why `currency` is a bare number (not the never-consumed
-`CurrencyValueSchema` object) and `location` is `{lat, lng}` (what field-zoo
+editing Zod. This is why `currency` is a bare number (the never-consumed
+`CurrencyValueSchema` object is deleted) and `location` is `{lat, lng}` (what field-zoo
 stores), not the never-consumed `{latitude, longitude}` shape.
 
 Purity: schemas/constants/derivation only — no runtime logic, no caching

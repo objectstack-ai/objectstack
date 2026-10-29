@@ -31,7 +31,7 @@ Record search is a **declared-but-unenforced** capability (cf. ADR-0049). `$sear
 - `object.searchable` boolean (`object.zod.ts:52`) — consumed by metadata-admin UI + the command-palette object gate; **not** the data layer.
 - `object.search` (`SearchConfigSchema`, `object.zod.ts:113`) — `fields`/`displayFields`/`filters`; **no runtime consumer**.
 - `view.searchableFields` (`view.zod.ts:522`) — UI input control + ListView; not the data layer.
-- field-level `searchable` — **DEAD** (per `2026-06-fieldschema-property-liveness.md`).
+- field-level `searchable` — **DEAD** (per `archive/2026-06/2026-06-fieldschema-property-liveness.md`).
 
 ## 4. Lookup search (objectui) — sends `$search`, gets a no-op
 - `LookupField.tsx:311` / `RecordPickerDialog.tsx:451` — bare `$search`. The picker "works" visually only because datasets are tiny; there is **no server filtering**.

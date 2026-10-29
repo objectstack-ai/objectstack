@@ -1,15 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #20051 — a flat list overlay's legacy `options` bag is judged at
+ * #25923 — a flat list overlay's `options` bag is refused by name at
  * `PUT /api/v1/meta/view/:name`, the door a Studio tenant or an MCP/AI author
  * writes through, on the real composition: the real `RestServer` route over
  * the real `saveMetaItem`, backed by a real `ObjectQL` + SQLite `sys_metadata`.
  *
- * Before the change (measured on `origin/main` @ `8d1f7ab`): the list overlay
- * member `.strip()`ped a top-level `options` from the parse without judging it,
- * so `options.timeline.metaFields` answered `200` and was stored as sent, while
- * the direct `timeline.metaFields` answered `422`.
+ * From #20051 until #25923 the door judged the bag key by key and stored a
+ * legal one as sent (`options.map` answered `200`). The bag is retired: each
+ * per-kind block is a top-level key of the view, and a stored bag is folded
+ * onto it on read (`list-view-options-bag-folded`, pinned in
+ * `@objectstack/metadata-protocol`).
  *
  * Refusal cases assert the ADR-0112 envelope — `code` AND `status` — and that
  * no row reached `sys_metadata`: the pair separates "refused by the door" from
@@ -104,57 +105,40 @@ async function boot() {
     return { put, storedRows };
 }
 
-const TIMELINE = { startDateField: 'created_at', titleField: 'name', metaFields: ['region'] };
-const flatList = (extra: Record<string, unknown>) => ({
-    name: 'crm_lead.timeline',
-    object: 'crm_lead',
-    viewKind: 'list',
-    label: 'Timeline',
-    type: 'timeline',
-    columns: ['name'],
-    ...extra,
-});
-
 type Issue = { path?: string; code?: string; message?: string };
 const issuesOf = (res: any): Issue[] => (res._json?.issues ?? []) as Issue[];
 
-describe('#20051 PUT /api/v1/meta/view judges a flat list overlay\'s `options` bag', () => {
-    it('a direct and an `options`-wrapped out-of-contract key get the same 422, and nothing is stored', async () => {
+const MAP_VIEW = {
+    name: 'showcase_task.work_map',
+    object: 'showcase_task',
+    viewKind: 'list',
+    label: 'Work Map',
+    type: 'map',
+    columns: ['title', 'location'],
+};
+const MAP = { locationField: 'location', titleField: 'title' };
+
+describe('#25923 PUT /api/v1/meta/view refuses a flat list overlay\'s `options` bag', () => {
+    it('a legal legacy `options.map` bag answers 422 at `options`, naming the move, and nothing is stored', async () => {
         const { put, storedRows } = await boot();
-
-        const direct = await put('crm_lead.timeline', flatList({ timeline: TIMELINE }));
-        const wrapped = await put('crm_lead.timeline', flatList({ options: { timeline: TIMELINE } }));
-
-        for (const res of [direct, wrapped]) {
-            expect(res._status, JSON.stringify(res._json)).toBe(422);
-            expect(res._json?.code).toBe('INVALID_METADATA');
-        }
-        expect(await storedRows('crm_lead.timeline')).toEqual([]);
-
-        const directHit = issuesOf(direct).find((i) => i.path === 'timeline' && i.code === 'unrecognized_keys');
-        const wrappedHit = issuesOf(wrapped).find((i) => i.path === 'options.timeline' && i.code === 'unrecognized_keys');
-        expect(directHit, JSON.stringify(direct._json)).toBeDefined();
-        expect(wrappedHit, JSON.stringify(wrapped._json)).toBeDefined();
-        expect(wrappedHit!.message).toBe(directHit!.message);
-        expect(wrappedHit!.message).toContain('`metaFields`');
+        const res = await put('showcase_task.work_map', { ...MAP_VIEW, options: { map: MAP } });
+        expect(res._status, JSON.stringify(res._json)).toBe(422);
+        expect(res._json?.code).toBe('INVALID_METADATA');
+        expect(await storedRows('showcase_task.work_map')).toEqual([]);
+        const hit = issuesOf(res).find((i) => i.path === 'options');
+        expect(hit, JSON.stringify(res._json)).toBeDefined();
+        expect(hit!.message).toMatch(/^A list view's `options` bag was removed in @objectstack\/spec 18\.3\.0/);
+        expect(hit!.message).toContain('Move each `options.KIND` block to `KIND`');
     });
 
-    it('a legal legacy `options.map` bag answers 200 and the stored row carries it unchanged', async () => {
+    it('CONTROL: the same block written top-level answers 200, and the stored row carries it', async () => {
         const { put, storedRows } = await boot();
-        const options = { map: { locationField: 'location', titleField: 'legacy_title' } };
-        const res = await put('showcase_task.work_map', {
-            name: 'showcase_task.work_map',
-            object: 'showcase_task',
-            viewKind: 'list',
-            label: 'Work Map',
-            type: 'map',
-            columns: ['title', 'location'],
-            options,
-        });
+        const res = await put('showcase_task.work_map', { ...MAP_VIEW, map: MAP });
         expect(res._status, JSON.stringify(res._json)).toBe(200);
         const rows = await storedRows('showcase_task.work_map');
         expect(rows).toHaveLength(1);
         const stored = typeof rows[0].metadata === 'string' ? JSON.parse(rows[0].metadata) : rows[0].metadata;
-        expect(stored.options).toEqual(options);
+        expect(stored.map).toEqual(MAP);
+        expect('options' in stored).toBe(false);
     });
 });

@@ -365,7 +365,7 @@ function warnOnTopLevelStyleUrl(schema: MapConfigSource): void {
       '`mapStyle` — named that way precisely to avoid this collision. Write `mapStyle: ' +
       `'${raw}'\` at the top level, or \`map: { style: '${raw}' }\` in the declared config block. ` +
       'On a view, write that same declared `map: { style: ... }`: ObjectView / ListView flatten ' +
-      '`options.map` through a whitelist of the keys `ObjectMapConfigSchema` declares, and that ' +
+      'the view\'s `map` block through a whitelist of the keys `ObjectMapConfigSchema` declares, and that ' +
       'whitelist carries `style` out under the flat spelling `mapStyle` (objectui#9950), so the ' +
       'declared block arrives and is read. `mapStyle` is the TOP-LEVEL spelling only — inside ' +
       'the `map` block it is undeclared, and the flatten drops it. objectui#5017.',
@@ -408,7 +408,7 @@ function warnOnShadowedFlatMapKeys(schema: MapConfigSource): void {
     `[ObjectMap] The \`map\` block configures this map, so these top-level keys are ` +
       `IGNORED: ${shadowed.map((k) => `\`${k}\``).join(', ')}. The \`map\` block is the ` +
       'authoring shape; the flat top-level spelling is the internal form ObjectView/ListView ' +
-      'produce when they flatten `options.map`, and what the author wrote outranks it. Move ' +
+      'produce when they flatten the view\'s `map` block, and what the author wrote outranks it. Move ' +
       'anything you still need into `map`, or drop the `map` block. objectui#5018.',
   );
 }

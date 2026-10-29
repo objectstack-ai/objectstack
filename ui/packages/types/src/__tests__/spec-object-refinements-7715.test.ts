@@ -145,24 +145,26 @@ describe('objectui#11717 — the Page `requires` ⇄ `kind` refusal reaches obje
   });
 });
 
-describe('objectui#12030 — the Page `details` + `tabs` slot-pair refusal reaches objectui', () => {
-  const BOTH = { kind: 'slotted', slots: { details: [], tabs: [] } };
+describe('objectstack#27053 — the retired `tabs` slot is refused at both objectui doors, with the spec\'s own issue', () => {
+  // The `details` + `tabs` pair refusal objectui#12030 attached left with the slot: the slot map
+  // carries the spec's `retiredKey()` tombstone BY REFERENCE, so the refusal needs no re-attach.
+  const TABS = { kind: 'slotted', slots: { tabs: [] } };
 
-  it('the spec refuses the pair at `slots.details`, and objectui refuses with the spec\'s own issue', () => {
-    const spec = SpecPageSchema.safeParse(specPage(BOTH));
+  it('the spec refuses `slots.tabs` with its prescription, and objectui refuses with the same issue', () => {
+    const spec = SpecPageSchema.safeParse(specPage(TABS));
     expect(spec.success).toBe(false);
-    const specIssue = spec.error!.issues.find((i) => i.path.join('.') === 'slots.details');
-    expect(specIssue?.code).toBe('custom');
+    const specIssue = spec.error!.issues.find((i) => i.path.join('.') === 'slots.tabs');
+    expect(specIssue?.message).toMatch(/^`page\.slots\.tabs` was removed/);
 
-    for (const r of [PageNodeSchema.safeParse(pageNode(BOTH)), safeValidateSchema(pageNode(BOTH))]) {
+    for (const r of [PageNodeSchema.safeParse(pageNode(TABS)), safeValidateSchema(pageNode(TABS))]) {
       expect(r.success).toBe(false);
-      const issues = r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message }));
-      expect(issues).toContainEqual({ code: 'custom', path: 'slots.details', message: specIssue!.message });
+      const messages = r.error!.issues.map((i) => i.message);
+      expect(messages).toContain(specIssue!.message);
     }
   });
 
-  it('controls: either slot alone passes on both doors', () => {
-    for (const extra of [{ kind: 'slotted', slots: { tabs: [] } }, { kind: 'slotted', slots: { details: [] } }]) {
+  it('controls: `details` alone, and `details` beside the other live slots, pass on both doors', () => {
+    for (const extra of [{ kind: 'slotted', slots: { details: [] } }, { kind: 'slotted', slots: { details: [], discussion: [] } }]) {
       expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
       expect(PageNodeSchema.safeParse(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema(pageNode(extra)).success).toBe(true);
@@ -340,8 +342,8 @@ const SITES = [
     spec: SpecPageSchema,
     // `checkPageRequiresKind` joined the spec object at 17.7.0 (objectstack#21459) and was
     // attached by objectui#11717: it reads `kind` and `requires`, both carried by reference.
-    // `checkPageSlotPair` joined at 18 (objectstack#22568) and was attached by objectui#12030:
-    // it reads `slots`, carried by reference.
+    // `checkPageSlotPair` joined at 18 (objectstack#22568), was attached by objectui#12030, and
+    // left the spec object with the `tabs` slot it paired with `details` (objectstack#27053).
     // objectui#12370's view-data check left this list with objectui#12666: objectstack#23784
     // removed it from the spec, and 18.0.0-next.3 is the first release without it (objectstack
     // `a35f7a6`). The census below accounts for it by what it judges, not by name
@@ -355,7 +357,6 @@ const SITES = [
     attached: [
       'checkPageSourceCompleteness',
       'checkPageRequiresKind',
-      'checkPageSlotPair',
       'checkPageRegionPlacement',
       'checkPageMainRegionWidth',
     ],

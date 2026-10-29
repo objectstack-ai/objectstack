@@ -10,6 +10,7 @@ import {
   rel,
   repoFilesOnDisk,
   repoRoot,
+  liveTurboConfig,
   rootAnchoredInputs,
   taskInputs,
 } from './helpers/turbo-inputs';
@@ -88,7 +89,7 @@ const INPUTS_NOT_DERIVABLE: ReadonlyMap<string, string> = new Map();
 
 const PACKAGES = packagesWithScript(TASK);
 const DERIVED = PACKAGES.map((pkg) => ({ ...pkg, outside: outOfPackageFiles(pkg) }));
-const ROOT_INPUTS = rootAnchoredInputs(TASK);
+const ROOT_INPUTS = rootAnchoredInputs(TASK, liveTurboConfig());
 const MATCHERS = ROOT_INPUTS.map((glob) => ({ glob, re: globToRegExp(glob) }));
 
 describe('turbo `lint` inputs cover every out-of-package file (objectui#4184)', () => {
@@ -167,7 +168,7 @@ describe('turbo `lint` inputs cover every out-of-package file (objectui#4184)', 
    */
   it('the explicit inputs list still carries $TURBO_DEFAULT$', () => {
     expect(
-      taskInputs(TASK),
+      taskInputs(TASK, liveTurboConfig()),
       `turbo.json \`${TASK}\` declares an explicit inputs list, so it no longer falls back to ` +
         `turbo's default. Without "$TURBO_DEFAULT$" in the list the package's OWN files stop ` +
         `being hashed.`,

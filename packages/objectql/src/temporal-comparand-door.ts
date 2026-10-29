@@ -216,6 +216,16 @@
  * expanded-year form (`+010026-10-01`, `-000001-10-01`), so the range reads
  * the year it names on every host.
  *
+ * ## [#27173] Prescription first, inside the client cap
+ *
+ * A client reads at most 500 characters of a refusal (`CLIENT_MESSAGE_MAX`,
+ * `@objectstack/types`, cut with `…`), and the cap stays. So every refusal
+ * here is ordered: what was written and why it is not a value of its kind,
+ * then what to write instead, then "NOT applied" and what the value would
+ * have done past this door. The consequence is the part a cut may take; the
+ * prescription is not. `filter-refusal-prescription-cap.test.ts`
+ * pins it per arm, the same rule #27098 set for the retired operators.
+ *
  * @see `@objectstack/core`'s `temporal-comparand.ts` — the value-half predicate,
  *   shared with the analytics raw-SQL decline so one rule cannot exist twice.
  * @see https://github.com/objectstack-ai/objectstack/issues/8690
@@ -484,12 +494,15 @@ function preview(value: unknown): string {
  * preset name (`last_30_days`) that the console would have lowered to
  * `{30_days_ago}`, so the fix a caller needs is almost always "wrap it as the
  * token the resolver knows", not "compute an instant yourself".
+ *
+ * [#27173] Each one is short, and printed right after the verdict, so it lands
+ * inside the 500 characters a client reads — see "Prescription first" above.
  */
 const REMEDY: Record<TemporalComparandKind, string> = {
   datetime:
-    'Write an ISO-8601 instant ("2026-07-15T00:00:00.000Z") on a calendar day that exists, '
-    + 'a bare "YYYY-MM-DD" (read as midnight UTC), epoch milliseconds as a number, or a '
-    + 'relative-date placeholder the resolver knows, e.g. "{30_days_ago}" / "{current_month_start}".',
+    'Write a relative-date placeholder such as "{30_days_ago}", an ISO-8601 instant '
+    + '("2026-07-15T00:00:00.000Z") on a day that exists, a bare "YYYY-MM-DD" (midnight UTC) or '
+    + 'epoch milliseconds.',
   date:
     'Write a "YYYY-MM-DD" calendar day that exists, or a relative-date placeholder the resolver '
     + 'knows, e.g. "{30_days_ago}" / "{current_month_start}".',
@@ -530,8 +543,8 @@ const YEAR_CLASS: Record<'date' | 'datetime', YearClass> = {
   date: {
     year: 'whose calendar day falls outside the years 0001 to 9999',
     ...misorders('does not sort as a day'),
-    remedy: 'Write a "YYYY-MM-DD" calendar day in the years 0001 to 9999, or an epoch-millisecond '
-      + 'number or Date whose UTC calendar day falls in those years.',
+    remedy: 'Write a "YYYY-MM-DD" day, epoch milliseconds or a Date whose UTC day falls in the years '
+      + '0001 to 9999.',
   },
   datetime: {
     year: DATETIME_YEARS,
@@ -703,13 +716,13 @@ export function assertTemporalComparandsInterpretable(
   // does: its text orders as no day or instant does, so it answers the WRONG
   // rows (or, on PostgreSQL, a database error) — or [#20280], for a `datetime`
   // in 0001..0999, it names a year MySQL's `DATETIME` does not document.
+  // [#27173] Each arm: the verdict, the prescription, then the consequence.
   const yearClass = yearClassOf(hit);
   if (yearClass) {
     throw invalidFilterError(
       `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field `
-      + `against ${preview(hit.value)} at ${hit.path}, ${yearClass.year}, the years a ${hit.kind} `
-      + `value may name, so it is not a ${hit.kind} value this platform can interpret. `
-      + `${yearClass.where} The filter was NOT applied. ${yearClass.remedy}`,
+      + `against ${preview(hit.value)} at ${hit.path}, ${yearClass.year}, so it is not a ${hit.kind} `
+      + `value. ${yearClass.remedy} The filter was NOT applied. ${yearClass.where}`,
     );
   }
   // [#20549] A comparand the rule reads as another value than it names.
@@ -718,16 +731,15 @@ export function assertTemporalComparandsInterpretable(
     throw invalidFilterError(
       `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field `
       + `against ${preview(hit.value)} at ${hit.path}, ${misread.why}, so it is not a ${hit.kind} `
-      + `value this platform can interpret. ${misread.where} The filter was NOT applied. `
-      + REMEDY[hit.kind],
+      + `value. ${REMEDY[hit.kind]} The filter was NOT applied. ${misread.where}`,
     );
   }
   throw invalidFilterError(
     `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} `
     + `field against ${preview(hit.value)} at ${hit.path}, which is not a ${hit.kind} value `
-    + 'this platform can interpret. It would reach the driver as written, compare false for '
-    + 'EVERY row, and return 200 with an empty result — indistinguishable from "there is no '
-    + `data". The filter was NOT applied. ${REMEDY[hit.kind]}`,
+    + `this platform can interpret. ${REMEDY[hit.kind]} The filter was NOT applied. As written `
+    + 'it would reach the driver, compare false for EVERY row, and return 200 with an empty '
+    + 'result — indistinguishable from "there is no data".',
   );
 }
 
@@ -784,13 +796,13 @@ export function assertHavingTemporalComparandsInterpretable(
   if (!hit) return;
   const column = havingColumnPhrase(hit, query);
   // The year class, in its own words, as on `where` (#20240, #20264, #20280).
+  // [#27173] The verdict, the prescription, then the consequence, as on `where`.
   const yearClass = yearClassOf(hit);
   if (yearClass) {
     throw invalidFilterError(
       `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
-      + `${yearClass.year}, the years a ${hit.kind} value may name, so it is not a ${hit.kind} `
-      + `value this platform can interpret. ${yearClass.having} The \`having\` was NOT applied. `
-      + yearClass.remedy,
+      + `${yearClass.year}, so it is not a ${hit.kind} value. ${yearClass.remedy} The \`having\` was `
+      + `NOT applied. ${yearClass.having}`,
     );
   }
   // [#20549] The misread classes, in their own words, as on `where`.
@@ -798,15 +810,15 @@ export function assertHavingTemporalComparandsInterpretable(
   if (misread) {
     throw invalidFilterError(
       `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
-      + `${misread.why}, so it is not a ${hit.kind} value this platform can interpret. `
-      + `${misread.having} The \`having\` was NOT applied. ${REMEDY[hit.kind]}`,
+      + `${misread.why}, so it is not a ${hit.kind} value. ${REMEDY[hit.kind]} The \`having\` was `
+      + `NOT applied. ${misread.having}`,
     );
   }
   throw invalidFilterError(
     `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
-    + `which is not a ${hit.kind} value this platform can interpret. Compared with each group as `
-    + 'written, it would keep no group or every group, a 200 indistinguishable from a real answer. '
-    + `The \`having\` was NOT applied. ${REMEDY[hit.kind]}`,
+    + `which is not a ${hit.kind} value this platform can interpret. ${REMEDY[hit.kind]} The `
+    + '`having` was NOT applied. Compared with each group as written, it would keep no group or '
+    + 'every group, a 200 indistinguishable from a real answer.',
   );
 }
 
@@ -847,7 +859,7 @@ function judgeResolvedToken(
 
 /** [#20844] The placeholder, where it sits, and what it resolved to — for the message. */
 function resolvedTokenPhrase(hit: ResolvedTokenOutsideYears): string {
-  return `${preview(hit.token)} at ${hit.path}, a relative-date placeholder that resolved to `
+  return `${preview(hit.token)} at ${hit.path}, a relative-date placeholder resolved to `
     + `${preview(hit.value)} (the year ${resolvedYearOf(hit.value)})`;
 }
 
@@ -866,7 +878,7 @@ function resolvedTokenWords(hit: ResolvedTokenOutsideYears): { cls: string; wher
   }
   const yearClass = yearClassOutside(hit.kind, hit.value);
   return {
-    cls: `${yearClass.year}, the years a ${hit.kind} value may name`,
+    cls: yearClass.year,
     where: yearClass.where,
     having: yearClass.having,
     remedy: `${RESOLVED_TOKEN_REMEDY} ${yearClass.remedy}`,
@@ -899,8 +911,8 @@ export function assertResolvedTemporalTokensInRange(
   const words = resolvedTokenWords(hit);
   throw invalidFilterError(
     `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field against `
-    + `${resolvedTokenPhrase(hit)}, ${words.cls}, so it is not a ${hit.kind} value this platform can `
-    + `interpret. ${words.where} The filter was NOT applied. ${words.remedy}`,
+    + `${resolvedTokenPhrase(hit)}, ${words.cls}. ${words.remedy} The filter was NOT applied. `
+    + words.where,
   );
 }
 
@@ -921,7 +933,6 @@ export function assertHavingResolvedTemporalTokensInRange(
   const words = resolvedTokenWords(hit);
   throw invalidFilterError(
     `aggregate('${object}'): ${havingColumnPhrase(hit, query)} compares against ${resolvedTokenPhrase(hit)}, `
-    + `${words.cls}, so it is not a ${hit.kind} value this platform can interpret. ${words.having} `
-    + `The \`having\` was NOT applied. ${words.remedy}`,
+    + `${words.cls}. ${words.remedy} The \`having\` was NOT applied. ${words.having}`,
   );
 }

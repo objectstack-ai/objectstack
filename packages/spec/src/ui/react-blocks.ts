@@ -314,7 +314,6 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       { name: 'onRowClick', type: '(record) => void', kind: 'callback', description: "Called with the clicked row's record — the hook for master/detail." },
       { name: 'onNavigate', type: "(recordId, action: 'view' | 'new_window') => void", kind: 'callback', description: "Called for page-level navigation. The second argument is a navigation-MODE token from a CLOSED vocabulary — 'view' opens the record page, 'new_window' opens it in a new browser tab; the reference implementation emits no other value and reads no other branch." },
       { name: 'fields', type: 'string[]', kind: 'binding', description: 'Limit/order the columns shown (defaults to the object list fields).' },
-      { name: 'options', type: 'Record<string, any>', kind: 'binding', description: 'View-type-specific options bag (kanban/calendar/gantt extras); prefer the typed spec props where they exist.' },
     ],
   },
   {

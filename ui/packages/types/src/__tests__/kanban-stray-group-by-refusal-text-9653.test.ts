@@ -62,9 +62,11 @@ function refusalMessage(doc: Record<string, unknown>, path: string, code: string
 
 const CHANNELS = [
   { name: 'declared `kanban` slot', doc: { kanban: { groupByField: 'stage', groupBy: 'stage' } }, path: 'kanban.groupBy', code: 'invalid_type' },
-  // `invalid_type` since objectui#6152 round 12: the bag nests the declared slot's
-  // own block, so the arm is a member there too (it was a `custom` check).
-  { name: 'legacy `options.kanban` bag', doc: { options: { kanban: { groupBy: 'stage' } } }, path: 'options.kanban.groupBy', code: 'invalid_type' },
+  // The legacy `options.kanban` bag was the second channel (`invalid_type` there
+  // since objectui#6152 round 12). objectstack#25923 retired the bag: it is
+  // refused whole at `options`, and a stored one is folded onto `kanban`, so
+  // its fixture lands here, in the declared slot, with no canonical lane beside it.
+  { name: 'declared `kanban` slot, the stray key alone (the folded legacy bag)', doc: { kanban: { groupBy: 'stage' } }, path: 'kanban.groupBy', code: 'invalid_type' },
 ] as const;
 
 describe('objectui#9653 · the stray-`groupBy` refusal does not deny the validation that emits it', () => {

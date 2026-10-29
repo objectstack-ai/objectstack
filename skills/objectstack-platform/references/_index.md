@@ -22,7 +22,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Transitive dependencies
 
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
+- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, UniqueScopeSchema
 - `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookRefusalSchema, HookEvent, HookSchema, HookContextSchema
 - `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
 - `node_modules/@objectstack/spec/src/security/rls.zod.ts` — Row-Level Security (RLS) Protocol

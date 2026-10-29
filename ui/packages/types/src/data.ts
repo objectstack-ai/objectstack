@@ -358,10 +358,20 @@ export interface RecordFieldAccess {
   /**
    * Fields the caller may write on this record, as field-level security
    * judges an update of the stored row. The object grant, the record's
-   * row-level write scope and a field's own rules (readonly, computed types)
-   * are not part of it.
+   * row-level write scope (see `writable`) and a field's own rules
+   * (readonly, computed types) are not part of it.
    */
   editable: string[];
+  /**
+   * Whether the caller may update this record at all, judged by the write
+   * gate on the stored row: the object grant, record sharing and ownership,
+   * row-level security. `false` means an edit of this record is refused
+   * whole, whatever `editable` lists. `true` does not promise that a save
+   * succeeds: a pending approval that locks the record has its own reader
+   * (the approvals record lock), and validation is judged on the values
+   * sent. Absent from a server that predates the verdict.
+   */
+  writable?: boolean;
 }
 
 /**

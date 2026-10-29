@@ -215,7 +215,7 @@ code lives in `currencyConfig`, never in the value.
 | `min` | `number` | — | Minimum value |
 | `max` | `number` | — | Maximum value |
 | `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether the column is pinned to `defaultCurrency` (`fixed`) or displays in the tenant default currency, the `localization.currency` setting (`dynamic`); the value is a bare number either way |
-| `currencyConfig.defaultCurrency` | `string` | `'CNY'` | The column's currency code under `fixed`; not the displayed currency under `dynamic` |
+| `currencyConfig.defaultCurrency` | `string` | — | The column's currency code under `fixed`, where it is required; not the displayed currency under `dynamic` |
 
 ```typescript
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }
@@ -1057,6 +1057,83 @@ what the box accepts, and only one of the two outcomes is announced:
   never reach the form, so no warning is possible.
 
 "No warning" therefore does not mean "the value is right".
+
+### Polymorphic pointer pairs (`referenceVia`)
+
+A `text` field that declares `referenceVia` holds a record id of the object its
+sibling column names, row by row: `sys_approval_request.record_id` points at the
+record `object_name` names, and `sys_activity.source_id` at the one
+`source_object` names. The record details grid resolves the pair from the row
+with `resolveRecordPointer(field, row)` and draws it with the renderer
+registered under `RECORD_POINTER_CARD_TYPE`. The fields package's default draws
+the record id as text; the console registers a record preview card there, so a
+pointer field on a record page shows the record it points at. When the card
+could read that record, its title links to the record's page in the current
+app, built by the same record-link builder the page's lookup values use; a
+record the reader cannot read is drawn with no link, and the card never says
+why. Nothing is authored for this: the `referenceVia` declaration on the field
+is the whole contract. List cells are not a call site yet.
+
+When the platform deletes the record a pointer names, it can say so on the row.
+A pointer field that also declares `referenceDeletedWhen: { field, value }`
+names a sibling `select` field and the option the platform writes there, as
+`sys_approval_request.record_id` declares
+`{ field: 'cancel_reason', value: 'record_deleted' }`. On a row holding that
+option the details grid draws a tombstone in the option's own label (localized
+when the console's bundle localizes it), reads nothing and links nothing. A
+record the card cannot read on any other row still gets the cause-free text:
+only the declaration means deleted.
+
+### Naming a registry item by name (`position-ref`, `permission-ref`)
+
+A `text` field that stores the **machine name** of one item of a metadata
+registry — a position, a permission set — declares the matching widget, and the
+record form lists that registry instead of asking for a typed name:
+
+```json
+{
+  "position": {
+    "type": "text",
+    "label": "Position",
+    "required": true,
+    "maxLength": 100,
+    "widget": "position-ref"
+  }
+}
+```
+
+| Widget | Lists | Stores |
+|---|---|---|
+| `position-ref` | the `position` registry (`GET /api/v1/meta/position`) | the position's `name` |
+| `permission-ref` | the `permission` registry (`GET /api/v1/meta/permission`) | the permission set's `name` |
+
+Like every `widget` value, the name is looked up as `field:<widget>`. Each item
+reads as its label beside its name, and the value written is the name alone: no
+label, no id. A stored name the registry does not list stays on screen, flagged
+*not found*, so a renamed or removed item is visible rather than dropped.
+`position-ref` leaves out the audience anchors, the spec's
+`AUDIENCE_ANCHOR_POSITIONS` (`everyone`, `guest`), because the server refuses an
+anchor as a grant target; a stored anchor still shows as its own option. The
+list comes from the data source's `listMetadataItems(type)`. When the adapter
+has none, the list is empty, or the load fails, the field is a text box that
+takes the typed name; a failure is shown with its cause, and the box stays
+editable.
+
+### A widget's face on the record heading
+
+A `text` field that declares `widget: 'recipient-picker'` or `widget: 'object-ref'` is drawn
+in a list column through the read cell registered under that widget's key, which names what
+the stored value references. When that field is also the object's `nameField`, the record
+page heading draws the value through the same cell: a record share heads its page with the
+recipient's name, not the user id it stores. Nothing is authored for this; the `widget`
+declaration on the field is the whole contract.
+
+The heading lives in `@object-ui/components`, which this package depends on and so cannot be
+imported from here the other way round. `@object-ui/components` therefore owns a slot,
+`setFieldReadFaceResolver` / `resolveFieldReadFace`, and this package fills it when it loads with the
+lookup the list cells make. The widget's key draws the stored text until a host registers a
+face under it (the console registers its own), and while it does, the heading prints the
+stored value as before. So does a host that does not load `@object-ui/fields`.
 
 ## Choosing a Field Type
 

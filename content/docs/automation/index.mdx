@@ -31,6 +31,7 @@ export const OpportunityStageHook: Hook = {
 - **Flows** are node-based processes built from nodes like decision, loop, record operations, http, notify, script, screen, wait, subflow, and parallel/join gateways — and the set is **registry-extensible**: plugins can contribute new node types via `registerNodeExecutor`. Flows launch on record changes, on a schedule, from a screen, or via API ([Flows](/docs/automation/flows)).
 - **Workflows** model a record's lifecycle as a **finite state machine**: states, transitions, and guards ([Workflows](/docs/automation/workflows)).
 - **Approvals** are flow nodes with approver resolution, approve/reject decisions, and escalation ([Approvals](/docs/automation/approvals)).
+- **Queues and assignment rules** route a new, ownerless record to a team: declared rules park it in a queue for a member to claim, or hand it to one member round-robin or by least load — no `beforeInsert` hook picks the owner ([Queues & assignment](/docs/automation/queues-and-assignment-rules)).
 - **Webhooks** deliver events to external systems through a **durable outbox** — exponential/linear/fixed retry with dead-lettering, HMAC signing, and an admin redeliver endpoint ([Webhook Delivery](/docs/automation/webhooks)).
 - **Connectors** package external systems behind named actions that flows dispatch — registered by plugins, or **declared as pure metadata** (`provider: 'rest' | 'openapi' | 'mcp'`) and materialized at boot, with reference-based credentials ([Connectors](/docs/automation/connectors)).
 - **Scheduled jobs** run one named bundle function on a cron, interval, or one-off schedule, with retry, a per-attempt timeout, and cluster leader election — a `schedule`-type flow is registered against the *same* job service, so the choice between them is about what runs, not about timing ([Scheduled Jobs](/docs/automation/jobs)).
@@ -46,6 +47,7 @@ Rule of thumb: model *state* with workflows, model *steps* with flows, use hooks
   <Card href="/docs/automation/flows" title="Flows" description="Node-based automation, screen flows, scheduled flows" />
   <Card href="/docs/automation/workflows" title="Workflows" description="State-machine lifecycle modeling" />
   <Card href="/docs/automation/approvals" title="Approvals" description="Approval nodes: approvers, decisions, escalation" />
+  <Card href="/docs/automation/queues-and-assignment-rules" title="Queues & Assignment" description="Park new records for a team, claim them, route by least load" />
   <Card href="/docs/automation/webhooks" title="Webhook Delivery" description="Durable outbox, retries, HMAC signing" />
   <Card href="/docs/automation/connectors" title="Connectors" description="Declarative rest/openapi/mcp instances, credentialRef auth" />
   <Card href="/docs/automation/jobs" title="Scheduled Jobs" description="Cron/interval/once schedules, retry, timeout, run history" />

@@ -355,11 +355,31 @@
  * `issue-create.mjs`. ⛔ No second read path beyond that fallback, and ⛔ not
  * a gate: an annotation only ever replaces a search for a number.
  *
+ * ## A seat's EDIT of its own artefact opens with its signature (#27113)
+ *
+ * The relay writes as one bot login, so the text is the only place a reader learns who wrote it. The
+ * seat-authored writers refuse a body whose first non-empty line is not the seat's signature,
+ * `LANE#N · ACCOUNT · SESSION` (`readSignatureLine`, `check-half-states.mjs`, whose banner carries the shape and
+ * the ruling). This door owns the half no other writer covers: a `comment_edit` or an `issue_patch` carrying a
+ * `body` in an actions file a seat hands it (`unsignedEditBodies`) — refused as usage (2) before anything is
+ * packed or sent, a dry run included. Three things it deliberately leaves alone:
+ *
+ *   - a body a SCRIPT generates and rewrites whole, recognised by the marker line its generator writes first
+ *     (`GENERATED_BODY_MARKERS`: the fleet roster's) — the ruling keeps generated cards out of scope;
+ *   - `comment` and `issue_create`, whose seat doors (`post-stamped.mjs`, `issue-create.mjs`) refuse first, and an
+ *     `issue_patch` that carries no body;
+ *   - `pr_create`: a pull request body's first line is `Fixes #n`, a closing keyword the platform reads there, and
+ *     the ruling is about posts, not pull request bodies.
+ *
+ * The library path (`packRequest`) is not judged here: its callers are the tools above, each of which judges
+ * its own body first.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0   the run completed with conclusion `success`, every body it wrote
  *       reads back as the bytes sent, and every run it started is listed.
- *   2   usage, or the packed payload was refused by the validator (nothing sent).
+ *   2   usage, the packed payload refused by the validator, or a seat's edit body
+ *       carrying no signature line (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
  *       dispatch route dead (401/407/0), or the run list unreadable.
  *   4   NOT STORED — the run succeeded and the read-back shows a body the board
@@ -380,7 +400,9 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute } from '../check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
+// The roster's generator marker, IMPORTED so the one generated body this door exempts is named by its own writer.
+import { ROSTER_MARKER } from '../fleet-roster.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
 import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, FIELDS, MAX_REQUEST_ID_CHARS, OPS, OP_NAMES, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
@@ -621,6 +643,30 @@ export function newRequestId(nowMs = Date.now(), random = () => randomBytes(3).t
  * (`strokePacing`) is refused here, before anything leaves, with the per-op doors named (the header's batch-gap
  * section). `pacing` rides along on both answers, for the caller that prints it.
  */
+/** The ops whose `body` is a seat's EDIT of a seat-authored artefact — the signature's half at this door (header). */
+export const SIGNED_EDIT_OPS = Object.freeze(['comment_edit', 'issue_patch']);
+
+/** The opening marker lines of the bodies a SCRIPT generates and rewrites whole — out of the signature's scope (header). */
+export const GENERATED_BODY_MARKERS = Object.freeze([ROSTER_MARKER]);
+
+/**
+ * The actions in a seat's stroke whose edit body opens with no signature line, each with `signatureRefusal`'s row —
+ * empty when every `comment_edit` / `issue_patch` body is signed, generated, or absent. Pure.
+ *
+ * @returns {{ action: number, op: string, line: string, why: string }[]} — `action` is 1-based, as the read-back rows count.
+ */
+export function unsignedEditBodies(actions) {
+  if (!Array.isArray(actions)) return [];
+  const rows = [];
+  actions.forEach((a, i) => {
+    if (a === null || typeof a !== 'object' || !SIGNED_EDIT_OPS.includes(a.op) || typeof a.body !== 'string') return;
+    if (GENERATED_BODY_MARKERS.some((marker) => a.body.trimStart().startsWith(marker))) return;
+    const row = signatureRefusal(a.body);
+    if (row !== null) rows.push({ action: i + 1, op: a.op, ...row });
+  });
+  return rows;
+}
+
 export function packRequest({ repo, session, actions, requestId = null, now = Date.now } = {}) {
   const payload = { request_id: requestId ?? newRequestId(now()), repo, session, actions };
   const judged = validatePayload(payload);
@@ -1461,10 +1507,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none": 11,
   "the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2": 6,
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
+  "the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone": 13,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
 });
-// Raised 21 → 22 with the run_rerun_failed seat battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 22;
+// Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 23;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2092,7 +2139,10 @@ export async function selfTest() {
       t('a stroke carrying no body reads nothing back: success, read-back none, no request beyond the dispatch and the run', [labels.state, labels.readBack?.state, labels.seen.filter((s) => !s.call.includes('/actions/runs') && s.call !== DISPATCH).length], ['success', 'none', 0]);
       t("the callers' one vocabulary: failure + notStored → 4, failure → 5, unverified → 6", [exitForResult({ state: 'failure', notStored: true }), exitForResult({ state: 'failure' }), exitForResult({ state: 'unverified' })], [EXIT_NOT_STORED, EXIT_PLATFORM_REFUSAL, EXIT_UNCONFIRMED]);
       // The CLI, end to end: the exit code a seat actually reads, from the actions file the card's seat sent.
-      writeFileSync(join(dir, 'patch.json'), JSON.stringify([{ op: 'issue_patch', issue: 11041, body: B }]), 'utf8');
+      // The seat's edit body opens with its signature (#27113), so the corrupted byte sits exactly that line's bytes further down.
+      const SIGNED = `domain:skills#2 · os-justin · ${SESSION}\n${B}`;
+      const SIGNED_AT = AT + Buffer.byteLength(SIGNED) - Buffer.byteLength(B);
+      writeFileSync(join(dir, 'patch.json'), JSON.stringify([{ op: 'issue_patch', issue: 11041, body: SIGNED }]), 'utf8');
       const cli = async (stored) => {
         let nowMs = T0;
         const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
@@ -2110,9 +2160,9 @@ export async function selfTest() {
           [console.log, console.error] = [log, err];
         }
       };
-      const cliBad = await cli(SPLIT);
-      t("⭐ the CLI: the card's stroke with a deliberately corrupted read-back EXITS 4, and --json says not_stored with the first differing byte", [cliBad.code, cliBad.json?.not_stored, cliBad.json?.read_back?.[0]?.first_difference_byte], [EXIT_NOT_STORED, true, AT]);
-      const cliGood = await cli(`${B.replace(/\n+$/u, '')}${PLATFORM_COMMENT_FOOTER}`);
+      const cliBad = await cli(SIGNED.replace('全', '\uFFFD\uFFFD'));
+      t("⭐ the CLI: the card's stroke with a deliberately corrupted read-back EXITS 4, and --json says not_stored with the first differing byte", [cliBad.code, cliBad.json?.not_stored, cliBad.json?.read_back?.[0]?.first_difference_byte], [EXIT_NOT_STORED, true, SIGNED_AT]);
+      const cliGood = await cli(`${SIGNED.replace(/\n+$/u, '')}${PLATFORM_COMMENT_FOOTER}`);
       t('…and the same stroke read back intact exits 0, its row landed', [cliGood.code, cliGood.json?.read_back?.[0]?.verdict], [EXIT_OK, 'landed']);
     }
 
@@ -2439,6 +2489,39 @@ export async function selfTest() {
       t(`⭐ --route behind a proxy that answers nothing: the process re-execs with ${PROXY_FLAG}, the read gets no answer, and the verdict is exit 3 with the error naming it — never direct`, [routeDeadProxy.status, deadOut?.transport ?? null, (deadOut?.error ?? '').includes('no answer'), routeDeadProxy.stderr.includes(PROXY_FLAG)], [EXIT_PREREQUISITE, null, true, true], routeDeadProxy.stderr.slice(-300));
     }
 
+    // ── the signature at the seat's door ────────────────────────────────────
+    battery("the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone");
+    {
+      const SIG = `domain:skills#2 · os-justin · ${SESSION}`;
+      const ROWS = (actions) => unsignedEditBodies(actions).map((r) => `${r.action}:${r.op}`);
+      t('an unsigned comment_edit body and an unsigned issue_patch body are both named, by 1-based action and op', ROWS([{ op: 'comment_edit', comment_id: 7, body: 'Edited.' }, { op: 'issue_patch', issue: 3, body: 'Seat post\n' }]), ['1:comment_edit', '2:issue_patch']);
+      t('…each row carries the line it read and why', unsignedEditBodies([{ op: 'comment_edit', comment_id: 7, body: '\n\nEdited.' }])[0]?.line, 'Edited.');
+      t('signed bodies pass, blank lines above the signature included', ROWS([{ op: 'comment_edit', comment_id: 7, body: `${SIG}\nEdited.` }, { op: 'issue_patch', issue: 3, body: `\n${SIG}\n\nSeat post` }]), []);
+      t('⛔ a signature on a LATER line is not one: the first non-empty line decides', ROWS([{ op: 'issue_patch', issue: 3, body: `Seat post\n${SIG}` }]), ['1:issue_patch']);
+      t('an issue_patch that carries no body (a close) is not judged', ROWS([{ op: 'issue_patch', issue: 3, state: 'closed', state_reason: 'completed' }]), []);
+      t("the other doors' ops are not judged here — comment and issue_create refuse at post-stamped and issue-create, pr_create's first line is `Fixes #n`", ROWS([{ op: 'comment', issue: 1, body: 'x' }, { op: 'issue_create', title: 't', body: 'x' }, { op: 'pr_create', title: 't', head: 'h', base: 'main', body: 'Fixes #1' }]), []);
+      t('the roster body is generated, and exempt by the marker its generator writes — imported, never restated', [GENERATED_BODY_MARKERS.includes(ROSTER_MARKER), ROWS([{ op: 'issue_patch', issue: 9, body: `${ROSTER_MARKER}\n\n| seat | holder |` }])], [true, []]);
+      t('…and a body that only MENTIONS the marker below its first line is not generated', ROWS([{ op: 'issue_patch', issue: 9, body: `Notes\n${ROSTER_MARKER}` }]), ['1:issue_patch']);
+      t('the judged ops are exactly the two edit ops, and both are in the table with a body', [[...SIGNED_EDIT_OPS], SIGNED_EDIT_OPS.every((op) => OPS[op] && [...OPS[op].required, ...OPS[op].optional].includes('body'))], [['comment_edit', 'issue_patch'], true]);
+      writeFileSync(join(dir, 'sig-unsigned.json'), JSON.stringify([{ op: 'labels_add', issue: 3, labels: ['a'] }, { op: 'issue_patch', issue: 3, body: 'Seat post\n' }]), 'utf8');
+      writeFileSync(join(dir, 'sig-signed.json'), JSON.stringify([{ op: 'issue_patch', issue: 3, body: `${SIG}\nSeat post\n` }]), 'utf8');
+      const env = (extra) => ({ ...process.env, GITHUB_TOKEN: TOKEN, GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', OS_PM_WRITE_PACE_FILE: join(dir, 'sig-pace.jsonl'), [SESSION_ENV]: SESSION, [CONTAINER_SESSION_ENV]: '', ...extra });
+      const spawn = (args, extra = {}) => spawnSync(process.execPath, [SELF_PATH, ...args], { encoding: 'utf8', env: env(extra) });
+      const refused = spawn(['--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'sig-unsigned.json'), '--dry-run']);
+      t('⭐ the CLI refuses the unsigned file on a DRY RUN: usage (2), the refusal names action 2 and the shape, and no payload is printed', [refused.status, refused.stderr.includes("action 2 (issue_patch)'s body opens with no signature line") && refused.stderr.includes('LANE#N · ACCOUNT · SESSION'), refused.stdout.includes('"event_type"')], [EXIT_USAGE, true, false], refused.stderr.slice(-300));
+      const noSession = spawn(['--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'sig-unsigned.json'), '--dry-run'], { [SESSION_ENV]: '' });
+      t('…judged on the file as handed, before the session: the same refusal with no session in the environment', [noSession.status, noSession.stderr.includes('no signature line')], [EXIT_USAGE, true]);
+      const signed = spawn(['--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'sig-signed.json'), '--dry-run']);
+      t('the signed file packs as before: exit 0, the payload printed, the body sent exactly as written', [signed.status, signed.status === EXIT_OK ? JSON.parse(signed.stdout).client_payload.actions[0].body.split('\n')[0] : null], [EXIT_OK, SIG], signed.stderr.slice(-300));
+      t('structural: the check runs in main right after the file is parsed, before the session and the packer', (() => {
+        const src = readReal(SELF_PATH, 'utf8');
+        // lastIndexOf: this very case spells the needle above `main`, so the first hit is the test, not the function.
+        const body = src.slice(src.lastIndexOf('export async function main('));
+        const at = body.indexOf('unsignedEditBodies(actions)');
+        return at > body.indexOf('JSON.parse(readFileSync(opts.actionsFile') && at < body.indexOf('const session = opts.session') && at < body.indexOf('packRequest(');
+      })());
+    }
+
     // ── the no-run conformance ──────────────────────────────────────────────
     battery('the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen');
     {
@@ -2648,6 +2731,8 @@ const USAGE = [
   `  ${CONTAINER_SESSION_ENV} (cse_<id> → session_<id>); ${SESSION_ENV} overrides the container (a local checkout, a test).`,
   `  ⛔ Never as a prefix on the command line: the seats' allow rules are literal command prefixes. The dispatch always`,
   `  goes to ${RELAY_REPO}; --repo names the target.`,
+  '  A comment_edit or issue_patch body opens with the seat\'s signature line, LANE#N · ACCOUNT · SESSION, or the file is',
+  '  refused (2) before anything is packed; the fleet roster\'s generated body is the one exemption.',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
@@ -2708,6 +2793,14 @@ export async function main(argv, deps = {}) {
     actions = JSON.parse(readFileSync(opts.actionsFile, 'utf8'));
   } catch (e) {
     console.error(`fleet-write/dispatch: --actions-file ${opts.actionsFile} cannot be read as JSON (${e?.message ?? 'unreadable'}). Nothing was sent.`);
+    return EXIT_USAGE;
+  }
+  // A seat's edit body opens with its signature (#27113) — judged on the file as handed, before the session, the
+  // packer or a dry run, so the refusal does not depend on the environment.
+  const unsigned = unsignedEditBodies(actions);
+  if (unsigned.length > 0) {
+    for (const row of unsigned) console.error(signatureRefusalText(row, { tool: 'fleet-write/dispatch', where: `action ${row.action} (${row.op})'s body` }));
+    console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
   }
   const session = opts.session ?? sessionFrom(env);
