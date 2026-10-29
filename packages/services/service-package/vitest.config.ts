@@ -1,11 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// This config exists for three settings; everything else stays on vitest's
+// This config exists for four settings; everything else stays on vitest's
 // defaults, deliberately — a key added here re-specifies behaviour for every
 // test file in the package (packages/cli/vitest.config.ts's header records the
 // incident that taught that).
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
+import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
 
 export default defineConfig({
   test: {
@@ -19,7 +20,12 @@ export default defineConfig({
     // #13517: quiet the registry's per-item registration chatter — the
     // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
     // default. Enforced by scripts/check-registry-log-declared.mjs.
-    env: { OS_REGISTRY_LOG: 'warn' },
+    // TMPDIR on /dev/shm when it is writable (#27306; vitest.memory-tmp.mts):
+    // the two tests that open a SQLite file do it in an `mkdtemp` under it.
+    // Measured beside four `dd … conv=fsync` writers on the same disk: green
+    // in that run, but the slowest case went from 0.17 s idle to 3.04 s, 61%
+    // of its 5 s budget, for no change in the code; READING_HEAD.
+    env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
   },
   resolve: {
     // `hydration-convert-forward.test.ts` boots the REAL engine, protocol and
