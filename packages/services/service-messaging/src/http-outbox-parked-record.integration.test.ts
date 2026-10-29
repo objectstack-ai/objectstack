@@ -11,7 +11,9 @@
  * nothing. The obvious fix (write the discarded event as a `dead` row) is
  * *actively unsafe on its own*: `redeliver()` reset ANY terminal row to
  * `pending` with no signature check, behind `POST /api/v1/webhooks/redeliver`
- * which any authenticated user can reach. A parked row has no signature —
+ * (admitted to a caller with edit access to `sys_webhook`, as decided by
+ * `packages/plugins/plugin-webhooks/src/redeliver-entitlement.ts`). A parked
+ * row has no signature —
  * the signature is computed at enqueue from the very secret that could not be
  * resolved — so redelivering one would put the payload on the wire UNSIGNED,
  * reopening #7799 through a door nobody would think to audit.
