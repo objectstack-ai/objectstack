@@ -46,7 +46,7 @@ function ctx(overrides: any = {}) {
     environmentId: undefined,
     executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] },
     // A signed-in caller: the credential the dispatcher's identity step records.
-    admission: { credential: 'session', authGate: undefined },
+    admission: { credential: 'session' as const, authGate: undefined },
     ...overrides,
   };
 }
