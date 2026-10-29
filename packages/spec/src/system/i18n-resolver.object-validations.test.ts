@@ -271,23 +271,26 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message beats the packaged tran
     vip_branch: 'Every VIP ticket needs a named owner.',
   };
 
-  /** The tenant's overlay: two messages rewritten, one rule of its own. */
+  /**
+   * The tenant's overlay: two messages rewritten, and one rule the packaged
+   * object does not declare (as an `objectExtensions` rule is folded on).
+   */
   const tenantDoc = () => {
     const doc = clone(DOC);
     doc.validations[0].message = REWRITE.closed_is_final;
     doc.validations[3].then.message = REWRITE.vip_branch;
     doc.validations.push(rule({
       type: 'script',
-      name: 'tenant_only_rule',
-      message: 'Our own rule, in our own words.',
+      name: 'unpackaged_rule',
+      message: 'A rule the package does not declare.',
       condition: 'record.owner == null',
     }));
     return doc;
   };
 
-  /** A catalog entry for the tenant's own rule too: it still must not apply. */
+  /** The catalog carries an entry for the unpackaged rule under its own name. */
   const bundle = TranslationBundleSchema.parse({
-    'zh-CN': localeData({ ...ZH, tenant_only_rule: '不该出现的译文。' }),
+    'zh-CN': localeData({ ...ZH, unpackaged_rule: '套件未声明的规则。' }),
   });
 
   it('serves the rewrite as written, and still translates every rule the tenant left alone', () => {
@@ -299,16 +302,17 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message beats the packaged tran
       wrapper: AUTHORED.wrapper,
       vip_branch: REWRITE.vip_branch,
       standard_branch: ZH.standard_branch,
-      // A rule the packaged object does not declare was authored after the fact.
-      tenant_only_rule: 'Our own rule, in our own words.',
+      // Nothing to diverge from: its own entry still applies.
+      unpackaged_rule: '套件未声明的规则。',
     });
   });
 
-  it('counts every named rule as authored when the packaged object declares none', () => {
+  it('applies the catalog to every rule when the packaged object declares none', () => {
     const { validations: _dropped, ...bare } = clone(DOC);
-    const doc = tenantDoc();
-    const out = translateObject(doc, bundle, { locale: 'zh-CN', packagedBase: bare }) as any;
-    expect(out.validations).toBe(doc.validations);
+    const out = translateObject(tenantDoc(), bundle, { locale: 'zh-CN', packagedBase: bare }) as any;
+    expect(out.validations[0].message).toBe(ZH.closed_is_final);
+    expect(out.validations[3].then.message).toBe(ZH.vip_branch);
+    expect(out.validations[4].message).toBe('套件未声明的规则。');
   });
 
   it('infers nothing without a packaged base: the catalog applies, as before', () => {

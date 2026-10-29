@@ -2659,8 +2659,8 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
  * rule of the same name, the sentence is the tenant's own and is returned as
  * written, judged by `scalarOverridesPackagedBase` (the one comparison `/meta`
  * judges the same message by). `messages.packagedRule` is the engine's lookup
- * into the packaged owner's declaration; absent means no packaged base is
- * known, and the catalog applies as it always did.
+ * into the packaged owner's declaration; absent, or answering no rule of the
+ * name, there is nothing to diverge from and the catalog applies as before.
  */
 describe('evaluateValidationRules — a tenant-rewritten rule message beats the packaged translation (ADR-0029 D9.2a)', () => {
   const PACKAGED = 'A standing duty must declare a frequency.';
@@ -2705,9 +2705,9 @@ describe('evaluateValidationRules — a tenant-rewritten rule message beats the 
     expect(err.message).toBe(ZH);
   });
 
-  it('counts a rule the packaged object does not declare as authored', () => {
+  it('translates a rule the packaged object does not declare (an extension rule), under its own name', () => {
     const [err] = failing(schemaWith(REWRITE), {}, { messages: messages({ packagedRule: () => undefined }) });
-    expect(err.message).toBe(REWRITE);
+    expect(err.message).toBe(ZH);
   });
 
   it('infers nothing without a packaged base: the catalog applies, as before', () => {

@@ -413,10 +413,10 @@ export interface ValidationMessageContext {
    * translation) is not applied to it.
    *
    * Absent when no packaged owner is registered for the object (a
-   * runtime-authored object, a registry-less host): nothing is inferred and
-   * the catalog applies, as on `/meta` with no base. Present, `undefined`
-   * means the packaged declaration carries no rule of that name, so the
-   * served rule was authored after the fact.
+   * runtime-authored object, a registry-less host), and `undefined` for a rule
+   * the packaged declaration does not carry (one an `objectExtensions` entry
+   * folds on, translated under its own name): either way there is nothing to
+   * diverge from, and the catalog applies, as on `/meta`.
    */
   packagedRule?: (ruleName: string) => unknown;
 }

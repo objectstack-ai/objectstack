@@ -10,7 +10,10 @@
  * The catalog translates the PACKAGED rule, so under `zh-CN`:
  *
  *  - the rewritten rule must answer the tenant's own sentence, as written;
- *  - the rule the tenant left alone must still answer its translation.
+ *  - the rule the tenant left alone must still answer its translation;
+ *  - a rule a second package folds on through `objectExtensions` — absent
+ *    from the owner's declaration by construction — must still answer its own
+ *    package's translation: it has no packaged message to diverge from.
  *
  * Both readers are driven off ONE real registry: the refusal of a real write
  * (the engine's validator), and the served object as `/meta` translates it —
@@ -26,14 +29,29 @@ import { ObjectQL } from './index.js';
 
 const OBJ = 'tr_duty';
 const PKG = 'com.objectstack.test.tenant-rewrite';
+const EXT_PKG = 'com.objectstack.test.tenant-rewrite-extension';
 
 const PACKAGED = {
   returned_needs_note: 'Say why the duty is being returned.',
   done_needs_owner: 'A finished duty needs an owner.',
+  ext_blocked_needs_reason: 'Say what is blocking the duty.',
 };
 const ZH = {
   returned_needs_note: '请写明打回的原因。',
   done_needs_owner: '已完成的职责需要负责人。',
+  ext_blocked_needs_reason: '请写明阻塞原因。',
+};
+
+/** The extension package's own rule, folded onto the object. */
+const EXTENSION = {
+  name: OBJ,
+  validations: [{
+    type: 'script',
+    name: 'ext_blocked_needs_reason',
+    message: PACKAGED.ext_blocked_needs_reason,
+    condition: "record.status == 'blocked' && record.return_note == null",
+    fields: ['return_note'],
+  }],
 };
 const REWRITE = 'Tell the owner what to change before you send it back.';
 
@@ -72,6 +90,7 @@ const BUNDLE: Record<string, any> = {
         _validations: {
           returned_needs_note: { message: PACKAGED.returned_needs_note },
           done_needs_owner: { message: PACKAGED.done_needs_owner },
+          ext_blocked_needs_reason: { message: PACKAGED.ext_blocked_needs_reason },
         },
       },
     },
@@ -82,6 +101,7 @@ const BUNDLE: Record<string, any> = {
         _validations: {
           returned_needs_note: { message: ZH.returned_needs_note },
           done_needs_owner: { message: ZH.done_needs_owner },
+          ext_blocked_needs_reason: { message: ZH.ext_blocked_needs_reason },
         },
       },
     },
@@ -134,6 +154,7 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
     await engine.init();
     engine.setI18nService(servedI18n(BUNDLE) as any);
     engine.registry.registerObject(body(PACKAGED.returned_needs_note) as any, PKG);
+    engine.registry.registerObject(EXTENSION as any, EXT_PKG, undefined, 'extend');
     if (overlay) {
       engine.registry.registerObject({ ...body(REWRITE), _provenance: 'org' } as any, PKG, undefined, 'overlay');
     }
@@ -170,6 +191,7 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
         refusal: {
           returned_needs_note: await refusal(header, { id: 'r1', status: 'returned' }),
           done_needs_owner: await refusal(header, { id: 'r2', status: 'done' }),
+          ext_blocked_needs_reason: await refusal(header, { id: 'r3', status: 'blocked' }),
         },
       };
     }
@@ -180,16 +202,24 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
     beforeEach(async () => { await boot(true); });
 
     it('the overlay is what both readers see, over a packaged owner that is still there', () => {
+      const served = (engine.registry.getObject(OBJ) as any).validations.map((r: any) => r.name);
+      expect(served).toEqual(['returned_needs_note', 'done_needs_owner', 'ext_blocked_needs_reason']);
       expect((engine.registry.getObject(OBJ) as any).validations[0].message).toBe(REWRITE);
-      expect((protocol.getPackagedObjectBase(OBJ) as any).validations[0].message).toBe(PACKAGED.returned_needs_note);
+      const packaged = protocol.getPackagedObjectBase(OBJ) as any;
+      expect(packaged.validations.map((r: any) => r.name)).toEqual(['returned_needs_note', 'done_needs_owner']);
+      expect(packaged.validations[0].message).toBe(PACKAGED.returned_needs_note);
     });
 
-    it('serves and refuses with the rewrite as written, and still translates the untouched rule', async () => {
-      const both = (zh: string) => ({ returned_needs_note: REWRITE, done_needs_owner: zh });
+    it('serves and refuses with the rewrite as written, and still translates the untouched and extension rules', async () => {
+      const rows = (t: typeof ZH) => ({
+        returned_needs_note: REWRITE,
+        done_needs_owner: t.done_needs_owner,
+        ext_blocked_needs_reason: t.ext_blocked_needs_reason,
+      });
       expect(await table()).toEqual({
-        'zh-CN': { served: both(ZH.done_needs_owner), refusal: both(ZH.done_needs_owner) },
-        zh: { served: both(ZH.done_needs_owner), refusal: both(ZH.done_needs_owner) },
-        en: { served: both(PACKAGED.done_needs_owner), refusal: both(PACKAGED.done_needs_owner) },
+        'zh-CN': { served: rows(ZH), refusal: rows(ZH) },
+        zh: { served: rows(ZH), refusal: rows(ZH) },
+        en: { served: rows(PACKAGED), refusal: rows(PACKAGED) },
       });
     });
   });
@@ -197,7 +227,7 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
   describe('control: no overlay', () => {
     beforeEach(async () => { await boot(false); });
 
-    it('translates both packaged rules on both readers', async () => {
+    it('translates every rule on both readers', async () => {
       expect(await table()).toEqual({
         'zh-CN': { served: ZH, refusal: ZH },
         zh: { served: ZH, refusal: ZH },

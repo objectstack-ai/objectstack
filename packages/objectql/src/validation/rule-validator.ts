@@ -3768,8 +3768,8 @@ export function emitValidationAdvisories(
  * `scalarOverridesPackagedBase`, the one comparison `/meta`'s
  * `translateObjectValidations` judges the same message by (⛔ never a second
  * one here), so the served rule and the refusal of the same write keep
- * showing one sentence. A rule the packaged declaration does not carry counts
- * as diverged; no packaged rule lookup means nothing is inferred.
+ * showing one sentence. A rule the packaged declaration does not carry, or no
+ * lookup at all, has nothing to diverge from: the catalog applies.
  */
 function authoredRuleMessage(
   rule: Pick<BaseRule, 'name' | 'message'>,
@@ -3777,8 +3777,7 @@ function authoredRuleMessage(
 ): string {
   if (messages?.translate && messages.objectName && messages.locale
       && typeof rule.name === 'string' && rule.name.length > 0) {
-    if (messages.packagedRule
-        && scalarOverridesPackagedBase(messages.packagedRule(rule.name) ?? {}, 'message', rule.message)) {
+    if (scalarOverridesPackagedBase(messages.packagedRule?.(rule.name), 'message', rule.message)) {
       return rule.message;
     }
     const key = objectValidationMessageKey(messages.objectName, rule.name);

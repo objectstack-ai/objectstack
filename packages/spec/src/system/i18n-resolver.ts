@@ -4003,9 +4003,15 @@ const MAX_VALIDATION_DEPTH = 10;
  * rule and reworded it — is authored data and keeps its text, judged by
  * {@link valueOverridesPackagedBase} (⛔ never a second comparison) against
  * the rule in {@link TranslateDocumentOptions.packagedBase}'s `validations`,
- * a `conditional` branch by its own name. A rule the base does not declare was
- * authored after the fact, and its message counts as diverged; no base
- * supplied means nothing is inferred and the catalog applies.
+ * a `conditional` branch by its own name.
+ *
+ * A rule the base does not declare has no packaged message to diverge from,
+ * so nothing is inferred and the catalog applies, as it does with no base at
+ * all (the predicate's own first edge). Unlike a list view, a rule is
+ * translated under its OWN name: a rule an `objectExtensions` entry folds onto
+ * the object, absent from the owner's declaration by construction, is
+ * translated by its package's entry for that name, and counting it as
+ * diverged would serve it untranslated.
  *
  * The evaluator applies the same rule to its refusal, through the exported
  * {@link scalarOverridesPackagedBase} and the packaged owner's declaration the
@@ -4034,9 +4040,7 @@ function translateObjectValidations(
       };
     }
     if (typeof rule.name !== 'string' || rule.name.length === 0) return raw;
-    if (packaged !== undefined && valueOverridesPackagedBase(packaged.get(rule.name) ?? {}, 'message', rule.message)) {
-      return raw;
-    }
+    if (valueOverridesPackagedBase(packaged.get(rule.name), 'message', rule.message)) return raw;
     const path = objectValidationMessageKey(objectName, rule.name).split('.');
     for (const code of localeChain(opts)) {
       const candidate = path.reduce<unknown>(
@@ -4061,14 +4065,11 @@ function translateObjectValidations(
 /**
  * The packaged object's validation rules by `name`, each `conditional` branch
  * under its own name to {@link MAX_VALIDATION_DEPTH}, for
- * {@link translateObjectValidations}' divergence test. `undefined` when no
- * base is known; an empty map when the base declares no rules, so every rule
- * on the served document then counts as authored. The first rule of a name
- * wins.
+ * {@link translateObjectValidations}' divergence test — empty when no base is
+ * known or it declares no rules. The first rule of a name wins.
  */
-function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, unknown>> | undefined {
+function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, unknown>> {
   const base = asRecord(packagedBase);
-  if (base === undefined) return undefined;
   const byName = new Map<string, Record<string, unknown>>();
   const visit = (raw: unknown, depth: number): void => {
     const rule = asRecord(raw);
@@ -4080,7 +4081,8 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
     }
     if (typeof rule.name === 'string' && rule.name.length > 0 && !byName.has(rule.name)) byName.set(rule.name, rule);
   };
-  if (Array.isArray(base.validations)) for (const raw of base.validations) visit(raw, 0);
+  const rules = base?.validations;
+  if (Array.isArray(rules)) for (const raw of rules) visit(raw, 0);
   return byName;
 }
 
