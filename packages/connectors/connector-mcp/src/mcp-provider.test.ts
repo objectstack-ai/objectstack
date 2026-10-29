@@ -9,7 +9,7 @@ import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ConnectorProviderContext } from '@objectstack/spec/integration';
-import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
+import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import type { McpClientLike, McpToolDescriptor, McpTransport } from './mcp-connector.js';
 import { createMcpProviderFactory, MCP_PROVIDER_KEY } from './mcp-provider.js';
 
@@ -136,9 +136,10 @@ describe('mcp provider fault classification (#3017)', () => {
     });
 });
 
-// A rejected credential is a configuration fault: it is thrown plain (fatal at
-// boot, never retried), told apart from an operational fault by the SDK's own
-// HTTP-transport error, wherever discovery raised it.
+// A rejected credential is a configuration fault, told apart from an operational
+// fault by the SDK's own HTTP-transport error, wherever discovery raised it.
+// [#27237] Thrown as the CONNECTOR_CREDENTIAL_REJECTED marker, carrying the
+// status: the materializer degrades the instance and never retries it.
 describe('mcp provider — a rejected credential is a configuration fault', () => {
     const http = { transport: { kind: 'http', url: 'https://mcp.vendor.example/mcp' } };
 
@@ -150,19 +151,21 @@ describe('mcp provider — a rejected credential is a configuration fault', () =
         );
     }
 
-    it.each([401, 403])('HTTP %i on connect / handshake throws plain, naming the status', async (status) => {
+    it.each([401, 403])('HTTP %i on connect / handshake throws the credential-rejected marker, naming the status', async (status) => {
         const err = await rejectionOf(async () => {
             throw new StreamableHTTPError(status, 'Error POSTing to endpoint: {"error":"invalid_token"}');
         });
         expect(err).toBeInstanceOf(Error);
         expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        expect(isConnectorCredentialRejected(err)).toBe(true);
+        expect((err as { status?: unknown }).status).toBe(status);
         expect((err as Error).message).toContain(
             `connector-mcp provider: connector 'github' was refused by its MCP server (HTTP ${status})`,
         );
-        expect((err as Error).message).toContain('is not retried');
+        expect((err as Error).message).toContain('This is a configuration fault — fix the credential.');
     });
 
-    it('HTTP 401 on tools/list throws plain too, and closes the client', async () => {
+    it('HTTP 401 on tools/list throws the marker too, and closes the client', async () => {
         let closed = false;
         const err = await rejectionOf(async () => ({
             listTools: async () => { throw new StreamableHTTPError(401, 'Error POSTing to endpoint: unauthorized'); },
@@ -170,6 +173,7 @@ describe('mcp provider — a rejected credential is a configuration fault', () =
             close: async () => { closed = true; },
         }));
         expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        expect(isConnectorCredentialRejected(err)).toBe(true);
         expect((err as Error).message).toContain('(HTTP 401)');
         expect(closed).toBe(true);
     });
@@ -177,6 +181,7 @@ describe('mcp provider — a rejected credential is a configuration fault', () =
     it("the SDK's UnauthorizedError, or a 401 in the cause chain, is the same fault", async () => {
         const direct = await rejectionOf(async () => { throw new UnauthorizedError(); });
         expect(isConnectorUpstreamUnavailable(direct)).toBe(false);
+        expect(isConnectorCredentialRejected(direct)).toBe(true);
         expect((direct as Error).message).toContain('(HTTP 401)');
         const wrapped = Object.assign(new Error('handshake failed'), { cause: new StreamableHTTPError(403, 'forbidden') });
         const nested = await rejectionOf(async () => { throw wrapped; });
@@ -187,8 +192,10 @@ describe('mcp provider — a rejected credential is a configuration fault', () =
     it('control: other HTTP statuses and a JSON-RPC error with code 401 stay upstream-unavailable', async () => {
         const status503 = await rejectionOf(async () => { throw new StreamableHTTPError(503, 'unavailable'); });
         expect(isConnectorUpstreamUnavailable(status503)).toBe(true);
+        expect(isConnectorCredentialRejected(status503)).toBe(false);
         const jsonRpc401 = await rejectionOf(async () => { throw new McpError(401, 'tool-level error code'); });
         expect(isConnectorUpstreamUnavailable(jsonRpc401)).toBe(true);
+        expect(isConnectorCredentialRejected(jsonRpc401)).toBe(false);
     });
 });
 

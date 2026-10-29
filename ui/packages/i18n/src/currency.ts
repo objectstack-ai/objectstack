@@ -7,9 +7,43 @@
  */
 
 /**
+ * The currency config a field declares, in the three modes of
+ * `@objectstack/spec`'s `CurrencyConfigSchema` (ADR-0144 D2 adds `record`).
+ */
+export interface FieldCurrencyConfig {
+  currencyMode?: 'dynamic' | 'fixed' | 'record';
+  defaultCurrency?: string;
+  /** `record` mode only: the sibling field holding each record's ISO 4217 code. */
+  currencyField?: string;
+}
+
+/**
+ * The sibling code field a `record`-mode amount points at (ADR-0144 D2), or
+ * `undefined` for a `dynamic` / `fixed` field and for anything that is not a
+ * currency config at all. The one reading every surface that needs the
+ * pointer itself — the form's code select, the grid footer's grouping test,
+ * the filter builder — shares, so none of them re-derives the mode test.
+ */
+export function recordCurrencyField(
+  field: { currencyConfig?: FieldCurrencyConfig } | null | undefined,
+): string | undefined {
+  const config = field?.currencyConfig;
+  if (config?.currencyMode !== 'record') return undefined;
+  return typeof config.currencyField === 'string' && config.currencyField !== ''
+    ? config.currencyField
+    : undefined;
+}
+
+/**
  * Resolve the display currency code for a currency-typed field, in precedence
  * order:
  *
+ *  0. a `record`-mode field (ADR-0144 D2) reads ONLY the record in scope: the
+ *     value of the sibling field `currencyConfig.currencyField` names. No
+ *     record, or a record whose code is blank, resolves to `undefined` — never
+ *     to steps 1–4. The record's code field is the only place that amount's
+ *     currency lives, so the tenant default would name a currency the amount
+ *     is not in: an amount of 100 EUR shown as `¥100` is worse than `100`;
  *  1. the field's explicit `currency` — a per-node display code. The spec
  *     declares it on presentation surfaces (the metric widget's `currency`, a
  *     dataset measure's `currency`) and looser grid/column configs carry it;
@@ -42,32 +76,42 @@
  * its own selected code, that code is the one to win, ahead of the tenant
  * default.
  *
- * `currencyMode: 'record'` (ADR-0144 D2) returns `undefined` outright: the
- * field has no currency of its own — each record's code lives in the sibling
- * field `currencyConfig.currencyField` names, which only a renderer holding the
- * row can read. No step applies, the tenant default included: a record whose
- * code is blank shows no symbol rather than a currency it never named. Reading
- * the row's code is the per-row display's job.
+ * `currencyMode: 'record'` (ADR-0144 D2) is step 0's alone: the field has no
+ * currency of its own — each record's code lives in the sibling field
+ * `currencyConfig.currencyField` names, which only a caller holding the row
+ * can pass. No other step applies, the tenant default included: a record whose
+ * code is blank, or a call with no record (a metric tile, an aggregate),
+ * shows no symbol rather than a currency it never named.
  *
  * This is the single resolution every field / measure / cell renderer shares -
  * ending the per-renderer drift where some read only `currency`, others only
  * `defaultCurrency`, and others `currencyConfig`. It lives in `@object-ui/i18n`
  * (alongside `useLocalization`) because the tenant default is a localization
  * concern; `@object-ui/fields` re-exports it for backward compatibility.
+ *
+ * `record` is the row / form values the amount sits in. A caller that holds no
+ * record (a column-level header, a footer over many rows) passes none, and a
+ * `record`-mode field then resolves to no currency, which is the honest answer
+ * for a set of amounts in different currencies.
  */
 export function resolveFieldCurrency(
   field:
     | {
         currency?: string;
         defaultCurrency?: string;
-        currencyConfig?: { currencyMode?: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string };
+        currencyConfig?: FieldCurrencyConfig;
       }
     | null
     | undefined,
   tenantDefault?: string,
+  record?: Readonly<Record<string, unknown>> | null,
 ): string | undefined {
   const config = field?.currencyConfig;
-  if (config?.currencyMode === 'record') return undefined;
+  if (config?.currencyMode === 'record') {
+    const codeField = recordCurrencyField(field);
+    const code = codeField !== undefined ? record?.[codeField] : undefined;
+    return typeof code === 'string' && code !== '' ? code : undefined;
+  }
   return (
     field?.currency ||
     (config?.currencyMode === 'fixed' ? config.defaultCurrency : undefined) ||

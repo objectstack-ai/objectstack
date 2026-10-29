@@ -43,6 +43,17 @@ export interface ConnectorMaterialization {
   def: Connector;
   handlers: Record<string, ConnectorMaterializationHandler>;
   close?: () => void | Promise<void>;
+  /**
+   * `true` when the upstream accepted the instance's resolved `auth` while
+   * materializing — the credential travelled with a request the upstream
+   * answered (an MCP handshake over http). The automation service then records
+   * the credential as verified, and a stored one marked `rejected` returns to
+   * `set`. Leave it unset when materializing sends no credential (a provider
+   * that first presents it on a call): a call answered `2xx` is not proof,
+   * since the endpoint may not check the credential, so such a provider's
+   * `rejected` credential stays so until it is set again.
+   */
+  credentialVerified?: boolean;
 }
 
 /**

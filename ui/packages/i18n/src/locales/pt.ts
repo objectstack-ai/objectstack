@@ -382,6 +382,14 @@ const pt = {
       postalCode: "Código postal",
       country: "País",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Selecionar moeda',
+      search: 'Pesquisar moeda…',
+      noResults: 'Nenhuma moeda encontrada',
+      available: 'Disponíveis',
+      all: 'Todas as moedas (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Desativado",
       completed: "Concluído",
@@ -4542,6 +4550,8 @@ const pt = {
     },
   },
   filterBuilder: {
+    currency: 'Moeda',
+    currencyNeedsAnd: 'Um valor em moeda só é comparado na moeda escolhida quando todas as condições devem ser atendidas (E).',
     where: "Onde",
     and: "E",
     or: "OU",

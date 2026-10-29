@@ -45,6 +45,7 @@ import React from 'react';
 import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
+import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 
 /**
  * Whether a `section-divider` row draws anything: a heading, a blurb, or both.
@@ -438,6 +439,9 @@ const useSafeFormTranslation = createSafeTranslation(
     // so a form with no I18nProvider renders what it always did.
     'common.submit': 'Submit',
     'common.cancel': 'Cancel',
+    // objectstack#27247 — the declared Reset button's copy when no
+    // `resetLabel` is authored; the shared key, for the reason above.
+    'common.reset': 'Reset',
     // objectui#3272 — the fullscreen long-text editor (`mobile_fullscreen`).
     // A whole dialog, not a word: title, its sr-only description, the footer's
     // confirm button, and the trigger's accessible name. `Cancel` in the footer
@@ -1208,6 +1212,15 @@ function renderFieldDescription(
   );
 }
 
+/**
+ * Widget keys whose DISPLAY reads a sibling field's value: a `record`-mode
+ * amount (ADR-0144 D2) shows the currency its record's code field holds, and a
+ * `formula` declaring `returnType: 'currency'` is drawn by the same widget.
+ * They get the live record (`dependentValues`) and nothing else from the
+ * data-source family — they query nothing.
+ */
+const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula']);
+
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {
     dataSource,
@@ -1253,6 +1266,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // leftover props onto a DOM node, where an unknown `emptyHint` attribute is
     // a React warning — hence an allow-list, not an unconditional pass-through.
     ...(CASCADE_OPTION_WIDGET_TYPES.has(normalizedType) ? { dependentValues, emptyHint } : {}),
+    // A record-mode amount's symbol and decimals follow the code the user picks
+    // in its sibling select, so the amount box needs the live record too.
+    ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
   };
 }
 
@@ -1604,7 +1620,9 @@ ComponentRegistry.register('form',
       // it". An authored value still wins verbatim, including `''`.
       submitLabel,
       cancelLabel,
+      resetLabel,
       showCancel = false,
+      showReset = false,
       showSubmit = true,
       layout = 'vertical',
       columns = 1,
@@ -2262,6 +2280,12 @@ ComponentRegistry.register('form',
     // widgets as a prop so they can dynamically load related records.
     const schemaCtx = React.useContext(SchemaRendererContext);
     const contextDataSource = schemaCtx?.dataSource ?? null;
+
+    // The codes already stored on the object's records, for each
+    // record-currency code field's "available" group (ADR-0144 D8 rule 3).
+    // Read once per object and handed down on the field's own metadata.
+    const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
+    const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
 
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
@@ -3170,6 +3194,20 @@ ComponentRegistry.register('form',
       return submitThroughValidation(event);
     };
 
+    // Handle reset (objectstack#27247). The form goes back to the values it
+    // opened with — react-hook-form's defaults, which the `defaultValues`
+    // reset above keeps current — and nothing is saved. Wired to the
+    // <form>'s own `reset` event, not only to the bar's button, so a footer
+    // outside the form (drawer, modal) reaches it with a `type="reset"`
+    // button naming the form's `id`; `preventDefault` keeps the browser from
+    // also restoring the DOM inputs behind react-hook-form's back.
+    const handleReset = (event?: React.FormEvent<HTMLFormElement>) => {
+      event?.preventDefault();
+      form.reset();
+      setSubmitError(null);
+      setRejectedFieldNames([]);
+    };
+
     // Handle cancel
     const handleCancel = () => {
       form.reset();
@@ -3741,7 +3779,9 @@ ComponentRegistry.register('form',
                   // is the declared metadata slot (#3090 — never the spec
                   // string); fall back to the field config itself when no
                   // metadata was stashed (standalone forms).
-                  field: field.field || field,
+                  // A record-currency code field also carries the codes its
+                  // object's records already hold (`usedCurrencyCodes`).
+                  field: withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]),
                   ...formField,
                   inputType: fieldProps.inputType,
                   // The field's label, forwarded explicitly because the
@@ -3920,8 +3960,10 @@ ComponentRegistry.register('form',
         // Extract schema props that should not be spread to DOM (handled separately by schema destructuring above)
         submitLabel: _submitLabel,
         cancelLabel: _cancelLabel,
+        resetLabel: _resetLabel,
         showSubmit: _showSubmit,
         showCancel: _showCancel,
+        showReset: _showReset,
 	        resetOnSubmit: _resetOnSubmit,
 	        defaultValues: _defaultValues,
 	        inputType: _inputType,
@@ -3972,6 +4014,7 @@ ComponentRegistry.register('form',
         <form
             ref={formRef}
             onSubmit={handleSubmit}
+            onReset={handleReset}
             className={className}
             {...formProps}
             // Apply designer props
@@ -4155,6 +4198,16 @@ ComponentRegistry.register('form',
                   {cancelLabel ?? t('common.cancel')}
                 </Button>
               )}
+              {showReset && (
+                <Button
+                  type="reset"
+                  variant="outline"
+                  disabled={isSubmitting || disabled}
+                  className="w-full sm:w-auto"
+                >
+                  {resetLabel ?? t('common.reset')}
+                </Button>
+              )}
               {showSubmit && (
               <Button
                 type="submit"
@@ -4188,6 +4241,8 @@ ComponentRegistry.register('form',
       { name: 'submitLabel', type: 'string' },
       { name: 'cancelLabel', type: 'string' },
       { name: 'showCancel', type: 'boolean' },
+      { name: 'showReset', type: 'boolean', description: 'Draw a Reset button that restores the opening values without saving' },
+      { name: 'resetLabel', type: 'string' },
       { 
         name: 'layout', 
         type: 'enum', 

@@ -16,7 +16,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
-import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
+import { pickLocalized, useObjectTranslation, useLocalization } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText } from '@object-ui/fields';
 import { useIsMobile, toast } from '@object-ui/components';
@@ -1178,13 +1178,16 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // the create-mode `required` suppression (#4069), so seeding and validation
   // cannot disagree about which mode this form is in.
   const isCreateForm = isCreateFormMode(schema);
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   // [#5683] `currentUserId` lets the one client-resolvable token
   // (`current_user`) pre-fill with the id the server would stamp anyway;
   // null/unloaded seeds nothing and keeps the omit-and-let-the-engine-resolve
   // contract above.
   const schemaDefaults = React.useMemo(
-    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId }) : {}),
-    [objectSchema, isCreateForm, perms.userId],
+    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency }) : {}),
+    [objectSchema, isCreateForm, perms.userId, homeCurrency],
   );
 
   // What the form OPENS with: the seeded defaults, overlaid with the caller's
@@ -1740,6 +1743,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
               previousValues,
               showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
               showCancel: schema.showCancel !== false,
+              // The declared Reset button (objectstack#27247); see the flat path.
+              showReset: schema.showReset === true && schema.mode !== 'view',
               // While an upload is in flight the Save button says so, the same
               // answer ActionParamDialog gives its Confirm button. The notice
               // below carries the reason in a sentence (objectui#10166).
@@ -1898,8 +1903,13 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     cancelLabel: schema.cancelText,
     showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
     showCancel: schema.showCancel !== false,
-    resetOnSubmit: schema.showReset
-      || schema.submitBehavior?.kind === 'continue'
+    // `showReset` is the declared Reset button — "Show the reset button" in
+    // the spec's block contract — drawn by the form's action bar and
+    // restoring the opening values without a save. It is NOT a clear after
+    // submit: it used to be OR-ed into `resetOnSubmit` below, so `true` drew
+    // no button and emptied the form after every save (objectstack#27247).
+    showReset: schema.showReset === true && schema.mode !== 'view',
+    resetOnSubmit: schema.submitBehavior?.kind === 'continue'
       || (!schema.submitBehavior && schema.resetOnSuccess && schema.mode === 'create'),
     defaultValues: finalDefaultValues,
     previousValues,

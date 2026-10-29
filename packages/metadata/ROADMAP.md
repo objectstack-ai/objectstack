@@ -20,7 +20,7 @@
 | Query / Search                   | Filtering, pagination, sorting by type/scope/state |
 | Bulk operations                  | `bulkRegister` / `bulkUnregister` with error handling |
 | Import / Export                  | Portable bundles with conflict resolution       |
-| Type registry                    | 26 built-in metadata types across 6 domains    |
+| Type registry                    | The built-in metadata types of `DEFAULT_METADATA_TYPE_REGISTRY`, by protocol domain |
 | Dependency tracking              | Cross-reference analysis between metadata items |
 | Watch / Subscribe                | Real-time change notification via callbacks     |
 | File watching (Node.js)          | Chokidar-based hot-reload for development       |

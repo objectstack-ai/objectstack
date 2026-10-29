@@ -51,7 +51,7 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 
 ### Flow Node Types
 
-Flows are built from **20 built-in node types** (plugins register more, e.g.
+Flows are built from **built-in node types** (plugins register more, e.g.
 `approval`):
 
 #### Control Flow

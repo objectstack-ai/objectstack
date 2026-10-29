@@ -23,6 +23,7 @@ import type { MetadataPreviewProps } from '../preview-registry.js';
 import { PreviewShell, PreviewEmptyState, PreviewErrorBoundary } from './PreviewShell.js';
 import {
   formatMeasure,
+  measureCellCurrency,
   formatDimensionValue,
   buildDatasetFieldHelpers,
   relabelDimensions,
@@ -308,7 +309,7 @@ export function DatasetPreview({ draft, locale }: MetadataPreviewProps) {
                     {columns.map((c) => (
                       <td key={c} className="px-2 py-1 tabular-nums whitespace-nowrap">
                         {measureNames.includes(c)
-                          ? formatMeasure(row[c], measureField(c)?.format, measureField(c)?.currency, measureField(c)?.percentScale, displayLocale)
+                          ? formatMeasure(row[c], measureField(c)?.format, measureCellCurrency(measureField(c), state.rows[i]), measureField(c)?.percentScale, displayLocale)
                           : formatDimensionValue(row[c], displayLocale)}
                       </td>
                     ))}

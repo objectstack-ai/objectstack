@@ -116,7 +116,7 @@ export function FormulaField({ value, field, ...props }: FieldWidgetComponentPro
     }
     const amount = Number(safe);
     if (isNaN(amount)) return <span className={typedClassName}>{String(safe)}</span>;
-    return <CurrencyField value={amount} onChange={props.onChange} field={field} readonly />;
+    return <CurrencyField value={amount} onChange={props.onChange} field={field} dependentValues={props.dependentValues} readonly />;
   }
 
   if (valueType === 'boolean') {
