@@ -164,6 +164,13 @@ function asAuthInvitation(raw: unknown, method: string): AuthInvitation {
 }
 
 /**
+ * The `error.code` of the invitation-preview door's one not-found body
+ * (`INVITATION_PREVIEW_NOT_FOUND` in objectstack `plugin-auth`
+ * `invitation-preview.ts`). A 404 without it did not come from the door.
+ */
+const INVITATION_PREVIEW_NOT_FOUND_CODE = 'RESOURCE_NOT_FOUND';
+
+/**
  * The boundary for the signed-out invitation preview's success body,
  * `{ success: true, data: { organizationName, inviterName, email } }`
  * (objectstack `plugin-auth` `invitation-preview.ts`). Anything else is a
@@ -171,13 +178,6 @@ function asAuthInvitation(raw: unknown, method: string): AuthInvitation {
  * treats a rejection as "no preview" and keeps its generic copy, so a wrong
  * shape never reaches the screen as a half-filled sentence.
  */
-/**
- * The `error.code` of the invitation-preview door's one not-found body
- * (`INVITATION_PREVIEW_NOT_FOUND` in objectstack `plugin-auth`
- * `invitation-preview.ts`). A 404 without it did not come from the door.
- */
-const INVITATION_PREVIEW_NOT_FOUND_CODE = 'RESOURCE_NOT_FOUND';
-
 function asAuthInvitationPreview(raw: unknown): AuthInvitationPreview {
   const body = raw as { success?: unknown; data?: Record<string, unknown> } | null | undefined;
   const data = body?.success === true ? body.data : undefined;
