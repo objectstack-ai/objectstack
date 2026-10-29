@@ -1014,11 +1014,12 @@ export function bodyTablePlacement(
 }
 
 /**
- * Sub-builder: the `page:tabs` node. Emits the Details tab, then the
- * Timeline tab (the one stream, objectstack#27055: field changes join it
- * under its Changes filter, so there is no History tab), the Related tab and
- * the Approvals tab, each only when the options give it content, in stable
- * order: Timeline sits second for a worked object and last otherwise.
+ * Sub-builder: the `page:tabs` node. Emits the Details tab, always first,
+ * then the Timeline tab (the one stream, objectstack#27055: field changes
+ * join it under its Changes filter, so there is no History tab), the Related
+ * tab and the Approvals tab, each of those three only when the options give
+ * it content. The order is stable: Timeline sits second for a worked object
+ * and last otherwise.
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into
