@@ -190,8 +190,12 @@ describe('DataPillar — a rule guard that does not parse holds with the draft (
     await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Rule A'), { timeout: 3000 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Show me' }));
-    await screen.findByText('Expression');
-    const box = rawEditorIn(document.body);
+    // The guard does not parse, so its builder reopens straight in raw CEL.
+    const box = await waitFor(() => {
+      const el = screen.queryAllByRole('combobox').find((e) => e.tagName === 'TEXTAREA') as HTMLTextAreaElement | undefined;
+      expect(el).toBeTruthy();
+      return el!;
+    });
     expect(box.value).toBe('record.status ==');
     fireEvent.change(box, { target: { value: "record.status == 'open'" } });
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
