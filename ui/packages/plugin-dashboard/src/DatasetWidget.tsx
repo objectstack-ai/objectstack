@@ -52,6 +52,7 @@ import {
   dimensionOptionTranslator,
   findChartSeriesRow,
   formatMeasure,
+  measureCellCurrency,
   formatDimensionValue,
   buildDatasetFieldHelpers,
   buildDatasetDrillFilter,
@@ -1880,7 +1881,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                   return (
                     <td key={c} className={cn('px-2 py-1 whitespace-nowrap tabular-nums', numericColumns.has(c) && 'text-right')}>
                       {measure
-                        ? formatMeasure(row[c], measureField(measure)?.format, measureField(measure)?.currency, measureField(measure)?.percentScale, displayLocale)
+                        ? formatMeasure(row[c], measureField(measure)?.format, measureCellCurrency(measureField(measure), state.rows[index]), measureField(measure)?.percentScale, displayLocale)
                         : formatDimensionValue(row[c], displayLocale)}
                     </td>
                   );
