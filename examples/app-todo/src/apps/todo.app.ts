@@ -33,6 +33,9 @@ export const TodoApp = App.create({
       icon: 'chart-bar',
       children: [
         { id: 'nav_dashboard', type: 'dashboard', dashboardName: 'task_dashboard', label: 'Dashboard', icon: 'layout-dashboard' },
+        // The app's report index: a `report` entry with no `reportName`. The
+        // console draws it only because the app declares it.
+        { id: 'nav_reports', type: 'report', icon: 'bar-chart-3' },
       ]
     },
   ]

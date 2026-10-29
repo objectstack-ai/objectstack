@@ -610,6 +610,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.appNav.choose': '— 请选择 —',
   'engine.inspector.appNav.noTargets': '还没有可链接的此类型条目。',
   'engine.inspector.appNav.unboundHint': '选定目标之前,该导航项保留在此处,但不会写入保存的导航。',
+  'engine.inspector.appNav.reportIndex': '报表索引',
+  'engine.inspector.appNav.reportIndexHint': '未选定报表时,该导航项打开应用的报表索引:列出应用自带、且当前成员可以打开的全部报表。',
   'engine.inspector.appNav.actionHint': '只有未绑定到对象的动作才能从菜单运行。',
   'engine.inspector.appNav.docPage': '文档页',
   'engine.inspector.appNav.book': '文档集',
