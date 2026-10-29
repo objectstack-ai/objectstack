@@ -364,6 +364,15 @@ export {
   type UserAuthGateSource,
 } from './auth-gate.js';
 
+// Managing API keys is a signed-in-session act on every data door: the one
+// rule the runtime dispatcher's and RestServer's per-object gates ask.
+export {
+  apiKeyManagementCredentialRefusal,
+  API_KEY_MANAGEMENT_READ_OPERATIONS,
+  API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE,
+  type ApiKeyManagementCredentialInput,
+} from './api-key-management-credential.js';
+
 // #2567 — the single anonymous-deny decision shared by every HTTP seam.
 export {
   shouldDenyAnonymous,

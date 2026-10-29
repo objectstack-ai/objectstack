@@ -2188,9 +2188,9 @@ const STUDIO_EN: Record<string, string> = {
     'Record visibility is inherited from the parent (master) record through its master-detail relationship.',
   'engine.studio.settings.capabilities': 'Capabilities (enable.*)',
   'engine.studio.settings.capabilitiesHint': 'Record-page features — every switch here is enforced by the runtime',
-  'engine.studio.settings.capTrackHistory': 'History tab (trackHistory)',
+  'engine.studio.settings.capTrackHistory': 'Field change history (trackHistory)',
   'engine.studio.settings.capTrackHistoryDesc':
-    'Shows the read-only History tab (audit trail) on record pages. Pair with per-field history tracking for human-readable diffs; audit capture itself is always on for compliance.',
+    "Shows the record's field changes: on the default record page they join the record's one timeline stream, under its Changes filter. Pair with per-field history tracking to pick which field diffs are summarized; audit capture itself is always on for compliance.",
   'engine.studio.settings.capFiles': 'Attachments (files)',
   'engine.studio.settings.capFilesDesc':
     'Generic Attachments panel on record pages (upload/download/delete). Off = the server also rejects new attachments targeting this object.',
@@ -3015,8 +3015,14 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27461 — a roll-up held until it is set up; `input` is the field
   // inspector's own label for the roll-up input it still needs.
   'engine.studio.held.fieldNeedsInput': '{input} on the field “{field}” needs a value',
+  // objectstack#27464 — a navigation rename typed but not committed yet.
+  'engine.studio.held.navRename': 'the rename of the navigation item “{item}” is not finished',
   // objectstack#27485 — a field CEL expression the inspector judged broken, held after it closes.
   'engine.studio.held.celInvalid': 'an expression on the field “{field}” has an error to fix',
+  // objectstack#27629 — the same hold for a validation rule, an action, and an item in the metadata editor.
+  'engine.studio.held.celInvalidRule': 'an expression on the rule “{rule}” has an error to fix',
+  'engine.studio.held.celInvalidAction': 'an expression on the action “{action}” has an error to fix',
+  'engine.studio.held.inspectorInvalid': '“{item}” has an error to fix in its inspector',
   'engine.studio.held.line': 'Not saved yet: {clause}. Your changes are kept here and saved once it is filled in.',
   'engine.studio.held.publish': 'Not published: {clause}, so that change is not saved yet. Finish it, then publish.',
   'engine.studio.held.inputHint': 'Required. Changes are saved once this has a value.',

@@ -3051,7 +3051,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3115,7 +3115,7 @@
         }
       ],
       "negative": [
-        "no runtime write reaches the anchor: OS_PLATFORM_OWNER_EMAIL is declared a NON-TABLE derivation input (admin-standing-surface.ts) — revocation is a configuration change plus a process roll, by design. Any in-product surface found mutating who is a platform administrator is an authorization finding: record it under RUNNER rule 2's carve-out (item, clause, detail withheld pending maintainer), never with a reproduction",
+        "no runtime write reaches the anchor: OS_PLATFORM_OWNER_EMAIL is declared a NON-TABLE derivation input (admin-standing-surface.ts) — revocation is a configuration change plus a process roll, by design. Any in-product surface found mutating who is a platform administrator is an authorization finding: record it under RUNNER rule 2's carve-out (no card; one run-record row `area.item · clause · security finding — detail withheld, reported to PM`), never with a reproduction",
         "the derivation reads the caller's OWN STORED sys_user row, never the session-seeded grants.email — the ⭐ P1 pin of the leg. That property is asserted by the unit pin (the '⭐ … reads the STORED row, never the seeded email' describe); do not attempt to re-prove it against a live server",
         "run every refused probe as the seeded admin too: a 200 proves each refusal keyed on the member's standing, not on a broken route (wrong-persona, both sides)",
         "out of scope here: the WALLED-posture boot refusal when the variable is unset (#11184) is plugin-auth's separate door — do not score it on this item"
@@ -3215,6 +3215,12 @@
           "date": "2026-10-27",
           "change": "automated.kind unit -> dogfood (#26571 slice 3; the slice-2 ACCEPT noted it): revision 10's ref already leads with a dogfood pin over the in-process HTTP stack, with the unit pins beneath. No ref, clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 12,
+          "date": "2026-10-29",
+          "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. negative[0] quoted the retired 'detail withheld pending maintainer' row and now names the new one. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
+          "ref": "#27642"
         }
       ]
     },

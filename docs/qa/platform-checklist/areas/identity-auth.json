@@ -1396,7 +1396,7 @@
       "title": "TOTP enrollment reveal: /two-factor/enable returns a parseable otpauth:// URI + backup codes, the declared reveal dialog's paths resolve against that exact shape, and the live re-reveal endpoint's behavior is recorded",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user with a known password enrolling their own second factor"],
@@ -1450,7 +1450,7 @@
         {
           "clause": "OBSERVE-AND-RECORD — the live re-reveal endpoint is recorded, not assumed: POST /api/v1/auth/two-factor/get-totp-uri is a mounted route that hands the totpURI back AFTER enrollment — measured password-gated and returning the SAME secret (the identity-auth slice report on #23878 (6216631966)). The enable dialog's 'shown only once' copy covers the backup codes only, so the re-reveal breaks no promise the console makes; whether a re-revealable TOTP secret is accepted design is a ruling owed, not this clause's verdict. The run records the behaviour (password-gated? same secret? before and after verification?) — this clause is satisfied by an accurate record, not by any particular outcome",
           "oracle": "api",
-          "verify": "drive POST /two-factor/get-totp-uri with and without the correct password, before and after the enrollment is verified; record each status and whether the returned URI carries the same secret. If it re-reveals with NO password gate, that is an authentication finding — RUNNER rule 2's carve-out applies (existence published, recipe withheld)",
+          "verify": "drive POST /two-factor/get-totp-uri with and without the correct password, before and after the enrollment is verified; record each status and whether the returned URI carries the same secret. If it re-reveals with NO password gate, that is an authentication finding — RUNNER rule 2's carve-out applies (no card; one run-record row, recipe withheld)",
           "evidence": "the recorded behavior table (secrets redacted)"
         },
         {
@@ -1463,7 +1463,7 @@
       "negative": [
         "enable with a wrong password succeeding — or an anonymous enable answering 2xx — is a FAIL: the password check is the proof-of-presence that stops a stolen cookie from enrolling an attacker's authenticator",
         "scoring ANY clause with the guard clause unmet is the false positive this item was authored against: an unarmed boot 404s the whole family, and a runner who skips the guard ticks green boxes on an absent surface (absence-inference, both directions)",
-        "if get-totp-uri re-reveals the secret with no password gate, do NOT publish the reproduction — authentication carve-out, RUNNER rule 2: item + clause + 'detail withheld pending maintainer'"
+        "if get-totp-uri re-reveals the secret with no password gate, do NOT publish the reproduction — authentication carve-out, RUNNER rule 2: no card, one run-record row `area.item · clause · security finding — detail withheld, reported to PM`"
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference"],
       "source": [
@@ -1489,6 +1489,12 @@
           "date": "2026-10-17",
           "change": "steps[6] and acceptance[4].clause corrected (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). Both read the enable dialog's 'shown only once' as a promise about the secret, but the copy says 'The backup codes are shown only once' — so a password-gated get-totp-uri that re-reveals the same secret contradicts no copy. The clause records the measured behaviour and leaves the design question (is a re-revealable secret acceptable?) to a ruling. Wording only: the step's request and the oracle are unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-29",
+          "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. negative[2] quoted the retired 'detail withheld pending maintainer' row and now names the new one; acceptance[4].verify said 'existence published', which read as the retired card, and now says no card. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
+          "ref": "#27642"
         }
       ]
     },
@@ -1497,7 +1503,7 @@
       "title": "Enrollment is inert until one correct TOTP verifies on the session lane — and the run records what sys_two_factor.verified actually carries in between",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user mid-enrollment (session lane)", "the same user at the sign-in challenge (cookie lane)"],
@@ -1538,7 +1544,7 @@
         {
           "clause": "LATENT-DEFAULT PROBE (observe-and-flag, auth-integrity — NOT a confirmed defect): record which value sys_two_factor.verified actually carries immediately post-enable. The suspicion it encodes: the object declares verified with defaultValue: true (sys-two-factor.object.ts) while better-auth enrolls verified:false, and AUTH_TWO_FACTOR_SCHEMA maps only the four RENAMED fields (backupCodes/userId/failedVerificationCount/lockedUntil — auth-schema-config.ts; `verified` needs no rename, so its absence from the map is not itself the defect). IF better-auth ever omits the column on insert, the ObjectQL default would mark an unverified enrollment active. The clause is satisfied by the accurate record; verified===false post-enable is the healthy reading",
           "oracle": "api",
-          "verify": "the system-context ObjectQL read of the row between enable and verify: capture `verified` verbatim. If it reads TRUE pre-confirmation AND clause 2's sign-in lane accepts the factor, that is an authentication-integrity finding — RUNNER rule 2's carve-out governs its publication (item + clause + detail withheld pending maintainer)",
+          "verify": "the system-context ObjectQL read of the row between enable and verify: capture `verified` verbatim. If it reads TRUE pre-confirmation AND clause 2's sign-in lane accepts the factor, that is an authentication-integrity finding — RUNNER rule 2's carve-out governs its publication (no card; one run-record row `area.item · clause · security finding — detail withheld, reported to PM`)",
           "evidence": "the row read (timestamped between enable and verify)"
         },
         {
@@ -1575,6 +1581,12 @@
           "date": "2026-10-27",
           "change": "fixtures.requires[1] names the DB-file read as the live-boot equivalent of the system-context read. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the run read sys_two_factor.verified from the DB file, which the item did not name. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-29",
+          "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. acceptance[2].verify quoted the retired 'detail withheld pending maintainer' row and now names the new one. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
+          "ref": "#27642"
         }
       ]
     },

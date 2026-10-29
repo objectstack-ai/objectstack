@@ -103,8 +103,18 @@ describe('evalRowPredicate', () => {
       expect(String(warn.mock.calls[0][0])).toContain('legacy expression dialect');
     });
 
-    it('routes a bare `===` string to the legacy engine', () => {
-      expect(evalRowPredicate("record.status === 'active'", { status: 'active' })).toBe(true);
+    it('reads a bare `===` string on CEL, where it faults — no legacy reading (objectstack#27457)', () => {
+      // A bare string is CEL shorthand, so legacy-only syntax faults on the CEL
+      // engine exactly as it does on the server: the verdict tracks the
+      // caller's fallback on a MATCHING row, which a real verdict would not.
+      expect(evalRowPredicate("record.status === 'active'", { status: 'active' })).toBe(false);
+      expect(evalRowPredicate("record.status === 'active'", { status: 'active' }, { fallback: true })).toBe(true);
+      // The CEL spelling of the same predicate holds on that row.
+      expect(evalRowPredicate("record.status == 'active'", { status: 'active' })).toBe(true);
+      // The deprecation warning still prescribes the CEL spelling, once.
+      const legacy = warn.mock.calls.filter(c => String(c[0]).includes('legacy expression dialect'));
+      expect(legacy).toHaveLength(1);
+      expect(String(legacy[0][0])).toContain('use "==" not "==="');
     });
 
     it('a legacy `${data.x}` / `${x}` string on a row surface retired with the CEL spellings (objectui#5741)', () => {
@@ -186,9 +196,9 @@ describe('evalRowPredicate', () => {
     });
 
     it('reports the legacy path fault with the legacy engine reason', () => {
-      // `===` routes to the legacy engine, which reports by throwing; the
-      // fail-closed report carries that message for the same reason.
-      evalRowPredicate('record.a === $$$', { a: 1 }, {
+      // A `${…}` template routes to the legacy engine, which reports by
+      // throwing; the fail-closed report carries that message for the same reason.
+      evalRowPredicate('${record.a === $$$}', { a: 1 }, {
         fallback: false,
         warnOnError: true,
         label: 'legacy-fault',
@@ -199,6 +209,22 @@ describe('evalRowPredicate', () => {
       expect(failure).toBeDefined();
       expect(failure).toContain('(legacy-fault)');
       expect(failure).toContain('Reason: [legacy]');
+    });
+
+    it('reports a bare `===` string as a CEL parse fault — it is CEL shorthand (objectstack#27457)', () => {
+      // The same text as a bare string no longer reaches the legacy engine: it
+      // faults on CEL, as on the server, and the report names the CEL reason.
+      evalRowPredicate('record.a === $$$', { a: 1 }, {
+        fallback: false,
+        warnOnError: true,
+        label: 'bare-fault',
+      });
+      const failure = warn.mock.calls
+        .map((c) => String(c[0]))
+        .find((m) => m.includes('failed to evaluate') && m.includes('(bare-fault)'));
+      expect(failure).toBeDefined();
+      expect(failure).toContain('Reason: [parse]');
+      expect(failure).not.toContain('[legacy]');
     });
 
     // The other half of objectui#3792: this function stopped being list-only
@@ -262,28 +288,30 @@ describe('evalRowPredicate — row wins over host scope (both dialect paths)', (
     expect(evalRowPredicate("record.tag == 'ROW'", ROW, { scope: DECOY })).toBe(true);
     expect(evalRowPredicate("record.tag == 'SCOPE'", ROW, { scope: DECOY })).toBe(false);
 
-    // Legacy: `===` routes to the other engine — same subject, same verdicts.
-    expect(evalRowPredicate("record.tag === 'ROW'", ROW, { scope: DECOY })).toBe(true);
-    expect(evalRowPredicate("record.tag === 'SCOPE'", ROW, { scope: DECOY })).toBe(false);
+    // Legacy: a `${…}` template routes to the other engine — same subject, same
+    // verdicts. (A bare `===` string is CEL shorthand since objectstack#27457,
+    // so the template is the one spelling left on this path.)
+    expect(evalRowPredicate("${record.tag === 'ROW'}", ROW, { scope: DECOY })).toBe(true);
+    expect(evalRowPredicate("${record.tag === 'SCOPE'}", ROW, { scope: DECOY })).toBe(false);
   });
 
   it('no longer binds `data` or the bare name to the row — on either path (objectui#5741)', () => {
     // `data` is the HOST's own now: the decoy answers, on both dialect paths.
     expect(evalRowPredicate("data.tag == 'SCOPE'", ROW, { scope: DECOY })).toBe(true);
-    expect(evalRowPredicate("data.tag === 'SCOPE'", ROW, { scope: DECOY })).toBe(true);
+    expect(evalRowPredicate("${data.tag === 'SCOPE'}", ROW, { scope: DECOY })).toBe(true);
     expect(evalRowPredicate("data.tag == 'ROW'", ROW, { scope: DECOY })).toBe(false);
-    expect(evalRowPredicate("data.tag === 'ROW'", ROW, { scope: DECOY })).toBe(false);
+    expect(evalRowPredicate("${data.tag === 'ROW'}", ROW, { scope: DECOY })).toBe(false);
     // The bare name is bound nowhere: it faults into the fallback on both paths.
     expect(evalRowPredicate("tag == 'ROW'", ROW, { scope: DECOY })).toBe(false);
-    expect(evalRowPredicate("tag === 'ROW'", ROW, { scope: DECOY })).toBe(false);
+    expect(evalRowPredicate("${tag === 'ROW'}", ROW, { scope: DECOY })).toBe(false);
     expect(evalRowPredicate("tag == 'ROW'", ROW, { scope: DECOY, fallback: true })).toBe(true);
-    expect(evalRowPredicate("tag === 'ROW'", ROW, { scope: DECOY, fallback: true })).toBe(true);
+    expect(evalRowPredicate("${tag === 'ROW'}", ROW, { scope: DECOY, fallback: true })).toBe(true);
   });
 
   it('still resolves host-scope keys the row does not shadow', () => {
     // The row winning is not the scope being dropped: background stays bound.
     expect(evalRowPredicate('features.on == true', ROW, { scope: DECOY })).toBe(true);
-    expect(evalRowPredicate('features.on === true', ROW, { scope: DECOY })).toBe(true);
+    expect(evalRowPredicate('${features.on === true}', ROW, { scope: DECOY })).toBe(true);
   });
 
   it('holds on the fail-closed route as well as the fast route', () => {
@@ -499,8 +527,8 @@ describe('evalRowPredicate — rowless (objectui#4640)', () => {
     expect(evalRowPredicate("record.tag == 'HOST'", null, { scope: HOST, rowless: true })).toBe(true);
     expect(evalRowPredicate("data.tag == 'HOST'", null, { scope: HOST, rowless: true })).toBe(true);
     // …on the legacy path too — one answer per value, not one per dialect.
-    expect(evalRowPredicate("record.tag === 'HOST'", null, { scope: HOST, rowless: true })).toBe(true);
-    expect(evalRowPredicate("data.tag === 'HOST'", null, { scope: HOST, rowless: true })).toBe(true);
+    expect(evalRowPredicate("${record.tag === 'HOST'}", null, { scope: HOST, rowless: true })).toBe(true);
+    expect(evalRowPredicate("${data.tag === 'HOST'}", null, { scope: HOST, rowless: true })).toBe(true);
   });
 
   it('is what stops those predicates from faulting into the fallback', () => {

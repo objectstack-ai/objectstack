@@ -1877,7 +1877,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "Permisos requeridos",
-        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para invocar esta acción (ADR-0066 D4). La ruta de acciones de la plataforma rechaza a cualquier otro con 403 (acciones script, flow y modal, y la vía MCP/IA), y se le oculta el botón. Una acción de type api llama directamente a su endpoint, así que ese endpoint debe volver a comprobarlas."
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener, todas las enumeradas, para invocar esta acción (ADR-0066 D4). La puerta de acciones de la plataforma rechaza a cualquier otro con 403 en cada llamada que despacha, incluida la vía MCP/IA, y se le oculta el botón. El endpoint de una acción de type api sigue siendo accesible directamente, así que debe seguir comprobándolas por sí mismo; en una acción api con un target de otro origen, la plataforma no comprueba nada en el servidor."
       },
       ai: {
         label: "Exposición a IA",

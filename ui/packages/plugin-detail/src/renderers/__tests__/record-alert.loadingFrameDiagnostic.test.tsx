@@ -104,11 +104,17 @@ function schema(visible: unknown) {
  * locale-map test for the real provider), and coupling this pin to that
  * unrelated noise would make it fail for a reason that has nothing to do
  * with objectui#5776.
+ *
+ * Two diagnostics count: the legacy engine's `Failed to evaluate expression`
+ * and the CEL leg's `A conditional predicate failed to evaluate`. A bare
+ * predicate is CEL (objectstack#27457), so the second is the one this card's
+ * bare shape reaches now; matching only the first would let the loading-frame
+ * silence below pass for a leg that never logs that text.
  */
 function evaluationFailureWarnings(spy: { mock: { calls: unknown[][] } }): string[] {
   return spy.mock.calls
     .map((call: unknown[]) => String(call[0]))
-    .filter((m: string) => /Failed to evaluate expression/.test(m));
+    .filter((m: string) => /Failed to evaluate expression|predicate failed to evaluate/.test(m));
 }
 
 describe('record:alert — loading-frame evaluation diagnostic (objectui#5776)', () => {
@@ -155,6 +161,10 @@ describe('record:alert — loading-frame evaluation diagnostic (objectui#5776)',
     const BROKEN = "bogus_unbound_field.status == 'x'";
     render(<RecordAlertRenderer schema={schema(BROKEN)} />);
 
-    expect(evaluationFailureWarnings(warnSpy).length).toBeGreaterThan(0);
+    const lines = evaluationFailureWarnings(warnSpy);
+    expect(lines.length).toBeGreaterThan(0);
+    // The bare predicate is CEL (objectstack#27457): the CEL engine names the
+    // unbound root, which is the line the author needs.
+    expect(lines.some((l) => l.includes('Unknown variable: bogus_unbound_field'))).toBe(true);
   });
 });

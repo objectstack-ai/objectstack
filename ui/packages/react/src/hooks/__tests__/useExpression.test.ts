@@ -240,8 +240,10 @@ describe('toPredicateInput — CEL envelope preservation (#2661)', () => {
       .toEqual({ dialect: 'cel', source: 'record.x == 1' });
   });
 
-  it('still wraps bare strings and non-cel envelopes as legacy ${…}', () => {
-    expect(toPredicateInput('data.age >= 18')).toBe('${data.age >= 18}');
+  it('normalizes a bare string into the `cel` envelope (objectstack#27457), and still wraps a non-cel envelope as legacy ${…}', () => {
+    // A bare string is CEL shorthand by the spec, so it reaches the CEL engine
+    // the server uses; only an envelope of another dialect keeps the wrap.
+    expect(toPredicateInput('data.age >= 18')).toEqual({ dialect: 'cel', source: 'data.age >= 18' });
     expect(toPredicateInput({ dialect: 'template', source: 'data.age >= 18' })).toBe('${data.age >= 18}');
   });
 
