@@ -31,6 +31,21 @@ export const AnalyticsEndpoint = z.enum([
 // ==========================================
 
 /**
+ * The one sentence a `cube` that names no cube — absent, `null`, not a string,
+ * or the empty string — is refused with: by {@link AnalyticsQueryRequestSchema}
+ * at the HTTP doors (`POST /analytics/query`, `POST /analytics/sql`) and by the
+ * engine's in-process guard, which parses through the same member rather than
+ * wording a second rule. Exported so the two cannot drift.
+ *
+ * Declared ahead of the schema on purpose: under `OS_EAGER_SCHEMAS=1`
+ * (`gen:schema`) the factory runs at module evaluation, and a constant below
+ * it would still be in its temporal dead zone.
+ */
+export const ANALYTICS_CUBE_NAME_REQUIRED =
+  'Name the cube to query: `cube` takes a cube name, as `GET /analytics/meta` lists them, or a '
+  + 'registered object name; an empty string names no cube.';
+
+/**
  * Query Request Body — the BARE `AnalyticsQuery` shape (#3878).
  *
  * The body IS the `AnalyticsQuery`: `cube` + `measures` at the top level with
@@ -47,10 +62,32 @@ export const AnalyticsEndpoint = z.enum([
  * rejected now — `.strict()` — and the dispatcher's `/analytics` entry answers
  * 400 with a migration hint. The unimplemented `format` field went with it
  * (declared ≠ enforced: every response is the JSON envelope).
+ *
+ * `cube` is REQUIRED and NON-EMPTY here: the base `AnalyticsQuerySchema` leaves
+ * it optional for the in-process callers that resolve the cube themselves, but
+ * a request body names its cube or it names nothing the engine can serve. The
+ * empty string used to pass this schema as "a string" and reach the engine,
+ * whose own guard threw a plain Error — a client input mistake answered as a
+ * 500. The schema refuses it now with one prescriptive sentence,
+ * {@link ANALYTICS_CUBE_NAME_REQUIRED}, carried by every refusal of the slot
+ * — the type-level `error` for an absent, `null` or non-string `cube`, the
+ * `.min(1)` for the empty string — so the most common client mistake, the key
+ * left out, reads the prescription too and not Zod's generic words. The
+ * ADR-0114 field code still tells the cases apart (`required` / `invalid_type`
+ * / `min_length`). The engine's in-process guard (`AnalyticsService.query` /
+ * `generateSql`, `@objectstack/service-analytics`) runs a value through this
+ * same member and throws the same `VALIDATION_FAILED` refusal, so a caller
+ * inside the process and one at the HTTP door read the same answer. A
+ * whitespace-only name is a NAME, just one no cube carries, and keeps its
+ * `CUBE_NOT_FOUND` answer from the engine.
  */
 export const AnalyticsQueryRequestSchema = lazySchema(() =>
   AnalyticsQuerySchema.extend({
-    cube: z.string().describe('Target cube name'),
+    cube: z.string({ error: ANALYTICS_CUBE_NAME_REQUIRED }).min(1, ANALYTICS_CUBE_NAME_REQUIRED).describe(
+      'Target cube name — the cube to query, as `GET /analytics/meta` lists them, or a registered '
+      + 'object name (read as an auto-inferred cube). Required and non-empty: an empty string names no '
+      + 'cube and is refused at the schema.',
+    ),
   }).strict()
 );
 
