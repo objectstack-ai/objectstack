@@ -7218,6 +7218,11 @@ export class ObjectStackProtocolImplementation implements
      * Computed on every draft read rather than stored at save: the verdict
      * depends on the live universe and the package's other drafts, which a
      * stored verdict would not see change.
+     *
+     * [#27444] An object draft is also told the namespace-prefix verdict
+     * ({@link objectNamespacePrefixViolation}, `NAMESPACE_PREFIX`), the one
+     * rule outside the gate that the promotion doors refuse a draft on — the
+     * same judge, on the draft row's package, never a copy of it.
      */
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
@@ -7232,6 +7237,7 @@ export class ObjectStackProtocolImplementation implements
             foldStoredCollection: (...a) => this.foldStoredCollection(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            objectNamespacePrefixViolation: (...a) => this.objectNamespacePrefixViolation(...a),
             orgWallEnforced: (...a) => this.orgWallEnforced(...a),
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
