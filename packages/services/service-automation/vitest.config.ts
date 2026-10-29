@@ -40,10 +40,11 @@ export default defineConfig({
     // the declaration in place. Enforced by
     // scripts/check-registry-log-declared.mjs.
     // TMPDIR on /dev/shm when it is writable (#27306; vitest.memory-tmp.mts):
-    // the four tests that persist runs to a SQLite file do it in an `mkdtemp`
-    // under it. Measured beside four `dd … conv=fsync` writers on the same
+    // the three tests that persist runs to a SQLite file do it in an
+    // `mkdtemp` under it. Measured beside four `dd … conv=fsync` writers on the same
     // disk: green in that run, but the slowest case went from 0.31 s idle to
-    // 4.35 s, 87% of its 5 s budget, for no change in the code; READING_HEAD.
+    // 4.35 s, 87% of its 5 s budget, for no change in the code; with TMPDIR
+    // there, under the same writers, 0.34 s.
     env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
   },
   resolve: {

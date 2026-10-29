@@ -24,7 +24,8 @@ export default defineConfig({
     // the two tests that open a SQLite file do it in an `mkdtemp` under it.
     // Measured beside four `dd … conv=fsync` writers on the same disk: green
     // in that run, but the slowest case went from 0.17 s idle to 3.04 s, 61%
-    // of its 5 s budget, for no change in the code; READING_HEAD.
+    // of its 5 s budget, for no change in the code; with TMPDIR there, under
+    // the same writers, 0.15 s.
     env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
   },
   resolve: {

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { accessSync, constants } from 'node:fs';
 import { defineConfig } from 'vitest/config';
+import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
 
 // This package re-exported the shared preset until #27076. It now carries one
 // key of its own, `test.env.TMPDIR`, so the preset's one setting is restated
@@ -27,20 +27,9 @@ import { defineConfig } from 'vitest/config';
 // tmpfs the same code still runs, `sync()` included: what each case asserts
 // (bytes on disk, atomic rename, the flush chain, the failure report) is
 // unchanged; only the wait for unrelated I/O is gone. Budgets, fixtures and
-// cases are untouched.
-//
-// A host without a writable /dev/shm (macOS, Windows) keeps its own temp
-// directory: the setting is absent there, not an error.
-const MEMORY_BACKED_TMP = '/dev/shm';
-
-function writableDir(dir: string): boolean {
-  try {
-    accessSync(dir, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
+// cases are untouched. The setting itself, and the host without a writable
+// /dev/shm, live in vitest.memory-tmp.mts, shared since #27306 with the other
+// packages whose tests write SQLite files under `os.tmpdir()`.
 
 export default defineConfig({
   test: {
@@ -51,6 +40,6 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
-    env: writableDir(MEMORY_BACKED_TMP) ? { TMPDIR: MEMORY_BACKED_TMP } : {},
+    env: memoryBackedTmpEnv(),
   },
 });

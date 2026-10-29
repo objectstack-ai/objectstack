@@ -20,7 +20,8 @@ export default defineConfig({
     // Measured on the 23 test files that do, beside four `dd … conv=fsync`
     // writers on the same disk: 3 of 192 cases timed out (posture
     // conformance, reclaim-space, declared-index retired keys) and the run
-    // took 98 s, against all green in 28 s idle; READING_HEAD.
+    // took 98 s, against all green in 28 s idle; with TMPDIR there, under the
+    // same writers, all green in 28 s. Assertions and budgets are untouched.
     env: memoryBackedTmpEnv(),
     // #9350: the live-dialect files each own a schema (Postgres) / database
     // (MySQL), named in the connection so knex's `client.database()` and the

@@ -40,13 +40,16 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, 'src/templates/**'],
     environment: 'node',
     // Every scaffold these tests write lands under `os.tmpdir()`, children
-    // included. Under the disk load of a Test Core shard (#27306), measured
-    // beside four `dd … conv=fsync` writers: all 301 cases still passed, but
-    // the `afterAll` that removes the scaffolded trees in
+    // included (#27306; vitest.memory-tmp.mts). The cost on a loaded disk is
+    // not fsync (four calls in the whole suite, by strace) but creating and
+    // removing those trees: ~4,000 unlinks and ~6,000 rmdirs. Measured beside
+    // four `dd … conv=fsync` writers on the same disk: all 301 cases passed,
+    // but the `afterAll` that removes the scaffolded tree in
     // `created-summary.test.ts` and `scaffold-skills-single-copy.test.ts` ran
-    // past its 10 s hook budget, and a file-level failure with no failed
-    // case is the red main saw (runs 40713919581, 40718500281: `pnpm run
-    // test exited (1)`, no test named). Rationale: vitest.memory-tmp.mts.
+    // past its 10 s hook budget, so two files failed with no failed case, and
+    // the run took 236 s against 21 s idle. With TMPDIR there, under the same
+    // writers, 19 of 19 files green in 20 s. Assertions and budgets are
+    // untouched.
     env: memoryBackedTmpEnv(),
   },
 });

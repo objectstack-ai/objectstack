@@ -239,7 +239,8 @@ export default defineConfig({
     // Measured on the 51 test files that do, beside four `dd … conv=fsync`
     // writers on the same disk: 25 of 685 cases timed out across 7 files
     // (package revert, uninstall, duplicate-adopt, list-commits) and the run
-    // took 501 s, against all green in 102 s idle; READING_HEAD.
+    // took 501 s, against all green in 102 s idle; with TMPDIR there, under the
+    // same writers, all green in 110 s. Assertions and budgets are untouched.
     projects: [
       {
         extends: true,

@@ -996,7 +996,9 @@ export default defineConfig({
     // tests migrate lives in an `mkdtemp` under it. Measured on the fifteen
     // `organization-ownership-*` files beside four `dd … conv=fsync`
     // writers on the same disk: 145 of 232 cases timed out and the run took
-    // 1,809 s, against 232 of 232 green in 68 s idle; READING_HEAD.
+    // 1,809 s, against 232 of 232 green in 68 s idle; with TMPDIR there, under
+    // the same writers, 232 of 232 green in 59 s. Assertions and budgets are
+    // untouched.
     projects: [
       {
         extends: true,

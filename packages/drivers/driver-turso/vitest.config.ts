@@ -15,7 +15,8 @@ import { memoryBackedTmpEnv } from '../../../vitest.memory-tmp.mts';
 // beside four `dd … conv=fsync` writers on the same disk: 21 of 502 cases
 // timed out across 4 files (inherited-members, external-object-parity,
 // drift-detection, migration-entries) and the run took 211 s, against all
-// green in 17 s idle; READING_HEAD.
+// green in 17 s idle; with TMPDIR there, under the same writers, all green in
+// 17 s. Assertions and budgets are untouched.
 export default defineConfig({
   test: {
     // A late console.* must not redden a green suite (#10374): vitest's worker
