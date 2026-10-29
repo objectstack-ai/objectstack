@@ -55,11 +55,14 @@
  * (objectstack#10749, ruling record 5377367175, Option B). It is not the
  * record's current state: after a decision the record's own status moves on
  * while the snapshot's stays. So the summary is a section headed "As
- * submitted" (`approvalsInbox.snapshotHeading`), its accessible name, and a
- * snapshot value never reads as the record's current one beside the page's
- * highlights, which read the request row. The record's current values are the
- * Details tab's pointer card's to show, a live read of the target that the
- * reader may be refused; this face reads no record.
+ * submitted" (`approvalsInbox.snapshotAsSubmitted`, in the muted label style
+ * of the panel's "Waiting on"), its accessible name, and a snapshot value
+ * never reads as the record's current one beside the page's highlights, which
+ * read the request row (ruling record 6499914328 on objectstack#27502). The
+ * heading names the source, not a status, so a pending request carries it
+ * too; a summary that draws nothing draws no heading. The record's current
+ * values are the Details tab's pointer card's to show, a live read of the
+ * target that the reader may be refused; this face reads no record.
  *
  * ## Cost
  *
@@ -188,8 +191,8 @@ function DeclaredSummary({ target, fields, shown, display }: {
 
   return (
     <section className="space-y-3" aria-labelledby={headingId} data-testid="record-snapshot-summary">
-      <div id={headingId} className="text-[11px] font-medium text-muted-foreground" data-summary-heading>
-        {String(t('approvalsInbox.snapshotHeading', { defaultValue: 'As submitted' }))}
+      <div id={headingId} className="text-[11px] text-muted-foreground mb-1" data-summary-heading>
+        {String(t('approvalsInbox.snapshotAsSubmitted', { defaultValue: 'As submitted' }))}
       </div>
       {plan.lead && (
         <div data-summary-lead={plan.lead}>

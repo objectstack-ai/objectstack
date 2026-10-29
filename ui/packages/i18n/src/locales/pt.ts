@@ -4236,7 +4236,7 @@ const pt = {
     progressBar: 'Progresso da decisão',
     declaredActions: 'Ações',
     decisionPanelOffRequestPage: 'O painel de decisão de aprovação só funciona nas páginas de solicitações de aprovação.',
-    snapshotHeading: 'Conforme enviado',
+    snapshotAsSubmitted: 'Conforme enviado',
     attachmentChip: 'Anexo',
     attachmentOpenFailed: 'Não foi possível abrir o anexo — tente novamente',
     approveOneTitle: 'Aprovar "{{title}}"?',

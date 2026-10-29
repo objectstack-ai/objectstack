@@ -4335,7 +4335,7 @@ const ru = {
     progressBar: 'Ход решения',
     declaredActions: 'Действия',
     decisionPanelOffRequestPage: 'Панель решения по согласованию работает только на страницах запросов на согласование.',
-    snapshotHeading: 'На момент подачи',
+    snapshotAsSubmitted: 'На момент подачи',
     attachmentChip: 'Вложение',
     attachmentOpenFailed: 'Не удалось открыть вложение — попробуйте ещё раз',
     approveOneTitle: 'Согласовать «{{title}}»?',

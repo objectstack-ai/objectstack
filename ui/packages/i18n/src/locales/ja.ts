@@ -4158,7 +4158,7 @@ const ja = {
     progressBar: '承認の進捗',
     declaredActions: 'アクション',
     decisionPanelOffRequestPage: '承認の決定パネルは承認リクエストのページでのみ機能します。',
-    snapshotHeading: '申請時の内容',
+    snapshotAsSubmitted: '申請時の内容',
     attachmentChip: '添付ファイル',
     attachmentOpenFailed: '添付ファイルを開けませんでした。もう一度お試しください',
     approveOneTitle: '「{{title}}」を承認しますか？',
