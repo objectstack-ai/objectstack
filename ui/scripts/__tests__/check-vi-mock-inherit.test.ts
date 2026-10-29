@@ -76,9 +76,33 @@ function frozen<T>(value: T): T {
   return value;
 }
 
+/**
+ * A reading that THREW is held too, and thrown again to each case that reads it:
+ * a red CLI fails the case that asserts on it, as it did when the case ran it,
+ * instead of killing the whole file at collection.
+ */
 function once<T>(read: () => T): () => T {
-  let held: { value: T } | undefined;
-  return () => (held ??= { value: frozen(read()) }).value;
+  let held: { value: T } | { error: unknown } | undefined;
+  return () => {
+    if (!held) {
+      try {
+        held = { value: frozen(read()) };
+      } catch (error) {
+        held = { error };
+      }
+    }
+    if ('error' in held) throw held.error;
+    return held.value;
+  };
+}
+
+/** Take a reading at collection; a failure stays held for the case that reads it. */
+function warm(reading: () => unknown) {
+  try {
+    reading();
+  } catch {
+    // held by `once()`; the case that reads it fails with this error
+  }
 }
 
 const realTree = {
@@ -1024,7 +1048,7 @@ describe('non-vacuity — the population refuses to collapse', () => {
 describe('repo state — the gate is green on this tree', () => {
   // Read at collection, never inside a case (objectstack#27449).
   const result = realTree.gate();
-  const out = realTree.cli();
+  warm(realTree.cli);
 
   it('has no frozen and no unreadable factory on a covered specifier', () => {
     expect(
@@ -1115,6 +1139,7 @@ describe('repo state — the gate is green on this tree', () => {
     // named only the members would claim less than the run actually checked --
     // the same over-claim in the other direction.
     expect(line).toMatch(new RegExp(`\\d+ call site\\(s\\) on ${escapeRe(named)} and their subpaths judged`));
+    const out = realTree.cli();
     expect(out).toMatch(/check-vi-mock-inherit: OK/);
     expect(out).toContain(`${result.census.covered} call site(s) on ${named} and their subpaths judged`);
   });
@@ -1254,10 +1279,10 @@ describe('the sweep — every `@object-ui/i18n` factory inherits, and the specif
    */
 
   // Read at collection, never inside a case (objectstack#27449).
-  const swept = realTree.i18n();
+  warm(realTree.i18n);
 
   it('no `@object-ui/i18n` factory freezes the surface', () => {
-    const result = swept;
+    const result = realTree.i18n();
     expect(
       result.frozen.map((f: { file: string; line: number }) => `${f.file}:${f.line}`),
       'convert these to the obtain-and-spread form — the specifier is covered, so the gate reds too',
@@ -1268,7 +1293,7 @@ describe('the sweep — every `@object-ui/i18n` factory inherits, and the specif
   it('walked a real population — a collapsed scan cannot read as a swept one', () => {
     // Same discipline as `FLOORS`: this describe's green is a claim about 92
     // call sites, so the count is asserted rather than assumed.
-    const census = swept.census;
+    const census = realTree.i18n().census;
     expect(census.covered).toBeGreaterThan(60);
     expect(census.inherits).toBeGreaterThan(60);
     expect(census.covered - census.inherits - census.automock).toBe(0);
