@@ -28,7 +28,6 @@ import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import { ModalForm } from './ModalForm';
 import { TabbedForm } from './TabbedForm';
-import { SplitForm } from './SplitForm';
 import { sectionFormLayout } from './autoLayout';
 
 registerAllFields();
@@ -79,10 +78,10 @@ afterEach(() => {
  * which describe how a section fills the grid rather than how wide the grid is.
  *
  * `ObjectForm` (simple path) and `ModalForm` already resolved it as
- * `explicit form columns ?? widest section ?? 1`. `TabbedForm` and `SplitForm`
- * read only the sections, so a view that declared `columns: 3` silently
- * rendered single-column in a tabbed or split form while the same metadata gave
- * 3 columns in a modal.
+ * `explicit form columns ?? widest section ?? 1`. `TabbedForm` (and the split
+ * form, since retired with ADR-0050) read only the sections, so a view that
+ * declared `columns: 3` silently rendered single-column in a tabbed form while
+ * the same metadata gave 3 columns in a modal.
  */
 describe('view-level `columns` outranks per-section columns', () => {
   const SECTIONS = [
@@ -109,31 +108,12 @@ describe('view-level `columns` outranks per-section columns', () => {
     expect(document.body.querySelector('[class*="@2xl:grid-cols-3"]')).not.toBeNull();
   });
 
-  it('SplitForm honours the form view’s columns', async () => {
-    render(
-      <SplitForm
-        schema={{
-          type: 'object-form',
-          formType: 'split',
-          objectName: 'lead',
-          mode: 'create',
-          columns: 3,
-          sections: SECTIONS,
-        }}
-        dataSource={makeDataSource()}
-      />,
-    );
-
-    await waitFor(() => expect(document.body.querySelector('form')).toBeTruthy());
-    expect(document.body.querySelector('[class*="@2xl:grid-cols-3"]')).not.toBeNull();
-  });
-
   it('falls back to the widest section when the view declares no columns', async () => {
     render(
-      <SplitForm
+      <TabbedForm
         schema={{
           type: 'object-form',
-          formType: 'split',
+          formType: 'tabbed',
           objectName: 'lead',
           mode: 'create',
           sections: [

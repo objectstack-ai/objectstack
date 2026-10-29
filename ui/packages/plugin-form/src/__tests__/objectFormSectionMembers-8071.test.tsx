@@ -151,7 +151,9 @@ import { render, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { PredicateScopeProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 
 registerAllFields();
 
@@ -175,7 +177,7 @@ const makeDataSource = () =>
 /** Mount a create-mode `object-form` in its DEFAULT layout and wait for the form. */
 async function mount(schema: Record<string, unknown>): Promise<HTMLElement> {
   const { container } = render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={{ type: 'object-form', objectName: 'invoice', mode: 'create', ...schema } as any}
       dataSource={makeDataSource()}
     />,
@@ -239,7 +241,7 @@ async function mountWithScope(
 ): Promise<HTMLElement> {
   const { container } = render(
     <PredicateScopeProvider scope={scope as any}>
-      <ObjectForm
+      <ObjectFormContainer
         schema={{ type: 'object-form', objectName: 'invoice', mode: 'create', ...schema } as any}
         dataSource={makeDataSource()}
       />
@@ -262,7 +264,7 @@ async function mountArm(
   sections: Array<Record<string, unknown>>,
 ): Promise<HTMLElement> {
   render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={
         {
           type: 'object-form',
@@ -490,7 +492,6 @@ describe('`object-form` — the member shape of `sections`', () => {
     // `description`, so a hit is a reading on an instrument that can report
     // none.
     const ARMS: Array<{ formType: string; blurb: (c: HTMLElement) => string[] }> = [
-      { formType: 'split', blurb: (c) => [...c.querySelectorAll('.border-b p')].map((e) => e.textContent ?? '') },
       { formType: 'modal', blurb: (c) => [...c.querySelectorAll('.border-b p')].map((e) => e.textContent ?? '') },
       {
         formType: 'wizard',

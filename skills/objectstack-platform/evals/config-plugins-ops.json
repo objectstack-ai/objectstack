@@ -3,8 +3,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Write `objectstack.config.ts` for our CRM app: objects, views and flows live under src/, the package namespace is `crm`, and it targets protocol 18.",
-      "expected_output": "A `defineStack` whose `manifest` carries `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'` and `engines: { protocol: '^18' }`, with barrel imports and `objects: Object.values(objects)` (same for `views` / `flows`). Object names carry the prefix in `name` (`crm_account`) — no object-level `namespace`, no `tableName`. No driver in `plugins:` (the CLI resolves it from the DB URL) and no `workflows` / `approvals` top-level keys (refused at load).",
+      "prompt": "Write `objectstack.config.ts` for our CRM app: objects, views and flows under src/, namespace `crm`, protocol 18.",
+      "expected_output": "`defineStack` with a `manifest` of `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'`, `engines: { protocol: '^18' }`; barrel imports, `objects: Object.values(objects)` (likewise `views` / `flows`); prefixed object names (`crm_account`), no object-level `namespace`, no `tableName`; no driver in `plugins:` (the CLI resolves it); no `workflows` / `approvals` keys (refused).",
       "files": [],
       "assertions": {
         "must_contain": ["defineStack", "manifest", "engines", "Object.values("],
@@ -13,8 +13,8 @@
     },
     {
       "id": 2,
-      "prompt": "Build a plugin that registers an `audit` service and records every metadata reload; it should also record every `task` insert.",
-      "expected_output": "A `Plugin` object with `name`, `init(ctx)` calling `ctx.registerService('audit', ...)` and `ctx.hook('metadata:reloaded', ...)`, `start(ctx)`, `destroy()`. Record-level events are NOT kernel hooks — `ctx.hook('data:beforeInsert')` registers and silently never fires — so the task insert is a data hook (`hooks:` collection / `ql.on('beforeInsert', 'task', ...)`, objectstack-data). No `onInstall` / `onEnable` / `onDisable` plugin hooks exist.",
+      "prompt": "Build a plugin registering an `audit` service that records every metadata reload and every `task` insert.",
+      "expected_output": "A `Plugin` with `name`, `init(ctx)` calling `ctx.registerService('audit', ...)` and `ctx.hook('metadata:reloaded', ...)`, `start(ctx)`, `destroy()`. Record events are not kernel hooks — `ctx.hook('data:beforeInsert')` registers and never fires — so the task insert is a data hook (objectstack-data). No `onInstall` / `onEnable` / `onDisable`.",
       "files": [],
       "assertions": {
         "must_contain": ["registerService", "ctx.hook(", "metadata:reloaded", "init(", "destroy"],
@@ -23,8 +23,8 @@
     },
     {
       "id": 3,
-      "prompt": "Our scheduled flows never launch, and a `notify` step reports success but nobody receives anything.",
-      "expected_output": "Both are missing capability tokens: `requires: ['automation', 'triggers', 'job', 'messaging']` on the stack root — `triggers` alone arms record-change triggers, schedule and time-relative triggers run on the `job` service, and without `messaging` notify returns success with `skipped: true`. Declaring is a demand (a missing provider is a hard boot error); an unknown token is rejected by `defineStack` at authoring time.",
+      "prompt": "Our scheduled flows never launch, and `notify` reports success but nobody receives anything.",
+      "expected_output": "`requires: ['automation', 'triggers', 'job', 'messaging']` on the stack root: `triggers` alone arms record-change triggers, schedule and time-relative ones run on the `job` service, and without `messaging` notify returns success with `skipped: true`. Declaring is a demand (missing provider = hard boot error); `defineStack` rejects an unknown token at authoring time.",
       "files": [],
       "assertions": {
         "must_contain": ["requires", "job", "messaging", "triggers"],
@@ -33,8 +33,8 @@
     },
     {
       "id": 4,
-      "prompt": "We deploy on Vercel serverless functions inside our own Hono app. Mount the ObjectStack API under /api.",
-      "expected_output": "`createHonoApp({ kernel })` from `@objectstack/hono` (prefix defaults to `/api`) mounted into the host app — `HonoServerPlugin` is for when ObjectStack owns the server. Uses `LiteKernel` for the cold-start-sensitive host, warns that `/auth/*` follows the auth `basePath`, not `prefix`, and that there are no `@objectstack/adapter-*` packages.",
+      "prompt": "We deploy on Vercel serverless functions in our own Hono app; mount the ObjectStack API under /api.",
+      "expected_output": "`createHonoApp({ kernel })` from `@objectstack/hono` (prefix defaults to `/api`) in the host app — `HonoServerPlugin` only when ObjectStack owns the server; `LiteKernel` for a cold-start-sensitive host; `/auth/*` follows the auth `basePath`, not `prefix`; no `@objectstack/adapter-*` packages exist.",
       "files": [],
       "assertions": {
         "must_contain": ["createHonoApp", "@objectstack/hono", "LiteKernel"],
@@ -43,8 +43,8 @@
     },
     {
       "id": 5,
-      "prompt": "I changed field types on an object that already has production data. Show me what the database needs, verify the metadata, and give me a quality score.",
-      "expected_output": "`os migrate plan` to preview the metadata↔DB drift, `os migrate apply` (with `--allow-destructive` for type changes / drops) to reconcile, then `os validate` (schema + CEL + widget bindings) and `os lint --score`. Does not report the change done until `os validate` passes; `os lint` does not replace it.",
+      "prompt": "I changed field types on an object with production data. Show me what the database needs, verify the metadata and give me a quality score.",
+      "expected_output": "`os migrate plan` previews the drift, `os migrate apply` (`--allow-destructive` for type changes / drops) reconciles, then `os validate` and `os lint --score`; not done until `os validate` passes, which `os lint` does not replace.",
       "files": [],
       "assertions": {
         "must_contain": ["os migrate plan", "os migrate apply", "os validate", "os lint"],
@@ -54,7 +54,7 @@
     {
       "id": 6,
       "prompt": "Plan the production deployment: Docker on Kubernetes behind nginx, PostgreSQL.",
-      "expected_output": "`os start` as the container entrypoint with `PORT` pinned explicitly (production fails loudly on a busy port; only dev auto-hops), `driver-sql` selected by the database URL (no `DriverPlugin` in `plugins:`), TLS terminated on the proxy with the app on an internal port, and `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS` / the app `hostname` kept in sync with the proxy. Health via `GET /health` and `GET /ready`.",
+      "expected_output": "`os start` as the entrypoint, `PORT` pinned (production fails loudly on a busy port), `driver-sql` by database URL (no `DriverPlugin` in `plugins:`), TLS on the proxy, app on an internal port, `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS` / app `hostname` in sync; health: `GET /health`, `GET /ready`.",
       "files": [],
       "assertions": {
         "must_contain": ["os start", "PORT", "OS_TRUSTED_ORIGINS", "driver-sql"],
@@ -63,8 +63,8 @@
     },
     {
       "id": 7,
-      "prompt": "Prepare a demo of our contracts app: the seed data assigns matters to 'Legal Counsel 1' and 'Paralegal 1', and the demo should open signed in as Legal Counsel 1.",
-      "expected_output": "Both people go in `demoStaff` — `name` exactly as the seed references them, `email`, and a `position` / `permissionSets` the stack itself declares — and `os dev` creates the accounts with the seed password (`admin123` by default): no `password` key, no `role:` alias, no platform set such as `admin_full_access`, and no hand-written `sys_user` seed row (it lands as a directory row nobody can sign in as). `devLogins` creates nothing: at most one entry naming Legal Counsel 1's address so the boot banner prints it. Notes that `os build` drops `demoStaff` and a production boot creates no demo account.",
+      "prompt": "Prepare a demo of our contracts app: the seed assigns matters to 'Legal Counsel 1' and 'Paralegal 1', and the demo opens signed in as Legal Counsel 1.",
+      "expected_output": "Both go in `demoStaff` — `name` as the seed references them, `email`, a `position` / `permissionSets` the stack declares — and `os dev` creates the accounts with the seed password: no `password` key, no `role:` alias, no platform set like `admin_full_access`, no hand-written `sys_user` seed row. `devLogins` creates nothing (at most a banner entry); `os build` drops `demoStaff`; production creates no demo account.",
       "files": [],
       "assertions": {
         "must_contain": ["demoStaff", "position", "permissionSets", "os dev"],
@@ -73,12 +73,22 @@
     },
     {
       "id": 8,
-      "prompt": "In the contracts demo, Paralegal 1 reports to Legal Counsel 1, so the approval flow's manager step reaches the right person on a fresh `os dev`. Set that up.",
-      "expected_output": "On Paralegal 1's `demoStaff` entry, `manager: 'counsel1@example.com'` — the `email` of Legal Counsel 1's own entry, never the display name — and nothing else: `os dev` writes `sys_user.manager_id` itself once every demo account exists, and leaves a manager an operator set by hand. No seed row or hook writing `manager_id`, no `reportsTo` / `managerEmail` alias (refused, naming `manager`); a manager naming no entry, the entry itself or a loop is refused when the stack loads.",
+      "prompt": "In the contracts demo Paralegal 1 reports to Legal Counsel 1; the approval flow's manager step must reach the right person on a fresh `os dev`.",
+      "expected_output": "On Paralegal 1's `demoStaff` entry, `manager: 'counsel1@example.com'` — Legal Counsel 1's entry `email`, never the display name — and nothing else: `os dev` writes `sys_user.manager_id` once every demo account exists. No seed row or hook writing `manager_id`, no `reportsTo` / `managerEmail` alias (refused); a manager naming no entry, itself or a loop is refused at load.",
       "files": [],
       "assertions": {
         "must_contain": ["demoStaff", "manager: '", "os dev"],
         "must_not_contain": ["manager_id:", "reportsTo:"]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "Add a `support_intake` queue staffed by the `service_agent` position and route every new `crm_case` into it (`requires: ['automation', 'triggers']`).",
+      "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["queues:", "assignmentRules:", "defineQueue", "'sharing'"],
+        "must_not_contain": ["assigned_to", "beforeInsert"]
       }
     }
   ]

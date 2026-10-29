@@ -108,7 +108,9 @@ import {
   ElementRecordPickerPropsSchema,
   ElementButtonPropsSchema,
   ElementRepeaterPropsSchema,
+  ObjectFormPropsSchema,
   ObjectGridPropsSchema,
+  ObjectMasterDetailFormPropsSchema,
   ObjectKanbanPropsSchema,
   PageHeaderProps,
 } from '../ui/component.zod';
@@ -419,6 +421,27 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(FormSectionSchema, 'view.form.sections[]', 'pane'),
     tombstone(FormViewSchema, 'view.form', 'splitSize'),
     tombstone(FormViewSchema, 'view.form', 'splitResizable'),
+    // #27159 (same family, before 18.3.0 shipped): the form view's last split
+    // key, and the `object-form` block's `split` value with its split-only keys.
+    tombstone(FormViewSchema, 'view.form', 'splitDirection'),
+    refusal(
+      "object-form formType 'split'",
+      () => ObjectFormPropsSchema.safeParse({ objectName: 'crm_contact', formType: 'split' }),
+      'formType',
+    ),
+    tombstone(ObjectFormPropsSchema, 'object-form', 'splitDirection'),
+    tombstone(ObjectFormPropsSchema, 'object-form', 'splitSize'),
+    tombstone(ObjectFormPropsSchema, 'object-form', 'splitResizable'),
+    refusal(
+      'object-form sections[].pane',
+      () => ObjectFormPropsSchema.safeParse({ objectName: 'crm_contact', sections: [{ pane: 'primary', fields: ['name'] }] }),
+      'sections',
+    ),
+    refusal(
+      'object-master-detail-form sections[].pane',
+      () => ObjectMasterDetailFormPropsSchema.safeParse({ objectName: 'crm_contact', sections: [{ pane: 'primary', fields: ['name'] }] }),
+      'sections',
+    ),
   ],
   // #25050: retired after 18.0.0, so the v18 train's major. Partial (unset
   // values and remote urls only), so the prescription's migrate sentence is

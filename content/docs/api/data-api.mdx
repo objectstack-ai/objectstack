@@ -474,7 +474,7 @@ is executed. `POST /analytics/sql` refuses the same keys. To order by a member, 
 <Callout type="info">
 **`fields[]` is the resolved presentation surface — read it first.** Each entry carries
 `name` and `type` and, when the producer declares them, `label`, `format`, `currency`,
-`percentScale`, `builtinAggregate`, `aggregate`, `nullLabel` and `polarity` (which direction
+`currencyField`, `percentScale`, `builtinAggregate`, `aggregate`, `nullLabel` and `polarity` (which direction
 of a measure's change is good news, relayed from the dataset measure): the optional members
 `AnalyticsResultResponseSchema` declares (`packages/spec/src/api/analytics.zod.ts`),
 mirrored member for member by `IAnalyticsService.query`'s `AnalyticsResult` and bound to
@@ -499,6 +499,13 @@ tenant default currency (the `localization.currency` setting), if one is set. A
 `dynamic` field (the default mode) never lends its `defaultCurrency` — only `fixed` does —
 so its column shows the tenant default. The cube query on this page carries no column
 `currency`.
+
+A measure column over a `currencyMode: 'record'` amount has one currency per row, so it
+carries `currencyField` instead of `currency`: the name of the dimension column, in the same
+answer, that groups by the amount's code field (`currencyConfig.currencyField`). Each row's
+currency is that row's value of that column. A `sum`, `avg`, `min` or `max` over such an
+amount is refused `INVALID_FIELD` / 400 unless the query groups by the code field, on the
+dataset query and the cube query alike; a `count` is served.
 
 The dataset query also states each measure column's `aggregate` (`count`, `sum`, `avg`,
 `min`, `max`, `count_distinct`), whether or not the author labelled the measure, so a

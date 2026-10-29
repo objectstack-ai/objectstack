@@ -33,7 +33,6 @@ import { registerAllFields } from '@object-ui/fields';
 import '@object-ui/components';
 import { ModalForm } from '../ModalForm';
 import { ObjectForm } from '../ObjectForm';
-import { SplitForm } from '../SplitForm';
 import { TabbedForm } from '../TabbedForm';
 import { WizardForm } from '../WizardForm';
 
@@ -57,9 +56,9 @@ const makeDataSource = (): any => ({
 });
 
 type Section = { name: string; label: string; columns?: number; fields: unknown[] };
-type Host = 'modal' | 'object' | 'split' | 'tabbed' | 'wizard';
+type Host = 'modal' | 'object' | 'tabbed' | 'wizard';
 
-const PAGE_HOSTS: Exclude<Host, 'modal'>[] = ['object', 'split', 'tabbed', 'wizard'];
+const PAGE_HOSTS: Exclude<Host, 'modal'>[] = ['object', 'tabbed', 'wizard'];
 
 function mount(host: Host, sections: Section[], extra: Record<string, unknown> = {}) {
   const schema = {
@@ -76,8 +75,6 @@ function mount(host: Host, sections: Section[], extra: Record<string, unknown> =
       return render(<ModalForm schema={{ ...schema, formType: 'modal' }} dataSource={ds} />);
     case 'object':
       return render(<ObjectForm schema={schema} dataSource={ds} />);
-    case 'split':
-      return render(<SplitForm schema={{ ...schema, formType: 'split' }} dataSource={ds} />);
     case 'tabbed':
       return render(<TabbedForm schema={{ ...schema, formType: 'tabbed' }} dataSource={ds} />);
     case 'wizard':

@@ -172,19 +172,17 @@ Stored as JSON on the parent row — no separate table / FK:
 ```typescript
 {
   type: 'currency',
-  currencyConfig: {
-    currencyMode: 'fixed',   // 'fixed' = the column is pinned to
-                             // defaultCurrency; 'dynamic' = tenant default
-    defaultCurrency: 'USD',  // ISO 4217
-  },
+  currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },  // ISO 4217
 }
+// per record: { currencyMode: 'record', currencyField: 'currency_code' }
 ```
 
-**Currency resolution.** The value is a bare number in both modes (ADR-0104
-D1), never `{ value, currency }`. The displayed symbol: under `'fixed'`,
-`currencyConfig.defaultCurrency`; under `'dynamic'` (default), the tenant
-`localization.currency` setting, not `defaultCurrency`; with neither, a plain
-grouped number (never a hardcoded `$`). A measure's own `currency` wins.
+**Currency resolution.** The value is a bare number in every mode, never
+`{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
+(default), the tenant `localization.currency`, else a plain number (never
+`$`); `'record'`, each record's code in the `text` field `currencyField`
+names, declaring `valueDomain: 'iso_4217_currency'`. Under
+`'fixed'`/`'dynamic'` a measure's own `currency` wins.
 
 ### Select with Default
 

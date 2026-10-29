@@ -70,7 +70,9 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import type { ObjectFormSection } from '@object-ui/types';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { DrawerForm } from '../DrawerForm';
 
 registerAllFields();
@@ -148,7 +150,7 @@ afterEach(() => {
 /** Mount through `ObjectForm` — the entry `RecordFormPage` itself uses. */
 const renderObjectForm = async (extra: Record<string, unknown>) => {
   render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={{
         type: 'object-form',
         objectName: 'crm_case',
@@ -204,15 +206,11 @@ const LAYOUTS: { label: string; mount: () => Promise<void> }[] = [
     mount: () => renderObjectForm({ formType: 'wizard' }),
   },
   {
-    label: "SplitForm — formType 'split' via ObjectForm delegation (split section map)",
-    mount: () => renderObjectForm({ formType: 'split' }),
-  },
-  {
-    label: "ModalForm — formType 'modal' via ObjectForm delegation (modal section map)",
+    label: "ModalForm — formType 'modal' via the block container (modal section map)",
     mount: () => renderObjectForm({ formType: 'modal', open: true }),
   },
   {
-    label: "DrawerForm — formType 'drawer' via ObjectForm delegation (drawer section map)",
+    label: "DrawerForm — formType 'drawer' via the block container (drawer section map)",
     mount: () => renderObjectForm({ formType: 'drawer', open: true }),
   },
   {
