@@ -15,12 +15,15 @@
  *
  *  - the count actually reaches the button and disables it, with the same
  *    message the RLS editor already shows;
- *  - the host RESETS its own count when the selection changes or the inspector
- *    unmounts (ruling sub-decision A) — writability must never depend on a
- *    child's teardown running, or closing the panel on a faulty formula leaves
- *    Save wedged shut with no editor on screen to fix it;
- *  - objectstack#27485, the switch arm: a switch to another object over a
- *    held formula asks before it drops the edit.
+ *  - objectstack#27485 — the verdict belongs to the DRAFT, not to the
+ *    selection: closing the inspector (Close, Escape, another field, another
+ *    tab) keeps the hold while the draft still carries the text it judged, and
+ *    a switch to another object asks before it drops the held edit. The
+ *    objectui#4306 ruling's sub-decision A stands as its two invariants:
+ *    writability never depends on a child's teardown running (the kept verdict
+ *    is read off the draft, and an edit, the field's removal or a load ends
+ *    it), and Save is never wedged with nothing on screen to fix (the held line
+ *    names the field, and its "Show me" reopens the editor).
  *
  * The engine is stubbed so the verdict is deterministic; the live lint is
  * CelPredicateField.test.tsx's job.
@@ -188,25 +191,6 @@ describe('DataPillar — auto-save is gated on the field inspector’s CEL verdi
     fireEvent.change(box, { target: { value: 'record.est_hours * 2' } });
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
   });
-
-  /**
-   * Sub-decision A. Closing the panel unmounts the inspector, so nothing will
-   * ever report `0` for it — the host must drop the count on its own, or the
-   * dirty draft stays wedged UNSAVED forever with no editor on screen to fix.
-   */
-  it('drops the count when the inspector closes, so the draft cannot wedge unsaved', async () => {
-    const box = await openFormulaField();
-
-    fireEvent.change(box, { target: { value: 'record.est_hours *' } });
-    await new Promise((r) => setTimeout(r, 2300));
-    expect(mockClient.save).not.toHaveBeenCalled();
-
-    // Two "Close" buttons dismiss the panel — the rail header's and the
-    // inspector shell's own; either clears the selection (and the block).
-    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
-    await waitFor(() => expect(screen.queryByText('Formula (CEL)')).toBeNull(), { timeout: 3000 });
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
-  });
 });
 
 /**
@@ -230,5 +214,51 @@ describe('DataPillar — a switch to another object over a held formula (objects
     await waitFor(() => expect(screen.queryByText('Est hours')).toBeNull(), { timeout: 3000 });
     await new Promise((r) => setTimeout(r, 2300));
     expect(mockClient.save).not.toHaveBeenCalled();
+  });
+});
+
+/** The ways the field inspector closes (the card's step 4). */
+const CLOSERS: Array<[string, () => void]> = [
+  ['its Close button', () => fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])],
+  ['Escape', () => fireEvent.keyDown(document.body, { key: 'Escape' })],
+  ['another field card', () => fireEvent.click((screen.getByText('Est hours').closest('.cursor-grab') as HTMLElement))],
+  ['the Records tab', () => fireEvent.click(screen.getByRole('button', { name: 'Records' }))],
+];
+
+describe('DataPillar — the CEL hold belongs to the draft, not to the open inspector (objectstack#27485)', () => {
+  async function breakFormula(): Promise<HTMLTextAreaElement> {
+    const box = await openFormulaField();
+    fireEvent.change(box, { target: { value: 'record.est_hours *' } });
+    await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Total'), { timeout: 3000 });
+    return box;
+  }
+
+  it.each(CLOSERS)('closing the inspector by %s keeps the hold, and the held line names the field', async (_how, close) => {
+    await breakFormula();
+    close();
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(mockClient.save).not.toHaveBeenCalled();
+    expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Total');
+  });
+
+  it('"Show me" reopens the field, and fixing it there releases the hold', async () => {
+    await breakFormula();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
+    await waitFor(() => expect(screen.queryByText('Formula (CEL)')).toBeNull(), { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Show me' }));
+    const label = await screen.findByText('Formula (CEL)');
+    const box = label.parentElement!.querySelector('[role="combobox"]') as HTMLTextAreaElement;
+    expect(box.value).toBe('record.est_hours *');
+    fireEvent.change(box, { target: { value: 'record.est_hours * 2' } });
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
+    expect(screen.queryByTestId('studio-held')).toBeNull();
+  });
+
+  it('removing the field ends the hold: nothing judged is left in the draft', async () => {
+    await breakFormula();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove “Total”' }));
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
+    const body = (mockClient.save.mock.calls.at(-1) as unknown[] | undefined)?.[2] as { fields: Array<{ name: string }> };
+    expect(body.fields.map((f) => f.name)).toEqual(['est_hours']);
   });
 });

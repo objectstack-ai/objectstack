@@ -2668,6 +2668,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.needsRuleField': '规则「{rule}」需要选择一个字段',
   'engine.studio.held.needsRuleMessage': '规则「{rule}」需要一条错误消息',
   'engine.studio.held.widgetNeedsInput': '组件「{widget}」的「{input}」需要填写',
+  'engine.studio.held.celInvalid': '字段「{field}」的表达式有错误需要修正',
   'engine.studio.held.line': '尚未保存：{clause}。更改已保留在此处，补全后会自动保存。',
   'engine.studio.held.publish': '未发布：{clause}，该更改尚未保存。请先补全，再发布。',
   'engine.studio.held.inputHint': '必填。填写后才会保存更改。',

@@ -6279,6 +6279,21 @@ function formFieldNames(fields: unknown): string[] {
     .filter((n) => !STUDIO_SYSTEM_FIELD_NAMES.has(n));
 }
 
+/**
+ * objectstack#27485 — what the field inspector's CEL verdict on `field` was
+ * judged from, as the object draft holds it: the field's type, its CEL texts
+ * (`expression`, the legacy `formula`, `visibleWhen`, `readonlyWhen`,
+ * `requiredWhen`) and the object's field names its lint resolves references
+ * against. The same stamp is the same verdict. `null` when the field is gone.
+ */
+function fieldCelStamp(draft: Record<string, unknown>, field: string): string | null {
+  const { entries } = readFields(draft.fields);
+  const def = entries.find((e) => e.name === field)?.def;
+  if (!def) return null;
+  const cel = [def.type, def.expression, def.formula, def.visibleWhen, def.readonlyWhen, def.requiredWhen];
+  return JSON.stringify([cel.map((v) => v ?? null), entries.map((e) => e.name)]);
+}
+
 /** The data-source writes the Form tab's Preview refuses (objectui#12515). */
 const PREVIEW_REFUSED_WRITES = new Set<PropertyKey>(['create', 'update', 'delete', 'bulk', 'bulkUpdate', 'bulkDelete']);
 
@@ -6415,13 +6430,54 @@ export function DataPillar({
   // that does not parse must not be saveable, let alone publishable as the live
   // field definition (objectui#4306).
   //
-  // The count is STAMPED with the selection it came from, so it expires by
-  // construction when the selection changes or the panel closes: an unmounted
-  // inspector can never retract its last verdict, and a host that waited for
-  // one would leave Save wedged shut with nothing on screen to fix.
+  // The report is STAMPED with the selection it came from: it is the open
+  // inspector's live verdict, and never reads as another selection's.
   const [blockingReport, setBlockingReport] = React.useState({ key: '', count: 0 });
   const fieldSelKey = fieldSel ? `${current?.name ?? ''}:${fieldSel.kind}:${fieldSel.id}` : '';
-  const inspectorBlocking = blockingReport.key === fieldSelKey ? blockingReport.count : 0;
+  // objectstack#27485 — the verdict belongs to the draft, not to the selection.
+  // Expiring it with the selection released the hold the moment the inspector
+  // closed (Escape, Close, another field, another tab) while the broken text
+  // stayed in the draft, and the autosave sent it. So each field's last live
+  // verdict is kept with the stamp of what it judged (`fieldCelStamp`, taken
+  // while the inspector is open on it) and holds, with the inspector closed,
+  // while the draft still carries that stamp: an edit to the text, the field's
+  // removal or the object's next load ends it. Nothing is left shut with
+  // nothing to fix: the held line names the field and its "Show me" opens it,
+  // and the open inspector's live verdict always wins.
+  const [celVerdicts, setCelVerdicts] = React.useState<Record<string, { field: string; count: number; stamp: string | null }>>({});
+  const liveFieldReport = fieldSel?.kind === 'field' && blockingReport.key === fieldSelKey;
+  const openFieldStamp = fieldSel?.kind === 'field' ? fieldCelStamp(objDraft, fieldSel.id) : null;
+  React.useEffect(() => {
+    if (!liveFieldReport || fieldSel === null) return;
+    const kept = { field: fieldSel.id, count: blockingReport.count, stamp: openFieldStamp };
+    setCelVerdicts((prev) => {
+      const was = prev[fieldSelKey];
+      if (was && was.count === kept.count && was.stamp === kept.stamp) return prev;
+      return { ...prev, [fieldSelKey]: kept };
+    });
+  }, [liveFieldReport, fieldSel, fieldSelKey, blockingReport.count, openFieldStamp]);
+  // The open object's fields whose verdict holds, and their summed count.
+  const celHeldFields: string[] = [];
+  let inspectorBlocking = 0;
+  const celFieldPrefix = `${current?.name ?? ''}:field:`;
+  for (const [key, kept] of Object.entries(celVerdicts)) {
+    if (!key.startsWith(celFieldPrefix) || key === fieldSelKey) continue;
+    if (kept.count > 0 && kept.stamp === fieldCelStamp(objDraft, kept.field)) {
+      celHeldFields.push(kept.field);
+      inspectorBlocking += kept.count;
+    }
+  }
+  if (blockingReport.key === fieldSelKey && blockingReport.count > 0) {
+    if (fieldSel?.kind === 'field') celHeldFields.push(fieldSel.id);
+    inspectorBlocking += blockingReport.count;
+  } else if (fieldSelKey !== '' && !liveFieldReport) {
+    // Opened, and its inspector has not reported yet: its kept verdict stands.
+    const kept = celVerdicts[fieldSelKey];
+    if (kept && kept.count > 0 && kept.stamp === openFieldStamp) {
+      celHeldFields.push(kept.field);
+      inspectorBlocking += kept.count;
+    }
+  }
   // The pillar's PANEL family reports separately (objectui#4527): the
   // validations, actions and settings panels all write through this same draft
   // and own no Save of their own, so their CEL faults have to reach this
@@ -6691,6 +6747,8 @@ export function DataPillar({
     setLoading(true);
     setError(null);
     setFieldSel(null);
+    // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
+    setCelVerdicts({});
     setDirty(false);
     (async () => {
       try {
@@ -6967,8 +7025,27 @@ export function DataPillar({
     snapshot: objDraft,
     save: doSave,
   });
+  // objectstack#27485 — an unsent edit the CEL verdict holds is named like an
+  // incomplete one: the held line, the surface's Publish and the rail's
+  // question all read it, so it outlives the inspector without going unseen.
+  const celHeldField = celHeldFields[0] ?? null;
+  const celHeldLabel = React.useMemo(() => {
+    if (celHeldField === null) return null;
+    const label = readFields(objDraft.fields).entries.find((e) => e.name === celHeldField)?.def.label;
+    return typeof label === 'string' && label.trim() !== '' ? label.trim() : celHeldField;
+  }, [celHeldField, objDraft.fields]);
+  const objCelHeld = React.useMemo<StudioHeld | null>(
+    () =>
+      dirty && celHeldField !== null && celHeldLabel !== null
+        ? {
+            clause: tFormat('engine.studio.held.celInvalid', locale, { field: celHeldLabel }),
+            target: { kind: 'field', id: celHeldField },
+          }
+        : null,
+    [dirty, celHeldField, celHeldLabel, locale],
+  );
   // Only the open object's own buffer is held (objectui#11272).
-  const objHeld = objLoaded ? objIncomplete : null;
+  const objHeld = objLoaded ? (objIncomplete ?? objCelHeld) : null;
   // objectstack#26917 — the refusal's way out: the object holding the
   // identifier is on this rail, so it opens instead of a second one being
   // made. The New button already asked about a held edit (objectstack#26845).
