@@ -429,7 +429,14 @@ callers first, or don't), and preserves "packaged code calls what it names".
    的，因为有的 action 我不想启用。」, the first-party pull on record): same
    `sys_metadata_activation` ledger, same §5 write authority, a consult point at action dispatch,
    a surface row. ⛔ The action-**clone** half is not chartered — it stays on §3's pre-chart
-   discipline until real pull appears.
+   discipline until real pull appears. The consult point is the `/actions` door —
+   `POST /actions/:object/:action` and the MCP `run_action` bridge, both through
+   `packages/runtime/src/action-execution.ts#disabledActionRefusal` — and per ADR-0066 D4 as
+   amended on 2026-10-29 (ruling of record 6499781492 on #27506) it covers `type: 'api'` too: a
+   same-origin api action is dispatched through that same door, so the one consult at action
+   dispatch is its consult (§4: each consumer documents its consult point), while an api action
+   whose `target` is off-origin stays browser-only and the activation write door refuses to flip
+   it — the server half lands under #27506.
 3. **Permission sets converge in a later card — and the amendment made it simpler.** The landed
    #11513 machinery (lock, clone action, row-state `active`, drift detection of the enforced
    copy) **stays valid meanwhile** — it is the regime's first instance, not a violation of it,

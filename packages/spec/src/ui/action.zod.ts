@@ -1587,22 +1587,32 @@ const actionObject = () => strictObject({
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a
-   * dual-surface gate from ONE declaration: the PLATFORM ACTION ROUTE rejects
+   * dual-surface gate from ONE declaration: the PLATFORM ACTION DOOR rejects
    * the call with 403 when the caller's systemPermissions don't cover these (the
    * source of truth), and the objectui action surfaces hide the button using the
    * same requirement. Independent of `visible` (CEL): this is the RBAC
    * capability contract, mirroring `App.requiredPermissions`.
    *
-   * **Server enforcement covers the platform's own invocation paths only** —
-   * `POST /api/v1/actions/<object>/<action>` (and the MCP/AI path), which is
-   * where `type: 'script' | 'flow' | 'modal'` actions land. A `type: 'api'`
-   * action whose `target` is a self-authored endpoint is called by the browser
-   * DIRECTLY: the platform never sees the request, so nothing checks this
-   * declaration server-side. Such an endpoint MUST re-check the capability
-   * itself (framework#3923) — treat the UI gate there as a courtesy, not a
-   * boundary.
+   * **Server enforcement is the platform action door** —
+   * `POST /api/v1/actions/<object>/<action>` and the MCP `run_action` bridge,
+   * which dispatch `type: 'script'`, `type: 'flow'`, the declarative
+   * `operation: 'update'` write and — per ADR-0066 D4 as amended 2026-10-29 —
+   * a `type: 'api'` action whose `target` is a same-origin platform path. For
+   * that api action the door runs this gate (beside the anonymous baseline and
+   * the ADR-0126 activation consult) and then forwards the call in-process to
+   * the declared `target` as the caller. The target endpoint keeps re-checking
+   * its own authorization: defence in depth, not a replacement. A `type: 'api'`
+   * action whose `target` is NOT a same-origin platform path stays browser-only
+   * and ungoverned — the door does not dispatch it, MCP does not list it, the
+   * activation switch refuses to flip it, and nothing checks this declaration
+   * server-side.
+   *
+   * Landing: ADR-0066 records the decision; the server half is the ruling's
+   * step 2 (#27506). Until it lands the door still refuses `type: 'api'`
+   * (`isHeadlessInvokableAction` admits `script`, `flow` and the declarative
+   * update only) and the console fetches `target` directly.
    */
-  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there.'),
+  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action door (`POST /actions/:object/:action` and MCP `run_action`) for script, flow, the declarative update and — per ADR-0066 D4 as amended 2026-10-29 — a `type: api` action whose `target` is a same-origin platform path, and mirrored as a UI hide. The same-origin endpoint keeps re-checking its own authorization (defence in depth, not a replacement); a `type: api` action with an off-origin `target` is browser-only and not gated server-side.'),
 
   /** Keyboard Shortcut */
 
