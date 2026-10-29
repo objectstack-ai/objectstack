@@ -21,6 +21,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 import {
   deriveParentWriteReachCases,
   runParentWriteReachProofs,
@@ -28,6 +29,11 @@ import {
   parentWriteReachSecurity,
   type ParentWriteReachReport,
 } from './parent-write-reach.js';
+
+// The boot's first load, paid during collection rather than in the first
+// case's clock (see `boot-warm-up.testkit.ts`). The boots below differ only in
+// their app and its security source, which the warm-up does not share.
+await warmUpBoot();
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;

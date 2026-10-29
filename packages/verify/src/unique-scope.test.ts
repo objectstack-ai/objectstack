@@ -31,12 +31,18 @@ import { join } from 'node:path';
 import { defineStack } from '@objectstack/spec';
 
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 import {
   deriveUniqueScopeCases,
   runUniqueScopeProofs,
   formatUniqueScopeReport,
   type UniqueScopeReport,
 } from './unique-scope.js';
+
+// The boot's first load, paid during collection rather than in the first
+// case's clock (see `boot-warm-up.testkit.ts`). The first boot below uses the
+// default options.
+await warmUpBoot();
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
