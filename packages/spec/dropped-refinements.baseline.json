@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 244,
-    "droppedRefinementSites": 892,
+    "droppedRefinementSites": 906,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -107,6 +107,7 @@
         "manifest.objects.element.fields.out.valueType",
         "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "manifest.objects.element.fields.out.valueType.summaryOperations",
         "manifest.objects.element.lifecycle",
         "manifest.objects.element.membershipKeys",
         "manifest.objects.element.membershipKeys.valueType",
@@ -237,6 +238,7 @@
         "data.options[1].manifest.objects.element.fields.out.valueType",
         "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "data.options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.objects.element.membershipKeys",
         "data.options[1].manifest.objects.element.membershipKeys.valueType",
@@ -366,6 +368,7 @@
         "options[1].manifest.objects.element.fields.out.valueType",
         "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.objects.element.membershipKeys",
         "options[1].manifest.objects.element.membershipKeys.valueType",
@@ -438,6 +441,7 @@
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys.valueType",
@@ -492,6 +496,7 @@
         "data.fields.out.valueType.currencyConfig",
         "data.fields.out.valueType.inlineColumns.element",
         "data.fields.out.valueType.relatedListFilter.lazy",
+        "data.fields.out.valueType.summaryOperations",
         "data.lifecycle",
         "data.listViews.valueType",
         "data.listViews.valueType.bulkActionDefs.element",
@@ -847,7 +852,8 @@
         "",
         "currencyConfig",
         "inlineColumns.element",
-        "relatedListFilter.lazy"
+        "relatedListFilter.lazy",
+        "summaryOperations"
       ]
     },
     "data/FieldOperators": {
@@ -951,6 +957,7 @@
         "fields.out.valueType.currencyConfig",
         "fields.out.valueType.inlineColumns.element",
         "fields.out.valueType.relatedListFilter.lazy",
+        "fields.out.valueType.summaryOperations",
         "lifecycle",
         "listViews.valueType",
         "listViews.valueType.bulkActionDefs.element",
@@ -970,7 +977,8 @@
         "fields.valueType",
         "fields.valueType.currencyConfig",
         "fields.valueType.inlineColumns.element",
-        "fields.valueType.relatedListFilter.lazy"
+        "fields.valueType.relatedListFilter.lazy",
+        "fields.valueType.summaryOperations"
       ]
     },
     "data/PostgresConfig": {
@@ -1251,7 +1259,8 @@
         "field",
         "field.currencyConfig",
         "field.inlineColumns.element",
-        "field.relatedListFilter.lazy"
+        "field.relatedListFilter.lazy",
+        "field.summaryOperations"
       ]
     },
     "system/AudienceConfig": {
@@ -1275,6 +1284,7 @@
         "operations.element.options[0].field.currencyConfig",
         "operations.element.options[0].field.inlineColumns.element",
         "operations.element.options[0].field.relatedListFilter.lazy",
+        "operations.element.options[0].field.summaryOperations",
         "operations.element.options[3].object",
         "operations.element.options[3].object.actions.element.in",
         "operations.element.options[3].object.actions.element.in.ai.outputSchema",
@@ -1309,6 +1319,7 @@
         "object.fields.out.valueType.currencyConfig",
         "object.fields.out.valueType.inlineColumns.element",
         "object.fields.out.valueType.relatedListFilter.lazy",
+        "object.fields.out.valueType.summaryOperations",
         "object.lifecycle",
         "object.listViews.valueType",
         "object.listViews.valueType.bulkActionDefs.element",
@@ -1349,6 +1360,7 @@
         "options[0].field.currencyConfig",
         "options[0].field.inlineColumns.element",
         "options[0].field.relatedListFilter.lazy",
+        "options[0].field.summaryOperations",
         "options[3].object",
         "options[3].object.actions.element.in",
         "options[3].object.actions.element.in.ai.outputSchema",
@@ -1675,6 +1687,7 @@
     "ui/ObjectFormProps": {
       "sites": [
         "customFields.element.columns.element",
+        "customFields.element.summaryOperations",
         "customFields.element.summaryOperations.filter.lazy",
         "sections.element",
         "submitBehavior.options[1].url"
@@ -1721,6 +1734,7 @@
       "sites": [
         "details.element.columns.element",
         "sections.element",
+        "sections.element.fields.element.options[2].summaryOperations",
         "sections.element.fields.element.options[2].summaryOperations.filter.lazy"
       ]
     },

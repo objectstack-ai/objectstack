@@ -145,6 +145,10 @@ vi.mock('../../../views/studio-design/packages-io', async (importOriginal) => ({
   fetchPackages: () => (state.packages ? Promise.resolve(state.packages) : new Promise<never>(() => {})),
 }));
 
+// Home marks an opened notification read through the bell's own write
+// (`useInboxBell`); this harness serves no inbox feed, so the write is stubbed.
+vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead: vi.fn() }) }));
+
 import { HomePage } from '../HomePage';
 
 const CRM = { name: 'crm', label: 'CRM', icon: 'Building2' };

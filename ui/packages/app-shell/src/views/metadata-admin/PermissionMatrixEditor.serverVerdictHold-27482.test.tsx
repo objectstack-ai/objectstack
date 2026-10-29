@@ -172,3 +172,43 @@ describe('a server error at a clause path holds the autosave (objectstack#27482)
     expect(server.sent).toHaveLength(0);
   });
 });
+
+/**
+ * objectstack#27452 — the verdict on the previous text is not shown under new
+ * text. An edit the lint holds never saves, so nothing re-reads the draft and
+ * the served verdict stays the one on the stored text; the clause shows only
+ * the error that applies to what it holds.
+ */
+describe('a lint-held edit does not show the previous text\'s server verdict (objectstack#27452)', () => {
+  /** A parse fault: the client lint holds it on its own. */
+  const HELD_BY_LINT = 'f_total >';
+
+  it('the server message leaves with its text; the client error and the hold stay, no PUT', async () => {
+    const server: Server = { draft: policy(REFUSED_USING), draftReads: 0, sent: [] };
+    await openPackageDoor(server);
+    await screen.findByText(REFUSAL);
+    const reads = server.draftReads;
+
+    edit(USING_PLACEHOLDER, HELD_BY_LINT);
+
+    await waitFor(() => expect(screen.getByTestId('perm-autosave-held')).toBeInTheDocument(), AUTOSAVE);
+    await waitFor(() => expect(screen.getByPlaceholderText(USING_PLACEHOLDER)).toHaveAttribute('aria-invalid', 'true'));
+    expect(screen.queryByText(REFUSAL)).toBeNull();
+    await pause(PAST_THE_PAUSE);
+    expect(server.sent).toHaveLength(0);
+    expect(server.draftReads).toBe(reads);
+    expect(screen.queryByText(REFUSAL)).toBeNull();
+  });
+
+  it('control: typed back to the judged text, the server message is shown again', async () => {
+    const server: Server = { draft: policy(REFUSED_USING), draftReads: 0, sent: [] };
+    await openPackageDoor(server);
+    await screen.findByText(REFUSAL);
+
+    edit(USING_PLACEHOLDER, HELD_BY_LINT);
+    await waitFor(() => expect(screen.queryByText(REFUSAL)).toBeNull());
+    edit(USING_PLACEHOLDER, REFUSED_USING);
+
+    expect(await screen.findByText(REFUSAL)).toBeInTheDocument();
+  });
+});

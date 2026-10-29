@@ -177,7 +177,12 @@ export async function globalBeforeHook(
     // change/reset only (sign-up has no prior history). Reuses
     // better-auth's native password.verify — no bespoke crypto. Stashes
     // the old hash so the after-hook appends it to the bounded ring on
-    // success.
+    // success. While an administrator's forced change is outstanding the
+    // current password is refused here whatever the history depth. The
+    // change door hands over its current-password claim, and the claim gate
+    // sits above the history ring as well as the forced change: no
+    // `PASSWORD_REUSE` of either kind is given until that claim is confirmed
+    // (see the method's docblock).
     if (
       candidate &&
       (ctx?.path === '/reset-password' || ctx?.path === '/change-password')
@@ -189,7 +194,10 @@ export async function globalBeforeHook(
         ctx.context.__osPwChangeUserId = userId;
         const pw = ctx?.context?.password;
         const verify = typeof pw?.verify === 'function' ? pw.verify.bind(pw) : undefined;
-        const oldHash = await this.assertPasswordNotReused(userId, candidate, verify);
+        const currentPassword = ctx?.path === '/change-password'
+          ? (typeof ctx?.body?.currentPassword === 'string' ? ctx.body.currentPassword : '')
+          : undefined;
+        const oldHash = await this.assertPasswordNotReused(userId, candidate, verify, currentPassword);
         if (oldHash !== undefined) ctx.context.__osPwHistory = { userId, oldHash };
       }
     }

@@ -165,6 +165,33 @@ import {
  */
 export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
 
+/** [#27489] A JSON object: what the clone door reads as a field map. Arrays and `null` are not. */
+function isFieldMap(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** [#27489] The kind of a refused clone body or `overrides`, named without echoing the value. */
+function describeNonFieldMap(value: unknown): string {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'an array';
+    return `a ${typeof value}`;
+}
+
+/** [#27500] The formats `GET /data/:object/export` serves, csv first as the default. */
+const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
+type ExportFormatServed = typeof EXPORT_FORMATS[number];
+
+/**
+ * [#27500] The export's `?format=`: absent is csv, a served format is itself,
+ * anything else (the empty value included) is `undefined`, which the route
+ * refuses.
+ */
+function readExportFormat(raw: unknown): ExportFormatServed | undefined {
+    if (raw === undefined) return 'csv';
+    const value = String(raw).trim().toLowerCase();
+    return (EXPORT_FORMATS as readonly string[]).includes(value) ? value as ExportFormatServed : undefined;
+}
+
 /**
  * [#24183] One export row as a json object carrying exactly `fields`, in that
  * order — the json arm's counterpart of the column list `formatRowCells` writes
@@ -296,6 +323,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // object's `enable.clone` capability, default on). Optional JSON body
     // `{ overrides?: {...} }` (or a bare field map) is applied on top of
     // the copied values, e.g. to set a new name or clear a unique field.
+    // Any other `overrides` (or bare body) is a 400.
     // Distinct path segment (`/clone`) keeps it clear of the greedy
     // `/data/:object/:id` matchers.
     this.routeManager.register({
@@ -316,13 +344,29 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const body = req.body ?? {};
                 // Accept both `{ overrides: {...} }` and a bare field map so
                 // callers can POST overrides directly without nesting.
-                const overrides = (body && typeof body === 'object' && 'overrides' in body)
-                    ? body.overrides
-                    : body;
+                const nested = isFieldMap(body) && 'overrides' in body;
+                const overrides = nested ? body.overrides : body;
+                // [#27489] Refused, not dropped: a non-object `overrides`
+                // (`"x"`, `1`, `true`, `null`) used to be skipped and answer
+                // `201` with a plain copy, and an array passed the `typeof`
+                // test and reached `cloneData`, which merged it index-wise.
+                // Refused here, at the door, before `cloneData` is called. An
+                // absent body or member is still a plain copy; `null` is a
+                // value the caller wrote, so it is refused rather than read as
+                // absent.
+                if (overrides !== undefined && !isFieldMap(overrides)) {
+                    const got = describeNonFieldMap(overrides);
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR', nested
+                        ? `The clone body's "overrides" must be an object of field values, got ${got}. `
+                            + 'Omit it for a plain copy.'
+                        : `The clone body must be an object, { "overrides": {...} } or a bare field map, got ${got}. `
+                            + 'Send no body for a plain copy.');
+                    return;
+                }
                 const result = await cloneData.call(p, {
                     object: req.params.object,
                     id: req.params.id,
-                    ...(overrides && typeof overrides === 'object' ? { overrides } : {}),
+                    ...(overrides !== undefined ? { overrides } : {}),
                     ...(environmentId ? { environmentId } : {}),
                     ...(context ? { context } : {}),
                 });
@@ -945,7 +989,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // GET /data/:object/export  — streaming export (M10.21 / C.21)
     //
     // Query params:
-    //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
+    //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.
+    //                        Any other value, empty included, is a 400.)
     //   fields=a,b,c        (every format. csv / xlsx write exactly these columns and
     //                        json rows carry exactly these keys, in list order; a key
     //                        the read did not return is absent from a json row.
@@ -1071,9 +1116,22 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     await this.answerImportTemplate(req, res, p, environmentId, objectName, context, q);
                     return;
                 }
-                const fmtRaw = String(q.format ?? 'csv').toLowerCase();
-                const format: 'csv' | 'json' | 'xlsx' =
-                    fmtRaw === 'json' ? 'json' : fmtRaw === 'xlsx' ? 'xlsx' : 'csv';
+                // [#27500] Read, not coerced: a value outside the set this door
+                // serves used to fall through to csv, so `format=pdf`,
+                // `format=xml` and `format=` answered `200` with a csv file the
+                // caller never asked for. An ABSENT `format` is still csv; a
+                // present one must name a served format, the empty value
+                // included (as `limit=` above is refused rather than read as
+                // absent). Trimmed and case-insensitive, the reading the
+                // template mode above gives the same parameter. The set is the
+                // one this route serves, not the spec's wider `ExportFormat`.
+                const format = readExportFormat(q.format);
+                if (format === undefined) {
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR',
+                        `The "format" query parameter takes ${EXPORT_FORMATS.join(', ')}, got `
+                        + `${JSON.stringify(q.format)}. Omit it for csv.`);
+                    return;
+                }
                 // Header row toggle (csv / xlsx). Default on; `header=false` omits it.
                 const includeHeader = String(q.header ?? 'true').toLowerCase() !== 'false';
                 const HARD_CAP = 50_000;
@@ -1132,14 +1190,20 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     ? q.search.trim()
                     : undefined;
                 // ADR-0061 override for which fields the term scans. Only meaningful
-                // alongside `search`; ignored on its own, exactly as in findData.
+                // alongside `search`; ignored on its own.
+                //
+                // [#27484] A value naming no field (`searchFields=`, `=,`) is
+                // kept as the empty list rather than read as absent, so
+                // `findData`'s search-fields gate refuses it exactly as on the
+                // list door. Read as absent, the export scanned the object's
+                // default search fields: a file of rows the caller's narrowing
+                // excluded.
                 let searchFields: string[] | undefined;
-                if (typeof q.searchFields === 'string' && q.searchFields.length > 0) {
+                if (typeof q.searchFields === 'string') {
                     searchFields = q.searchFields.split(',').map((s: string) => s.trim()).filter(Boolean);
                 } else if (Array.isArray(q.searchFields)) {
                     searchFields = q.searchFields.filter((s: any) => typeof s === 'string' && s.length > 0);
                 }
-                if (searchFields && searchFields.length === 0) searchFields = undefined;
 
                 let orderby: any = undefined;
                 if (typeof q.orderby === 'string' && q.orderby.length > 0) {

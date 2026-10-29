@@ -422,7 +422,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.summary.field': 'Child field to aggregate',
   'designer.field.summary.relationshipField': 'Child relationship field (optional)',
   'designer.field.summary.setObjectFirst': 'Set the child object first',
-  'designer.field.summary.countFieldHint': 'Ignored for count, but still required — pick any child field.',
+  'designer.field.summary.countFieldHint': 'Count counts the child rows, so it needs no child field.',
   'designer.field.summary.filterSection': 'Filter (rows to aggregate)',
   'designer.field.summary.addFilter': 'Add condition',
   'designer.field.summary.noFilter': 'No filter — every child row is aggregated.',
@@ -3012,6 +3012,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11910 — a dashboard widget held until it is bound; `input` is the
   // widget inspector's own label for it (Dataset, Values (measures)).
   'engine.studio.held.widgetNeedsInput': '{input} on the widget “{widget}” needs a value',
+  // objectstack#27485 — a field CEL expression the inspector judged broken, held after it closes.
+  'engine.studio.held.celInvalid': 'an expression on the field “{field}” has an error to fix',
   'engine.studio.held.line': 'Not saved yet: {clause}. Your changes are kept here and saved once it is filled in.',
   'engine.studio.held.publish': 'Not published: {clause}, so that change is not saved yet. Finish it, then publish.',
   'engine.studio.held.inputHint': 'Required. Changes are saved once this has a value.',
@@ -3326,7 +3328,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.group.collapseHint': 'Controls how this group appears in the actual form (see Preview).',
   'engine.studio.designer.group.relatedListLabel': 'Place a related table here (relatedList)',
   'engine.studio.designer.group.relatedListNone': 'None — a section of fields',
-  'engine.studio.designer.group.relatedListHint': 'The group then stands for that related list\'s table, drawn at this position in the record\'s details column. A group that places a table holds no fields.',
+  'engine.studio.designer.group.relatedListHint': 'The group then stands for that related list\'s table, drawn at this position in the record\'s details column. Only body tables are offered: a relationship marked Primary (in body), or an inline-edited master-detail child. A group that places a table holds no fields.',
+  'engine.studio.designer.group.relatedListNotBody': '“{entry}” is not a body table (a side card or a hidden list), so the record page draws nothing here and publishing refuses it. Mark that relationship Primary (in body), or pick None.',
   'engine.studio.designer.group.relatedListHasFields': 'Move this group\'s fields to another group first: a group that places a related table holds no fields.',
   'engine.studio.designer.group.relatedListLoading': 'Loading the objects that point at this one…',
   // objectui#11788 — the New automation dialog's trigger choice, left unset.

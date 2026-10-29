@@ -4,10 +4,10 @@
  * #10740 — `POST /api/v1/webhooks/redeliver` carries the CALLER'S tenant.
  *
  * This route is the reason `SqlHttpOutbox.redeliver` is classified
- * request-contextual rather than as a dispatcher sweep: its auth gate is "any
- * authenticated user", and `sys_http_delivery` is a tenant-scoped object. On a
- * walled deployment (`OS_TENANCY_POSTURE=isolated`) an unscoped replay from
- * here is an authenticated user writing another organization's delivery row —
+ * request-contextual rather than as a dispatcher sweep: a request reaches it
+ * (any caller entitled to administer webhooks), and `sys_http_delivery` is a
+ * tenant-scoped object. On a walled deployment (`OS_TENANCY_POSTURE=isolated`)
+ * an unscoped replay from here is a caller writing another organization's delivery row —
  * exactly what the driver's tenant audit exists to catch, and the one site
  * where silencing that audit would convert a detectable hole into an
  * undetectable one.
@@ -28,6 +28,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { WebhookOutboxPlugin } from './webhook-outbox-plugin.js';
+import { webhookAdministrationSecurity } from './redeliver-entitlement.testkit.js';
 
 /** Captures the handler `registerAdminRoutes` mounts, and lets us call it. */
 function mountRoute(opts: {
@@ -49,6 +50,8 @@ function mountRoute(opts: {
             registerRedeliverGuard: () => {},
             redeliverHttp: opts.redeliverHttp,
         },
+        // The entitlement gate: every signed-in caller here administers webhooks.
+        security: webhookAdministrationSecurity(),
         auth: { api: { getSession: async () => opts.session } },
     };
     const ctx: any = {

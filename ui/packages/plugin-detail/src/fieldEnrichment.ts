@@ -216,6 +216,10 @@ export const ENRICHED_FIELD_METADATA_KEYS = [
   // The SPEC channel for a per-field currency (a bare `currency` key is
   // designer/DB-only) — resolveFieldCurrency reads it second (#2548).
   'currencyConfig',
+  // A formula's declared result type, which picks its face in the formula
+  // cell: `currency` draws through the currency cell with the
+  // `currencyConfig` above. Without it a money formula read as a bare number.
+  'returnType',
   'precision',
   'scale',
   // The author's digit-grouping hint, which overrides `scale`'s scale-0

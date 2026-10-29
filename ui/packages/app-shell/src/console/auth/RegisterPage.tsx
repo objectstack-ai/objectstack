@@ -24,6 +24,12 @@
  * same "Cannot connect to server" panel with Retry as `./LoginPage`, in place
  * of the form. The sign-up request goes to the same server, so a live-looking
  * form would only have deferred that news to the submit.
+ *
+ * Opened from an invitation the server no longer knows, it draws
+ * `InvitationGoneNotice` in place of the form; a sign-up the server refuses
+ * with `SELF_REGISTRATION_CLOSED` re-reads the preview, so an invitation that
+ * went away meanwhile ends the same way, and a live one names the address it
+ * was sent to (#27509, `./invitationArrival`).
  */
 
 import { useEffect, useState } from 'react';
@@ -42,7 +48,7 @@ import { signUpRefusalMessages } from './signUpRefusalMessages.js';
 import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './signUpOffer.js';
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import { ServerUnreachable } from './LoginPage.js';
-import { invitationArrivalCopy, useInvitationPreview } from './invitationArrival.js';
+import { InvitationGoneNotice, invitationArrivalCopy, useInvitationArrival } from './invitationArrival.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <Link to={href} className={className}>{children}</Link>
@@ -106,8 +112,9 @@ export function RegisterPage() {
   const signedOut = sessionChecked && !user;
   const bootstrap = useBootstrapStatus(signedOut && needsBootstrapProbe(authConfig, invitationRedirect));
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
-  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
-  const invitationPreview = useInvitationPreview(redirect);
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic
+  // copy. #27509 — `gone` when the server no longer knows the invitation.
+  const invitationArrival = useInvitationArrival(redirect);
 
   // Sign-up switched off — bounce a signed-out visitor to /login, keeping
   // `?redirect=`. A signed-in one is moved on below instead, never to /login.
@@ -134,8 +141,18 @@ export function RegisterPage() {
     return <AuthPageLayout>{null}</AuthPageLayout>;
   }
 
+  if (invitationRedirect && invitationArrival.gone) {
+    return (
+      <AuthPageLayout>
+        <InvitationGoneNotice />
+      </AuthPageLayout>
+    );
+  }
+
   const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
-  const invitationCopy = invitationRedirect ? invitationArrivalCopy('register', invitationPreview, t) : null;
+  const invitationCopy = invitationRedirect
+    ? invitationArrivalCopy('register', invitationArrival.preview, t)
+    : null;
 
   // Registration here is by invitation only. Say so BEFORE the form; the
   // sentence is the `SELF_REGISTRATION_CLOSED` refusal's own copy, the same
@@ -236,7 +253,17 @@ export function RegisterPage() {
         title={invitationCopy ? invitationCopy.title : t('auth.register.title')}
         description={invitationCopy ? invitationCopy.description : t('auth.register.description')}
         linkComponent={RouterLink}
-        errorMessages={signUpRefusalMessages(t)}
+        errorMessages={signUpRefusalMessages(
+          t,
+          invitationRedirect ? { preview: invitationArrival.preview } : undefined,
+        )}
+        // #27509 — a refused invitee re-reads the preview: the invitation may
+        // have gone away since the page opened.
+        onError={(error) => {
+          if (invitationRedirect && (error as Error & { code?: string }).code === 'SELF_REGISTRATION_CLOSED') {
+            invitationArrival.recheck();
+          }
+        }}
         labels={{
           nameLabel: t('auth.register.nameLabel'),
           namePlaceholder: t('auth.register.namePlaceholder'),

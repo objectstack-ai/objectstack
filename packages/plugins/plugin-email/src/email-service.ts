@@ -665,6 +665,15 @@ export class EmailService implements IEmailService {
     return !(this.options.transport instanceof LogTransport);
   }
 
+  /**
+   * `IEmailService.getDefaultFrom` — the sender {@link send} applies when the
+   * input names none, read live so it follows {@link setDefaultFrom} from the
+   * `mail` settings namespace.
+   */
+  getDefaultFrom(): EmailAddress | undefined {
+    return this.options.defaultFrom;
+  }
+
   /** Replace the default `from` address used when callers omit `input.from`. */
   setDefaultFrom(from: EmailAddress | undefined): void {
     this.options.defaultFrom = from;

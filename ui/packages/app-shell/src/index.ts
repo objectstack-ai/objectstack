@@ -264,7 +264,10 @@ export { MarketplacePackagePage } from './console/marketplace/MarketplacePackage
 export { LoginPage as DefaultLoginPage } from './console/auth/LoginPage.js';
 export { signInRefusalMessages } from './console/auth/signInRefusalMessages.js';
 export { RegisterPage as DefaultRegisterPage } from './console/auth/RegisterPage.js';
-export { signUpRefusalMessages } from './console/auth/signUpRefusalMessages.js';
+export {
+  signUpRefusalMessages,
+  type SignUpRefusalInvitation,
+} from './console/auth/signUpRefusalMessages.js';
 // The sign-up decision the default login/register pages above and the
 // console's own pages share — one rule, read off `disableSignUp` AND
 // `features.audiencePosture` (objectui#11691, objectui#11705).
@@ -277,11 +280,16 @@ export {
 export { useBootstrapStatus, type BootstrapStatus } from './console/auth/bootstrapStatus.js';
 // The register-first prompt both login pages show a signed-out visitor who
 // arrived from an invitation link (#25886), and the signed-out invitation
-// preview both login and both register pages greet that visitor with (#26473).
+// preview both login and both register pages greet that visitor with (#26473),
+// or answer with the "no longer valid" notice when the server no longer knows
+// the invitation (#27509).
 export {
   InvitationSignUpPrompt,
+  InvitationGoneNotice,
   invitationArrivalCopy,
+  useInvitationArrival,
   useInvitationPreview,
+  type InvitationArrival,
 } from './console/auth/invitationArrival.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';

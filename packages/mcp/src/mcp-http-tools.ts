@@ -69,6 +69,11 @@ import {
 // the `packages/spec` campaign standardised on — already carried in
 // `api-surface/shared.json`, so reusing it adds nothing to any public surface.
 import { strictUnknownKeyError } from '@objectstack/spec/shared';
+// [#27411] The input schemas the save/build gate parses an expression slot
+// with. `validate_expression` parses with the SAME schema before it runs the
+// formula checks, so a blank source gets the gate's verdict and its published
+// sentence, never a second blank rule written here.
+import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
 import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
@@ -481,12 +486,22 @@ function jsonText(value: unknown): string {
  * whose fields are flattened to top level; a `template` is a text template.
  * Exposing a single friendly `site` keeps the tool aligned with how an author
  * thinks about *where* the expression goes.
+ *
+ * `slot` is the spec input schema the save/build gate parses that site's slot
+ * with: an evaluated CEL slot (`EvaluatedExpressionInputSchema` — the formula
+ * `expression`, validation and flow-edge conditions) or a `{{ }}` template slot
+ * (`TemplateExpressionInputSchema`). The tool parses with it first, so whatever
+ * the gate refuses at the envelope level — today a source that is blank after
+ * trimming — the tool refuses too, with the gate's own issue.
  */
-const VALIDATE_SITE_MAP: Record<string, { role: FieldRole; scope: 'record' | 'flattened' }> = {
-  formula: { role: 'value', scope: 'record' },
-  validation: { role: 'predicate', scope: 'record' },
-  flow_condition: { role: 'predicate', scope: 'flattened' },
-  template: { role: 'template', scope: 'record' },
+const VALIDATE_SITE_MAP: Record<
+  string,
+  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType }
+> = {
+  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema },
+  validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema },
+  flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
+  template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
 
 // ── Tool arguments: an undeclared key is REFUSED, not stripped (#16913) ──────
@@ -828,11 +843,27 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot } = VALIDATE_SITE_MAP[site ?? 'formula'];
           const hint = { objectName, fields, fieldTypes, scope } as const;
-          const result = validateExpression(role, expression, hint);
+          // The gate's envelope verdict first: `validateExpression` treats a
+          // blank source as "not authored" and answers ok, while the save gate
+          // refuses it. Each issue is the spec schema's own (code and message),
+          // so the tool and the gate cannot drift apart on this rule.
+          const slotParse = slot.safeParse(expression);
+          const result = slotParse.success
+            ? validateExpression(role, expression, hint)
+            : {
+                ok: false,
+                errors: slotParse.error.issues.map((issue) => ({
+                  source: expression,
+                  message: issue.message,
+                  code: issue.code,
+                })),
+                warnings: [],
+              };
           const inScope = introspectScope(role, hint);
-          const inferredType = role === 'value' ? inferExpressionType(expression, hint) : undefined;
+          const inferredType =
+            slotParse.success && role === 'value' ? inferExpressionType(expression, hint) : undefined;
           return textResult({
             ok: result.ok,
             errors: result.errors,

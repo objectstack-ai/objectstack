@@ -42,12 +42,29 @@
  * The audit / ownership FKs (`created_by`, `updated_by`, `owner_id`) never
  * become a related list (objectui `deriveRelatedLists`), so they are not
  * inbound relationships an entry may name — the set `defineStack` excludes.
+ *
+ * ## A field group names body tables only (#27478)
+ *
+ * A field group's `relatedList` positions a BODY TABLE; it never promotes a
+ * side card (ruling B on #27055: body-ness is the FK's own keys,
+ * `isBodyTableRelationship` in `@objectstack/spec/data`). So a group whose
+ * entry names a relationship that is not one — a side card, or a list hidden by
+ * `relatedList: false` — is `related-list-group-not-body` at `error`: the
+ * record page would draw nothing at the group. Judged on the same children as
+ * the name check above (a child the stack holds, whose FK keys are known), and
+ * the sentence is `fieldGroupBodyTableRefusal`'s, the one `defineStack` writes.
+ * `relatedLists` entries are not judged this way: they order body tables and
+ * side cards alike.
  */
 
+import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from '@objectstack/spec/data';
 import { recordsOf } from './object-graph.js';
 
 /** A related-list entry that matches no inbound relationship of its object. */
 export const RELATED_LIST_REF_UNKNOWN = 'related-list-ref-unknown';
+
+/** A field group's `relatedList` naming a relationship that is not a body table. */
+export const RELATED_LIST_GROUP_NOT_BODY = 'related-list-group-not-body';
 
 export interface RelatedListRefFinding {
   /** Always `error`: the same verdict `defineStack` gives. */
@@ -82,6 +99,10 @@ const HINT =
   'Name a child object that has a lookup / master_detail field pointing at this object, ' +
   'or object.field to pick one FK of a child with several; remove the entry otherwise.';
 
+const NOT_BODY_HINT =
+  "Mark the relationship relatedList: 'primary' on the child's FK (or leave relatedList off an inline-edited " +
+  "master_detail), name only a body table as object.field, or remove the group's relatedList.";
+
 /** The inbound relationships, spelled the way an entry may name them. */
 function spell(relationships: ReadonlyArray<{ child: string; field: string }>): string {
   if (relationships.length === 0) return 'it has none';
@@ -114,13 +135,13 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
   }
 
   // Parent name → its inbound relationships, in child then field order.
-  const inbound = new Map<string, Array<{ child: string; field: string }>>();
+  const inbound = new Map<string, NamedInboundRelationship[]>();
   for (const [child, fields] of fieldsByObject) {
     for (const [field, def] of Object.entries(fields)) {
       if (!isRec(def) || (def.type !== 'lookup' && def.type !== 'master_detail')) continue;
       if (typeof def.reference !== 'string' || AUDIT_FKS.has(field)) continue;
       const list = inbound.get(def.reference) ?? [];
-      list.push({ child, field });
+      list.push({ child, field, def });
       inbound.set(def.reference, list);
     }
   }
@@ -138,12 +159,17 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
     const parentName = obj.name;
     const relationships = inbound.get(parentName) ?? [];
 
-    const judge = (entry: unknown, subject: string, key: string, path: string): void => {
-      if (typeof entry !== 'string' || entry.length === 0) return;
+    // The inbound relationships an entry names: every FK of a bare child, or the one `object.field`.
+    const namedBy = (entry: string): NamedInboundRelationship[] => {
       const dot = entry.indexOf('.');
       const child = dot === -1 ? entry : entry.slice(0, dot);
       const field = dot === -1 ? undefined : entry.slice(dot + 1);
-      if (relationships.some((r) => r.child === child && (field === undefined || r.field === field))) return;
+      return relationships.filter((r) => r.child === child && (field === undefined || r.field === field));
+    };
+    const judge = (entry: unknown, subject: string, key: string, path: string): void => {
+      if (typeof entry !== 'string' || entry.length === 0) return;
+      const child = entry.includes('.') ? entry.slice(0, entry.indexOf('.')) : entry;
+      if (namedBy(entry).length > 0) return;
       if (!fieldsByObject.has(child) && !options?.wholeCollection) return;
       findings.push({
         severity: 'error',
@@ -166,7 +192,20 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
     if (Array.isArray(obj.fieldGroups)) {
       obj.fieldGroups.forEach((group, i) => {
         if (!isRec(group) || group.relatedList === undefined) return;
-        judge(group.relatedList, `fieldGroups[${i}].relatedList`, 'fieldGroups', `${objPath}.fieldGroups[${i}].relatedList`);
+        const path = `${objPath}.fieldGroups[${i}].relatedList`;
+        judge(group.relatedList, `fieldGroups[${i}].relatedList`, 'fieldGroups', path);
+        if (typeof group.relatedList !== 'string' || group.relatedList.length === 0) return;
+        const message = fieldGroupBodyTableRefusal(parentName, i, group.relatedList, namedBy(group.relatedList));
+        if (message === undefined) return;
+        findings.push({
+          severity: 'error',
+          rule: RELATED_LIST_GROUP_NOT_BODY,
+          where: `object "${parentName}" › fieldGroups`,
+          path,
+          // The sentence `defineStack` writes for the same group, word for word.
+          message,
+          hint: NOT_BODY_HINT,
+        });
       });
     }
   }

@@ -463,8 +463,10 @@ export interface AuthClient {
   /**
    * The signed-out preview of an invitation (organization, inviter, masked
    * address). Needs no session. Resolves `null` for the server's one
-   * not-found answer (unknown, expired, used or withdrawn id); rejects on any
-   * other failure.
+   * not-found answer (unknown, expired, used or withdrawn id) — read it as
+   * "this invitation is no longer valid"; rejects on any other failure,
+   * including a 404 that does not carry that answer's body (a server without
+   * the route).
    */
   getInvitationPreview: (invitationId: string) => Promise<AuthInvitationPreview | null>;
   /** Accept an invitation as the current user */

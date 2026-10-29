@@ -118,6 +118,43 @@ describe('Storage REST Routes', () => {
       await handler(req, res);
       expect(res._status).toBe(400);
     });
+
+    // [#27413] The declared size is a byte count: a finite, non-negative JSON
+    // number. Anything else is refused at the door, before the pending
+    // `sys_file` row — a non-numeric size used to fail that insert as a 500,
+    // and a negative one was stored.
+    it.each<[string, unknown]>([
+      ['a non-numeric string', 'abc'],
+      ['an empty string', ''],
+      ['a numeric string', '100'],
+      ['a negative number', -5],
+      ['a negative fraction', -0.5],
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['a boolean', true],
+    ])('REFUSED 400 INVALID_REQUEST: size as %s, with no sys_file row written', async (_label, size) => {
+      const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+      const createFile = vi.spyOn(store, 'createFile');
+      const res = createMockRes();
+      await handler(createMockReq({ body: { filename: 'a.png', mimeType: 'image/png', size } }), res);
+
+      expect(res._status, JSON.stringify(res._json)).toBe(400);
+      expect(res._json.success).toBe(false);
+      expect(res._json.error.code).toBe('INVALID_REQUEST');
+      expect(res._json.error.message).toMatch(/^size must be the file size in bytes/);
+      expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
+    });
+
+    it.each([0, 1024])('CONTROL: size %d is accepted and stored on the pending row as sent', async (size) => {
+      const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+      const res = createMockRes();
+      await handler(createMockReq({ body: { filename: 'a.png', mimeType: 'image/png', size } }), res);
+
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      const row = await store.getFile(res._json.data.fileId);
+      expect(row!.size).toBe(size);
+      expect(row!.status).toBe('pending');
+    });
   });
 
   describe('POST /upload/complete', () => {
