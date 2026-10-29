@@ -229,7 +229,7 @@ describe('security-external-owner-unmapped — the fix line', () => {
 // to recommend 'private' everywhere: on a writable external object that is the shape this rule warns
 // refuses every member edit. Its fix line for the objects this rule judges is built from this
 // rule's own two ways out; every other object keeps the 'private' recommendation.
-describe("security-owd-unset's fix line on a writable external object", () => {
+describe("security-owd-unset's fix line on an external object", () => {
   const owdUnsetHint = (stack: Record<string, unknown>, where: string) => {
     const findings = validateSecurityPosture(stack).filter((f) => f.rule === SECURITY_OWD_UNSET && f.where === where);
     expect(findings, where).toHaveLength(1);
