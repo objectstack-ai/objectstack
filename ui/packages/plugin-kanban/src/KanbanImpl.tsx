@@ -1355,6 +1355,51 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
   }, [boardColumns.length])
 
   /**
+   * Open the board on its first column that holds a card (#27418).
+   *
+   * A phone shows one column at a time, so a pipeline whose first stages are
+   * empty opened on an empty column and read as an empty board. On the FIRST
+   * load only, the flat scroller brings the first non-empty column into view.
+   * The column order is untouched, and a column already in view (the first
+   * column holds cards, or a wide board shows several) is never scrolled to.
+   *
+   * ⛔ It never moves the board after the viewer did: any pointer, touch,
+   * wheel or key input on the scroller ends it, and so does the first settled
+   * load that holds a card, whether or not it scrolled. A board that settles
+   * empty waits for its first card, unless the viewer moved first.
+   *
+   * It waits for `recordsSettled` (a column's cards are only a fact once the
+   * rows have arrived) and for `boardWidth` (the columns take their final width
+   * from it, so an offset read before it would land on the wrong column).
+   */
+  const initialColumnShownRef = React.useRef(false)
+  React.useEffect(() => {
+    const el = flatScrollRef.current
+    if (!el) return
+    const viewerMoved = () => { initialColumnShownRef.current = true }
+    const events = ['pointerdown', 'touchstart', 'wheel', 'keydown'] as const
+    for (const name of events) el.addEventListener(name, viewerMoved, { passive: true })
+    return () => { for (const name of events) el.removeEventListener(name, viewerMoved) }
+  }, [swimlaneField])
+  React.useLayoutEffect(() => {
+    if (initialColumnShownRef.current || !recordsSettled || !boardWidth) return
+    const el = flatScrollRef.current
+    if (!el) return
+    const firstFilled = boardColumns.findIndex((col) => col.cards.length > 0)
+    if (firstFilled < 0) return
+    initialColumnShownRef.current = true
+    const first = el.children[0]
+    const target = el.children[firstFilled]
+    if (firstFilled === 0 || !first || !target) return
+    const box = el.getBoundingClientRect()
+    const column = target.getBoundingClientRect()
+    if (column.left >= box.left && column.right <= box.right) return
+    // Move by the distance between the two columns, from wherever the snap
+    // rests the first one (Chromium rests a phone board at `scrollLeft: 16`).
+    el.scrollLeft += column.left - first.getBoundingClientRect().left
+  }, [recordsSettled, boardWidth, boardColumns])
+
+  /**
    * The swimlane board's single horizontal scroll position (objectui#8448).
    *
    * A ref, not state: this value must be readable from a `scroll` handler and

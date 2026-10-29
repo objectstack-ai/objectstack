@@ -208,22 +208,23 @@ describe('[#7858] ownership scoping vs federated (external) objects', () => {
     });
   });
 
-  describe('the INJECTED anchor contributes nothing', () => {
-    // The card's measured values, pre-fix:
-    //   buildReadFilter(measure_ext_nostamp, __readScope='own')  = {"owner_id":"usr_member_1"}
-    //   buildReadFilter(measure_ext_nostamp, __readScope='unit') = {"owner_id":"usr_member_1"}
+  // [#27425] #7858 pinned `null` here ("ownership contributes nothing"), which
+  // read as every row to every member: a driver may serve `owner_id` without
+  // the schema declaring it, so "undeclared" never meant "no owner". The
+  // anchor is unproven, and an unproven anchor narrows the scope.
+  describe('the INJECTED anchor narrows the scope, never widens it', () => {
     it.each(['own', 'own_and_reports', 'unit', 'unit_and_below'] as const)(
-      'read: no owner predicate at __readScope=%s',
+      'read: deny-all at __readScope=%s',
       async (scope) => {
         const filter = await svc.buildReadFilter('measure_ext_nostamp', {
           userId: MEMBER,
           __readScope: scope,
         } as never);
-        expect(filter).toBeNull();
+        expect(filter).toEqual({ id: '__deny_all__' });
       },
     );
 
-    it('read: `org` scope stays null, exactly as it already did', async () => {
+    it('read: `org` scope stays null — it never reads the owner column', async () => {
       const filter = await svc.buildReadFilter('measure_ext_nostamp', {
         userId: MEMBER,
         __readScope: 'org',
@@ -232,23 +233,107 @@ describe('[#7858] ownership scoping vs federated (external) objects', () => {
     });
 
     it.each(['update', 'delete'] as const)(
-      'write: no owner predicate on a bulk %s',
+      'write: a bulk %s admits no row below `org`, and `org` stays null',
       async (verb) => {
-        const filter = await svc.buildWriteFilter(
-          'measure_ext_nostamp',
-          { userId: MEMBER, __writeScope: 'own' } as never,
-          verb,
-        );
-        expect(filter).toBeNull();
+        expect(
+          await svc.buildWriteFilter('measure_ext_nostamp', { userId: MEMBER, __writeScope: 'own' } as never, verb),
+        ).toEqual({ id: '__deny_all__' });
+        expect(
+          await svc.buildWriteFilter('measure_ext_nostamp', { userId: MEMBER, __writeScope: 'org' } as never, verb),
+        ).toBeNull();
       },
     );
 
-    it('read: the principal-less degenerate case is not reached either', async () => {
-      // Ownership contributes nothing BEFORE the deny-all fallback, so a
-      // federated object does not become unreadable to an anonymous API key
-      // over a column it has not got.
+    it('read: the principal-less degenerate case reaches the deny-all fallback', async () => {
       const filter = await svc.buildReadFilter('measure_ext_nostamp', {} as never);
-      expect(filter).toBeNull();
+      expect(filter).toEqual({ id: '__deny_all__' });
+    });
+
+    it('read: an external principal on a `public_read` phantom object meets the owner_only floor, closed', async () => {
+      const svcPublicRead = new SharingService({
+        engine: makeEngine({
+          measure_ext_nostamp: federatedSchema({ sharingModel: 'public_read' }),
+          sys_record_share: { name: 'sys_record_share' },
+        }),
+      });
+      const filter = await svcPublicRead.buildReadFilter('measure_ext_nostamp', {
+        userId: 'u_ext', tenantId: 'org_a', audience: 'external', posture: 'EXTERNAL', __readScope: 'own',
+      } as never);
+      expect(filter).toEqual({ id: '__deny_all__' });
+    });
+
+    it('read: a pending approval step still opens the record it waits on — an id list, not an owner read', async () => {
+      const withApproval = new SharingService({
+        engine: makeEngine({
+          measure_ext_nostamp: federatedSchema(),
+          sys_record_share: { name: 'sys_record_share' },
+        }),
+        approvals: () => ({
+          pendingApproverReadGrants: async () => new Map([['c1', ['apr_1']]]),
+        }),
+      });
+      const filter = await withApproval.buildReadFilter('measure_ext_nostamp', {
+        userId: MEMBER,
+        __readScope: 'own',
+      } as never);
+      expect(filter).toEqual({ id: { $in: ['c1'] } });
+    });
+  });
+
+  /**
+   * [#27425] A remote row arrives WITH an `owner_id` the schema's `fields` do
+   * not declare. Each fixture stores the row exactly as the driver serves it,
+   * and the read filter is applied to those rows by the double's `find`, so
+   * the assertion is on rows, not on a filter shape. Before the fix the filter
+   * was `null` and the member read 2 of 2, the other owner's row too.
+   */
+  describe('a driver serves `owner_id` that `fields` does not declare', () => {
+    const OTHER = 'usr_admin';
+    const SERVED_ROWS = [
+      { id: 'r_mine', owner_id: MEMBER, name: 'Mine' },
+      { id: 'r_theirs', owner_id: OTHER, name: 'Theirs' },
+    ];
+
+    const readAs = async (object: string, schema: unknown, rows: Array<Record<string, unknown>>) => {
+      const engine = makeEngine(
+        { [object]: schema, sys_record_share: { name: 'sys_record_share' } },
+        { [object]: rows.map((r) => ({ ...r })) },
+      );
+      const filter = await new SharingService({ engine }).buildReadFilter(object, {
+        userId: MEMBER,
+        __readScope: 'own',
+      } as never);
+      const seen = await engine.find(object, filter == null ? {} : { where: filter as Record<string, unknown> });
+      return seen.map((r) => r.id);
+    };
+
+    it('a plugin driver returning owner_id with nothing declared: the member reads no row, not 2 of 2', async () => {
+      const schema = federatedSchema({ name: 'ext_plugin_served', external: { remoteName: 'rows' } });
+      expect(await readAs('ext_plugin_served', schema, SERVED_ROWS)).toEqual([]);
+    });
+
+    it('the SQL driver with columnMap → owner_id (it applies the map): own rows only', async () => {
+      // The map is the author's declaration of the owner column, so the anchor
+      // is not phantom and ordinary scoping applies over the served column.
+      const schema = federatedSchema({
+        name: 'ext_sql_mapped',
+        external: { remoteName: 'rows', columnMap: { assignee: 'owner_id' } },
+      });
+      expect(await readAs('ext_sql_mapped', schema, SERVED_ROWS)).toEqual(['r_mine']);
+    });
+
+    it('a driver that does NOT apply the columnMap serves no owner_id: the member reads no row', async () => {
+      const schema = federatedSchema({
+        name: 'ext_plugin_mapped',
+        external: { remoteName: 'rows', columnMap: { assignee: 'owner_id' } },
+      });
+      const unmapped = SERVED_ROWS.map(({ owner_id, ...rest }) => ({ ...rest, assignee: owner_id }));
+      expect(await readAs('ext_plugin_mapped', schema, unmapped)).toEqual([]);
+    });
+
+    it('ANTI-VACUITY: the same rows with `owner_id` DECLARED read own-only', async () => {
+      const schema = { ...DECLARED_REAL_OWNER, name: 'ext_declared' };
+      expect(await readAs('ext_declared', schema, SERVED_ROWS)).toEqual(['r_mine']);
     });
   });
 

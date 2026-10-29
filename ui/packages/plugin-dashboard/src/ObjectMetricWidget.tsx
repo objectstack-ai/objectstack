@@ -10,6 +10,7 @@ import React, { useState, useEffect, useContext, useCallback, useMemo } from 're
 import { SchemaRendererContext, useFilterScope, useDataInvalidation } from '@object-ui/react';
 import { isDrillEnabled, resolveDrillTitle, isStructuredGroupBy, objectAggregateSpecQuery, toFilterNode } from '@object-ui/core';
 import type { I18nLabel, ObjectChartSchema, ObjectMetricDrillDownConfig } from '@object-ui/types';
+import type { ObjectMetricProps } from '@objectstack/spec/ui';
 import {
   useLocalization,
   useDisplayLocale,
@@ -288,6 +289,16 @@ export interface ObjectMetricWidgetProps {
    * comparison window.
    */
   compareTo?: CompareToConfig;
+  /**
+   * Which direction of change is good news for this tile's number — the
+   * `object-metric` row's own key, BY REFERENCE (`ObjectMetricProps['polarity']`
+   * in `@objectstack/spec/ui`, the dataset measure's `higher | lower | neutral`
+   * vocabulary). Forwarded to `MetricWidget`, which colours the badge it draws,
+   * the `compareTo`-derived one or the static `trend`, by it. Undeclared keeps
+   * rise green, fall red; nothing infers it from the aggregated field's name
+   * (objectstack#27347).
+   */
+  polarity?: ObjectMetricProps['polarity'];
   /** Optional i18n translator used to localize the trend label. */
   t?: (key: string, defaultValue: string) => string;
   /** Layout variant forwarded to MetricWidget: 'card' (default) or 'bare'. */
@@ -314,6 +325,7 @@ export const ObjectMetricWidget: React.FC<ObjectMetricWidgetProps> = ({
   drillDown,
   title,
   compareTo,
+  polarity,
   t: tProp,
   variant,
 }) => {
@@ -752,6 +764,7 @@ export const ObjectMetricWidget: React.FC<ObjectMetricWidgetProps> = ({
         value={tileValue}
         trend={trend}
         derivedTrend={derivedTrend}
+        polarity={polarity}
         icon={icon}
         className={className}
         description={description}

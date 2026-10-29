@@ -13,11 +13,13 @@
  * also what Studio's page-create seeds and what a slotted page fills — and the
  * WIDTH decides how its content is laid out:
  *
- *  - 1280 px and up: three resident columns, details | timeline | related;
- *  - 1024 – 1279 px: details | timeline, the related column folded into a rail
+ *  - 1120 px and up: three resident columns, details | timeline | related;
+ *  - 760 – 1119 px: details | timeline, the related column folded into a rail
  *    behind a toggle;
- *  - below 1024 px, and whenever the page is embedded (drawer / split pane):
+ *  - below 760 px, and whenever the page is embedded (drawer / split pane):
  *    the tab strip, exactly as before.
+ *
+ * (Container widths — see the two constants for how they are derived.)
  *
  * ## Why the columns are derived, never authored
  *
@@ -39,11 +41,49 @@
  * and the host draws the tabs. Tabs are the correct rendering of any strip.
  */
 
-/** A container at least this wide lays the default record page out in three columns. */
-export const RECORD_PAGE_THREE_COLUMN_MIN_WIDTH = 1280;
+/**
+ * The console sidebar's width when it is expanded: `SIDEBAR_WIDTH` (16rem) of
+ * the sidebar primitive in `@object-ui/components`. Measured on the console
+ * (HotCRM contact record page, sidebar expanded, objectstack#27241): the
+ * record page root is the window minus this — 1184 px in a 1440 px window,
+ * 1024 px in 1280, 768 px in 1024.
+ */
+const EXPANDED_SIDEBAR_WIDTH = 256;
 
-/** A container at least this wide (and narrower than the three-column floor) lays it out in two. */
-export const RECORD_PAGE_TWO_COLUMN_MIN_WIDTH = 1024;
+/**
+ * A container at least this wide lays the default record page out in three
+ * columns.
+ *
+ * Derived from the window it must serve, not picked (objectstack#27241, the
+ * maintainer's ruling 「1440 窗口（含侧栏）即三栏」): a 1440 px window with the
+ * sidebar expanded is three columns.
+ *
+ *     1440 (window) − 256 (expanded sidebar) = 1184 px of container
+ *     1184 − 64 (headroom: a classic 15–17 px scrollbar, browser zoom
+ *                rounding, a sidebar a few px wider) = 1120
+ *
+ * At 1120 the v3 template (`1.25fr : 1fr : 20rem`, 24 px page padding each
+ * side, 24 px gaps) leaves 1120 − 48 − 48 − 320 = 704 px for details +
+ * timeline (≈ 391 + 313). It stays container-measured: the same page in a
+ * drawer is narrow on a wide screen.
+ */
+export const RECORD_PAGE_THREE_COLUMN_MIN_WIDTH = 1440 - EXPANDED_SIDEBAR_WIDTH - 64;
+
+/**
+ * A container at least this wide (and narrower than the three-column floor)
+ * lays it out in two.
+ *
+ * Derived the same way (objectstack#27241): a 1024 px window with the sidebar
+ * expanded stays two columns, not the tabs.
+ *
+ *     1024 (window) − 256 (expanded sidebar) = 768 px of container
+ *     768 − 8 (headroom) = 760
+ *
+ * At 760 the two-column grid (24 px page padding each side, a 24 px gap)
+ * gives each column (760 − 48 − 24) / 2 = 344 px — the narrowest a details
+ * section's two-field row stays legible.
+ */
+export const RECORD_PAGE_TWO_COLUMN_MIN_WIDTH = 1024 - EXPANDED_SIDEBAR_WIDTH - 8;
 
 /** How the synthesized default record page is laid out at the width it has. */
 export type RecordPageTier = 'tabs' | 'two-column' | 'three-column';
@@ -84,20 +124,28 @@ export interface RecordPageColumnSwitches {
  *
  *  - timeline off: its blocks fold into a 「动态」 (Activity) card at the foot
  *    of the related column, and the related column takes the timeline's place;
- *  - related off: the related column (with any folded timeline) stays behind
- *    the rail toggle, as it does when the width cannot fit it.
+ *  - related off: there is no related column and no rail
+ *    (objectstack#27241, 「关联 OFF 就没有栏」) — the switch decides whether
+ *    the column exists; the rail toggle only opens or closes a column the
+ *    switch allows, when the width cannot fit it resident.
  *
  * So timeline off on a three-column page draws details | related, related off
- * draws details | timeline with the rail, and in the two-column tier timeline
- * off draws details | related. Below the column tiers the page is tabbed and
- * the switches are not read; they are kept for when it widens.
+ * draws details | timeline (no rail), and in the two-column tier related on
+ * draws details | timeline with the rail while timeline off draws details |
+ * related. With both off the page is the details column alone. Below the
+ * column tiers the page is tabbed and the switches are not read; they are
+ * kept for when it widens.
  */
 export interface RecordPageArrangement {
   /** The resident columns, left to right. Always starts with `details`. */
   columns: RecordPageColumn[];
   /** The timeline's blocks are drawn as the related column's foot card. */
   timelineFolded: boolean;
-  /** The related column is drawn as a rail behind a toggle, not resident. */
+  /**
+   * The related column is drawn as a rail behind a toggle, not resident: the
+   * switch keeps it (`related` on) and the tier has no room for it. Never set
+   * when the switch is off.
+   */
   relatedRail: boolean;
 }
 
@@ -118,7 +166,7 @@ export function recordPageArrangementFor(
   return {
     columns,
     timelineFolded: !switches.timeline,
-    relatedRail: !columns.includes('related'),
+    relatedRail: switches.related && !columns.includes('related'),
   };
 }
 

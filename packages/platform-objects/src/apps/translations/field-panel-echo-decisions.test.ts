@@ -708,9 +708,11 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     // locales, so the echo rule above reads them translated, not undecided.
     // 10 since #23735: the `referenceDeletedWhen` composite (`field`, `value`),
     // whose four string leaves that card authored in all three locales.
-    expect(UNWALKED_CHILDREN.length).toBe(10);
+    // 11 since #27184: `currencyConfig.currencyField` (the record mode's code
+    // field), its two string leaves authored in all three locales.
+    expect(UNWALKED_CHILDREN.length).toBe(11);
     for (const child of [
-      'currencyConfig.currencyMode', 'currencyConfig.defaultCurrency', 'storage.notNull',
+      'currencyConfig.currencyMode', 'currencyConfig.defaultCurrency', 'currencyConfig.currencyField', 'storage.notNull',
       'referenceDeletedWhen.field', 'referenceDeletedWhen.value',
     ]) {
       expect(UNWALKED_CHILDREN).toContain(child);

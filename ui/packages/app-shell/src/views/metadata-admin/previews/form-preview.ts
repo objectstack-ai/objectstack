@@ -17,7 +17,7 @@
  */
 
 /** Form types that render inline (no portalled overlay). */
-export const INLINE_FORM_TYPES = new Set(['simple', 'tabbed', 'wizard', 'split']);
+export const INLINE_FORM_TYPES = new Set(['simple', 'tabbed', 'wizard']);
 
 /** Form types that render as a portalled, page-locking overlay. */
 export const OVERLAY_FORM_TYPES = new Set(['drawer', 'modal']);

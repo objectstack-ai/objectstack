@@ -52,7 +52,7 @@ import { render, waitFor, fireEvent, screen } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import { MasterDetailForm } from './MasterDetailForm';
-import { ObjectForm } from './ObjectForm';
+import { ObjectFormContainer } from './ObjectFormContainer';
 import './index';
 
 const toastSuccess = vi.fn();
@@ -82,8 +82,8 @@ vi.mock('@object-ui/components/ui/sonner', async (orig) => {
 
 registerAllFields();
 
-/** The full vocabulary `object-form` declares — every renderer `ObjectForm` routes to. */
-const OBJECT_FORM_SIX = ['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal'] as const;
+/** The full vocabulary `object-form` declares — every renderer the block routes to. */
+const OBJECT_FORM_FIVE = ['simple', 'tabbed', 'wizard', 'drawer', 'modal'] as const;
 
 /**
  * The variants that render the parent half INLINE, so the master-detail host's
@@ -92,7 +92,7 @@ const OBJECT_FORM_SIX = ['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal
  * lands in a portal dialog) are excluded by LAYOUT, not by the seam — that
  * exclusion is measured in `masterDetailFormTypeVocabulary.test.tsx`.
  */
-const INLINE_PARENT_VARIANTS = ['simple', 'tabbed', 'split'] as const;
+const INLINE_PARENT_VARIANTS = ['simple', 'tabbed'] as const;
 
 const parentObject = {
   name: 'po',
@@ -189,11 +189,12 @@ describe('a failing child leg leaves NO committed parent, whichever variant rend
   );
 });
 
-describe('every renderer ObjectForm routes to honours the declared `submitHandler` seam', () => {
-  // Mounted through `ObjectForm` itself — the component that OWNS the routing —
-  // so this exercises the same forwarding path a real host uses, not each
-  // variant in isolation.
-  it.each(OBJECT_FORM_SIX)(
+describe('every renderer an `object-form` block routes to honours the declared `submitHandler` seam', () => {
+  // Mounted through `ObjectFormContainer` — the block's own route: a layout
+  // goes to `ObjectForm`, a `drawer` / `modal` to the container it supplies
+  // (ADR-0050) — so this exercises the same forwarding path a real block uses,
+  // not each variant in isolation.
+  it.each(OBJECT_FORM_FIVE)(
     'formType `%s`: hands the values to the host and does NOT persist on its own',
     async (formType) => {
       const submitHandler = vi.fn().mockResolvedValue({ id: 'p1' });
@@ -209,7 +210,7 @@ describe('every renderer ObjectForm routes to honours the declared `submitHandle
       } as any;
 
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={{
             type: 'object-form',
             objectName: 'po',
@@ -247,7 +248,7 @@ describe('every renderer ObjectForm routes to honours the declared `submitHandle
 
 describe('master-detail: the parent commits INSIDE the atomic batch, not beside it', () => {
   // The card's own measurement, re-expressed as a pin. On `main` the `tabbed`
-  // and `split` rows read `batchTransaction 0 / create 1`.
+  // row (and the since-retired `split` one) read `batchTransaction 0 / create 1`.
   it.each(INLINE_PARENT_VARIANTS)(
     'formType `%s`: one batchTransaction carrying BOTH legs, and zero independent creates',
     async (formType) => {

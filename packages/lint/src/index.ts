@@ -380,6 +380,17 @@ export type {
   SharingRuleEnforceabilitySeverity,
 } from './validate-sharing-rule-enforceability.js';
 
+// A writable external object on an owner-keyed sharing model whose owner column
+// no remote row serves refuses every member edit and delete (403).
+export {
+  validateExternalOwnerSharing,
+  SECURITY_EXTERNAL_OWNER_UNMAPPED,
+} from './validate-external-owner-sharing.js';
+export type {
+  ExternalOwnerSharingFinding,
+  ExternalOwnerSharingSeverity,
+} from './validate-external-owner-sharing.js';
+
 // #4983 — the sibling surface, and ADR-0056 D4's gate finally wired. An RLS
 // `using` / `check` the runtime cannot compile is DROPPED (and, when it is the
 // only applicable policy, replaced by the deny sentinel), so the policy reads

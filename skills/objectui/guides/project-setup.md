@@ -72,7 +72,6 @@ Add plugins as needed (full plugin catalog):
   "@object-ui/plugin-view": "latest",
   "@object-ui/plugin-tree": "latest",
   "@object-ui/plugin-designer": "latest",
-  "@object-ui/plugin-ai": "latest",
   "@object-ui/plugin-chatbot": "latest"
 }
 ```
