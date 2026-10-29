@@ -904,7 +904,7 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
    * secret inline. Requires `provider`.
    */
   auth: ConnectorInstanceAuthSchema.optional().describe(
-    'Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097).',
+    'Declarative instance auth — references credentials via `credentialRef` (resolved when the instance materializes), never inline secrets. Requires `provider` (ADR-0097).',
   ),
 
   /** Zapier-style Capabilities */

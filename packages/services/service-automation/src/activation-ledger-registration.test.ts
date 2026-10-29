@@ -60,13 +60,16 @@ async function registeredObjectNames(): Promise<string[]> {
 }
 
 describe('#12359 — the automation service is NOT the activation ledger\'s registrant', () => {
-    it('registers its own three objects and nothing else', async () => {
+    it('registers its own four objects and nothing else', async () => {
         // Equality, not `not.toContain`: an assertion that only names the
-        // absent object would stay green while this manifest grew a FOURTH
+        // absent object would stay green while this manifest grew a FIFTH
         // registration nobody reviewed, which is the same class of drift.
         // [#20790] The third is reviewed: `sys_flow_credential`, the write-only
-        // flow credential channel this service owns.
-        expect(await registeredObjectNames()).toEqual(['sys_automation_run', 'sys_flow_dispatch', 'sys_flow_credential']);
+        // flow credential channel this service owns. [#27237] So is the fourth:
+        // `sys_connector_credential`, the connector credential store.
+        expect(await registeredObjectNames()).toEqual([
+            'sys_automation_run', 'sys_flow_dispatch', 'sys_flow_credential', 'sys_connector_credential',
+        ]);
     });
 
     it('does not name sys_metadata_activation in any manifest it registers', async () => {
