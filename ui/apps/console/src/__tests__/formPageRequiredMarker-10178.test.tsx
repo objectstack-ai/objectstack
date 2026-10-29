@@ -133,10 +133,10 @@ describe('objectui#10178 — FormPage keeps the required `*` out of the accessib
   it('a required checkbox has no `*` in its name and announces required via aria-required', async () => {
     await renderForm();
     // Since objectui#10179 a `boolean` row renders the shared `BooleanField`
-    // (a switch), and the row's `<label for>` is its ONLY name — the hand-rolled
+    // (a checkbox for `boolean` since objectstack#27519), and the row's `<label for>` is its ONLY name — the hand-rolled
     // arm's own wrapping label, which doubled the name to `Agree * Agree`, is
     // gone. So the name is now asserted EXACTLY, not merely `*`-free.
-    const checkbox = await waitFor(() => screen.getByRole('switch', { name: 'Agree' }));
+    const checkbox = await waitFor(() => screen.getByRole('checkbox', { name: 'Agree' }));
     expect(checkbox.id).toBe('f_agree');
     expect(checkbox).toHaveAccessibleName('Agree');
     expect(checkbox).toHaveAttribute('aria-required', 'true');
@@ -159,7 +159,7 @@ describe('objectui#10178 — FormPage keeps the required `*` out of the accessib
 
   it('CONTROL — an optional checkbox has no marker and carries no aria-required', async () => {
     await renderForm();
-    const checkbox = await waitFor(() => screen.getByRole('switch', { name: 'Opt in' }));
+    const checkbox = await waitFor(() => screen.getByRole('checkbox', { name: 'Opt in' }));
     expect(markerFor('f_optin')).toBeNull();
     expect(checkbox).not.toHaveAttribute('aria-required');
     expect(checkbox).not.toHaveAttribute('required');
