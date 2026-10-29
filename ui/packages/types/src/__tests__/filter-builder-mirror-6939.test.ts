@@ -153,12 +153,11 @@
  *   - **every member has a renderer branch** — the ruling's precondition. That
  *     is a render measurement, so it lives in the render half
  *     (`examples/schema-catalog/test/filter-builder-mirror-6939.test.tsx`,
- *     `every member of FILTER_FIELD_TYPES draws a branch of its own`): a
+ *     `` `<member>` draws a branch of its own, not the fallthrough ``): a
  *     member added to the list with no bucket reddens there.
  *   - **every member is a spec `FieldType`**, except the members named in
  *     `SPEC_FIELD_TYPE_EXEMPTIONS` below, each with its reason. A member that
  *     is neither reddens here.
- */
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
