@@ -301,16 +301,19 @@ export type {
 } from './driver-connect-errors.js';
 // [#27277] The engine's floor over a plugin driver on an external datasource
 // (ADR-0015 Tier A): the in-memory reading of a driver query it applies, and
-// the two 422 refusals it raises (registered in ERROR_CODE_LEDGER).
+// the two 422 refusals it raises (registered in ERROR_CODE_LEDGER), plus
+// [#27471] the 400 read refusal (the standard INVALID_QUERY).
 export { applyDriverQueryInMemory } from './driver-query-in-memory.js';
 export type { DriverQueryInMemory, DriverQueryInMemoryOptions } from './driver-query-in-memory.js';
 export {
   ExternalWriteRefusedError,
+  ExternalReadRefusedError,
   ExternalRowCapExceededError,
   EXTERNAL_WRITE_REFUSED_CODE,
   EXTERNAL_ROW_CAP_EXCEEDED_CODE,
   EXTERNAL_ROW_CAP,
   EXTERNAL_WRITE_REFUSED_STATUSES,
+  EXTERNAL_READ_REFUSED_STATUSES,
 } from './external-driver-errors.js';
 export type { ExternalWriteOperation } from './external-driver-errors.js';
 export { needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';

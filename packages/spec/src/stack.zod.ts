@@ -38,6 +38,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
+import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
 import { InlineGridColumnSchema } from './data/field.zod';
 import { pageComponentSlotPositions } from './ui/component.zod';
@@ -3846,6 +3847,14 @@ const RELATED_LIST_AUDIT_FKS: ReadonlySet<string> = new Set(['created_by', 'upda
  *
  * The message names the entry and every inbound relationship that exists,
  * spelled the way an entry may name it.
+ *
+ * [#27478] A field group's `relatedList` that DOES name inbound relationships
+ * must name body tables only (`isBodyTableRelationship`, ruling B on #27055):
+ * the group positions a body table and never promotes a side card, so one that
+ * names a side card or a hidden list would draw nothing at the group. Judged
+ * here for the same reason — the FK's keys live on the child — and on the same
+ * children: a child left unjudged above is left unjudged here. The sentence is
+ * `fieldGroupBodyTableRefusal`'s, which `@objectstack/lint` writes too.
  */
 function collectRelatedListNameErrors(
   config: ObjectStackDefinition,
@@ -3884,14 +3893,14 @@ function collectRelatedListNameErrors(
   }
 
   // Parent name → its inbound relationships, in child then field order.
-  const inbound = new Map<string, Array<{ child: string; field: string }>>();
+  const inbound = new Map<string, NamedInboundRelationship[]>();
   for (const [child, fields] of fieldsByObject) {
     for (const [field, def] of Object.entries(fields)) {
       const fieldDef = asRecord(def);
       if (!fieldDef || (fieldDef.type !== 'lookup' && fieldDef.type !== 'master_detail')) continue;
       if (typeof fieldDef.reference !== 'string' || RELATED_LIST_AUDIT_FKS.has(field)) continue;
       const list = inbound.get(fieldDef.reference) ?? [];
-      list.push({ child, field });
+      list.push({ child, field, def: fieldDef });
       inbound.set(fieldDef.reference, list);
     }
   }
@@ -3913,12 +3922,17 @@ function collectRelatedListNameErrors(
     if (seen.has(parentName)) continue;
     seen.add(parentName);
     const relationships = inbound.get(parentName) ?? [];
-    const judge = (entry: unknown, where: string): void => {
-      if (typeof entry !== 'string') return;
+    // The inbound relationships an entry names: every FK of a bare child, or the one `object.field`.
+    const namedBy = (entry: string): NamedInboundRelationship[] => {
       const dot = entry.indexOf('.');
       const child = dot === -1 ? entry : entry.slice(0, dot);
       const field = dot === -1 ? undefined : entry.slice(dot + 1);
-      if (relationships.some((r) => r.child === child && (field === undefined || r.field === field))) return;
+      return relationships.filter((r) => r.child === child && (field === undefined || r.field === field));
+    };
+    const judge = (entry: unknown, where: string): void => {
+      if (typeof entry !== 'string') return;
+      const child = entry.includes('.') ? entry.slice(0, entry.indexOf('.')) : entry;
+      if (namedBy(entry).length > 0) return;
       if (!fieldsByObject.has(child) && (artifactScope.has(child) || isPlatformObjectName(child))) return;
       errors.push(
         `Object '${parentName}' ${where} '${entry}' matches no inbound relationship of '${parentName}' ` +
@@ -3932,7 +3946,11 @@ function collectRelatedListNameErrors(
     if (Array.isArray(parent.fieldGroups)) {
       parent.fieldGroups.forEach((group: unknown, i: number) => {
         const record = asRecord(group);
-        if (record?.relatedList !== undefined) judge(record.relatedList, `fieldGroups[${i}].relatedList`);
+        if (record?.relatedList === undefined) return;
+        judge(record.relatedList, `fieldGroups[${i}].relatedList`);
+        if (typeof record.relatedList !== 'string') return;
+        const refusal = fieldGroupBodyTableRefusal(parentName, i, record.relatedList, namedBy(record.relatedList));
+        if (refusal !== undefined) errors.push(refusal);
       });
     }
   }

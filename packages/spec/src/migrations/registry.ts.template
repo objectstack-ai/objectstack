@@ -2274,6 +2274,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'refused at parse rather than rewritten.',
   },
   {
+    id: 'manifest-packaging-manifest-deps-retired',
+    order: 114,
+    text:
+      'It also retires a plugin manifest\'s `packaging: \'manifest-deps\'` (ADR-0025 v2 §3.3, ADR-0049 '
+      + 'enforce-or-remove): the strategy existed on the build side only — `os plugin build` kept the '
+      + '`package.json` dependencies out of the bundle for an install-time resolution nothing ever ran — so '
+      + '`bundled` is the one strategy and the default. The value is refused at parse with its prescription, '
+      + 'and the D2 conversion `manifest-packaging-manifest-deps-removed` strips it from the stack\'s manifest '
+      + 'and every `packages[].manifest`; an `objectstack.plugin.json` is edited by hand.',
+  },
+  {
     id: 'manifest-permissions-string-list-retired',
     order: 85,
     text:

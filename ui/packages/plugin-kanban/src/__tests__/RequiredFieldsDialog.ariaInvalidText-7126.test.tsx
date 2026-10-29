@@ -147,13 +147,16 @@ describe('RequiredFieldsDialog marks a failed required TEXT field (objectui#7126
     await waitFor(() => expect(document.querySelectorAll('[data-slot="date-picker"] input')).toHaveLength(2));
 
     // `boolean` and `toggle` both resolve to `BooleanField`, whose control is a
-    // Radix `<button role="switch">`; `time` renders one native input, and
+    // Radix `<button role="checkbox">` for `boolean` and `<button
+    // role="switch">` for `toggle` (objectstack#27519); `time` renders one
+    // native input, and
     // `date` / `datetime` each render the platform picker's text box
     // (objectui#12664). Selected by their OWN element so a mark that landed on
     // BooleanField's wrapper `div` instead cannot satisfy this.
     const carriers: ReadonlyArray<readonly [string, string]> = [
       ['text', 'input[type="text"]'],
-      ['boolean', 'button[role="switch"]'],
+      ['boolean', 'button[role="checkbox"]'],
+      ['toggle', 'button[role="switch"]'],
       ['date / datetime', '[data-slot="date-picker"] input'],
       ['time', 'input[type="time"]'],
     ];
@@ -168,8 +171,9 @@ describe('RequiredFieldsDialog marks a failed required TEXT field (objectui#7126
         );
       }
     }
-    // `boolean` + `toggle` are two fields sharing one widget — both switches
-    // must be there, or the loop above would have passed on a single one.
-    expect(document.querySelectorAll('button[role="switch"]')).toHaveLength(2);
+    // `boolean` + `toggle` are two fields sharing one widget — one control
+    // each must be there, or the loop above would have passed on a single one.
+    expect(document.querySelectorAll('button[role="checkbox"]')).toHaveLength(1);
+    expect(document.querySelectorAll('button[role="switch"]')).toHaveLength(1);
   });
 });

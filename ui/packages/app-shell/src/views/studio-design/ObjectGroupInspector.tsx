@@ -25,7 +25,7 @@ import {
   InspectorEmptyState,
 } from '../metadata-admin/inspectors/_shared.js';
 import { readFields, readGroups, updateGroup } from '../metadata-admin/previews/object-fields-io.js';
-import { t } from '../metadata-admin/i18n.js';
+import { t, tFormat } from '../metadata-admin/i18n.js';
 import {
   acceptRelatedListEntries,
   relationshipEntry,
@@ -139,6 +139,7 @@ export function ObjectGroupInspector({
         onPatch={onPatch}
         readOnly={readOnly}
         tr={tr}
+        locale={locale}
       />
     </InspectorShell>
   );
@@ -151,9 +152,17 @@ export function ObjectGroupInspector({
  * draws that table at the group's position in the details column.
  *
  * What the picker can write is held to what the spec accepts:
- *  - only inbound relationships are offered, and a pick is checked against
- *    them before it is written (a name matching none is refused at
- *    `defineStack` and by the publish door's lint);
+ *  - only inbound relationships that are BODY TABLES are offered
+ *    (objectstack#27478): a group positions a body table and never promotes a
+ *    side card, so a relationship whose FK keeps it a side card, or hides it,
+ *    is not offered. Body-ness is the record page's own verdict (`isPrimary`,
+ *    `@objectstack/spec`'s `isBodyTableRelationship`), the predicate the spec's
+ *    refusal reads too. A pick is checked against them before it is written (a
+ *    name matching none, or naming a list that is not a body table, is refused
+ *    at `defineStack` and by the publish door's lint);
+ *  - a stored value naming a list that is not a body table stays visible, with
+ *    a line saying why the page draws nothing for it, so the author can clear
+ *    it or mark the relationship primary;
  *  - a group that still holds fields cannot be made a table (the object parse
  *    refuses a field whose group is a table group), so the picker is withheld
  *    until its fields move elsewhere;
@@ -168,6 +177,7 @@ function RelatedTablePlacement({
   onPatch,
   readOnly,
   tr,
+  locale,
 }: {
   groups: ReturnType<typeof readGroups>;
   group: ReturnType<typeof readGroups>[number];
@@ -177,6 +187,7 @@ function RelatedTablePlacement({
   onPatch: (patch: Record<string, unknown>) => void;
   readOnly: boolean;
   tr: (key: string) => string;
+  locale?: string;
 }): React.ReactElement {
   const current = typeof group.relatedList === 'string' ? group.relatedList : '';
   const placedElsewhere = new Set(
@@ -184,20 +195,34 @@ function RelatedTablePlacement({
       .filter((g) => g.key !== group.key && typeof g.relatedList === 'string')
       .flatMap((g) => relationshipsNamedBy(g.relatedList as string, relationships)),
   );
+  // Every relationship an entry names must be a body table (a bare child name
+  // names all of that child's FKs); the spec refuses the entry otherwise.
+  const namesBodyTablesOnly = (entry: string) => {
+    const named = relationshipsNamedBy(entry, relationships);
+    return named.length > 0 && named.every((r) => r.isPrimary);
+  };
   const options = relationships
+    .filter((r) => r.isPrimary)
     .filter((r) => !placedElsewhere.has(r) || relationshipsNamedBy(current, relationships).includes(r))
     .map((r) => {
       const entry = relationshipEntry(r, relationships);
       return { value: entry, label: `${relationshipLabel(r)} (${entry})` };
     });
+  // A stored value the picker would not offer — it names a side card or a
+  // hidden list — is still shown, so the select does not read as "None".
+  const currentNotBody = ready && current !== '' && relationshipsNamedBy(current, relationships).length > 0
+    && !namesBodyTablesOnly(current);
+  if (currentNotBody && !options.some((o) => o.value === current)) options.push({ value: current, label: current });
   const blockedByFields = memberCount > 0;
   const commit = (v: string) => {
     if (!v) {
       onPatch({ fieldGroups: updateGroup(groups, group.key, { relatedList: undefined }) });
       return;
     }
-    // The pre-write check, shared with the relatedLists editor.
+    // The pre-write check, shared with the relatedLists editor, plus the body
+    // table rule a group's entry answers to.
     if (blockedByFields || acceptRelatedListEntries([v], relationships).length === 0) return;
+    if (!namesBodyTablesOnly(v)) return;
     onPatch({ fieldGroups: updateGroup(groups, group.key, { relatedList: v }) });
   };
   return (
@@ -216,6 +241,11 @@ function RelatedTablePlacement({
             ? tr('engine.studio.designer.group.relatedListHasFields')
             : tr('engine.studio.designer.group.relatedListHint')}
       </p>
+      {currentNotBody && (
+        <p className="text-[11px] leading-4 text-destructive" data-testid="group-related-table-not-body">
+          {tFormat('engine.studio.designer.group.relatedListNotBody', locale, { entry: current })}
+        </p>
+      )}
     </div>
   );
 }

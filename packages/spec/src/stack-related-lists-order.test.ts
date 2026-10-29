@@ -46,9 +46,15 @@ const event = {
   },
 };
 const note = { name: 'rlo_note', label: 'Note', fields: { title: { type: 'text' as const, label: 'Title' } } };
+// [#27478] A body table: an inline-edited master_detail child with no relatedList.
+const line = {
+  name: 'rlo_line',
+  label: 'Line',
+  fields: { lead_id: { type: 'master_detail' as const, label: 'Lead', reference: 'rlo_lead', inlineEdit: 'grid' as const } },
+};
 
 const stackOf = (parent: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-  ({ manifest, objects: [parent, task, event, note], ...extra }) as any;
+  ({ manifest, objects: [parent, task, event, note, line], ...extra }) as any;
 
 const refusalOf = (fn: () => unknown): Refusal | undefined => {
   try {
@@ -154,9 +160,87 @@ describe('defineStack — relatedLists names an inbound relationship', () => {
 
   it('judges a field group relatedList the same way', () => {
     const groups = (relatedList: string) => [{ key: 'lines', label: 'Lines', relatedList }];
-    expect(() => defineStack(stackOf(lead({ fieldGroups: groups('rlo_task') })))).not.toThrow();
+    expect(() => defineStack(stackOf(lead({ fieldGroups: groups('rlo_line') })))).not.toThrow();
     const refusal = refusalOf(() => defineStack(stackOf(lead({ fieldGroups: groups('rlo_nope') }))));
     expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
     expect(refusal?.issues?.[0]).toContain("Object 'rlo_lead' fieldGroups[0].relatedList 'rlo_nope'");
+  });
+});
+
+/**
+ * [#27478, ruling B on #27055] A field group's `relatedList` only POSITIONS a
+ * body table; body-ness is the FK's own keys (`isBodyTableRelationship`). A
+ * group naming a side card or a hidden list would draw nothing at the group,
+ * so `defineStack` refuses it with a prescription. Each refusal's control
+ * differs from it by the FK's keys or by the entry alone.
+ */
+describe('defineStack — a field group relatedList names body tables only', () => {
+  const groups = (relatedList: string) => [{ key: 'basics', label: 'Basics' }, { key: 'lines', label: 'Lines', relatedList }];
+  const withChild = (child: Record<string, unknown>, relatedList: string) =>
+    ({ manifest, objects: [lead({ fieldGroups: groups(relatedList) }), child] }) as any;
+  const taskFk = (keys: Record<string, unknown>) => ({
+    ...task,
+    fields: { lead_id: { ...task.fields.lead_id, ...keys } },
+  });
+  const lineFk = (keys: Record<string, unknown>) => ({
+    ...line,
+    fields: { lead_id: { ...line.fields.lead_id, ...keys } },
+  });
+
+  it('accepts a group naming a body table: relatedList primary, or an inline-edited master_detail (controls)', () => {
+    expect(() => defineStack(withChild(taskFk({ relatedList: 'primary' }), 'rlo_task'))).not.toThrow();
+    expect(() => defineStack(withChild(line, 'rlo_line'))).not.toThrow();
+    expect(() => defineStack(withChild(lineFk({ inlineEdit: true }), 'rlo_line.lead_id'))).not.toThrow();
+  });
+
+  it('refuses a group naming a side card, with the FK and the prescription', () => {
+    const refusal = refusalOf(() => defineStack(withChild(task, 'rlo_task')));
+    expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(typeof refusal?.status).toBe('number');
+    expect(refusal?.issues).toHaveLength(1);
+    expect(refusal?.issues?.[0]).toContain(
+      "Object 'rlo_lead' fieldGroups[1].relatedList 'rlo_task' names a related list that is not a body table: 'rlo_task.lead_id' is a side card.",
+    );
+    expect(refusal?.issues?.[0]).toContain("Set relatedList: 'primary' on that FK, or remove the group's relatedList.");
+  });
+
+  it("refuses an inline-edited master_detail that keeps itself a side card with relatedList: true", () => {
+    const refusal = refusalOf(() => defineStack(withChild(lineFk({ relatedList: true }), 'rlo_line')));
+    expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refusal?.issues).toEqual([expect.stringContaining("'rlo_line.lead_id' is a side card")]);
+  });
+
+  it('refuses a plain master_detail (no inlineEdit) and a hidden list, naming which', () => {
+    expect(refusalOf(() => defineStack(withChild(lineFk({ inlineEdit: undefined }), 'rlo_line')))?.issues)
+      .toEqual([expect.stringContaining("'rlo_line.lead_id' is a side card")]);
+    expect(refusalOf(() => defineStack(withChild(taskFk({ relatedList: false }), 'rlo_task')))?.issues)
+      .toEqual([expect.stringContaining("'rlo_task.lead_id' is hidden (relatedList: false)")]);
+  });
+
+  it('refuses a bare child name when any FK it names is not a body table, pointing at object.field', () => {
+    const mixed = {
+      ...event,
+      fields: { ...event.fields, related_to: { ...event.fields.related_to, relatedList: 'primary' } },
+    };
+    const refusal = refusalOf(() => defineStack(withChild(mixed, 'rlo_event')));
+    expect(refusal?.issues).toHaveLength(1);
+    expect(refusal?.issues?.[0]).toContain("'rlo_event.who_id' is a side card");
+    expect(refusal?.issues?.[0]).toContain("name only the body table as object.field ('rlo_event.related_to')");
+    // Control: the one FK that is a body table, named as object.field.
+    expect(() => defineStack(withChild(mixed, 'rlo_event.related_to'))).not.toThrow();
+  });
+
+  it('does not judge relatedLists entries this way: they order side cards too (control)', () => {
+    expect(() => defineStack(stackOf(lead({ relatedLists: ['rlo_task', 'rlo_line'] })))).not.toThrow();
+  });
+
+  it('leaves a group naming a child it cannot see unjudged, as the name check does', () => {
+    expect(() => defineStack(stackOf(lead({ fieldGroups: groups('rlo_sibling') })), { artifactObjects: ['rlo_sibling'] })).not.toThrow();
+  });
+
+  it('a name matching nothing is the unknown-name refusal alone, not also this one', () => {
+    const refusal = refusalOf(() => defineStack(stackOf(lead({ fieldGroups: groups('rlo_note') }))));
+    expect(refusal?.issues).toHaveLength(1);
+    expect(refusal?.issues?.[0]).toContain('matches no inbound relationship');
   });
 });

@@ -357,7 +357,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.summary.field': '汇总的子字段',
   'designer.field.summary.relationshipField': '子关系字段(可选)',
   'designer.field.summary.setObjectFirst': '请先选择子对象',
-  'designer.field.summary.countFieldHint': '计数时不参与计算,但规范要求必填——任选一个子字段即可。',
+  'designer.field.summary.countFieldHint': '计数统计子记录条数,无需选择子字段。',
   'designer.field.summary.filterSection': '筛选(参与汇总的子记录)',
   'designer.field.summary.addFilter': '添加条件',
   'designer.field.summary.noFilter': '未设筛选 — 所有子记录都参与汇总。',
@@ -2964,7 +2964,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.designer.group.collapseHint': '控制该分组在真实表单（预览）中的折叠方式。',
   'engine.studio.designer.group.relatedListLabel': '在此放置关联表(relatedList)',
   'engine.studio.designer.group.relatedListNone': '无 —— 一组字段',
-  'engine.studio.designer.group.relatedListHint': '该分组将代表这张关联列表的表格,显示在记录详情栏的这个位置。放置表格的分组不含字段。',
+  'engine.studio.designer.group.relatedListHint': '该分组将代表这张关联列表的表格,显示在记录详情栏的这个位置。只列出正文表格:标为「主要（进正文）」的关系,或内嵌编辑的主从子对象。放置表格的分组不含字段。',
+  'engine.studio.designer.group.relatedListNotBody': '“{entry}”不是正文表格(是侧栏卡片或已隐藏的列表),记录页不会在此绘制任何内容,发布时会被拒绝。请把该关系标为「主要（进正文）」,或选择「无」。',
   'engine.studio.designer.group.relatedListHasFields': '请先把本分组的字段移到其他分组:放置关联表的分组不含字段。',
   'engine.studio.designer.group.relatedListLoading': '正在加载指向本对象的对象…',
   // objectui#11788 — 新建自动化对话框里不选触发方式时的选项。
