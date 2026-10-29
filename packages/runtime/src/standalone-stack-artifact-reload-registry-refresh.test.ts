@@ -20,6 +20,11 @@
 // Measured before the fix on this rig (each type v1 at boot, v2 in the file):
 // email_template, dashboard, flow, page and action listed v1 on both list faces
 // and served v2 by name; object served v2 on all three (its own re-ingest).
+//
+// What the fix must leave alone is pinned beside it: the cold boot (each case's
+// v1 control), the installed package's record, and an environment save through
+// the protocol, which still wins on every read after the reload re-registers
+// the package beneath it.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -150,5 +155,29 @@ describe('an artifact hot reload refreshes every read of every item the boot reg
     await reload('v2');
 
     expect(registry.getPackage(PACKAGE_ID)).toMatchObject({ source: 'code', enabled: true, status: 'installed' });
+  }, BOOT_TIMEOUT);
+
+  it('an environment save of the template still wins on every read after a reload re-registers the package', async () => {
+    const { protocol, reload } = await bootOverArtifact();
+    const subjects = async () => {
+      const pick = (res: any) => (res?.items ?? []).filter((i: any) => i?.name === 'arl_mail').map((i: any) => i.subject);
+      return {
+        list: pick(await protocol.getMetaItems({ type: 'email_template' })),
+        execution: pick(await protocol.getMetaItemsForExecution({ type: 'email_template' })),
+        byName: (await protocol.getMetaItem({ type: 'email_template', name: 'arl_mail' }))?.item?.subject,
+      };
+    };
+    await protocol.saveMetaItem({
+      type: 'email_template',
+      name: 'arl_mail',
+      item: { name: 'arl_mail', label: 'Mail', locale: 'en-US', subject: 'Saved subject', bodyHtml: '<p>saved</p>' },
+    });
+    const saved = { list: ['Saved subject'], execution: ['Saved subject'], byName: 'Saved subject' };
+    // Positive control: the save is live before any reload.
+    expect(await subjects()).toEqual(saved);
+
+    await reload('v2');
+
+    expect(await subjects()).toEqual(saved);
   }, BOOT_TIMEOUT);
 });
