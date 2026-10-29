@@ -8,7 +8,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ObjectSchema } from '@objectstack/spec/data';
 import {
@@ -61,7 +61,40 @@ function renderAmount(fields: Record<string, Record<string, unknown>>) {
   return { onPatch, saved };
 }
 
+/** {@link renderAmount}, with each patch applied to the draft, so a second edit sees the first. */
+function renderAmountLive(initial: Record<string, Record<string, unknown>>) {
+  const onPatch = vi.fn();
+  function Live() {
+    const [fields, setFields] = React.useState(initial);
+    return (
+      <ObjectFieldInspector
+        type="object"
+        name="invoice"
+        draft={{ name: 'invoice', fields }}
+        selection={{ kind: 'field', id: 'amount' }}
+        onPatch={(patch) => {
+          onPatch(patch);
+          setFields(patch.fields as Record<string, Record<string, unknown>>);
+        }}
+        onClearSelection={vi.fn()}
+        onSelectionChange={vi.fn()}
+        readOnly={false}
+        locale="en-US"
+      />
+    );
+  }
+  render(<Live />);
+  const saved = () => onPatch.mock.calls.at(-1)![0].fields as Record<string, Record<string, unknown>>;
+  return { onPatch, saved };
+}
+
 const CODE = { type: 'text', label: 'Currency', valueDomain: 'iso_4217_currency' };
+
+async function pick(label: RegExp | string, option: string) {
+  fireEvent.keyDown(screen.getByRole('combobox', { name: label }), { key: 'ArrowDown' });
+  await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
+  fireEvent.click(screen.getByRole('option', { name: option }));
+}
 
 describe('Studio currency section (ADR-0144 D2)', () => {
   it('a mode switch keeps only the keys that mode reads', () => {
@@ -86,6 +119,19 @@ describe('Studio currency section (ADR-0144 D2)', () => {
     renderAmount({ amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } }, currency_code: CODE });
     expect(screen.getByRole('combobox', { name: 'Currency mode' })).toHaveTextContent('Record');
     expect(screen.getByRole('combobox', { name: /Currency field/ })).toHaveTextContent('currency_code');
+  });
+
+  it('switching a fixed amount to record writes no defaultCurrency, and the object parses (#27268 refuses one)', async () => {
+    const { saved } = renderAmountLive({
+      amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } },
+      currency_code: CODE,
+    });
+    await pick('Currency mode', 'Record — each record names its currency');
+    expect(saved().amount.currencyConfig).toEqual({ currencyMode: 'record' });
+    await pick(/Currency field/, 'currency_code');
+    const fields = saved();
+    expect(fields.amount.currencyConfig).toEqual({ currencyMode: 'record', currencyField: 'currency_code' });
+    expect(ObjectSchema.safeParse({ name: 'invoice', label: 'Invoice', fields }).success).toBe(true);
   });
 
   it('"Create currency field" writes an explicit code field and the pointer, and the object parses', async () => {
