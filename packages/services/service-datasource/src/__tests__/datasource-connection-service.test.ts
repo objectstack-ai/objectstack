@@ -1414,6 +1414,6 @@ describe('[#27727] reconnect requires `previous`, the record the live pool was b
     await service.reconnect(next, { context: ctx, previous: pluginDs });
 
     expect(engine.drivers.get('tree')).toBe(live);
-    expect(engine.defs.at(-1)).toMatchObject({ name: 'tree', driver: 'spike_tree', schemaMode: 'external' });
+    expect(engine.defs[engine.defs.length - 1]).toMatchObject({ name: 'tree', driver: 'spike_tree', schemaMode: 'external' });
   });
 });
