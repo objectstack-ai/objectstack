@@ -807,6 +807,18 @@ viewport:
 | 1024 – 1279 px | Details · timeline; the related column folds into a rail opened from a **Related (N)** toggle above the columns |
 | below 1024 px, or embedded (drawer / split pane) | The tab strip, exactly as before |
 
+The related column loads counts first and rows on demand (`RelatedCardStack`).
+Every card's count is asked in one request set, through the same count store
+the tab strip's badges read, and each card is a placeholder until the set has
+answered. A card counted at 0 is its title row alone and reads no rows. A card
+above 0 reads its first three rows, projected to the name field and one status
+or date field, once it is in view (`IntersectionObserver`). The details column
+never waits for any of it. `RecordPageColumns` takes `relatedFieldsOf`, the
+child objects' field definitions the host already holds, so the counts read no
+child schema first; `prefetchRelatedCounts` and `relatedCountTargetsIn` warm
+another record's counts, which the console's drawer does for the record `↑` /
+`↓` would show next.
+
 One header (title, actions, highlights, stage path) serves every tier, and
 the page description stays the tabbed one: the columns are read off it by
 each tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create

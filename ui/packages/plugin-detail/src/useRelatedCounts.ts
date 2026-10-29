@@ -173,7 +173,11 @@ async function countTargets(
   const ds = asCountingSource(source.dataSource);
   const parentKey = parentKeyOf(source.parentId);
   if (!ds || !parentKey || targets.length === 0) return;
-  const probe = (objectName: string, query: any) => ds.find(objectName, query);
+  // The store's own probe asks one row (`$top` 1) and reads only the total,
+  // so that row carries its id alone. A larger `$top` is a rail's claim on
+  // the rows it draws, which keeps the whole row.
+  const probe = (objectName: string, query: any) =>
+    ds.find(objectName, query?.$top === 1 ? { ...query, $select: ['id'] } : query);
   const schemaFields = (objectName: string): Promise<FieldContainerLike> =>
     typeof ds.getObjectSchema === 'function'
       ? ds.getObjectSchema(objectName).then(

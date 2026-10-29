@@ -195,6 +195,15 @@ related lists as cards with Approvals, Attachments and the created/updated line.
 1024 px the related column folds into a rail behind a **Related (N)** toggle. Below that, and
 always in a drawer or split pane, the tab strip is drawn. `?tab=` selects a tab in the strip.
 
+In the column tiers the related column loads in steps, and the details column never waits for
+it. The page asks every card's count in one request set, sent beside the record read, and the
+cards show placeholders until those counts land. A card counted at 0 is its title row alone
+and reads no rows. A card above 0 reads its first three rows once it scrolls into view, asking
+only for the record's name field and one status or date field. When the timeline column is
+switched off, its **Activity** card in the related column stays closed, and reads nothing, until
+it is opened. In a drawer, the record that **↑** / **↓** would show next has its related counts
+read ahead.
+
 ### Slotted pages
 
 `kind: 'slotted'` overrides only the parts of the synthesized page you name, and the

@@ -72,7 +72,9 @@ describe('useRelatedCounts (objectstack#27056)', () => {
     await flush();
     // One request set: the three counts are out together, none answered yet.
     expect(reads.map((r) => r.object)).toEqual(['task', 'note', 'case']);
+    // A count reads the total: its one row carries the id alone.
     expect(reads.every((r) => r.query.$count === true && r.query.$top === 1)).toBe(true);
+    expect(reads.map((r) => r.query.$select)).toEqual([['id'], ['id'], ['id']]);
     expect(reads.map((r) => r.query.$filter)).toEqual([{ account: 'acc-1' }, { account: 'acc-1' }, { account: 'acc-1' }]);
     expect(TARGETS.map((t) => result.current.stateOf(t.id).kind)).toEqual(['pending', 'pending', 'pending']);
 
