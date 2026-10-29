@@ -710,20 +710,31 @@ export function evaluateCondition(
 /**
  * Convenience function to evaluate a plain condition string against a data record.
  * Supports both template expressions (e.g., '${data.amount > 1000}') and
- * plain expressions (e.g., "status == 'overdue'").
+ * bare CEL predicates (e.g., "status == 'overdue'").
  * Record fields are available both directly (status) and namespaced (data.status).
+ *
+ * A bare string is CEL (objectstack#27605): the spec defines it as shorthand for
+ * `{ dialect: 'cel', source }`, so it takes the CEL route
+ * {@link ExpressionEvaluator.evaluateCondition} gives it and a predicate that
+ * evaluates reaches the same verdict on both. Only a `${…}` template stays on
+ * the legacy engine. The answer is
+ * `true` only when the predicate evaluates to `true`: a fault (a JS-only
+ * spelling such as `===` included), a non-boolean result and a blank condition
+ * all answer `false`.
  */
 export function evaluatePlainCondition(
   condition: string,
   record: Record<string, any>
 ): boolean {
+  if (typeof condition !== 'string' || isBlankPredicateText(condition)) {
+    return false;
+  }
   const evaluator = new ExpressionEvaluator({ ...record, data: record }, globalCache, globalFormulas);
   try {
-    const isTemplate = /\$\{/.test(condition);
-    const result = isTemplate
-      ? evaluator.evaluate(condition, { throwOnError: true })
-      : evaluator.evaluateExpression(condition);
-    return result === true;
+    if (/\$\{/.test(condition)) {
+      return evaluator.evaluate(condition, { throwOnError: true }) === true;
+    }
+    return evaluator.evaluateCondition(condition, { throwOnError: true });
   } catch {
     return false;
   }
