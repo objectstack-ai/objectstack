@@ -28,7 +28,7 @@ import {
 import {
   type LinkingAuthContext,
 } from './implicit-account-linking.js';
-import { IdpLocaleSync } from './idp-locale-claim.js';
+import { IdpLocaleSync, type IdpLocaleClaim } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
 import {
   API_KEY_DEFAULT_EXPIRY_DAYS,
@@ -2168,6 +2168,21 @@ export class AuthManager {
     resolveAuth: () => this.linkingContext(),
     warn: (message, meta) => this.config.logger?.warn?.(message, meta),
   });
+
+  /**
+   * Apply an IdP's `locale` claim to a user, for a sign-in that does not run
+   * through the OIDC seams (a host's own session hand-off): the user's
+   * language preference (`sys_user.locale`) is written only while it is unset
+   * or still holds the value an IdP sign-in last wrote, so a language the user
+   * chose in the environment is kept. The same call the OIDC JIT path makes,
+   * with the same `idp-locale:` record; the claim is closed against the i18n
+   * service's locales, and an unsupported one clears only an IdP-written
+   * value. Never throws: a failure is reported at `warn` and the user keeps
+   * the preference they had. The rule and its record: `idp-locale-claim.ts`.
+   */
+  public applyIdpLocaleClaim(userId: string, claim: IdpLocaleClaim): Promise<void> {
+    return this.idpLocale.apply(userId, claim);
+  }
 
   /**
    * [ADR-0093 D7] The users created in each in-flight better-auth request,
