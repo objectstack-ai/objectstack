@@ -2128,7 +2128,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   const [slotPropsClaims, setSlotPropsClaims] = React.useState(0);
   const [copilotStatus, setCopilotStatus] = React.useState<StudioCopilotStatus>({
     available: false,
-    planPending: false,
+    planPendingCount: 0,
   });
   const [copilotCanvasOpen, setCopilotCanvasOpen] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
@@ -2568,7 +2568,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
             onModeChange={setSlotMode}
             hasProps={slotHasProps}
             copilotAvailable={copilotAvailable}
-            planPending={copilotStatus.planPending}
+            planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
             wideWidth={copilotCanvasOpen && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
             overlay={isMobile}

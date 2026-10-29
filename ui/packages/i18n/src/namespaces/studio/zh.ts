@@ -2712,6 +2712,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.slot.expand': '展开右栏',
   'engine.studio.slot.backToChat': '回到对话',
   'engine.studio.slot.planPending': '方案待确认',
+  'engine.studio.slot.pendingCount': '{count} 项待确认',
   'engine.studio.slot.openFullPage': '在完整页面中打开',
   'engine.studio.pillar.data': '数据',
   'engine.studio.pillar.automations': '自动化',
