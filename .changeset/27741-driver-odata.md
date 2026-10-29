@@ -1,5 +1,6 @@
 ---
 '@objectstack/driver-odata': patch
+'@objectstack/spec': patch
 ---
 
 feat(driver-odata): a new package, `@objectstack/driver-odata`, serves an OData v4 service's entity sets as external objects through a plugin driver, with no code per entity set
@@ -14,4 +15,7 @@ A server plugin, `createODataDriverPlugin({ name, serviceRoot, auth, pageSize, r
 - **Writes**, under the datasource's `external.allowWrites` and the object's `external.writable`: `POST`, `PATCH` and `DELETE` by key, with `If-Match` carrying the `@odata.etag` of the row's last read. Only properties the entity type declares are sent. A refused write reaches the caller as `422 EXTERNAL_WRITE_REFUSED` with the service's message; `upsert`, the bulk verbs and transactions are refused by name.
 - **Keys and schema.** The key comes from `$metadata` (CSDL 4.0, inheritance and namespace aliases resolved); a row's `id` is the key's value, or the key predicate body for a composite key. `introspectSchema` lists entity sets, EDM-typed properties, keys and single-valued navigation properties as lookup candidates.
 - **Credentials.** The secret is the datasource's `external.credentialsRef`, dereferenced through the host's datasource secret store (`options.secrets`, the same binder the datasource admin plugin takes) at the first request, and again once after a 401. `bearer` and `basic` are supported; a missing reference, store or secret refuses the request rather than sending it unauthenticated. The config itself refuses a `serviceRoot` that carries credentials.
+- **Read scopes.** A `ReadableIds` leaf (a read-scope semi-join) is refused by the driver itself, in the shared refusal envelope, before anything is sent: `$filter` cannot spell it, and leaving it out would read it as no restriction.
+- **Conformance.** The package runs all eleven shared driver case-sets, behind the real engine floor, over an in-process OData service that evaluates the `$filter` the driver writes, under an ordinal and a case-insensitive collation.
+- **`@objectstack/spec`:** `llms.txt` counts the new package (73 published).
 - **The dialect seam.** Headers, the response envelope, the `$metadata` reader, literal and function spellings and the count option go through one `ODataDialect`; only `odataV4Dialect` ships. A v2 dialect is a new file implementing it.

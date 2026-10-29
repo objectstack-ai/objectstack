@@ -48,6 +48,7 @@
  * read from `$metadata`, which the driver reads once, at the first request.
  */
 
+import { findMisplacedReadableIds, readableIdsDriverRefusal } from '@objectstack/core';
 import type { DriverQuery, IDataDriver, IntrospectedSchema, IntrospectedTable } from '@objectstack/spec/contracts';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { EdmEntitySet, EdmEntityType, EdmProperty, ODataDialect, ODataServiceModel } from './dialect.js';
@@ -255,6 +256,7 @@ export class ODataDriver implements IDataDriver {
   // ---------------------------------------------------------------------------
 
   async find(object: string, query: DriverQuery = {}, _options?: DriverOptions): Promise<Row[]> {
+    refuseReadableIds(query.where);
     const binding = await this.bind(object);
     const limit = typeof query.limit === 'number' ? query.limit : undefined;
     const offset = typeof query.offset === 'number' ? query.offset : undefined;
@@ -293,6 +295,7 @@ export class ODataDriver implements IDataDriver {
   }
 
   async count(object: string, query: DriverQuery = {}, _options?: DriverOptions): Promise<number> {
+    refuseReadableIds(query.where);
     const binding = await this.bind(object);
     const { filter, complete } = translateWhere(query.where, binding, this.dialect);
     if (!complete) {
@@ -557,6 +560,18 @@ export class ODataDriver implements IDataDriver {
       if (oldest !== undefined) this.etags.delete(oldest);
     }
   }
+}
+
+/**
+ * A `ReadableIds` leaf (ADR-0139 D3) is a read-scope predicate: "the ids of X
+ * this caller may read". `$filter` has no tenant-walled semi-join to spell it
+ * with, and leaving it out — the translator's answer to anything it cannot
+ * spell — would read it as no restriction. So it is refused, loudly, before
+ * anything is sent.
+ */
+function refuseReadableIds(where: unknown): void {
+  const site = findMisplacedReadableIds(where, false);
+  if (site) throw readableIdsDriverRefusal('driver-odata', site, 'an OData $filter has no form of the tenant-walled semi-join');
 }
 
 const etagKey = (object: string, id: string | number) => `${object}\u0000${String(id)}`;
