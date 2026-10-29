@@ -79,7 +79,7 @@ import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
 import { CurrencyConfigSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
-import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
+import { ManifestPermissionsSchema, PluginPackagingSchema } from '../kernel/manifest.zod';
 import {
   DeleteRecordConfigSchema,
   GetRecordConfigSchema,
@@ -282,6 +282,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),
+  ],
+  // #27123: `packaging: 'manifest-deps'`, refused by the enum's own error map.
+  'manifest-packaging-manifest-deps-removed': [
+    refusal("manifest.packaging 'manifest-deps'", () => PluginPackagingSchema.safeParse('manifest-deps')),
   ],
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),

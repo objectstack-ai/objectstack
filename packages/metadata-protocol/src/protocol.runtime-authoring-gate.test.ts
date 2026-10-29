@@ -4985,7 +4985,9 @@ describe('the object save door judges related-list names against the live regist
     });
 
     it('SAVES the same write once the registry child carries the FK — and a body-table group beside it', async () => {
-        const { protocol, rows } = hostWith([line({ quote: { type: 'master_detail', label: 'Quote', reference: 'rl_quote' } })]);
+        const { protocol, rows } = hostWith([
+            line({ quote: { type: 'master_detail', label: 'Quote', reference: 'rl_quote', inlineEdit: 'grid' } }),
+        ]);
 
         const result = await save(protocol, parent({
             relatedLists: ['rl_quote_line'],
@@ -4994,5 +4996,23 @@ describe('the object save door judges related-list names against the live regist
 
         expect(result.success).toBe(true);
         expect(quoteRows(rows).map((r) => r.state)).toEqual(['active']);
+    });
+
+    // [#27478] A field group only positions a BODY TABLE. The control above
+    // differs from this refusal by the FK's `inlineEdit` alone: without it a
+    // plain master_detail child is a side card, and the group would draw nothing.
+    it('REFUSES a field group naming a side card, with the 422 envelope and the prescription', async () => {
+        const { protocol, rows } = hostWith([line({ quote: { type: 'master_detail', label: 'Quote', reference: 'rl_quote' } })]);
+
+        const err = await save(protocol, parent({
+            fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'rl_quote_line.quote' }],
+        })).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === 'related-list-group-not-body');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe('objects.rl_quote.fieldGroups[0].relatedList');
+        expect(issue.message).toContain("'rl_quote_line.quote' is a side card");
+        expect(quoteRows(rows)).toEqual([]);
     });
 });
