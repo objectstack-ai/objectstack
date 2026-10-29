@@ -1362,6 +1362,7 @@ const pt = {
     relatedCardCount_other: "{{count}} registros · ampliar",
     relatedDefaultChanged: "Ordem padrão atualizada",
     relatedRestoreDefault: "Restaurar padrão",
+    relatedRestoreDefaultOrder: "Restaurar ordem padrão",
     relatedHiddenCount: "{{count}} ocultas",
     relatedHiddenCount_one: "{{count}} oculta",
     relatedHiddenCount_many: "{{count}} ocultas",

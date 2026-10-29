@@ -1323,6 +1323,7 @@ const de = {
     relatedCardCount_other: "{{count}} Datensätze – vergrößern",
     relatedDefaultChanged: "Standardreihenfolge aktualisiert",
     relatedRestoreDefault: "Standard wiederherstellen",
+    relatedRestoreDefaultOrder: "Standardreihenfolge wiederherstellen",
     relatedHiddenCount: "{{count}} ausgeblendet",
     relatedHiddenCount_one: "{{count}} ausgeblendet",
     relatedHiddenCount_other: "{{count}} ausgeblendet",

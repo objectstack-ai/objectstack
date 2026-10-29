@@ -830,8 +830,6 @@ const WRITE_SITES: Record<string, WriteSite> = {
   'packages/plugin-form/src/ModalForm.tsx :: ModalFormBody > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/ObjectForm.tsx :: SimpleObjectForm > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/ObjectForm.tsx :: SimpleObjectForm > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
-  'packages/plugin-form/src/SplitForm.tsx :: SplitForm > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
-  'packages/plugin-form/src/SplitForm.tsx :: SplitForm > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/TabbedForm.tsx :: TabbedForm > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/TabbedForm.tsx :: TabbedForm > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/WizardForm.tsx :: WizardForm > handleStepSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),

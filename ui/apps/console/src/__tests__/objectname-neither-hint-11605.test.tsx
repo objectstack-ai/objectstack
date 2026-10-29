@@ -38,8 +38,8 @@
  *    is working. `object-kanban` has two such rows: inline `data`, and lanes
  *    that carry their own `cards`. `object-form` and `view:form` have two
  *    kinds: inline `customFields`, and, for each sectioned `formType`
- *    (`tabbed`, `wizard`, `split`, `drawer`, `modal`), sections whose every
- *    field is inline.
+ *    (`tabbed`, `wizard`, `drawer`, `modal`), sections whose every field is
+ *    inline. `split` left the block's `formType` with ADR-0050 (#27159).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -175,8 +175,12 @@ async function mount(schema: Record<string, unknown>) {
  */
 const INLINE_SECTIONS = [{ label: 'Contact', fields: [{ name: 'email', label: 'Email address', type: 'text' }] }];
 
-/** The `formType`s `ObjectForm` dispatches to a sectioned renderer of its own. */
-const SECTIONED_VARIANTS = ['tabbed', 'wizard', 'split', 'drawer', 'modal'] as const;
+/**
+ * The `formType`s the block hands to a sectioned renderer of its own: the two
+ * layouts `ObjectForm` draws, and the two containers `ObjectFormContainer`
+ * opens. `split` is gone with its renderer (#27159).
+ */
+const SECTIONED_VARIANTS = ['tabbed', 'wizard', 'drawer', 'modal'] as const;
 
 const SECTIONED_ROWS = (['object-form', 'view:form'] as const).flatMap((type) =>
   SECTIONED_VARIANTS.map((formType) => ({ type, formType })),

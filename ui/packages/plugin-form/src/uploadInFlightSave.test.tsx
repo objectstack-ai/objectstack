@@ -39,7 +39,6 @@ import { registerAllFields, useUploadingSignal } from '@object-ui/fields';
 import { ObjectForm } from './ObjectForm';
 import { ModalForm } from './ModalForm';
 import { DrawerForm } from './DrawerForm';
-import { SplitForm } from './SplitForm';
 import { TabbedForm } from './TabbedForm';
 import { WizardForm } from './WizardForm';
 import { MasterDetailForm } from './MasterDetailForm';
@@ -213,7 +212,6 @@ describe('record form — save while an upload is in flight (objectui#10166)', (
    * A host wired without a pin would be a claim nothing re-derives.
    */
   it.each([
-    ['SplitForm', SplitForm as any, { type: 'object-split-form', sections: [{ name: 's1', label: 'Main', fields: ['name', 'attachment'] }] }],
     ['TabbedForm', TabbedForm as any, { type: 'object-tabbed-form', sections: [{ name: 's1', label: 'Main', fields: ['name', 'attachment'] }] }],
     ['DrawerForm', DrawerForm as any, { type: 'object-drawer-form', open: true, fields: ['name', 'attachment'] }],
   ])('stores nothing mid-upload and the attachment once it resolves (%s)', async (_name, Host, extra) => {

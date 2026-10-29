@@ -41,7 +41,6 @@ import {
 } from '../autoLayout';
 import { ModalForm } from '../ModalForm';
 import { ObjectForm } from '../ObjectForm';
-import { SplitForm } from '../SplitForm';
 import { TabbedForm } from '../TabbedForm';
 import { WizardForm } from '../WizardForm';
 
@@ -77,7 +76,7 @@ const single = (columns: number): Section[] => [
   { name: 'classification', label: 'Classification', columns, fields: ['q1', 'q2', 'q3'] },
 ];
 
-type Host = 'modal' | 'object' | 'split' | 'tabbed' | 'wizard';
+type Host = 'modal' | 'object' | 'tabbed' | 'wizard';
 
 function mount(host: Host, sections: Section[], extra: Record<string, unknown> = {}) {
   const schema = {
@@ -94,8 +93,6 @@ function mount(host: Host, sections: Section[], extra: Record<string, unknown> =
       return render(<ModalForm schema={{ ...schema, formType: 'modal' }} dataSource={ds} />);
     case 'object':
       return render(<ObjectForm schema={schema} dataSource={ds} />);
-    case 'split':
-      return render(<SplitForm schema={{ ...schema, formType: 'split' }} dataSource={ds} />);
     case 'tabbed':
       return render(<TabbedForm schema={{ ...schema, formType: 'tabbed' }} dataSource={ds} />);
     case 'wizard':
@@ -138,7 +135,7 @@ function perRowAt(read: { grid: string[]; span: string[] }, tier: (typeof TIERS)
   return tracks / span;
 }
 
-const HOSTS: Host[] = ['modal', 'object', 'split', 'tabbed'];
+const HOSTS: Host[] = ['modal', 'object', 'tabbed'];
 
 describe('objectui#12548 — a 2 / 3 / 1 mixed form draws 2 / 3 / 1 per row', () => {
   for (const host of HOSTS) {

@@ -22,11 +22,9 @@ metadata:
 
 ## When to Use This Skill
 
-- You are building a **visual flow** (auto-launched, screen, or scheduled).
-- You need a **state machine** or **approval process** for a business object.
-- You are setting up **event-driven triggers** (record create/update/delete).
-- You need **scheduled automation** (daily reports, data cleanup).
-- You are **integrating a vendor system** or receiving its callback.
+Flows (auto-launched, screen, scheduled), state machines and approvals,
+record-change triggers, scheduled automation, vendor integrations and their
+callbacks, and **assignment rules** that route a new record to a queue or a person.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` here is an **Expression** envelope evaluated
@@ -122,14 +120,8 @@ error. **RAW** keys are read as written: a
 ### Flow Variables
 
 `variables` is an **array** of `{ name, type, isInput, isOutput }` entries —
-not a name-keyed map; a variable has no `label`:
-
-```typescript
-variables: [
-  { name: 'case_id', type: 'text', isInput: true },             // passed in when invoked
-  { name: 'approval_result', type: 'boolean', isOutput: true }, // returned on completion
-],
-```
+not a name-keyed map; a variable has no `label`: `variables: [{ name: 'case_id',
+type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOutput: true }]`.
 
 → [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
 
@@ -138,35 +130,29 @@ variables: [
 > **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
 > routes a failed node to a handler instead of ending the run. **`type: 'fault'`
 > is what routes — a `label: 'error'` alone does nothing:** an ordinary edge
-> traverses on SUCCESS, so the handler would run on success and never on
-> failure (`objectstack validate` reports `flow-error-label-not-fault`).
-> A handled failure does NOT consume a flow-level `errorHandling.retry`, which
-> replays the flow from the start — prefer a fault edge when the failure is
-> local. The handler reads `{{ <nodeId>.error }}` (or run-wide
-> `{{ $error.message }}`; in CEL, `vars["$error"]`). The run then reports
-> success, and the failed step stays in the trace.
+> traverses on SUCCESS (`objectstack validate` reports `flow-error-label-not-fault`).
+> A handled failure does not consume a flow-level `errorHandling.retry`, which
+> replays from the start — prefer a fault edge for a local failure. The handler
+> reads `{{ <nodeId>.error }}` (run-wide `{{ $error.message }}`; in CEL,
+> `vars["$error"]`); the run then reports success and the failed step stays in the trace.
 
 | ROUTES (runtime failure) | Does NOT route (fatal either way) |
 |:--|:--|
 | 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null`; graph past the nesting ceiling; unscoped run |
 
-> **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
-> governs the end-user surface: under the default `runAs: 'user'`, the engine
-> **strips** a `readonly` field from any non-system write — `create_record` and
-> `update_record` alike — the step reports success but the value never lands,
-> and the drop is named in the step's warnings. A flow that
-> maintains a `readonly` field (approval stamps, conversion flags, SLA
-> markers, rollups) must run `runAs: 'system'`.
-> `os validate` / `os build` fail a `runAs:'user'` `update_record` that writes
-> a `readonly` field, so it surfaces at build time. (`readonlyWhen` fields are
-> the same story, per record state —
-> flagged as a warning.) Do **not** work around this by removing `readonly`;
-> that loses the field's edit protection.
+> **Writing a `readonly` field? Set `runAs: 'system'`.** Under the default
+> `runAs: 'user'` the engine **strips** a `readonly` field from `create_record`
+> and `update_record` alike — the step reports success, the value never lands,
+> the drop is named in the step's warnings — so a flow maintaining one (approval
+> stamps, conversion flags, SLA markers, rollups) runs `runAs: 'system'`.
+> `os validate` / `os build` fail a `runAs:'user'` `update_record` writing one
+> (`readonlyWhen`: a warning, per record state). Do **not** remove `readonly`
+> instead; that loses the field's edit protection.
 
-> **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`.
-> When one step in it must write a `readonly` field, move that step into a
-> dedicated `runAs: 'system'` flow and call it from a `subflow` node — raising
-> the whole flow silently elevates every other write in it.
+> **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`; a
+> step that must write a `readonly` field moves into a dedicated `runAs: 'system'`
+> flow called from a `subflow` node — raising the whole flow silently elevates
+> every other write in it.
 >
 > **Elevation stops at identity assignment.** A `runAs: 'system'` flow's
 > insert, update, delete, transfer, restore or purge of `sys_user_position`,
@@ -180,9 +166,9 @@ variables: [
 > https://objectstack.ai/docs/permissions/system-context#1-authorization-and-scoping).
 >
 > **A `runAs: 'system'` sweep must pin its organization.** System context has no
-> trigger user, so nothing narrows the query: a scan or rollup with no
-> organization predicate reads and writes across every tenant. The tenant column
-> is platform-injected — filter on it, never re-declare it per object.
+> trigger user, so a scan or rollup with no organization predicate reads and
+> writes across every tenant; filter on the platform-injected tenant column, never
+> re-declare it per object.
 
 > **Who may START a flow: `requiredPermissions: ['…']` on the flow** (ADR-0066
 > D4) — every door that starts it by name (trigger route, action of type `flow`,
@@ -202,13 +188,11 @@ variables: [
 
 ### Filter operands (`config.filter`)
 
-- **Each operand is a value slot** — a literal, or a CEL value envelope
-  evaluated before the query (`filter: { id: { dialect: 'cel', source:
-  'record.id' } }`). A whole-string **query placeholder** (`{current_user_id}`,
-  `{today}`, `{current_year_start}`) passes through verbatim for the query
-  engine to expand; a flow variable never shadows a placeholder. Only `filter`
-  gets this hand-off — in a text slot `{{ current_year_start }}` is a nonsense
-  reference.
+- **Each operand is a value slot** — a literal or a CEL envelope evaluated
+  before the query (`filter: { id: { dialect: 'cel', source: 'record.id' } }`).
+  A whole-string **query placeholder** (`{current_user_id}`, `{today}`,
+  `{current_year_start}`) passes through verbatim for the query engine; a flow
+  variable never shadows it, and only `filter` gets this hand-off.
 - **An operand that evaluates to `null` refuses the node** (not
   `fault`-routable): a dropped condition does not narrow a query, it widens
   it, so a routed `delete_record` would empty the object while the run reports
@@ -258,13 +242,10 @@ write them right the first time:
    ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }` → writes the whole record object
    ✅ `source: 'newRec.id'`
 
-3. **`script` nodes call a registered function — that is all they do.** Set
-   `config.function` to a function registered via
-   `defineStack({ functions: { my_fn: (ctx) => … } })`. It is **required**: an
-   empty `script` node refuses at execute; an unregistered function fails loudly.
-
-   There is no other dispatch form: `notify` for delivery, `connector_action`
-   for a vendor system, a function for logic.
+3. **`script` nodes call a registered function — nothing else.** `config.function`
+   (**required**: an empty node refuses at execute, an unregistered name fails
+   loudly) names one registered via `defineStack({ functions: { my_fn: (ctx) => … } })`;
+   `notify` delivers, `connector_action` reaches a vendor, a function computes.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
    database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
@@ -298,17 +279,9 @@ write them right the first time:
    } });
    ```
 
-4. **Conditions are bare CEL — the stdlib is what you may call bare.** The table
-   is **objectstack-formula**'s `CEL_STDLIB_FUNCTIONS`, the bare-callable public
-   subset; receiver methods (called on a value, never bare) are not in it.
-   An UNKNOWN function (`PRIOR()`, a typo'd name) and a `{…}`-wrapped field ref
-   both **fail the build**: a brace is a template, not CEL — write `record.x`,
-   not `{record.x}`.
-
-5. **`notify` reports SUCCESS when the `messaging` capability is absent.** The
-   executor logs `no messaging service registered` and returns success with
-   `output: { delivered: 0, failed: 0, skipped: true }` and `metrics.acted: 0` —
-   a green run that delivered nothing. Declare `messaging` in `requires`.
+4. **Conditions are bare CEL; only the stdlib (`CEL_STDLIB_FUNCTIONS`,
+   **objectstack-formula**) is callable bare.** An unknown function (`PRIOR()`, a
+   typo) and a `{…}`-wrapped field ref both **fail the build** — write `record.x`.
 
 ---
 
@@ -316,11 +289,43 @@ write them right the first time:
 
 ---
 
+## Assignment rules — route a new record to a queue or a person
+
+The third automation family: `assignmentRules` on the stack routes each inserted
+row of an `ownership: 'user'` object whose `owner_id` and `queue` are both still
+empty — once, after every `beforeInsert` hook, never on update, never refusing the
+insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
+`record.*`) match decides:
+
+<!-- os:check -->
+```typescript
+import { defineAssignmentRule } from '@objectstack/spec/automation';
+
+export const caseIntake = defineAssignmentRule({
+  name: 'case_intake',
+  object: 'crm_case',
+  entries: [
+    { name: 'urgent', criteria: 'record.priority == "urgent"',
+      assignTo: { type: 'queue', value: 'escalations' } },           // no strategy: parked for a claim
+    { name: 'rest', assignTo: { type: 'queue', value: 'support_intake' },
+      strategy: 'least_loaded', load: 'record.status != "closed"' }, // or 'round_robin'; `load` only with least_loaded
+  ],
+});
+```
+
+`strategy` is for a queue target only; `assignTo: { type: 'user', value: '<id>' }`
+names one owner. Queues are declared in `queues` (objectstack-data); an approval
+for the same people is `approvers: [{ type: 'queue', value: 'support_intake' }]`
+([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
+⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
+
+---
+
 ## Triggers — Event-Driven Automation
 
-A `record_change` flow fires automatically on a data event. There is **no
-standalone trigger object and no top-level `trigger` / `event` key** — the
-binding lives entirely in the flow's **`start` node `config`**.
+A `record_change` flow fires on a data event; there is **no standalone trigger
+object and no top-level `trigger` / `event` key** — the binding is the `start`
+node's `config`.
 
 ### Prerequisite — declare the capabilities your nodes need
 
@@ -405,25 +410,22 @@ packaged spec, `auth.credentialRef` (the customer's administrator supplies the
 value) — dispatched by `connector_action`; an inbound vendor callback is an
 `api` flow. Never a plugin, never an `http` node holding a credential. Recipes,
 credential hand-off, loader limits: [references/integration-recipes.md](./references/integration-recipes.md).
-Platform code only when one holds — and then it is the platform's, filed as
-a card; the app still writes none: the protocol is not HTTP; the work writes
-identity objects (users, units, positions); it processes files or binaries
-locally; one fixed action contract must span several vendors; the callback's
-signature is outside the `api` door's HMAC. A document the loader cannot take
-yet (YAML, Swagger 2.0, `$ref`, OAuth, request signing) is a gap named against
-its platform card, never a reason to write code.
+Platform code only when one holds — and then it is the platform's, filed as a
+card, the app still writing none: the protocol is not HTTP; the work writes
+identity objects (users, units, positions); it processes files locally; one fixed
+action contract spans several vendors; the callback's signature is outside the
+`api` door's HMAC. A document the loader cannot take yet (YAML, Swagger 2.0,
+`$ref`, OAuth, request signing) is a gap named against its platform card, never a
+reason to write code.
 
 ---
 
 ## CRM Automation Blueprint
 
-Default approach — model the business lifecycle in Flow/Approval metadata
-first (integrations: above) — in this CRM-style structure:
-
-| Automation Type | Typical Location | Pattern |
-|:--|:--|:--|
-| Flow (screen / approval / scheduled) | `src/flows/*.flow.ts` | explicit `variables`, `nodes` + `edges`; approval config in the approvals reference |
-| Flow registry | `src/flows/index.ts` | Export `allFlows: Flow[]` and register centrally in `defineStack({ flows })` |
+Model the business lifecycle in Flow / Approval metadata first (integrations:
+above): flows in `src/flows/*.flow.ts` with explicit `variables`, `nodes` +
+`edges` (approval config: the approvals reference), exported as `allFlows: Flow[]`
+from `src/flows/index.ts` and registered centrally in `defineStack({ flows })`.
 
 ---
 

@@ -91,7 +91,7 @@ const ROWS: ReadonlyArray<{ key: string; valid: unknown; wrong: unknown }> = [
         fields: ['name', { name: 'email', type: 'email' }],
         visibleWhen: { dialect: 'cel', source: 'record.kind == "b2b"' },
       },
-      { group: 'contact_info', pane: 'secondary' },
+      { group: 'contact_info', columns: 1 },
     ],
     wrong: 'basics',
   },
@@ -101,9 +101,9 @@ const ROWS: ReadonlyArray<{ key: string; valid: unknown; wrong: unknown }> = [
   { key: 'showStepIndicator', valid: false, wrong: 'no' },
   { key: 'nextText', valid: { en: 'Next', fr: 'Suivant' }, wrong: 42 },
   { key: 'prevText', valid: 'Back', wrong: 42 },
-  { key: 'splitDirection', valid: 'vertical', wrong: 'diagonal' },
-  { key: 'splitSize', valid: 40, wrong: '40%' },
-  { key: 'splitResizable', valid: false, wrong: 'false' },
+  // `splitDirection` / `splitSize` / `splitResizable` left the block with
+  // `formType: 'split'` (objectstack#27159): tombstones in the spec row, which
+  // the mirror now declares by reference, so no authored value parses.
   { key: 'drawerSide', valid: 'left', wrong: 'center' },
   { key: 'drawerWidth', valid: '40%', wrong: 40 },
   { key: 'modalSize', valid: 'lg', wrong: 'huge' },

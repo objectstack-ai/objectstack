@@ -14,15 +14,21 @@
  *      schema, a container's `form` / `formViews.*`, a ViewItem form record, a
  *      flattened form overlay, and `defineStack`.
  *   2. The split-only keys `sections[].pane` (and the legacy `groups[].pane`),
- *      `splitSize` and `splitResizable` are `retiredKey()` tombstones, refused
- *      on every layout. `splitDirection`, `drawerSide`, `drawerWidth` and
- *      `modalSize` stay declared — a stated boundary, pinned as one.
- *   3. One D2 conversion, retired from the load path:
+ *      `splitSize`, `splitResizable` and — since the renderer half, #27159 —
+ *      `splitDirection` are `retiredKey()` tombstones, refused on every
+ *      layout. `drawerSide`, `drawerWidth` and `modalSize` stay declared — a
+ *      stated boundary, pinned as one.
+ *   3. The `object-form` page block (#27159): `formType` drops `split` and
+ *      keeps `drawer` / `modal` (the block renderer is the caller that opens
+ *      those containers); its `splitDirection`, `splitSize`, `splitResizable`
+ *      and `sections[].pane` are tombstones.
+ *   4. One D2 conversion, retired from the load path:
  *      `form-view-presentation-types-removed` deletes a retired member (the
- *      form lands on `simple`) and strips the three keys from stored rows and
- *      existing sources; its D3 entry is `ui-form-view-type-layout-only`.
- *   4. Tree-scoped absence: no form view inside the declared radius still
- *      authors a retired member.
+ *      form lands on `simple`) and strips the split keys from stored rows and
+ *      existing sources, form views and `object-form` blocks alike; its D3
+ *      entry is `ui-form-view-type-layout-only`.
+ *   5. Tree-scoped absence: no form view inside the declared radius still
+ *      authors a retired member, and nothing authors a `formType: 'split'`.
  *
  * On the assertion set: a schema refusal raises a `ZodError` whose issues carry
  * `code` and `path` but no ADR-0112 `status` (that envelope belongs to the
@@ -45,6 +51,7 @@ import { applyConversionsToStoredItem } from '../conversions/stored';
 import type { ConversionNotice } from '../conversions/types';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { defineStack } from '../stack.zod';
+import { ObjectFormPropsSchema, ObjectMasterDetailFormPropsSchema } from './component.zod';
 import { FormSectionSchema, FormViewSchema, VIEW_METADATA_MEMBERS, ViewItemSchema, ViewSchema } from './view.zod';
 
 const CONVERSION_ID = 'form-view-presentation-types-removed';
@@ -76,6 +83,9 @@ const KEY_FIRST_SENTENCE = {
   splitSize:
     "`view.form.splitSize` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it sized the primary pane of a "
     + "`type: 'split'` form, and `split` left the form view `type` in the same release, so no form view draws panes.",
+  splitDirection:
+    "`view.form.splitDirection` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it set the pane orientation "
+    + 'of a split form, and the split form renderer retired in the same release, so no form draws panes.',
   splitResizable:
     "`view.form.splitResizable` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it made the panes of a "
     + "`type: 'split'` form resizable, and `split` left the form view `type` in the same release, so no form view "
@@ -175,7 +185,7 @@ describe('FormView.type — `simple | tabbed | wizard`, default `simple`', () =>
   });
 });
 
-describe('the split-only keys — `pane`, `splitSize`, `splitResizable` — are tombstones on every layout', () => {
+describe('the split-only keys — `pane`, `splitSize`, `splitResizable`, `splitDirection` — are tombstones on every layout', () => {
   it.each(LIVE_TYPES)('`pane` is refused with its prescription on a %s form, in `sections` and in the legacy `groups`', (type) => {
     for (const bucket of ['sections', 'groups'] as const) {
       const r = FormViewSchema.safeParse({ type, [bucket]: [{ label: 'Main', pane: 'primary', fields: ['name'] }] }) as Parse;
@@ -196,8 +206,8 @@ describe('the split-only keys — `pane`, `splitSize`, `splitResizable` — are 
     }
   });
 
-  it.each(['splitSize', 'splitResizable'] as const)('`%s` is refused with its prescription', (key) => {
-    const value = key === 'splitSize' ? 40 : true;
+  it.each(['splitSize', 'splitResizable', 'splitDirection'] as const)('`%s` is refused with its prescription', (key) => {
+    const value = { splitSize: 40, splitResizable: true, splitDirection: 'vertical' }[key];
     for (const type of LIVE_TYPES) {
       const r = FormViewSchema.safeParse({ type, sections: SECTIONS, [key]: value }) as Parse;
       expect(r.success, type).toBe(false);
@@ -207,23 +217,23 @@ describe('the split-only keys — `pane`, `splitSize`, `splitResizable` — are 
     }
   });
 
-  it('the three keys are registered in RETIRED_KEYS_BY_MAJOR[18] under their exact def keys', () => {
+  it('the four keys are registered in RETIRED_KEYS_BY_MAJOR[18] under their exact def keys', () => {
     expect(RETIRED_KEYS_BY_MAJOR[18]).toEqual(expect.arrayContaining([
       'ui/FormSection:pane',
       'ui/FormView:splitSize',
       'ui/FormView:splitResizable',
+      'ui/FormView:splitDirection',
     ]));
   });
 
-  it('STATED BOUNDARY: `splitDirection`, `drawerSide`, `drawerWidth` and `modalSize` stay declared', () => {
+  it('STATED BOUNDARY: `drawerSide`, `drawerWidth` and `modalSize` stay declared', () => {
     // `modalSize` is read by the console's record dialog on every layout; the
-    // other three feed the React `ObjectForm` block contract (`react-blocks.ts`),
-    // whose `formType='split' | 'drawer'` still reads them. They move with the
-    // renderer card, never silently here.
+    // other two feed the React `ObjectForm` block contract (`react-blocks.ts`),
+    // whose `formType='drawer'` container still reads them (#27153 keeps their
+    // enforce-or-remove question for form views).
     const r = FormViewSchema.safeParse({
       type: 'simple',
       sections: SECTIONS,
-      splitDirection: 'vertical',
       drawerSide: 'left',
       drawerWidth: '480px',
       modalSize: 'lg',
@@ -247,6 +257,152 @@ type Notice = Pick<ConversionNotice, 'conversionId' | 'path' | 'from' | 'to'>;
 const brief = (n: ConversionNotice): Notice => ({ conversionId: n.conversionId, path: n.path, from: n.from, to: n.to });
 const ours = (n: ConversionNotice) => n.conversionId === CONVERSION_ID;
 
+/** The `object-form` block's prescriptions (#27159) → their first sentences. */
+const BLOCK_SPLIT_FIRST_SENTENCE =
+  "'split' was removed from the `object-form` `formType` enum in @objectstack/spec 18.3.0 (ADR-0050) — the split "
+  + 'form renderer retired with it, so nothing draws two panes:';
+const blockKeyFirstSentence = (key: string, what: string) =>
+  `\`object-form\` property \`${key}\` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it ${what} of a `
+  + "`formType: 'split'` form, and `split` left the block in the same release, so no form draws panes.";
+const BLOCK_KEYS = {
+  splitDirection: ['set the pane orientation', 'vertical'],
+  splitSize: ['sized the primary pane', 40],
+  splitResizable: ['made the panes resizable', true],
+} as const;
+const BLOCK = { objectName: 'crm_contact' };
+
+describe('the `object-form` block — `split` leaves `formType`, `drawer` / `modal` stay (#27159)', () => {
+  it('the vocabulary is the three layouts plus the two containers the block opens', () => {
+    const formType = ObjectFormPropsSchema.shape.formType as unknown as { unwrap: () => { options: readonly string[] } };
+    expect(formType.unwrap().options).toEqual(['simple', 'tabbed', 'wizard', 'drawer', 'modal']);
+  });
+
+  it("refuses `formType: 'split'` by name, with its prescription", () => {
+    const r = ObjectFormPropsSchema.safeParse({ ...BLOCK, formType: 'split' }) as Parse;
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => i.path.join('.'))).toEqual(['formType']);
+    expect(r.error!.issues[0]!.code).toBe('invalid_value');
+    expect(r.error!.issues[0]!.message.startsWith(BLOCK_SPLIT_FIRST_SENTENCE), r.error!.issues[0]!.message).toBe(true);
+    expect(r.error!.issues[0]!.message).toContain('object-master-detail-form');
+    expect(r.error!.issues[0]!.message).toContain(MIGRATE_SENTENCE);
+  });
+
+  it('CONTROL: `drawer` and `modal` still parse on the block, with the keys their containers read', () => {
+    expect(ObjectFormPropsSchema.safeParse({ ...BLOCK, formType: 'drawer', drawerSide: 'left', drawerWidth: '480px' }).success).toBe(true);
+    expect(ObjectFormPropsSchema.safeParse({ ...BLOCK, formType: 'modal', modalSize: 'lg', modalCloseButton: false }).success).toBe(true);
+    for (const formType of LIVE_TYPES) {
+      expect(ObjectFormPropsSchema.safeParse({ ...BLOCK, formType }).success, formType).toBe(true);
+    }
+  });
+
+  it.each(Object.keys(BLOCK_KEYS) as (keyof typeof BLOCK_KEYS)[])('`%s` is a tombstone on the block, whatever its `formType`', (key) => {
+    const [what, value] = BLOCK_KEYS[key];
+    for (const formType of ['simple', 'tabbed', 'drawer', 'modal'] as const) {
+      const r = ObjectFormPropsSchema.safeParse({ ...BLOCK, formType, [key]: value }) as Parse;
+      expect(r.success, formType).toBe(false);
+      expect(r.error!.issues.map((i) => i.path.join('.'))).toEqual([key]);
+      expect(r.error!.issues[0]!.message.startsWith(blockKeyFirstSentence(key, what)), r.error!.issues[0]!.message).toBe(true);
+      expect(r.error!.issues[0]!.message).toContain(MIGRATE_SENTENCE);
+    }
+  });
+
+  // One section shape serves both blocks (`objectFormSection()`), so the
+  // tombstone and its prescription are the same on each.
+  it.each([
+    ['object-form', ObjectFormPropsSchema, { ...BLOCK, formType: 'tabbed' }],
+    ['object-master-detail-form', ObjectMasterDetailFormPropsSchema, { ...BLOCK, formType: 'tabbed' }],
+  ] as const)('a section `pane` is a tombstone on the `%s` block', (_block, schema, base) => {
+    const r = schema.safeParse({ ...base, sections: [{ label: 'Main', pane: 'primary', fields: ['name'] }] }) as Parse;
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues.filter((i) => i.path.join('.') === 'sections.0.pane');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message.startsWith(
+      'Section property `pane` (on `object-form` and `object-master-detail-form` `sections[]`) was removed in '
+      + "@objectstack/spec 18.3.0 (ADR-0050) — it placed a section in one pane of an `object-form` `formType: 'split'` form",
+    ), issues[0]!.message).toBe(true);
+    expect(issues[0]!.message).toContain(MIGRATE_SENTENCE);
+    // CONTROL: the same section without `pane` parses on this block.
+    expect(schema.safeParse({ ...base, sections: [{ label: 'Main', fields: ['name'] }] }).success).toBe(true);
+  });
+
+  it('the three block keys are registered in RETIRED_KEYS_BY_MAJOR[18]', () => {
+    expect(RETIRED_KEYS_BY_MAJOR[18]).toEqual(expect.arrayContaining([
+      'ui/ObjectFormProps:splitDirection',
+      'ui/ObjectFormProps:splitSize',
+      'ui/ObjectFormProps:splitResizable',
+    ]));
+  });
+
+  it('fails tsc at the authoring site: `split` and the split keys are not in the block input type', () => {
+    const props: z.input<typeof ObjectFormPropsSchema> = {
+      ...BLOCK,
+      // @ts-expect-error — `split` left the block's `formType`.
+      formType: 'split',
+      // @ts-expect-error — `splitSize` is a `retiredKey()` tombstone, typed `never`.
+      splitSize: 40,
+    };
+    expect(ObjectFormPropsSchema.safeParse(props).success).toBe(false);
+  });
+
+  it('a STORED page converts its `object-form` blocks: `split` and the split keys go, `drawer` stays', () => {
+    const row = {
+      name: 'desk',
+      regions: [{
+        name: 'main',
+        components: [
+          { type: 'object-form', properties: { ...BLOCK, formType: 'split', splitDirection: 'vertical', sections: [{ label: 'A', pane: 'primary', fields: ['name'] }] } },
+          { type: 'object-form', properties: { ...BLOCK, formType: 'drawer', drawerSide: 'left' } },
+        ],
+      }],
+    };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) }) as typeof row;
+    expect(notices.filter(ours).map((n) => [n.from, n.path.replace(/^.*?properties/, 'properties')])).toEqual([
+      ['split', 'properties.formType'],
+      ['splitDirection', 'properties.splitDirection'],
+      ['pane', 'properties.sections[0].pane'],
+    ]);
+    expect(out.regions[0]!.components[0]!.properties).toEqual({ ...BLOCK, sections: [{ label: 'A', fields: ['name'] }] });
+    expect(out.regions[0]!.components[1]).toBe(row.regions[0]!.components[1]);
+    expect(ObjectFormPropsSchema.safeParse(out.regions[0]!.components[0]!.properties).success).toBe(true);
+  });
+
+  it('a STORED page converts its `object-master-detail-form` blocks: a section `pane` goes, nothing else', () => {
+    // Through 18.2.0 the shared section shape parsed `pane` on this block too.
+    const details = [{ childObject: 'crm_contact_note', title: 'Notes' }];
+    const row = {
+      name: 'desk',
+      regions: [{
+        name: 'main',
+        components: [
+          {
+            type: 'object-master-detail-form',
+            properties: { ...BLOCK, formType: 'tabbed', sections: [{ label: 'A', pane: 'primary', fields: ['name'] }, { label: 'B', fields: ['email'] }], details },
+          },
+          { type: 'object-master-detail-form', properties: { ...BLOCK, sections: [{ label: 'C', fields: ['name'] }], details } },
+        ],
+      }],
+    };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) }) as typeof row;
+    expect(notices.filter(ours).map((n) => [n.from, n.path.replace(/^.*?properties/, 'properties')])).toEqual([
+      ['pane', 'properties.sections[0].pane'],
+    ]);
+    expect(out.regions[0]!.components[0]!.properties).toEqual({
+      ...BLOCK,
+      formType: 'tabbed',
+      sections: [{ label: 'A', fields: ['name'] }, { label: 'B', fields: ['email'] }],
+      details,
+    });
+    // A block without a `pane` keeps its identity.
+    expect(out.regions[0]!.components[1]).toBe(row.regions[0]!.components[1]);
+    expect(ObjectMasterDetailFormPropsSchema.safeParse(out.regions[0]!.components[0]!.properties).success).toBe(true);
+    // Before the conversion the stored block is refused at the pane.
+    expect(ObjectMasterDetailFormPropsSchema.safeParse(row.regions[0]!.components[0]!.properties).success).toBe(false);
+  });
+});
+
+
 describe(`the D2 conversion ${CONVERSION_ID}`, () => {
   it('a STORED view container replays to a body the strict door accepts, landing on `simple`', () => {
     const row = {
@@ -266,6 +422,7 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
     const out = applyConversionsToStoredItem('view', row, { onNotice: (n) => notices.push(n) }) as typeof row;
     expect(notices.filter(ours).map(brief)).toEqual([
       { conversionId: CONVERSION_ID, path: 'views[0].formViews.beside.type', from: 'split', to: '(removed)' },
+      { conversionId: CONVERSION_ID, path: 'views[0].formViews.beside.splitDirection', from: 'splitDirection', to: '(removed)' },
       { conversionId: CONVERSION_ID, path: 'views[0].formViews.beside.splitSize', from: 'splitSize', to: '(removed)' },
       { conversionId: CONVERSION_ID, path: 'views[0].formViews.beside.sections[0].pane', from: 'pane', to: '(removed)' },
       { conversionId: CONVERSION_ID, path: 'views[0].formViews.beside.sections[1].pane', from: 'pane', to: '(removed)' },
@@ -273,7 +430,7 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
     ]);
     const parsed = ViewSchema.parse(out);
     expect(parsed.formViews?.beside?.type).toBe('simple');
-    expect(parsed.formViews?.beside?.splitDirection).toBe('vertical');
+    expect(parsed.formViews?.beside).not.toHaveProperty('splitDirection');
     expect(parsed.formViews?.quick?.type).toBe('simple');
     expect(parsed.formViews?.quick?.drawerSide).toBe('left');
     // A live layout is the author's and is never touched.
@@ -335,13 +492,15 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
 // own `src/` trees. It judges the AUTHORING SHAPE of a FORM VIEW: a `form`
 // object literal whose own braces hold a retired `type`, a `formViews` entry
 // whose own braces do, and an object literal naming `viewKind: 'form'` beside
-// one. The bound, stated: `type: 'modal'` on its own is an ACTION type and
-// `formType` is the React / page-block prop (#27159), so neither is judged
-// bare; `pane`, `splitSize` and `splitResizable` are not judged either — the
-// `object-form` page block still declares all three, so a bare key is not a
-// form view's. A form view assembled by spread or a computed key, YAML, and
+// one, and — since #27159 — any `formType: 'split'`: `split` left the
+// `object-form` block and the `object-master-detail-form` block alike, so no
+// `formType` anywhere admits it. The bound, stated: `type: 'modal'` on its own
+// is an ACTION type, and `formType: 'drawer' | 'modal'` is a live `object-form`
+// container, so neither is judged bare; the bare keys `pane`, `splitDirection`,
+// `splitSize` and `splitResizable` are not judged either — a key name alone is
+// too generic to read as a form's, and each tombstone refuses it at parse. A form view assembled by spread or a computed key, YAML, and
 // the console under `ui/` (outside this radius) are outside what this walk sees.
-describe('tree-scoped absence: nothing inside the declared radius still authors a retired form view type', () => {
+describe('tree-scoped absence: nothing inside the declared radius still authors a retired form view type or `formType: \'split\'`', () => {
   const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const THIS_FILE = path.relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/');
@@ -353,6 +512,8 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   const SKIPPED_DIRS = new Set(['node_modules', 'dist', '.turbo', '.cache', '.objectstack', 'coverage', '.next', '.source']);
 
   const RETIRED = String.raw`["']?type["']?\s*:\s*["'](?:split|drawer|modal)["']`;
+  /** A `formType` naming the retired `split` — no block admits it (#27159). */
+  const FORM_TYPE_SPLIT = /["']?\bformType["']?\s*:\s*["']split["']/;
   /** A `form` slot whose own braces hold a retired `type`. */
   const FORM_SLOT = new RegExp(String.raw`["']?\bform["']?\s*:\s*\{[^{}]*?` + RETIRED);
   /** An object literal naming `viewKind: 'form'` with a retired `type` in the same braces. */
@@ -388,7 +549,7 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   const stripInlineCode = (text: string): string => text.replace(/`[^`\n]*`/g, '');
   const judge = (raw: string): boolean => {
     const text = stripInlineCode(raw);
-    return FORM_SLOT.test(text) || FORM_ITEM.some((re) => re.test(text)) || formViewsEntries(text);
+    return FORM_SLOT.test(text) || FORM_TYPE_SPLIT.test(text) || FORM_ITEM.some((re) => re.test(text)) || formViewsEntries(text);
   };
 
   /**
@@ -426,6 +587,8 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     expect(judge('{ "name": "crm_lead.peek", "viewKind": "form", "type": "modal" }')).toBe(true);
     expect(judge("{ type: 'split', object: 'crm_lead', viewKind: 'form' }")).toBe(true);
     expect(judge("Prose.\n\n```ts\nform: { type: 'split' }\n```\n")).toBe(true);
+    expect(judge("properties: { formType: 'split', objectName: 'crm_lead' }")).toBe(true);
+    expect(judge('{ "type": "object-form", "properties": { "formType": "split" } }')).toBe(true);
     // Neighbours that must NOT match.
     expect(judge("form: { type: 'tabbed', sections: [] },")).toBe(false);
     expect(judge("{ name: 'open_detail', type: 'modal', target: 'detail_page' }")).toBe(false);
@@ -433,6 +596,7 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     expect(judge("formViews: { quick: { type: 'simple', sections: [{ fields: [{ field: 'a', type: 'modal' }] }] } }")).toBe(false);
     expect(judge("{ viewKind: 'list', type: 'split' }")).toBe(false);
     expect(judge("a form once wrote `form: { type: 'modal' }`.")).toBe(false);
+    expect(judge("a block once wrote `formType: 'split'`.")).toBe(false);
   });
 
   it('no form view authoring a retired member survives inside the declared radius', () => {
