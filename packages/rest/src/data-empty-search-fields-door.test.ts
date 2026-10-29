@@ -19,12 +19,21 @@
  * `query-expression-conformance.test.ts`. This file is the door-level half:
  * the status and `code` each door answers, the spelling it names, that the
  * driver was never asked, and the controls answering exactly as before.
+ *
+ * [#27683] The body's published schema (`FindDataRequestSchema`) now declares
+ * the override the normalizer enforces, so `POST /data/:object/query` refuses
+ * an empty `searchFields` / `$searchFields` / `search.fields` where every other
+ * malformed body is refused: at the schema, `400 VALIDATION_FAILED` naming
+ * `query.KEY`, as an empty `select` is (`data-empty-projection-count-door.test.ts`).
+ * The parity test at the end holds the schema door and the protocol door to
+ * one refused set.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { FindDataRequestSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -52,10 +61,17 @@ const REFUSED_GET: ReadonlyArray<readonly [string, Record<string, string>, strin
   ['searchFields= blank, unprefixed (the card)', { searchFields: '' }, 'searchFields'],
 ];
 
-/** name · the `POST /data/:object/query` body beside `search` · the key the refusal names. */
-const REFUSED_POST: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
-  ['searchFields: []', { search: TERM, searchFields: [] }, 'searchFields'],
-  ['object-form search.fields: []', { search: { query: TERM, fields: [] } }, 'search'],
+/**
+ * name · the `POST /data/:object/query` body · the `fields[0].field` the body
+ * schema's refusal names. [#27683] Refused at the schema, `VALIDATION_FAILED`;
+ * they were the door's `VALIDATION_ERROR` before.
+ */
+const REFUSED_POST_AT_SCHEMA: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
+  ['searchFields: []', { search: TERM, searchFields: [] }, 'query.searchFields'],
+  ['$searchFields: ""', { search: TERM, $searchFields: '' }, 'query.$searchFields'],
+  ['$searchFields: " , "', { search: TERM, $searchFields: ' , ' }, 'query.$searchFields'],
+  ['$searchFields: []', { search: TERM, $searchFields: [] }, 'query.$searchFields'],
+  ['object-form search.fields: []', { search: { query: TERM, fields: [] } }, 'query.search.fields'],
 ];
 
 function createMockServer() {
@@ -78,6 +94,7 @@ function makeRes() {
 describe('[#27484] a searchFields override naming no field on the Data API doors — sqlite', () => {
   let engine: ObjectQL;
   let driver: any;
+  let protocol: ObjectStackProtocolImplementation;
   const reads = { n: 0 };
   let list: (query: Record<string, string>) => Promise<{ status: number; body: any }>;
   let query: (body: Record<string, unknown>) => Promise<{ status: number; body: any }>;
@@ -100,7 +117,7 @@ describe('[#27484] a searchFields override naming no field on the Data API doors
       driver[verb] = (o: string, ...rest: unknown[]) => { if (o === OBJECT) reads.n += 1; return real(o, ...rest); };
     }
 
-    const protocol = new ObjectStackProtocolImplementation(engine as any);
+    protocol = new ObjectStackProtocolImplementation(engine as any);
     const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
     rest.registerRoutes();
@@ -147,13 +164,13 @@ describe('[#27484] a searchFields override naming no field on the Data API doors
     expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
   });
 
-  it('POST query: an empty override, either slot, is 400 VALIDATION_ERROR naming the key — no read', async () => {
+  it("POST query: an empty override, either slot, is the schema door's 400 VALIDATION_FAILED naming the key — no read", async () => {
     const before = reads.n;
-    for (const [name, body, param] of REFUSED_POST) {
+    for (const [name, body, field] of REFUSED_POST_AT_SCHEMA) {
       const res = await query(body);
       expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
-      expect(res.body.code, name).toBe('VALIDATION_ERROR');
-      expect(res.body.error, name).toContain(`Query parameter '${param}' names no field`);
+      expect(res.body.code, name).toBe('VALIDATION_FAILED');
+      expect(res.body.fields?.[0]?.field, name).toBe(field);
     }
     expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
   });
@@ -189,5 +206,43 @@ describe('[#27484] a searchFields override naming no field on the Data API doors
     const exportedNarrowed = await exportCsv({ searchFields: 'label' });
     expect(exportedNarrowed.status).toBe(200);
     expect(exportedNarrowed.rows).toEqual([]);
+  });
+
+  /**
+   * [#27683] The schema door (`FindDataRequestSchema`, which `POST
+   * /data/:object/query` parses its body with) and the protocol door
+   * (`findData`, which every other Data API door reaches without that schema)
+   * refuse the same set as naming no field, probe for probe. A blank member
+   * is outside it on both sides: the schema admits it and the door looks it
+   * up, refusing it as an unknown field.
+   */
+  it('parity: the body schema refuses exactly the values the protocol door refuses as naming no field', async () => {
+    const STRINGS = ['', '   ', ',', ' , ', ',,', 'label', ' label , note ', 'label,,'];
+    const LISTS = [[], [''], ['label'], ['label', 'note']];
+    const probes: Array<[string, Record<string, unknown>]> = [
+      ...[...STRINGS, ...LISTS].map((v): [string, Record<string, unknown>] => [`$searchFields: ${JSON.stringify(v)}`, { search: TERM, $searchFields: v }]),
+      ...LISTS.map((v): [string, Record<string, unknown>] => [`searchFields: ${JSON.stringify(v)}`, { search: TERM, searchFields: v }]),
+      ...LISTS.map((v): [string, Record<string, unknown>] => [`search.fields: ${JSON.stringify(v)}`, { search: { query: TERM, fields: v } }]),
+    ];
+    const verdicts: string[] = [];
+    for (const [name, bag] of probes) {
+      const schemaRefuses = !FindDataRequestSchema.safeParse({ object: OBJECT, query: { object: OBJECT, ...bag } }).success;
+      // The protocol door's answer: served, or the refusal's code.
+      let door = 'served';
+      try {
+        await protocol.findData({ object: OBJECT, query: JSON.parse(JSON.stringify(bag)) } as any);
+      } catch (e: any) {
+        door = e?.code === 'VALIDATION_ERROR' && /names no field/.test(String(e?.message)) ? 'names no field' : String(e?.code);
+      }
+      expect(schemaRefuses, `${name}: schema ${schemaRefuses ? 'refuses' : 'admits'}, door ${door}`).toBe(door === 'names no field');
+      verdicts.push(`${name} → ${door}`);
+    }
+    // Neither side is vacuous: 8 refused as naming no field, every other probe
+    // served, except the blank member the door refuses by name.
+    expect(verdicts.filter((v) => v.endsWith('→ names no field'))).toHaveLength(8);
+    expect(verdicts.filter((v) => v.endsWith('→ served'))).toHaveLength(9);
+    expect(verdicts.filter((v) => v.endsWith('→ INVALID_FIELD'))).toEqual([
+      '$searchFields: [""] → INVALID_FIELD', 'searchFields: [""] → INVALID_FIELD', 'search.fields: [""] → INVALID_FIELD',
+    ]);
   });
 });

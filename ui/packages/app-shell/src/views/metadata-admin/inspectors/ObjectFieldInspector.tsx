@@ -50,6 +50,7 @@
 import * as React from 'react';
 import {
   FieldSchema,
+  isAggregateCompatibleWithFieldType,
   isBodyTableRelationship,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
@@ -2562,6 +2563,20 @@ function SummaryConfigFields({
     () => childFields.filter((f) => !f.hidden).map((f) => ({ value: f.name, label: f.label, hint: f.type })),
     [childFields],
   );
+  // objectstack#27461 — the child field to aggregate is offered only where the
+  // spec accepts it for the chosen function: its aggregate × field-type rule
+  // (`isAggregateCompatibleWithFieldType`), never a list kept here. Before a
+  // function is picked, a field any value-reading function accepts. The
+  // filter rows below still offer every child field: a filter reads any.
+  const aggregandOptions: InspectorComboOption[] = React.useMemo(() => {
+    const accepts = (type: string) =>
+      fn
+        ? isAggregateCompatibleWithFieldType(fn, type)
+        : SUMMARY_FUNCTIONS.some((f) => summaryFunctionReadsField(f) && isAggregateCompatibleWithFieldType(f, type));
+    return childFields
+      .filter((f) => !f.hidden && accepts(f.type))
+      .map((f) => ({ value: f.name, label: f.label, hint: f.type }));
+  }, [childFields, fn]);
   // The FK back to this parent lives on a child relation field.
   const relationshipOptions: InspectorComboOption[] = React.useMemo(
     () =>
@@ -2618,7 +2633,7 @@ function SummaryConfigFields({
           label={tr('designer.field.summary.field')}
           value={typeof ops.field === 'string' ? ops.field : ''}
           onCommit={(v) => patchOps({ field: v || undefined })}
-          options={aggregateOptions}
+          options={aggregandOptions}
           loading={loading}
           placeholder={fieldPlaceholder}
           searchPlaceholder={tr('designer.field.lookup.searchFields')}
