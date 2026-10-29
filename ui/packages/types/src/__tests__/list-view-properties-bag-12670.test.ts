@@ -406,7 +406,7 @@ describe('the spec\'s list view checks run in the bag, with the spec\'s own issu
 /* ── 6. The node: flat members, runtime slots, content channels ───────────── */
 
 describe('the node around the bag (objectui#12670)', () => {
-  it.each(['columns', 'filter', 'kanban', 'options', 'showSearch'] as const)(
+  it.each(['columns', 'filter', 'kanban', 'showSearch'] as const)(
     'a flat `%s` is refused on both faces, by name, toward the bag',
     (key) => {
       for (const [face, parse] of FACES) {
@@ -416,6 +416,18 @@ describe('the node around the bag (objectui#12670)', () => {
       }
     },
   );
+
+  it('a flat `options` is refused on both faces with the retired bag\'s own text, NOT pointed at `properties.options` (objectstack#25923)', () => {
+    // It was a row of the table above. The bag is retired on the list view, so
+    // `properties.options` is no home to point an author at: the refusal is the
+    // spec tombstone's, which names the top-level blocks instead.
+    for (const [face, parse] of FACES) {
+      const found = at(issuesOf(parse({ ...RULED, options: [] })), 'options');
+      expect(found.map((i) => i.code), face).toEqual(['invalid_type']);
+      expect(found[0].message, face).toMatch(/^A list view's `options` bag was removed in @objectstack\/spec /);
+      expect(found[0].message, face).not.toContain('→ `properties.options`');
+    }
+  });
 
   it('a node-level `label` is kept on both faces, as the spec\'s page component keeps it', () => {
     for (const [face, parse] of FACES) {

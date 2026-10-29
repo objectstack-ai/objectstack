@@ -140,11 +140,17 @@ function sameCurrency(a: MoneyCurrency, b: MoneyCurrency): boolean {
   return a.mode === b.mode;
 }
 
-/** A field's currency, read through the schema a currency field is parsed with — or `null` when it does not parse. */
+/**
+ * A field's currency, read through the schema a currency field is parsed with — or `null` when it does not parse.
+ * A `fixed` config with no code does not parse (the schema refuses it rather than filling in a code), so the
+ * `defaultCurrency` guard below only narrows the type the refinement already guarantees.
+ */
 function currencyOf(config: unknown): MoneyCurrency | null {
   const parsed = CurrencyConfigSchema.safeParse(config ?? {});
   if (!parsed.success) return null;
-  if (parsed.data.currencyMode === 'fixed') return { mode: 'fixed', code: parsed.data.defaultCurrency };
+  if (parsed.data.currencyMode === 'fixed') {
+    return parsed.data.defaultCurrency === undefined ? null : { mode: 'fixed', code: parsed.data.defaultCurrency };
+  }
   // [ADR-0144 D2] A `record`-mode amount is in the currency its sibling code
   // field holds — never the tenant default a `dynamic` stamp would claim. The
   // schema requires the pointer under `record`, so a parsed config carries it.

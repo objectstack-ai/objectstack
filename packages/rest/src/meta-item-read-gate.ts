@@ -396,7 +396,9 @@ export interface DocsAudience {
     /**
      * `book` resolved over `docs`, narrowed to the entries this caller may read
      * — exactly the body `GET /meta/book/:name/tree` serves once the book's own
-     * audience has admitted the caller. `canRead` is a {@link docReader} over
+     * audience has admitted the caller. Its *Uncategorized* group holds only
+     * the docs NO book of this audience claims (#27091), so a sibling book's
+     * pages never land there. `canRead` is a {@link docReader} over
      * the same `docs` when the caller already holds one.
      */
     readableTree(
@@ -702,7 +704,10 @@ export async function resolveDocsAudience(
         admitsBook: (book: Book) => audienceAllows(book?.audience, caller),
         docReader,
         readableTree: (book, docs, canRead) => {
-            const tree = resolveBookTree(book, docs, book._packageId);
+            // [#27091] Every book this audience was built over judges the
+            // *Uncategorized* catch-all, so a doc a sibling book places is not
+            // this book's orphan (ADR-0046 §6.4).
+            const tree = resolveBookTree(book, docs, book._packageId, books);
             // The fast path serves the tree whole — no entry can fail an
             // audience every doc passes, and the empty-group drop below is
             // part of the narrowing, not of the tree.

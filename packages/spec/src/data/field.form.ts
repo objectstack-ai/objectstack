@@ -97,8 +97,9 @@ export const fieldForm = defineForm({
         // values, so it takes the `object.form.ts` `access` / `lifecycle` face: a
         // composite whose sub-rows are DECLARED, so their labels and help text
         // reach the translation catalogs (a schema-derived sub-field never does).
-        // Schema defaults (`dynamic`, `CNY`) are placeholders the renderer never
-        // writes on mount, so an untouched composite stays absent.
+        // The schema default (`dynamic`) is a placeholder the renderer never
+        // writes on mount, so an untouched composite stays absent. A code has no
+        // default (#27157): `fixed` without one is refused, not filled in.
         // #22727 — a formula returning `currency` carries its currency in this
         // same key, so the row shows for it too; the gate is the returnType
         // row's own value, not a second control.
@@ -115,7 +116,7 @@ export const fieldForm = defineForm({
             ] },
             // ADR-0144 D2 — the record-mode pointer.
             { field: 'currencyField', type: 'text', helpText: 'Record mode only, and required there: the field on this object holding each record\'s ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code.' },
-            { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Defaults to CNY. Not read in dynamic mode.' },
+            { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode.' },
           ],
         },
         // Every `visibleWhen` below is a MEANINGFULNESS gate, not a parse gate:
@@ -392,7 +393,11 @@ export const fieldForm = defineForm({
       columns: 2,
       fields: [
         // Database & Performance
-        { field: 'externalId', colSpan: 1, helpText: 'Mark as external ID for upsert operations' },
+        // No `externalId` row (#26674). `field.externalId` is graded `dead`
+        // (liveness/field.json): no upsert, import or seed reads it, so a
+        // switch here only invited an author to rely on it. The schema still
+        // parses the key; upsert matching lives on a seed dataset's
+        // `externalId` and an import mapping's `upsertKey`.
         // #19332 G1b — `storage` is a strict object with one boolean, so it takes
         // the same declared-composite face as `currencyConfig` above. The one
         // contradiction the schema refuses (`notNull` beside `requiredWhen`) is

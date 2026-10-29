@@ -74,8 +74,16 @@ describe('currencyMode decides whether currencyConfig.defaultCurrency is read (o
     // meaning "whatever the spec materializes for an empty config".
     const parsed = CurrencyConfigSchema.parse({});
     expect(parsed.currencyMode, 'the spec defaults an empty config to dynamic').toBe('dynamic');
-    expect(parsed.defaultCurrency, 'the spec fills in a code of its own').not.toBe(TENANT);
+    expect(parsed.defaultCurrency, 'the spec fills in no code (#27157)').toBeUndefined();
     expect(resolveFieldCurrency({ currencyConfig: parsed }, TENANT)).toBe('USD');
+  });
+
+  it('record: the field names no currency of its own, so nothing supplies one, the tenant default included', () => {
+    const parsed = CurrencyConfigSchema.parse({ currencyMode: 'record', currencyField: 'currency_code' });
+    expect(resolveFieldCurrency({ currencyConfig: parsed }, TENANT)).toBeUndefined();
+    expect(resolveFieldCurrency({ currencyConfig: { ...parsed, defaultCurrency: 'EUR' } }, TENANT)).toBeUndefined();
+    expect(resolveFieldCurrency({ defaultCurrency: 'EUR', currencyConfig: parsed }, TENANT)).toBeUndefined();
+    expect(resolveFieldCurrency({ currencyConfig: parsed })).toBeUndefined();
   });
 
   it('parsed-empty: the materialized shape as a renderer receives it', () => {

@@ -239,6 +239,41 @@ describe('getMetaItem — single stored read is canonical (#3903)', () => {
     });
 });
 
+// [#25923] A protocol-18 list view row written while the overlay still took
+// the legacy `options` bag (17.5.0 to 18.2.0 judged it per kind and stored it
+// as sent). The bag is retired now; `list-view-options-bag-folded` is
+// `retiredFromLoadPath`, so only this stored seam replays it.
+const legacyBagViewRow = {
+    type: 'view',
+    name: 'showcase_task.work_map',
+    metadata: {
+        name: 'showcase_task.work_map',
+        object: 'showcase_task',
+        viewKind: 'list',
+        label: 'Work Map',
+        type: 'map',
+        columns: ['title', 'location'],
+        map: { locationField: 'location' },
+        options: { map: { locationField: 'address', titleField: 'legacy_title' } },
+    },
+};
+
+describe('[#25923] a stored list view\'s `options` bag is served folded onto the top-level block', () => {
+    it('the single and the list read move `options.KIND` to `KIND`, the top-level value winning per key', async () => {
+        const { engine, rows } = makeStubEngine([legacyBagViewRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const single: any = await protocol.getMetaItem({ type: 'view', name: 'showcase_task.work_map' });
+        const listed = ((await protocol.getMetaItems({ type: 'view' })).items as any[])
+            .find((i) => i.name === 'showcase_task.work_map');
+        for (const item of [single.item, listed]) {
+            expect(item.map).toEqual({ locationField: 'location', titleField: 'legacy_title' });
+            expect('options' in item).toBe(false);
+        }
+        // The row at rest is not rewritten by the reads.
+        expect(JSON.parse(rows[0]!.metadata).options).toEqual(legacyBagViewRow.metadata.options);
+    });
+});
+
 describe('loadMetaFromDb — boot hydration converts, diagnoses, never drops (#3903)', () => {
     it('registers the CONVERTED body and reports invalid: 0 for chain-owned history', async () => {
         const { engine, registered } = makeStubEngine([legacyObjectRow, legacyActionRow]);
@@ -307,6 +342,56 @@ describe('a stored select with no option source — read and named, never droppe
         const res = await protocol.loadMetaFromDb();
         expect(res).toEqual({ loaded: 1, errors: 0, invalid: 1, storeUnavailable: false });
         expect(registered.some((r) => r.kind === 'object' && r.body?.name === 'crm_ticket')).toBe(true);
+    });
+});
+
+// ── the newTabUrl path door's disposition for a STORED row ─────────────────────
+//
+// `ActionSchema.newTabUrl` refuses a value that does not start with `/`: it is
+// a path on this backend, which the console prefixes with the backend origin.
+// `saveMetaItem` stores the authored body verbatim, so a row saved before the
+// refusal can hold an absolute URL. No conversion can derive a backend path
+// from an external URL, so the row keeps its bytes and is READ AND NAMED:
+// served with `_diagnostics` locating `newTabUrl`, counted `invalid` at boot
+// and still registered (its next save is refused 422 by the same schema).
+const absoluteNewTabUrlRow = {
+    type: 'action',
+    name: 'export_invoice',
+    metadata: {
+        name: 'export_invoice', label: 'Export', type: 'script', objectName: 'crm_invoice',
+        target: 'exportInvoice', opensInNewTab: true,
+        newTabUrl: 'https://example.com/export/{recordId}',
+    },
+};
+
+describe('a stored action whose newTabUrl is an absolute URL — read and named, never rewritten', () => {
+    it('getMetaItem serves the row unchanged with _diagnostics naming newTabUrl', async () => {
+        const { engine } = makeStubEngine([absoluteNewTabUrlRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res: any = await protocol.getMetaItem({ type: 'action', name: 'export_invoice' });
+        expect(res.item.newTabUrl).toBe('https://example.com/export/{recordId}');
+        expect(res.item._diagnostics?.valid).toBe(false);
+        expect(res.item._diagnostics.errors.map((e: { path?: string }) => e.path)).toContain('newTabUrl');
+    });
+
+    it('boot hydration counts it invalid and STILL registers it with the stored value', async () => {
+        const { engine, registered } = makeStubEngine([absoluteNewTabUrlRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.loadMetaFromDb();
+        expect(res).toEqual({ loaded: 1, errors: 0, invalid: 1, storeUnavailable: false });
+        const action = registered.find((r) => r.kind === 'item' && r.type === 'action')!;
+        expect(action.body.newTabUrl).toBe('https://example.com/export/{recordId}');
+    });
+
+    it('CONTROL: the same row with a backend path loads valid', async () => {
+        const pathRow = {
+            ...absoluteNewTabUrlRow,
+            metadata: { ...absoluteNewTabUrlRow.metadata, newTabUrl: '/export/{recordId}' },
+        };
+        const { engine } = makeStubEngine([pathRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.loadMetaFromDb();
+        expect(res).toEqual({ loaded: 1, errors: 0, invalid: 0, storeUnavailable: false });
     });
 });
 

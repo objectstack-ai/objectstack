@@ -31,7 +31,7 @@
  * pointer or a measure — so the `derives(kind)` rule (objectui#10380) has
  * nothing to gate, and a whitelisted kind with no declared block reaches
  * `ListView` with no block at all, exactly as before. How the block then
- * renders (`schema.tree || schema.options.tree`, and the chart binding) is
+ * renders (`schema.tree || schema.tree`, and the chart binding) is
  * `plugin-list`'s half, pinned there, and not re-pinned here.
  *
  * ## Why the schema is captured rather than rendered
@@ -95,7 +95,7 @@ const VIEW_COLUMNS = ['name', 'status', 'amount'];
 const TREE_BLOCK = { parentField: 'parent_id' };
 /** A spec-valid ADR-0021 chart block (the spec's view schema refuses the legacy axes). */
 const CHART_BLOCK = { dataset: 'ds_duly_task', dimensions: ['status'], values: ['amount'] };
-/** A legacy `options` bag block, distinct from the top-level ones so a crossed wire fails. */
+/** A retired `options` bag block, distinct from the top-level ones so a crossed wire fails. */
 const BAG_TREE = { parentField: 'legacy_parent' };
 
 function objectWith(view: Record<string, unknown>) {
@@ -184,23 +184,24 @@ describe("InterfaceListPage relays its source view's tree and chart blocks (obje
     expect(schema.chart).toEqual(CHART_BLOCK);
   });
 
-  it("PRECEDENCE: a row carrying both its own block and the legacy bag's sends both, and `ListView` lays the block over the bag", async () => {
-    // The bag is forwarded verbatim under `options` (objectui#10380); the
-    // block goes out at the top level, the slot `ListView` reads first.
+  it("RETIRED (objectstack#25923): a row carrying its own block and a legacy bag sends the block alone, and no `options`", async () => {
+    // The list view's `options` bag is retired: the server folds a stored bag
+    // onto the top-level blocks before the row is served, so the page relays
+    // the block and never a bag (it forwarded one verbatim under objectui#10380).
     const schema = await relayed(
       { type: 'tree', tree: TREE_BLOCK, options: { tree: BAG_TREE } },
       whitelisting('tree'),
     );
     expect(schema.tree).toEqual(TREE_BLOCK);
-    expect(schema.options?.tree).toEqual(BAG_TREE);
+    expect('options' in schema).toBe(false);
   });
 
-  it('CONTROL: a row whose only tree config is the legacy bag sends no top-level block — the bag rules alone', async () => {
-    // Green on the base by construction. What it fails is a relay that writes
-    // `tree: undefined` or an empty block, which would read as a second source.
+  it('CONTROL: a row whose only tree config is a legacy bag sends neither a block nor the bag', async () => {
+    // What it fails is a relay that lifts the bag's block to the top level (the
+    // fold is the server's, on stored rows) or still forwards `options`.
     const schema = await relayed({ type: 'tree', options: { tree: BAG_TREE } }, whitelisting('tree'));
     expect('tree' in schema).toBe(false);
-    expect(schema.options?.tree).toEqual(BAG_TREE);
+    expect('options' in schema).toBe(false);
   });
 
   it('CONTROL: no page-derived default exists for either kind — a whitelisted kind with no declared block gets no invented one', async () => {

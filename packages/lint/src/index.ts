@@ -568,6 +568,19 @@ export type {
   ObjectFieldRefSeverity,
 } from './validate-object-field-refs.js';
 
+// [#27069] Related-list names: each `relatedLists` entry and field-group
+// `relatedList` must match an inbound lookup / master_detail relationship.
+// `error`, the verdict `defineStack` gives, and on the runtime publish door,
+// which runs no `defineStack`.
+export {
+  validateRelatedListRefs,
+  RELATED_LIST_REF_UNKNOWN,
+} from './validate-related-list-refs.js';
+export type {
+  RelatedListRefFinding,
+  RelatedListRefOptions,
+} from './validate-related-list-refs.js';
+
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export { validateActionDispatchContract, ACTION_DISPATCH_CONTRACT_MISMATCH } from './validate-action-dispatch-contract.js';
 export type { ActionDispatchContract, ActionDispatchContractFinding } from './validate-action-dispatch-contract.js';

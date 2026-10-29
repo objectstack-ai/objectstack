@@ -79,9 +79,9 @@
  *     repository's own definition of a released family, read from the file for
  *     the reason `check-changeset-presence.mjs` gives — a hand-written list
  *     misses `@object-ui/console` under `apps/`) MINUS `private: true`. The
- *     subtraction is load-bearing and not cosmetic: `packages/vscode-extension`
- *     is named `object-ui`, IS in the fixed group (changesets versions it) and
- *     is `private`, so npm never receives it.
+ *     subtraction is load-bearing and not cosmetic: a private package may sit
+ *     in the fixed group (changesets versions it) while npm never receives it,
+ *     as the VS Code extension did until objectstack#25910 removed it.
  *   - THE FILE LIST comes from `npm pack --dry-run --json`, not from a walk of
  *     `dist/` on disk. Those differ, and the tarball is the thing a consumer
  *     installs: a package's `files` field, its `.npmignore` and npm's own always
@@ -280,8 +280,8 @@ export function discoverPublishedPackages(root, released = readReleaseGroup(root
       if (!existsSync(manifestPath)) continue;
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
       // `private` is checked BEFORE release-group membership is trusted:
-      // `object-ui` (packages/vscode-extension) is in the fixed group and is
-      // private, so changesets versions it and npm never sees it.
+      // a private package may sit in the fixed group, so changesets versions it
+      // and npm never sees it.
       if (!manifest.name || !released.has(manifest.name) || manifest.private === true) continue;
       packages.push({ name: manifest.name, dir, manifest });
     }

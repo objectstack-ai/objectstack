@@ -22,6 +22,10 @@
  * spread: a declared key still travels, an arbitrary undeclared one does not,
  * and the top-level `style` namespace is never written.
  *
+ * objectstack#25923 — the list view's `options` bag is retired, so the block is
+ * the view's own top-level `map` (its one spelling) and these mount it there;
+ * the whitelist is the same `pickFlatMapConfig` step.
+ *
  * objectui#9950 — `style` is no longer DROPPED either. It is delivered under
  * its flat spelling `mapStyle`, which is what `ObjectMap.getMapConfig` reads
  * (`schema.mapStyle || schema.map?.style`) and a declared member of
@@ -76,14 +80,14 @@ const BASE = {
   columns: ['name'],
 } as const;
 
-/** Mount ListView on a `map`-typed view and return the schema handed to `object-map`. */
+/** Mount ListView on a `map`-typed view declaring `map` and return the schema handed to `object-map`. */
 async function mapSchemaFor(mapOptions: Record<string, unknown>) {
   captured = [];
   const dataSource = makeDataSource() as any;
   render(
     <SchemaRendererProvider dataSource={dataSource}>
       <ListView
-        schema={{ ...BASE, options: { map: mapOptions } } as never}
+        schema={{ ...BASE, map: mapOptions } as never}
         dataSource={dataSource}
       />
     </SchemaRendererProvider>,
@@ -92,7 +96,7 @@ async function mapSchemaFor(mapOptions: Record<string, unknown>) {
   return captured[captured.length - 1].schema as Record<string, unknown>;
 }
 
-describe('ListView flattens `options.map` through a whitelist, not a raw spread (objectui#5177)', () => {
+describe('ListView flattens the `map` block through a whitelist, not a raw spread (objectui#5177)', () => {
   beforeEach(() => {
     captured = [];
   });

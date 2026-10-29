@@ -18,14 +18,11 @@ test.describe('Console Rendering', () => {
       if (msg.type() === 'error') {
         const text = msg.text();
         // Ignore benign errors (e.g. favicon 404, service-worker registration,
-        // MSW mock messages, and network errors for optional resources)
+        // and network errors for optional resources). The Console ships no
+        // mock service worker, so no MSW message is excused here.
         if (
           text.includes('favicon') ||
           text.includes('service-worker') ||
-          text.includes('mockServiceWorker') ||
-          text.includes('MSW') ||
-          text.includes('Mock Service Worker') ||
-          text.includes('[MSW]') ||
           text.includes('Failed to load resource') ||
           text.includes('net::ERR_') ||
           text.includes('Failed to connect to ObjectStack server')

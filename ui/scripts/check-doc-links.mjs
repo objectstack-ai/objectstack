@@ -286,7 +286,7 @@
  * `/docs/layout`, twice (real directories with no index page, so no route);
  * `/docs/types` and `/examples` (neither exists); and two disk paths that were
  * simply absent (a `docs/SHADCN_SYNC.md` that has never existed, and a
- * per-package `LICENSE` that `packages/vscode-extension` does not have).
+ * per-package `LICENSE` the VS Code extension package never had).
  *
  * All eleven were repointed at a page or path that does exist, in the same PR as
  * this row — none had to be dropped, unlike #3603's 9, where 6 assumed a whole

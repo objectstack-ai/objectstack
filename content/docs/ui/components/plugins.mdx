@@ -1,0 +1,386 @@
+---
+title: "Plugin blocks — component reference"
+navTitle: "Plugin Blocks"
+description: "The object-bound data blocks: grids, lists, forms, boards, calendars, charts, maps and more."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Generated from sdui.manifest.json by node scripts/gen-sdui-reference.mjs; change the manifest or the generator, never this page. */}
+
+These blocks come from the view plugins. Most are bound to an object, through their own `objectName` input or the node's `dataSource` binding, and draw its records.
+
+<Callout type="info">
+This page is generated from the repo-root `sdui.manifest.json`, the component manifest CI
+regenerates from the renderer registry. Regenerate it with
+`node scripts/gen-sdui-reference.mjs`; `node scripts/gen-sdui-reference.mjs --check` fails when it is stale.
+</Callout>
+
+## `object-calendar` [#object-calendar]
+
+Namespace `plugin-calendar`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-calendar` schema refuses a block that declares none of them, unless the node's `dataSource.object` names the object, which then lands on this key. |
+| `calendar` | `object` |  | startDateField, endDateField, titleField, colorField |
+| `filter` | `array` |  | Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, narrowing the records the calendar fetches. Lowered to `$filter` on the query. |
+| `sort` | `array` |  | Sort order in `[{ field, order }]` form, ordering the records the calendar fetches. Lowered to `$orderby` on the query. |
+| `defaultView` | `enum`: `month`, `week`, `day` |  | The grid the calendar opens on. A narrow viewport downgrades `day` to `month`; the author’s choice is otherwise honoured on first render. |
+| `locale` | `string` |  | BCP-47 tag used to format the dates and times this calendar renders. A tag `Intl` refuses is dropped — the same answer as an absent key — rather than passed through to throw out of render. |
+| `data` | `array` |  | Pre-fetched records drawn as-is, IN PLACE OF the calendar’s own query — `objectName`, `filter` and `sort` are then unused and `staticData` is never reached. Each member is a RECORD, read for the fields the `calendar` config names plus its `id`; a member with no value in the start field is counted in the unscheduled area rather than dropped. |
+| `staticData` | `array` |  | Inline records, read SECOND on the record-source ladder: an authored `data` wins and this key is then never reached, while `objectName` is read AFTER it, so a calendar carrying both draws these rows and issues no query. Members are records read exactly as `data`’s are. |
+| `loading` | `boolean` |  | External loading state, honoured ONLY alongside an array `data`: it then replaces the calendar with its loading placeholder. On a calendar fed by `staticData` or by `objectName` it is dropped, because that calendar owns its own loading state. |
+| `navigation` | `object` |  | What an event click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is `drawer` (the overlay), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `drawer` default. `page` opens the record page through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, there is no record page to open and the click opens nothing. `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, `preventNavigation: true` opens nothing, and `size` sets the overlay width. An overlay mode wins over a parent view’s click handler; any other mode hands the click to it. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-chart` [#object-chart]
+
+Namespace `plugin-charts`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | Object this chart aggregates. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline `data`, the chart shows a hint naming this key instead of an empty frame. |
+| `data` | `array` |  | Optional static data |
+| `filter` | `array` |  | — |
+| `aggregate` | `object` |  | Aggregation config: \{ field, function, groupBy \} |
+| `drillDown` | `object` |  | Segment drill config: \{ enabled?, filter?, title?, target?: 'drawer' \| 'dialog', columns?, maxRows? \}. Present = on; \{\} is enough. Clicking a segment opens the underlying records filtered by the clicked category. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `dashboard` [#dashboard]
+
+Namespace `plugin-dashboard`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `widgets` | `array` |  | The widget tree — the spec’s DashboardWidget[]. Each widget binds a dataset (ADR-0021) and may carry a layout (\{ x, y, w, h \}) and filterBindings. When omitted the dashboard renders an empty grid. |
+| `label` | `string` \| `object` |  | Display name, shown as the header title when `header` is declared — a string or an inline per-locale map such as \{ en, "zh-CN" \}. Spec-canonical spelling; the legacy `title` spelling is not authoring surface. |
+| `description` | `string` \| `object` |  | Header description shown under the title — a string or an inline per-locale map. Rendered only when `header` is declared and `header.showDescription` is not false. |
+| `header` | `object` |  | Header block: \{ showTitle?, showDescription?, actions? \}. Strict — the contract rejects any other key. Renders nothing (zero pixels) when everything it would show is suppressed. |
+| `globalFilters` | `array` |  | Dashboard-level filter bar — the spec’s GlobalFilter[]. Filter values live as dashboard variables (readable in widget expressions as page.\<name>) and are AND-merged into each bound widget’s query per its filterBindings. |
+| `dateRange` | `object` |  | Built-in date-range filter: \{ field?, defaultRange?, allowCustomRange? \}. `defaultRange` takes the spec’s date presets plus "custom"; the bound field defaults to created_at. |
+| `refreshIntervalSeconds` | `number` |  | Auto-refresh period in seconds. Zero or a negative value disables the timer, and it only runs when the host wires an onRefresh handler. |
+| `columns` | `number` |  | — |
+| `gap` | `number` |  | — |
+| `className` | `string` |  | — |
+
+## `object-metric` [#object-metric]
+
+Namespace `plugin-dashboard`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | Object this metric aggregates. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no `fallbackValue`, the tile shows a hint naming this key instead of a value. |
+| `label` | `string` \| `object` |  | Heading of the tile, and of the drill-down panel when `title` is not set. Accepts either a plain string or an inline per-locale map (`{ en: "Pipeline", "zh-CN": "销售管道" }`) — the `I18nLabel` union the contract admits on this key — and the tile resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry. |
+| `aggregate` | `object` |  | Aggregation config: \{ field, function, groupBy \} |
+| `icon` | `string` |  | — |
+| `description` | `string` \| `object` |  | Helper text rendered under the value. Accepts either a plain string or an inline per-locale map (`{ en: "This quarter", "zh-CN": "本季度" }`), resolved against the active UI language with the same fallback chain as `label`. |
+| `title` | `string` \| `object` |  | Heading of the drill-down panel. Defaults to `label` — set it only when the records list wants a different name from the tile. Accepts either a plain string or an inline per-locale map (`{ en: "Open deals", "zh-CN": "进行中的商机" }`), resolved against the active UI language with the same fallback chain as `label`. |
+| `filter` | `array` |  | Criteria the aggregation is scoped by. The same filter narrows the drill-down list, so the number and the records behind it always agree. |
+| `colorVariant` | `enum`: `default`, `blue`, `teal`, `orange`, `purple`, `success`, `warning`, `danger` |  | Colour of the icon container. Semantic, not decorative: `success` / `warning` / `danger` should track what the number means. |
+| `variant` | `enum`: `card`, `bare` |  | `card` draws the tile’s own surface; `bare` drops it, for a metric already sitting inside a card. |
+| `format` | `string` |  | Numeral-style format pattern, e.g. `0,0`, `$0,0`, `0%`. Use `currency` instead of hard-coding a currency symbol here. |
+| `currency` | `string` |  | ISO 4217 code, e.g. `USD`. Enables locale-aware currency formatting of the value. |
+| `prefix` | `string` |  | Static text placed before the formatted value. |
+| `suffix` | `string` |  | Static text placed after the formatted value. |
+| `invert` | `boolean` |  | Display `1 - value` — for gauges whose good direction is down, such as error rate shown as uptime. |
+| `fallbackValue` | `string` |  | Value shown when no data source resolves. For static/demo tiles; a bound metric should not need it. |
+| `trend` | `object` |  | Static trend badge: `{ value, label, direction }`. Use `compareTo` instead when the trend should be computed from data. |
+| `compareTo` | `object` |  | Period-over-period comparison, `{ kind: "previousPeriod" }` or `{ kind: "previousYear" }` — the computed alternative to a static `trend`. |
+| `drillDown` | `object` |  | Click-through config that opens the records behind the number. `drillDown.filter` and `drillDown.mode` do not apply to a metric, which has no clicked point to filter by and no row to open, so the list is always scoped by this block’s own `filter`; a drill `filter` belongs on `object-chart` or `object-pivot`, and `mode` on `object-data-table`. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-pivot` [#object-pivot]
+
+Namespace `plugin-dashboard`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | Object this pivot table cross-tabulates. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the table shows a hint naming this key and fetches nothing. |
+| `title` | `string` |  | — |
+| `rowField` | `string` | yes | — |
+| `columnField` | `string` | yes | — |
+| `valueField` | `string` | yes | — |
+| `aggregation` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | — |
+| `showRowTotals` | `boolean` |  | — |
+| `showColumnTotals` | `boolean` |  | — |
+| `filter` | `array` |  | — |
+| `format` | `string` |  | — |
+| `drillDown` | `object` |  | Click-through config that opens the records behind a clicked cell, header or total — in a drawer, a dialog, the object’s list page (`target: "navigate"`), or an analytical report (`report`). The drilled list is this block’s `filter` narrowed by the clicked value. `drillDown.mode` does not apply: every click point on a pivot is an aggregated bucket, so it always drills through; `mode` belongs on `object-data-table`. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `embeddable-form` [#embeddable-form]
+
+Namespace `plugin-form`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `formId` | `string` | yes | — |
+| `objectName` | `string` |  | Object the form creates a record in. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the form shows a hint naming this key instead of a form that cannot submit. |
+| `title` | `string` |  | — |
+| `description` | `string` |  | — |
+| `fields` | `array` |  | Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: "note", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (`EmbeddableForm` passes this array straight through to `<ObjectForm>` with no `sections`, so it renders through the same `SimpleObjectForm` as `object-form` above — see its `fields` description). |
+| `allowMultiple` | `boolean` |  | — |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-form` [#object-form]
+
+Namespace `plugin-form`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | Object this form creates or edits. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline fields (non-empty `customFields`, or `sections` whose every field is inline), the form shows a hint naming this key instead of a form with no fields. |
+| `fields` | `array` |  | Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: "note", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations). |
+| `mode` | `enum`: `create`, `edit`, `view` |  | — |
+| `formType` | `enum`: `simple`, `tabbed`, `wizard`, `split`, `drawer`, `modal` |  | — |
+| `sections` | `array` |  | — |
+| `title` | `string` \| `object` |  | Heading of the drawer and modal presentations (`formType: "drawer"` / `"modal"`). Accepts either a plain string or an inline per-locale map (`{ en: "New order", "zh-CN": "新建订单" }`) — the `I18nLabel` union the contract admits on this key — and the form resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry. |
+| `description` | `string` \| `object` |  | Subtitle under the drawer and modal heading. Accepts either a plain string or an inline per-locale map (`{ en: "Enter the order details", "zh-CN": "填写订单信息" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `layout` | `enum`: `vertical`, `horizontal` |  | Label placement: `vertical` puts each label above its field (the default), `horizontal` beside it. |
+| `columns` | `number` |  | — |
+| `defaultTab` | `string` |  | — |
+| `tabPosition` | `enum`: `top`, `bottom`, `left`, `right` |  | — |
+| `allowSkip` | `boolean` |  | — |
+| `showStepIndicator` | `boolean` |  | — |
+| `splitDirection` | `enum`: `horizontal`, `vertical` |  | — |
+| `splitSize` | `number` |  | — |
+| `splitResizable` | `boolean` |  | — |
+| `drawerSide` | `enum`: `top`, `bottom`, `left`, `right` |  | — |
+| `drawerWidth` | `string` |  | — |
+| `modalSize` | `enum`: `sm`, `default`, `lg`, `xl`, `full` |  | — |
+| `modalCloseButton` | `boolean` |  | Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by `ObjectForm`’s modal route and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown. |
+| `contentLayout` | `enum`: `simple`, `tabbed` |  | How the modal presentation lays out sections. `tabbed` differs from `simple` only when more than one section has a field to show (`ModalForm` tests `schema.contentLayout === "tabbed" && groups.length > 1`). |
+| `confirmOnDiscard` | `boolean` |  | Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set `false` to close immediately. |
+| `recordId` | `string` |  | The record to load in `edit` / `view` mode. Leave unset for `create`. |
+| `customFields` | `array` |  | Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source. |
+| `initialValues` | `object` |  | Values to prefill in `create` mode. |
+| `initialData` | `object` |  | Alternate spelling of `initialValues` that the drawer/modal presentations read FIRST — PER MEMBER (`{ ...initialValues, ...initialData }`), so a member this key says nothing about keeps its `initialValues` value. Prefer `initialValues` in new schemas. |
+| `readOnly` | `boolean` |  | Render every field read-only, whatever `mode` says. |
+| `submitText` | `string` \| `object` |  | Label of the Save button. A map no locale limb resolves shows the default label. Accepts either a plain string or an inline per-locale map (`{ en: "Save order", "zh-CN": "保存订单" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `cancelText` | `string` \| `object` |  | Label of the Cancel button. Accepts either a plain string or an inline per-locale map (`{ en: "Back", "zh-CN": "返回" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `nextText` | `string` \| `object` |  | Label of the next-step button (wizard). Accepts either a plain string or an inline per-locale map (`{ en: "Continue", "zh-CN": "继续" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `prevText` | `string` \| `object` |  | Label of the previous-step button (wizard). Accepts either a plain string or an inline per-locale map (`{ en: "Previous", "zh-CN": "上一步" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `showSubmit` | `boolean` |  | — |
+| `showCancel` | `boolean` |  | — |
+| `showReset` | `boolean` |  | — |
+| `submitBehavior` | `object` |  | Declarative post-submit behaviour, one of `{ kind: "thank-you", title?, message? }`, `{ kind: "redirect", url, delayMs? }`, `{ kind: "continue" }`, `{ kind: "next-record" }`. When present it takes precedence over `successMessage` / `navigateOnSuccess` / `resetOnSuccess`. |
+| `successMessage` | `string` \| `object` |  | Toast shown after a successful submit. Ignored when `submitBehavior` or `navigateOnSuccess` is set. Accepts either a plain string or an inline per-locale map (`{ en: "Order saved", "zh-CN": "订单已保存" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `navigateOnSuccess` | `string` |  | Path to navigate to after a successful create/update. Supports `{id}` / `{recordId}` interpolation from the saved record and is same-origin-guarded. Takes precedence over `successMessage`. |
+| `resetOnSuccess` | `boolean` |  | Clear the form after a successful submit instead of keeping the saved values. |
+| `mobile` | `object` |  | Phone-only presentation overrides, e.g. `{ stepper: "auto", stepperMinFields: 8, fullscreenLongText: true }`. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-master-detail-form` [#object-master-detail-form]
+
+Namespace `plugin-form`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | The PARENT object this form creates or edits. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the form shows a hint naming this key instead of an empty parent form. |
+| `mode` | `enum`: `create`, `edit` |  | — |
+| `sections` | `array` |  | — |
+| `details` | `array` of `object` | yes | The child collections, one OBJECT per entry, judged by the spec's closed `details` entry: `childObject` (required) names the child object; `relationshipField` is the FK on the child back to the parent, derived from the child's metadata when omitted; `columns` are the line grid's columns as the spec's inline grid column objects (`{ name, … }`, never a bare field name), derived from the child's fields when omitted; `formFields` names the per-row form's fields; `inlineMode` is `grid` (editable cells) or `form` (list + per-row form); `amountField` is the CHILD column summed and `totalField` the PARENT field that sum is saved to; `title`, `minRows`, `maxRows` and `addLabel` dress the section and its grid. An undeclared member key is refused by name. `sortField` is not a member: the line-position field is derived from the child object (objectui#11070), and since `@objectstack/spec` 17.7.0 the entry refuses an authored `sortField` with the spec's retired-key message (objectstack-ai/objectstack#21589). |
+| `recordId` | `string` |  | The parent record to load in `edit` mode. Leave unset for `create`. |
+| `formType` | `enum`: `simple`, `tabbed` |  | How the PARENT half of the form is presented. The detail grids below it are unaffected. |
+| `fields` | `array` |  | Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its NAMED members (a bare name, or the `{ field }` entry) against that pool, so such a member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. An inline field entry (`{ name, type, … }`) names nothing to resolve and is drawn whatever this key lists, as on every form type (objectui#11615). Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key bounds what the form DRAWS and edits, not what Save writes: on a create, the submitted set is the drawn fields plus any parent value seeded through `initialValues` (or its alternate spelling `initialData`), drawn or not. A seed for an undeclared, server-owned, computed or read-only field is still stripped, as on any save. Author one or the other, or list every section member here too. Members are bare field names; NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description). |
+| `title` | `string` \| `object` |  | Names the record in the built-in "… saved" toast after an edit save, which shows only when the host supplies no `onSuccess`. Accepts either a plain string or an inline per-locale map (`{ en: "Purchase order", "zh-CN": "采购单" }`) — the `I18nLabel` union the contract admits on this key — and the renderer resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry. |
+| `submitText` | `string` \| `object` |  | Label of the button that saves the parent and every detail row in one batch. Defaults to "Save" when editing a record (`mode: "edit"` with a `recordId`) and to "Create" otherwise, in the active UI language; an empty string, or a map no locale limb resolves, shows the default too. Accepts either a plain string or an inline per-locale map (`{ en: "Save order", "zh-CN": "保存订单" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `cancelText` | `string` \| `object` |  | Label of the Cancel button, which renders only when the host supplies an `onCancel` callback (a runtime slot, not authorable in a JSON document). Defaults to "Cancel", in the active UI language; an empty string, or a map no locale limb resolves, shows the default too. Accepts either a plain string or an inline per-locale map (`{ en: "Back", "zh-CN": "返回" }`), resolved against the active UI language with the same fallback chain as `title`. |
+| `showSubmit` | `boolean` |  | — |
+| `initialValues` | `object` |  | Values to prefill on the PARENT record in `create` mode. |
+| `initialData` | `object` |  | Alternate spelling of `initialValues` the renderer also reads: the `parentSchema` memo carries both keys onto the parent form, which merges them PER MEMBER with this one winning. Prefer `initialValues` in new schemas. |
+| `taxRateField` | `string` |  | Name of the field ON THE CHILD object that holds each line’s tax rate. Feeds the line-items totals row; leave unset when the detail rows carry no tax. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-gantt` [#object-gantt]
+
+Namespace `plugin-gantt`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-gantt` schema refuses a block that declares none of them, unless the node's `dataSource.object` names the object, which then lands on this key. |
+| `gantt` | `object` |  | Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored. The spec requires `startDateField`, `endDateField` and `titleField`, which name the record fields a task's bar starts at, ends at and is titled by; the other members (`progressField`, `colorField`, `dependenciesField`, `parentField`, `viewMode`, `exportFileName`, …) are optional. |
+| `data` | `object` |  | A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a gantt carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` charts those rows, `{ provider: 'object', object }` queries that object and `{ provider: 'api', read }` reads through that request. A bare array is not this key’s shape and is not a record source: the gantt falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`. |
+| `staticData` | `array` |  | Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a gantt carrying both charts these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones. |
+| `filter` | `array` |  | Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the tasks the gantt charts — from every record source it reads: the object, an `api` request, or inline rows. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape. |
+| `sort` | `array` |  | Task order in `[{ field, order }]` form, ordering the rows the gantt charts. Lowered to `$orderby` on the same query. |
+| `navigation` | `object` |  | What a task click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the task's record in a drawer, this renderer's own default. `mode` is `drawer` (the overlay), `new_window`, `page` or `none`, and a block written without `mode` takes the spec's `drawer` default. `drawer` opens the task's record in the drawer; `none` opens nothing. `page` opens the task's record page in the same tab and `new_window` opens it in a new tab. The gantt builds that address itself from the page it is on and does not use a record navigator the host publishes, so a host that publishes one changes nothing: on the object's own list or view route (`…/OBJECT/view/VIEW`) the address is the record page `…/OBJECT/record/ID`, while on any other page, such as a custom page, `/OBJECT/record/ID` is appended to the current address. The object is `data.object` when `data` is the object provider, else `objectName`; on inline rows that name neither there is no record to open, and every mode, the default drawer included, opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. |
+| `label` | `string` \| `object` |  | Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label. A string is used as written, and an inline locale map (`{ en, "zh-CN", … }`) gives the entry for the display locale. The chart draws it nowhere else. |
+| `skipWeekends` | `boolean` |  | Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays. The day view also folds the Saturday and Sunday columns out of its axis. |
+| `holidays` | `array` of `string` |  | Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math. A non-empty list turns the working calendar on by itself, without `skipWeekends`, and the day view folds each listed date's column out of its axis. |
+| `persistLayout` | `boolean` |  | Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName`. The object half is `objectName`, else `data.object`, and `gantt` on inline rows that name neither. With `false` the toolbar has no save-layout button and nothing is stored. |
+| `viewName` | `string` |  | Layout-persistence scope, the second half of the `objectName:viewName` storage key (renderer default `'default'`). Two gantts on the same object with different names keep separate saved layouts, and a gantt restores only the layout saved under its own name. |
+| `markers` | `array` |  | Extra vertical reference lines drawn like the Today marker — each `{ date, label?, color? }`: `date` places the line (a date outside the drawn range draws none), `label` is drawn against it, `color` paints it. `color` is a CSS colour, the theme's primary colour when omitted. |
+| `criticalPath` | `boolean` |  | Seed the critical-path highlight ON; the toolbar toggle stays available either way |
+| `showBaselines` | `boolean` |  | Render the planned-vs-actual baseline bars — ON unless an explicit `false` disables it. A task draws one only when `gantt.baselineStartField` and `gantt.baselineEndField` give it both baseline dates. |
+| `readOnly` | `boolean` |  | Disable every write path on this gantt and lock the record drawer. A task click still opens the record, read-only. |
+| `mobileReadOnly` | `boolean` |  | Auto read-only on narrow viewports — ON unless an explicit `false` disables it. Narrow is under 640px: the chart's own width once it is measured, the viewport's until then. A narrow chart's own write paths are gated as under `readOnly`, read-only badge included, but the record drawer is locked by `readOnly` alone, so a task's record still opens writable. `false` keeps a narrow chart editable, and `readOnly: true` locks the chart and the drawer at any width. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-grid` [#object-grid]
+
+Namespace `plugin-grid`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | Object this grid lists. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline `data` rows, the grid shows an error saying an object name is required and fetches nothing. |
+| `columns` | `array` |  | Columns to show, either field names (`["name", "email"]`) or column objects (`[{ field: "name", label: "Full Name", width: 200 }]`). The canonical spelling — the deprecated `fields` is only read when this is absent. |
+| `filter` | `array` |  | Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, lowered to `$filter`. The canonical spelling — the retired `defaultFilters` is not read (`@objectstack/spec` 18 refuses it by name). |
+| `label` | `string` \| `object` |  | Grid label, used as the table caption, as the export file title and in the record-detail overlay heading. The canonical spelling — the deprecated `title` is only read when this is absent. Accepts either a plain string or an inline per-locale map (`{ en: "Accounts", "zh-CN": "客户" }`) — the `I18nLabel` union the contract admits on this key — and the grid resolves the map against the display locale (the workspace's regional default when one is configured, otherwise the active UI language), falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry. |
+| `description` | `string` \| `object` |  | One line of help text drawn above the grid's rows, in muted type. Accepts either a plain string or an inline per-locale map (`{ en: "Everyone you work with", "zh-CN": "你的所有联系人" }`) — the `I18nLabel` union the contract admits on this key — resolved against the display locale the way `label` is. A map with no usable entry draws no line. |
+| `sort` | `array` |  | Initial sort order, `[{ field, order }]`. The only sort spelling this block reads — the retired single-sort `defaultSort` is refused by the protocol and ignored by the renderer. |
+| `pagination` | `object` |  | Pagination config, `{ pageSize, pageSizeOptions, … }`. Presence enables paging with the object's settings, and an explicit off wins — the deprecated flat `showPagination: false` turns paging off even beside this object, because this object declares no off switch of its own. Prefer it over the deprecated flat `pageSize` / `showPagination` pair. |
+| `searchableFields` | `array` of `string` |  | Fields the toolbar search box queries. A non-empty list is what enables search — prefer it over the deprecated boolean `showSearch`, which cannot say WHICH fields to search. |
+| `data` | `object` |  | Data source configuration — a `ViewData` object discriminated by `provider`: `{ provider: "object", object }` (what an omitted `data` falls back to, using `objectName`), `{ provider: "value", items: [...] }` for inline rows that bypass the object query, or `{ provider: "schema", schemaId }`. The canonical spelling — the deprecated `staticData` is the array-only shortcut for the `value` provider, so inline rows go under `items` here rather than in a bare array. |
+| `rowHeight` | `enum`: `compact`, `short`, `medium`, `tall`, `extra_tall` |  | Row density. An unrecognised value falls back to `compact` rather than erroring. |
+| `frozenColumns` | `number` |  | How many leading columns stay pinned while the grid scrolls horizontally. |
+| `resizable` | `boolean` |  | Let users drag column borders to resize. On by default. The only spelling — the legacy `resizableColumns` is retired and refused by name (objectui#6152). |
+| `reorderableColumns` | `boolean` |  | Let users drag columns into a different order. |
+| `showColumnTypeIcons` | `boolean` |  | Show a field-type icon in each column header. Off by default — the type is usually obvious from the cell content, and the icons compete with the column labels. |
+| `rowColor` | `object` |  | Rules that colour whole rows from a field value. |
+| `conditionalFormatting` | `array` |  | Row style rules, each `{ condition, style }` — a CEL `condition` over the row’s own `record.*` and a CSS `style` map, the rule a list view declares. The first matching rule styles that row. The native `{ field, operator, value }` rule, its `expression`, and a colour written beside `condition` instead of inside `style` are retired (objectui#11533). |
+| `emptyState` | `object` |  | What the grid draws in place of an empty table, `{ title, message, icon, link }`: a Lucide `icon` name, a `title` (default: the table's own "No results found"), a `message` (default: none) and one `link: { label, url }` the user follows (default: none) — an in-app path, or an `http(s)://` or `mailto:` address, opened as a `url` action opens it. `title`, `message` and the link's `label` each accept a plain string or an inline per-locale map, resolved against the display locale. Not drawn when a term typed into the grid's own server-side search box is what emptied it — the table and its search box stay, so the term can be cleared. Leave it out and an empty grid draws the table's own empty row. |
+| `grouping` | `object` |  | Group rows by one or more fields into collapsible sections. |
+| `aggregations` | `array` |  | Per-group roll-ups shown in group headers, `[{ field, type: "sum" \| "count" \| "avg" \| "min" \| "max" \| "count_distinct" }]`. Needs `grouping` to have anything to roll up. |
+| `selection` | `object` |  | Selection config, `{ type: "none" \| "single" \| "multiple" }`. Presence enables selection — an object with no `type` selects multiple rows — and an explicit off wins: `type: "none"` turns selection off even beside a declared `bulkActions`. The canonical spelling — the deprecated boolean/string `selectable` is only read when this is absent. |
+| `rowActions` | `array` |  | Names of actions offered on each row’s menu. |
+| `bulkActions` | `array` |  | Names of actions offered once rows are selected. Needs a multi-row `selection` to be reachable. |
+| `batchActions` | `array` |  | Legacy alias of `bulkActions`, and the one the renderer reads FIRST when both are set. Prefer `bulkActions` in new schemas. |
+| `bulkActionDefs` | `array` |  | Full inline bulk-action definitions, for actions that are not named entries in the object’s action set. Use `bulkActions` when the action already exists. |
+| `editable` | `boolean` |  | Enable inline cell editing (double-click or Enter opens a cell). |
+| `singleClickEdit` | `boolean` |  | With `editable`, a single click opens the cell instead of a double-click. Has no effect on a non-editable grid. |
+| `keyboardNavigation` | `boolean` |  | Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Defaults to on when the grid renders editable; a read-only grid keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid. |
+| `navigation` | `object` |  | What a row click does, `{ mode: "drawer" \| "page" \| "new_window" \| "none", … }`; a block written without `mode` opens the drawer. |
+| `operations` | `object` |  | Toggles for the built-in affordances, `{ create, update, delete, export }`, e.g. `{ delete: false }`. A declared block replaces the default, so an `update` / `delete` it does not name is withheld. |
+| `exportOptions` | `object` |  | Export config, `{ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }`. `streaming` (default true) picks server-side streaming vs browser-side assembly for the export — a behaviour fork, not decoration; set it to `false` to force browser-side assembly. Needs `operations.export` to be reachable from the toolbar. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-kanban` [#object-kanban]
+
+Namespace `plugin-kanban`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | Object this board lists. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no rows from `data`, `bind` or a parent view, the board shows a hint naming this key instead of an empty board. |
+| `columns` | `array` |  | — |
+| `filter` | `array` |  | Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, narrowing the records the board fetches. Lowered to `$filter` on the query. |
+| `limit` | `number` |  | Row cap — the most records the board fetches, lowered to the query’s top-level `$top` (renderer default 100). The board renders every fetched record into a lane and offers no pagination, so this is the author’s window on the object rather than a page size. PRECEDENCE: a node-level `dataSource` binding’s own `limit` wins outright; the `pagination.pageSize` of a view that binding names fills this key only when the node leaves it unset. |
+| `groupBy` | `string` |  | Record field whose value buckets cards into lanes. Its picklist options become the lanes when `columns` is absent, and a drag between lanes writes the target lane’s value back to the record. A value matching no lane lands in the trailing “Uncategorized” lane rather than disappearing. |
+| `cardTitle` | `string` |  | Record field rendered as the card title. Read AHEAD of `titleField`, which is the legacy spelling of the same choice; when neither yields a value the shared record-display resolver names the card. |
+| `titleField` | `string` |  | Legacy spelling of `cardTitle` — the record field rendered as the card title. `cardTitle` wins when both are authored. |
+| `swimlaneField` | `string` |  | Record field that splits the board into horizontal swimlanes. When absent the board falls back to `grouping.fields[0].field`. |
+| `coverImageField` | `string` |  | Record field holding a card cover image — a URL string, or a file object carrying a `url`. Any other value leaves the card without a cover. |
+| `data` | `array` |  | Inline records to render instead of fetching. Authoring it SUPPRESSES the board’s own query entirely. Members are records: the board reads `id` (or `_id`) as the card identity, the `groupBy` field’s value as the lane, the card-title field, `coverImageField`, and every `cardFields` entry. Records handed down by a parent view and a `bind` expression both take priority over it. |
+| `cardFields` | `array` |  | Record field NAMES rendered as cells on each card, in the order written. Members are bare names, not entry objects. An explicit list wins over the object’s `highlightFields` role; unlike that fallback it is NOT filtered against the object definition, so a name the object no longer declares simply renders no cell. An empty array reads as omitted. |
+| `grouping` | `object` |  | Only `grouping.fields[0].field` is read, and only as the FALLBACK for `swimlaneField`: it names the record field that splits the board into horizontal swimlanes when no `swimlaneField` is authored. An explicit `swimlaneField` wins. Every other position inside `grouping`, later `fields` entries included, is inert on this board. |
+| `conditionalFormatting` | `array` |  | Per-card style rules, each `{ condition, style }` — a CEL `condition` over the card’s own `record.*` and a CSS `style` map, the rule a list view declares. The first matching rule styles that card alone. A rule comparing a relation field sees the stored foreign key rather than the expanded record. The native `{ field, operator, value }` rule and a colour written beside `condition` instead of inside `style` are retired and refused by name (objectui#11522). |
+| `navigation` | `object` |  | What a card click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is `drawer` (the overlay), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `drawer` default. `page` opens the record page through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, there is no record page to open and the click opens nothing. `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, `preventNavigation: true` opens nothing, and `size` sets the overlay width. A click handler from a parent view outranks the whole key. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `list-view` [#list-view]
+
+Namespace `plugin-list`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `data` | `object` |  | Where this list's records come from, the spec's `ViewData`: `{ provider: 'object', object }` lists that object's records, and `{ provider: 'value', items }` hands the list its rows. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` outranks this key. With neither, the list shows a hint naming `data.object` instead of an empty list. |
+| `type` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | The list kind, the spec's list view `type`. Absent, a bound saved view's kind applies, else a grid. On a metadata page it is written `properties.type`; the node's own `type` stays `list-view`. |
+| `columns` | `array` |  | The fields the list shows, in order: field names (`["name", "stage"]`) or the spec's `ListColumn` objects. They are also the query's `$select`. Optional on a page node: a node bound to a saved view through `dataSource.view` draws that view's columns. |
+| `filter` | `array` |  | The base query filter, the spec's `ViewFilterRule` array `[{ field, operator, value }]`, lowered to `$filter`. |
+| `sort` | `array` |  | The initial sort order, `[{ field, order }]`, lowered to `$orderby` in the order written. |
+| `pagination` | `object` |  | The spec's pagination config, `{ pageSize, pageSizeOptions }`: `pageSize` caps each query (`$top`), and `pageSizeOptions` offers those sizes to the user. |
+| `searchableFields` | `array` of `string` |  | The field names the toolbar search box searches. A term typed into the box is sent with these fields only. |
+| `label` | `string` \| `object` |  | The list's label: it names the exported file and heads the record-detail overlay. A plain string, or an inline per-locale map (`{ en: "Open tasks", "zh-CN": "未完成任务" }`) resolved against the display locale. |
+| `description` | `string` \| `object` |  | One line about the list, drawn as the toolbar's info control (its tooltip and accessible name). A plain string, or an inline per-locale map resolved against the display locale. `appearance.showDescription: false` hides it. |
+| `requiredPermissions` | `array` of `string` |  | Capabilities the viewer must ALL hold to see this list, the names permission sets grant through `systemPermissions`. A viewer missing one sees an insufficient-permissions notice in place of the list, and no records are queried. Absent or empty: no gate. |
+| `userFilters` | `object` |  | The quick-filter bar above the list, the spec's `UserFilters` config: `{ element: "dropdown" \| "toggle" \| "tabs", fields \| tabs }`. Each filter narrows the query. |
+| `userActions` | `object` |  | Which toolbar controls the user gets, the spec's `UserActionsConfig` of per-control toggles: a control set to `false` (for example `sort: false`) is taken off the toolbar, and the controls it does not name stay. |
+| `addRecord` | `object` |  | The Add button, the spec's `AddRecordConfig`. The spec row declares `enabled` default `true` and `position` default `"bottom"`; the renderer does not apply those defaults: it draws the button only for an explicit `enabled: true`, and places an absent `position` at the top (objectui#13099 owns that gap). `position` places it: `"top"` (the toolbar), `"bottom"` (under the list) or `"both"`. A click opens the create form for the listed object, the one the object list's New opens: the record-form overlay, or the full-page create for an object whose `editMode` is `page`. The button is withheld for a viewer who may not create, or whose create the object greys, and on a host that serves no create. `mode` and `formView` are not read. `userActions.addRecordForm: false` also takes the button off. |
+| `compactToolbar` | `boolean` |  | Gather the grouping, row colour, density and hide-fields controls into one Display form. On by default; `false` draws one toolbar button per control. |
+| `appearance` | `object` |  | The spec's appearance config, `{ showDescription, allowedVisualizations }`. `showDescription: false` hides the description. `allowedVisualizations` narrows the kinds a view switcher offers, and a page node draws no switcher, so on a page it changes nothing: the node's `type` is the kind drawn. |
+| `exportOptions` | `object` |  | The export menu, `{ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }`. Declaring it offers the export on the toolbar, in the listed formats; `fileNamePrefix` names the file. |
+| `allowPrinting` | `boolean` |  | Draw a Print button that opens the browser's print dialog for the list. |
+| `showRecordCount` | `boolean` |  | The record count in the list's footer. On by default; `false` takes it off. |
+| `emptyState` | `object` |  | What the list draws when no record comes back, the spec's `EmptyState`: `{ title, message, icon, link }`. `title`, `message` and the link's `label` each take a plain string or an inline per-locale map. |
+| `hiddenFields` | `array` of `string` |  | Field names taken out of `columns`. A name `columns` does not show takes nothing out. |
+| `fieldOrder` | `array` of `string` |  | Field names that order the columns left after `hiddenFields`. A column not listed comes after every listed one; a listed name that is not a column orders nothing. |
+| `rowHeight` | `enum`: `compact`, `short`, `medium`, `tall`, `extra_tall` |  | Row density. Absent, rows are `compact`. |
+| `resizable` | `boolean` |  | Let users drag column borders to resize the grid's columns. |
+| `selection` | `object` |  | Row selection, `{ type: "none" \| "single" \| "multiple" }`. |
+| `navigation` | `object` |  | What clicking a row does, the spec's `NavigationConfig`: `{ mode: "drawer" \| "page" \| "new_window" \| "none", … }`. The drawer opens the record over the list, headed by the list's `label`. |
+| `grouping` | `object` |  | Group the rows, `{ fields: [{ field, order, collapsed }] }`. The groups and their header counts come from the server. |
+| `rowColor` | `object` |  | Colour whole rows by a field's value, `{ field, colors: { VALUE: COLOR } }`. |
+| `conditionalFormatting` | `array` of `object` |  | Row style rules, each `{ condition, style }`: a CEL `condition` over the row's `record.*` and a CSS `style` map. The first rule that matches styles the row. |
+| `inlineEdit` | `boolean` |  | Open the grid in inline-edit mode, for users who may update the object. |
+| `rowActions` | `array` of `string` |  | Names of the actions offered on each row's menu. |
+| `bulkActions` | `array` of `string` |  | Names of the actions offered once rows are selected. Needs a multi-row `selection`. |
+| `bulkActionDefs` | `array` of `object` |  | Full bulk-action definitions, the spec's `BulkActionDef`: a mass update (`operation: "update"` with a `patch`) or delete, or a named action run once for the whole selection. |
+| `kanban` | `object` |  | The board, the spec's kanban block: `{ groupByField, columns, titleField, summarizeField }`. `groupByField` is the lane field and `columns` the fields on each card. |
+| `calendar` | `object` |  | The calendar, `{ startDateField, endDateField, titleField, colorField, allDayField }`. |
+| `gantt` | `object` |  | The gantt chart, `{ startDateField, endDateField, titleField, progressField, dependenciesField }`. Both date fields are needed to draw it. |
+| `gallery` | `object` |  | The gallery, `{ coverField, titleField, visibleFields, cardSize, … }`. |
+| `timeline` | `object` |  | The timeline, `{ startDateField, endDateField, titleField, groupByField, colorField, scale }`. |
+| `map` | `object` |  | The map, `{ locationField }` or `{ latitudeField, longitudeField }`, with `titleField`, `zoom` and `center`. |
+| `tree` | `object` |  | The tree, `{ parentField, labelField, fields, defaultExpandedDepth }`. |
+| `chart` | `object` |  | The chart a `type: "chart"` list draws, bound to an ADR-0021 dataset: `{ dataset, values, dimensions, chartType }`. There is no default binding. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-map` [#object-map]
+
+Namespace `plugin-map`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`, or the node’s `dataSource` binding; the `object-map` schema refuses a block that declares none of them. |
+| `map` | `object` |  | The field configuration: `latitudeField` / `longitudeField` (or one `locationField` holding a `"lat,lng"` string, a `{ lat, lng }` object or a `[lat, lng]` pair) place each record’s marker, and a record with no readable coordinates is not plotted; `titleField` and `descriptionField` name what the marker popup shows; `zoom` and `center` (`[latitude, longitude]`) set the initial camera, which otherwise fits the markers; `style` is a MapLibre style URL, read after the node’s `mapStyle`. |
+| `data` | `object` |  | A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a map carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` plots those rows and `{ provider: 'object', object }` queries that object, both narrowed by `filter` and ordered by `sort`. A bare array is not this key’s shape and is not a record source: the map falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`. |
+| `staticData` | `array` |  | Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a map carrying both plots these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones. |
+| `filter` | `array` |  | Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the markers the map plots — fetched rows and inline (`staticData`, `{ provider: 'value' }`) rows alike. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape. |
+| `sort` | `array` |  | Marker order in `[{ field, order }]` form, ordering the rows the map plots. Lowered to `$orderby` on the same query. |
+| `mapStyle` | `string` |  | MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record |
+| `navigation` | `object` |  | What a marker click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is `drawer` (the overlay), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `drawer` default. `drawer` opens the marker’s record in the drawer; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of the map’s `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a map that names no `objectName`, there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. A click handler from a parent view outranks the whole key. |
+| `enableClustering` | `boolean` |  | Group nearby markers into one numbered cluster. Absent, the map clusters only above 100 markers; `false` turns clustering off at any count. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `markdown` [#markdown]
+
+Namespace `plugin-markdown`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `content` | `string` | yes | — |
+| `className` | `string` |  | — |
+
+## `object-timeline` [#object-timeline]
+
+Namespace `plugin-timeline`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node. A timeline drawn from `items`, `data` or a `bind` path issues no query and needs none to draw, but `navigation` still reads it: without it `page` opens nothing and `new_window` / `openNewTab` open no record page. |
+| `variant` | `enum`: `vertical`, `horizontal`, `gantt` |  | — |
+| `filter` | `array` |  | Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the records the timeline fetches. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. Authored `items` or `data` suppress that query, so the key then narrows nothing. The MongoDB-style record form is not this key’s shape. |
+| `sort` | `array` |  | Order of the records the timeline fetches, in `[{ field, order }]` form, lowered to `$orderby` on the same query. The rail draws entries composed from records by their start date, earliest first, whatever this order. Authored `items` or `data` suppress the query, so the key then orders nothing. |
+| `navigation` | `object` |  | What an entry click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is `drawer` (the overlay), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `drawer` default. `drawer` opens the entry’s record in the drawer; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of the timeline’s `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a timeline that names no `objectName`, there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. On a timeline that names no `objectName`, `new_window` and `openNewTab` open no record page either: the new tab’s address is a slash and the entry’s `id` alone (its `_id` when it has no `id`, `undefined` when it has neither). A click handler from a parent view outranks the whole key. |
+| `timeline` | `object` |  | Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: \{ startDateField, endDateField, titleField, groupByField, colorField, scale \}. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling. On entries composed from records, `startDateField` is the entry’s date, `endDateField` the end printed after it, `titleField` the title, `groupByField` the field whose value heads each group (without it, entries group into date buckets), and `colorField` the field whose option colour, or the value itself when it is a colour literal, paints the marker. Each outranks the flat key of the same binding, and `titleField` / `startDateField` outrank `mapping`’s `title` / `date`. `scale` sets the axis unit of the gantt branch, which on this block draws authored `items` only. |
+| `limit` | `number` |  | Maximum number of records loaded onto the rail (row cap); lowered to the query's top-level `$top` (renderer default 100). A timeline renders one rail with no pagination control, so this is the author's window rather than a page size. A value that is not a positive integer is ignored with a console warning, and the default cap applies. |
+| `data` | `array` |  | Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written. |
+| `items` | `array` |  | Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each entry is the kind this node's `variant` selects: a feed entry `{ time?, title, description?, variant?, icon?, content?, className? }` (`variant` absent / `vertical` / `horizontal`), or a gantt row `{ label, items? }` (`variant: 'gantt'`) whose bars are `{ title?, startDate?, endDate?, variant? }`, each date a string or epoch milliseconds. These are `@object-ui/types`'s `TimelineFeedItem` and `TimelineGanttItem`. They are drawn as written: the `timeline` block’s field bindings, `mapping` and `descriptionField` do not apply to them. |
+| `dateFormat` | `enum`: `short`, `long`, `iso` |  | How each entry's date is rendered (renderer default `short`): `short` / `long` are locale-formatted, `iso` is the locale-free machine form. |
+| `rowLabel` | `string` |  | Header label for the gantt row column — read by the gantt branch only, which on this block needs authored `items`. Without it the header shows the default label. |
+| `minDate` | `string` |  | Pin the gantt axis start (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured. A value that is not a date, or a `minDate` after `maxDate`, refuses the chart with a diagnostic naming it. |
+| `maxDate` | `string` |  | Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured. A value that is not a date, or a `maxDate` before `minDate`, refuses the chart with a diagnostic naming it. |
+| `descriptionField` | `string` |  | Field rendered as each entry's description (renderer default `description`). It is declared flat because the `timeline` block has no member for it, and `mapping.description` outranks it when both are written. |
+| `mapping` | `object` |  | Record-to-entry field mapping `{ title?, date?, description?, variant? }`, each a field name — the binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has. On the vertical rail a colour that `timeline.colorField` resolves for an entry outranks that marker colour. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `object-tree` [#object-tree]
+
+Namespace `plugin-tree`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` |  | ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`, read in that order: a tree on `data` or `staticData` never queries this object. On a tree whose rows are inline it still names the record page a new-tab click opens. |
+| `tree` | `object` |  | The field configuration: `parentField` names the field holding each record’s parent id (auto-detected from the object’s self-referencing field when omitted), `labelField` the field drawn indented in the first column (default `name`), `fields` the further fields drawn as flat columns after it, and `defaultExpandedDepth` how many levels open on first draw (`0` shows roots only; omitted, every level is open). |
+| `data` | `object` |  | A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a tree carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` draws those records and `{ provider: 'object', object }` queries that object, both narrowed by `filter`. The `api` and `schema` providers draw no rows on the tree. A bare array is not this key’s shape and is not a record source: the tree falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`. |
+| `staticData` | `array` |  | Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a tree carrying both draws these rows and never queries that object. Each record is placed under the record its `parentField` value names, and one naming no record is drawn as a root. `filter` narrows these rows exactly as it does fetched ones. |
+| `filter` | `array` |  | Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the records the tree draws — fetched rows and inline (`staticData`, `{ provider: 'value' }`) rows alike. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. A record whose parent the filter removed is drawn as a root. The MongoDB-style record form is not this key’s shape. |
+| `navigation` | `object` |  | What a row click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens nothing: this renderer supplies no drawer default. `mode` is `drawer` (the overlay), `new_window`, `page` or `none`, and a block written without `mode` takes the spec’s `drawer` default. `drawer` opens the row’s record in the drawer; `new_window` opens the record page in a new tab; `none` opens nothing. `page` opens the record page of `data.object` when `data` is the object provider, else of the tree’s `objectName`, through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a tree that names neither (inline rows with no `objectName`), there is no record page to open and the click opens nothing. `preventNavigation: true` opens nothing whatever the mode, `openNewTab: true` opens the record page in a new tab and outranks every mode except `none`, and `size` sets the overlay width. A click handler from a parent view outranks the whole key. |

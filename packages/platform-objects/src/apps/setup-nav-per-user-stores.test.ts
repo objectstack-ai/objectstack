@@ -70,7 +70,8 @@ function relatedListsOf(root: unknown, objectName: string): Rec[] {
 
 /** The `tabs` item whose body holds the related list over `objectName`. */
 function tabOf(objectName: string): Rec | undefined {
-  const items = (((SysUserDetailPage.slots as Rec).tabs as Rec).properties as Rec).items as Rec[];
+  const tabs = (SysUserDetailPage.regions![0]!.components as Rec[]).find((c) => c.type === 'page:tabs') as Rec;
+  const items = (tabs.properties as Rec).items as Rec[];
   return items.find((item) => relatedListsOf(item.children, objectName).length > 0);
 }
 

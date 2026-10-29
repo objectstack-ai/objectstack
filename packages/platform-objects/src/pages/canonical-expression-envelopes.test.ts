@@ -243,22 +243,23 @@ describe('downgrade control — a shipped page, predicate downgraded to bare', (
     // half only this package can run, and the one that reds if the lint
     // detector is ablated or its import breaks.)
     const source = JSON.parse(JSON.stringify(pageExports.SysUserDetailPage)) as AnyRec;
-    const slots = source.slots as AnyRec;
-    const alerts = slots.alerts as AnyRec[];
-    const authored = (alerts[0]!.visibleWhen as AnyRec).source as string;
+    const components = (source.regions as AnyRec[])[0]!.components as AnyRec[];
+    const alertAt = components.findIndex(c => c.type === 'record:alert');
+    const alert = components[alertAt]!;
+    const authored = (alert.visibleWhen as AnyRec).source as string;
     expect(
       typeof authored,
       'this control expects the shipped page to still carry the CANONICAL envelope. '
         + 'If it is already bare, THIS is not the failure to read — the gate above '
         + '(`authors NO bare expression string`) is, and it names the offending path.',
     ).toBe('string');
-    alerts[0]!.visibleWhen = authored;
+    alert.visibleWhen = authored;
 
     const audit = auditPageExpressionEnvelopes(source, pageLabel('SysUserDetailPage', source as unknown as Page));
-    expect(audit.findings.map(f => f.path)).toEqual(['slots.alerts[0].visibleWhen']);
+    expect(audit.findings.map(f => f.path)).toEqual([`regions[0].components[${alertAt}].visibleWhen`]);
     const rendered = renderBareExpressionFindings(audit.findings);
     expect(rendered).toContain('sys_user_detail');
-    expect(rendered).toContain('slots.alerts[0].visibleWhen');
+    expect(rendered).toContain(`regions[0].components[${alertAt}].visibleWhen`);
 
     // …and the untouched export is still clean, so the red above came from the
     // mutation and not from something this test left behind.

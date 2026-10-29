@@ -129,6 +129,11 @@ export type {
 // (objectui#13453); tests import it from `useRecordEditable` directly.
 export { useRecordEditable } from './useRecordEditable';
 export type { RecordOperation } from './useRecordEditable';
+// The Claim affordance on a record sitting in an ownership queue (objectstack
+// ADR-0142 D4): the server's `queue_claim` answer decides the button, the
+// claim is `{ owner_id: <self> }` through the normal update.
+export { recordSitsInQueue, queueClaimAdmitted, useQueueClaimOffered, claimQueuedRecord } from './queueClaim';
+export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
 export { InlineFieldInput, extractLookupId, TEXTUAL_REF_FALLBACK_TYPES } from './InlineFieldInput';

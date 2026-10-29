@@ -60,7 +60,13 @@ export const docsRedirects = [
   ['/docs/guides/metadata/dashboard', '/docs/ui/dashboards'],
   ['/docs/guides/public-forms', '/docs/ui/forms'],
   ['/docs/guides/metadata/doc', '/docs/ui/doc-pages'],
-  ['/docs/concepts/setup-app', '/docs/ui/setup-app'],
+  ['/docs/concepts/setup-app', '/docs/ui/apps'],
+  // 2026-10-28: the Setup, Console and Studio pages were retired. Their
+  // author-facing facts moved into apps, views, actions, approvals and
+  // validating-metadata; the product tour is build-without-code.
+  ['/docs/ui/setup-app', '/docs/ui/apps'],
+  ['/docs/ui/console', '/docs/build-without-code'],
+  ['/docs/ui/studio', '/docs/build-without-code'],
   ['/docs/guides/solutions/create-vs-edit-form', '/docs/ui/create-vs-edit-form'],
   ['/docs/guides/solutions/field-grouping-and-order', '/docs/ui/field-grouping-and-order'],
   // The page was renamed role-based -> audience-based (the direction

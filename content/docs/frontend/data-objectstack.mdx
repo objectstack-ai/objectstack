@@ -1,0 +1,554 @@
+---
+title: "ObjectStack Data Adapter"
+description: "Data adapter for connecting ObjectUI to ObjectStack backends"
+---
+
+The `@object-ui/data-objectstack` package provides a data adapter that connects ObjectUI to ObjectStack backends. It enables seamless integration with ObjectStack's data layer, supporting CRUD operations, queries, and real-time updates.
+
+## Installation
+
+```bash
+npm install @object-ui/data-objectstack
+```
+
+**Note:** `@objectstack/client` is a regular dependency of this package — it is installed and resolved along with it, so there is nothing to install separately.
+
+## Overview
+
+The ObjectStack adapter bridges ObjectUI's schema-driven UI with ObjectStack's data backend, providing:
+
+- 🔌 **Automatic Integration** - Connect to ObjectStack APIs
+- 🔄 **CRUD Operations** - Create, read, update, delete
+- 🔍 **Query Builder** - Build complex queries
+- 📊 **Data Binding** - Automatic data synchronization
+- 🚀 **Real-time Updates** - Live data updates (if supported by backend)
+
+## Features
+
+- **ObjectStack Client Integration** - Uses `@objectstack/client` for API communication
+- **Headless** - No React dependency; the adapter is a plain `DataSource` object you inject at the renderer boundary
+- **Query Support** - Full ObjectQL query support
+- **Automatic Field Mapping** - Maps ObjectStack schemas to UI components
+- **Type Safety** - Full TypeScript support
+- **Error Handling** - Comprehensive error handling and retry logic
+
+## Quick Start
+
+### 1. Create the adapter
+
+This package is **headless** — it exports no React components and no hooks. You
+create a plain adapter object:
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+const dataSource = createObjectStackAdapter({
+  baseUrl: 'https://api.example.com',
+  token: 'your-api-token', // optional if auth is handled elsewhere
+});
+```
+
+`createObjectStackAdapter` returns an `ObjectStackAdapter` — the concrete adapter
+class, which implements `DataSource`, the universal interface every ObjectUI
+renderer consumes. `new ObjectStackAdapter(config)` is the class form of the same
+thing and has the same type. Annotate the value as `DataSource` wherever you want
+only the universal surface.
+
+### 2. Inject it at the renderer boundary
+
+React wiring lives in `@object-ui/react`, not here. Wrap your tree in
+`SchemaRendererProvider` and hand it the adapter:
+
+```tsx
+import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+import type { ObjectGridBlockNode } from '@object-ui/types';
+
+const dataSource = createObjectStackAdapter({
+  baseUrl: 'https://api.example.com',
+});
+
+// The block's props go in its `properties` bag, as `@objectstack/spec` declares them.
+const mySchema: ObjectGridBlockNode = { type: 'object-grid', properties: { objectName: 'user' } };
+
+function App() {
+  return (
+    <SchemaRendererProvider dataSource={dataSource}>
+      <SchemaRenderer schema={mySchema} />
+    </SchemaRendererProvider>
+  );
+}
+```
+
+`SchemaRenderer` also accepts an explicit `dataSource` prop
+(`<SchemaRenderer schema={mySchema} dataSource={dataSource} />`) when you would
+rather inject per render than through context.
+
+### 3. Bind a block to data
+
+A schema node's `dataSource` key is **metadata, not the adapter** — it is the
+spec's per-element binding describing *what to query*, while the adapter above
+describes *how to reach the backend*:
+
+```json
+{
+  "type": "list-view",
+  "dataSource": { "object": "user", "view": "active", "limit": 50 }
+}
+```
+
+The binding accepts `object`, `view`, `filter`, `sort` and `limit`. `view` names
+a saved view whose columns, filter, sort and page size are applied to the render;
+`filter` is *additional* criteria that AND-combines with the view's rather than
+replacing it. See [Per-element data binding](/docs/frontend/data-source) for the
+full table of which blocks honour which keys.
+
+## API Reference
+
+### `createObjectStackAdapter`
+
+Factory returning an `ObjectStackAdapter` — the concrete adapter class, which
+implements `DataSource` — backed by an ObjectStack backend.
+
+**Config:**
+
+```typescript
+function createObjectStackAdapter<T = unknown>(config: {
+  /** ObjectStack server base URL */
+  baseUrl: string;
+
+  /** Optional bearer token */
+  token?: string;
+
+  /** Optional custom fetch (proxies, auth headers, test doubles) */
+  fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+  /** Metadata cache tuning */
+  cache?: {
+    maxSize?: number; // default 100 schemas
+    ttl?: number; // default 5 * 60 * 1000 ms
+  };
+
+  /** Reconnect behaviour */
+  autoReconnect?: boolean; // default true
+  maxReconnectAttempts?: number; // default 3
+  reconnectDelay?: number; // default 1000 ms
+}): ObjectStackAdapter<T>;
+```
+
+**Example:**
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+const dataSource = createObjectStackAdapter({
+  baseUrl: 'https://api.example.com',
+  token: 'your-api-token',
+  cache: { maxSize: 100, ttl: 5 * 60 * 1000 },
+  autoReconnect: true,
+  maxReconnectAttempts: 5,
+});
+```
+
+`api.example.com` is a placeholder — here and in every other example on this
+page. RFC 2606 reserves `example.com` precisely so documentation can name a host
+that can never resolve to somebody's real service, so a snippet copied with it
+left in fails loudly instead of reaching a stranger's server. Replace it with
+your own ObjectStack server's URL.
+
+Pass a record type to get typed results — the default is `unknown`:
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+type User = { id: string; name: string; email: string };
+
+const dataSource = createObjectStackAdapter<User>({ baseUrl: 'https://api.example.com' });
+```
+
+### `ObjectStackAdapter`
+
+The class behind the factory — and the type the factory declares. `new
+ObjectStackAdapter(config)` and `createObjectStackAdapter(config)` take the same
+config and produce the same type, so the two forms are interchangeable:
+
+```typescript
+import { createObjectStackAdapter, ObjectStackAdapter } from '@object-ui/data-objectstack';
+
+type User = { id: string; name: string; email: string };
+
+// Same declared type, either way.
+const fromFactory = createObjectStackAdapter<User>({ baseUrl: 'https://api.example.com' });
+const fromClass = new ObjectStackAdapter<User>({ baseUrl: 'https://api.example.com' });
+```
+
+**What changed.** This section used to tell you to hold the class type to
+reach the members listed under *Beyond `DataSource`* below, because the factory
+declared `DataSource<T>` while returning `new ObjectStackAdapter(config)`: the
+value always carried those members, only the declared type hid them
+(objectui#7323). That distinction is gone. If you switched to
+`new ObjectStackAdapter(...)` solely to reach a cache, connection-state or batch
+method, you can switch back to the factory — nothing about the value changes, and
+neither does its type. The class name is still worth importing when you need
+something to annotate with.
+
+Narrowing still works, and is still the right shape for a prop, a field or a test
+double that must accept **any** adapter:
+
+```typescript
+import type { DataSource } from '@object-ui/types';
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+// The universal surface only, by annotation.
+const dataSource: DataSource = createObjectStackAdapter({ baseUrl: 'https://api.example.com' });
+```
+
+**On the `DataSource` interface** (available from either form, and from any other
+adapter):
+
+- `find(resource, params?)` - Query multiple records
+- `findOne(resource, id, params?)` - Get a single record by ID
+- `create(resource, data)` - Create a record
+- `update(resource, id, data, opts?)` - Update a record
+- `delete(resource, id, opts?)` - Delete a record
+- `getObjectSchema(objectName)` - Fetch schema metadata (cached)
+- `bulk?(resource, operation, data)` - Batch create/update/delete on one object
+- `batchTransaction?(operations)` - Cross-object atomic batch (master-detail)
+- `onMutation?(listener)` - Subscribe to create/update/delete events
+- `queryGroupHeaders?(resource, query)` - Answer a grouped list view's group
+  header query (`compileListViewGroupQuery`), one row per group with its true
+  `count` — what a grouped grid groups by on the server (objectui#7189)
+
+`bulk`, `batchTransaction`, `onMutation` and `queryGroupHeaders` are
+**optional** members of `DataSource`: not every adapter implements them, so
+through a `DataSource`-typed value they must be feature-detected
+(`typeof dataSource.bulk === 'function'`). `ObjectStackAdapter` implements all
+four unconditionally, and the factory declares the class, so a value from
+either form calls them directly. (`onMutation`
+was listed under *Adapter-only* here until objectui#7323; it is optional on
+`DataSource`, not absent from it.)
+
+**Beyond `DataSource`** (declared on `ObjectStackAdapter`, so reachable from
+either form):
+
+- `connect()` - Establish the connection (called lazily by every operation)
+- `getCacheStats()` / `invalidateCache(key?)` / `clearCache()` - Cache control
+- `getClient()` - Access the underlying `@objectstack/client` instance
+- `getConnectionState()` / `isConnected()` - Connection introspection
+- `onConnectionStateChange(listener)` - Subscribe to state changes (returns unsubscribe)
+- `onBatchProgress(listener)` - Subscribe to bulk progress (returns unsubscribe)
+
+Those six bullets cover nine members, and they are the documented subset.
+`ObjectStackAdapter` declares more members beyond `DataSource` than these —
+`Exclude<keyof ObjectStackAdapter<unknown>, keyof DataSource<unknown>>` lists
+them all; the rest are lower-level seams — client discovery, cache-key
+invalidation, dataset and dashboard access and advisory subscriptions among
+them — which this page does not document and which carry no compatibility
+promise here.
+
+### Per-element data binding
+
+A schema node's `dataSource` key is the spec's `ElementDataSource` (validated by
+`ElementDataSourceSchema` in `@objectstack/spec`) — plain JSON metadata, **not**
+the adapter object:
+
+```typescript
+interface ElementDataSource {
+  /** Object to query (required) */
+  object: string
+
+  /** Saved view name — supplies columns, filter, sort and page size */
+  view?: string
+
+  /** Additional filter rules, one `{ field, operator, value }` per condition; they AND together and with the view's filter */
+  filter?: ViewFilterRule[]
+
+  /** Sort order — overrides the view's */
+  sort?: Array<{ field: string; order: 'asc' | 'desc' }>
+
+  /** Row cap — overrides the view's page size */
+  limit?: number
+}
+```
+
+The spec schema is **strict**: a key outside this list is rejected rather than
+silently ignored. `SchemaRenderer` also strips this key from the props it
+spreads, so the metadata can never shadow the injected adapter. Full per-block
+support table: [Per-element data binding](/docs/frontend/data-source).
+
+## Usage Examples
+
+Every example below binds a block with the per-element `dataSource` metadata. The
+adapter itself is injected once, at the renderer boundary, as shown in Quick Start.
+
+### Grid over an object
+
+```json
+{
+  "type": "object-grid",
+  "dataSource": { "object": "product", "limit": 20 }
+}
+```
+
+### Narrowing a saved view
+
+`filter` AND-combines with the view's own filter, so a binding can only narrow
+what the view already restricts. It is a list of `{ field, operator, value }`
+rules, which AND together:
+
+```json
+{
+  "type": "object-grid",
+  "dataSource": {
+    "object": "order",
+    "view": "open_orders",
+    "filter": [{ "field": "total", "operator": "greater_than", "value": 100 }],
+    "limit": 50
+  }
+}
+```
+
+### Form on one record
+
+Form blocks honour `object` (a form edits a record, so there is no collection
+query to filter or page):
+
+```json
+{
+  "type": "object-form",
+  "dataSource": { "object": "user" }
+}
+```
+
+### Kanban
+
+`object-kanban` honours `object` and `filter`; it has no ordering or row cap of
+its own:
+
+```json
+{
+  "type": "object-kanban",
+  "dataSource": {
+    "object": "task",
+    "filter": [{ "field": "project", "operator": "equals", "value": "acme" }]
+  }
+}
+```
+
+## Configuration
+
+The adapter reads **no environment variables of its own** — configuration is
+passed to `createObjectStackAdapter` in code. Sourcing those values from the
+environment is your bundler's business (`process.env.*` under Node or webpack,
+`import.meta.env.*` under Vite):
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+const dataSource = createObjectStackAdapter({
+  baseUrl: process.env.OBJECTSTACK_API_URL!,
+  token: process.env.OBJECTSTACK_API_TOKEN,
+  cache: { maxSize: 200, ttl: 10 * 60 * 1000 },
+  autoReconnect: true,
+  maxReconnectAttempts: 5,
+  reconnectDelay: 2000,
+});
+```
+
+### Custom fetch
+
+Pass your own `fetch` to route requests through a proxy or attach extra headers:
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+const dataSource = createObjectStackAdapter({
+  baseUrl: 'https://api.example.com',
+  fetch: (input, init) =>
+    fetch(input, { ...init, headers: { ...init?.headers, 'X-Tenant': 'acme' } }),
+});
+```
+
+## Advanced Usage
+
+### Custom Queries
+
+Call the adapter directly for queries a block does not cover. Query parameters
+are OData-style (`$filter`, `$orderby`, `$top`, `$skip`, `$select`, `$expand`):
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+const dataSource = createObjectStackAdapter({ baseUrl: 'https://api.example.com' });
+const startDate = '2024-01-01';
+
+const [users, orders] = await Promise.all([
+  dataSource.find('user', {
+    $filter: { createdAt: { $gte: startDate } },
+    $orderby: 'createdAt desc',
+    $top: 20,
+  }),
+  dataSource.find('order', {
+    $filter: { status: 'completed' },
+    $select: ['id', 'total', 'createdAt'],
+  }),
+]);
+
+// find() resolves to { data, total? }
+console.log(users.data.length, users.total);
+```
+
+### Mutations
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+type User = { id: string; name: string; email: string };
+
+const dataSource = createObjectStackAdapter<User>({ baseUrl: 'https://api.example.com' });
+
+const user = await dataSource.create('user', { name: 'Ada', email: 'ada@example.com' });
+
+const updated = await dataSource.update('user', user.id, { name: 'Ada Lovelace' });
+
+await dataSource.delete('user', user.id);
+```
+
+Batch writes on one object go through `bulk`, and cross-object writes that must
+commit or roll back together go through `batchTransaction`. Both are optional on
+the `DataSource` interface, so a value you annotated as `DataSource` still has to
+feature-detect them — but the adapter implements both unconditionally and the
+factory declares the adapter, so the value from Quick Start calls them directly:
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+type User = { id: string; name: string; email: string };
+
+const adapter = createObjectStackAdapter<User>({ baseUrl: 'https://api.example.com' });
+
+await adapter.bulk('user', 'create', [
+  { name: 'Alice', email: 'alice@example.com' },
+  { name: 'Bob', email: 'bob@example.com' },
+]);
+
+// `{ $ref: 0 }` resolves to the id minted by operation 0
+await adapter.batchTransaction([
+  { object: 'invoice', action: 'create', data: { no: 'INV-1' } },
+  { object: 'invoice_line', action: 'create', data: { invoice: { $ref: 0 }, amount: 10 } },
+]);
+```
+
+### Error Handling
+
+The adapter throws typed errors with stable codes:
+
+```typescript
+import {
+  createObjectStackAdapter,
+  MetadataNotFoundError,
+  AuthenticationError,
+  ConnectionError,
+} from '@object-ui/data-objectstack';
+
+const dataSource = createObjectStackAdapter({ baseUrl: 'https://api.example.com' });
+
+try {
+  const schema = await dataSource.getObjectSchema('user');
+} catch (error) {
+  if (error instanceof MetadataNotFoundError) {
+    // code 'METADATA_NOT_FOUND', statusCode 404
+  } else if (error instanceof AuthenticationError) {
+    // code 'AUTHENTICATION_ERROR', statusCode 401
+  } else if (error instanceof ConnectionError) {
+    // code 'CONNECTION_ERROR', statusCode 503
+  }
+}
+```
+
+Exported error types: `ObjectStackError` (base), `MetadataNotFoundError`,
+`BulkOperationError`, `ConnectionError`, `AuthenticationError`,
+`DataApiValidationError`, plus the `isObjectStackError` / `isErrorType` guards.
+
+## Package Information
+
+**Package Name:** `@object-ui/data-objectstack` — published on npm, see the
+[npm page](https://www.npmjs.com/package/@object-ui/data-objectstack) for the current version  
+**License:** MIT
+
+## Dependencies
+
+This package declares no peer dependencies. Everything below is a regular dependency that is installed and resolved with the package:
+
+- **@objectstack/client** - ObjectStack API client
+- **@objectstack/spec** - ObjectStack metadata spec and shared contracts
+- **@object-ui/core** - Schema engine and query helpers
+- **@object-ui/types** - TypeScript types
+
+## Integration with Plugins
+
+Many plugins support ObjectStack data sources:
+
+- **plugin-grid** - Data grids with ObjectStack queries
+- **plugin-form** - Forms with ObjectStack CRUD
+- **plugin-kanban** - Kanban boards with ObjectStack data
+- **plugin-calendar** - Calendars with ObjectStack events
+- **plugin-gantt** - Gantt charts with ObjectStack tasks
+- **plugin-map** - Maps with ObjectStack locations
+
+## Next Steps
+
+- **[ObjectStack Documentation](https://docs.objectstack.ai)** - Learn about ObjectStack
+- **[Data Sources Guide](/docs/frontend/data-source)** - Learn about data sources
+- **[Plugins](/docs/frontend/plugins)** - Explore plugins with data support
+- **[Schema Overview](/docs/frontend)** - Learn the schema format
+
+## Troubleshooting
+
+### Authentication Errors
+
+An `AuthenticationError` (code `AUTHENTICATION_ERROR`, status 401) means the
+`token` passed to `createObjectStackAdapter` was missing, expired or rejected.
+Check the connection state and the values you passed in:
+
+Connection introspection lives on the adapter, not on the `DataSource` interface
+— and the factory declares the adapter, so the value from Quick Start reaches it
+without a second construction:
+
+```typescript
+import { createObjectStackAdapter } from '@object-ui/data-objectstack';
+
+const dataSource = createObjectStackAdapter({ baseUrl: 'https://api.example.com' });
+
+console.log(dataSource.getConnectionState()); // 'connected' | 'error' | ...
+
+dataSource.onConnectionStateChange((event) => {
+  if (event.error) console.error('Connection error:', event.error);
+});
+```
+
+After the first connect, the state follows the requests you make. A request
+with no HTTP answer moves it to `reconnecting`, then to `error` once the
+`maxReconnectAttempts` budget is spent. The next answered request moves it back
+to `connected`. An answered 4xx or 5xx leaves it unchanged, because the server
+is reachable.
+
+### CORS Issues
+
+Configure CORS on your ObjectStack backend to allow your domain.
+
+### Data Not Loading
+
+Check browser console and network tab for errors. Verify:
+- `baseUrl` points at the right ObjectStack server
+- The token is valid and not expired
+- The object name exists in your ObjectStack instance
+- The block's `dataSource` binding names an object (and a `view`, if used) that resolves
+- An adapter is actually injected — a block with no `SchemaRendererProvider`
+  above it and no `dataSource` prop has nothing to query with
+
+## Need Help?
+
+- [ObjectStack Documentation](https://docs.objectstack.ai)
+- [GitHub Issues](https://github.com/objectstack-ai/objectstack/issues)
+- [ObjectUI Documentation](/docs/frontend)

@@ -1537,7 +1537,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1584,7 +1584,7 @@
         {
           "clause": "related lists are DERIVED from the relationship declaration with no hand-built page: the Account detail auto-renders them (Projects is the pinned example)",
           "oracle": "dom",
-          "verify": "after screenshot, the related tabs exist on the stock detail page (pinned by objectui e2e/live/detail-related-list.spec.ts)",
+          "verify": "after screenshot, the related tabs exist on the stock detail page",
           "evidence": "detail screenshot"
         },
         {
@@ -1616,7 +1616,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/detail-related-list.spec.ts — acceptance[2] ONLY (the relationship-derived Projects related list on the Account detail page: Northwind's detail renders a Projects tab whose panel shows the projects' status labels). packages/qa/dogfood/test/related-list-server-paging-and-gate.dogfood.test.ts, at the REST data door the related list reads through (GET /api/v1/data/showcase_contact scoped by the Northwind filter) on the showcase as shipped, pins the server halves: acceptance[1] and negative[1] (the filtered read holds the 26 seeded contacts; $top=10 pages at $skip 0, 10 and 20 each answer total 26 and return 10, 10 and 6 rows with no id repeated or skipped), acceptance[4] (each served child re-reads by its own id with the same row) and acceptance[5] with negative[2] (a member staffed contributor is refused the identical query 403 with no rows; a member staffed manager reads it 200 with rows). acceptance[0] and negative[0] (the console's own top/skip on every child request), the pager text, acceptance[3] (the Invoices tab's authored title and columns) and the Contacts tab's absence for the contributor stay live browser legs: they are judged on the console's requests and rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
+        "ref": "packages/qa/dogfood/test/related-list-server-paging-and-gate.dogfood.test.ts, at the REST data door the related list reads through (GET /api/v1/data/showcase_contact scoped by the Northwind filter) on the showcase as shipped, pins the server halves: acceptance[1] and negative[1] (the filtered read holds the 26 seeded contacts; $top=10 pages at $skip 0, 10 and 20 each answer total 26 and return 10, 10 and 6 rows with no id repeated or skipped), acceptance[4] (each served child re-reads by its own id with the same row) and acceptance[5] with negative[2] (a member staffed contributor is refused the identical query 403 with no rows; a member staffed manager reads it 200 with rows). acceptance[0] and negative[0] (the console's own top/skip on every child request), the pager text, acceptance[2] (the relationship-derived Projects tab on Northwind's detail page and its status labels), acceptance[3] (the Invoices tab's authored title and columns) and the Contacts tab's absence for the contributor stay live browser legs: they are judged on the console's requests and rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "#3358 §4 (evidence run captured exactly this trace)",
@@ -1679,7 +1679,8 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for the server halves of acceptance[1], [4], [5] and negative[1], [2] (#26573 slice 4), and says why acceptance[0], [3], negative[0] and the rendered halves stay live browser legs. No clause changed",
           "ref": "#26573"
-        }
+        },
+        { "revision": 10, "date": "2026-10-28", "change": "automated.ref and acceptance[2].verify drop ui/e2e/live/detail-related-list.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a row's name link now opens the record drawer (the record-open preference, #26681) and the spec waited for the /record/ID route it no longer navigates to. acceptance[2] joins the live browser legs the ref lists; its derivation, own-tab promotion and option-label cells stay unit-pinned in objectui (deriveRelatedLists.test.ts, buildDefaultPageSchema.test.ts, RelatedList.columnIdentityAccessor.test.tsx). The dogfood pin is unchanged. No clause changed", "ref": "#25914" }
       ]
     },
     {

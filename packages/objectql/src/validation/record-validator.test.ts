@@ -1362,6 +1362,66 @@ describe('validateRecord — `currency` is outside the max_scale enforced set (#
 });
 
 /**
+ * [#27236] A `currency` field written as an object, the retired
+ * `{ value, currency }` shape (ADR-0104 D1), is refused with the SAME wire code
+ * as before, `invalid_number` and nothing more, and a sentence that teaches the
+ * shape: a bare number, with the currency declared in `currencyConfig` or taken
+ * from the tenant default. The accept set does not move. A non-number string, an
+ * array, and an object on a `number` field keep the plain sentence (CONTROLS).
+ */
+describe('[#27236] validateRecord — a currency value written as an object names the bare-number shape', () => {
+  const refusalOf = (schema: Parameters<typeof validateRecord>[0], data: Record<string, unknown>, mode: 'insert' | 'update' = 'insert') => {
+    try {
+      validateRecord(schema, data, mode);
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      return (e as ValidationError).fields;
+    }
+    return null;
+  };
+  const lesson = renderValidationMessage({ messageKey: 'invalid_number_currency_object', label: 'Amount', field: 'amount' });
+  const plain = renderValidationMessage({ messageKey: 'invalid_number', label: 'Amount', field: 'amount' });
+  const dynamic = { fields: { amount: { type: 'currency', label: 'Amount' } } };
+  const fixed = { fields: { amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } } };
+
+  for (const [name, schema] of [['dynamic', dynamic], ['fixed', fixed]] as const) {
+    it(`refuses { value, currency } on a ${name}-mode field with invalid_number and the lesson, on insert and update`, () => {
+      for (const mode of ['insert', 'update'] as const) {
+        expect(refusalOf(schema, { amount: { value: 10, currency: 'USD' } }, mode)).toEqual([
+          { field: 'amount', code: 'invalid_number', message: lesson, label: 'Amount' },
+        ]);
+      }
+    });
+  }
+
+  it('the lesson is a different sentence from the plain one and names currencyConfig', () => {
+    expect(lesson).not.toBe(plain);
+    expect(lesson.startsWith('Amount is a currency amount: write it as a bare number')).toBe(true);
+    expect(lesson).toContain('currencyConfig');
+  });
+
+  it('a bare number passes', () => {
+    expect(refusalOf(dynamic, { amount: 10 })).toBeNull();
+    expect(refusalOf(fixed, { amount: 10 }, 'update')).toBeNull();
+  });
+
+  it('CONTROL — a non-number string on a currency field keeps the plain sentence', () => {
+    expect(refusalOf(dynamic, { amount: 'abc' })).toEqual([{ field: 'amount', code: 'invalid_number', message: plain, label: 'Amount' }]);
+  });
+
+  it('CONTROL — an array on a currency field keeps the plain sentence', () => {
+    expect(refusalOf(dynamic, { amount: [10] })).toEqual([{ field: 'amount', code: 'invalid_number', message: plain, label: 'Amount' }]);
+  });
+
+  it('CONTROL — an object on a number field keeps the plain sentence (the lesson is currency-only)', () => {
+    const number = { fields: { amount: { type: 'number', label: 'Amount' } } };
+    expect(refusalOf(number, { amount: { value: 10, currency: 'USD' } })).toEqual([
+      { field: 'amount', code: 'invalid_number', message: plain, label: 'Amount' },
+    ]);
+  });
+});
+
+/**
  * [#20846] A `date` / `datetime` value the kind's rule reads, whose year falls
  * outside the kind's supported years, is refused with the SAME wire code as
  * before — `invalid_date`, constraint `{ type }` and nothing more — and a

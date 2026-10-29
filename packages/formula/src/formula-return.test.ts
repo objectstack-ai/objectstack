@@ -38,6 +38,8 @@ const FIELDS: Readonly<Record<string, FormulaSourceField>> = {
   weighted: { type: 'formula', returnType: 'currency', currencyConfig: USD },
   count_formula: { type: 'formula', returnType: 'number' },
   broken: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'US' } },
+  // `fixed` with no code: the spec refuses it rather than filling in CNY (#27157).
+  fixed_no_code: { type: 'currency', currencyConfig: { currencyMode: 'fixed' } },
 };
 
 const NAMES = Object.keys(FIELDS);
@@ -127,6 +129,8 @@ describe('CONTROL — a numeric formula stays `number`', () => {
       'record.flag ? record.amount : record.fee_eur',
       // A source whose currency does not parse names no currency.
       'record.broken * 2',
+      // Nor does a fixed source with no code: it is never read as CNY (#27157).
+      'record.fixed_no_code * 2',
       // A roll-up's unit is its child field's, not readable here.
       'record.rollup * 2',
       'record.amount % 3',

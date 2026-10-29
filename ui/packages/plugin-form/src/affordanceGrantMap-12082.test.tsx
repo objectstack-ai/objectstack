@@ -612,6 +612,7 @@ const WRITE_HELPERS: Readonly<Record<string, Verb>> = {
   emulateBatchTransaction: 'batch',
   'recordDelete.run': 'delete',
   saveWithOcc: 'update',
+  claimQueuedRecord: 'update',
 };
 
 type WriteSite =
@@ -699,6 +700,14 @@ const WRITE_SITES: Record<string, WriteSite> = {
     mapped(['feedReactionAdd'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > onClick :: delete':
     mapped(['recordDelete'], RECORD_PAGE),
+  // Claim on a record sitting in an ownership queue (objectstack ADR-0142 D4).
+  // No object grant answers a claim: the server admits it from the record's
+  // own sharing verdict (a queue member, an edit share, Modify All) on an
+  // unowned row, so no map row could. The page offers it only on the explain
+  // engine's record-scoped answer for a transfer of THIS record
+  // (`useQueueClaimOffered`, a `queue_claim` rule that `admits`).
+  'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleClaim :: update':
+    outOfFamily("a queue claim: admitted by the server from the row's own sharing verdict, not an object grant, and offered only on the explain engine's record-scoped `queue_claim: admits` answer for this record"),
   'packages/app-shell/src/views/RelatedRecordActionsBridge.tsx :: RelatedRecordActionsBridge > value > resolve :: delete':
     mapped(['relatedRowDelete'], 'packages/app-shell/src/views/RelatedRecordActionsBridge.tsx'),
   // Setup's permission-set and position holders (objectui#12082, leg B's last
@@ -797,6 +806,7 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // list's own object (with a `linkField`) is a create of the child, and a
   // re-parent of the picked record (without one) an update of the picked
   // object — the rows a related list's "+ New" and row Edit read.
+  'packages/plugin-detail/src/queueClaim.ts :: claimQueuedRecord :: update': helper('claimQueuedRecord'),
   'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: create':
     mapped(['relatedNew'], RELATED_LIST),
   'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: update':

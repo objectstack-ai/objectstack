@@ -202,44 +202,46 @@ describe('objectui#8355 · surface 1 — the view-level `calendar` block', () =>
   });
 });
 
-describe('objectui#8355 · surface 2 — the legacy `options.calendar` nesting', () => {
-  it.each(RETIRED)('refuses `%s` there too, with the SAME message and the SAME `invalid_type` code', (alias, canonical) => {
+describe('objectui#8355 · surface 2 — the legacy `options.calendar` nesting is RETIRED (objectstack#25923)', () => {
+  // Until objectstack#25923 the bag nested surface 1's own block, so each arm
+  // fired there too, with ONE message. The bag is retired: the list overlay's
+  // `options` is a tombstone that refuses the bag WHOLE, by name, before any
+  // block inside it is judged, and a stored bag is folded onto `calendar` on
+  // read, where surface 1's arms judge it.
+  const BAG_REFUSAL = /^A list view's `options` bag was removed in @objectstack\/spec /;
+
+  it.each(RETIRED)('refuses a bag carrying `%s` at `options` itself, judging nothing inside it', (alias) => {
     const result = listView({ options: { calendar: { startDateField: 'kickoff', [alias]: 'kickoff' } } });
     expect(result.success, `${alias} still parses green under options.calendar`).toBe(false);
-    const issue = issueAt(result, `options.calendar.${alias}`);
-    // objectui#6152 round 12: the bag nests surface 1's own block, so the arm is
-    // a declared MEMBER here too (it was a `custom` check while `options` was an
-    // open record). One code and ONE message in both nestings.
-    expect(issue?.code).toBe('invalid_type');
-    expect(issue?.message).toContain(`Did you mean \`${alias}\` → \`${canonical}\`?`);
-    const surface1 = issueAt(listView({ calendar: { startDateField: 'kickoff', [alias]: 'kickoff' } }), `calendar.${alias}`);
-    expect(issue?.message).toBe(surface1?.message);
+    expect(issueAt(result, 'options')?.message).toMatch(BAG_REFUSAL);
+    expect(issueAt(result, `options.calendar.${alias}`)).toBeUndefined();
   });
 
-  it('DARK CONTROL: a canonical legacy block parses GREEN', () => {
-    const ok = listView({ options: { calendar: { startDateField: 'kickoff' } } });
-    expect(ok.success, JSON.stringify(ok.error?.issues)).toBe(true);
+  it('a canonical block in the bag is refused the same way; the same block at the top level parses GREEN', () => {
+    const bag = listView({ options: { calendar: { startDateField: 'kickoff' } } });
+    expect(issueAt(bag, 'options')?.message).toMatch(BAG_REFUSAL);
+    const top = listView({ calendar: { startDateField: 'kickoff' } });
+    expect(top.success, JSON.stringify(top.error?.issues)).toBe(true);
   });
 
-  it('UNDECLARED-KEY CONTROL: an undeclared key is refused with the spec\'s own `unrecognized_keys` (objectui#6152 round 12 closed the bag)', () => {
-    // Until round 12 this row pinned the nesting OPEN ("nothing else under
-    // `options.calendar` is judged here"). The by-name arms above report
-    // `invalid_type` at their own path; a key no arm names reports the spec
-    // slot's `unrecognized_keys` at the block, as on surface 1.
-    const r = listView({ options: { calendar: { [CONTROL_KEY]: 'x' } } });
+  it('UNDECLARED-KEY CONTROL: a key no arm names is refused at the top-level block with the spec\'s own `unrecognized_keys`', () => {
+    // The row that pinned the bag CLOSED (objectui#6152 round 12), moved to the
+    // one nesting left.
+    const r = listView({ calendar: { startDateField: 'kickoff', [CONTROL_KEY]: 'x' } });
     expect(r.success).toBe(false);
-    const issue = issueAt(r, 'options.calendar') as { code?: string; keys?: string[] } | undefined;
+    const issue = issueAt(r, 'calendar') as { code?: string; keys?: string[] } | undefined;
     expect(issue?.code).toBe('unrecognized_keys');
     expect(issue?.keys).toEqual([CONTROL_KEY]);
   });
 
-  it('SIBLING CONTROL: the objectui#8365 `options.kanban.groupBy` refusal still fires', () => {
+  it('SIBLING CONTROL: the objectui#8365 `kanban.groupBy` refusal still fires', () => {
     // The calendar refusal and the kanban one rode the same `.check()` until
     // objectui#6152 round 12 made both arms of the nested blocks, so this row is
-    // what reports a refactor that dropped the earlier card's refusal on the way past.
-    const result = listView({ options: { kanban: { groupBy: 'stage' } } });
+    // what reports a refactor that dropped the earlier card's refusal on the way
+    // past. It wrote the bag nesting until objectstack#25923.
+    const result = listView({ kanban: { groupByField: 'stage', groupBy: 'stage' } });
     expect(result.success).toBe(false);
-    expect(issueAt(result, 'options.kanban.groupBy')?.message)
+    expect(issueAt(result, 'kanban.groupBy')?.message)
       .toContain('Did you mean `groupBy` → `groupByField`?');
   });
 });
