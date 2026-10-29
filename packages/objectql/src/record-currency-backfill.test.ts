@@ -12,7 +12,7 @@
 // The backfill's writes go through the real engine, so its own record-mode
 // guard and the code field's `valueDomain` judge each one.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ObjectQL } from './engine.js';
 import {
   backfillRecordCurrencyCodes,
@@ -23,7 +23,6 @@ import {
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
   const writes: Array<{ object: string; id: string; data: Record<string, unknown> }> = [];
-  let reads = 0;
   const storeFor = (o: string) => {
     let s = stores.get(o);
     if (!s) { s = new Map(); stores.set(o, s); }
@@ -62,13 +61,12 @@ function makeDriver() {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
-      reads++;
+      // Rows are seeded in id order and never re-keyed, so the store's order is
+      // the `id` order the keyset walk seeks by.
       const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
-      rows.sort((a, b) => String(a.id).localeCompare(String(b.id)));
       return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
-      reads++;
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
       return null;
     },
@@ -98,7 +96,6 @@ function makeDriver() {
     driver,
     storeFor,
     writes,
-    reads: () => reads,
     failUpdateFor: (id: string | null) => { failUpdateFor = id; },
   };
 }
@@ -114,10 +111,14 @@ describe('backfillRecordCurrencyCodes — rows stored before the switch to recor
     d.storeFor('deal').set(id, { id, name: id, ...row });
   };
   const deal = (id: string) => d.storeFor('deal').get(id);
+  /** Every row read the driver was asked for, counted beside the double rather than inside it. */
+  const reads = () => vi.mocked(d.driver.find).mock.calls.length + vi.mocked(d.driver.findOne).mock.calls.length;
 
   beforeEach(async () => {
     engine = new ObjectQL();
     d = makeDriver();
+    vi.spyOn(d.driver, 'find');
+    vi.spyOn(d.driver, 'findOne');
     engine.registerDriver(d.driver, true);
     await engine.init();
     engine.registry.registerObject({
@@ -196,13 +197,13 @@ describe('backfillRecordCurrencyCodes — rows stored before the switch to recor
   it('a code that is not an ISO 4217 member is refused before any row is read', async () => {
     seedMixed();
     for (const code of ['usd', 'XYZ', 'US', ' USD', '']) {
-      const before = d.reads();
+      const before = reads();
       const err = await backfillRecordCurrencyCodes(engine, quietLogger, {
         object: 'deal', field: 'amount', code, apply: true,
       }).then(() => null, (e: unknown) => e as Record<string, unknown>);
       expect(err, code).toMatchObject({ code: 'INVALID_FIELD', status: 400, httpStatus: 400, field: 'currency_code' });
       expect(String(err?.message)).toContain('Refused before the walk read or wrote any row.');
-      expect(d.reads(), code).toBe(before);
+      expect(reads(), code).toBe(before);
     }
     expect(d.writes).toEqual([]);
   });
@@ -216,7 +217,7 @@ describe('backfillRecordCurrencyCodes — rows stored before the switch to recor
       expect(err, field).toMatchObject({ code: 'INVALID_FIELD', status: 400, field });
       expect(String(err?.message)).toContain(`'deal.${field}' is not a record-mode currency field`);
     }
-    expect(d.reads()).toBe(0);
+    expect(reads()).toBe(0);
     expect(d.writes).toEqual([]);
   });
 
