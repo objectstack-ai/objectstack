@@ -126,7 +126,7 @@ export interface MasterDetailFormSchema {
   objectName: string;
   mode?: 'create' | 'edit';
   /**
-   * `string | number` to match `ObjectFormSchema` and the drawer/modal/split/
+   * `string | number` to match `ObjectFormSchema` and the drawer/modal/
    * tabbed/wizard envelopes that hand a record straight through to this form —
    * a numeric primary key is a real backend shape. Narrowed to a string only at
    * the batch-transaction boundary, whose `BatchTransactionOperation.id` is a

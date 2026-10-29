@@ -25,7 +25,9 @@ import { render, screen, waitFor, renderHook } from '@testing-library/react';
 import React from 'react';
 import { createI18n, I18nProvider, useObjectLabel } from '@object-ui/i18n';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 
 registerAllFields();
 
@@ -100,7 +102,7 @@ const NAMED_SECTIONS = [
 const renderForm = (instance: any, schema: Record<string, unknown>) =>
   render(
     <I18nProvider instance={instance}>
-      <ObjectForm
+      <ObjectFormContainer
         schema={{
           type: 'object-form',
           objectName: 'crm_case',

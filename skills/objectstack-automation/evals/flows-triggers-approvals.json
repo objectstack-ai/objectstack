@@ -3,8 +3,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Every night at 02:00, mark `subscription` records whose `renewal_date` is in the past as `lapsed`. `status` is a readonly field that only automation may change.",
-      "expected_output": "Emits a `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`; no cron tag), `runAs: 'system'` because a scheduled run has no trigger user and a readonly field is stripped under `runAs: 'user'`. One `update_record` node with `filter` as an ObjectQL where-map (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
+      "prompt": "Every night at 02:00, mark `subscription` records whose `renewal_date` has passed as `lapsed`; `status` is a readonly field only automation may change.",
+      "expected_output": "A `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`), `runAs: 'system'` (a readonly field is stripped under `runAs: 'user'`); one `update_record` with a where-map `filter` (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
       "files": [],
       "assertions": {
         "must_contain": ["defineFlow", "type: 'schedule'", "runAs: 'system'", "update_record", "edges"],
@@ -13,8 +13,8 @@
     },
     {
       "id": 2,
-      "prompt": "When an opportunity moves into stage `closed_won`, send the account owner an inbox notification with the deal name.",
-      "expected_output": "Emits a `record_change` flow whose binding lives on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, and a bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'` so it fires only on the transition. A `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`. `requires` must list `automation`, `triggers` and `messaging`, else notify reports success with `skipped: true`.",
+      "prompt": "When an opportunity reaches stage `closed_won`, send the account owner an inbox notification with the deal name.",
+      "expected_output": "A `record_change` flow bound on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'`; a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`; `requires` lists `automation`, `triggers`, `messaging`, else notify reports success with `skipped: true`.",
       "files": [],
       "assertions": {
         "must_contain": ["triggerType", "record-after-update", "previous.", "notify", "recipients", "messaging", "{{"],
@@ -23,8 +23,8 @@
     },
     {
       "id": 3,
-      "prompt": "Build an autolaunched flow `budget_approval` on the `project` object: when `budget` increases past 100000, route to a manager for approval. The manager can approve, reject, or send the record back to the submitter for revision; after the submitter reworks and resubmits it returns to the manager for another round. Cap it at two send-backs.",
-      "expected_output": "Emits the ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a third `revise` out-edge targeting an `approval_revise` node (no config), and a resubmit edge back into the approval node typed `type: 'back'` — the only thing that legalises the cycle for `registerFlow`. The flow lives in `flows` (there is no `approvals` stack collection); the window is a node, not a re-suspend of the approval node.",
+      "prompt": "Build an autolaunched flow `budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs.",
+      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
       "files": [],
       "assertions": {
         "must_contain": ["type: 'approval'", "approval_revise", "type: 'back'", "maxRevisions", "revise"],
@@ -33,8 +33,8 @@
     },
     {
       "id": 4,
-      "prompt": "Build a guided 'new client onboarding' wizard: step 1 collects company details, step 2 asks whether a credit check is needed — if yes show a credit-check screen, otherwise skip it — then create the `account` record.",
-      "expected_output": "Because the steps BRANCH on logic, this is a `screen` flow (`type: 'screen'`), not a form-view wizard: `screen` nodes for each step, a `decision` node whose out-edges carry mutually exclusive `condition` predicates (an unguarded out-edge always runs, in parallel), a `create_record` node, explicit `variables` entries (`{ name, type, isInput, isOutput }`), and every path reaching an `end`. The flow stays `runAs: 'user'`.",
+      "prompt": "Build a guided 'new client onboarding' wizard: step 1 collects company details, step 2 asks whether a credit check is needed (if yes, a credit-check screen; else skip), then creates the `account` record.",
+      "expected_output": "The steps BRANCH, so a `screen` flow (`type: 'screen'`), not a form-view wizard: a `screen` node per step, a `decision` whose out-edges carry mutually exclusive `condition` predicates (an unguarded out-edge always runs, in parallel), a `create_record`, explicit `variables` entries (`{ name, type, isInput, isOutput }`), every path reaching an `end`; `runAs: 'user'`.",
       "files": [],
       "assertions": {
         "must_contain": ["screen", "decision", "condition", "create_record", "variables"],
@@ -43,8 +43,8 @@
     },
     {
       "id": 5,
-      "prompt": "Add a step that calls our `pricing.recalc` function to compute the discount and saves it on the quote, then posts the quote to our tax service over HTTP; if the tax call fails, route to a handler node instead of failing the run.",
-      "expected_output": "Emits a `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs`, and `outputVariable: 'recalc'`; a pure compute step, so a following `update_record` persists it with `fields: { discount: { dialect: 'cel', source: 'recalc.discount' } }`. The `http` node sets `timeoutMs`. Failure routing is a `type: 'fault'` edge; a bare error label routes nothing.",
+      "prompt": "Add a step calling our `pricing.recalc` function to compute the discount and save it on the quote, then post the quote to our tax service over HTTP; if the tax call fails, route to a handler node instead of failing the run.",
+      "expected_output": "A `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs` and `outputVariable: 'recalc'` — pure compute, so a following `update_record` persists `fields: { discount: { dialect: 'cel', source: 'recalc.discount' } }`. The `http` node sets `timeoutMs`. Failure routing is a `type: 'fault'` edge; a bare error label routes nothing.",
       "files": [],
       "assertions": {
         "must_contain": ["function:", "outputVariable", "type: 'fault'", "timeoutMs", "update_record", "dialect: 'cel'"],
@@ -53,8 +53,8 @@
     },
     {
       "id": 6,
-      "prompt": "When a `job_application` is approved, email the applicant. Applicants are not users; the address is in the record's `applicant_email` field.",
-      "expected_output": "`notify` with `recipients: { emailField: 'applicant_email' }` (the fourth recipient form: an `email`-typed field of the trigger record) and `channels: 'email'` alone — never a CEL envelope over `record.applicant_email`, which must yield user ids and fails the node for an address no user holds.",
+      "prompt": "When a `job_application` is approved, email the applicant — not a user; the address is the record's `applicant_email` field.",
+      "expected_output": "`notify` with `recipients: { emailField: 'applicant_email' }` (the fourth recipient form: an `email` field of the trigger record) and `channels: 'email'` alone — never a CEL envelope over `record.applicant_email`, which must yield user ids and fails for an address no user holds.",
       "files": [],
       "assertions": {
         "must_contain": ["notify", "emailField", "applicant_email", "'email'"],
@@ -63,8 +63,8 @@
     },
     {
       "id": 7,
-      "prompt": "An expense approval only holders of the `expense.approve_request` capability may start; route to the `finance_manager` position, and the submitter must never approve their own expense.",
-      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'finance_manager' }]`, sets `excludeSubmitter: true`, and its `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
+      "prompt": "An expense approval only holders of `expense.approve_request` may start; route to the `finance_manager` position; the submitter must never approve their own expense.",
+      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'finance_manager' }]` with `excludeSubmitter: true`, and `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
       "files": [],
       "assertions": {
         "must_contain": ["requiredPermissions", "excludeSubmitter: true", "type: 'position'"],
@@ -73,8 +73,8 @@
     },
     {
       "id": 8,
-      "prompt": "A screen flow: the user uploads the signed contract PDF on the last step, then the flow creates the `contract` record with the file in its `signed_copy` field.",
-      "expected_output": "A `type: 'screen'` flow whose last `screen` carries `{ name: 'signed_copy', type: 'file', required: true }` and resumes with the uploaded `sys_file` id bound to `signed_copy`; a `create_record` after it writes `fields: { signed_copy: { dialect: 'cel', source: 'signed_copy' } }`, which claims the file for the record.",
+      "prompt": "A screen flow: the user uploads the signed contract PDF on the last step; the flow then creates the `contract` record with the file in `signed_copy`.",
+      "expected_output": "A `type: 'screen'` flow whose last `screen` carries `{ name: 'signed_copy', type: 'file', required: true }` and resumes with the `sys_file` id bound to `signed_copy`; a following `create_record` writes `fields: { signed_copy: { dialect: 'cel', source: 'signed_copy' } }`, claiming the file for the record.",
       "files": [],
       "assertions": {
         "must_contain": ["type: 'screen'", "type: 'file'", "create_record", "signed_copy"],
@@ -83,8 +83,8 @@
     },
     {
       "id": 9,
-      "prompt": "Build a screen flow `convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a `crm_contact` linked to it, and ends on a screen that shows links to both new records.",
-      "expected_output": "A `screen` flow (`type: 'screen'`): a first `screen` node collecting `company_name` and `contact_name`; two `create_record` nodes with `outputVariable` (`account`, `contact`), the contact's `fields` linking it with `account: { dialect: 'cel', source: 'account.id' }`; then a last `screen` node whose fields are two `type: 'record_link'` fields, each with `reference` naming its object (`crm_account`, `crm_contact`) and `defaultValue: { dialect: 'cel', source: 'account.id' }` / `{ dialect: 'cel', source: 'contact.id' }`, carrying no `required`, `placeholder` or `options`. The `end` node carries no `message` (refused on a completed end) and the screen `description` holds no markdown link — the links are the `record_link` fields, spelled `record_link`, never the object field type.",
+      "prompt": "Build a screen flow `convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a linked `crm_contact`, and ends on a screen linking to both new records.",
+      "expected_output": "A `type: 'screen'` flow: a `screen` collecting `company_name` and `contact_name`; two `create_record` nodes with `outputVariable` (`account`, `contact`), the contact linked by `account: { dialect: 'cel', source: 'account.id' }`; a last `screen` of two `type: 'record_link'` fields with `reference` (`crm_account`, `crm_contact`) and `defaultValue: { dialect: 'cel', source: 'account.id' }` / `'contact.id'`, no `required`, `placeholder` or `options`. The `end` carries no `message` (refused when completed), the `description` no markdown link — the links are the `record_link` fields, never the object field type.",
       "files": [],
       "assertions": {
         "must_contain": ["record_link", "reference", "defaultValue", "outputVariable", "dialect: 'cel'"],
@@ -93,8 +93,8 @@
     },
     {
       "id": 10,
-      "prompt": "The `expense` record page shows an Edit button to every member who can read the record. While an expense is under approval, members who are not on the approval still get the button and their save is refused with `409 RECORD_LOCKED`. Make the page know the record is locked before it offers the edit.",
-      "expected_output": "Read the lock itself: `client.approvals.getRecordLock('expense', recordId)` (`GET /api/v1/approvals/records/expense/:recordId/lock`) answers `{ locked }` to anyone who can read the record, participant or not — the same judgement the lock hook applies to the write — so the page hides or disables Edit while `locked` is `true`. Not the request row: a non-participant is served none, and request content stays behind the object's `approvalsVisibleToReaders`, which is not switched on for this. A record the caller cannot read answers `404 RECORD_NOT_FOUND`, the same as a missing one.",
+      "prompt": "The `expense` record page shows Edit to every member who can read the record; while an expense is under approval, non-participants still get the button and their save is refused with `409 RECORD_LOCKED`. Let the page know the record is locked before offering the edit.",
+      "expected_output": "Read the lock itself: `client.approvals.getRecordLock('expense', recordId)` (`GET /api/v1/approvals/records/expense/:recordId/lock`) answers `{ locked }` to anyone who can read the record — the lock hook's own judgement — so the page hides Edit while `locked` is `true`. Not the request row: a non-participant is served none, and request content stays behind `approvalsVisibleToReaders`. An unreadable record answers `404 RECORD_NOT_FOUND`, like a missing one.",
       "files": [],
       "assertions": {
         "must_contain": ["getRecordLock", "locked"],
@@ -103,8 +103,8 @@
     },
     {
       "id": 11,
-      "prompt": "When a `contractor` record is marked `onboarded`, grant its linked user (`contractor.user_id`) the `contractor_portal` permission set. Make the flow run as system so the grant always lands.",
-      "expected_output": "Not as system: a system-context insert into `sys_user_permission_set` (as into `sys_user_position`, `sys_invitation` or `sys_member`) is refused with `PERMISSION_DENIED` — elevation does not lift a governed identity write, a dedicated system subflow included. Emits the `record_change` flow with `runAs: 'user'`: its `create_record` on `sys_user_permission_set` is judged by the delegated-administration gate as the user whose write fired the flow, recorded as the grant's `granted_by`; a user the gate would not let grant the set is refused, which is the rule, not a defect to route around.",
+      "prompt": "When a `contractor` is marked `onboarded`, grant its linked user (`contractor.user_id`) the `contractor_portal` permission set; run the flow as system so the grant always lands.",
+      "expected_output": "Not as system: a system-context insert into `sys_user_permission_set` (as into `sys_user_position`, `sys_invitation` or `sys_member`) is refused with `PERMISSION_DENIED` — elevation does not lift a governed identity write, a system subflow included. The flow runs `runAs: 'user'`: its `create_record` on `sys_user_permission_set` is judged by the delegated-administration gate as the user whose write fired it, recorded as `granted_by`; a user the gate would not let grant the set is refused — the rule, not a defect.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -118,6 +118,16 @@
           "runAs: 'system'",
           "sudo"
         ]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "Spread new `crm_case` records evenly across the support team; a `refund_requested` case needs sign-off from the support-leads queue.",
+      "expected_output": "An assignment rule, not a flow or hook: `defineAssignmentRule({ name: 'case_intake', object: 'crm_case', entries: [{ name: 'all', assignTo: { type: 'queue', value: 'support_team' }, strategy: 'round_robin' }] })` in `assignmentRules` — evaluated once per insert on a still-ownerless row, never on update; no counter field. The sign-off is an `approval` node (`type: 'approval'`) with `approvers: [{ type: 'queue', value: 'support_leads' }]`: the queue's members join the slate at node entry; an empty queue adds nobody.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineAssignmentRule", "strategy: 'round_robin'", "type: 'queue'", "type: 'approval'"],
+        "must_not_contain": ["assigned_to", "record-after-create"]
       }
     }
   ]

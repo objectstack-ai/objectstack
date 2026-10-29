@@ -31,7 +31,9 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, cleanup } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { resetSectionGroupReports } from '../sectionGroups';
 
 registerAllFields();
@@ -93,7 +95,7 @@ async function proGroup(
   kind = 'pro',
 ): Promise<Outcome> {
   render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={{
         type: 'object-form',
         formType,
@@ -122,7 +124,7 @@ async function proGroup(
 }
 
 const BY_REFERENCE = [{ group: 'general' }, { group: 'pro_details' }];
-const LAYOUTS = ['simple', 'tabbed', 'split', 'drawer', 'modal'] as const;
+const LAYOUTS = ['simple', 'tabbed', 'drawer', 'modal'] as const;
 
 describe('objectui#13055 (a) — a faulting field-group predicate hides the group on every layout', () => {
   it('the no-sections fieldGroups fallback (simple form): parse fault and unknown field both hide', async () => {

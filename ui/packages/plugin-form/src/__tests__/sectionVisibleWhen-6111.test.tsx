@@ -126,7 +126,9 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import React from 'react';
 import { PredicateScopeProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { ModalForm } from '../ModalForm';
 
 registerAllFields();
@@ -194,7 +196,7 @@ const renderObjectForm = async (
 ) => {
   render(
     <PredicateScopeProvider scope={scope as any}>
-      <ObjectForm
+      <ObjectFormContainer
         schema={{
           type: 'object-form',
           objectName: 'crm_case',
@@ -257,7 +259,7 @@ const LAYOUTS: {
     mount: (scope, gate) => renderObjectForm(scope, { formType: 'simple' }, gate),
   },
   {
-    label: 'ModalForm — via ObjectForm delegation (key-by-key remap + ModalForm groups map)',
+    label: 'ModalForm — via the block container (key-by-key remap + ModalForm groups map)',
     mount: (scope, gate) => renderObjectForm(scope, { formType: 'modal', open: true }, gate),
   },
   {
@@ -275,10 +277,10 @@ const LAYOUTS: {
     mount: (scope, gate) => renderModalFormDirect(scope, { contentLayout: 'tabbed' }, gate),
   },
   {
-    // Same arm via ObjectForm delegation: `contentLayout` rides the spread and
+    // Same arm via the block container: `contentLayout` rides the spread and
     // the key-by-key section remap must have copied `visibleWhen` for the tab
     // to receive it — both hops, like the stacked modal row above.
-    label: "ModalForm — contentLayout 'tabbed', via ObjectForm delegation (#6237)",
+    label: "ModalForm — contentLayout 'tabbed', via the block container (#6237)",
     mount: (scope, gate) =>
       renderObjectForm(scope, { formType: 'modal', open: true, contentLayout: 'tabbed' }, gate),
   },
@@ -294,12 +296,8 @@ const LAYOUTS: {
     mount: (scope, gate) => renderObjectForm(scope, { formType: 'tabbed' }, gate),
   },
   {
-    label: 'DrawerForm — via ObjectForm delegation (key-by-key remap + explicit-sections divider)',
+    label: 'DrawerForm — via the block container (key-by-key remap + explicit-sections divider)',
     mount: (scope, gate) => renderObjectForm(scope, { formType: 'drawer', open: true }, gate),
-  },
-  {
-    label: 'SplitForm — via ObjectForm delegation (key-by-key remap + paneFields divider)',
-    mount: (scope, gate) => renderObjectForm(scope, { formType: 'split' }, gate),
   },
 ];
 

@@ -618,15 +618,19 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "货币配置",
-        helpText: "此字段使用哪种货币——货币字段，或返回类型为“货币”的公式字段。未设置时为 dynamic 模式。两种模式下值都是一个纯数字。"
+        helpText: "此字段使用哪种货币——货币字段，或返回类型为“货币”的公式字段。未设置时为 dynamic 模式。任何模式下值都是一个纯数字。"
       },
       "currencyConfig.currencyMode": {
         label: "货币模式",
-        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。"
+        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。record：每条记录有自己的货币，保存在 currencyField 指向的字段中。"
+      },
+      "currencyConfig.currencyField": {
+        label: "币种字段",
+        helpText: "仅用于 record 模式，且在该模式下必填：本对象上保存每条记录 ISO 4217 币种代码的字段——一个声明了 valueDomain iso_4217_currency 的文本字段，惯例命名为 currency_code。"
       },
       "currencyConfig.defaultCurrency": {
         label: "默认货币",
-        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。fixed 模式下必填，不会自动填入。dynamic 模式下不读取。"
+        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。fixed 模式下必填，不会自动填入。dynamic 模式下不读取；record 模式下不允许设置。"
       },
       step: {
         label: "步进值",

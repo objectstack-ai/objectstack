@@ -365,6 +365,14 @@ import {
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
 import { isFederatedObject, isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
+// [#27277] The correctness floor over a plugin driver on an external datasource.
+import {
+  createExternalDriverFloor,
+  externalPredicateWriteRefusal,
+  isExternalDriverFloor,
+  needsExternalDriverFloor,
+  unwrapExternalDriverFloor,
+} from './external-driver-floor.js';
 // [#25522 cut 14] The master-detail landing, the preview's parents and the
 // related reads a validation rule makes; the methods of the same names below
 // hand each body the members it reads (`MasterDetailRelatedHost`). Imported after
@@ -4525,6 +4533,12 @@ interface TransactionScope {
  */
 export interface DatasourceDef {
   name: string;
+  /**
+   * [#27277] The driver id the datasource selects. Read to decide whether the
+   * engine floors the datasource's driver (`needsExternalDriverFloor`: a
+   * non-managed datasource on a driver id that is not built in).
+   */
+  driver?: string;
   schemaMode?: string;
   external?: {
     /** Datasource-wide write gate — ADR-0015 §5.3 Gate 3. */
@@ -9045,7 +9059,8 @@ export class ObjectQL implements IObjectQLEngine {
   registerDriver(driver: IDataDriver, isDefault: boolean = false) {
     const existing = this.drivers.get(driver.name);
     if (existing) {
-      if (existing !== driver) {
+      // [#27277] The entry may be the floored instance of this very driver.
+      if (unwrapExternalDriverFloor(existing) !== unwrapExternalDriverFloor(driver)) {
         this.logger.warn(
           'Driver name collision — KEEPING the already-registered driver and DISCARDING the one just supplied. ' +
             'Two different driver instances claim one name, so whatever configuration the discarded instance carried ' +
@@ -9076,6 +9091,7 @@ export class ObjectQL implements IObjectQLEngine {
     this.drivers.set(driver.name, driver);
     this.supplyFileColumnsMovedResolver(driver);
     this.supplyTenantKeyCertifiedResolver(driver);
+    this.applyExternalDriverFloor(driver.name);
     this.logger.info('Registered driver', {
       driverName: driver.name,
       version: driver.version
@@ -9218,7 +9234,43 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerDatasourceDef(def: DatasourceDef): void {
     if (!def?.name) return;
-    this.datasourceDefs.set(def.name, { schemaMode: def.schemaMode, external: def.external });
+    // [#27277] A def that names no driver keeps the id stored before it: the
+    // datasource-connection service re-registers a def without `driver` after
+    // a connect (`EngineDatasourceDef` has no such key), and reading that
+    // absence as "not a plugin driver" would take the floor back off.
+    const driver = def.driver ?? this.datasourceDefs.get(def.name)?.driver;
+    this.datasourceDefs.set(def.name, { driver, schemaMode: def.schemaMode, external: def.external });
+    this.applyExternalDriverFloor(def.name);
+  }
+
+  /**
+   * [#27277] Put the registered driver of datasource `name` behind the engine's
+   * correctness floor when its definition calls for one, or take it back out
+   * when a later definition no longer does (`external-driver-floor.ts`).
+   *
+   * Called from both doors — {@link registerDriver} and
+   * {@link registerDatasourceDef} — because either can come first. The floored
+   * driver REPLACES the entry in `drivers`, once, so every reader of the map
+   * (`getDriver`, `getDriverByName`, the default-driver and transaction-scope
+   * identity checks) holds one instance.
+   */
+  private applyExternalDriverFloor(name: string): void {
+    const current = this.drivers.get(name);
+    if (!current) return;
+    const floored = isExternalDriverFloor(current);
+    if (needsExternalDriverFloor(this.datasourceDefs.get(name))) {
+      if (floored) return;
+      this.drivers.set(name, createExternalDriverFloor(current, {
+        datasource: name,
+        fieldsOf: (object) => this._registry.getObject(object)?.fields,
+        logger: this.logger,
+      }));
+      this.logger.info('Datasource served by a plugin driver: the engine applies each query in memory', {
+        datasource: name,
+      });
+    } else if (floored) {
+      this.drivers.set(name, unwrapExternalDriverFloor(current));
+    }
   }
 
   /**
@@ -16340,6 +16392,9 @@ export class ObjectQL implements IObjectQLEngine {
            // boundary's status passthrough — decorated; the #5748/#11009
            // family stays a plain Error, byte-identical to before.
            if (dispatch.kind === 'reject') throw engineUpdateDispatchRejectError(dispatch);
+           // [#27277] A floored plugin driver offers no `updateMany` on purpose:
+           // say so, rather than ask for the `multi` this caller already passed.
+           if (isExternalDriverFloor(driver)) throw externalPredicateWriteRefusal(driver.name, object, 'update');
            throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
        }
 
@@ -19627,7 +19682,10 @@ export class ObjectQL implements IObjectQLEngine {
         // refusal names the dropped `where` keys; the classic shape keeps
         // `ENGINE_DELETE_REJECT_MESSAGE`; the fallback arm is a `multi`
         // verdict against a driver with no `deleteMany`.
-        throw new Error(dispatch.kind === 'reject' ? dispatch.message : ENGINE_DELETE_REJECT_MESSAGE);
+        if (dispatch.kind === 'reject') throw new Error(dispatch.message);
+        // [#27277] See update()'s twin: a floored plugin driver offers no `deleteMany`.
+        if (isExternalDriverFloor(driver)) throw externalPredicateWriteRefusal(driver.name, object, 'delete');
+        throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
       }
 
       // [#6966] See update()'s twin — same rule, same single binding point.

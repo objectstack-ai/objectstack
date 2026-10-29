@@ -171,6 +171,25 @@ The document must be **OpenAPI 3.x**. A Swagger 2.0 document — or one with no
 document, URL or file it came from: convert it to OpenAPI 3.x offline and point
 `spec` at the converted document. The runtime never converts.
 
+The ObjectStack repository carries that offline step as a script (it is not
+shipped in the npm package): `normalize-openapi` reads a file or URL, JSON or
+YAML, converts Swagger 2.0 to OpenAPI 3.0, bundles and inlines every `$ref`,
+makes `servers[0].url` absolute, writes one JSON document and prints its
+sha256 — and, given allow-patterns, the `include` list for the operations they
+match.
+
+```bash
+pnpm --filter @objectstack/connector-openapi normalize-openapi \
+  --in https://example.com/openapi.yaml --out ./specs/crm-openapi.json \
+  --include-pattern '^GET /v1/customers'
+```
+
+Inlining is bounded: a recursive schema, or one more than `--max-depth`
+(default 2) named schemas deep, becomes a typed stub whose description names
+the reference it replaced. A Swagger 2.0 operation whose empty `consumes` list
+would drop its request body is refused until `--empty-consumes <media type>`
+says which media type it accepts.
+
 ### `provider: 'mcp'` — one action per tool
 
 Config: **`transport`** (required) and **`include`** (optional tool-name

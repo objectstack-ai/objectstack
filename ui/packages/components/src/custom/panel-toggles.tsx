@@ -12,13 +12,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { cn } from '../lib/utils';
 import { Kbd, KbdGroup } from './kbd';
 
-/** One panel a {@link PanelToggles} group shows or hides. */
+/** One panel a {@link PanelToggles} control shows or hides. */
 export interface PanelToggleItem {
-  /** Stable identity within the group; also the button's `data-panel-toggle`. */
+  /** Stable identity within the control; also the segment's `data-panel-toggle`. */
   id: string;
-  /** The panel's name — the button's accessible name and its tooltip text. */
+  /** The panel's name — the segment's visible text, its accessible name and its tooltip text. */
   label: string;
-  /** The panel's icon. Decorative: the label names the button. */
+  /** The panel's icon, drawn before the label. Decorative: the label names the segment. */
   icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
   /** Whether the panel is shown. */
   pressed: boolean;
@@ -31,26 +31,36 @@ export interface PanelToggleItem {
 
 export interface PanelTogglesProps {
   items: readonly PanelToggleItem[];
-  /** The group's accessible name. */
+  /** The control's accessible name. */
   label: string;
   className?: string;
 }
 
 /**
- * A row of icon buttons that show and hide a page's panels — the reader's
+ * ONE segmented control that shows and hides a page's panels — the reader's
  * own layout switches (objectstack#27052), the way an editor's title bar
- * toggles its side panels. Each button is a toggle: `aria-pressed` says
- * whether its panel is shown, the pressed state is tinted, and its tooltip
- * names the panel and the shortcut that toggles it.
+ * toggles its side panels. Each segment is a toggle with an icon and its
+ * label (objectstack#27241): `aria-pressed` says whether its panel is shown;
+ * a segment that is on is filled with the accent tint and reads in the
+ * foreground colour, a segment that is off is plain muted text — the state
+ * reads at a glance, in both themes, without hovering. Its tooltip names the
+ * panel and the shortcut that toggles it.
  *
  * Pure presentation: the host owns the state and the shortcut handlers, and
- * hands in localized labels.
+ * hands in localized labels. The console's record page draws it at the end
+ * of the record header's action row; any other host may place it where its
+ * own chrome is.
  */
 export function PanelToggles({ items, label, className }: PanelTogglesProps) {
   if (items.length === 0) return null;
   return (
     <TooltipProvider delayDuration={300}>
-      <div role="group" aria-label={label} className={cn('inline-flex items-center gap-0.5', className)} data-panel-toggles="">
+      <div
+        role="group"
+        aria-label={label}
+        className={cn('inline-flex h-8 items-center gap-0.5 rounded-md border border-border bg-background p-0.5', className)}
+        data-panel-toggles=""
+      >
         {items.map((item) => {
           const Icon = item.icon;
           return (
@@ -60,17 +70,18 @@ export function PanelToggles({ items, label, className }: PanelTogglesProps) {
                   size="sm"
                   pressed={item.pressed}
                   onPressedChange={item.onPressedChange}
-                  aria-label={item.label}
                   aria-keyshortcuts={item.ariaKeyShortcuts}
                   className={cn(
-                    'h-8 min-w-8 px-2 text-muted-foreground',
+                    'h-[1.625rem] min-w-0 gap-1.5 rounded-[5px] px-2 text-xs font-medium text-muted-foreground',
+                    'hover:bg-muted hover:text-foreground',
                     // `aria-pressed`, not Radix's `data-state`: the tooltip
                     // trigger writes its own `data-state` onto this button.
-                    'aria-pressed:bg-primary/10 aria-pressed:text-primary hover:aria-pressed:bg-primary/15',
+                    'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
                   )}
                   data-panel-toggle={item.id}
                 >
-                  <Icon className="h-4 w-4" aria-hidden />
+                  <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span>{item.label}</span>
                 </Toggle>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="flex items-center gap-2">

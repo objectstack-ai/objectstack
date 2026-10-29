@@ -178,6 +178,15 @@ export class DriverConnectError extends Error {
 /** Why a declared datasource has no live driver (framework#3828). */
 export type DatasourceUnavailableKind = 'blocked' | 'failed';
 
+/**
+ * [#27277] The reasons {@link DatasourceUnavailableError} reports: the two a
+ * datasource with no live driver has, plus `remote` — the driver IS live, and
+ * the remote system behind a plugin driver failed this one request (it threw,
+ * was unreachable, or answered 5xx). Per request, so it is never a value the
+ * connection layer records ({@link DatasourceUnavailableInfo} keeps the two).
+ */
+export type DatasourceUnavailableReason = DatasourceUnavailableKind | 'remote';
+
 /** What the connection layer recorded about a datasource it could not connect. */
 export interface DatasourceUnavailableInfo {
   kind: DatasourceUnavailableKind;
@@ -245,19 +254,24 @@ export class DatasourceUnavailableError extends Error {
   constructor(
     public readonly datasource: string,
     public readonly objectName: string,
-    public readonly kind: DatasourceUnavailableKind,
+    public readonly kind: DatasourceUnavailableReason,
     publicDetail?: string,
   ) {
-    const head =
-      `[ObjectQL] Datasource '${datasource}' configured for object '${objectName}' is declared but not connected`;
+    const head = kind === 'remote'
+      ? `[ObjectQL] Datasource '${datasource}' could not answer this request for object '${objectName}'`
+      : `[ObjectQL] Datasource '${datasource}' configured for object '${objectName}' is declared but not connected`;
     const why =
-      kind === 'blocked'
+      kind === 'remote'
+        ? `: the remote system behind its plugin driver failed, did not respond, or answered with a server ` +
+          `error. It may clear; retry later.`
+        : kind === 'blocked'
         ? `: the host's datasource connect policy refused it.`
         : `: it failed to connect at startup and the server was started with ` +
           `OS_ALLOW_DRIVER_CONNECT_FAILURE. Nothing re-runs the connect — the server must be ` +
           `restarted once the datasource is reachable.`;
     const detail = publicDetail ? ` ${publicDetail}` : '';
-    super(`${head}${why}${detail} See the startup logs or Setup → Datasources for the cause.`);
+    const where = kind === 'remote' ? 'the server log' : 'the startup logs or Setup → Datasources';
+    super(`${head}${why}${detail} See ${where} for the cause.`);
     this.name = 'DatasourceUnavailableError';
   }
 }

@@ -618,15 +618,19 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "通貨設定",
-        helpText: "このフィールドの通貨（通貨フィールド、または戻り値型が「通貨」の数式フィールド）。未設定の場合は dynamic モードです。どちらのモードでも、値は単なる数値です。"
+        helpText: "このフィールドの通貨（通貨フィールド、または戻り値型が「通貨」の数式フィールド）。未設定の場合は dynamic モードです。どのモードでも、値は単なる数値です。"
       },
       "currencyConfig.currencyMode": {
         label: "通貨モード",
-        helpText: "dynamic（既定）：フィールド自体は通貨を持たず、金額はテナントの既定通貨（localization.currency 設定）で表示されます。fixed：フィールドは 1 つの通貨 defaultCurrency を持ちます。"
+        helpText: "dynamic（既定）：フィールド自体は通貨を持たず、金額はテナントの既定通貨（localization.currency 設定）で表示されます。fixed：フィールドは 1 つの通貨 defaultCurrency を持ちます。record：各レコードが独自の通貨を持ち、currencyField が指すフィールドに保存されます。"
+      },
+      "currencyConfig.currencyField": {
+        label: "通貨フィールド",
+        helpText: "record モード専用で、同モードでは必須：各レコードの ISO 4217 通貨コードを保持する、このオブジェクト上のフィールド。valueDomain iso_4217_currency を宣言したテキストフィールドで、慣例名は currency_code。"
       },
       "currencyConfig.defaultCurrency": {
         label: "既定の通貨",
-        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。fixed モードでは必須で、自動では補われません。dynamic モードでは参照されません。"
+        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。fixed モードでは必須で、自動では補われません。dynamic モードでは参照されず、record モードでは指定できません。"
       },
       step: {
         label: "ステップ値",

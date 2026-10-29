@@ -15,7 +15,9 @@
  * `relatedList: 'primary'`) is a table section of the Details tab, placed
  * right after the FIRST field section; several stack in the order given; the
  * remaining sections follow. Every other list is a side card in the one
- * `Related` tab. The `fieldGroups` placement entry is fenced (#27069).
+ * `Related` tab. A field group whose `relatedList` names a body table's
+ * relationship places that table at the group's position instead
+ * (objectstack#27069, objectstack#27241).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -43,7 +45,7 @@ const items = (tabs: any) => tabs.properties.items;
 const shape = (nodes: any[]) =>
   nodes.map((n) =>
     n.type === 'record:details'
-      ? `details(${(n.properties.sections ?? []).map((s: any) => s.label).join(',')})`
+      ? `details(${(n.properties.sections ?? []).map((s: any) => s.label ?? s.group).join(',')})`
       : `${n.type === 'record:related_list' ? 'table' : n.type}(${n.properties.objectName})`,
   );
 
@@ -99,5 +101,68 @@ describe('the page knows its body tables', () => {
     expect(shape(columns.details)).toEqual(['details(Basic)', 'table(quote_line_item)', 'details(Terms,Notes)']);
     expect(columns.related.map((n: any) => n.properties.objectName)).toEqual(['task']);
     expect(columns.relatedCount).toBe(1);
+  });
+});
+
+describe('a field group places a body table at its position (objectstack#27069, objectstack#27241)', () => {
+  // 基本信息 · 条款 · [明细行] · 备注 — the author put the line items after the terms.
+  const placed = (entry: string, groupsOrder = ['basic', 'terms', 'lines', 'notes']) => ({
+    name: 'quote',
+    fields: {
+      name: { type: 'text', label: 'Name', group: 'basic' },
+      terms: { type: 'textarea', label: 'Terms', group: 'terms' },
+      notes: { type: 'textarea', label: 'Notes', group: 'notes' },
+    },
+    fieldGroups: groupsOrder.map((key) => (key === 'lines' ? { key, label: 'Lines', relatedList: entry } : { key, label: key })),
+  });
+  const detailsOf = (def: any, related: any[]) => shape(items(buildDefaultTabs(def, { related }))[0].children);
+
+  it('the table named by a group (child object name) sits at that group; the others keep "after the first section"', () => {
+    expect(detailsOf(placed('quote_line_item'), [LINES, SCHEDULE])).toEqual([
+      'details(basic)',
+      'table(quote_schedule)',
+      'details(terms)',
+      'table(quote_line_item)',
+      'details(notes)',
+    ]);
+  });
+
+  it('an `object.field` entry names the one FK; an entry naming another FK places nothing', () => {
+    expect(detailsOf(placed('quote_line_item.quote'), [LINES])).toEqual([
+      'details(basic,terms)',
+      'table(quote_line_item)',
+      'details(notes)',
+    ]);
+    expect(detailsOf(placed('quote_line_item.other_fk'), [LINES])).toEqual([
+      'details(basic)',
+      'table(quote_line_item)',
+      'details(terms,notes)',
+    ]);
+  });
+
+  it('a group declared before every field group puts its table first', () => {
+    expect(detailsOf(placed('quote_line_item', ['lines', 'basic', 'terms', 'notes']), [LINES])).toEqual([
+      'table(quote_line_item)',
+      'details(basic,terms,notes)',
+    ]);
+  });
+
+  it('a group declared last puts its table after every field section', () => {
+    expect(detailsOf(placed('quote_line_item', ['basic', 'terms', 'notes', 'lines']), [LINES])).toEqual([
+      'details(basic,terms,notes)',
+      'table(quote_line_item)',
+    ]);
+  });
+
+  it('the host-passed sections place the same way (the `{ group }` sections RecordDetailView passes)', () => {
+    const def = placed('quote_line_item');
+    // The `{ group }` reference form, as the host writes it (the options type
+    // names the enumerated form only).
+    const sections: Array<Record<string, unknown>> = [{ group: 'basic' }, { group: 'terms' }, { group: 'notes' }];
+    expect(shape(items(buildDefaultTabs(def, { sections, related: [LINES] }))[0].children)).toEqual([
+      'details(basic,terms)',
+      'table(quote_line_item)',
+      'details(notes)',
+    ]);
   });
 });

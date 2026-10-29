@@ -152,8 +152,13 @@ function RichTextEditorSurface({
           // After the spread because it COMPOSES the host's `className` (which
           // reaches this component as the `className` prop) with the surface's
           // own classes, rather than letting the raw host value replace them.
+          //
+          // `font-mono` is for the SOURCE the person types; the placeholder is
+          // prose addressed to them (a public form's "Describe your request"),
+          // so it takes the sans stack while the typed source stays mono
+          // (objectstack-ai/objectstack#27417).
           className={cn(
-            'font-mono',
+            'font-mono placeholder:font-sans',
             fullHeight ? 'text-base h-full min-h-full resize-none' : 'text-sm',
             className,
           )}

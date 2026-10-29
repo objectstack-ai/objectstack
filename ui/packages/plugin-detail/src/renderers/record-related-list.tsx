@@ -37,7 +37,7 @@ import {
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
 import { RelatedArrangementScopeContext } from '../ArrangedRelatedTab';
-import { CollapsedRelatedCard, RelatedDefaultChangedHint, RelatedHiddenLine } from '../RelatedCardStack';
+import { CollapsedRelatedCard, RelatedDefaultChangedHint, RelatedFootLine } from '../RelatedCardStack';
 import { RelatedCardChromeContext } from '../relatedListCompact';
 import { relatedCardId } from '../synth/relatedArrangement';
 import { useRecordAriaProps } from './recordComponentAria';
@@ -879,7 +879,8 @@ export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps>
   // objectstack#27055 — inside the tabbed tier's 关联 tab the reader's
   // arrangement applies (`ArrangedRelatedTab`): a collapsed list draws as its
   // title + count and reads no rows; every other list carries its chrome; the
-  // tab's last list closes it with the changed-default hint and the hidden line.
+  // tab's last list closes it with the changed-default hint and the foot line
+  // (the hidden cards, 「恢复默认顺序」).
   const scope = React.useContext(RelatedArrangementScopeContext);
   const arrangedId =
     scope && typeof schema?.objectName === 'string' && typeof schema?.relationshipField === 'string'
@@ -890,7 +891,12 @@ export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps>
     const lines = scope.lastId === arrangedId && (
       <>
         {scope.defaultChanged && <RelatedDefaultChangedHint onRestore={scope.restoreDefault} />}
-        {scope.hiddenCount > 0 && <RelatedHiddenLine count={scope.hiddenCount} onShow={scope.showHidden} />}
+        <RelatedFootLine
+          hiddenCount={scope.hiddenCount}
+          onShowHidden={scope.showHidden}
+          rearranged={scope.rearranged}
+          onRestoreDefault={scope.restoreDefaultArrangement}
+        />
       </>
     );
     if (scope.isCollapsed(arrangedId)) {

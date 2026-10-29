@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema, FieldType } from './field.zod';
+import { FieldSchema, FieldType, VALUE_DOMAIN_FIELD_TYPES } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -1838,6 +1838,91 @@ function refuseNonPictureImageField(
 }
 
 /**
+ * [ADR-0144 D2] A `record`-mode amount's `currencyConfig.currencyField` names
+ * the field THIS object declares that holds each record's currency: a `text`
+ * field carrying `valueDomain: 'iso_4217_currency'`. The amount stays a bare
+ * number (ADR-0104 D1); the code field is the only place its currency lives,
+ * so a pointer into nothing, into a non-text field or into an unconstrained
+ * text field would parse and give the amount a currency no write ever checks.
+ *
+ * `CurrencyConfigSchema` sees one config at a time and refuses the half it
+ * can see (a `record` config with no pointer, a pointer under another mode);
+ * what the pointer names is judged here, beside
+ * {@link refuseNonPictureImageField}, for the same reason: only the object
+ * holds the field map. Judged for every field whose config is `record`, so a
+ * `formula` declaring `returnType: 'currency'` meets it in the same shape.
+ *
+ * Three refusals, one located issue per offending field at
+ * `['fields', <field>, 'currencyConfig', 'currencyField']`, each carrying the
+ * prescription and the object's candidate fields:
+ *
+ *  - the name is not a declared field (or is the amount itself);
+ *  - the field's type is not one that may declare a value domain
+ *    (`VALUE_DOMAIN_FIELD_TYPES`, field.zod.ts — `text` alone today; the ADR's
+ *    "text field" rests on that set, so this door reads it rather than
+ *    repeating the literal);
+ *  - the field is of such a type without `valueDomain: 'iso_4217_currency'`.
+ *
+ * Judged against the AUTHORED field map. Not judged on
+ * `ObjectExtensionSchema`: an extension's fields merge into an object it does
+ * not hold, so its pointer may name a field only the owner declares.
+ */
+function refuseDishonestRecordCurrencyField(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const map = fields as Record<string, { type?: unknown; valueDomain?: unknown; currencyConfig?: unknown } | null>;
+  const isCodeType = (type: unknown): boolean => typeof type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(type);
+  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
+  const isCodeField = (f: (typeof map)[string]): boolean =>
+    isCodeType(f?.type) && f?.valueDomain === 'iso_4217_currency';
+  for (const [name, field] of Object.entries(map)) {
+    const config = field?.currencyConfig as { currencyMode?: unknown; currencyField?: unknown } | undefined;
+    if (config?.currencyMode !== 'record' || typeof config.currencyField !== 'string') continue;
+    const target = config.currencyField;
+    const candidates = Object.keys(map).filter((k) => k !== name && isCodeField(map[k]!));
+    const prescription =
+      `\`currencyField\` must name a ${codeTypes} field of this object declaring \`valueDomain: 'iso_4217_currency'\` — `
+      + (candidates.length > 0
+        ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
+        : 'the object has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`.');
+    const path = ['fields', name, 'currencyConfig', 'currencyField'];
+    const declared = target !== name && Object.prototype.hasOwnProperty.call(map, target);
+    if (!declared) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, but object \`${objectName}\` declares no `
+          + `other field \`${target}\`. ${prescription}`,
+      });
+      continue;
+    }
+    const type = map[target]?.type;
+    if (!isCodeType(type)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object `
+          + `\`${objectName}\`; a record currency is an ISO 4217 code in a ${codeTypes} field. ${prescription}`,
+      });
+      continue;
+    }
+    if (!isCodeField(map[target]!)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object \`${objectName}\` `
+          + `that does not declare \`valueDomain: 'iso_4217_currency'\`, so a write could store any string as the `
+          + `currency. Add \`valueDomain: 'iso_4217_currency'\` to \`${target}\`, or point at another field. ${prescription}`,
+      });
+    }
+  }
+}
+
+/**
  * [objectui#12489 ruling 6203737086, letter A] A field's
  * `referenceDeletedWhen: { field, value }` names a SIBLING `select` field on
  * this object and one of that field's declared option values — the row state
@@ -3482,6 +3567,9 @@ const ObjectSchemaBase = strictObject(
   // object — the same door, for the same reason: only the object holds the
   // field map the pointer resolves against.
   refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
+  // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
+  // ISO 4217 `text` sibling — the same door: only the object holds the map.
+  refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
   // [objectui#12489 ruling 6203737086, letter A] A `referenceDeletedWhen`
   // predicate names a declared single-value `select` sibling and one of its
   // options — the same door: only the object holds the sibling map.

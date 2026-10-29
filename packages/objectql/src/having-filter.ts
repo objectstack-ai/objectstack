@@ -210,6 +210,10 @@ import { utcInstantMs } from '@objectstack/spec/data';
 // [#20444] `$empty`'s value-level half — the spec's one definition of what a
 // stored value counts as empty for a face that judges by value.
 import { isEmptyFilterValue } from '@objectstack/spec/data';
+// [#27277] `$like` / `$ilike`'s pattern language — the spec's one compilation,
+// the one `driver-memory` and `formula` evaluate and `driver-sql` hands to
+// `LIKE` / `GLOB` — read by the driver-where position only.
+import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from '@objectstack/spec/data';
 // [#20176] The storage rule a temporal column puts a value in — ONE function,
 // shared with `driver-sql`'s and `driver-memory`'s `where`.
 import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
@@ -248,11 +252,36 @@ interface FilterClause {
   root: string;
   /** One-sentence semantics printed before the supported-operator list. */
   semantics: string;
+  /** [#27277] What ignoring an unknown operator would silently return, in the refusal's last sentence. */
+  ignoring: string;
+  /**
+   * [#27277] Whether the pattern pair `$like` / `$ilike` is evaluated here. Only
+   * the driver-where position takes it: a `where` carries it to every driver
+   * (#7536), while `having` and the per-aggregation `filter` never declared it.
+   */
+  patterns?: true;
 }
 
 const HAVING_CLAUSE: FilterClause = {
   root: 'having',
   semantics: 'HAVING filters the aggregated rows (aggregation aliases + groupBy projections)',
+  ignoring: 'return unfiltered aggregates',
+};
+
+/**
+ * [#27277] The driver-where position: a `where` the engine evaluates over the
+ * rows a plugin driver returned (`applyDriverQueryInMemory`, the ADR-0015 Tier
+ * A correctness floor). The rows are the object's own flat columns, as for the
+ * per-aggregation `filter`, and the vocabulary is the full `where` one — the
+ * pattern pair included.
+ */
+const DRIVER_WHERE_CLAUSE: FilterClause = {
+  root: 'where',
+  semantics:
+    'The engine evaluates this `where` over the rows a plugin driver returned '
+    + '(the object\'s own columns, the `where` operator vocabulary)',
+  ignoring: 'return rows the filter excludes',
+  patterns: true,
 };
 
 /**
@@ -266,6 +295,7 @@ export function aggregationFilterClause(index: number): FilterClause {
     semantics:
       'A per-aggregation `filter` narrows the SOURCE rows that one aggregation reads '
       + '(raw column namespace, the `where` operator vocabulary)',
+    ignoring: 'return unfiltered aggregates',
   };
 }
 
@@ -293,6 +323,9 @@ const CONDITION_OPERATORS = [
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
   '$empty',
 ] as const;
+
+/** [#27277] The pattern pair, evaluated at the driver-where position only ({@link FilterClause.patterns}). */
+const PATTERN_OPERATORS = ['$like', '$ilike'] as const;
 
 /**
  * [#20099] The operators whose WHOLE comparand may be a `{ $field }` reference —
@@ -407,11 +440,11 @@ function unknownOperator(
   }
   const supported = where === 'logical'
     ? `${LOGICAL_OPERATORS.join(', ')} (or a column condition)`
-    : CONDITION_OPERATORS.join(', ');
+    : [...CONDITION_OPERATORS, ...(clause.patterns ? PATTERN_OPERATORS : [])].join(', ');
   return invalidFilterError(
     `Unsupported operator '${op}' in \`${clause.root}\`. ${clause.semantics} and supports: ${supported}. `
     + `An unknown operator is refused rather than ignored — ignoring it would silently `
-    + `return unfiltered aggregates (ADR-0078).`,
+    + `${clause.ignoring} (ADR-0078).`,
   );
 }
 
@@ -581,6 +614,30 @@ function icontainsComparandError(field: string, value: unknown, path: string): E
  * and `parseFilterAST` lowers it there — so an author carrying it over from a
  * `where` is told which slot takes it rather than that it is malformed.
  */
+/**
+ * [#27277] What is wrong with a `$like` / `$ilike` comparand, or `undefined`.
+ * The three shapes `driver-memory` and `driver-sql` refuse: a non-string, a
+ * trailing unpaired backslash, a U+0000.
+ */
+function likePatternViolation(pattern: unknown): string | undefined {
+  if (typeof pattern !== 'string') {
+    return `requires a string comparand, received ${preview(pattern)}. A pattern's "%" matches any `
+      + `sequence, "_" one character, and a backslash escapes either, so a non-string comparand cannot `
+      + `be coerced without inventing wildcards the caller never wrote. For a literal substring search `
+      + `write "$contains", whose comparand IS text.`;
+  }
+  if (hasDanglingLikeEscape(pattern)) {
+    return `has a pattern ending in a lone unpaired backslash (${JSON.stringify(pattern)}). A backslash `
+      + `escapes the character after it, so a trailing one escapes nothing. Write two backslashes to `
+      + `match a literal backslash, or drop the trailing one.`;
+  }
+  if (hasNulInLikePattern(pattern)) {
+    return `has a pattern holding the NUL character U+0000, which no backend reads portably. Remove it `
+      + `from the pattern.`;
+  }
+  return undefined;
+}
+
 function havingNotAConditionError(having: unknown): Error {
   const shape = 'a filter condition OBJECT over the aggregated rows — { "ALIAS": { "$gt": 100 } }';
   if (Array.isArray(having)) {
@@ -2019,6 +2076,32 @@ export function matchesHaving(
 }
 
 /**
+ * [#27277] Evaluate one row a plugin driver returned against the `where` the
+ * engine sent it — the driver-where position of this walker, read by
+ * `applyDriverQueryInMemory`.
+ *
+ * The SAME walker as `having` and the per-aggregation `filter`, for their
+ * reason: one vocabulary, one ADR-0112 envelope, the #5298 null-safe
+ * negations, and the column's storage rule for a temporal comparand. Only the
+ * wording and the pattern pair differ ({@link DRIVER_WHERE_CLAUSE}). The `where`
+ * arrives already judged and lowered by the engine's doors; the per-row
+ * refusals here are the floor for a caller that evaluates rows directly.
+ *
+ * `classes` and `jsonStored` are the object's declared field classes and
+ * JSON-stored fields ({@link declaredFieldClasses},
+ * {@link declaredJsonStoredFields}); absent ⇒ every comparand as written and the
+ * substring reading of `$contains`.
+ */
+export function matchesDriverWhere(
+  row: Record<string, any>,
+  where: FilterCondition | null | undefined,
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  jsonStored?: ReadonlySet<string>,
+): boolean {
+  return matchesHaving(row, where, DRIVER_WHERE_CLAUSE.root, DRIVER_WHERE_CLAUSE, classes, jsonStored);
+}
+
+/**
  * [#10576] Evaluate one raw source row against one `aggregations[i].filter`
  * predicate — the per-aggregation filter of `AggregationNodeSchema` (the
  * contract half of #10413's ruling), applied by the in-memory aggregation
@@ -2245,6 +2328,12 @@ function checkCondition(
     if ((op === '$exists' || op === '$null') && typeof target !== 'boolean') {
       throw nonBooleanFlagComparandError(op, field, target, `${path}.${op}`);
     }
+    // [#27277] …and the pattern pair's, where the clause evaluates it. Off that
+    // position the pair is an unknown operator and `default:` refuses it.
+    if ((op === '$like' || op === '$ilike') && clause.patterns) {
+      const violation = likePatternViolation(target);
+      if (violation) throw invalidFilterError(`Operator "${op}" on field "${field}" at ${path}.${op} ${violation}`);
+    }
     // [#21007] A scalar comparison on a declared JSON-stored column — refused,
     // as `where` refuses it. The backstop under the one-time judgment
     // (assertAggregationFilterSparesJsonStoredFields), for a row that gets here.
@@ -2383,6 +2472,16 @@ function checkCondition(
       case '$icontains':
         if (typeof value !== 'string'
           || !asciiCaseInsensitiveContains(value, target)) return false;
+        break;
+      // [#27277] `$like` / `$ilike` — the caller's OWN pattern, anchored to the
+      // whole value, compiled by the spec (`likePatternToRegExp`: `u` flag, the
+      // `$ilike` fold ASCII-only and in the source). Not `escapeRegex`d — a `%`
+      // here is the caller's wildcard (#7536). A value that is not text matches
+      // no pattern, as `$contains` answers it.
+      case '$like':
+      case '$ilike':
+        if (!clause.patterns) throw unknownOperator(op, 'condition', keys, clause);
+        if (typeof value !== 'string' || !likePatternToRegExp(target, op === '$ilike').test(value)) return false;
         break;
       // [#5702] The `$regex` arm is GONE. It built `new RegExp(target, $options)`
       // and, on an illegal pattern, `return false` — an unrunnable filter

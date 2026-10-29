@@ -139,7 +139,6 @@ const FORMS: ReadonlyArray<{ form: string; formType: string | undefined }> = [
   { form: 'ObjectForm (default arm)', formType: undefined },
   { form: 'DrawerForm', formType: 'drawer' },
   { form: 'ModalForm', formType: 'modal' },
-  { form: 'SplitForm', formType: 'split' },
   { form: 'TabbedForm', formType: 'tabbed' },
   { form: 'WizardForm', formType: 'wizard' },
 ];
