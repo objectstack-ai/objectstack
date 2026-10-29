@@ -2952,9 +2952,13 @@ and rebuild.
 
 **`objectstack.manifest.json` supplies the listing fields.** When that file is
 present in the working directory, publish reads `manifestId`, `displayName`,
-`description`, `category`, `tagline`, `iconUrl`, `homepageUrl`, `license`,
+`description`, `category`, `tags`, `iconUrl`, `homepageUrl`, `license`,
 `readmePath` and a `translations` map from it, so a listing need not be retyped
-as flags on every publish. **CLI flags always win.** A per-locale `readme` entry
+as flags on every publish. **CLI flags always win.** `tags` has no flag and is
+sent as written: the control plane judges the list, and a refusal is its 400,
+printed as it is. A top-level `tagline` is used only as the description, when
+neither `--description` nor the file's `description` gives one; otherwise it is
+not sent, and a warning says so. A per-locale `readme` entry
 may be inlined markdown or a path resolved against the manifest's own directory
 (`README.zh-CN.md`). Publishing without the file is fully supported — it stays
 flag-driven.

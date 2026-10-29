@@ -448,6 +448,21 @@ function importNameRefusedError(message: string): Error {
 }
 
 /**
+ * [#27510] What the saved-datasource Test answers for a name that resolves no
+ * stored datasource: the `404` / `RESOURCE_NOT_FOUND` envelope (ADR-0112), in
+ * the words `GET /datasources/:name` uses, so the admin route relays it as the
+ * read sibling answers the same name. It mirrors the admin service's helper of
+ * the same name; `saved-datasource-test-unknown-name.test.ts` holds the two
+ * doors' answers equal.
+ */
+function datasourceNotFoundError(name: string): Error {
+  const err = new Error(`Datasource "${name}" does not exist.`) as Error & { code?: string; status?: number };
+  err.code = 'RESOURCE_NOT_FOUND';
+  err.status = 404;
+  return err;
+}
+
+/**
  * [#24772] The refusal every federation door answers for the platform's
  * primary datasource: listing its remote tables, drafting or importing one,
  * refreshing its catalog.
@@ -696,10 +711,24 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * rebuild does, and replaces the verdict either way. A datasource whose
    * failed rebuild kept its old pool serving has a live driver, so it is
    * probed as before.
+   *
+   * [#27510] A name that resolves no saved datasource is not a datasource that
+   * failed its probe, so it is the one outcome that THROWS: the 404
+   * {@link datasourceNotFoundError}, which the route answers exactly as
+   * `GET /datasources/:name` answers the same name. It answered `ok: false`
+   * with the engine's "has no registered driver" sentence, the answer a saved
+   * datasource that is down gets, so a caller could not tell the two apart.
+   * The name is resolved through `getDatasource`, the stored-record read the
+   * sibling `:name` doors make (both plugins wire it to
+   * `metadata.get('datasource', name)`). The primary datasource is not looked
+   * up: it may have no stored record, and its live driver answers for it.
    */
   async testConnection(
     datasource: string,
   ): Promise<{ ok: boolean; latencyMs?: number; tableCount?: number; error?: string }> {
+    if (datasource !== DEFAULT_DATASOURCE_NAME && !(await this.config.getDatasource(datasource))) {
+      throw datasourceNotFoundError(datasource);
+    }
     const started = Date.now();
     try {
       const driver = this.config.liveDriver?.(datasource);

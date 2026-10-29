@@ -10506,8 +10506,8 @@ const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
  * had no engine — nothing polled, counted consecutive failures or tripped a
  * breaker; `status` was read by nothing (the runtime publishes a COMPUTED
  * `state`, and participation is `enabled`); and a webhook nested in a
- * connector was never registered as a `webhook` item, so it was never
- * materialized into `sys_webhook` or delivered.
+ * connector was never registered as a `webhook` item, so the webhook
+ * dispatcher never read it or delivered it.
  *
  * A pure lossless delete, one notice per stripped key: none of the three ever
  * had an effect to preserve. In particular the nested `webhooks` are STRIPPED,
