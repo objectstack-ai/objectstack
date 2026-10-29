@@ -4,22 +4,17 @@ import { ANALYTICS_CUBE_NAME_REQUIRED, AnalyticsQueryRequestSchema } from '@obje
 import { fieldsFromZodIssues, validationFailure, VALIDATION_FAILED_STATUS } from '@objectstack/types';
 
 /**
- * The schema's `cube` member, resolved on the first refusal and kept: reading
- * it at module load would resolve the lazy request schema for every importer
- * of the service, which is the allocation `lazySchema` exists to defer.
- */
-let cubeMember: typeof AnalyticsQueryRequestSchema.shape.cube | undefined;
-
-/**
- * The ONE refusal for an analytics query that names no cube — `cube` absent or
- * the empty string — thrown by `AnalyticsService.query` (through `queryIn`) and
+ * The ONE refusal for an analytics query that names no cube — `cube` absent,
+ * the empty string, or a `null` an untyped caller slipped past the guard —
+ * thrown by `AnalyticsService.query` (through `queryIn`) and
  * `AnalyticsService.generateSql` before any other gate runs.
  *
  * ## Why a typed refusal, and why its words are the schema's
  *
  * The HTTP doors (`POST /analytics/query`, `POST /analytics/sql`) parse the body
- * with `AnalyticsQueryRequestSchema`, whose `cube` is `z.string().min(1, …)`:
- * a missing or empty name is refused there, `400 VALIDATION_FAILED` with a
+ * with `AnalyticsQueryRequestSchema`, whose `cube` is a string with a
+ * type-level `error` and a `.min(1)`, both carrying one sentence: a missing,
+ * non-string or empty name is refused there, `400 VALIDATION_FAILED` with a
  * `fields[]` entry at `cube`, and the engine is never reached. The engine's
  * own guard stays for the callers that do not pass through that schema — a
  * plugin, a flow, a test, anything that holds the service — and the base
@@ -56,13 +51,15 @@ let cubeMember: typeof AnalyticsQueryRequestSchema.shape.cube | undefined;
  * Refusing it would be a second rule beside the schema's `.min(1)`.
  */
 export function cubeNameRequiredError(cube: unknown): Error & { code: string; status: number } {
-  cubeMember ??= AnalyticsQueryRequestSchema.shape.cube;
-  const verdict = cubeMember.safeParse(cube);
+  // `lazySchema` caches the resolved request schema and `.shape` is itself
+  // cached, so this read costs nothing after the first refusal in a process.
+  const verdict = AnalyticsQueryRequestSchema.shape.cube.safeParse(cube);
   if (verdict.success) {
     // Both call sites guard with `!queryInput.cube`, and every falsy value
-    // fails `z.string().min(1)`; a caller reaching here with an accepted name
-    // would mint a refusal naming no field and prescribing a fix that is false.
-    throw new Error('cubeNameRequiredError: called with a cube name the schema accepts');
+    // fails the member; a caller reaching here with an accepted name would
+    // mint a refusal naming no field and prescribing a fix that is false. A
+    // programmer error, which a boundary rightly reports as a server fault.
+    throw new TypeError('cubeNameRequiredError: called with a cube name the schema accepts');
   }
   const issues = verdict.error.issues.map((issue) => ({ ...issue, path: ['cube', ...issue.path] }));
   const err = validationFailure(ANALYTICS_CUBE_NAME_REQUIRED, fieldsFromZodIssues(issues, { cube })) as Error & {

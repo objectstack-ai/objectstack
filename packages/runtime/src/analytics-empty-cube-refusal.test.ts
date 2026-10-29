@@ -127,11 +127,11 @@ describe.each<Door>(['/analytics/query', '/analytics/sql'])('%s — an empty cub
         expect(serviceCalls(calls)).toEqual([]);
     });
 
-    it('the `required` code covers every absent required key of the body, and an absent body', async () => {
-        // The door hands the body to the mapper, so the D3 split reports every
-        // missing key as `required` (it used to read `invalid_type`): pinned
-        // beyond `cube` because the changeset says so for `measures` and for
-        // a bodiless request.
+    it('the `required` code reaches `measures` left out and a bodiless request too', async () => {
+        // The door hands the body to the mapper, so the D3 split reports a
+        // missing key as `required` (it used to read `invalid_type`): the two
+        // other cases the changeset names, pinned by field and code (their
+        // messages are Zod's own, no sentence of this change's).
         const noMeasures = await post(door, { cube: 'orders' });
         expect(noMeasures.res.statusCode).toBe(400);
         expect(noMeasures.res.body.error.code).toBe('VALIDATION_FAILED');
