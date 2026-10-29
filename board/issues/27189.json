@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:39:17Z",
-  "updated_at": "2026-10-29T08:14:45Z",
+  "updated_at": "2026-10-29T09:00:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27189",
   "body": "Blocked-by: #27184\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** 数据建模文档的币种页：三种模式、兄弟币种字段、命名约定、哪些写法被拒及处方；明确「元数据永不写本位币」。\n- **为什么改：** 示例与文档是 AI 作者照抄的源头。\n- **风险与回滚：** 纯文档。\n- **先看：** `content/docs/data-modeling/`；#27158 先改掉两句虚报。\n- **两分钟验证：** docs-audit 通过。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Write the page from the ADR (M3-4) and M0-1's describe text.\n- [ ] docs-audit affected-docs green.\n\nLane: devx · Size: S · Review: default. `Clause-②: no` · `Metadata-protocol: none`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."

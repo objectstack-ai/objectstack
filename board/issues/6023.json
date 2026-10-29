@@ -1,7 +1,7 @@
 {
   "number": 6023,
   "kind": "issue",
-  "title": "[PM seat] domain:devx @ objectstack — 🟢 sunhaolin",
+  "title": "[PM seat] domain:devx @ objectstack — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "sunhaolin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-10-28T17:19:34Z",
+  "updated_at": "2026-10-29T13:08:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 446,
+  "comments": 448,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
-  "body": "domain:devx#1 · sunhaolin · session_017xRBcVyH9FzSkzAGmz8LNE\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`, ⛔ not copied here. This is **`domain:devx` seat 1**. Seat 2 is #20163 and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM\n\n🟢 `sunhaolin` (`GET /user`) · `session_017xRBcVyH9FzSkzAGmz8LNE` (cloud session, direct summons) · seated 2026-10-28T17:19Z. Summons, the maintainer's words in this session, verbatim: `/pm-dispatch devx seat 1`.\n\n- **Sibling seat:** seat 2 (#20163, `os-justin`) finishes only the cards it holds (#27114, #25910) and then signs off. The maintainer's word, verbatim, in this session: 「seat 2 只处理手上的任务就会下班」 (recorded on #20163). Every other `domain:devx` card is this seat's.\n- **Posture:** batch default 3, default judgment tier, `mode:subagent` for S/M cards. No predecessor posture carries over.\n- **Mailbox:** not opened. Zero open `pm:mailbox` pulls in the repository at seating, so no sibling reads one.\n\n## Inherited ledger\n\nPosture and ledger live in this session (pointer only). Canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs, read by `assignee:sunhaolin`. The previous body revision (os-warren, 2026-10-27) is the archive of the last term.\n\n## Hot-file serial queue\n\n⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch.\n\n- `packages/drivers/driver-memory/src/index.ts` → #26206, PR #27323 (in the merge queue).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes.\n- Wake: this session's chat and PR subscriptions (#27323). Wall: none. Decision filed: #27297 (blocks #25919).\n"
+  "body": "domain:devx#1 · sunhaolin · session_017xRBcVyH9FzSkzAGmz8LNE\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`, ⛔ not copied here. This is **`domain:devx` seat 1**. Seat 2 is #20163 and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM\n\n⏳ vacant. The last holder was `sunhaolin` · `session_017xRBcVyH9FzSkzAGmz8LNE` (cloud session, direct summons `/pm-dispatch devx seat 1`), seated 2026-10-28T15:09Z, signed off 2026-10-29T13:07Z on the maintainer's word 「当前任务处理完就下班」 / 「你可以下班了」. `check-handover` exited 0 before this body was written. Successor: `/pm-dispatch devx seat 1`, then read this body and the sign-off brief below it.\n\n## Inherited ledger (queue snapshot at sign-off)\n\n- **Seat 2 (#20163, `os-justin`) is in office again** (its knock 6496906129, the maintainer's 「然后你的devx 车道继续上班 seat 2」). With seat 1 vacant, every `domain:devx` card is seat 2's, the ones below included.\n- **Ruled and dispatchable:** #25919 PR 2. #27297 was ruled A (6485892110): every ⛔/never line stays whole in the `ui/AGENTS.md` core and the 10 KB cap is dropped. The director returned the card to `pm:queue` (6485939739). Tier H; dispatch with `Ruling-ref: 6485892110` beside 6435359095.\n- **Seat 2's own picks (knock 6496906129):** #27114, #27283 (`pm:retriage` still asks triage for the first-touch audit, 6473826107), #27550.\n- **Waiting on the maintainer:**\n  - #25807 (p1 sweep anchor; 18.2.0 has shipped): the 78 parked partials' pin upgrades need the maintainer's go (6455691924).\n  - #25913 (p3): retiring `check-side-effects-array.mjs` edits root `ci.yml`, which the standing maintainer word puts behind a ruling.\n- **Not filed, with the maintainer:** a string `plugins` entry naming a module with no default and no `init` becomes a silent empty `AppPlugin` (`packages/core/src/stack-plugins.ts` `materializeStackPlugin`). It is in PR #27323's Acceptance notes, with a seam reading only.\n\n## Hot-file serial queue\n\n- None. The term's only entry (`packages/drivers/driver-memory/src/index.ts` → #26206) landed as PR #27323 (`1c5fe3cb7e`).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes.\n- Timers: none remain (the one check-in on #27319's re-run fired and self-disabled). Subscriptions: none (PR #27323 merged; auto-unsubscribed).\n"
 }

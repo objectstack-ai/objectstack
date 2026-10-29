@@ -1,0 +1,35 @@
+{
+  "number": 27577,
+  "kind": "issue",
+  "title": "objectql + cli: backfill the currency code when a stored amount switches to record mode, and a 409 acknowledgement at the metadata door (multi-currency, epic #8345)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T13:36:49Z",
+  "updated_at": "2026-10-29T13:42:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27577",
+  "body": "epic:#8345#1 · os-bill · session_01Utp6CbTZrFqRYNgjSaSbN5\n\nFiled by the epic PM under maintainer ruling 6492000994 on #8345 (letter B, 2026-10-29T08:39Z, 「B 放行，欠显式回填」). Part of #8345. ⛔ Not a claim. Lands after R1 (#27268, #27339, #27338, #27340 merged 2026-10-29) and ⛔ before R2 (#27191 / #27192 / #27193): the R2 home projection has no code to convert a codeless row, so a consolidated `sum` would silently omit it.\n\nRuling-ref: 6492000994\n\n## 维护者速读\n\n- **改了什么：** 已有数据的 `dynamic` / `fixed` 金额字段改成 `record` 模式后，旧行没有币种码。新增一个显式回填：运维给定币种码（`--code USD`），把「有金额、无币种码」的行补上；默认只报告，`--apply` 才写，可重复跑。元数据保存时，这种切换会返回现有的 409 `destructive_change`，说明三个后果和回填命令，`force` 可放行。\n- **为什么改：** 不回填的话，这些行显示为纯数字、分组落进 null 组、币种筛选里看不到，R2 合并报表也会漏掉它们。\n- **风险与回滚：** 回填只写币种码为空的行，从不推断币种码；409 不读数据行，不加启动时拒绝。回滚即撤 PR。\n- **先看：** 先例 `packages/objectql/src/summary-backfill.ts` 与 `os migrate summary-nulls`；`packages/metadata-protocol/src/protocol.ts` 的 `detectDestructiveObjectChanges`（Phase 3a）。\n- **两分钟验证：** 对一个有旧行的对象把金额切到 `record`：保存返回 409 并点名命令；dry run 报出待补行数，`--apply` 后再跑一次报 0。\n- **需要您做的：** 无，已裁 B。\n\n## Task\n\n- [ ] **Backfill function** in `@objectstack/objectql`, modelled on `summary-backfill.ts`. For one object and one `record`-mode amount field, write an operator-supplied ISO 4217 code into every row whose amount is not blank and whose code field (`currencyConfig.currencyField`) is blank. ⛔ The code is never derived: not from a retired `defaultCurrency`, not from `localization.currency`, not from anything else (ADR-0144 D8 rule 4; #27119 Q2 X). A row that already holds a code is never touched; a code that fails `iso_4217_currency` is refused before any write. Dry run by default, `--apply` to write, idempotent (a second run finds nothing), per-row counts: written / skipped (code present) / skipped (amount blank). No `sys_migration` flag: nothing gates on the run. Whether it writes through `engine.update` or at the driver as `summary-backfill.ts` does is the card's call: follow the precedent you pick and say why in the PR.\n- [ ] **CLI face** `os migrate record-currency-codes --object <o> --field <amount> --code <ISO> [--apply]` in `@objectstack/cli`, the same split as `summary-backfill.ts` / `os migrate summary-nulls`.\n- [ ] **Metadata-door acknowledgement:** `detectDestructiveObjectChanges` (`packages/metadata-protocol/src/protocol.ts`, the `saveMetaItem` Phase 3a-destructive gate) gains one finding, `currency_mode_to_record`: the previous `currencyConfig.currencyMode` is not `record`, the next is `record`, and the field is stored. It answers as the existing HTTP 409 `destructive_change` with the existing `force` remedy. Its message names the three consequences (codeless rows display as a plain number, fall into the `null` group, sit outside every currency-paired filter) and the command above. It reads no rows, like its siblings `field_type_change` and `field_required_no_default`. ⛔ No boot-time refusal: a code-declared package registered at boot has no previous version to diff.\n- [ ] Tests: the backfill (dry run, apply, idempotence, a row with a code untouched, a blank amount skipped, a bad code refused); the 409 finding (fires on dynamic→record and fixed→record over a stored field, not on a new field, lifted by `force`); a CLI smoke.\n\nOut of this card's diff, kept with the epic PM (governed paths, Tier H, not mixed into a code PR): the one-line `skills/**` note (switching a stored field to `record` leaves rows codeless; run the backfill) and the ADR-0144 open item with its dated note. The epic PM also adds to #27193 that blank-code rows are reported as their own class, apart from missing-rate rows.\n\nLane: server (objectql, metadata-protocol), with the `packages/cli` command as the cross-lane half, dispatched by the epic PM per 「epic的卡你统一派」 · Size: M · Review: default. Declarations, for the card to confirm against the tree: `Clause-②: yes (widening)` (a new member of an existing refusal face, the reading of #27339's review 6490309706) · `Metadata-protocol: none` (what an author can write is unchanged; `force` lifts the acknowledgement). Left open on purpose: how a cloud tenant without a CLI reaches the backfill (an admin route or Studio action, M3 or later).\n\nEpic: #8345. Dedupe: #8345 thread, ruling 6492000994, #27193 (R2 recompute: a different operation on the home columns); no open card carries this slice.\n"
+}

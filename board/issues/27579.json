@@ -1,0 +1,33 @@
+{
+  "number": 27579,
+  "kind": "issue",
+  "title": "service-analytics: refuse fixed-versus-fixed cross-currency measures at dataset compile (multi-currency, epic #8345)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:server",
+    "enhancement",
+    "pm:epic",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T13:39:27Z",
+  "updated_at": "2026-10-29T13:39:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27579",
+  "body": "epic:#8345#1 · os-bill · session_01Utp6CbTZrFqRYNgjSaSbN5\n\nFiled by the epic PM under maintainer ruling 6486427200 on #8345 (ADR-0144 Open item 12, letter A, 2026-10-29T02:42Z, 「A 拒收，R1 之后单独立卡」). Part of #8345. ⛔ Not a claim. R1 has landed (#27268, #27339, #27338, #27340), so this card is free to go. It pairs with no PR and ships in whichever Version Packages release it is ready for.\n\nRuling-ref: 6486427200\n\n## 维护者速读\n\n- **改了什么：** 数据集编译时新增两条只针对 `fixed` 币种的拒收：度量上写的 `currency` 和被汇总字段的 `fixed` 币种不同 ⇒ 拒收；派生度量的金额操作数落在两个不同的 `fixed` 币种 ⇒ 拒收。两条都返回 `DATASET_INVALID` / 400，并给出改法。\n- **为什么改：** 这两种写法今天会算出不报错的错数（比如 USD 字段标成 EUR，或 USD 减 EUR）。record 模式的同类护栏已随 #27338 上线，这张卡把 fixed 模式拉平。\n- **风险与回滚：** 这是收窄：以前能编译的这两种写法会被拒。仓内实测预计 0 处；已部署租户存的数据集无法从仓库里调查，PR 正文会写明。回滚即撤 PR。\n- **先看：** `packages/services/service-analytics/src/measure-currency-coherence.ts`；起点是 PR #27338 的初稿提交 `fea128ce`（后在 `507ed8f9` 撤掉）。\n- **两分钟验证：** 写一个 USD `fixed` 字段配度量 `currency: 'EUR'` 的数据集：注册与请求都返回 400 并给出改法；写 `currency: 'USD'` 照常通过。\n- **需要您做的：** 无，已裁 A。\n\n## Task\n\n- [ ] **Shape 1:** a measure `currency` whose code differs from the aggregated field's `fixed` code → `DATASET_INVALID` / 400, naming the fix (delete the measure's `currency`; the column takes the field's code). A measure `currency` that restates the `fixed` code stays accepted.\n- [ ] **Shape 2:** a derived measure (any op) whose monetary operands resolve to two different `fixed` codes → `DATASET_INVALID` / 400, naming the fix (derive from measures in one currency, or drop the operand in the other). A non-monetary operand (a `count`) is not compared.\n- [ ] Not judged, unchanged: a `fixed` code against the tenant's currency (not known at compile: cannot answer, so do not block); a measure `currency` over a `dynamic` field (the explicit code tops the #27119 Q2 X chain and stays legal). The record-mode arms are already on main from #27338.\n- [ ] Both doors compile through the same `compileDataset` call, so the refusal reaches boot registration, `queryDataset` and the Studio draft preview. Test all three.\n- [ ] **Starting point:** PR #27338's first-draft commit `fea128ce` (the fixed arms of `measure-currency-coherence.ts`, the two moved pins in `currency-mode-relay.test.ts` and `query-dataset.test.ts`, the guard tests). It was dropped at `507ed8f9` and is not on main (squash merge); fetch it with `git fetch origin pull/27338/head`, since it is an ancestor of that head. Re-apply onto main, not onto the old branch.\n- [ ] **Narrowing kit** as on #27157 / PR #27218: the full dogfood battery on the final head, and a survey of in-tree dataset metadata for both shapes (0 expected in `examples/**`). A deployed tenant's stored datasets cannot be surveyed from the repository, and the PR body says so.\n\nDeclarations (fixed in the ruling): `Clause-②: yes (narrowing)` · `Metadata-protocol: narrowed` · `@objectstack/service-analytics` **minor** with a BREAKING paragraph (the fixed group refuses `major` before GA, per `check-changeset-no-major`) · ADR-0087 marker `not-required (no-migration-prescription)`: the prescription is the refusal message, and no stored shape converts. The ADR-0144 Open item 12 dated note (Tier H) stays with the epic PM, apart from this code PR.\n\nLane: server (service-analytics) · Size: S–M · Review: `CONTRACT_REVIEW_TIER` (the published refusal face narrows). Epic: #8345. Dedupe: #8345 thread, ruling 6486427200, PR #27338 (record arms only); no open card carries this slice.\n"
+}

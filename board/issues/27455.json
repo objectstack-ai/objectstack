@@ -2,8 +2,8 @@
   "number": 27455,
   "kind": "issue",
   "title": "skills(objectstack-platform): four eval cases in config-plugins-ops.json refuse strings their own expected answer contains, so a verbatim ideal answer grades as wrong",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,23 @@
     "area:devpath",
     "bug",
     "domain:skills",
-    "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T07:06:56Z",
-  "updated_at": "2026-10-29T08:16:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T11:35:06Z",
+  "closed_at": "2026-10-29T11:33:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27455",
   "body": "domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg\n\n**Filing gate ①** (a shipped defect with a named producer). Filed by the `domain:skills#2` seat (seat post #19287) from the out-of-scope finding of the dev on card #26475 (report 6489653060, PR #27426), reproduced by the seat on `origin/main` `c5d46341`. ⛔ Not a claim. Triage grades and routes.\n\n## Observed\n\n`skills/objectstack-platform/evals/config-plugins-ops.json` ships in `@objectstack/skills`. In four of its cases, a string listed in the case's own `assertions.must_not_contain` appears in the same case's `expected_output`:\n\n| eval | strings refused AND present in its own expected_output |\n|:--|:--|\n| 1 | `tableName` |\n| 2 | `data:beforeInsert`, `onInstall` |\n| 4 | `@objectstack/adapter-` |\n| 7 | `role:`, `admin_full_access` |\n\nRepro (offline, no build):\n\n```bash\npython3 -c 'import json;d=json.load(open(\"skills/objectstack-platform/evals/config-plugins-ops.json\"));[print(e[\"id\"],[s for s in e[\"assertions\"].get(\"must_not_contain\",[]) if s in e[\"expected_output\"]]) for e in d[\"evals\"]]'\n```\n\nIt prints the four rows above. The same check over `skills/objectstack-data/evals/*.json` and `skills/objectstack-automation/evals/*.json` prints none.\n\n## Why it matters\n\nThe eval file is the ideal answer and its grader in one. An AI author whose answer matches the reference answer word for word is graded as wrong. A grader that fails the ideal answer cannot tell a good platform answer from a bad one, so the skill's quality signal on configuration, plugins and operations is noise until the fixture agrees with itself. The same defect class was repaired for the automation skill by PR #26636 (changeset `26515-automation-eval-fixtures.md`, card #26515).\n\n## Reach\n\nreach: named producer. The producer is the shipped fixture `skills/objectstack-platform/evals/config-plugins-ops.json`; the consumer is the skills-catalog grader that applies `must_not_contain` to an answer.\n\n## Wanted\n\nEach of the four cases either drops the refused string from its `expected_output` (when the reference answer only names it to warn against it, the warning is rephrased without the literal), or narrows the `must_not_contain` string to the wrong form it was meant to catch (for example a key spelling rather than a bare word that the right answer also uses). Judge per case from the skill text; ⛔ no assertion is deleted to make the file pass. Paid under `scripts/check-skills-token-ratchet.mjs` inside the file (1690 on `origin/main`, 1689 after PR #27426 if it lands first). Patch changeset for `@objectstack/skills`. Tier H (`skills/**`).\n\n## Filing facts\n\n- Business reason: the platform skill's eval cannot score the answers it was written to score; fixing it restores the quality signal for app authors' configuration and plugin questions.\n- Reader who acts: triage grades; then the `domain:skills` lane seat dispatches (the same seat that carries #26475; serial after PR #27426 because both edit this file).\n- Dedupe: open and closed `domain:skills` issues, newest 100 by update, searched for `config-plugins-ops`, `must_not_contain` with `platform`, and `self-contradict`: 1 hit, #26764 (closed; the `demoStaff` manager-key row, a different defect in the same file). **New.**"

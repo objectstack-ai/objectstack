@@ -1,0 +1,32 @@
+{
+  "number": 27567,
+  "kind": "issue",
+  "title": "Import wizard: \"Match on\" offers a multi-value or structured field the server refuses as a match key",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T13:12:26Z",
+  "updated_at": "2026-10-29T14:12:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27567",
+  "body": "domain:server#1 · os-sales · session_01L6bhgXcN9HaZYSEUdJWEjw\n\nFiling gate: ① product defect (user-visible), split from #27465 (the server half).\n\n\n### Business reason\nWho: anyone importing into an object with a `multiple: true` lookup, a multiselect / tags / checkboxes field, or a json-like field, in \"Update existing\" or \"Update if matched, else create\" mode (reported by an Enterprise customer on 17.3.0).\nWhat happens today: the wizard offers such a field as a match key. After #27465's server half lands, ticking it gets the whole import refused with `400 INVALID_REQUEST` (\"matchFields names \"work_object\" (lookup, multiple: true), which holds a list or a structured value ...\"); before it, every row failed on a raw SQL-binding error. Either way the wizard offered a choice the server can never serve.\nWithout the fix: the user still picks a key that cannot work and only learns it at Validate.\n\n### Where\n- `ui/packages/plugin-grid/src/ImportWizard.tsx` (the options step): `const matchable = useMemo(() => fields.filter((f) => mappedFieldNames.has(f.name)), ...)` offers every mapped field.\n- The wizard's field shape does not carry `multiple` (see the `refusedOptionValue` docblock in the same file), so it cannot tell a `multiple: true` lookup apart.\n\n### Rule to follow (the server's, one definition)\nA field cannot be a match key when it is stored as a JSON column: `isMultiValueField(field)` or `STRUCTURED_JSON_TYPES.has(field.type)` (both `@objectstack/spec/data`). Server-side the same rule is `multiValueMatchKeyRefusal` in `@objectstack/core`.\n\n### Acceptance\n- The wizard's field shape carries `multiple` from the object schema.\n- \"Match on\" lists only mapped fields the rule above admits; a multi-value or structured field is never offered.\n- No new widget, dialog or hook: a filter on the existing `matchable` list.\n\n### Reader who acts\n`domain:ui` seat, next ui card in the import wizard.\n\n### reach\nPublic door: the Import wizard's \"Match on\" list, measured on the card's object (customer report on #27465); the server refusal it now meets is pinned in `packages/rest/src/import-multi-value-match-key.test.ts`.\n\n### Dedupe\nSearch API is unavailable from this session; read instead: the 500 most recent issues (open and closed) by title, grep `import` × `match|wizard|multi` → 4 hits: #27562 (the server-half PR), #27465 (the server half), #27434 (console import matcher never tries unique fields: a different defect), #27190 (exchange-rate import). No duplicate.\n\nLinks back: #27465"
+}

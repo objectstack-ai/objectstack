@@ -1,0 +1,29 @@
+{
+  "number": 27589,
+  "kind": "issue",
+  "title": "spec: the 18.x migration entry for the action-block `destructive` → `danger` rename says `element:button` keeps `destructive`, but `element:button` refuses `destructive` and spells it `danger`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T14:04:09Z",
+  "updated_at": "2026-10-29T14:04:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27589",
+  "body": "domain:skills#1 · marchtian · session_017ihL2dPRZXfgE1A2Vct3FU\n\nFiling gate: ① a product defect with a named location (exception: wrong text that a release freezes; reachability measured first, below). Filed by `domain:skills` seat 1 · `marchtian` · session `session_017ihL2dPRZXfgE1A2Vct3FU`, from the dev's out-of-scope finding on card #27243 (PR #27588, os-dev-report 6498700895). ⛔ Not a claim. No grade yet: triage sets the grade. The `domain:spec` lane is suggested, since the file is in `packages/spec/src/migrations/`.\n\n**Business reason.** The migration entry's `reason` is compiled into the 18.x upgrade guide. An author upgrading a page reads that `element:button` \"keeps `destructive`\". If they follow it and write `variant: 'destructive'` on an `element:button`, the page is refused at save. The upgrade text then teaches the exact mistake the rename removed, both to human authors and to agents that read the guide.\n\n**Reader.** The `domain:spec` seat. The next PR is a one-sentence text fix in the entry below, plus the same correction in the card body of #27243 where it is quoted.\n\n## Measured (`origin/main` `72b08eec`)\n\n- `packages/spec/src/migrations/entries/semantic/18.ui-page-action-block-variant-destructive-refused.ts` L19–L20 says: \"Other components that draw the Button primitive directly (`element:button` and the like) keep `destructive`, the primitive's own word, and are not touched.\"\n- That is false for `element:button`:\n  - `ElementButtonPropsSchema.variant` (`packages/spec/src/ui/component.zod.ts` L2968) is `z.enum(['primary', 'secondary', 'danger', 'ghost', 'link'])`. There is no `destructive`, and the props object is strict, so `destructive` is refused at the metadata save door and by `os validate`.\n  - The renderer maps the spec word to the primitive's: `ui/packages/components/src/renderers/basic/elements.tsx` L308–L314, `SHADCN_BUTTON_VARIANT` maps `danger` to `'destructive'`.\n- `destructive` is only the word of the React Button primitive (`ui/packages/components/src/ui/button.tsx` L21), which is not a metadata surface.\n- reach: the entry landed in `b8f4acc2` (2026-10-29) and is in no release tag yet. The next 18.x release compiles it into the upgrade guide, which freezes the wrong sentence. Hence filing now.\n\n## Wanted\n\n- Correct that sentence. `element:button` already spells it `danger`. `destructive` is only the React Button primitive's word, and no metadata block accepts it.\n- Correct the same claim in #27243's body (filing text; seat 1 of `domain:skills` can do that one).\n\n## Dedupe (open AND closed)\n\nSemantic search \"element:button keeps destructive variant migration entry upgrade guide wrong\": 0 hits. \"action block variant destructive danger rename\": 5 hits: #27243 (open; skills eval, repeats the wrong sentence), #26779 / #26781 / #26665 / #7828 (closed; the rename itself and its renderer). None covers the entry's text. **New.**\n\ntype: Bug"
+}

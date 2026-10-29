@@ -1,7 +1,7 @@
 {
   "number": 7623,
   "kind": "issue",
-  "title": "[PM seat] domain:skills — ⏳ vacant",
+  "title": "[PM seat] domain:skills — 🟢 marchtian",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-11T09:13:50Z",
-  "updated_at": "2026-10-28T18:33:52Z",
+  "updated_at": "2026-10-29T10:33:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 161,
+  "comments": 162,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/7623",
-  "body": "domain:skills#1 · sunhaolin · session_017xRBcUi2qhP1eKRbZJ1Ze1\n\n**This post is the single authoritative registration of the skills seat (seat 1, `domain:skills#1`).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/skills.md`, ⛔ not copied here. The previous body (🟢 `sunhaolin`, `session_017xRBcUi2qhP1eKRbZJ1Ze1`, signed off by the 收班简报 that follows this edit) is the prior revision of this body.\n\n## Current PM\n\n⏳ vacant · since 2026-10-28T18:31Z · the previous sitter `session_017xRBcUi2qhP1eKRbZJ1Ze1` (`sunhaolin`, a direct cloud session) signed off on the maintainer's word 「当前任务处理完，合并后就下班」 (this session, 2026-10-28). Takeover: `/pm-dispatch skills seat 1`, read this body and the 收班简报 first.\n\n- Seat 2 (`domain:skills#2`, #19287, `os-justin`) is seated and live; its split notices on this seat's mailbox name what it holds (#27291, #27326, #27265; #26777 landing) and leave #27260 and the rest of the lane to the next seat-1 sitter.\n- Dispatch backend used this shift: `mode:subagent` in a direct cloud session; the relay (route `dispatch`) for every write; Tier S landed by the seat on an in-seat `CONTRACT_REVIEW_TIER` record, Tier H landed by the approver's own ready + enqueue.\n\n## Inherited ledger\n\nIn flight at sign-off: none claimed by `Seat: domain:skills#1`. Both cards of this shift are CLOSED and MERGED: #27214 → PR #27308 (`19f49ef3`), #27209 → PR #27304 (`b4eecd50`). #27223 is the epic subtree's (#27293; claim 6473812605 by `session_017xRBcVBKAFk1ntXSjvPt7U`, same account, different session) — ⛔ not this seat's.\n\nCarried, not re-measured: #26717, #26768 and #25583 `pm:awaiting-maintainer`; #26940 `pm:blocked`.\n\n## Hot-file serial queue\n\n- Every lane file: FREE from this seat. Seat 2's in-flight surfaces are read from its claims and its post.\n- Readings left by this shift: `.claude/skills/pm-dispatch/references/dispatch-runbook.md` 245 / 245 and `references/execution-duties.md` 188 / 188 (line ratchet, headroom 0); `skills/objectstack-ui/rules/pages.md` 5689 / 5692 tokens.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes.\n- Platform facts measured this shift: a cloud seat cannot push `mailbox/<login>` through the fleet gate (`mailbox-open.mjs` needs `--head` of a branch the session pushed); the relay's `issue_patch` refuses a body without the seat signature as its first line, so a seat cannot refresh a dev-written PR body without displacing its `Fixes #n` first line (the seat record on the PR carries corrected readings instead).\n- Mailbox PR #27296 closed at sign-off; the successor opens its own.\n"
+  "body": "domain:skills#1 · marchtian · session_017ihL2dPRZXfgE1A2Vct3FU\n\n**This post is the single authoritative registration of the skills seat (seat 1, `domain:skills#1`).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/skills.md`, ⛔ not copied here. The previous body (⏳ vacant, written by `session_017xRBcUi2qhP1eKRbZJ1Ze1`, `sunhaolin`, with its 收班简报 6477362488) is the prior revision of this body.\n\n## Current PM\n\n🟢 `marchtian` · `session_017ihL2dPRZXfgE1A2Vct3FU` (a thread of the Claude Code project \"Objectstack 本体 skills\" on the `marchtian` account) · seated 2026-10-29T10:28Z on the maintainer's summons in that project (「再开一个 skills 车道」).\n\n- Posture, round ledger and round reports live in the project, ⛔ not here (project-seat stub).\n- Seat 2 (`domain:skills#2`, #19287) is ⏳ vacant since its 收班简报 6493936299; this seat reads the whole lane queue until a seat-2 sitter posts a `split`.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `issue-create.mjs`) as `objectstack-fleet[bot]`; ⛔ GitHub MCP writes; ⛔ the `marchtian` account writes no content (assignee only).\n\n## Inherited ledger\n\nIn flight at seating: none (`pm:dispatched` with `Seat: domain:skills#1`: 0; the predecessor's brief 6477362488 lists every seat-1 card as landed or handed over). Carried from seat 2's brief 6493936299, not re-measured: #26940 in the decision box; #27354, #26303, #26184 `pm:blocked`; #26617 `pm:on-hold`; #26717, #26768, #25583 `pm:awaiting-maintainer`.\n\n## Hot-file serial queue\n\n- Every lane file: FREE (no claim, no open PR of this seat yet). Claims on the cards carry each in-flight surface.\n- Ratchet readings left by the two predecessors on `origin/main` `ded67bfb`: `SKILL.md` 319 / 319, `references/{contract-review,triage-duties,dispatch-runbook,execution-duties}.md` at their ceilings (headroom 0); `skills/objectstack-platform/evals/config-plugins-ops.json` 1689 / 1690 tokens.\n\n## Notes\n\n- Mailbox: opened at seating; its number is on the round-open marker below this edit.\n- Merges are published to customers through `@objectstack/skills` (`skills/**`) only on a release the maintainer runs; verification layer = the token ratchet, the skill evals and the seat's contract review.\n"
 }

@@ -1,7 +1,7 @@
 {
   "number": 26945,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 5 — 🟢 os-warren · 由 os-warren 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 5 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T22:34:24Z",
-  "updated_at": "2026-10-27T22:44:05Z",
+  "updated_at": "2026-10-29T09:46:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26945",
-  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 5**, opened on the maintainer's word in the Claude Code project \"objectstack devx ui\" (「UI 车道可以再开一个座位」, 2026-10-27T22:30Z). The `pm:seat` index (open and closed, read 2026-10-27T22:33Z) holds `domain:ui` seat 1 (#25966), seat 2 (#25995) and seat 4 (#26620); no seat 3 post exists and the maintainer named no number, so this seat takes the lane's highest number plus one (`seat-post-protocol.md`).\n\n- **Current PM:** 🟢 `os-warren` · 由 os-warren 账户的项目负责 (project \"objectstack devx ui\", seat thread \"Take another ui lane seat\") · `session_01JQwxbXGpVJHZTXXerMoY4C` · seated 2026-10-27T22:35Z. The same project also sits `domain:ui` seat 1 (#25966) in a separate seat thread; the two seats split seat 1's former area below and never claim the same card.\n- **File area:** carved from seat 1's area. Seat 5 = the Studio Interfaces pillar (navigation entries, page picker, dashboard widget types, the Interfaces list), the approvals-inbox i18n card (#26883) and `ui/scripts` tooling (#26860, after PR #26854). The Setup permission-set header card (#26884) is in seat 2's Setup area and stays with seat 2. Seat 1 keeps every other path it held, its in-flight cards and loans, and the rest of Studio. Seat 2's area is unchanged; Studio Access stays out of this seat while seat 2 has cards in flight on that pillar. Seat 4 keeps its lane-wide rule. Claims carry `Seat: domain:ui#5`.\n- **Model:** default judgment tier (Opus) under the quota exemption; no card whose order binds `CONTRACT_REVIEW_TIER`. A Tier H PR waits for the director seat's contract review and this seat's ACCEPT before any approver is asked (#26617).\n- **Hot-file serial queue:** none held yet. Read #25966's, #25995's and #26620's queues before any claim; ⛔ `ui/.github/**` and the root `ci.yml` stay out of bounds, as they record.\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#5` + `head:claude/` PRs.\n- **Patrol:** hourly, :55, bound to the seat thread.\n- **Wall:** none.\n"
+  "body": "domain:ui#5 · os-warren · session_01JQwxbXGpVJHZTXXerMoY4C\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 5**. Seat 1 is #25966, seat 2 is #25995 and seat 4 is #26620; no seat 3 post exists.\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-warren` · `session_01JQwxbXGpVJHZTXXerMoY4C`. It sat in the Claude Code project \"objectstack devx ui\", seat thread \"Take another ui lane seat\", from 2026-10-27T22:35Z until it stood down at 2026-10-29T09:44Z. The maintainer's words were 「当前任务处理完，合并后就下班」 (2026-10-29T06:47Z) and 「车道经理下班应该按照 pm-dispatch 技能」 (09:40Z).\n- **Stay-behind:** none. Every claimed card landed, and #27328 is handed to the decision box. `check-handover --session=session_01JQwxbXGpVJHZTXXerMoY4C --account=os-warren --since=<seat start>` exited 0 (window from 2026-10-27T22:30Z).\n- **Patrol:** the hourly trigger `trig_013QwJ73hyh7KdeqzGrQhckq` is disabled. Its stored prompt is wind-down text, so rewrite it before re-enabling.\n\n## Ledger\n\n- **Area while held:** carved from seat 1's area. It covered the Studio Interfaces pillar, `ui/scripts` tooling, and cards seat 1 handed over by agreement. Seat 2 keeps Setup and seat 4 keeps the record page v3 epic children (#27052–#27059). The area returns to seat 1 (#25966) unless a new seat 5 holder agrees a split.\n- **Decision box:** #27328 is `needs-user-decision`. The premise (Edit offered on a `writable:false` row) was disproved on a live stack. The options are A, close as `not_planned` (recommended), or B, keep the card and file a components card for a readable reason on the hidden Edit. The release comment is 6493302542.\n- **Queue snapshot (`domain:ui` `pm:queue`, read 2026-10-29T09:44Z):**\n  - #27386 and #27380 are multi-row HotCRM suggestions, mostly spec keys, with no triage comment yet.\n  - #27375 is seat 2's follow-up.\n  - #27355 rows 1, 5, 7, 8 and 11 are still open. Rows 2–4, 6, 9–10 and 12–13 were carded and answered on the card.\n  - #26998, #25918, #25921 and #25943 were all ruled out of this seat's area earlier.\n- **Open question carried:** the app-less public form (`/forms/:name`, `/f/:slug`) has no app brand to read. Fixing that needs a spec or server door. It was reported on #27355 (6490776608) and no card was filed.\n- **Standing constraints (maintainer):**\n  - Changesets go to the root `.changeset/`.\n  - No PR on the objectui repository.\n  - `node scripts/check-sdui-manifest.mjs` is a gate on every ui card.\n  - A Tier H PR waits for the director's contract review PASS and the seat ACCEPT before any approver is asked (#26617).\n  - At most 3 actively developing card threads per seat. Threads waiting on review or CI don't count (2026-10-28).\n- **Hot-file serial queue:** none held.\n- **Pointer:** the ledger is the labels, the assignee, the `Claim:` comments carrying `Seat: domain:ui#5`, and `head:claude/` PRs. The sign-off brief is the newest comment on this post.\n- **Wall:** none.\n\nNext holder: `/pm-dispatch 接手`, then read this post first.\n"
 }

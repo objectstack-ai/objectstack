@@ -12,20 +12,22 @@
   },
   "labels": [
     "area:auth",
-    "domain:server",
+    "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T18:45:12Z",
-  "updated_at": "2026-10-29T01:05:28Z",
+  "updated_at": "2026-10-29T12:44:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27334",
   "body": "Filing gate ②: a gap found while measuring a ruled card. The maintainer ruled on cloud#3125 that language preference follows the cloud account into every environment (batch #387 item 1, ruling `6345186088`). That ruling is carried by objectstack-ai/cloud#3159. Its local-stack reading passed on 2026-10-28 (https://github.com/objectstack-ai/cloud/issues/3159#issuecomment-6477558629), and found that one cloud door skips the rule. Filed by `repo:cloud` seat 2.\n\n## 维护者速读\n\n环境通过 OIDC（「Continue with ObjectOS Cloud」）登录时，会按 `idp-locale-claim.ts` 的规则把 cloud 账号的语言写进环境用户。规则是：只在用户的语言仍为空、或仍是上次 IdP 写入的值时才写。但 cloud 控制台的「打开」门走的是 sso-open → sso-exchange 交接，不经过 OIDC，所以拿不到这条规则；而 plugin-auth 包入口没有导出它。这张卡只做导出，让 cloud 能复用同一条规则，规则只有一个归属方。\n\n## Facts (objectstack `main`)\n\n- `packages/plugins/plugin-auth/src/idp-locale-claim.ts` defines `readIdpLocaleClaim`, `resolveIdpLocale`, `decideIdpLocaleWrite`, `idpLocaleRecordIdentifier` and `IdpLocaleSync`. `auth-manager.ts:31` uses them.\n- `packages/plugins/plugin-auth/src/index.ts` exports none of them. The only locale exports are the auth-email helpers.\n\n## Work\n\n1. Export from the plugin-auth package entry one call that applies a locale claim to a user under the same rule and record as the OIDC path: `IdpLocaleSync` plus its deps type, or a thin `applyIdpLocale({ engine, userId, claim, supported })`. The OIDC path keeps calling it unchanged.\n2. Add a changeset (minor) and a test that imports the entry point and runs the three rule cases: unset → written; still the recorded value → overwritten; local choice → kept.\n\n## Done when\n\n`import { … } from '@objectstack/plugin-auth'` gives a caller outside the package the same write-or-keep decision and `idp-locale:` record the OIDC JIT path uses.\n\n## Reader\n\nThe objectstack seat dispatches it. The cloud half is the card that names this one in Blocked-by."

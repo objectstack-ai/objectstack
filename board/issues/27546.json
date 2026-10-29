@@ -1,0 +1,34 @@
+{
+  "number": 27546,
+  "kind": "pull_request",
+  "title": "test(plugin-security): pin that the registered security service serves reopenAudienceBindingSuggestion",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T12:24:41Z",
+  "updated_at": "2026-10-29T13:06:24Z",
+  "closed_at": "2026-10-29T13:06:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T13:06:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27546",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuVpEmthvkRbuHGjC6oSQZvd)_\n\nFixes #27362\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — test-only diff; no published skill, doc or authorable surface moves.\n\n## 维护者速读\n\n- 改了什么:新增一个测试文件,钉住 plugin-security 注册的 `security` 服务确实提供可选方法 `reopenAudienceBindingSuggestion`,并且它调用的是真正的模块函数而不是桩。\n- 为什么改:这个方法是可选的,若接线被重构删掉,所有测试仍然全绿,而两个“重新打开建议绑定”的接口会悄悄变成 501。\n- 风险与回滚:只加测试,不改任何源码、不发布任何内容(`skip-changeset`);回滚即删除该测试文件。\n- 先看:`packages/plugins/plugin-security/src/registered-security-service-reopen.pin.test.ts`(唯一改动文件,看文件头说明的理由与断言)。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-security exec vitest run src/registered-security-service-reopen.pin.test.ts`,预期 1 个测试通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOne new test file beside the members pin: `packages/plugins/plugin-security/src/registered-security-service-reopen.pin.test.ts`.\n\nIt boots the real `SecurityPlugin` the same way `registered-security-service-members.pin.test.ts` does and takes the object it registers as `security`. Then it asserts two things:\n\n1. `reopenAudienceBindingSuggestion` is a function on the registered object.\n2. Calling it reaches this package's `reopenAudienceBindingSuggestion` module function, with the suggestion deps (which carry `ql`), the caller context and the id. The test returns that function's answer unchanged. The module function is replaced with a spy through a partial `vi.mock`, so the test proves the call is delegated and not answered by a stub.\n\nPer triage 6486679343, the test sits beside the members pin with its own reason and is **not** in `MUST_SERVE_OPTIONAL`. That list holds optional members whose absence consumers read as a fallback that admits. Reopen's absence refuses (`501`, every dismissal stands), so it does not belong there. The file header gives the reason.\n\nNo source change. The member's wiring in `security-plugin-security-service.ts` is untouched.\n\n## Tests\n\n- New pin plus members pin, on merged head `a34ad920b1`: `Test Files 2 passed (2)`, `Tests 5 passed (5)`.\n- `pnpm --filter @objectstack/plugin-security test`: `Test Files 237 passed (237)`, `Tests 5112 passed | 45 skipped (5157)`.\n- `pnpm --filter @objectstack/plugin-security typecheck`: exit 0. This includes `check:test-typecheck` over `tsconfig.test.json`, which compiles the new file: `0 file(s) / 0 error(s)`.\n\n<details><summary>Negative-pin ablation (through scripts/ablation-replace.mjs; restored, blob equal to HEAD)</summary>\n\nThe test imports `./security-plugin.js` relatively, so it runs against `src/` and no `dist/` rebuild applies.\n\n**A: delete the two wiring lines** (`reopenAudienceBindingSuggestion: (callerContext: any, id: string) =>` and the delegation line under it)\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob 49d0052dfcc1 -> f7bf8b8f1b32\n     × serves the member, delegating to the module function with the caller context and id\nAssertionError: reopenAudienceBindingSuggestion is not served: both reopen routes answer 501: expected 'undefined' to be 'function'\n Test Files  1 failed (1)\nablation-replace:   blob after restore  49d0052dfcc19efcadaa7dd47386e9459f570413\nablation-replace:   blob at HEAD        49d0052dfcc19efcadaa7dd47386e9459f570413\nablation-replace:   git diff HEAD       empty\n```\n\n**B: keep the member and replace the delegation with a stub** (`Promise.resolve({ suggestion: { id, status: 'pending' } })`)\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob 49d0052dfcc1 -> 0af78b7d0772\n     × serves the member, delegating to the module function with the caller context and id\nAssertionError: expected { suggestion: { id: 'sugg_1', …(1) } } to be { suggestion: { id: 'sugg_1', …(1) } } // Object.is equality\n Test Files  1 failed (1)\nablation-replace:   blob after restore  49d0052dfcc19efcadaa7dd47386e9459f570413\n```\n\nAfter restore the pin is green again: `Tests 1 passed (1)`.\n</details>\n\n## Acceptance notes\n\n- `skip-changeset`: the diff publishes nothing. `files[]` is `dist`, `README.md` and `CHANGELOG.md`, and the tsup entry is `src/index.ts`. Measured after `pnpm build`: the new test's names occur in 0 `dist/` files, and the positive control `reopenAudienceBindingSuggestion` occurs in 4.\n- The boot helper (about 25 lines) is copied from the members pin, not imported. The pin file exports nothing, and importing one test file from another would also run its suites.\n\n## Verification\n\nLocal subset on head `a34ad920b1` (merge of `origin/main` `f57eddcf0c`). Exit codes were captured before any pipe.\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 52 commands. 50 exited 0.\n- Two answered exit 3 (`PREREQUISITE NOT MET`, they need the whole workspace built): `pnpm check:dual-build-cjs-loads` and `pnpm check:i18n`. Both are **NOT MEASURED** locally and are left to CI's `Lint & Repo Gates`. A single test file under `src/` is outside what either one reads.\n- `--ran` reconcile: `52 derived famil(ies) accounted for — 50 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)`, exit 0.\n- The derivation printed a stale-tree warning: `origin/main` moved after the merge, and the changed files are `scripts/pm/*` and `scripts/gen-sdui-reference.mjs` families. They are not this diff's.\n- `npx eslint --no-inline-config` on the new file: exit 0.\n- `pnpm --filter @objectstack/plugin-security typecheck`: exit 0.\n- `pnpm --filter @objectstack/plugin-security test`: exit 0, 237/237 files.\n- Every family CI runs is read from this PR's check-runs. None of them was re-run locally.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgXcN9HaZYSEUdJWEjw)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgXcN9HaZYSEUdJWEjw\n"
+}

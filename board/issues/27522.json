@@ -1,0 +1,37 @@
+{
+  "number": 27522,
+  "kind": "issue",
+  "title": "Hand-written inventory counts in live docs, skills and READMEs drift silently: delete the number, keep the names or point at the source (cross-lane sweep)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T10:25:52Z",
+  "updated_at": "2026-10-29T13:13:03Z",
+  "closed_at": "2026-10-29T13:11:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27522",
+  "body": "domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg\n\n**Filing gate ③** (maintainer-directed). Filed by the `domain:skills#2` seat (seat post #19287, signed off this session; filed on the maintainer's direct word after sign-off). ⛔ Not a claim. Triage grades, routes, and splits this into one child per lane (gate ④); the seat dispatches nothing.\n\n## The maintainer's words (verbatim, in order, this session, 2026-10-29)\n\n1. On PR #27470 having fixed `skills/objectui/README.md` 「Plugins (19)」 → 「(18)」 by hand: 「计数这种开发都是应该作废的吧？有意义吗？」\n2. 「手写计数应该删掉，立卡排查处理」\n3. 「技术的问题不只是 skills 吧」\n\n## Why\n\nA hand-written count of a live inventory (\"49 field types\", \"Plugins (18)\", \"10 built-in locales\") teaches a reader nothing the names do not, no gate reads it against the tree, and it goes wrong the moment the inventory changes. Measured on `origin/main` `ded67bfb`:\n\n- `examples/app-showcase/README.md` L19 says the showcase uses 「all 38 chart types」; `ChartTypeSchema` (`packages/spec/src/ui/chart.zod.ts` L112) declares **20**.\n- `skills/objectui/README.md` L58 said 「Plugins (19)」 until PR #27470 hand-fixed it to 18 after `plugin-ai` was retired; the README itself says 「Nothing checks this list against the `packages/` tree」.\n\nEvery such number is a standing maintenance duty with no reader that enforces it (SKILL.md four-axis: 「remove 优于 declare-and-maintain,每个已声明的键都是永久义务」).\n\n## Rule for the fix\n\n- Delete the number. Keep the enumerated names where they teach something; otherwise point at the source of truth (the schema, the directory, the generated reference page).\n- Where a number genuinely matters to the reader, it is generated or pinned by an existing gate — ⛔ no new gate (「新增门禁默认否」; the maintainer named none).\n- ⛔ Not in scope (keep as written): release notes and CHANGELOGs (point-in-time), dated audit reports and design docs, ADRs, sample CLI output, measurements stated 「at the time」, generated pages, and counts already pinned by a gate.\n\n## Inventory (a floor, not exhaustive)\n\nRegex scan of human-written `.md` / `.mdx` on `ded67bfb` for a number before an inventory noun; the implementer of each child re-sweeps its own lane more widely (TS `describe()` / JSDoc strings, code comments and `ui/docs` non-audit pages were not scanned here).\n\n| Lane (by file home) | File | Line | Count |\n|:--|:--|:--|:--|\n| `domain:skills` (Tier H) | `skills/objectstack-data/SKILL.md` | 41, 297 | 49 field types |\n| | `skills/objectstack-data/rules/field-types.md` | 9 | 49 available options |\n| | `skills/objectstack-data/SKILL.md` | 46 | 8 lifecycle events |\n| | `skills/objectstack-data/references/data-hooks.md` | 10, 31 | 8 lifecycle events |\n| | `skills/objectstack-automation/SKILL.md` | 54 | 20 built-in node types |\n| | `skills/objectui/README.md` | 58 | Plugins (18) |\n| | `skills/objectui/guides/schema-expressions.md` | 231 | 30 functions |\n| `domain:devx` (docs) | `content/docs/capabilities/views.mdx` | 30 | 36 built-in tokens |\n| | `content/docs/releases/implementation-status.mdx` | 45 | 14 lifecycle events (a living status page, not a release note — triage confirms) |\n| | `docs/qa/platform-checklist/README.md` | 374 | 49 field types, 20 chart types (illustrative prose; the checklist's own `enumSource.expect` is gate-pinned and stays) |\n| example (routed by what it exercises) | `examples/app-showcase/README.md` | 19, 72 | 49 field types, 8 view types, **38 chart types (spec: 20)** |\n| `domain:server` | `packages/metadata/README.md` | 195 | 26 built-in metadata types across 6 protocol domains |\n| | `packages/metadata/ROADMAP.md` | 23 | 26 built-in metadata types across 6 domains |\n| `domain:spec` | `packages/spec/PLUGIN_STANDARDS.md` | 208 | 17 services across 13 plugins |\n| `domain:ui` | `ui/packages/i18n/README.md` | 3, 7 | 10 built-in locales (L7 already lists them) |\n\nMeasured as OUT of scope by the rule above: `content/docs/ai/skills-reference.mdx` 「10 skills」 is computed (`packages/spec/scripts/build-skill-docs.ts` L246, `${skills.length}`); `content/docs/ui/components/index.mdx` 「106 components」 is generated by `scripts/gen-sdui-reference.mjs`; `content/docs/releases/v17/**`, `v18/**`, `CHANGELOG.md`, `RELEASE_NOTES.md`, `ui/docs/audits/**`, `packages/spec/ZOD_SCHEMA_AUDIT_REPORT.md`, `docs/design/**` are point-in-time; `content/docs/permissions/system-context.mdx` L308 / L408 are dated measurements; 「Runtime: 3 plugins」 in `content/docs/deployment/cli.mdx`, `validating-metadata.mdx`, `getting-started/build-with-claude-code.mdx`, `protocol/kernel/lifecycle.mdx` is sample output; `skills/objectstack-ai/SKILL.md` L87 「10 fictional tools across 6 skills」 describes one audited incident.\n\n## Acceptance\n\n- Each child's PR deletes (or generates) every in-scope count in its lane, names any it keeps and why, and re-sweeps its lane with a broader pattern than this card's.\n- Skills children pay under `scripts/check-skills-token-ratchet.mjs` (deletion only shrinks); `skills/**` is Tier H; the `@objectstack/skills` changeset is a patch.\n- `Clause-②: no` · `Metadata-protocol: none`.\n\n## Filing facts\n\n- Business reason: readers and AI authors trust a stated count; a wrong one (38 chart types where 20 exist) misleads them, and a right one costs a hand edit every time the inventory moves. Removing them removes the drift class.\n- Reader who acts: triage (grade, split per lane under gate ④, route); each lane seat dispatches its child.\n- Dedupe: open and closed issues updated since 2026-09-01 (405, REST list), matched for `hand-written count`, `hard-coded count`, `count drift`, `手写计数`, `stale count`, `chart types`, and `field types … count`: 1 hit, #27441 (a QA run record that mentions chart types; unrelated). **New.**"
+}

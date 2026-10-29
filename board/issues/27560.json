@@ -1,0 +1,30 @@
+{
+  "number": 27560,
+  "kind": "pull_request",
+  "title": "fix(plugin-charts): a two-dimension sankey draws every flow, not only the first group's",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T12:52:38Z",
+  "updated_at": "2026-10-29T13:09:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27560",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPi1WuDmCwpfQHCGmcaxKEh)_\nFixes #27460\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：桑基图拿到两个维度（例如 status × category）时，画出每一条 status → category 流向，不再只画第一个 category 的流向；点一条流向可下钻到那一格的记录。\n- 为什么改：第二个维度被透视成多条序列，桑基图分支只读第一条，其余全部静默丢掉，看起来像一张完整的图（卡上 Alpha 3/2/2，Beta、Gamma 不见了）。\n- 风险与回滚：只动桑基图分支；单序列桑基图、对比叠加、其他图表类型不变；回滚就是 revert 本 PR。\n- 先看：`ui/packages/plugin-charts/src/AdvancedChartImpl.tsx` 的 `buildSankeyCellFlows` 与 sankey 分支开头；`ui/packages/plugin-dashboard/src/DatasetWidget.tsx` 的 `chartSeries`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-charts/src/AdvancedChartImpl.sankeyTwoDimensions-27460.test.tsx`，预期 8 条全绿，其中一条逐条断言 6 条流向及数值。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **The sankey arm draws a pivot as two columns of nodes.** Two or more flow series (every series except a `variant: 'comparison'` overlay) reaching the sankey are the groups of a pivoted second dimension: the spec refuses a second measure on a sankey (`SINGLE_SERIES_CHART_TYPES`), and `buildChartSeries` pivots the second dimension into series exactly when the chart carries one measure. `buildSankeyCellFlows` makes each row's category a source node, each series a target node, and each cell the row carries a flow valued by the cell. One flow series keeps the one-level arm byte for byte.\n- **Absent is not omitted; non-positive is said.** A cell the row does not carry is a combination the dataset did not answer, so it is no flow and no omission. A carried cell that is not above zero is dropped and the existing omitted-rows note (`chart.sankeyOmittedRows`, no new strings) is printed once per target column that lost a cell. No carried cell above zero is the existing `no-positive-flow` refusal, naming every column.\n- **A flow click drills to its cell.** A link is exactly one `(category, series)` pair, the pair `findChartSeriesRow` resolves to one dataset row; the event carries `category`, `categoryId`, `series`, `seriesLabel` and `value`. A node spans several cells, so a node click does not drill (as the one-level root does not).\n- **`DatasetWidget` hands a sankey only the measure it renders.** A stored sankey that declares several measures (refused at publish) would otherwise have its later measures drawn as groups, and the dropped-measure warning would be false. A pivot carries one measure, so nothing is filtered from it. The `SINGLE_SERIES_CHART_FAMILIES` docblock says so.\n\n## Tests\n\n- New `AdvancedChartImpl.sankeyTwoDimensions-27460.test.tsx` (8): the pivot is built with `buildChartSeries` from the card's shape (3 statuses × 3 categories, 6 answered pairs); it asserts the six flows `source → target: value`, the six links and six named nodes, no note for unanswered pairs, the note for a carried negative cell, the refusal for all-zero cells, the flow click and no node click; controls: one series and a comparison overlay stay one-level.\n- New `DatasetWidget.sankeyTwoDimensions-27460.test.tsx` (1): the card's widget through the real chain draws all six nodes and six links.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-charts/ packages/plugin-dashboard/`: Test Files 294 passed (294), Tests 3175 passed, 15 skipped, at `13e084eb`.\n\n## Acceptance notes\n\n- **Ablation (renderer).** `if (flowSeries.length >= 2)` → `if (false && …)` through `scripts/ablation-replace.mjs` (anchor 1 → 0, blob restored to HEAD, `git diff HEAD` empty): 5 of 9 red, the first reading `expected [ 'Alpha → Open: 3', …(2) ]`, the card's 3/2/2; the two one-series controls stayed green.\n- **Ablation (dashboard).** `chartType === 'sankey'` → `'ablated'` in `chartSeries`: `DatasetWidget.singleSeriesMeasures-11417.test.tsx` goes red on `sankey: fires iff the second measure's values leave the drawn chart unchanged` (1 of 22), so the existing tie pins the filter.\n- **pie / donut / funnel / treemap** each bind `series[0]` too (their arms read `series[0]?.dataKey` and nothing else; read on `13e084eb`, not rendered), so a two-dimension pivot on them draws only the first second-dimension group. The two-level fix does not cover them (a pie has no second column of nodes); they are reported to the seat, not fixed here.\n- **A pivot with ONE second-dimension value** reaches the arm as one series and draws the one-level shape: that value as the root, flowing to each first-dimension value. Every flow is drawn; only the orientation differs from the two-level shape.\n- **An inline `object-chart` sankey with two measures** (no publish-time arity refusal on that node) now draws category → measure flows instead of silently dropping the second measure.\n- Three or more dimensions: `buildChartSeries` pivots only the second dimension, a cross-family question outside this card.\n\n## Verification\n\nLocal gates from `node scripts/dispatch-gates.mjs --commands` at `13e084eb`, each exit captured before any pipe and reconciled with `--ran`; type-check of both packages; every other family is CI's and is cited from the PR's check runs in the report.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgWJECm7uQEkPAHKqat)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 27186,
   "kind": "issue",
   "title": "objectql: record-mode guards — blank code refuses the write; ungrouped sum/avg/min/max over a record-mode field refused; summary roll-up over one refused at registration (multi-currency M0-2, epic #8345)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:37:39Z",
-  "updated_at": "2026-10-28T21:08:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T10:58:34Z",
+  "closed_at": "2026-10-29T10:57:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

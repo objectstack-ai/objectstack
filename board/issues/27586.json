@@ -1,0 +1,30 @@
+{
+  "number": 27586,
+  "kind": "pull_request",
+  "title": "docs(objectql): query-syntax §9 states the all-unknown projection refusal, not the retired every-column fallback",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T13:55:16Z",
+  "updated_at": "2026-10-29T14:11:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27586",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYp3oFeDem8Tbh8pzWA\n\nFixes #27565\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: updated here — content/docs/protocol/objectql/query-syntax.mdx §9 (heading, lead sentence, example and callout): the all-unknown projection is refused 400 VALIDATION_ERROR by engine.find() / findOne(), a mix still drops the unknown columns, expand sub-reads are unaffected, the REST ingress answers 400 INVALID_FIELD. Prose only; skills/** needs no change.\n\n## 维护者速读\n\n- **改了什么**：协议文档 `query-syntax.mdx` 第 9 节改写：投影里混有已知列时未知列才会被丢弃；全部是未知列时 `find()` / `findOne()` 答 `400 VALIDATION_ERROR`（与 `fields: []` 同一拒绝）；`expand` 子查询不受影响；REST 入口对任何未知列答 `400 INVALID_FIELD`。\n- **为什么改**：PR #27541 已让引擎拒绝全未知投影，但这页还写着\"回退为读全部列\"，会把钩子和流程作者引向引擎现在拒绝的写法。\n- **风险与回滚**：极低，纯文档，不动代码、不发布；回滚即 revert。\n- **先看**：`content/docs/protocol/objectql/query-syntax.mdx` 第 9 节\"Unknown Projection Fields\"（唯一改动文件）。\n- **两分钟验证**：`git grep -n \"falls all the way back\" content/docs`，预期无输出（退出码 1）。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n`content/docs/protocol/objectql/query-syntax.mdx` §9. The heading \"Unknown Fields Are Tolerated\" became \"Unknown Projection Fields\", because the old one now misleads. The lead sentence, the example and the callout were rewritten, and the \"falls all the way back to every field\" clause is removed. `git grep -n \"falls all the way back\" content/docs` returns nothing (exit 1). No other page linked the old anchor (`git grep unknown-fields-are-tolerated` has no hits).\n\nEach clause was checked against the code and a test at head `6535c19c`:\n\n| Clause on the page | Code | Test |\n|:---|:---|:---|\n| An unknown plain column is dropped only while one requested column is known; `id` / `created_at` / `updated_at` always count as known | `packages/objectql/src/engine.ts:13635-13641` (find), `:13943-13946` (findOne); `packages/objectql/src/declared-read-columns.ts:79` | `packages/objectql/src/engine-empty-projection-refusal.test.ts:257`; `packages/objectql/src/query-expression-conformance.test.ts:1776` |\n| An all-unknown projection is refused by `find()` / `findOne()` with `400 VALIDATION_ERROR`, naming the requested columns, before any driver read | `engine.ts:13641`, `:13946` call `refuseProjectionOfUnknownColumns`; `packages/objectql/src/empty-projection-door.ts:61-78` (status, code, `got [...]` in the message) | `engine-empty-projection-refusal.test.ts:241`, `:249` (`reads` stays empty); `query-expression-conformance.test.ts:1786` |\n| The same refusal as `fields: []` | `empty-projection-door.ts:111` and `:125` both go through `refuseEmptyProjection` | the same file's `fields: []` block, earlier in `engine-empty-projection-refusal.test.ts` |\n| `expand` sub-reads are unaffected, because the engine always adds `id` and strips it back off | `engine.ts:12797`, `:12806` (adds `id`), `:12845` (strips it); `id` is never dropped (`declared-read-columns.ts:79`) | `packages/objectql/src/engine.test.ts:1942`, `:2010` |\n| The REST ingress answers `400 INVALID_FIELD` for any unknown name, alone or mixed | `packages/metadata-protocol/src/protocol-query-validation.ts:716-727` (`unknown.length > 0`) | `query-expression-conformance.test.ts:1431` (alone), `:1441` (mixed); `packages/rest/src/data-record-read-malformed-query-door.test.ts:73` |\n\n## Tests\n\n<details><summary>The cited suites on the merged head 6535c19c</summary>\n\n`bash scripts/pm/os-verify-lock.sh -c \"pnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2 src/engine-empty-projection-refusal.test.ts src/query-expression-conformance.test.ts\"`\n\n```\n Test Files  2 passed (2)\n      Tests  209 passed (209)\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n## Acceptance notes\n\n- Prose only, no code; `skip-changeset`: nothing in any package's `files[]` changes.\n- The old callout listed \"registry-less hosts\" among the callers the tolerance protects. That is dropped: an unregistered object is now refused `404 OBJECT_NOT_FOUND` by the engine first (`query-expression-conformance.test.ts`, the registry-less guard after `:1786`). The new lead sentence says \"on a registered object\".\n\n## Verification\n\n<details><summary>Derived gates, local subset (head 6535c19c)</summary>\n\n`node scripts/docs-audit/affected-docs.mjs`: exit 0, \"0 docs name something this change touched\".\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived the same 43 commands before and after the `origin/main` merge. On the merged head all 43 exit 0. Some first answered exit 3 (PREREQUISITE NOT MET, nothing measured), or exit 1 from a stale `json-schema`, until the build closures of `@objectstack/lint...` and `@objectstack/client-react...` (spec included) were rebuilt on that head. After the rebuild they exit 0: `check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples`, `check:docs-transcript-drift`, `check:docs`.\n\n`--ran` with every exit recorded: \"43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero — all 43 recorded an exit code and none of them is 3)\".\n\nNOT MEASURED locally: `Build Docs` and `Check Documentation Links`. These are CI-only jobs, and this PR's check-runs answer them.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYp3oFeDem8Tbh8pzWA)_\n"
+}

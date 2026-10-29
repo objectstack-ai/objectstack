@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T13:53:13Z",
-  "updated_at": "2026-10-29T02:51:02Z",
+  "updated_at": "2026-10-29T10:17:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25805",
   "body": "Filing class: platform gap (build-time) — reach: `os validate` / `os lint` / `os build`, measured on `@objectstack/cli` 18.1.0 in objectstack-ai/hotclm (`main` `4460d31`, os-dev-report on objectstack-ai/hotclm#107).\n\n## Symptom\nAn app that declares another app as a dependency cannot author a lookup to that app's object. Probe: hotclm adds `Field.lookup('crm_contract')` on `clm_contract` (DESIGN §03 pins this cross-package link) and declares HotCRM in `manifest.dependencies` (`{ 'app.objectstack.hotcrm': '^6.0.0', 'app.objectstack.hotcrm.revenue': '^6.0.0' }`, the shape HotCRM's own modules use). `os validate` → exit 1, `object-reference-unknown`: *lookup target crm_contract resolves to no object defined in this stack*. `os lint` → same error, plus warning `flow-trigger-unknown-object` for a `record_change` flow on `crm_contract`.\n\n## Why\n`@objectstack/lint` 18.1.0 `validateObjectReferences` resolves a reference against (1) the stack's own objects, (2) `artifactProvidedObjectNames(stack)` — the bodies in `packages[]`, (3) `PLATFORM_PROVIDED_OBJECT_NAMES`. It never reads `manifest.dependencies`. Meanwhile `os explain flow-trigger-unknown-object` says the runtime publish gate DOES judge a package against its `manifest.dependencies` closure — build time and publish time disagree about what a package may reference. (History: #16611 made the dangling-target check an error, correctly; this is the cross-package case it did not cover.)\n\n## Expected\nThe build-time reference ladder (validate, lint, build) also resolves names provided by packages declared in `manifest.dependencies` — the same closure the publish gate uses — so an app can declare a cross-package lookup / `record_change` trigger without bundling the other app's stacks into its own artifact.\n\n## Repro\n1. A stack with `manifest.dependencies` naming a package that defines `crm_contract`.\n2. `Field.lookup('crm_contract')` on one of its objects.\n3. `os validate` → `object-reference-unknown`.\n\nWorkarounds considered and refused by the app (maintainer rule 「平台的问题就等平台」): bundling the other app's stacks into this artifact (ships a second app; the other app is not on npm), or turning the link into a text id (loses the picker, `$expand`, referential meaning).\n\n---\n_Filed by the objectstack-ai/hotclm PM seat from the hotclm#107 dev report._\n"

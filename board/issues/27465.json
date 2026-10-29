@@ -2,8 +2,8 @@
   "number": 27465,
   "kind": "issue",
   "title": "/import upsert: a `multiple: true` lookup ticked as a match field fails every row with `Operator \"=\" … received an array`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "baozhoutao",
@@ -14,18 +14,21 @@
     "area:records",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-10-29T07:14:51Z",
-  "updated_at": "2026-10-29T08:16:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T14:11:59Z",
+  "closed_at": "2026-10-29T14:10:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27465",
   "body": "### Edition\n\nObjectOS Enterprise (licensed, self-managed)\n\n### Version\n\nSeen on 17.3.0. The same code path is unchanged on `main` @ `968925c` (packages at 18.2.0).\n\n### What happened / What you expected\n\nIn the Import wizard, with **\"Update if matched, else create\"** (upsert) or **\"Update existing\"**, the \"Match on\" checkbox list offers every mapped field, including a `lookup` declared `multiple: true`. If that field is ticked, **every row** fails, both on the dry run (\"Validate data\") and on the real import:\n\n```\nOperator \"=\" on field \"work_object\" requires a single comparable value, but received an array, which cannot be bound as a SQL parameter. Use a string, number, bigint, boolean, null or Date (or a binary value); for a list use $in/$nin, and for a range use $between.\n```\n\n(In our case 0 valid, 28 errors. On 18.x the message is the redacted variant, with the full diagnostic in the server log.)\n\nExpected: a multi-valued field is either not offered as a match field, or refused up front with a clear request-level error. A raw SQL-binding error on every row should not happen.\n\n### Steps\n\n1. Define an object with a multi-valued lookup, e.g.\n   ```ts\n   work_object: { type: 'lookup', reference: 'some_object', multiple: true, displayField: 'name' }\n   ```\n   plus a few scalar fields.\n2. Open the object's list view → Import, upload a CSV that maps a column to `work_object` (one or more referenced names per cell).\n3. Choose **Update if matched, else create**, and tick `work_object` (alone or with other fields) under **Match on**.\n4. Click **Validate data**, or import → every row fails with the error above.\n\n### Root cause (traced on `main` @ 968925c)\n\n1. **UI offers it.** `ui/packages/plugin-grid/src/ImportWizard.tsx:1967`:\n   `const matchable = useMemo(() => fields.filter((f) => mappedFieldNames.has(f.name)), …)`. Any mapped field is matchable. The wizard's field shape does not carry `multiple` (see the comment near line 673), so it cannot tell a multi-valued field apart.\n2. **Server accepts it.** `packages/rest/src/import-prepare.ts:316` `readMatchFieldsBody` checks only the shape (`string[]` / `string[][]`), not whether each named field can serve as an equality key.\n3. **Runner passes the array straight into the filter.** `coerceRow` resolves a `multiple: true` lookup cell to an array of ids, and `packages/core/src/utils/import-runner.ts:833` `findExisting` does\n   ```ts\n   for (const f of keySet) filter[f] = data[f];   // data[f] is string[] here\n   ```\n   so the query is `where: { work_object: ['id1', …] }`.\n4. **Driver refuses it.** `packages/drivers/driver-sql/src/sql-driver.ts` `assertCompilableComparand` → `unbindableComparandError`: an implicit `$eq` against an array is not bindable. The objectql layer does not rewrite a bare array on a multi-valued field either.\n\n`rowsSharingKey` (`import-runner.ts:888`) also builds keys from the same coerced values, so it would need to agree with whatever rule is chosen.\n\n### Suggested fix\n\nExact array equality is order-sensitive and not a meaningful identity key, so refusing seems cleaner than trying to match:\n\n- **Server:** in `import-prepare.ts`, once `metaMap` is resolved, refuse `matchFields` that name a multi-valued field (`multiple: true`, multi-select, JSON-stored types) with a 400 `INVALID_REQUEST` that names the field. The same rule should apply to `mappingArtifact.upsertKey`.\n- **UI:** expose `multiple` on the wizard's field shape and exclude multi-valued fields from `matchable`, so they are never offered.\n\nWorkaround for now: don't tick multi-valued fields under \"Match on\"."

@@ -1,0 +1,30 @@
+{
+  "number": 27561,
+  "kind": "issue",
+  "title": "[PM seat] domain:ui · seat 3 — 🟢 os-bill · 由 os-bill 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T13:03:58Z",
+  "updated_at": "2026-10-29T13:04:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27561",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CaJoinvGQSbHeDaWBe\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 3**, opened on the maintainer's word naming this number (「接 ui seat 2 seat 3」, Claude Code project \"Objectstack 多币种 UI\", 2026-10-29T12:59Z). Seat 1 is #25966, seat 2 is #25995, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 `os-bill` · Claude Code project \"Objectstack 多币种 UI\", seat thread \"运行 ui 车道席位 3 派发\" · `session_01Utp6CaJoinvGQSbHeDaWBe` · seated at this post's creation (the seat-taken comment below carries the stamp). Posture, ledger and round reports live in the project.\n\n## Seat stub\n\n- **File area (split from seat 1's remainder; seat 2 keeps its recorded area):** Studio — `ui/packages/app-shell/src/views/studio-design/**` and the other Studio views and pages under `ui/packages/app-shell/src/views/**`, `ui/packages/plugin-designer`, `ui/packages/plugin-editor`; AI chat — `ui/packages/plugin-chatbot`; tooling — `ui/scripts/**`; end-to-end — `ui/e2e/**`. Seat 1 (#25966) keeps everything else outside seat 2's area, and keeps its in-flight Studio cards to landing (#27464, #27458, #27518). Cards on one file stay with one seat and land in order. Claims carry `Seat: domain:ui#3`.\n- **Excluded:** the `pm:epic` subtrees (#8345 multi-currency, run from the same project; #26676 record page).\n- **Hot-file serial queue:** none held. Read #25966's and #25995's queues and their claims' `File surface:` lines before any claim. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card; no PR is assigned to or review-requested from the seat account — after seat ACCEPT and a same-head contract PASS, Tier H PRs request review from the governed approvers.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#3` + `head:claude/` PRs.\n- **Wall:** none."
+}

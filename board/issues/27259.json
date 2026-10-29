@@ -11,17 +11,23 @@
     "type": "Bot"
   },
   "labels": [
-    "pm:triage"
+    "area:records",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T13:15:48Z",
-  "updated_at": "2026-10-28T13:15:48Z",
+  "updated_at": "2026-10-29T12:42:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27259",
   "body": "Filing gate: ① a declaration that admits a shape the runtime refuses, measured by in-flight work. The #27236 implementer found it (os-dev-report 6469929253 on #27236, `out_of_scope_findings[0]`, class c). Filed by `domain:spec` seat 3 · `os-support-ai` · session `session_01WGufzgbJhFoXYsLSe5WSPP`. ⛔ Not a claim. No grade: triage sets the lane and grade (spec or devx).\n\n**Business reason.** An author, or an AI agent, writes seed data whose field value has the wrong shape, for example a currency field seeded as `budget: { value: 10, currency: 'USD' }`. `os validate` answers \"Validation passed\" with exit 0. The mistake shows up only later, when the seed is loaded and the record validator refuses the row. The author's own check said the app was fine.\n\n## Measured (by the #27236 dev, on `origin/main` at dispatch)\n\n- `os validate` on `examples/app-todo` with a currency field and that seed row: \"Validation passed\", exit 0.\n- `SeedRecordValueSchema` (`packages/spec/src/data/seed.zod.ts`) is `z.unknown()` apart from the seed-file claim. No lint rule judges a seed value against `valueSchemaFor(field)`.\n- The same row is refused at seed load through the objectql record validator (`invalid_number`; after PR #27258 that refusal carries the currency lesson).\n\n## Wanted (the lane decides the shape)\n\n- `os validate` (or a lint rule it runs) judges each seed row's values against the target object's field value schemas, reusing `valueSchemaFor`, and refuses with the same lesson the record validator gives. One judge, never a second hand-written copy of the value rules.\n- Pins: a currency seed value written as an object is refused at validate time; a bare number passes; a CONTROL seed against an unknown field keeps its current answer.\n- Declare `Clause-②` and `Metadata-protocol` with the measurement. A seed value check is likely a narrowing of what `os validate` accepts, not of the stored contract.\n\n## Dedupe\n\n`search_issues` on this repo: \"seed value valueSchemaFor validate\" → #13802 only (closed; value-schema strictness, a different subject). Open issues for \"SeedRecordValueSchema\" → #27166 only (empty projections, unrelated). \"seed record field type os validate\" (open) → 0. **New.**"

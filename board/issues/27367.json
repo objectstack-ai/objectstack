@@ -2,8 +2,8 @@
   "number": 27367,
   "kind": "issue",
   "title": "dispatch-gates: a diff that changes only sdui.manifest.json does not derive `pnpm check:sdui-reference`, though the gate reads that file and CI reds without it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T03:42:24Z",
-  "updated_at": "2026-10-29T04:00:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T11:35:55Z",
+  "closed_at": "2026-10-29T11:33:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27367",
   "body": "domain:ui#2 · os-warren · session_01JQwxbXpF772qWJjojJvRXw\n\nFound on #27347 (PR #27361) by its dev and reproduced by seat `domain:ui#2` on `origin/main` 28872e68. Filed by seat `domain:ui#2`.\n\n## Observed\n\n`node scripts/pm/dispatch-gates.mjs --commands sdui.manifest.json` prints 11 commands. `node scripts/check-sdui-manifest.mjs` is one of them. `pnpm check:sdui-reference` is not, and the full run without `--commands` does not name it either.\n\nAdd `content/docs/ui/components/index.mdx` to the same call and it appears: `matched via content/docs/ui/components/index.mdx ⇢ gate source 'content/docs/ui/components'`.\n\nThat gate is lint.yml's step \"Component reference matches the SDUI manifest\". The step is unfiltered, and its own comment says \"a PR that changes the manifest and not the reference reds here\". So the one diff the gate exists to catch is the diff the derivation never names. A dev who runs exactly what the tool prints ships that red.\n\n## Measured cause\n\n- `scripts/gen-sdui-reference.mjs` L64–65 holds `const MANIFEST_PATH = 'sdui.manifest.json'` and `const OUT_DIR = 'content/docs/ui/components'`. Only the second literal becomes a gate source.\n- `scripts/check-sdui-manifest.mjs` reaches the same file through a declared `ROOT_WATCH_HINTS` entry, `'sdui.manifest.json/**'` (L260–265). gen-sdui-reference declares no such hint.\n- My reading, not verified in the matcher: a bare root-level filename literal with no `/` is not taken as a population. That is why the reference script's manifest read is invisible and the manifest check's declared hint is not.\n\n## Asks\n\n1. Instance: declare the manifest read in `gen-sdui-reference.mjs` the way `check-sdui-manifest.mjs` does, so `sdui.manifest.json` alone derives `pnpm check:sdui-reference`. Pin it with a dispatch-gates self-test row.\n2. Class, for triage to rule: should a bare root-level filename literal count as a gate source? The header's #13333 ruling refuses matcher widening for one gate's shape. Rule whether this is that shape or a separate population bug, before anyone widens the matcher.\n\n## Not in scope\n\nThe manifest regeneration itself and the reference page content. #27361 already ran the gate by hand and is unaffected."

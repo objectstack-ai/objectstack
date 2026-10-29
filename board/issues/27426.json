@@ -2,9 +2,9 @@
   "number": 27426,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-data, -automation and -platform teach ownership queues and assignment rules (ADR-0142 phase 2) with one eval each",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/l",
     "tooling"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T06:23:12Z",
-  "updated_at": "2026-10-29T08:12:25Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-29T09:40:38Z",
+  "closed_at": "2026-10-29T09:40:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-29T09:40:36Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27426",
