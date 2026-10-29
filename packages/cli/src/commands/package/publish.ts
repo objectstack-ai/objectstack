@@ -32,7 +32,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import { PackageSchema } from '@objectstack/spec/marketplace';
-import { printHeader, printKV, printSuccess, printError, printStep, isExitSignal } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, printStep, printWarning, isExitSignal } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
 import { resolveCloudActiveEnvironmentId } from '../../utils/active-environment.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
@@ -257,6 +257,34 @@ async function tryLoadTemplateManifest(
 }
 
 /**
+ * Keys `objectstack.manifest.json` accepts — `TemplateManifestSchema` inherits
+ * them from `CreatePackageRequestSchema` — that this command does NOT carry to
+ * the control plane.
+ *
+ * They are not sent because nothing in this repo shows the hosted
+ * `POST /cloud/packages` route writes them: the request schema declares them,
+ * but the read-side row stores `tags` as a string, and `publisher` is a trust
+ * tier that gates listing privileges, so a value self-declared in an author's
+ * file is a privilege claim only the control plane can judge. `visibility` is
+ * flag-only on purpose (see the `--visibility` flag).
+ *
+ * Dropping an authored key silently is the defect, so each one the file
+ * declares is named in a warning. The warning does not fail the publish: the
+ * bundled blank template ships `isStarter: true`, and refusing it would break
+ * every project scaffolded from it.
+ *
+ * Every `TemplateManifestSchema` key is classified in
+ * `test/package-publish-uncarried-manifest-keys.test.ts`, so a key the schema
+ * gains later goes red there until publish either sends it or lists it here.
+ */
+export const UNCARRIED_MANIFEST_KEYS = ['visibility', 'tags', 'publisher', 'isStarter'] as const;
+
+/** The {@link UNCARRIED_MANIFEST_KEYS} that `manifest` declares, in list order. */
+export function uncarriedManifestKeys(manifest: Record<string, unknown>): string[] {
+  return UNCARRIED_MANIFEST_KEYS.filter((key) => manifest[key] !== undefined);
+}
+
+/**
  * Read a string that is EITHER inlined markdown OR a path relative to
  * the template manifest directory. Treats short, single-line `.md` /
  * `.markdown` strings as paths and reads them; everything else is
@@ -450,6 +478,15 @@ export default class PackagePublish extends Command {
         printStep(`Loaded objectstack.manifest.json`);
       }
       const m = tplManifest?.data ?? {};
+      const uncarried = uncarriedManifestKeys(m);
+      if (uncarried.length > 0) {
+        printWarning(
+          `objectstack.manifest.json declares ${uncarried.map((k) => `\`${k}\``).join(', ')}, which `
+          + '`os package publish` does not send to the control plane: the published package will not carry '
+          + (uncarried.length === 1 ? 'it.' : 'them.')
+          + (uncarried.includes('visibility') ? ' Pass --visibility to set visibility.' : ''),
+        );
+      }
       const baseDir = tplManifest?.baseDir ?? process.cwd();
 
       // One gate for both paths — the explicitly supplied id and the derived one
