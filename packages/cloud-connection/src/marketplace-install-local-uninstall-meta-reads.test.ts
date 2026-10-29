@@ -187,6 +187,9 @@ async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata:
             return services[name];
         },
         logger,
+        // Every kernel context can announce; the uninstall's `metadata:reloaded`
+        // (#27395) is pinned in the resync file, so here it reaches no subscriber.
+        trigger: async () => undefined,
     };
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
     await plugin.start(ctx as never);

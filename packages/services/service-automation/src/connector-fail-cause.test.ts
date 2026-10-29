@@ -360,13 +360,18 @@ describe('#5575 — boot (fatal) still carries the cause text, not structured me
         );
     });
 
-    it('appends the auth failure, whose own text still names the credentialRef', async () => {
+    // [#27237] An unresolved reference degrades its instance now; what stays
+    // fatal at boot is the host's resolver THROWING — foreign code whose
+    // failure is not "the credential is not set".
+    it("appends the host resolver's failure", async () => {
         await expect(
-            bootFatal([providerConnector('billing', { auth: { type: 'bearer', credentialRef: 'MISSING' } })], {
+            bootFatal([providerConnector('billing', { auth: { type: 'bearer', credentialRef: 'VAULT_REF' } })], {
                 factory: okFactory,
-                credentialResolver: () => undefined,
+                credentialResolver: () => {
+                    throw new Error('vault session expired');
+                },
             }),
-        ).rejects.toThrow(/auth resolution failed \(ADR-0097 §3\)\. cause: .*credentialRef 'MISSING' did not resolve/s);
+        ).rejects.toThrow(/auth resolution failed \(ADR-0097 §3\)\. cause: vault session expired/);
     });
 
     it('keeps a multi-line ZodError dump intact on the fatal path', async () => {

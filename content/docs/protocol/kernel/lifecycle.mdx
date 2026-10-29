@@ -18,11 +18,13 @@ command, so no `objectstack upgrade …` line on this page is runnable.
 
 **Code-plugin installation is local and partial.** `os plugin install
 ./x.osplugin` verifies a local artifact's signature against the environment's
-trusted keys and its per-file integrity, then unpacks it; nothing loads an
-installed plugin at boot yet, and there is no `os plugin enable` or `test`.
+trusted keys and its per-file integrity, then unpacks it, and the next
+`os serve` re-verifies it and loads it — `runtime: 'node'` only, in process;
+`sandbox` and `worker` are refused at boot until
 [ADR-0025](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0025-plugin-package-distribution.md)
-§3.5 M1 records the loader as the next step; see
-[Plugin Installation](#plugin-installation) for what an author does today.
+M3. `os plugin disable`, `enable` and `uninstall` act at the next boot; there
+is no `os plugin test`. See [Plugin Installation](#plugin-installation) for
+what an author does today.
 </Callout>
 
 ObjectStack manages the complete **lifecycle** of the platform runtime—from initial boot through schema evolution and graceful shutdown, and describes the design intent for plugin installation, upgrades, and rollbacks. The boot sequence is implemented as described; the installation and upgrade flows are design intent (see the callout above).
@@ -201,8 +203,11 @@ class AppPlugin implements Plugin {
 records and the platform ships only in part: `os plugin install ./x.osplugin`
 verifies a local artifact (its signature against the environment's trusted
 keys, its files against the manifest's `integrity` map), unpacks it and
-records the installation, writing nothing until every check passes. Download
-from the cloud, loading an installed plugin at boot, and the install hooks and
+records the installation, writing nothing until every check passes. At the
+next boot, `os serve` re-verifies each installation (the kept artifact's
+sha256, its signature against the trusted keys as they are now, the unpacked
+tree) and loads it by its declared tier: `node` in process, `sandbox` and
+`worker` refused by name. Download from the cloud and the install hooks and
 registry below have no command and no runtime path. The sections below up to
 *Upgrades* describe that design, not a command you can run. See
 [What an author does today](#what-an-author-does-today).
@@ -375,8 +380,8 @@ transitions (this page, above), not code hooks; boot-time code goes in
 ### What an author does today
 
 The one install command for a code plugin is `os plugin install`, for a
-signed artifact on local disk, and nothing loads what it installs yet. What
-exists, per the
+signed artifact on local disk; the next `os serve` loads what it installed.
+What exists, per the
 [CLI reference](https://github.com/objectstack-ai/objectstack/blob/main/packages/cli/README.md):
 
 - **Runtime plugins** declared in `objectstack.config.ts` `plugins` are loaded
@@ -390,8 +395,12 @@ exists, per the
   manifest) are packaged and shipped with `os plugin build`, `os plugin sign`
   and `os plugin publish`. A signed `.osplugin` on local disk is installed with
   `os plugin install` once its publisher key is trusted (`os plugin keygen`,
-  `os plugin trust add`); `os serve` does not load installed plugins yet, and a
-  published `.osplugin` has no `os` command that fetches it from the cloud.
+  `os plugin trust add`). `os serve` re-verifies and loads it at boot when it
+  declares `runtime: 'node'` (author code in the host process, not isolated),
+  refuses `sandbox` and `worker` until they are routed, and prints each refusal
+  by name; `os plugin disable | enable | uninstall ID` take effect at the next
+  boot. A published `.osplugin` has no `os` command that fetches it from the
+  cloud.
 
 See [Plugin System](/docs/plugins) for how kernel plugins are created and
 registered.
@@ -920,7 +929,7 @@ Plugin authors must document breaking changes in CHANGELOG.md.
 
 ObjectStack lifecycle management provides:
 - **Deterministic Boot:** 7-phase boot sequence with clear error handling
-- **Atomic Installations (design):** ADR-0025 calls for transactional, all-or-nothing plugin installs; `os plugin install` verifies a local artifact in full before it writes anything, but nothing loads an installed plugin at boot yet
+- **Atomic Installations (design):** ADR-0025 calls for transactional, all-or-nothing plugin installs; `os plugin install` verifies a local artifact in full before it writes anything, and `os serve` re-verifies it before loading it
 - **Zero-Downtime Upgrades:** Blue-green and rolling strategies for production
 - **Automatic Rollback:** Failed upgrades auto-revert to previous version
 - **Health Monitoring:** Built-in health checks validate system state

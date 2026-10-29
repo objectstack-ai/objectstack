@@ -218,26 +218,38 @@ export function lowerRelationSite(site: RelationFilterSite, ids: readonly unknow
   };
 }
 
-/** How the words name the condition: its keys, never its values. */
+/**
+ * How the words name the condition: its keys, never its values — the first,
+ * and a count of the rest. [#27351] Every reason that is about one key names
+ * that key in its own words, and the path already places the condition, so
+ * listing more keys would cost the route its room inside the client cap.
+ */
 function describeKeys(keys: readonly string[]): string {
   if (keys.length === 0) return 'no keys';
-  const shown = keys.slice(0, 3).map((key) => JSON.stringify(key)).join(', ');
-  const more = keys.length > 3 ? `, and ${keys.length - 3} more` : '';
-  return `keys ${shown}${more}`;
+  const more = keys.length > 1 ? `, and ${keys.length - 1} more` : '';
+  return `keys ${JSON.stringify(keys[0])}${more}`;
 }
 
 /** The ids route every driver serves: `$in` on a single-valued relation, `$contains` per id on a multi-valued one. */
 function idsRoute(field: string, multiple: boolean): string {
   return multiple
-    ? `{ "${field}": { "$contains": ID } } for one id, an $or of those for several`
+    ? `an $or of { "${field}": { "$contains": ID } }, one per id`
     : `{ "${field}": { "$in": [ID, …] } }`;
 }
 
 /**
  * The words of a structural refusal ({@link admitRelationCondition}): the
- * position, the verdict and the route first — the REST door bounds a 4xx
- * message at 500 characters by truncation — and nothing after the route that a
- * caller needs.
+ * position, the short reason and the route first — the REST door bounds a 4xx
+ * message at 500 characters by truncation — then "NOT applied" and any
+ * reasoning, which is the part a cut may take.
+ *
+ * [#27351] The route comes right after the short reason, ahead of "NOT
+ * applied", for every reason — the rule the temporal, text-operator and
+ * no-operator-object doors follow. The head names the field once by name and
+ * once at the end of its path, so the column after the path is named by its
+ * type alone, and the route names the field only in its spelling.
+ * `relation-condition-prescription-cap.test.ts` pins each reason's route
+ * inside the cap.
  */
 export function relationConditionRefusalMessage(refusal: RelationConditionRefusal, context: string): string {
   const { field, type, target, multiple, path, key } = refusal;
@@ -245,9 +257,9 @@ export function relationConditionRefusalMessage(refusal: RelationConditionRefusa
   const named = target === undefined ? 'the related object' : `'${target}'`;
   const head =
     `${context}: filter on '${field}' puts a nested-relation condition (${describeKeys(refusal.keys)}) at `
-    + `${path}, beneath the declared ${type} field '${field}'`;
+    + `${path}, beneath the ${type} field`;
   const verdict = 'The filter was NOT applied.';
-  const twoStep = `then match '${field}' against its ids: ${idsRoute(field, multiple)}.`;
+  const twoStep = `then match its ids: ${idsRoute(field, multiple)}.`;
   switch (refusal.reason) {
     case 'unregistered-target':
       return (
@@ -255,30 +267,31 @@ export function relationConditionRefusalMessage(refusal: RelationConditionRefusa
         + (target === undefined
           ? ', and the field declares no related object to read. '
           : `, and no object '${target}' is registered here to read. `)
-        + `${verdict} Match '${field}' against ids you hold: ${idsRoute(field, multiple)}.`
+        + `Match ids you hold: ${idsRoute(field, multiple)}. ${verdict}`
       );
     case 'empty':
       return (
-        `${head}, and it names no field of ${related}. ${verdict} Name one `
-        + `({ "${field}": { "FIELD": VALUE } }), or test that '${field}' has a value: `
-        + `{ "${field}": { "$null": false } }.`
+        `${head}, and it names no field of ${related}. Name one `
+        + `({ "${field}": { "FIELD": VALUE } }), or test for a value: { "${field}": { "$null": false } }. `
+        + verdict
       );
     case 'undeclared-key':
       return (
-        `${head}, and '${key}' is not a field of ${related}. ${verdict} Name a field it declares: `
-        + `{ "${field}": { "FIELD": VALUE } }. A key it does not declare would read as a real empty answer.`
+        `${head}, and '${key}' is not a field of ${related}. Name a field it declares: `
+        + `{ "${field}": { "FIELD": VALUE } }. ${verdict} A key it does not declare would read as a real empty `
+        + 'answer.'
       );
     case 'dotted-key':
       return (
-        `${head}, and '${key}' is a dotted path: the condition reaches one level only. ${verdict} `
-        + `Read ${named} with that condition yourself, ${twoStep}`
+        `${head}, and '${key}' is a dotted path: the condition reaches one level only. `
+        + `Read ${named} with that condition, ${twoStep} ${verdict}`
       );
     case 'second-level':
     default:
       return (
-        `${head}, and '${key}' is itself a ${refusal.keyType ?? 'relation'} field of ${related} holding a `
-        + `condition of its own: one level only. ${verdict} Read ${named} with { "${key}": { … } } yourself, `
-        + twoStep
+        `${head}, and '${key}' holds a condition of its own: one level only. Read ${named} with `
+        + `{ "${key}": { … } }, ${twoStep} ${verdict} '${key}' is itself a `
+        + `${refusal.keyType ?? 'relation'} field of ${related}.`
       );
   }
 }

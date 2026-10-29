@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IJobService } from '@objectstack/spec/contracts';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
@@ -9,9 +9,11 @@ import type {
     ConnectorInstanceAuth,
     ResolvedConnectorAuth,
     ConnectorProviderContext,
+    ConnectorMaterializationHandler,
 } from '@objectstack/spec/integration';
-import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
+import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
 import type { AutomationEngineOptions, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
@@ -24,6 +26,34 @@ import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
 import { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 import { SysFlowCredential } from './sys-flow-credential.object.js';
+import { SysConnectorCredential } from './sys-connector-credential.object.js';
+import type {
+    ConnectorCredentialRef,
+    ConnectorCredentialSetRequest,
+    ConnectorCredentialClearRequest,
+} from '@objectstack/spec/contracts';
+import {
+    CONNECTOR_CREDENTIAL_REF_MAX_LENGTH,
+    CONNECTOR_CREDENTIAL_VALUE_MAX_LENGTH,
+    ConnectorCredentialStore,
+    ConnectorCredentialUnavailableError,
+    SECRET_HANDLE_PREFIX,
+    connectorCredentialFingerprint,
+    credentialDoorRefusal,
+    credentialForms,
+    credentialRejectedOnCallReason,
+    credentialRejectionStatusOf,
+    isAcceptedCallResult,
+    isSuppliedByEnv,
+    missingCredentialReason,
+    probeConnectorCredential,
+    resolveConnectorCredential,
+    upstreamRefusalMessage,
+    withoutCredentialThrown,
+    type ConnectorCredentialChain,
+    type ConnectorCredentialRecord,
+    type ConnectorCredentialResolution,
+} from './connector-credentials.js';
 import {
     FlowCredentialChannel,
     storedFlowStates,
@@ -171,16 +201,19 @@ export interface AutomationServicePluginOptions {
      */
     runHistoryMaxPerFlow?: number;
     /**
-     * Resolves a declarative connector instance's `auth.credentialRef` to its
-     * secret at boot (ADR-0097 §3). Defaults to {@link defaultEnvCredentialResolver}
-     * — the **open tier**: a `credentialRef` names an environment variable. An
+     * The host's credential resolver — the third arm of a declarative
+     * connector's `auth.credentialRef` chain (ADR-0097 §3, #27237): an
+     * environment variable of the same name wins, then the
+     * `sys_connector_credential` row an administrator set, then this. An
      * enterprise host injects a vault/KMS-backed resolver here without touching
-     * the materialization path. A ref that resolves to `undefined`/empty is a
-     * hard boot error (an app must not silently run with a dead connector).
+     * the materialization path. A ref no arm answers for registers the instance
+     * degraded, naming the ref, and it materializes once the ref is set — never
+     * a failed boot. A resolver that THROWS keeps its contract: fatal at boot.
      *
      * The engine reads an `api` flow's start-node `config.secretRef` through
-     * the same resolver, at every inbound post: a name that resolves to
-     * nothing refuses that post as unavailable (`503`), never verifies it.
+     * this resolver alone — {@link defaultEnvCredentialResolver} when absent —
+     * at every inbound post: a name that resolves to nothing refuses that post
+     * as unavailable (`503`), never verifies it.
      */
     credentialResolver?: CredentialResolver;
     /**
@@ -344,6 +377,47 @@ function holdsFlowDefinition(engine: AutomationEngine, name: string, held: unkno
         return stableStringify(engine.canonicalizeStoredFlow(name, definition).parsed) === stableStringify(held);
     } catch {
         return false;
+    }
+}
+
+/**
+ * [#27237] The `credentialRef` a declarative instance's `auth` names, or
+ * `undefined` for `none` / no `auth` — the reference the resolver chain
+ * (`./connector-credentials.ts`) is asked for.
+ */
+function credentialRefOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
+    if (!auth || auth.type === 'none') return undefined;
+    return auth.credentialRef;
+}
+
+/** The `basic` username an instance sends beside its secret — what its `Authorization` header encodes with it. */
+function basicUsernameOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
+    return auth?.type === 'basic' ? auth.username : undefined;
+}
+
+/**
+ * Build the static {@link ResolvedConnectorAuth} a provider factory applies
+ * from a declarative instance's `auth` and the secret its `credentialRef`
+ * resolved to (ADR-0097 §3). `secret` is present whenever `auth` names a
+ * reference — an unresolved one never reaches here: the reconcile degrades
+ * the instance first (#27237).
+ */
+function resolveInstanceAuth(auth: ConnectorInstanceAuth | undefined, secret: string | undefined): ResolvedConnectorAuth | undefined {
+    if (!auth) return undefined;
+    if (auth.type === 'none') return { type: 'none' };
+    const value = secret ?? '';
+    switch (auth.type) {
+        case 'bearer':
+            return { type: 'bearer', token: value };
+        case 'api-key':
+            return {
+                type: 'api-key',
+                key: value,
+                headerName: auth.headerName ?? 'X-API-Key',
+                paramName: auth.paramName,
+            };
+        case 'basic':
+            return { type: 'basic', username: auth.username, password: value };
     }
 }
 
@@ -655,8 +729,36 @@ export class AutomationServicePlugin implements Plugin {
      * Disjoint from {@link materializedConnectors} EXCEPT when a *changed*
      * entry's re-materialization failed — then the old live connector keeps
      * serving (still tracked there) while the retry is pending here.
+     *
+     * [#27237] `held` marks an instance whose upstream refused a credential
+     * stored through the credential door: degraded like the others, but
+     * neither the retry timer nor a reconcile re-attempts it while its
+     * signature — which carries the row's revision — stays the same. Setting
+     * the credential again, a change of the declaration, or a restart lifts
+     * it. A refused value the door does not hold (an environment variable,
+     * the host's resolver) is never held: it can change where this process
+     * cannot see it, so its instance retries on the backoff.
      */
-    private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string }>();
+    private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string; held?: boolean }>();
+    /**
+     * [#27237] References whose upstream refused a value the credential door
+     * does not hold — an environment variable or the host's resolver — keyed
+     * by reference, with the source that was refused and the reason (already
+     * scrubbed of the value). There is no row to mark, so this is what the
+     * listing reports as `rejected` until a provider proves the reference while
+     * materializing, it stops resolving from that source, or the process
+     * restarts. A call answered `2xx` does not clear it, as it does not clear
+     * a row.
+     */
+    private credentialRefusals = new Map<string, { source: 'env' | 'vault'; reason: string }>();
+    /**
+     * [#27237] The backoff count of an instance refused on such a value, by
+     * instance name. Kept across a re-materialization — a rest or openapi
+     * instance materializes without sending its credential, so the count would
+     * otherwise restart at one on every retry — and dropped once a provider
+     * proves the credential, or the instance or its credential's source changes.
+     */
+    private credentialRefusalAttempts = new Map<string, { signature: string; attempts: number }>();
     private declarativeRetryTimer?: ReturnType<typeof setTimeout>;
     /**
      * [#7742] The connector collection carried by the most recent
@@ -693,6 +795,12 @@ export class AutomationServicePlugin implements Plugin {
      * source, and the `flow` credential channel of the metadata save door.
      */
     private credentialChannel?: FlowCredentialChannel;
+    /**
+     * [#27237] The connector credential store — the second arm of the
+     * `credentialRef` chain (env → this → the host's resolver) and what the
+     * credential door writes. See `./connector-credentials.ts`.
+     */
+    private connectorCredentialStore?: ConnectorCredentialStore;
     /** [#20790] Serializes the one-time credential move — see {@link scheduleCredentialMigration}. */
     private credentialMigration: Promise<void> = Promise.resolve();
     /** [#20790] The crypto-provider subscription that re-runs the move; dropped at destroy. */
@@ -775,7 +883,8 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential],
+                // [#27237] The connector credential store rides it too.
+                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential, SysConnectorCredential],
             });
             return true;
         } catch (err) {
@@ -816,7 +925,8 @@ export class AutomationServicePlugin implements Plugin {
      * service — the `suspendedRunStore: 'memory'` composition, which registers
      * no run object: a flow credential has nowhere else to go, so the channel
      * needs its table on every composition. Every other composition registers
-     * it with the run objects ({@link registerRunObject}).
+     * it with the run objects ({@link registerRunObject}). [#27237]
+     * {@link SysConnectorCredential} rides with it, for the same reason.
      */
     private registerCredentialObject(ctx: PluginContext): boolean {
         try {
@@ -828,7 +938,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysFlowCredential],
+                objects: [SysFlowCredential, SysConnectorCredential],
             });
             return true;
         } catch (err) {
@@ -952,6 +1062,17 @@ export class AutomationServicePlugin implements Plugin {
         // metadata save door stores them in it (registered at `start()`).
         this.credentialChannel = new FlowCredentialChannel(() => this.resolveDataEngine(ctx));
         this.engine.setFlowCredentialSource(this.credentialChannel);
+
+        // [#27237] The connector credential store, and the door the
+        // `automation` service's credential members answer through: the
+        // declared instances it lists and the reconcile a write runs are this
+        // plugin's, while the registered service is the engine.
+        this.connectorCredentialStore = new ConnectorCredentialStore(() => this.resolveDataEngine(ctx));
+        this.engine.setConnectorCredentialDoor({
+            list: () => this.listConnectorCredentialRefs(ctx),
+            set: (request) => this.setConnectorCredential(ctx, request),
+            clear: (request) => this.clearConnectorCredential(ctx, request),
+        });
 
         // [#20281 stage ③] The connector sync executor, served on the
         // `automation` service's contract (`pullConnectorSource`) — the door a
@@ -1464,14 +1585,17 @@ export class AutomationServicePlugin implements Plugin {
         // registry is fully populated with declared `connectors:` entries. Turn each
         // provider-bound entry into a live, dispatchable connector now. Deliberately
         // NOT wrapped in a swallowing try/catch: a misconfiguration (unknown provider,
-        // invalid providerConfig, unresolvable credentialRef, name conflict) MUST fail
-        // boot loudly — a metadata platform shipping a plausible-but-dead connector is
-        // the worst failure mode. A start()-phase throw is fatal under both LiteKernel
-        // and ObjectKernel (rollbackOnFailure defaults on), so the operator sees it.
-        // One carve-out (#3017): a factory signalling its UPSTREAM is temporarily
-        // unreachable (CONNECTOR_UPSTREAM_UNAVAILABLE) degrades that one instance —
-        // registered action-less + retried with backoff — instead of failing boot;
-        // an operational blip in one integration must not take the whole app down.
+        // invalid providerConfig, a host credential resolver that throws, name
+        // conflict) MUST fail boot loudly — a metadata platform shipping a
+        // plausible-but-dead connector is the worst failure mode. A start()-phase
+        // throw is fatal under both LiteKernel and ObjectKernel (rollbackOnFailure
+        // defaults on), so the operator sees it.
+        // Carve-outs degrade that one instance (registered action-less) instead of
+        // failing boot: a factory signalling its UPSTREAM is temporarily unreachable
+        // (#3017, CONNECTOR_UPSTREAM_UNAVAILABLE — retried with backoff), and, since
+        // #27237, a `credentialRef` no source answers for (it materializes once the
+        // credential is set) or one its upstream refuses (CONNECTOR_CREDENTIAL_REJECTED).
+        // An operational blip in one integration must not take the whole app down.
         await this.materializeDeclaredConnectors(ctx, { fatal: true });
 
         // ── Runtime re-bind: re-sync flow triggers on 'metadata:reloaded' ──────
@@ -1557,7 +1681,13 @@ export class AutomationServicePlugin implements Plugin {
                 | { onCryptoProviderChange?(listener: () => void): () => void }
                 | undefined;
             if (!this.unsubscribeCryptoProvider && typeof dataEngine?.onCryptoProviderChange === 'function') {
-                this.unsubscribeCryptoProvider = dataEngine.onCryptoProviderChange(() => this.scheduleCredentialMigration(ctx));
+                this.unsubscribeCryptoProvider = dataEngine.onCryptoProviderChange(() => {
+                    this.scheduleCredentialMigration(ctx);
+                    // [#27237] A stored connector credential decrypts only once
+                    // the host's provider is in — which is after the boot
+                    // reconcile — so an instance degraded on it retries now.
+                    if (this.degradedInstances.size > 0) void this.materializeDeclaredConnectors(ctx, { fatal: false });
+                });
             }
         });
 
@@ -1882,8 +2012,18 @@ export class AutomationServicePlugin implements Plugin {
         // registry and the tracked maps. Each caller still observes its own
         // run's failure (a fatal boot error propagates), while the chain itself
         // is never left poisoned for the next caller.
-        const run = this.reconcileQueue.then(() => this.reconcileDeclaredConnectors(ctx, opts));
-        this.reconcileQueue = run.catch(() => undefined);
+        return this.onReconcileQueue(() => this.reconcileDeclaredConnectors(ctx, opts));
+    }
+
+    /**
+     * Run `fn` after every reconcile already queued, and before any queued
+     * after it. The credential door's writes run here too (#27237), so a write
+     * and the reconcile it triggers never interleave with another write's, and
+     * the instance always ends on the value the store ends on.
+     */
+    private onReconcileQueue<T>(fn: () => Promise<T>): Promise<T> {
+        const run = this.reconcileQueue.then(fn);
+        this.reconcileQueue = run.then(() => undefined, () => undefined);
         return run;
     }
 
@@ -1947,6 +2087,45 @@ export class AutomationServicePlugin implements Plugin {
             desired.set(bound.name, { entry: bound, signature: connectorInstanceSignature(bound) });
         }
 
+        // [#27237] Where each instance's `credentialRef` resolves from joins its
+        // signature — `env`, `object:<revision>`, `vault`, `missing` — so a
+        // credential write re-materializes exactly the instances naming it. One
+        // read of the store's bookkeeping per run, never a value; skipped when
+        // nothing declared names a reference. Under a walled tenancy posture
+        // the chain has no stored arm (S1 on #27230); a posture that cannot be
+        // read is not one that is absent, so the rows count as unreadable then.
+        let chain: ConnectorCredentialChain = { vault: this.options.credentialResolver };
+        let credentialRows: Map<string, ConnectorCredentialRecord> | undefined = new Map();
+        if ([...desired.values()].some((d) => credentialRefOf(d.entry.auth) !== undefined)) {
+            try {
+                chain = await this.connectorCredentialChain(ctx);
+                if (chain.store) credentialRows = await chain.store.list();
+            } catch (err) {
+                chain = { store: this.connectorCredentialStoreOrNone(), vault: this.options.credentialResolver };
+                credentialRows = undefined;
+                ctx.logger.warn(
+                    '[Automation] the connector credential store, or the tenancy posture that decides whether it is read, '
+                        + 'could not be read — an instance whose credential it would supply keeps what it has and retries.',
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        const credentialSources = new Map<string, string>();
+        for (const d of desired.values()) {
+            const ref = credentialRefOf(d.entry.auth);
+            if (ref === undefined) continue;
+            const fingerprint = connectorCredentialFingerprint(chain, ref, credentialRows);
+            credentialSources.set(ref, fingerprint);
+            d.signature += `|credential:${fingerprint}`;
+        }
+        // A refusal of a value the door does not hold stands until an upstream
+        // accepts the reference — or the reference stops resolving from the
+        // source that was refused (`env` / `vault` are fingerprints as well).
+        for (const [ref, refusal] of [...this.credentialRefusals]) {
+            const fingerprint = credentialSources.get(ref);
+            if (fingerprint !== 'unreadable' && fingerprint !== refusal.source) this.credentialRefusals.delete(ref);
+        }
+
         // 1. Remove connectors we previously materialized that are no longer
         //    desired (deleted from the stack, or newly `enabled: false`).
         for (const [name, tracked] of [...this.materializedConnectors]) {
@@ -1962,9 +2141,11 @@ export class AutomationServicePlugin implements Plugin {
             try { engine.unregisterConnector(name); } catch { /* ignore */ }
             ctx.logger.info(`[Automation] dropped degraded connector instance '${name}' (no longer declared)`);
         }
+        for (const name of [...this.credentialRefusalAttempts.keys()]) {
+            if (!desired.has(name)) this.credentialRefusalAttempts.delete(name);
+        }
 
         // 2. Add new instances and re-materialize changed ones (signature diff).
-        const resolver = this.options.credentialResolver ?? defaultEnvCredentialResolver;
         let changed = 0;
         for (const [name, { entry, signature }] of desired) {
             const existing = this.materializedConnectors.get(name);
@@ -1979,6 +2160,12 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 continue;
             }
+
+            // [#27237] Held: its upstream refused this very stored value. The
+            // next attempt is the next change of the credential or the entry,
+            // or a restart.
+            const held = this.degradedInstances.get(name);
+            if (held?.held && held.signature === signature) continue;
 
             const provider = entry.provider;
 
@@ -2004,22 +2191,40 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
 
-            let auth;
-            try {
-                auth = await this.resolveInstanceAuth(entry.auth, resolver, name, provider);
-            } catch (err) {
-                // #5575 — the old `fail((err as Error).message)` handed a FOREIGN
-                // message straight to the log message. `resolveInstanceAuth`'s own
-                // throw is single-line, but the resolver is host-supplied
-                // (`AutomationServicePluginOptions.credentialResolver` — a secrets
-                // service, or anything that validates with Zod), so what lands here
-                // is not ours to assume anything about.
-                fail(
-                    `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
-                    err,
-                );
-                continue;
+            // [#27237] env → the stored row → the host's resolver
+            // (`./connector-credentials.ts`). A reference no arm answers for, or a
+            // stored one this deployment cannot read now, degrades THIS instance
+            // and names the reference — never a failed boot: an administrator
+            // installs the app first and fills the credential after (ruling A on
+            // #27230; ADR-0097's amendment note).
+            const ref = credentialRefOf(entry.auth);
+            let credential: Extract<ConnectorCredentialResolution, { kind: 'resolved' }> | undefined;
+            if (ref !== undefined) {
+                let resolution: ConnectorCredentialResolution;
+                try {
+                    resolution = await resolveConnectorCredential(chain, ref, credentialRows);
+                } catch (err) {
+                    // #5575 — the host's resolver threw. It is host-supplied
+                    // (`AutomationServicePluginOptions.credentialResolver` — a
+                    // secrets service, or anything that validates with Zod), so
+                    // what lands here is not ours to assume anything about, and its
+                    // contract is unchanged: fatal at boot, logged and skipped on
+                    // a reload.
+                    fail(
+                        `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
+                        err,
+                    );
+                    continue;
+                }
+                if (resolution.kind !== 'resolved') {
+                    await this.degradeConnectorForCredential(engine, ctx, {
+                        name, entry, provider, signature, existing, ref, resolution,
+                    });
+                    continue;
+                }
+                credential = resolution;
             }
+            const auth = resolveInstanceAuth(entry.auth, credential?.value);
 
             // The registry hands back RAW authored values (see
             // `DeclaredConnectorItem`), so the schema's defaults are applied
@@ -2073,7 +2278,30 @@ export class AutomationServicePlugin implements Plugin {
                 // #3017 — an *operational* fault (upstream unreachable) degrades
                 // the one instance instead of failing the run, in BOTH modes;
                 // only configuration faults keep the fail-loud contract below.
-                if (isConnectorUpstreamUnavailable(err)) {
+                // [#27237] A provider's message is foreign text: an upstream that
+                // echoes the credential back must not carry it into the husk's
+                // reason, a log record or the thrown boot error.
+                const thrown = withoutCredentialThrown(err, credentialForms(credential?.value, basicUsernameOf(entry.auth)));
+                // [#27237] The upstream refused the credential (ruling on
+                // #27237, comment 6470087293): degrade the instance and mark a
+                // stored credential `rejected` — never a failed boot, never a
+                // retry loop against the same value.
+                if (isConnectorCredentialRejected(thrown)) {
+                    await this.holdConnectorForRejectedCredential(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        ref,
+                        live: existing,
+                        takeDown: false,
+                        credential,
+                        reason: (thrown as Error).message,
+                        cause: thrown,
+                    });
+                    continue;
+                }
+                if (isConnectorUpstreamUnavailable(thrown)) {
                     this.degradeConnectorInstance(engine, ctx, {
                         name,
                         entry,
@@ -2090,8 +2318,8 @@ export class AutomationServicePlugin implements Plugin {
                         // as structured `meta` instead of interpolating it into a
                         // message. Passing only the flattened string here is what
                         // forced the interpolation this issue removes.
-                        reason: (err as Error).message,
-                        cause: err,
+                        reason: (thrown as Error).message,
+                        cause: thrown,
                     });
                     continue;
                 }
@@ -2102,7 +2330,7 @@ export class AutomationServicePlugin implements Plugin {
                 // to the thrown message on the fatal one.
                 fail(
                     `[Automation] failed to materialize connector instance '${name}' via provider '${provider}' (ADR-0097).`,
-                    err,
+                    thrown,
                 );
                 continue;
             }
@@ -2118,8 +2346,19 @@ export class AutomationServicePlugin implements Plugin {
             // what the factory named its def, so discovery, dispatch, and the
             // conflict rule all agree with the metadata the author wrote.
             const def = { ...materialization.def, name };
-            engine.registerConnector(def, materialization.handlers, 'declarative');
-            this.materializedConnectors.set(name, { signature, provider, close: materialization.close });
+            const tracked = { signature, provider, close: materialization.close };
+            // [#27237] A credentialed instance's calls are watched for the
+            // upstream's 401 / 403 (rest and openapi answer them as a result),
+            // and — unless the provider proved the credential while
+            // materializing — for the first one it accepts.
+            const proven = materialization.credentialVerified === true;
+            const handlers = credential && ref !== undefined
+                ? this.watchForCredentialRejection(engine, ctx, {
+                    name, entry, provider, signature, ref, credential, tracked, proven,
+                }, materialization.handlers)
+                : materialization.handlers;
+            engine.registerConnector(def, handlers, 'declarative');
+            this.materializedConnectors.set(name, tracked);
             // Success clears any pending degraded retry — including replacing a
             // registered husk (registerConnector above overwrote it).
             const recovered = this.degradedInstances.delete(name);
@@ -2128,6 +2367,14 @@ export class AutomationServicePlugin implements Plugin {
                 `[Automation] ${recovered ? 'recovered' : existing ? 're-materialized' : 'materialized'} ` +
                     `connector instance '${name}' via provider '${provider}' (${def.actions?.length ?? 0} action(s))`,
             );
+            // [#27237] Only a provider that proved the credential while
+            // materializing (`credentialVerified` — mcp's handshake) says the
+            // upstream accepted it. rest and openapi first send it on a call,
+            // where a `2xx` only stamps a `set` row's time; neither that nor a
+            // materialization alone turns a `rejected` row back to `set`.
+            if (credential && ref !== undefined && proven) {
+                await this.recordCredentialProven(ctx, name, ref, credential);
+            }
         }
 
         if (changed > 0) {
@@ -2238,6 +2485,598 @@ export class AutomationServicePlugin implements Plugin {
         );
     }
 
+    /**
+     * [#27237] The `credentialRef` chain this plugin resolves through: env →
+     * the store → the host's resolver. Under a walled tenancy posture
+     * (`group` / `isolated`) the store is left out — S1 on #27230: a stored
+     * connector credential is environment-level, and an environment several
+     * organizations share is not supported by the store — so a reference
+     * resolves from the environment or the host's resolver only. Throws when
+     * the posture cannot be read.
+     */
+    private async connectorCredentialChain(ctx: PluginContext): Promise<ConnectorCredentialChain> {
+        const vault = this.options.credentialResolver;
+        const posture = await this.readTenancyPosture(ctx);
+        if (posture !== undefined && postureEnforcesWall(posture)) return { vault };
+        return { store: this.connectorCredentialStoreOrNone(), vault };
+    }
+
+    /** [#27237] The store, or one with no data engine — which stores nothing and reads every row as absent. */
+    private connectorCredentialStoreOrNone(): ConnectorCredentialStore {
+        return this.connectorCredentialStore ?? new ConnectorCredentialStore(() => undefined);
+    }
+
+    /**
+     * [#27237] The deployment's effective tenancy posture, from the `tenancy`
+     * service; `undefined` when none is registered (a single-organization
+     * composition). Only "not registered" is absorbed: a registered service
+     * that fails to resolve throws, since a posture that could not be read is
+     * not one that is absent — the rest plugin's `tenancyServiceProvider`
+     * (#13906) for the same reason.
+     */
+    private async readTenancyPosture(ctx: PluginContext): Promise<TenancyPosture | undefined> {
+        const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+        let tenancy: unknown;
+        if (kernel && typeof kernel.getServiceAsync === 'function') {
+            try {
+                tenancy = await kernel.getServiceAsync<unknown>('tenancy');
+            } catch (err) {
+                if (!isServiceNotRegisteredError(err)) throw err;
+            }
+        } else {
+            // A `KernelBase`-shaped host (`LiteKernel`) has no service
+            // factories, so "not registered" is the only fault its accessor reports.
+            try { tenancy = ctx.getService<unknown>('tenancy'); } catch { tenancy = undefined; }
+        }
+        return effectiveTenancyPosture(tenancy as Parameters<typeof effectiveTenancyPosture>[0]);
+    }
+
+    /**
+     * [#27237] The chain the credential door reads and writes through, with
+     * the posture it was composed under. A posture that cannot be read is the
+     * door's `503`, never a guess.
+     */
+    private async doorCredentialChain(
+        ctx: PluginContext,
+    ): Promise<
+        | { chain: ConnectorCredentialChain & { store: ConnectorCredentialStore }; walled?: undefined }
+        | { chain: ConnectorCredentialChain; walled: TenancyPosture }
+    > {
+        let posture: TenancyPosture | undefined;
+        try {
+            posture = await this.readTenancyPosture(ctx);
+        } catch {
+            throw new ConnectorCredentialUnavailableError(
+                'The tenancy posture could not be read, so whether connector credentials are stored in this environment '
+                    + 'cannot be told now. Nothing was read or changed.',
+            );
+        }
+        const vault = this.options.credentialResolver;
+        if (posture !== undefined && postureEnforcesWall(posture)) return { chain: { vault }, walled: posture };
+        return { chain: { store: this.connectorCredentialStoreOrNone(), vault } };
+    }
+
+    /** [#27237] The walled refusal of a credential write — S1 on #27230 — naming the posture. */
+    private walledCredentialRefusal(posture: TenancyPosture): Error {
+        return credentialDoorRefusal(
+            `Connector credentials are environment-level, and this environment runs the '${posture}' tenancy posture, `
+                + "where several organizations share it, so none is stored here. A declarative connector's credentialRef "
+                + "still resolves from a server environment variable of the same name, or the host's credential resolver. "
+                + 'Nothing was changed.',
+            'PERMISSION_DENIED',
+            403,
+        );
+    }
+
+    /**
+     * [#27237] Degrade one instance whose `credentialRef` has no value it can
+     * use: no arm of the chain answers (`missing`), or the stored row cannot
+     * be read now (`unavailable` — no crypto provider yet, an unreadable
+     * store). A functional degradation, so `warn`, once per cause: the husk is
+     * visible on `GET /connectors` and in the credential listing, and a
+     * `connector_action` dispatch fails naming the reference.
+     *
+     * A `missing` reference takes a live connector down with it — the value it
+     * was materialized with was cleared, and a connector still serving a
+     * cleared credential is the surprise this door must not have. An
+     * `unavailable` one leaves it serving: the value exists, and the
+     * deployment cannot read it this minute. Both retry on the #3017 backoff,
+     * which is also how a replica that did not take the write learns of it.
+     */
+    private async degradeConnectorForCredential(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            existing?: { close?: () => void | Promise<void> };
+            ref: string;
+            resolution: Exclude<ConnectorCredentialResolution, { kind: 'resolved' }>;
+        },
+    ): Promise<void> {
+        const reason = info.resolution.kind === 'missing'
+            ? missingCredentialReason(info.ref, this.options.credentialResolver !== undefined)
+            : info.resolution.reason;
+        let hasLive = info.existing !== undefined;
+        if (info.resolution.kind === 'missing' && info.existing) {
+            await this.dematerializeConnector(engine, info.name, info.existing, ctx, `its credential '${info.ref}' is no longer set`);
+            hasLive = false;
+        }
+        const prior = this.degradedInstances.get(info.name);
+        const repeat = prior !== undefined && prior.signature === info.signature && prior.reason === reason;
+        this.degradedInstances.set(info.name, {
+            attempts: repeat ? prior.attempts + 1 : 1,
+            signature: info.signature,
+            reason,
+        });
+        // A retry that finds the same cause: the husk and the record are there.
+        if (repeat) return;
+        if (!hasLive) {
+            try {
+                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), reason, 'declarative');
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
+                        `connector registry until a retry succeeds.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        ctx.logger.warn(
+            `[Automation] connector instance '${info.name}' (provider '${info.provider}') is degraded: ${reason}.` +
+                (hasLive ? ' The previously-materialized connector keeps serving.' : ''),
+        );
+    }
+
+    /**
+     * [#27237] Every `credentialRef` a declared provider-bound instance names,
+     * with the instances naming it — read from the declaration the reconcile
+     * reads ({@link readDeclaredConnectorItems}). An instance with
+     * `enabled: false` is listed too: an administrator may fill its credential
+     * before enabling it.
+     */
+    private async declaredCredentialRefs(ctx: PluginContext): Promise<Map<string, Array<{ name: string; packageId?: string }>>> {
+        const declared = (await this.readDeclaredConnectorItems(ctx, { post: true })) ?? [];
+        const out = new Map<string, Array<{ name: string; packageId?: string }>>();
+        for (const raw of declared) {
+            const entry = raw as DeclaredConnectorItem & { _packageId?: unknown };
+            if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
+            if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
+            const ref = credentialRefOf(entry.auth);
+            if (ref === undefined) continue;
+            const packageId = typeof entry._packageId === 'string' && entry._packageId.length > 0 ? entry._packageId : undefined;
+            const list = out.get(ref) ?? [];
+            if (!list.some((c) => c.name === entry.name)) list.push({ name: entry.name, ...(packageId ? { packageId } : {}) });
+            out.set(ref, list);
+        }
+        return out;
+    }
+
+    /** [#27237] The stored rows, or the door's 503 when the store cannot be read — never an empty listing that hides them. */
+    private async readCredentialRowsForDoor(chain: ConnectorCredentialChain): Promise<Map<string, ConnectorCredentialRecord>> {
+        if (!chain.store) return new Map();
+        try {
+            return await chain.store.list();
+        } catch {
+            throw new ConnectorCredentialUnavailableError(
+                'The connector credential store could not be read, so which references are set cannot be told now. Nothing was changed.',
+            );
+        }
+    }
+
+    /** [#27237] One listing entry — a reference, its source and status, and the instances naming it. Never a value. */
+    private async describeCredentialRef(
+        chain: ConnectorCredentialChain,
+        ref: string,
+        declaredBy: Array<{ name: string; packageId?: string }> | undefined,
+        rows: ReadonlyMap<string, ConnectorCredentialRecord>,
+    ): Promise<ConnectorCredentialRef> {
+        const probe = await probeConnectorCredential(chain, ref, rows);
+        const record = chain.store ? rows.get(ref) : undefined;
+        const descriptors = new Map((this.engine?.getConnectorDescriptors() ?? []).map((d) => [d.name, d]));
+        // A refused value the door does not hold has no row: its refusal is
+        // kept in memory, and reported while the reference still resolves from there.
+        const refusal = this.credentialRefusals.get(ref);
+        const refused = refusal !== undefined && refusal.source === probe.source ? refusal : undefined;
+        const statusReason = refused ? refused.reason : probe.source === 'object' ? record?.statusReason : undefined;
+        return {
+            ref,
+            status: refused ? 'rejected' : probe.status,
+            source: probe.source,
+            writable: probe.source !== 'env' && chain.store !== undefined,
+            declared: declaredBy !== undefined,
+            connectors: (declaredBy ?? []).map((c) => {
+                const d = descriptors.get(c.name);
+                return {
+                    name: c.name,
+                    ...(c.packageId ? { packageId: c.packageId } : {}),
+                    ...(d ? { state: d.state } : {}),
+                    ...(d?.degradedReason ? { degradedReason: d.degradedReason } : {}),
+                };
+            }),
+            ...(statusReason ? { statusReason } : {}),
+            ...(record?.updatedAt ? { updatedAt: record.updatedAt } : {}),
+            ...(record?.updatedBy ? { updatedBy: record.updatedBy } : {}),
+            ...(record?.lastVerifiedAt ? { lastVerifiedAt: record.lastVerifiedAt } : {}),
+        };
+    }
+
+    /**
+     * [#27237] `IAutomationService.listConnectorCredentialRefs` — every
+     * declared reference, then every stored row no installed package declares
+     * any more (so it can be cleared), ordered by reference.
+     */
+    private async listConnectorCredentialRefs(ctx: PluginContext): Promise<ConnectorCredentialRef[]> {
+        const { chain } = await this.doorCredentialChain(ctx);
+        const declared = await this.declaredCredentialRefs(ctx);
+        const rows = await this.readCredentialRowsForDoor(chain);
+        const refs = new Set<string>([...declared.keys(), ...rows.keys()]);
+        const out: ConnectorCredentialRef[] = [];
+        for (const ref of [...refs].sort()) {
+            out.push(await this.describeCredentialRef(chain, ref, declared.get(ref), rows));
+        }
+        return out;
+    }
+
+    /** [#27237] The reference a door call names — present, and within the store's bound — or its `400`. */
+    private credentialRefOfRequest(ref: unknown): string {
+        if (typeof ref !== 'string' || ref.length === 0) {
+            throw credentialDoorRefusal('A connector credential reference is required.', 'VALIDATION_ERROR', 400);
+        }
+        if (ref.length > CONNECTOR_CREDENTIAL_REF_MAX_LENGTH) {
+            throw credentialDoorRefusal(
+                `A connector credential reference is at most ${CONNECTOR_CREDENTIAL_REF_MAX_LENGTH} characters; this one has ${ref.length}.`,
+                'VALIDATION_ERROR',
+                400,
+            );
+        }
+        return ref;
+    }
+
+    /**
+     * [#27237] `IAutomationService.setConnectorCredential` — store one value
+     * for a declared reference, then reconcile, so every instance naming it
+     * re-materializes without a restart. Answers the reference's entry after
+     * that reconcile. Refuses, before anything is written: a walled tenancy
+     * posture (403, S1 on #27230), an empty or oversized value or one spelled
+     * as a secret handle (400), an undeclared reference (404), one an
+     * environment variable supplies (409); the store refuses without a crypto
+     * provider (503).
+     *
+     * The write and its reconcile run on the reconcile queue, so two writes
+     * in one process never interleave: the instance ends on the value the
+     * store ends on. Two replicas inserting the first row for one reference
+     * at once meet the unique index, and the second answers `409`.
+     */
+    private async setConnectorCredential(ctx: PluginContext, request: ConnectorCredentialSetRequest): Promise<ConnectorCredentialRef> {
+        const ref = this.credentialRefOfRequest(request?.ref);
+        const door = await this.doorCredentialChain(ctx);
+        if (door.walled !== undefined) throw this.walledCredentialRefusal(door.walled);
+        const { chain } = door;
+        const store = chain.store;
+        const value: unknown = request?.value;
+        if (typeof value !== 'string' || value.length === 0) {
+            throw credentialDoorRefusal(`Credential '${ref}' needs a value: a non-empty string.`, 'VALIDATION_ERROR', 400);
+        }
+        if (value.length > CONNECTOR_CREDENTIAL_VALUE_MAX_LENGTH) {
+            throw credentialDoorRefusal(
+                `Credential '${ref}' is at most ${CONNECTOR_CREDENTIAL_VALUE_MAX_LENGTH} characters long.`,
+                'VALIDATION_ERROR',
+                400,
+            );
+        }
+        // The data engine stores a `secret` value spelled as a handle as
+        // given, and dereferences it as a secret it already holds — which
+        // would point this connector at another row's secret.
+        if (value.startsWith(SECRET_HANDLE_PREFIX)) {
+            throw credentialDoorRefusal(
+                `Credential '${ref}' cannot start with '${SECRET_HANDLE_PREFIX}': the credential store reads a value spelled that way `
+                    + 'as a handle to a secret it already holds, not as a credential. Nothing was written.',
+                'VALIDATION_ERROR',
+                400,
+            );
+        }
+        const declared = await this.declaredCredentialRefs(ctx);
+        const declaredBy = declared.get(ref);
+        if (!declaredBy) {
+            throw credentialDoorRefusal(
+                `No installed connector declares credential '${ref}'. This door stores only a reference a declarative ` +
+                    'connector instance names in its auth.credentialRef; the listing at ' +
+                    'GET /api/v1/automation/connectors/credential-refs names them all.',
+                'RESOURCE_NOT_FOUND',
+                404,
+            );
+        }
+        if (isSuppliedByEnv(chain, ref)) {
+            throw credentialDoorRefusal(
+                `Credential '${ref}' is supplied by the environment variable of the same name, which wins over a stored ` +
+                    'value, so a value stored here would never be read. Change it where the environment is configured, ' +
+                    'or unset that variable to manage it here.',
+                'RESOURCE_CONFLICT',
+                409,
+            );
+        }
+        const userId = request.context?.userId;
+        await this.onReconcileQueue(async () => {
+            const { revision } = await store.set({
+                ref,
+                value,
+                userId,
+                connectorNames: declaredBy.map((c) => c.name),
+                packageIds: [...new Set(declaredBy.map((c) => c.packageId).filter((p): p is string => p !== undefined))],
+            });
+            ctx.logger.info(
+                `[Automation] connector credential '${ref}' set (revision ${revision})${userId ? ` by user '${userId}'` : ''}; ` +
+                    `reconciling ${declaredBy.map((c) => `'${c.name}'`).join(', ')}.`,
+            );
+            await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+        });
+        return this.describeCredentialRef(chain, ref, declaredBy, await this.readCredentialRowsForDoor(chain));
+    }
+
+    /**
+     * [#27237] `IAutomationService.clearConnectorCredential` — remove the
+     * stored value for one reference, then reconcile: every instance naming it
+     * is torn down and registered degraded, naming the reference. `404` when
+     * nothing is stored for it; `403` under a walled tenancy posture. Runs on
+     * the reconcile queue, as a write does.
+     */
+    private async clearConnectorCredential(ctx: PluginContext, request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef> {
+        const ref = this.credentialRefOfRequest(request?.ref);
+        const door = await this.doorCredentialChain(ctx);
+        if (door.walled !== undefined) throw this.walledCredentialRefusal(door.walled);
+        const { chain } = door;
+        const store = chain.store;
+        const userId = request?.context?.userId;
+        await this.onReconcileQueue(async () => {
+            let cleared: boolean;
+            try {
+                cleared = await store.clear(ref, userId);
+            } catch {
+                throw new ConnectorCredentialUnavailableError(
+                    `Credential '${ref}' could not be cleared: the connector credential store could not be read or written. Nothing was changed.`,
+                );
+            }
+            if (!cleared) {
+                throw credentialDoorRefusal(`Nothing is stored for credential '${ref}'.`, 'RESOURCE_NOT_FOUND', 404);
+            }
+            ctx.logger.info(`[Automation] connector credential '${ref}' cleared${userId ? ` by user '${userId}'` : ''}.`);
+            await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+        });
+        const declared = await this.declaredCredentialRefs(ctx);
+        return this.describeCredentialRef(chain, ref, declared.get(ref), await this.readCredentialRowsForDoor(chain));
+    }
+
+    /**
+     * [#27237] Degrade one instance whose upstream refused its credential —
+     * at materialization (`ConnectorCredentialRejectedError`, the mcp
+     * provider) or on a call (a 401 / 403 result, rest and openapi). The
+     * reason quotes the upstream, already scrubbed of the value by the caller.
+     *
+     * A value stored through the door is marked `rejected` on its row and
+     * the instance is held: no timer retry, since its signature carries the
+     * row's revision and the same value would be refused again; setting it
+     * again, a change of the declaration, or a restart re-attempts it. So is
+     * an instance with no `credentialRef` (its credential is written into the
+     * declaration, e.g. an MCP transport header): only a change of the
+     * declaration changes what it sends. A value the door does not hold — an
+     * environment variable, the host's resolver — can change where this
+     * process cannot see it (a rotation, a rate limit that lifts), so its
+     * instance retries on the #3017 backoff, and the listing reports the
+     * refusal from {@link credentialRefusals}.
+     *
+     * A refusal at materialization leaves a live connector serving, as every
+     * failed re-materialization does; a refusal on a call takes the connector
+     * that made it down (`takeDown`).
+     */
+    private async holdConnectorForRejectedCredential(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            ref?: string;
+            live?: { close?: () => void | Promise<void> };
+            takeDown: boolean;
+            credential?: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>;
+            reason: string;
+            cause?: unknown;
+        },
+    ): Promise<void> {
+        let hasLive = info.live !== undefined;
+        if (info.takeDown && info.live) {
+            await this.dematerializeConnector(engine, info.name, info.live, ctx, 'its upstream refused its credential');
+            hasLive = false;
+        }
+        const stored = info.credential?.source === 'object' ? info.credential.record : undefined;
+        const held = info.credential === undefined || stored !== undefined;
+        let attempts = 1;
+        if (held) {
+            this.degradedInstances.set(info.name, { attempts, signature: info.signature, reason: info.reason, held: true });
+        } else {
+            const prior = this.credentialRefusalAttempts.get(info.name);
+            attempts = prior && prior.signature === info.signature ? prior.attempts + 1 : 1;
+            this.credentialRefusalAttempts.set(info.name, { signature: info.signature, attempts });
+            this.degradedInstances.set(info.name, { attempts, signature: info.signature, reason: info.reason });
+            const source = info.credential?.source;
+            if (info.ref !== undefined && (source === 'env' || source === 'vault')) {
+                this.credentialRefusals.set(info.ref, { source, reason: info.reason });
+            }
+        }
+        if (!hasLive) {
+            try {
+                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), info.reason, 'declarative', info.cause);
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
+                        `connector registry until ${held ? 'its credential changes' : 'a retry succeeds'}.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        if (stored) {
+            try {
+                await this.connectorCredentialStoreOrNone().markRejected(stored, info.reason);
+            } catch (markErr) {
+                ctx.logger.warn(
+                    `[Automation] connector instance '${info.name}': its credential row could not be marked rejected.`,
+                    describeThrownForLog(markErr),
+                );
+            }
+        }
+        // #5575 — the reason quotes the upstream, foreign text: it rides `meta`.
+        ctx.logger.warn(
+            `[Automation] connector instance '${info.name}' (provider '${info.provider}') is degraded: its upstream refused ` +
+                `its credential. ` +
+                (hasLive
+                    ? 'The previously-materialized connector keeps serving' + (held ? '.' : `; retrying with backoff, attempt ${attempts}.`)
+                    : held
+                        ? 'Not retried until its credential is set again, its declaration changes, or the server restarts.'
+                        : `Retrying with backoff, attempt ${attempts}.`),
+            { reason: info.reason },
+        );
+    }
+
+    /**
+     * [#27237] A provider proved an instance's credential while materializing
+     * (`credentialVerified`). A stored value's row records when, and a
+     * `rejected` row of that same revision returns to `set`; a refusal of a
+     * value the door does not hold is forgotten, and so is the instance's
+     * backoff count.
+     */
+    private async recordCredentialProven(
+        ctx: PluginContext,
+        name: string,
+        ref: string,
+        credential: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>,
+    ): Promise<void> {
+        this.credentialRefusalAttempts.delete(name);
+        if (credential.source !== 'object') {
+            if (this.credentialRefusals.get(ref)?.source === credential.source) this.credentialRefusals.delete(ref);
+            return;
+        }
+        if (!credential.record) return;
+        try {
+            await this.connectorCredentialStoreOrNone().markVerified(credential.record);
+        } catch (markErr) {
+            ctx.logger.warn(
+                `[Automation] connector instance '${name}': its provider proved its credential, but the credential row could not record it.`,
+                describeThrownForLog(markErr),
+            );
+        }
+    }
+
+    /**
+     * [#27237] A call with a stored credential was answered `2xx`: the row's
+     * last-verified time moves if it is still `set`. Nothing else — a `2xx`
+     * from an endpoint that never checked the credential is no proof, so a
+     * `rejected` row, a refusal of a value the door does not hold and the
+     * backoff count all stay as they are.
+     */
+    private async recordCredentialCallAccepted(
+        ctx: PluginContext,
+        name: string,
+        credential: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>,
+    ): Promise<void> {
+        if (credential.source !== 'object' || !credential.record) return;
+        try {
+            await this.connectorCredentialStoreOrNone().markCallAccepted(credential.record);
+        } catch (markErr) {
+            ctx.logger.warn(
+                `[Automation] connector instance '${name}': a call with its credential was answered 2xx, but the credential row could not record it.`,
+                describeThrownForLog(markErr),
+            );
+        }
+    }
+
+    /**
+     * [#27237] Wrap a credentialed instance's handlers so the first call its
+     * upstream answers 401 / 403 degrades the instance (ruling on #27237,
+     * comment 6470087293), and — unless the provider already `proven` the
+     * credential at materialization — the first call it answers `2xx` stamps a
+     * stored credential's last-verified time while its row is `set` (never a
+     * proof that clears `rejected`). A call's own result is returned unchanged.
+     * Both run on the reconcile queue, and only against the materialization
+     * these handlers belong to, so neither races a reconcile or a credential
+     * write that already replaced it. A refusal is awaited (the caller sees
+     * the instance degraded once its call returns); an acceptance is not,
+     * so a call never waits on a reconcile.
+     */
+    private watchForCredentialRejection(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            ref: string;
+            credential: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>;
+            tracked: { signature: string; provider: string; close?: () => void | Promise<void> };
+            proven: boolean;
+        },
+        handlers: Record<string, ConnectorMaterializationHandler>,
+    ): Record<string, ConnectorMaterializationHandler> {
+        let refused = false;
+        let accepted = info.proven;
+        const current = () => !this.destroyed && this.materializedConnectors.get(info.name) === info.tracked;
+        const watched: Record<string, ConnectorMaterializationHandler> = {};
+        for (const [key, handler] of Object.entries(handlers)) {
+            watched[key] = async (input, callCtx) => {
+                const result = await handler(input, callCtx);
+                if (!accepted && !refused && isAcceptedCallResult(result)) {
+                    accepted = true;
+                    void this.onReconcileQueue(async () => {
+                        if (current()) await this.recordCredentialCallAccepted(ctx, info.name, info.credential);
+                    });
+                    return result;
+                }
+                const status = credentialRejectionStatusOf(result);
+                if (status === undefined || refused) return result;
+                refused = true;
+                const reason = credentialRejectedOnCallReason(
+                    info.name,
+                    info.ref,
+                    status,
+                    upstreamRefusalMessage(
+                        (result as { body?: unknown }).body,
+                        credentialForms(info.credential.value, basicUsernameOf(info.entry.auth)),
+                    ),
+                    info.credential.source === 'object',
+                );
+                try {
+                    await this.onReconcileQueue(async () => {
+                        if (!current()) return;
+                        await this.holdConnectorForRejectedCredential(engine, ctx, {
+                            name: info.name,
+                            entry: info.entry,
+                            provider: info.provider,
+                            signature: info.signature,
+                            ref: info.ref,
+                            live: info.tracked,
+                            takeDown: true,
+                            credential: info.credential,
+                            reason,
+                        });
+                        // Retry on the backoff when the refused value is not a stored one.
+                        this.scheduleDeclarativeRetry(ctx);
+                    });
+                } catch (err) {
+                    ctx.logger.warn(
+                        `[Automation] connector instance '${info.name}' was refused its credential on a call, and could not be degraded.`,
+                        describeThrownForLog(err),
+                    );
+                }
+                return result;
+            };
+        }
+        return watched;
+    }
+
     /** The action-less def a degraded instance registers (#3017). */
     private buildDegradedHuskDef(name: string, entry: DeclaredConnectorItem): Connector {
         return {
@@ -2277,10 +3116,11 @@ export class AutomationServicePlugin implements Plugin {
      */
     private scheduleDeclarativeRetry(ctx: PluginContext): void {
         this.clearDeclarativeRetryTimer();
-        if (this.destroyed || this.degradedInstances.size === 0) return;
-        const delay = Math.min(
-            ...[...this.degradedInstances.values()].map((d) => declarativeRetryDelayMs(d.attempts)),
-        );
+        // [#27237] A held instance (its credential was refused) is not retried
+        // on a timer: the same value would be refused again.
+        const retrying = [...this.degradedInstances.values()].filter((d) => !d.held);
+        if (this.destroyed || retrying.length === 0) return;
+        const delay = Math.min(...retrying.map((d) => declarativeRetryDelayMs(d.attempts)));
         const timer = setTimeout(() => {
             this.declarativeRetryTimer = undefined;
             // Always soft: a background retry must never crash a running server.
@@ -2289,7 +3129,7 @@ export class AutomationServicePlugin implements Plugin {
         (timer as unknown as { unref?: () => void }).unref?.();
         this.declarativeRetryTimer = timer;
         ctx.logger.info(
-            `[Automation] ${this.degradedInstances.size} degraded connector instance(s); next retry in ${delay}ms`,
+            `[Automation] ${retrying.length} degraded connector instance(s); next retry in ${delay}ms`,
         );
     }
 
@@ -2299,54 +3139,14 @@ export class AutomationServicePlugin implements Plugin {
         name: string,
         tracked: { close?: () => void | Promise<void> },
         ctx: PluginContext,
+        why = 'no longer declared',
     ): Promise<void> {
         try { engine.unregisterConnector(name); } catch { /* ignore */ }
         if (tracked.close) {
             try { await tracked.close(); } catch { /* best-effort */ }
         }
         this.materializedConnectors.delete(name);
-        ctx.logger.info(`[Automation] unregistered declarative connector instance '${name}' (no longer declared)`);
-    }
-
-    /**
-     * Resolve a declarative instance's `auth` into the static
-     * {@link ResolvedConnectorAuth} a provider factory applies — dereferencing
-     * `credentialRef` through the resolver. An `undefined`/empty resolution is a
-     * hard boot error (ADR-0097 §3): an app must not run with a connector whose
-     * credentials never loaded.
-     */
-    private async resolveInstanceAuth(
-        auth: ConnectorInstanceAuth | undefined,
-        resolver: CredentialResolver,
-        connectorName: string,
-        provider: string,
-    ): Promise<ResolvedConnectorAuth | undefined> {
-        if (!auth) return undefined;
-        if (auth.type === 'none') return { type: 'none' };
-
-        const secret = await resolver(auth.credentialRef);
-        if (secret === undefined || secret === null || secret === '') {
-            throw new Error(
-                `[Automation] connector instance '${connectorName}' (provider '${provider}'): credentialRef ` +
-                    `'${auth.credentialRef}' did not resolve to a value. The open tier resolves credentialRef from ` +
-                    `environment variables — set the '${auth.credentialRef}' env var, or wire ` +
-                    `AutomationServicePluginOptions.credentialResolver to a secrets service (ADR-0097 §3).`,
-            );
-        }
-
-        switch (auth.type) {
-            case 'bearer':
-                return { type: 'bearer', token: secret };
-            case 'api-key':
-                return {
-                    type: 'api-key',
-                    key: secret,
-                    headerName: auth.headerName ?? 'X-API-Key',
-                    paramName: auth.paramName,
-                };
-            case 'basic':
-                return { type: 'basic', username: auth.username, password: secret };
-        }
+        ctx.logger.info(`[Automation] unregistered declarative connector instance '${name}' (${why})`);
     }
 
     /**

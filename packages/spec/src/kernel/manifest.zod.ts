@@ -197,25 +197,28 @@ export type PluginEngines = z.input<typeof PluginEnginesSchema>;
  * forced to manual review. That gate is a real consumer of this key, which is
  * why the tier is not a candidate for retirement.
  *
- * NOT ENFORCED at load. Load-side enforcement is **not implemented** — nothing
- * dispatches on the tier (its only reads are two CLI progress lines that echo
- * the value), so a locally installed plugin runs in-process with a full
- * PluginContext whatever tier it declares. `sandbox` and `worker` therefore
- * name the isolation the publish gate assumes, not isolation the loader
- * applies; a local install is not confined by this field. The QuickJS runner
- * under `packages/runtime/src/sandbox/` is the hook / action SCRIPT-BODY
- * sandbox and is never reached from a plugin's declared tier.
+ * ENFORCED at load for a plugin `os plugin install` installed (ADR-0025 §3.5
+ * M1): the boot-time loader (`packages/runtime/src/installed-plugin-loader.ts`,
+ * `dispatchPluginRuntime`) dispatches on the tier before it imports anything.
+ * `node` is imported in process with a full PluginContext — author code in
+ * the host process, T0, NOT isolation. `sandbox` and `worker` are REFUSED by
+ * name until M3 routes them, with no in-process fallback, and an installed
+ * plugin that declares no tier is refused too (default-deny). So a declared
+ * `sandbox` is never run unconfined: today it is not run at all. The QuickJS
+ * runner under `packages/runtime/src/sandbox/` is the hook / action
+ * SCRIPT-BODY sandbox and is not reached from a plugin's declared tier yet.
  *
- * Enforcing the tier at load is tracked as its own decision (v18 direction);
- * do not read this field as an isolation guarantee until it lands.
+ * A plugin a stack's own `plugins` array names is the app's code and is not
+ * dispatched on this field.
  */
 export const PluginRuntimeSchema = z
   .enum(['node', 'sandbox', 'worker'])
   .describe(
     'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
     + 'marketplace publish gate (an unverified publisher requesting `node` is rejected with '
-    + 'HTTP 422 and forced to manual review); load-side enforcement is NOT implemented, so a '
-    + 'locally installed plugin is not isolated by the tier it declares',
+    + 'HTTP 422 and forced to manual review) and at boot for a plugin `os plugin install` '
+    + 'installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are '
+    + 'refused until they are routed (ADR-0025 M3), never run in process instead',
   );
 
 export type PluginRuntime = z.input<typeof PluginRuntimeSchema>;
@@ -1014,20 +1017,25 @@ export const ManifestSchema = strictObject({
 
   /**
    * Trust / isolation tier the plugin DECLARES (ADR-0025 §3.6).
-   * Unset implies a pure-metadata package (no executable code).
+   * Unset implies a pure-metadata package (no executable code). An artifact
+   * `os plugin build` produces carries code, so on one an unset tier is an
+   * omission, not that declaration; the boot-time loader refuses an installed
+   * plugin with no tier either way (`runtime_undeclared`, default-deny), and
+   * one with no entry module too.
    *
-   * ⚠️ Enforced at the cloud marketplace **publish gate** only — an unverified
+   * ⚠️ Enforced at the cloud marketplace **publish gate** — an unverified
    * publisher requesting the `node` tier is hard-rejected (HTTP 422) and forced
-   * to manual review. **Load-side enforcement is not implemented**: a locally
-   * installed plugin is not isolated by the tier it declares. See
+   * to manual review — and **at boot for a plugin `os plugin install`
+   * installed**: only `node` is loaded (in process, not isolated); `sandbox`
+   * and `worker` are refused until ADR-0025 M3 routes them. See
    * {@link PluginRuntimeSchema} for the full split.
    */
   runtime: PluginRuntimeSchema.optional()
     .describe(
       'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
       + 'marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual '
-      + 'review); load-side enforcement is NOT implemented, so a locally installed plugin is '
-      + 'not isolated by the tier it declares',
+      + 'review) and at boot for a plugin `os plugin install` installed: only `node` is loaded '
+      + '(in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them',
     ),
 
   /**

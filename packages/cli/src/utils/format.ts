@@ -791,6 +791,12 @@ export interface ServerReadyOptions {
   isDev: boolean;
   pluginCount: number;
   pluginNames?: string[];
+  /**
+   * [ADR-0025 §3.5 M1] Installed plugins (`os plugin install`) the boot-time
+   * loader refused, each already printed by name as a `✗` line. `0` or absent:
+   * no row.
+   */
+  installedPluginsRefused?: number;
   uiEnabled?: boolean;
   consolePath?: string;
   /** Resolved storage driver display name (e.g. "MongoDBDriver", "SqlDriver(pg)"). */
@@ -1279,6 +1285,10 @@ export function printServerReady(opts: ServerReadyOptions) {
   console.error(chalk.dim(`  Plugins: ${opts.pluginCount} loaded`));
   if (opts.pluginNames && opts.pluginNames.length > 0) {
     console.error(chalk.dim(`           ${opts.pluginNames.join(', ')}`));
+  }
+  if (opts.installedPluginsRefused && opts.installedPluginsRefused > 0) {
+    const n = opts.installedPluginsRefused;
+    console.error(chalk.yellow(`  ⚠ ${n} installed plugin${n === 1 ? ' was' : 's were'} refused and not loaded (the ✗ lines above say why)`));
   }
   // [#22073] Print-once: every banner section that RESTATES a boot-phase logger
   // record hands back the record it restated, at the moment it prints its own

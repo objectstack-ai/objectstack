@@ -151,9 +151,11 @@ A code-bearing plugin — a directory carrying an `objectstack.plugin.json` mani
 | `os plugin publish [artifact]` | Publish a signed `.osplugin` to ObjectOS Cloud |
 | `os plugin keygen --out <path>` | Generate a publisher Ed25519 key pair: `<path>.key.pem` (private, stays with you) and `<path>.pub.pem` |
 | `os plugin trust add <pub.pem> --key-id <id>` | Trust a publisher public key in this environment's database (`sys_trusted_key`); `trust list` shows the keys, `trust revoke <id>` revokes one |
-| `os plugin install <artifact>` | Verify a local `.osplugin`'s detached signature against the trusted keys and its per-file `integrity`, then unpack it to `<OS_HOME>/plugins/<env>/<id>/<version>/`; `--trust-unsigned` is the explicit dev override for an unsigned artifact |
+| `os plugin install <artifact>` | Verify a local `.osplugin`'s detached signature against the trusted keys (before anything is unpacked) and its per-file `integrity`, then unpack it to `<OS_HOME>/plugins/<env>/<id>/<version>/`; `--trust-unsigned` is the explicit dev override for an unsigned artifact |
+| `os plugin disable <id>` / `os plugin enable <id>` | Keep an installed plugin from loading at the next boot, or load it again |
+| `os plugin uninstall <id>` | Mark an installed plugin for removal: the next boot loads nothing of it and removes its directory |
 
-`os plugin install` refuses, by name, an unknown or revoked key, a signature over other bytes, a missing signature and an integrity mismatch. `os serve` does not load installed plugins yet: loading them at boot is the next step of ADR-0025's M1 install loop. `os plugin` (singular) is unrelated to `os plugins` (plural), oclif's plugin manager, which this package does not ship — see [`os plugins` and `os help`](#os-plugins-and-os-help-not-commands).
+`os plugin install` refuses, by name, an unknown or revoked key, a signature over other bytes, a missing signature and an integrity mismatch. The next `os serve` (or `os dev` / `os start`) re-verifies every installation before importing any of its code — the kept artifact's sha256, its signature against the trusted keys as they are then (a key revoked since install refuses it), and the unpacked tree — and loads it by its declared `runtime` tier: `node` in process (author code in the host process, not isolated); `sandbox` and `worker` are refused by name until ADR-0025 M3 routes them, and a plugin that declares no tier is refused. A refused plugin does not stop the boot; each refusal is one `✗` line naming why. `os plugin` (singular) is unrelated to `os plugins` (plural), oclif's plugin manager, which this package does not ship — see [`os plugins` and `os help`](#os-plugins-and-os-help-not-commands).
 
 ### Quality
 
