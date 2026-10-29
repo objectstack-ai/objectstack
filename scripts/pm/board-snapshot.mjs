@@ -1154,9 +1154,11 @@ export function readGoneLedger(outDir) {
  * Read from the FILES, never accumulated across runs: an accumulated counter
  * drifts from what is actually stored, and the count check would then be
  * comparing the board with a number this tool made up. `openNumbers`, when
- * given a Set, is filled with the open records' numbers for the reconcile.
+ * given a Set, is filled with the open records' numbers (issues and pull
+ * requests) for the reconcile; `openIssueNumbers` with the open ISSUES only,
+ * which is the set `issues_open` counts and the gone ledger subtracts from.
  */
-export function censusArchive(outDir, { openNumbers = null } = {}) {
+export function censusArchive(outDir, { openNumbers = null, openIssueNumbers = null } = {}) {
   const counts = { issues_open: 0, issues_closed: 0, issues_transferred: 0, pulls_open: 0, pulls_closed: 0, records: 0 };
   let names = [];
   try {
@@ -1178,6 +1180,7 @@ export function censusArchive(outDir, { openNumbers = null } = {}) {
       continue;
     }
     if (open) openNumbers?.add(record.number);
+    if (open && !pull) openIssueNumbers?.add(record.number);
     if (pull && open) counts.pulls_open += 1;
     else if (pull) counts.pulls_closed += 1;
     else if (open) counts.issues_open += 1;
@@ -1740,7 +1743,7 @@ async function snapshot(repo, options) {
   const gone = readGoneLedger(outDir);
   const takeCensus = () => {
     const open = new Set();
-    const census = censusArchive(outDir, { openNumbers: open });
+    const census = censusArchive(outDir, { openIssueNumbers: open });
     return {
       counts: census,
       check: countCheck({
@@ -1748,8 +1751,9 @@ async function snapshot(repo, options) {
         openPullRequests: board.open_pull_requests,
         archivedOpenIssues: census.issues_open,
         // Only a ledgered number the census COUNTED is subtracted: one archived
-        // closed, or recorded as transferred, is not in `issues_open`, and
-        // subtracting it anyway would absorb a real surplus of the same size.
+        // closed, recorded as transferred, or a pull request is not in
+        // `issues_open`, and subtracting it anyway would absorb a real surplus
+        // of the same size.
         gone: gone.filter((n) => open.has(n)),
         pending: countCheckPendingReason({
           phase,
@@ -1931,7 +1935,7 @@ export function renderRun(result, options) {
     `  since        ${m.since ?? '(from the beginning)'} — ${m.since_reason}`,
     `  read         ${m.run.numbers_read} number(s) in ${m.requests} request(s); walk ${m.run.walk_complete ? 'complete' : 'INCOMPLETE'}${m.run.blank_pages_reasked ? `; ${m.run.blank_pages_reasked} blank page(s) asked again` : ''}`,
     `  written      ${result.written.length} file(s)${result.manifestMoved ? ' + manifest' : ''}`,
-    `  archive      ${m.counts.records} record(s): ${m.counts.issues_open} open / ${m.counts.issues_closed} closed issue(s)${m.counts.issues_transferred ? ` / ${m.counts.issues_transferred} transferred` : ''}, ${m.counts.pulls_open} open / ${m.counts.pulls_closed} closed pull request(s)`,
+    `  archive      ${m.counts.records} record(s): ${m.counts.issues_open} open / ${m.counts.issues_closed} closed issue(s)${m.counts.issues_transferred ? ` / ${m.counts.issues_transferred} transferred` : ''}, ${m.counts.pulls_open} open / ${m.counts.pulls_closed} closed pull request(s)${m.run.reconcile?.cut_short ? ' — on disk AFTER the cut-short reconcile\'s repairs; the count check below is the census from before them' : ''}`,
   ];
 
   if (!result.written.length && !result.manifestMoved) {
@@ -3238,6 +3242,7 @@ export async function selfTest() {
     t('…and what it DID read is kept: the repaired close is on disk and named, the summary says CUT SHORT, not "nothing was compared"',
       readArchivedCard(cutDir, 501).issue.state === 'closed' && stableJson(cut.reconcile.reread) === stableJson([{ number: 501, state: 'closed' }])
       && /CUT SHORT — /.test(cutText.text) && /archived again: #501 closed/.test(cutText.text) && !/nothing was compared/.test(cutText.text)
+      && /on disk AFTER the cut-short reconcile's repairs; the count check below is the census from before them/.test(cutText.text)
       && !cutBoard.calls.includes('/repos/o/r/issues/502'));
     t('…and the reserve held: the reconcile stopped with the board read still affordable', cut.manifest.requests <= 5 + BOARD_READ_RESERVE);
 
@@ -3245,11 +3250,11 @@ export async function selfTest() {
     // as transferred is not subtracted again, so it cannot absorb a real
     // surplus — here an issue whose own read fails (502), which is that
     // number's verdict and never the run's.
-    seedArchive(ledgerDir, [card(602), card(603)], [601]);
+    seedArchive(ledgerDir, [card(602), card(603), card(605, { pull_request: { url: 'https://api.github.com/repos/o/r/pulls/605' } })], [601, 605]);
     writeIfChanged(issuePath(ledgerDir, 601), stableJson({ ...issueRecord(card(601)), transferred_to: 'o/cloud#9' }));
     const ledgerBoard = fakeBoard({ rows: [card(603)], failing: new Set([602]) });
     const ledgered = await driveSnapshot({ dir: ledgerDir, board: ledgerBoard });
-    t('a gone-ledger number already recorded as transferred is NOT subtracted twice — the surplus it would have absorbed stays red',
+    t('a gone-ledger number already recorded as transferred, or one that is an open PULL REQUEST, is NOT subtracted from the issue count — the surplus it would have absorbed stays red',
       ledgered.manifest.count_check.verdict === 'surplus' && ledgered.manifest.count_check.surplus === 1 && ledgered.manifest.count_check.gone_ledger === 0
       && renderRun(ledgered, { out: ledgerDir, dryRun: false }).exitCode === EXIT_COUNT_MISMATCH);
     t('…and a 5xx on one number is that number\'s verdict: named unreadable, the record untouched, the run still renders',
