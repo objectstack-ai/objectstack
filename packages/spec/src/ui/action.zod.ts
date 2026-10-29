@@ -1597,11 +1597,15 @@ const actionObject = () => strictObject({
    * `POST /api/v1/actions/<object>/<action>` and the MCP `run_action` bridge,
    * which dispatch `type: 'script'`, `type: 'flow'`, the declarative
    * `operation: 'update'` write and — per ADR-0066 D4 as amended 2026-10-29 —
-   * a `type: 'api'` action whose `target` is a same-origin platform path. For
-   * that api action the door runs this gate (beside the anonymous baseline and
-   * the ADR-0126 activation consult) and then forwards the call in-process to
-   * the declared `target` as the caller. The target endpoint keeps re-checking
-   * its own authorization: defence in depth, not a replacement. A `type: 'api'`
+   * a `type: 'api'` action whose `target` is a same-origin platform path (the
+   * declared `target`, before interpolation, starts with exactly one `/` and
+   * goes on past it — not `//`, nor `/` and a backslash). For that api action
+   * the door runs this gate (beside the anonymous baseline and the ADR-0126
+   * activation consult) and then forwards the call in-process to the declared
+   * `target` as the caller. The door gates the calls it dispatches, and only
+   * those: the `target` endpoint stays directly reachable, so it MUST still
+   * enforce this capability itself, the door's gate being the added check
+   * (defence in depth, not a replacement). A `type: 'api'`
    * action whose `target` is NOT a same-origin platform path stays browser-only
    * and ungoverned — the door does not dispatch it, MCP does not list it, the
    * activation switch refuses to flip it, and nothing checks this declaration
@@ -1612,7 +1616,7 @@ const actionObject = () => strictObject({
    * (`isHeadlessInvokableAction` admits `script`, `flow` and the declarative
    * update only) and the console fetches `target` directly.
    */
-  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action door (`POST /actions/:object/:action` and MCP `run_action`) for script, flow, the declarative update and — per ADR-0066 D4 as amended 2026-10-29 — a `type: api` action whose `target` is a same-origin platform path, and mirrored as a UI hide. The same-origin endpoint keeps re-checking its own authorization (defence in depth, not a replacement); a `type: api` action with an off-origin `target` is browser-only and not gated server-side.'),
+  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on every call the platform action door (`POST /actions/:object/:action` and MCP `run_action`) dispatches, and mirrored as a UI hide. ADR-0066 D4, as amended 2026-10-29, brings a `type: api` action whose declared `target` is a same-origin platform path (exactly one leading `/`, followed by neither `/` nor a backslash) under that door; its `target` endpoint stays directly reachable, so it MUST still enforce this capability itself, the door\'s gate being the added check. A `type: api` action with an off-origin `target` is browser-only and not gated server-side.'),
 
   /** Keyboard Shortcut */
 

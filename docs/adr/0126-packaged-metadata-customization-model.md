@@ -436,7 +436,9 @@ callers first, or don't), and preserves "packaged code calls what it names".
    same-origin api action is dispatched through that same door, so the one consult at action
    dispatch is its consult (§4: each consumer documents its consult point), while an api action
    whose `target` is off-origin stays browser-only and the activation write door refuses to flip
-   it — the server half lands under #27506.
+   it. The switch stops the action's dispatch, not a direct call to its `target` endpoint: the
+   door's half lands under #27506, and the console's click meets the consult only from step 3
+   (#27611), which sends it to the door instead of fetching `target`.
 3. **Permission sets converge in a later card — and the amendment made it simpler.** The landed
    #11513 machinery (lock, clone action, row-state `active`, drift detection of the enforced
    copy) **stays valid meanwhile** — it is the regime's first instance, not a violation of it,
