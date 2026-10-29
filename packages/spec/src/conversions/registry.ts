@@ -11530,9 +11530,11 @@ const ACTION_CONTAINER_BLOCK_TYPES = new Set(['action:group', 'action:menu']);
  * longer read that word, and would fall back to a plain button with no
  * refusal anywhere to say so. Its own `variant` and its members' are renamed
  * as the four blocks' are. Every other value is left alone, and so is every
- * other component type: `destructive` stays the Button primitive's word on
- * `element:button` and the other primitive-backed components, which this
- * entry never reads. A member that is not an object, or a list that is not an
+ * other component type, which this entry never reads: `element:button`
+ * already spells the arm `danger` and refuses `destructive`, and the record
+ * blocks that forward a variant to the Button primitive unchanged
+ * (`record:quick_actions`, a `record:alert` action) keep the primitive's own
+ * `destructive`. A member that is not an object, or a list that is not an
  * array, is left as stored. The reach is every position `mapPageComponents`
  * visits — regions, slots, nested containers — the props gate's own reach.
  * Idempotent by construction: a rewritten value reads `'danger'`, which this
@@ -11607,7 +11609,7 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
                 // Canonical already, and another value: untouched.
                 { type: 'action:button', properties: { label: 'Archive', actionType: 'script', variant: 'danger' } },
                 { type: 'action:button', properties: { label: 'Open', actionType: 'url', target: '/apps/ops', variant: 'outline' } },
-                // The Button primitive's own word on another component: not this entry's.
+                // Another component type: not this entry's, whatever it holds (its own row refuses `destructive`).
                 { type: 'element:button', properties: { label: 'Reset', variant: 'destructive' } },
                 // A container's trigger and one of its members: both renamed, the other member untouched.
                 {

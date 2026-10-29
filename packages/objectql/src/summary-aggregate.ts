@@ -39,8 +39,12 @@ export interface SummaryDescriptor {
   /** FK field on the child pointing back to the parent. */
   fkField: string;
   fn: 'count' | 'sum' | 'min' | 'max' | 'avg';
-  /** Child field aggregated (unused for count). */
-  sourceField: string;
+  /**
+   * Child field aggregated — `summaryOperations.field`. Absent on a `count`,
+   * which counts the child rows and reads no field (the spec's
+   * `summaryFunctionReadsField`); every other function carries one.
+   */
+  sourceField?: string;
   /**
    * Optional predicate (a query `where` FilterCondition) restricting which child
    * rows are aggregated. ANDed with the parent-FK match when the aggregate runs.

@@ -2,7 +2,8 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { FieldSchema } from '@objectstack/spec/data';
 
 // The inspector loads the object list (published + drafts) for the lookup
 // picker; stub both surfaces.
@@ -567,14 +568,45 @@ describe('ObjectFieldInspector — summary roll-up editor', () => {
     });
   });
 
-  it('keeps the aggregate-field picker for count (the spec requires the key) with the ignored note', () => {
+  // #27462 — a count reads no child field, so the spec no longer requires
+  // `summaryOperations.field` for it (`summaryFunctionReadsField`). The editor
+  // reads that same predicate: no child-field control for a count.
+  it('offers no aggregate-field picker for count, only the note that a count needs none', () => {
     renderField(
       { total: { type: 'summary', summaryOperations: { object: 'crm_order', function: 'count' } } },
       'total',
     );
-    expect(screen.getByText('Child field to aggregate')).toBeInTheDocument();
-    expect(screen.getByText(/ignored for count/i)).toBeInTheDocument();
+    expect(screen.queryByText('Child field to aggregate')).not.toBeInTheDocument();
+    expect(screen.getByText('Count counts the child rows, so it needs no child field.')).toBeInTheDocument();
     expect(screen.getByText('Child relationship field (optional)')).toBeInTheDocument();
+  });
+
+  it('saves a count roll-up with no child field, and the spec accepts what it saves', async () => {
+    const { onPatch } = renderField(
+      { total: { type: 'summary', summaryOperations: { object: 'crm_order' } } },
+      'total',
+    );
+    // Before a function is picked the control is still offered (an unset
+    // function answers "reads a field").
+    expect(screen.getByText('Child field to aggregate')).toBeInTheDocument();
+    fireEvent.keyDown(controlFor('Aggregation'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: 'Count — child records' }));
+    const total = onPatch.mock.calls.at(-1)![0].fields.total;
+    expect(total.summaryOperations).toEqual({ object: 'crm_order', function: 'count' });
+    expect(FieldSchema.safeParse({ name: 'total', ...total }).success).toBe(true);
+  });
+
+  it('control: a sum still offers the picker, and the spec still refuses it without a field', () => {
+    renderField(
+      { total: { type: 'summary', summaryOperations: { object: 'crm_order', function: 'sum' } } },
+      'total',
+    );
+    expect(screen.getByText('Child field to aggregate')).toBeInTheDocument();
+    const parsed = FieldSchema.safeParse({
+      name: 'total', type: 'summary', summaryOperations: { object: 'crm_order', function: 'sum' },
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues[0].path).toEqual(['summaryOperations', 'field']);
   });
 
   /* ── filter editor (framework#1868): summaryOperations.filter ── */
