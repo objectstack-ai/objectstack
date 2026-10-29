@@ -160,7 +160,9 @@ export interface IDatasourceAdminService {
 
   /**
    * Persist a new runtime datasource (`origin: 'runtime'`, environment-scoped).
-   * Rejects when a code-defined datasource of the same name exists.
+   * Rejects when a code-defined datasource of the same name exists, and rejects
+   * a draft that names `external.credentialsRef`: the only reference a create
+   * stores is the one a supplied `secret` is bound under.
    */
   createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary>;
 
