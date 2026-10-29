@@ -162,7 +162,7 @@ Install package request
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review) and at boot for a plugin `os plugin install` installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them |
-| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **packaging** | `Enum<'bundled'>` | optional | Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key or write `bundled` |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
@@ -208,7 +208,7 @@ Package manifest installed through POST /api/v1/packages (AUTHORING stage; scope
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review) and at boot for a plugin `os plugin install` installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them |
-| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **packaging** | `Enum<'bundled'>` | optional | Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key or write `bundled` |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
@@ -316,7 +316,7 @@ Package manifest installed through POST /api/v1/packages (AUTHORING stage; scope
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review) and at boot for a plugin `os plugin install` installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them |
-| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **packaging** | `Enum<'bundled'>` | optional | Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key or write `bundled` |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
@@ -433,7 +433,7 @@ Install package request
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review) and at boot for a plugin `os plugin install` installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them |
-| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **packaging** | `Enum<'bundled'>` | optional | Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key or write `bundled` |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
@@ -566,7 +566,7 @@ Upgrade package request
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review) and at boot for a plugin `os plugin install` installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them |
-| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **packaging** | `Enum<'bundled'>` | optional | Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key or write `bundled` |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
@@ -660,7 +660,7 @@ Resolve dependencies request
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review) and at boot for a plugin `os plugin install` installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them |
-| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **packaging** | `Enum<'bundled'>` | optional | Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key or write `bundled` |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
