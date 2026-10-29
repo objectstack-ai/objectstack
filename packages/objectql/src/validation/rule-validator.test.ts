@@ -2649,3 +2649,83 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
     expect(err.message).not.toBe('这条不该出现。');
   });
 });
+
+/**
+ * ADR-0029 D9.2a — a tenant's rewrite of a rule message beats the packaged
+ * translation in the refusal.
+ *
+ * The catalog entry at `objects.<o>._validations.<rule>.message` translates
+ * the PACKAGED rule. When the served rule's message diverged from the packaged
+ * rule of the same name, the sentence is the tenant's own and is returned as
+ * written, judged by `scalarOverridesPackagedBase` (the one comparison `/meta`
+ * judges the same message by). `messages.packagedRule` is the engine's lookup
+ * into the packaged owner's declaration; absent, or answering no rule of the
+ * name, there is nothing to diverge from and the catalog applies as before.
+ */
+describe('evaluateValidationRules — a tenant-rewritten rule message beats the packaged translation (ADR-0029 D9.2a)', () => {
+  const PACKAGED = 'A standing duty must declare a frequency.';
+  const REWRITE = 'Pick how often this duty repeats.';
+  const ZH = '常规任务必须设置频率。';
+  const KEY = 'zh-CN|objects.duly_duty._validations.standing_no_frequency.message';
+  const t = (key: string, locale: string) => ({ [KEY]: ZH } as Record<string, string>)[`${locale}|${key}`] ?? key;
+
+  const failing = (schema: any, data: Record<string, unknown>, opts: Record<string, unknown>) => {
+    try {
+      evaluateValidationRules(schema, data, 'insert', opts);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    throw new Error('expected a ValidationError');
+  };
+
+  const scriptRule = (message: string) => ({
+    type: 'script',
+    name: 'standing_no_frequency',
+    message,
+    condition: "record.frequency == null || record.frequency == ''",
+    fields: ['frequency'],
+  });
+  const schemaWith = (message: string) => ({
+    fields: { frequency: { type: 'select', label: '频率' } },
+    validations: [scriptRule(message)],
+  });
+  const packagedRule = (name: string) => (name === 'standing_no_frequency' ? scriptRule(PACKAGED) : undefined);
+  const messages = (extra: Record<string, unknown> = {}) =>
+    ({ locale: 'zh-CN', objectName: 'duly_duty', translate: t, ...extra });
+
+  it('returns the rewrite as written in a non-default locale', () => {
+    const [err] = failing(schemaWith(REWRITE), {}, { messages: messages({ packagedRule }) });
+    expect(err.message).toBe(REWRITE);
+    expect(err.code).toBe('rule_violation');
+    expect(err.field).toBe('frequency');
+  });
+
+  it('still translates a rule whose message is the packaged one', () => {
+    const [err] = failing(schemaWith(PACKAGED), {}, { messages: messages({ packagedRule }) });
+    expect(err.message).toBe(ZH);
+  });
+
+  it('translates a rule the packaged object does not declare (an extension rule), under its own name', () => {
+    const [err] = failing(schemaWith(REWRITE), {}, { messages: messages({ packagedRule: () => undefined }) });
+    expect(err.message).toBe(ZH);
+  });
+
+  it('infers nothing without a packaged base: the catalog applies, as before', () => {
+    const [err] = failing(schemaWith(REWRITE), {}, { messages: messages() });
+    expect(err.message).toBe(ZH);
+  });
+
+  it('judges a conditional branch against the packaged branch of the same name', () => {
+    const conditional = (branchMessage: string) => ({
+      type: 'conditional',
+      name: 'standing_gate',
+      message: 'wrapper',
+      when: 'true',
+      then: { ...scriptRule(branchMessage) },
+    });
+    const packaged = (name: string) => (name === 'standing_no_frequency' ? scriptRule(PACKAGED) : undefined);
+    const schema = (m: string) => ({ fields: { frequency: { type: 'select' } }, validations: [conditional(m)] });
+    expect(failing(schema(REWRITE), {}, { messages: messages({ packagedRule: packaged }) })[0].message).toBe(REWRITE);
+    expect(failing(schema(PACKAGED), {}, { messages: messages({ packagedRule: packaged }) })[0].message).toBe(ZH);
+  });
+});
