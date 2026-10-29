@@ -339,6 +339,7 @@ import {
     externalBindingSaveRefusal,
     objectNamespacePrefixViolation,
     objectsBoundExternallyTo,
+    permissionSetNameCollisionRefusal,
     refuseUngrammaticalMetaItemName,
     saveWriteBinding,
     unknownDatasourceSaveRefusal,
@@ -19609,6 +19610,35 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * The `RESOURCE_CONFLICT` / 409 a permission-set write is refused with when
+     * its name already belongs to a DIFFERENT owner's active set — the save
+     * door and the draft→active promotion both ask it, so one name resolves to
+     * one set at both doors. See {@link permissionSetNameCollisionRefusal} for
+     * the predicate, the two active-holder sources it reads, and why a
+     * same-owner re-author is untouched.
+     *
+     * `RESOURCE_CONFLICT` / 409 is the envelope this package already answers for
+     * a name/namespace already taken at the package door (the unmanaged-install
+     * collisions), so a client reads one code for "that name is taken" however
+     * it arrived. No code is minted (ADR-0112, ADR-0114).
+     */
+    private permissionSetNameCollisionRefusal(
+        singularType: string,
+        name: string,
+        writePackageId: string | null | undefined,
+        verb: 'save' | 'publish',
+    ): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof permissionSetNameCollisionRefusal> = {
+            get engine() { return readEngine(); },
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
+        };
+        return permissionSetNameCollisionRefusal.call(host, singularType, name, writePackageId, verb);
+    }
+
+    /**
      * [ADR-0015 §4.2 · #25211] The save doors' half of "`object.external` only
      * on a datasource whose `schemaMode` is not 'managed'": the pair of the item
      * being saved and the stored or registered item on the other side of it,
@@ -20963,12 +20993,21 @@ export class ObjectStackProtocolImplementation implements
             // writer, as the name judge is. See
             // {@link permissionSetOwnerBindingRefusal}.
             {
+                const writeBinding = await this.saveWriteBinding(singularType, request, mode);
                 const ownerRefusal = permissionSetOwnerBindingRefusal(
-                    singularType, request.item, request.name,
-                    await this.saveWriteBinding(singularType, request, mode),
-                    'save',
+                    singularType, request.item, request.name, writeBinding, 'save',
                 );
                 if (ownerRefusal) throw ownerRefusal;
+                // [harden] …and a permission set whose NAME another owner's
+                // active set already holds, with `RESOURCE_CONFLICT` / 409: a
+                // set's name is its identity across the deployment, and a grant
+                // resolves it by that name alone. Judged against the binding
+                // this save RESOLVES, as the owner refusal is. See
+                // {@link permissionSetNameCollisionRefusal}.
+                const nameCollision = await this.permissionSetNameCollisionRefusal(
+                    singularType, request.name, writeBinding, 'save',
+                );
+                if (nameCollision) throw nameCollision;
             }
             // [#21639] …and a view container whose save name, or any name its
             // expansion produces, is a name already served from elsewhere —
@@ -23028,6 +23067,21 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, promoteInto, 'publish',
             );
             if (ownerRefusal) throw ownerRefusal;
+        }
+        // [harden] …and a permission-set draft whose name a DIFFERENT owner's
+        // active set already holds by the time it is published: a draft save
+        // judged the active sets of its moment, and another owner may have
+        // published that name since (or the draft was addressed to a second
+        // package in the first place). Judged again here, with the save door's
+        // own predicate and envelope, against the package promoted into, before
+        // `repo.promoteDraft` writes — so a batch publish aborts on it as it
+        // aborts on the owner refusal above. See
+        // {@link permissionSetNameCollisionRefusal}.
+        {
+            const nameCollision = await this.permissionSetNameCollisionRefusal(
+                singularType, request.name, promoteInto, 'publish',
+            );
+            if (nameCollision) throw nameCollision;
         }
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet

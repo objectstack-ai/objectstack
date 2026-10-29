@@ -269,6 +269,91 @@ export async function defaultRecordPageSaveRefusal(
     return err;
 }
 
+/**
+ * The body of `ObjectStackProtocolImplementation#permissionSetNameCollisionRefusal`;
+ * the method's docblock there is its contract.
+ *
+ * A `permission` set's name is its identity across the whole deployment: a
+ * grant (`sys_user_permission_set.permission_set`) resolves its set by that
+ * name alone (ADR-0131 D4), and the security catalog answers one definition per
+ * name. So a name may belong to exactly one owner, and a write that would
+ * publish a SECOND set of a name an ACTIVE set already holds under a DIFFERENT
+ * owner is refused here, with nothing written — a package never writes into a
+ * record another owns (ADR-0086 D4).
+ *
+ * `owner` is the publishing package (`package_id` / `_packageId`), or `null`
+ * for an environment-authored runtime set; `permission` takes no environment
+ * overlay (`allowEnvironmentOverlay: false`, ADR-0005), so a name a package
+ * holds is never an environment author's to re-use either, and the predicate is
+ * symmetric: a write's owner that is not an active holder's owner is foreign.
+ * The same-owner edit path (the owning package re-authoring its own set) is
+ * untouched. The active holders are read from BOTH the stored environment rows
+ * (a set published through the metadata door) and the engine registry (a set a
+ * package ships in code); a registry item is counted only when it names its
+ * owner, so an item of unprovable provenance never invents a rejection — the
+ * stance the store-unavailable branch takes too ({@link rethrowUnlessMetadataStoreUnprovisioned}).
+ */
+export async function permissionSetNameCollisionRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'storedOverlayEntries'>,
+    singularType: string,
+    name: string,
+    writePackageId: string | null | undefined,
+    verb: 'save' | 'publish',
+): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
+    if (singularType !== 'permission') return undefined;
+    const writeOwner = typeof writePackageId === 'string' && writePackageId !== '' ? writePackageId : null;
+
+    // Every owner that already holds an ACTIVE set under this name.
+    const owners = new Set<string | null>();
+    let records: any[] = [];
+    try {
+        // [ADR-0131 D6] A save lands environment-wide, so the sets it meets are
+        // the environment-wide rows. An UNPROVISIONED store counts as "no
+        // stored sets"; any other read failure propagates — answering "no
+        // other owner" from a read that never happened would accept the very
+        // second set this exists to refuse.
+        records = await this.readActiveOverlayRows({ type: singularType });
+    } catch (error) {
+        this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+    }
+    for (const entry of this.storedOverlayEntries({ type: singularType }, records)) {
+        if (entry.name !== name) continue;
+        owners.add(entry.packageId ?? null);
+    }
+    const registry = this.engine.registry;
+    if (typeof registry?.getItem === 'function') {
+        let registered: unknown;
+        try {
+            registered = registry.getItem(singularType, name);
+        } catch {
+            registered = undefined;
+        }
+        if (registered && typeof registered === 'object') {
+            const owner = (registered as { _packageId?: unknown })._packageId;
+            // Count a registry holder only when it names its owner: an item of
+            // unprovable provenance is not proof of a foreign owner.
+            if (typeof owner === 'string' && owner !== '') owners.add(owner);
+        }
+    }
+
+    const foreign = [...owners].filter((owner) => owner !== writeOwner);
+    if (foreign.length === 0) return undefined;
+
+    const describe = (owner: string | null) => (owner === null ? 'this environment' : `package '${owner}'`);
+    const held = [...new Set(foreign.map(describe))].join(' and ');
+    const mine = describe(writeOwner);
+    const err = new Error(
+        `A permission set named '${name}' already belongs to ${held}. ${mine} cannot ${verb === 'publish' ? 'publish' : 'save'} `
+        + `a second set of that name: a permission set's name is its identity across the whole deployment — a grant resolves `
+        + `its set by name alone (ADR-0131 D4), and no package writes into a record another owns (ADR-0086 D4), so one name `
+        + `must resolve to exactly one set. Nothing was written. Rename this set to a name ${mine} owns (prefix it with your `
+        + `own module prefix), or edit the existing set in the package that owns it and re-publish.`,
+    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+    err.code = 'RESOURCE_CONFLICT';
+    err.status = 409;
+    return err;
+}
+
 /** The body of `ObjectStackProtocolImplementation#externalBindingSaveRefusal`; the method's docblock there is its contract. */
 export async function externalBindingSaveRefusal(
     this: Pick<SaveDoorRefusalHost, 'externalBindingDatasourceDefinition' | 'objectsBoundExternallyTo'>,
