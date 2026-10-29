@@ -94,10 +94,10 @@ describe('StudioChatDock as the right slot\'s copilot (#2477 item 2, objectui#12
   it('reports itself available to the slot, and unavailable on unmount', () => {
     const reports: StudioCopilotStatus[] = [];
     const { unmount } = mountCopilot((s) => reports.push(s));
-    expect(reports.at(-1)).toEqual({ available: true, planPending: false });
+    expect(reports.at(-1)).toEqual({ available: true, planPendingCount: 0 });
     expect(screen.getByTestId('studio-copilot-maximize')).toBeInTheDocument();
     unmount();
-    expect(reports.at(-1)).toEqual({ available: false, planPending: false });
+    expect(reports.at(-1)).toEqual({ available: false, planPendingCount: 0 });
   });
 
   it('an empty catalog renders nothing and reports no copilot', () => {
@@ -105,6 +105,6 @@ describe('StudioChatDock as the right slot\'s copilot (#2477 item 2, objectui#12
     const reports: StudioCopilotStatus[] = [];
     const { container } = mountCopilot((s) => reports.push(s));
     expect(container).toBeEmptyDOMElement();
-    expect(reports.at(-1)).toEqual({ available: false, planPending: false });
+    expect(reports.at(-1)).toEqual({ available: false, planPendingCount: 0 });
   });
 });

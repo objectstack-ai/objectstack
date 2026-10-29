@@ -3059,6 +3059,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.slot.expand': 'Show the right panel',
   'engine.studio.slot.backToChat': 'Back to the conversation',
   'engine.studio.slot.planPending': 'a plan awaits your approval',
+  'engine.studio.slot.pendingCount': '{count} awaiting your approval',
   'engine.studio.slot.openFullPage': 'Open full page',
   'engine.studio.pillar.data': 'Data',
   'engine.studio.pillar.automations': 'Automations',
