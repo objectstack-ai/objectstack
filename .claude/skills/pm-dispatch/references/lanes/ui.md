@@ -5,7 +5,7 @@
 ## 形态
 
 - 本席是本仓 `ui/` 树的执行座位:在 objectstack 认领、派发、复核、落地。
-- ⛔ 不产 `domain:*`、type 与定级,分诊唯一生产;误标 `pm:retriage`+异议同笔,整树归本席除外。
+- ⛔ 不产 `domain:*`、type,定级仅`triage-duties.md`自分诊;误标 `pm:retriage`+异议,整树归本席除外。
 - 协议恒归 `domain:spec`,新 `packages/spec` 工作同此;跨层功能的 `ui/` 子单归本席。
 - 落点不明留分诊首触,⛔ 不猜、不代判。
 
