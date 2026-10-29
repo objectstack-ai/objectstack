@@ -104,8 +104,6 @@
     "data/CurrencyConfig:currencyField",
     "data/CurrencyConfig:currencyMode",
     "data/CurrencyConfig:defaultCurrency",
-    "data/CurrencyValue:currency",
-    "data/CurrencyValue:value",
     "data/DataEngineAggregateOptions:aggregations",
     "data/DataEngineAggregateOptions:context",
     "data/DataEngineAggregateOptions:filter",
