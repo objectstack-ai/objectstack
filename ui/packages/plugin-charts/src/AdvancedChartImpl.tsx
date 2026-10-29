@@ -1276,13 +1276,13 @@ type TreemapCellLeaf = {
  * leaves of one category share its colour.
  */
 function buildTreemapGroups(
-  data: ReadonlyArray<Record<string, any>>,
+  data: ReadonlyArray<Record<string, unknown>>,
   xAxisKey: string,
   groups: readonly NormalizedSeries[],
   palette: readonly string[],
 ): { nodes: Array<{ name: string; fill: string; children: TreemapCellLeaf[] }>; carried: number; omitted: SankeyOmittedColumn[] } {
   const isSizable = (v: unknown) => Number.isFinite(Number(v)) && Number(v) > 0;
-  const carries = (row: Record<string, any> | null | undefined, key: string) =>
+  const carries = (row: Record<string, unknown> | null | undefined, key: string) =>
     row != null && Object.prototype.hasOwnProperty.call(row, key);
   const nodes = data.flatMap((row, rowIndex) => {
     const category = String(row?.[xAxisKey] ?? '');
@@ -2253,7 +2253,7 @@ function AdvancedChartImplInner({
   // one cell: Recharts reports only leaf clicks, and each leaf carries its row
   // and series, the `{ category, series }` pair the drill lookup resolves to one
   // dataset row — the two-level sankey's flow click, for a leaf.
-  const handleTreemapCellClick = React.useCallback((node: any) => {
+  const handleTreemapCellClick = React.useCallback((node: unknown) => {
     if (!onChartClick) return;
     const leaf = node as Partial<TreemapCellLeaf> | undefined;
     const row = typeof leaf?.rowIndex === 'number' ? data[leaf.rowIndex] : undefined;
