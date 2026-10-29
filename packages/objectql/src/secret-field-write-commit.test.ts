@@ -57,7 +57,9 @@ function makeDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async syncSchema() {},
     async find(o: string, ast: any) {
-      return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)).map(copy);
+      const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+      return page.map(copy);
     },
     async findOne(o: string, ast: any) { return (await this.find(o, ast))[0] ?? null; },
     async create(o: string, data: Row) {
