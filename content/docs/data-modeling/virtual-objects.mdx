@@ -35,8 +35,9 @@ If the remote is a SQL database you can reach, you need no driver of your own �
 built-in one through [External datasources](/docs/data-modeling/external-datasources).
 
 A virtual object pays for its freshness on every request: each list read is a round
-trip to the remote, and the remote's query power is the object's query power. That is
-the trade the table above decides.
+trip to the remote, and a read can match at most 1000 rows
+([the cap](#the-engine-re-applies-every-query)). That is the trade the table above
+decides.
 
 ## The recipe
 
@@ -178,20 +179,25 @@ export function createPortScheduleDriver(transport: PortScheduleTransport): IDat
 }
 ```
 
-**A driver cannot opt out of correctness.** The rules it keeps:
+**A driver cannot opt out of correctness, only of performance.** The engine does not
+trust a plugin driver to have applied the query: it re-applies it
+([below](#the-engine-re-applies-every-query)). The rules the driver keeps:
 
-- **Apply every condition, sort and page it receives.** The engine hands the driver
-  the view's filter, the user's search, the sort and the page size, and serves whatever
-  comes back as the answer. A condition the driver drops widens the result silently — a
-  user sees rows the filter excluded, and nothing on the page says so. An engine-side
-  floor for drivers that cannot push a condition down is planned
-  ([#27277](https://github.com/objectstack-ai/objectstack/issues/27277)); until it lands
-  the whole obligation is the driver's.
-- **Refuse by name what the remote cannot run** — an operator, a combinator, a column it
-  does not carry — and fail when the remote fails. Throw; ⛔ never return an empty
-  array, which reads exactly like "no rows match". A thrown driver error answers the
-  caller `500 INTERNAL_ERROR` today; a dedicated refusal for driver failures is planned
-  with the floor above.
+- **Never return fewer rows than match.** The engine filters, sorts and pages the rows
+  your driver returns, so extra rows cost only transfer, but a row your driver leaves out
+  is lost. When you cannot translate part of a `where`, send the remote a WIDER filter,
+  never a narrower one: drop an untranslatable member of a top-level `$and` (or the whole
+  `where`), and drop a whole `$or` or `$not` that contains one. ⛔ Dropping one branch
+  of an `$or` narrows the result. The skeleton above takes the stricter road and refuses
+  instead, which is also safe.
+- **Fail when the remote fails.** Throw; ⛔ never return an empty array, which reads
+  exactly like "no rows match". A read that throws (a refusal by name included) answers
+  the caller `503 ERR_DATASOURCE_UNAVAILABLE` with `reason: 'remote'`. Its message says
+  the remote could not answer and to retry; your error's own text goes to the server log
+  at `warn` and never to the caller. A write the remote refuses with a 4xx is answered
+  `422 EXTERNAL_WRITE_REFUSED` carrying your error's message, so set `status` (or
+  `statusCode`) on the error you throw. A write that fails any other way is `503`, as a
+  read is.
 - **Send the remote only the columns it owns.** `update` receives the patch plus any
   field a hook stamped, plus `id`, `updated_at` and `updated_by`, which the engine adds on
   its own and no remote column declares.
@@ -372,7 +378,61 @@ remote row does not carry — so every row reads as someone else's
 `sharingModel: 'public_read_write'` and decide who may edit in `beforeUpdate`, as above.
 Serving an owner column the checks can read is the other way out; the reference test
 does not cover it, so pin it in your own test if you take it.
+
+Missing owner columns fail closed: the edit is refused, never allowed by mistake. So pick
+one of the two ways out on purpose. Either set `sharingModel` explicitly, or have your
+driver return the owner under the field name the checks read. On a plugin driver that
+mapping is the driver's own job: `external.columnMap` is applied by the built-in SQL
+drivers, not by the engine. A validation warning for an external object on an
+owner-keyed sharing model is tracked in
+[#27332](https://github.com/objectstack-ai/objectstack/issues/27332).
 </Callout>
+
+### The engine re-applies every query
+
+For a datasource whose `schemaMode` is not `managed` and whose `driver` is not a built-in
+id (memory, sqlite, sqlite-wasm, postgres, mysql, mongodb, turso), the engine holds the
+driver behind a correctness floor. It does not change a federated database on a built-in
+driver.
+
+- **What the driver is sent.** `find` gets `where` and `orderBy`, which it may push
+  down, and `limit: 1001`. It never gets `offset` or `fields`. `findOne` and `count`
+  reach your driver as that same `find`. `aggregate` is never called; the engine
+  aggregates in memory.
+- **What the engine does with the rows.** It applies the whole query itself: `where`
+  (the engine's own operator vocabulary, `$like` and `$ilike` included), the sort (no
+  value sorts last), `offset` and `limit` (a paged read breaks ties by `id`), and the
+  projection.
+- **Writes** go to your driver unchanged.
+
+So a driver grows in three steps, each correct:
+
+1. **Return every row.** Ignore the query and answer the resource's rows. The answer is
+   correct for any resource with at most 1000 rows.
+2. **Push `where` and `orderBy` down.** The remote returns only the matching rows, so the
+   1000-row cap now counts matching rows, not the whole resource, and less travels. The
+   engine still re-checks every row, so a translation slip shows up as a missing row
+   (step 1's rule), never as an extra one.
+3. **Skip the floor with a conformance-tested driver.** This is planned for a later
+   phase ([#27261](https://github.com/objectstack-ai/objectstack/issues/27261)): a driver
+   that passes the platform's conformance kit would be trusted with paging and the cap.
+   It does not exist yet.
+
+**The 1000-row cap.** A read that matches more than 1000 rows is refused with
+`422 EXTERNAL_ROW_CAP_EXCEEDED` rather than answered from a partial set. The fix is to
+narrow the filter so fewer rows match, or, for data that size, to mirror it into a real
+object with a [scheduled pull](/docs/automation/jobs#pulling-a-mapping) and read that.
+The cap applies to plugin drivers only. It also means a list cannot page past its first
+1000 matching rows: the page at offset 1000 is refused, not empty. The cap is fixed and
+not configurable.
+
+**Not covered by the floor.**
+
+- `updateMany` and `deleteMany` pass their `where` to your driver unchanged, so a driver
+  that offers them must apply the whole `where`.
+- A read whose scope composes a `ReadableIds` leaf, such as an object
+  `controlled_by_parent`, is refused (ADR-0139): the engine has no semi-join over a
+  plugin driver's rows.
 
 ### Credentials
 
@@ -389,15 +449,19 @@ repository.
 
 ## What your driver receives
 
-Measured on the reference test, request by request:
+Measured on the reference test, request by request, with the engine's floor
+([above](#the-engine-re-applies-every-query)) in place:
 
 | The platform does | Your driver is called with |
 | :--- | :--- |
 | Boots | `connect()` once. No `syncSchema`, no `introspectSchema` (`checkOnBoot: false`). |
-| Serves a list (`GET /data/berth_slot` with the view's filter, sort and page size) | `find(object, { where, orderBy, limit })`, then `count(object, { where })` for the total |
-| Serves a record (`GET /data/berth_slot/:id`) | `findOne(object, { where: { id }, limit: 1 })` |
-| Writes (`PATCH /data/berth_slot/:id`) | several by-id reads (the pre-image for hooks and checks), then `update(object, id, patch)` with the extra keys above |
+| Serves a list (`GET /data/berth_slot` with the view's filter, sort and page size) | `find(object, { where, orderBy, limit: 1001 })`, then `find(object, { where, limit: 1001 })` for the total. The page size is applied by the engine. |
+| Serves a record (`GET /data/berth_slot/:id`) | `find(object, { where: { id }, limit: 1001 })` |
+| Writes (`PATCH /data/berth_slot/:id`) | several by-id reads as `find` (the pre-image for hooks and checks), then `update(object, id, patch)` with the extra keys above |
 | Refuses a caller with no grant on a list read | nothing |
+
+Your driver should still implement `findOne` and `count`: the engine calls them on a
+driver that is not behind the floor, and the shape test below exercises them.
 
 Two details catch every first driver:
 
