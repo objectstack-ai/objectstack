@@ -167,6 +167,12 @@ interface CachedProposedPlan {
   questions: string[];
   assumptions: string[];
   targetApp?: string;
+  /**
+   * objectstack#27480 — the extend-or-new question a `decision: 'iterate_or_new'`
+   * plan asks. Kept through the cache because without it a cache-fallback
+   * reload turns the question back into a plan with a "Build it" button.
+   */
+  iterateOrNew?: { app?: { name: string; label?: string } };
 }
 
 interface CacheableChatToolInvocation {
@@ -256,6 +262,13 @@ function proposedPlanToCachedResult(pp: CachedProposedPlan): Record<string, unkn
     counts: pp.counts,
     questions: pp.questions,
     ...(pp.targetApp ? { targetApp: pp.targetApp } : {}),
+    // objectstack#27480 — the two keys `detectProposedPlan` reads the question from.
+    ...(pp.iterateOrNew
+      ? {
+          decision: 'iterate_or_new',
+          ...(pp.iterateOrNew.app ? { existingAppOverlap: pp.iterateOrNew.app } : {}),
+        }
+      : {}),
     blueprint: {
       objects: pp.objects.map((o) => ({
         name: o.name,

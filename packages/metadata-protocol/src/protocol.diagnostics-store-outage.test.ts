@@ -306,7 +306,9 @@ describe('[#8924] a caller error the producer classified is refused loudly, neve
         const res: any = await p.getMetaDiagnostics({ type: 'fields' });
         expect(res.total).toBe(0);
         expect(res.scannedTypes).toBe(1);
-        expect(res.stats.fields).toEqual({ count: 0, locked: 0, packages: [] });
+        // [#27514] Keyed by the canonical type the plural folds to, not the plural.
+        expect(Object.keys(res.stats)).toEqual(['field']);
+        expect(res.stats.field).toEqual({ count: 0, locked: 0, packages: [] });
     });
 
     it('a name that is a plural of NOTHING still answers benignly — the second verdict (#8421) lives on the mint door, not here', async () => {
