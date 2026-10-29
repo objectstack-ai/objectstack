@@ -465,7 +465,7 @@ describe('[#27237] seat review r1: only a stored value holds its instance', () =
         provider.state.rejectAtMaterialization = false;
         provider.state.verifyAtMaterialization = true;
         await reload();
-        expect(provider.tokenOf(provider.state.materialized.at(-1)!)).toBe('dummy-vault-value-ffff-0006');
+        expect(provider.tokenOf(provider.state.materialized[provider.state.materialized.length - 1])).toBe('dummy-vault-value-ffff-0006');
         expect(engine.getConnectorDegradedReason('billing')).toBeUndefined();
         // The provider proved it while materializing: no call needed.
         expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ source: 'vault', status: 'set' });
