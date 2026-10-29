@@ -32,6 +32,9 @@ export const PipelineDashboard: Dashboard = {
   name: 'pipeline_dashboard',
   label: 'Pipeline Dashboard',
   description: 'Aggregate view of the sales pipeline with period-over-period comparisons.',
+  // Only the sales set reads the pipeline, so only its holders are offered
+  // the dashboard. The nav entry carries the same list (security/capabilities.ts).
+  requiredPermissions: ['crm.view_pipeline'],
   columns: 12,
   widgets: [
     // --- Row 1: KPI tiles -------------------------------------------------

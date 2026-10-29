@@ -30,7 +30,8 @@ export const CrmApp = App.create({
       label: 'Analytics',
       icon: 'chart-bar',
       children: [
-        { id: 'nav_pipeline_dashboard', type: 'dashboard', dashboardName: 'pipeline_dashboard', label: 'Pipeline', icon: 'layout-dashboard' },
+        // Same audience as the dashboard itself (see security/capabilities.ts).
+        { id: 'nav_pipeline_dashboard', type: 'dashboard', dashboardName: 'pipeline_dashboard', label: 'Pipeline', icon: 'layout-dashboard', requiredPermissions: ['crm.view_pipeline'] },
       ],
     },
   ],

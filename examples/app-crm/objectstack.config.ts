@@ -17,6 +17,7 @@ import {
   FinanceApproverPosition,
   SalesUserPermissionSet,
   GuestPortalProfile,
+  allCapabilities,
 } from './src/security/index.js';
 import { CrmSeedData } from './src/data/index.js';
 import { CrmDatasource, CrmAnalyticsDatasource } from './src/datasources/crm.datasource.js';
@@ -98,6 +99,9 @@ export default defineStack({
   // Security
   positions: [SalesRepPosition, SalesManagerPosition, FinanceApproverPosition],
   permissions: [SalesUserPermissionSet, GuestPortalProfile],
+  // [ADR-0066 D1] The capability `crm_sales_user` grants and the Pipeline
+  // dashboard requires (src/security/capabilities.ts).
+  capabilities: allCapabilities,
   // No `sharingRules`. The three this app used to declare
   // (`share_high_value_opps_with_managers`, `share_active_leads_with_manager`,
   // `share_won_deal_activities`) were anchored on `crm_opportunity`,
