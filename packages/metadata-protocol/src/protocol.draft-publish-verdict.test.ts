@@ -102,6 +102,12 @@ function matchesMetadataWhere(r: Row, where: Record<string, unknown>): boolean {
             continue;
         }
         if (v === undefined) continue;
+        // The active read asks `type: { $in: [type, plural] }`; no other
+        // operator reaches this stub.
+        if (v && typeof v === 'object' && Array.isArray((v as { $in?: unknown }).$in)) {
+            if (!(v as { $in: unknown[] }).$in.includes((r as any)[k])) return false;
+            continue;
+        }
         if ((r as any)[k] !== v) return false;
     }
     return true;
@@ -464,13 +470,17 @@ describe('[#27445] a stored dashboard carrying an undeclared filterBindings key'
     it('still loads unchanged — the rule judges the authoring path, never the read', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        // A row written before the rule existed, stored verbatim the way
-        // `saveMetaItem` stores one: no gate ran when it landed.
-        await engine.insert('sys_metadata', {
-            type: 'dashboard', name: board.name, organization_id: null, package_id: PKG,
-            state: 'active', metadata: JSON.stringify(board),
-        });
-        expect([...rows.values()].map((r) => r.name)).toContain(board.name);
+        // A row written while no rule judged it: the save path with the
+        // authoring gate switched off, which stores the body verbatim exactly
+        // as a write made before this rule existed did.
+        process.env.OS_ALLOW_UNLINTED_METADATA_WRITES = '1';
+        try {
+            const saved: any = await (protocol as any).saveMetaItem({ type: 'dashboard', name: board.name, item: board, packageId: PKG });
+            expect(saved.success).toBe(true);
+        } finally {
+            delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+        }
+        expect([...rows.values()].filter((r) => r.name === board.name).map((r) => r.state)).toEqual(['active']);
 
         const read: any = await protocol.getMetaItem({ type: 'dashboard', name: board.name, packageId: PKG } as any);
         expect(read.item.widgets[0].filterBindings).toEqual({ regoin: false });
