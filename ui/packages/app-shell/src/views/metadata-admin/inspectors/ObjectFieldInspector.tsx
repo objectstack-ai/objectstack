@@ -102,6 +102,11 @@ import {
   type FieldTypeId,
 } from '../previews/field-types.js';
 import { FieldTypePicker } from './FieldTypePicker.js';
+import {
+  ExternalFieldBadge,
+  readExternalBinding,
+  useExternalWriteState,
+} from '../previews/external-object.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import type { CelLintIssue } from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
@@ -664,6 +669,13 @@ export function ObjectFieldInspector({
   /** The object this field belongs to — `draft` is the object document. */
   const objectName = String(draft.name ?? '');
 
+  // ADR-0015 — on an external object the field is a remote column: no rename,
+  // retype, duplicate or remove (each would reshape the remote table), and the
+  // field says where it comes from. A hook, so above the `!entry` return.
+  const external = readExternalBinding(draft);
+  const externalWriteState = useExternalWriteState(external);
+  const ddlLocked = readOnly || !!external;
+
   /* ─── Blocking CEL verdicts → the host's Save gate (objectui#4306) ─────
    *
    * Mirrors the shape PermissionAdvancedFacets uses for its per-clause map:
@@ -875,7 +887,7 @@ export function ObjectFieldInspector({
   // since two separate writeView() calls from the same stale `entry` closure
   // would have the second clobber the first.
   const deriveNameFor = (label: string): string | null => {
-    if (readOnly) return null;
+    if (ddlLocked) return null;
     const owner = recordedOwner();
     // The author's own value wins outright — including one that happens to be
     // SHAPED like a placeholder (objectui#7615).
@@ -1012,7 +1024,7 @@ export function ObjectFieldInspector({
 
   const headerActions = (
     <div className="flex items-center gap-1">
-      {!readOnly && (
+      {!ddlLocked && (
         <Button
           variant="ghost"
           size="sm"
@@ -1033,7 +1045,7 @@ export function ObjectFieldInspector({
     </div>
   );
 
-  const footer = (
+  const footer = external ? undefined : (
     <InspectorRemoveButton
       label={tFormat('designer.field.remove', locale, {
         label: typeof def.label === 'string' ? def.label : entry.name,
@@ -1058,11 +1070,16 @@ export function ObjectFieldInspector({
     >
       {/* Basic */}
       <Section title={tr('designer.field.section.basic')}>
+        {external && (
+          <div>
+            <ExternalFieldBadge binding={external} state={externalWriteState} locale={locale} />
+          </div>
+        )}
         <InspectorTextField
           label={tr('designer.field.apiName')}
           value={entry.name}
           onCommit={setKey}
-          disabled={readOnly}
+          disabled={ddlLocked}
           mono
           testId="field-apiname-input"
         />
@@ -1105,7 +1122,7 @@ export function ObjectFieldInspector({
           label={tr('designer.field.type')}
           value={type}
           onCommit={changeType}
-          disabled={readOnly}
+          disabled={ddlLocked}
           locale={locale}
         />
         <div className="flex items-center gap-4 pt-1">

@@ -293,6 +293,15 @@ const STUDIO_EN: Record<string, string> = {
   'designer.canvas.removeSectionHint': 'Remove section (fields move to Ungrouped)',
   'designer.canvas.renameHint': 'Double-click to rename',
   'designer.canvas.sectionN': 'Section {n}',
+  // External (ADR-0015) objects: field source and write state
+  'designer.external.from': 'From {datasource}',
+  'designer.external.readOnly': 'Read-only',
+  'designer.external.writable': 'Writable',
+  'designer.external.unconfirmed': 'Writes unconfirmed',
+  'designer.external.unconfirmedHint':
+    'Writes need allowWrites on datasource {datasource} as well as writable on this object, and the datasource could not be read.',
+  'designer.external.notice':
+    'External object: its fields mirror a table in datasource {datasource}, so fields cannot be added, removed, renamed or retyped here.',
   // Field stubs (disabled runtime-preview placeholders)
   'designer.stub.pickDate': 'Pick a date…',
   'designer.stub.off': 'Off',
