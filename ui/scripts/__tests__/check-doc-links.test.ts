@@ -668,9 +668,12 @@ describe('the repo it guards', () => {
     }
 
     // 25 until objectstack#27145: the SDK pages that carried most of them left
-    // this workspace, and the monorepo copies link the docs site instead. Two
-    // when re-measured, so the floor only keeps the loop from going vacuous.
-    expect(targets.size).toBeGreaterThanOrEqual(1);
+    // this workspace, and the monorepo copies link the docs site instead. The
+    // last two went with the vscode-extension package (#27275), so the tree
+    // holds none today and there is no population floor to keep. What stops
+    // this from passing over a broken extractor is the `selfRepoPath` unit
+    // test further down, which feeds it the URL shapes directly; this case
+    // keeps the gate for the next self-repo URL someone writes.
     expect([...targets].filter((target) => !fs.existsSync(path.join(repoRoot, target)))).toEqual([]);
   });
 
