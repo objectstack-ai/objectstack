@@ -5,7 +5,7 @@
 
 fix(i18n): a tenant's rewrite of a packaged validation rule message is served as written in every locale, on the refusal and on `/meta` (#27221)
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: semantic
 
 A package's bundle translates the rule messages that package shipped (`objects.<object>._validations.<rule>.message`). When a tenant overlaid a packaged object and reworded one of its validation rule messages, keeping the rule's name, a reader in any locale the bundle carries got the package's translation instead of the tenant's sentence. The rejected write's error and the rule served by `/meta` (and the public form) both showed it.
