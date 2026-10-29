@@ -2036,7 +2036,6 @@ const en = {
       unique: 'Unique',
       readOnly: 'Read Only',
       hidden: 'Hidden',
-      externalId: 'External ID',
       trackHistory: 'Track History',
       defaultValue: 'Default Value',
       placeholder: 'Placeholder',

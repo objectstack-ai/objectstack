@@ -1653,7 +1653,6 @@ const de = {
       unique: "Eindeutig",
       readOnly: "Nur lesen",
       hidden: "Ausgeblendet",
-      externalId: "Externe ID",
       trackHistory: "Verlauf verfolgen",
       defaultValue: "Standardwert",
       placeholder: "Platzhalter",

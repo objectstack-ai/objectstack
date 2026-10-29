@@ -1694,7 +1694,6 @@ const pt = {
       unique: "Único",
       readOnly: "Somente leitura",
       hidden: "Oculto",
-      externalId: "ID externo",
       trackHistory: "Rastrear histórico",
       defaultValue: "Valor padrão",
       placeholder: "Espaço reservado",

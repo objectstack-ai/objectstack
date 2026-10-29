@@ -1653,7 +1653,6 @@ const ko = {
       unique: "고유",
       readOnly: "읽기 전용",
       hidden: "숨김",
-      externalId: "외부 ID",
       trackHistory: "기록 추적",
       defaultValue: "기본값",
       placeholder: "자리 표시자",
