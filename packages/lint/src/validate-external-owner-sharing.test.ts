@@ -113,13 +113,17 @@ describe('security-external-owner-unmapped — which objects it judges', () => {
     expect(findingsFor(ext({ isSystem: true }))).toEqual([]);
   });
 
-  it('stays silent when a remote column serves owner_id: mapped through columnMap, or declared', () => {
-    expect(findingsFor(ext({ sharingModel: 'private' }, { columnMap: { assignee: 'owner_id' } }))).toEqual([]);
-    const declared = ext({
-      sharingModel: 'private',
-      fields: { ...NAME_FIELD, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner' } },
-    });
-    expect(findingsFor(declared)).toEqual([]);
+  it('stays silent when the author declares owner_id, with or without a columnMap entry for it', () => {
+    const fields = { ...NAME_FIELD, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner' } };
+    expect(findingsFor(ext({ sharingModel: 'private', fields }))).toEqual([]);
+    expect(findingsFor(ext({ sharingModel: 'private', fields }, { columnMap: { assignee: 'owner_id' } }))).toEqual([]);
+  });
+
+  it('a columnMap entry alone does not silence it: only a built-in SQL driver applies columnMap', () => {
+    const findings = findingsFor(ext({ sharingModel: 'private' }, { columnMap: { assignee: 'owner_id' } }));
+    expect(findings.map((f) => f.rule)).toEqual([SECURITY_EXTERNAL_OWNER_UNMAPPED]);
+    expect(findings[0]!.message).toContain("'owner_id'");
+    expect(findings[0]!.message).toContain('columnMap');
   });
 
   it('a columnMap that maps only created_by does not serve the owner check', () => {
@@ -138,11 +142,19 @@ describe("security-external-owner-unmapped — ownership: 'none' moves the refus
     }
   });
 
-  it('warns when the audit columns are off, and is silent when columnMap maps created_by', () => {
+  it('warns when the audit columns are off, and on a columnMap entry for created_by alone', () => {
     const noAudit = findingsFor(ext({ sharingModel: 'private', ownership: 'none', systemFields: { audit: false } }));
     expect(noAudit).toHaveLength(1);
     expect(noAudit[0]!.message).toContain("'created_by'");
-    expect(findingsFor(ext({ sharingModel: 'private', ownership: 'none' }, { columnMap: { author: 'created_by' } }))).toEqual([]);
+    const mapped = findingsFor(ext({ sharingModel: 'private', ownership: 'none' }, { columnMap: { author: 'created_by' } }));
+    expect(mapped).toHaveLength(1);
+    expect(mapped[0]!.message).toContain("'created_by'");
+    expect(mapped[0]!.message).toContain('columnMap');
+  });
+
+  it('is silent when the author declares created_by', () => {
+    const fields = { ...NAME_FIELD, created_by: { type: 'lookup', reference: 'sys_user', label: 'Created by' } };
+    expect(findingsFor(ext({ sharingModel: 'private', ownership: 'none', fields }))).toEqual([]);
   });
 
   it('is silent on public_read_write whatever the ownership tier', () => {

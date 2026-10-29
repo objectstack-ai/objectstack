@@ -751,14 +751,19 @@ const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
       'column to compare and refuses every row.',
     'There are two ways out. Declare `sharingModel: \'public_read_write\'`: every member who holds ' +
       '`allowEdit` may then edit, and a `beforeUpdate` hook decides who really may. Or serve the column ' +
-      'the check reads: map the remote owner column to `owner_id` through `external.columnMap` and declare ' +
-      '`owner_id` in `fields`, so the owner edits and deletes the row and other members are refused. ' +
-      'Declaring the field matters for reads too: without it the platform treats `owner_id` as its own ' +
-      'unstored column and does not scope reads by owner. On an object without `owner_id`, map the remote ' +
-      'creator column to `created_by` instead, so the creator writes the row.',
+      'the check reads: declare `owner_id` in `fields` and have the driver return the remote owner under ' +
+      'that name, so the owner edits and deletes the row and other members are refused. A built-in SQL ' +
+      'driver does that through `external.columnMap` (remote column to `owner_id`); `columnMap` is applied ' +
+      'by those drivers, not by the engine, so a plugin driver must return the field itself. Declaring ' +
+      'the field matters for reads too: the platform\'s own `owner_id` is treated as unstored, and reads ' +
+      'are not scoped by owner. On an object without `owner_id`, declare `created_by` the same way instead, ' +
+      'so the creator writes the row.',
+    'A `columnMap` entry for the column without a declared field is reported too, with its own wording: ' +
+      'it serves the check on a built-in SQL driver and does nothing on a plugin driver, and the ' +
+      'declaration is what holds on both.',
     'Deletes are not opened by `public_read_write`: that model opens edits, and the floor keeps deletes ' +
       'to the row\'s `created_by`. On an external object that column has no storage either, so member ' +
-      'deletes stay refused unless `created_by` is mapped or an authored policy or share grants them.',
+      'deletes stay refused unless the driver returns `created_by` or an authored policy or share grants them.',
     'The rule judges only a writable binding (`external.writable: true`) on a model that keys writes to ' +
       'an owner (`private`, `public_read`, or none on a custom object). `controlled_by_parent` is not judged: ' +
       'the master record\'s gate decides its writes. It is a warning, not an error: the stack is valid and ' +
