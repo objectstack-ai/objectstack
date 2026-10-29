@@ -178,7 +178,7 @@ describe('#27417 — a server refusal naming fields marks each of them', () => {
     expect(describedText(name)).toContain('Name must be at most 3 characters');
     expect(describedText(email)).toContain('Email is not a valid email address');
     // The row the refusal does not name stays unmarked.
-    expect(screen.getByLabelText('Company')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Company')).not.toHaveAttribute('aria-invalid', 'true');
     // The banner and the toast are unchanged.
     expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
     expect(String(vi.mocked(toast.error).mock.calls[0][0])).toContain('Submit failed (400)');
@@ -202,7 +202,7 @@ describe('#27417 — a server refusal naming fields marks each of them', () => {
     const name = screen.getByLabelText('Name');
     await waitFor(() => expect(name).toHaveAttribute('aria-invalid', 'true'));
     expect(screen.getByLabelText('Email')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByLabelText('Company')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Company')).not.toHaveAttribute('aria-invalid', 'true');
     expect(describedText(name)).toContain('Name must be at most 3 characters');
   });
 
@@ -221,7 +221,7 @@ describe('#27417 — a server refusal naming fields marks each of them', () => {
     const email = screen.getByLabelText('Email');
     await waitFor(() => expect(email).toHaveAttribute('aria-invalid', 'true'));
     expect(describedText(email)).toContain('An inquiry with this email already exists.');
-    expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid', 'true');
   });
 
   it('an edit to a marked row clears its mark and leaves the others', async () => {
@@ -234,7 +234,7 @@ describe('#27417 — a server refusal naming fields marks each of them', () => {
     await waitFor(() => expect(name).toHaveAttribute('aria-invalid', 'true'));
 
     await userEvent.type(name, '!');
-    expect(name).not.toHaveAttribute('aria-invalid');
+    expect(name).not.toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByText('Name must be at most 3 characters')).toBeNull();
     expect(screen.getByLabelText('Email')).toHaveAttribute('aria-invalid', 'true');
   });
@@ -250,9 +250,10 @@ describe('#27417 — a refusal naming no field marks none', () => {
 
     expect(await screen.findByText(/Invalid inquiry status transition\./)).toBeInTheDocument();
     for (const label of ['Name', 'Email', 'Company']) {
-      expect(screen.getByLabelText(label)).not.toHaveAttribute('aria-invalid');
-      expect(screen.getByLabelText(label)).not.toHaveAttribute('aria-describedby');
+      expect(screen.getByLabelText(label)).not.toHaveAttribute('aria-invalid', 'true');
     }
+    // No row was given a reason to point at.
+    expect(document.querySelectorAll('[id$="-error"]')).toHaveLength(0);
   });
 
   it('a field the form does not draw marks nothing', async () => {
@@ -267,8 +268,8 @@ describe('#27417 — a refusal naming no field marks none', () => {
     await fillAndSubmit({ Name: 'Ada', Email: 'ada@example.com' });
 
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1));
-    expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid');
-    expect(screen.getByLabelText('Email')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Email')).not.toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByText('Company is required')).toBeNull();
   });
 });
@@ -289,7 +290,7 @@ describe('#27417 — the client required refusal marks the missing fields', () =
     expect(email).toHaveAttribute('aria-invalid', 'true');
     expect(describedText(name)).toBe('Name is required');
     expect(describedText(email)).toBe('Email is required');
-    expect(screen.getByLabelText('Company')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Company')).not.toHaveAttribute('aria-invalid', 'true');
   });
 });
 
@@ -308,7 +309,7 @@ describe('#27417 — a faulted visibleWhen marks its row and points it at the ba
     const company = screen.getByLabelText('Company');
     expect(company).toHaveAttribute('aria-invalid', 'true');
     expect(company.getAttribute('aria-describedby')).toBe(banner.id);
-    expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid', 'true');
     warn.mockRestore();
   });
 });
