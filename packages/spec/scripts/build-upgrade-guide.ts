@@ -107,16 +107,12 @@ function tableRow(cells: readonly string[]): string {
 }
 
 /**
- * A `surface` as one code span, however the entry author wrote it. Many
- * entries mark their own code inside it (`` `globalFilters` on a view ``), and a
- * single-backtick wrapper closed at the first of those marks, so the line
- * rendered as alternating code and prose fragments. `codeSpan` fences the text
- * by CommonMark's rule (one backtick longer than the longest run inside), which
- * leaves every backtick-free surface byte-identical and shows an author's inner
- * backticks literally inside the span.
+ * An entry's `surface` as one code span, however the author wrote it: both
+ * render sites go through this one door (`lib/markdown-code-span.ts` says why
+ * the fence is longer than a backtick), and a refusal names the entry.
  */
-function surfaceSpan(surface: string): string {
-  return codeSpan(surface);
+function surfaceSpan(id: string, surface: string): string {
+  return codeSpan(surface, `entry ${id}`);
 }
 
 /** One hop's own section: `## Protocol N-1 → N` and everything under it. */
@@ -145,7 +141,7 @@ function hopSection(major: number): string[] {
       const window = c.retiredFromLoadPath
         ? 'retired — `migrate meta` only'
         : `live — protocol ${c.toMajor} loader accepts the old shape`;
-      out(tableRow([`\`${c.id}\``, surfaceSpan(c.surface), c.summary, window]));
+      out(tableRow([`\`${c.id}\``, surfaceSpan(c.id, c.surface), c.summary, window]));
     }
     out();
   }
@@ -154,7 +150,7 @@ function hopSection(major: number): string[] {
     out('### Semantic (delegated to you, with acceptance criteria)');
     out();
     for (const s of semantic) {
-      out(`- **\`${s.id}\`** — ${surfaceSpan(s.surface)} → ${s.replacement}`);
+      out(`- **\`${s.id}\`** — ${surfaceSpan(s.id, s.surface)} → ${s.replacement}`);
       out(`  - Why not automatic: ${s.reason}`);
       out(`  - Done when: ${s.acceptanceCriteria}`);
     }

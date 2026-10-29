@@ -29,14 +29,15 @@ function longestBacktickRun(text: string): number {
 
 /**
  * `text` as one code span, whatever backticks it carries. Byte-identical to
- * `` `${text}` `` for a text with no backtick at all, so the common case does
- * not move. Refuses a blank or multi-line text: a code span cannot say nothing,
- * and a line ending would render as a space and end the list item or table row
- * the span sits in.
+ * `` `${text}` `` for a text with no backtick and no leading or trailing space,
+ * so the common case does not move. Refuses a blank or multi-line text, naming
+ * `subject` (the entry, for the generator) in the refusal: a code span cannot
+ * say nothing, and a line ending renders as a space inside the span and, in a
+ * table row, ends the row.
  */
-export function codeSpan(text: string): string {
-  if (text.trim() === '') throw new Error('codeSpan: a code span cannot hold a blank text.');
-  if (/[\r\n]/.test(text)) throw new Error(`codeSpan: a code span holds one line; got ${JSON.stringify(text)}.`);
+export function codeSpan(text: string, subject = 'codeSpan'): string {
+  if (text.trim() === '') throw new Error(`${subject}: a code span cannot hold a blank text.`);
+  if (/[\r\n]/.test(text)) throw new Error(`${subject}: a code span holds one line; got ${JSON.stringify(text)}.`);
   const fence = '`'.repeat(longestBacktickRun(text) + 1);
   const pad = /^[` ]|[` ]$/.test(text) ? ' ' : '';
   return `${fence}${pad}${text}${pad}${fence}`;
@@ -52,9 +53,10 @@ function backtickStringLengthAt(markdown: string, at: number): number {
 
 /**
  * The code span that opens at `at` in `markdown`, read by CommonMark's rule:
- * its content (after the one-space strip), and the index just past its closing
- * backtick string. `null` when no backtick string of the opening length
- * follows — the opener is then literal backticks, not a span.
+ * its content (line endings as spaces; one space stripped from each end when
+ * both ends are spaces and the content is not spaces only), and the index just
+ * past its closing backtick string. `null` when no backtick string of the
+ * opening length follows — the opener is then literal backticks, not a span.
  */
 export function readCodeSpan(markdown: string, at: number): { content: string; end: number } | null {
   const open = backtickStringLengthAt(markdown, at);
@@ -67,8 +69,8 @@ export function readCodeSpan(markdown: string, at: number): { content: string; e
     }
     const run = backtickStringLengthAt(markdown, i);
     if (run === open) {
-      let content = markdown.slice(at + open, i).replace(/\r?\n/g, ' ');
-      if (content.startsWith(' ') && content.endsWith(' ') && content.trim() !== '') content = content.slice(1, -1);
+      let content = markdown.slice(at + open, i).replace(/\r\n?|\n/g, ' ');
+      if (content.startsWith(' ') && content.endsWith(' ') && !/^ +$/.test(content)) content = content.slice(1, -1);
       return { content, end: i + run };
     }
     i += run;

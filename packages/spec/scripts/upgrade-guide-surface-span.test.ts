@@ -4,19 +4,21 @@
 // span, and a surface may carry backticks of its own: most semantic entries
 // mark their inline code in it. CommonMark closes a span at the next backtick
 // string of the opening length, so the span must be fenced longer than any run
-// inside it — or the line renders as alternating code and prose fragments.
-// Three pins, kept apart:
+// inside it — or the line renders as alternating code and prose fragments. A
+// conversion's surface sits in a GFM table cell as well, where an unescaped
+// pipe ends the cell, inside a code span or not. Three pins, kept apart:
 //
-// - the helper: `codeSpan` fences by that rule and is byte-identical for a
-//   backtick-free text; `readCodeSpan` reads a span the way a renderer does, and
-//   reads the OLD single-backtick wrapping of a marked surface as broken (the
-//   lit control — a reader that cannot see a break would prove nothing);
+// - the helper: `codeSpan` fences by that rule and leaves a text with no
+//   backtick and no leading or trailing space byte-identical; `readCodeSpan`
+//   reads a span the way a renderer does, and reads the OLD single-backtick
+//   wrapping of a marked surface as broken (the lit control — a reader that
+//   cannot see a break would prove nothing);
 // - the real entry set: every conversion and semantic surface the registries
 //   carry round-trips through the pair, so a new entry cannot bring the defect
 //   back whatever backticks it carries;
-// - the generated guide: the REAL generator's bytes, read back span by span,
-//   give every entry's surface verbatim — pinned on what ships, not on the
-//   helper.
+// - the generated guide: the REAL generator's bytes, read back span by span and
+//   cell by cell, give every entry's surface verbatim — pinned on what ships,
+//   not on the helper.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -44,8 +46,32 @@ function semanticEntries(): { major: number; entry: SemanticMigration }[] {
   return out;
 }
 
+/**
+ * A GFM table row's cells, read the way the spec reads them: every `|` ends a
+ * cell, inside a code span or not, except one escaped as `\|` (GFM §4.10,
+ * example 200). The pieces outside the row's leading and trailing pipe are
+ * dropped; each cell is trimmed.
+ */
+function gfmCells(row: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  for (let i = 0; i < row.length; i++) {
+    if (row[i] === '\\' && row[i + 1] === '|') {
+      cell += '\\|';
+      i++;
+    } else if (row[i] === '|') {
+      cells.push(cell);
+      cell = '';
+    } else {
+      cell += row[i];
+    }
+  }
+  cells.push(cell);
+  return cells.slice(1, -1).map((c) => c.trim());
+}
+
 describe('codeSpan — one code span for any one-line text', () => {
-  it('a backtick-free text is wrapped in single backticks, byte for byte as before', () => {
+  it('a text with no backtick and no leading or trailing space is wrapped in single backticks, byte for byte as before', () => {
     expect(codeSpan('flow.node.type')).toBe('`flow.node.type`');
     expect(codeSpan('data.query.aggregations[].distinct')).toBe('`data.query.aggregations[].distinct`');
   });
@@ -61,10 +87,11 @@ describe('codeSpan — one code span for any one-line text', () => {
     expect(codeSpan(' lead')).toBe('`  lead `');
   });
 
-  it('a blank or multi-line text is refused, never rendered as a span that says nothing or breaks its line', () => {
-    expect(() => codeSpan('')).toThrow(/blank/);
+  it('a blank or multi-line text is refused, naming the subject, never rendered as a span that says nothing or breaks its row', () => {
+    expect(() => codeSpan('')).toThrow(/^codeSpan: .*blank/);
     expect(() => codeSpan('   ')).toThrow(/blank/);
     expect(() => codeSpan('a\nb')).toThrow(/one line/);
+    expect(() => codeSpan('', 'entry some-id')).toThrow(/^entry some-id: /);
   });
 
   it('round-trips through the reader', () => {
@@ -80,6 +107,13 @@ describe('readCodeSpan — CommonMark’s reading of a span', () => {
     expect(readCodeSpan('`a` b', 0)).toEqual({ content: 'a', end: 3 });
     expect(readCodeSpan('`` `a` b `` c', 0)).toEqual({ content: '`a` b', end: 11 });
     expect(readCodeSpan('x `a`', 2)).toEqual({ content: 'a', end: 5 });
+  });
+
+  it('a line ending inside the span reads as a space; a span of spaces only keeps them', () => {
+    expect(readCodeSpan('`a\nb`', 0)).toEqual({ content: 'a b', end: 5 });
+    expect(readCodeSpan('`a\r\nb`', 0)).toEqual({ content: 'a b', end: 6 });
+    expect(readCodeSpan('`  `', 0)).toEqual({ content: '  ', end: 4 });
+    expect(readCodeSpan('` \t `', 0)).toEqual({ content: '\t', end: 5 });
   });
 
   it('an opener with no closer of its length is not a span', () => {
@@ -115,11 +149,15 @@ describe('the real entry set — every surface the registries carry renders as o
     }
   });
 
-  it('every conversion surface round-trips, whatever backticks it carries', () => {
+  it('every conversion surface round-trips, whatever backticks it carries, and carries no backslash', () => {
     expect(ALL_CONVERSIONS.length).toBeGreaterThan(50);
     for (const c of ALL_CONVERSIONS) {
       const span = codeSpan(c.surface);
       expect(readCodeSpan(span, 0)?.content, c.id).toBe(c.surface);
+      // A backslash before a pipe is where GFM renderers part ways (one reads
+      // `\\|` as a literal backslash and a cell boundary, another as a backslash
+      // and an escaped pipe), so a conversion surface carries none — loudly.
+      expect(c.surface, c.id).not.toContain('\\');
     }
   });
 });
@@ -160,9 +198,9 @@ describe('the generated guide — read back span by span, every entry’s surfac
     return has;
   }
 
-  /** The one line of `major`'s section that starts with `prefix`. */
+  /** The one line of a rendered `major`'s section that starts with `prefix`. */
   function lineOf(major: number, prefix: string): string {
-    const hits = (sections.get(major) ?? []).filter((line) => line.startsWith(prefix));
+    const hits = sections.get(major)!.filter((line) => line.startsWith(prefix));
     expect(hits, prefix).toHaveLength(1);
     return hits[0]!;
   }
@@ -180,17 +218,27 @@ describe('the generated guide — read back span by span, every entry’s surfac
     }
   });
 
-  it('each conversion’s table row carries its surface as one span in its own cell', () => {
+  it('each conversion’s table row is four cells, the surface one span filling its own cell', () => {
     for (const [key, list] of Object.entries(CONVERSIONS_BY_MAJOR)) {
       const major = Number(key);
       if (!rendered(major)) continue;
       for (const c of list) {
-        const prefix = `| \`${c.id}\` | `;
-        const line = lineOf(major, prefix);
-        const span = readCodeSpan(line, prefix.length);
+        const line = lineOf(major, `| \`${c.id}\` | `);
+        const cells = gfmCells(line);
+        expect(cells, c.id).toHaveLength(4);
+        const span = readCodeSpan(cells[1]!, 0);
+        expect(span?.end, c.id).toBe(cells[1]!.length);
         expect(span?.content.replace(/\\\|/g, '|'), c.id).toBe(c.surface);
-        expect(line.slice(span!.end).startsWith(' | '), c.id).toBe(true);
       }
+    }
+  });
+
+  it('the lit control: the old single-backtick row of a conversion whose surface carries a pipe splits into extra cells', () => {
+    const piped = ALL_CONVERSIONS.filter((c) => c.surface.includes('|'));
+    expect(piped.length).toBeGreaterThan(0);
+    for (const c of piped) {
+      const old = `| \`${c.id}\` | \`${c.surface}\` | ${c.summary} | live |`;
+      expect(gfmCells(old).length, c.id).toBeGreaterThan(4);
     }
   });
 });
