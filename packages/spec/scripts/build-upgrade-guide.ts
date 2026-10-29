@@ -43,6 +43,7 @@ import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '../src/kernel/protocol-version';
 import { MIGRATIONS_BY_MAJOR, MIGRATION_SUPPORT_FLOOR } from '../src/migrations/registry';
 import { exitWith, runProjectionCli, type ProjectionCliResult } from './lib/projection-cli';
+import { codeSpan } from './lib/markdown-code-span';
 import { buildDocsPages, DOCS_DIR, writeDocsPages, type HopInput } from './lib/upgrade-guide-docs';
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -97,6 +98,27 @@ function howToUpgrade(form: 'file' | 'page'): string[] {
   return lines;
 }
 
+/**
+ * A GFM table row. The pipe is the one character a row reads as structure, in
+ * every inline span of the cell included, so each cell escapes it.
+ */
+function tableRow(cells: readonly string[]): string {
+  return `| ${cells.map((cell) => cell.replace(/\|/g, '\\|')).join(' | ')} |`;
+}
+
+/**
+ * A `surface` as one code span, however the entry author wrote it. Many
+ * entries mark their own code inside it (`` `globalFilters` on a view ``), and a
+ * single-backtick wrapper closed at the first of those marks, so the line
+ * rendered as alternating code and prose fragments. `codeSpan` fences the text
+ * by CommonMark's rule (one backtick longer than the longest run inside), which
+ * leaves every backtick-free surface byte-identical and shows an author's inner
+ * backticks literally inside the span.
+ */
+function surfaceSpan(surface: string): string {
+  return codeSpan(surface);
+}
+
 /** One hop's own section: `## Protocol N-1 → N` and everything under it. */
 function hopSection(major: number): string[] {
   const lines: string[] = [];
@@ -123,7 +145,7 @@ function hopSection(major: number): string[] {
       const window = c.retiredFromLoadPath
         ? 'retired — `migrate meta` only'
         : `live — protocol ${c.toMajor} loader accepts the old shape`;
-      out(`| \`${c.id}\` | \`${c.surface}\` | ${c.summary} | ${window} |`);
+      out(tableRow([`\`${c.id}\``, surfaceSpan(c.surface), c.summary, window]));
     }
     out();
   }
@@ -132,7 +154,7 @@ function hopSection(major: number): string[] {
     out('### Semantic (delegated to you, with acceptance criteria)');
     out();
     for (const s of semantic) {
-      out(`- **\`${s.id}\`** — \`${s.surface}\` → ${s.replacement}`);
+      out(`- **\`${s.id}\`** — ${surfaceSpan(s.surface)} → ${s.replacement}`);
       out(`  - Why not automatic: ${s.reason}`);
       out(`  - Done when: ${s.acceptanceCriteria}`);
     }
