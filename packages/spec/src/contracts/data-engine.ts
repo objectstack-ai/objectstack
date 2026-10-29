@@ -240,6 +240,22 @@ export interface WriteObservabilityOptions {
  */
 export interface EngineDatasourceDef {
   name: string;
+  /**
+   * The driver id the datasource selects (`driver` on the authored
+   * datasource: a built-in id such as `postgres`, or the `driver.NAME` id a
+   * server plugin published). The engine reads it to decide whether the
+   * datasource's driver is held behind its correctness floor (a non-managed
+   * `schemaMode` on a driver id that is not built in): a plugin driver is
+   * not trusted to have applied the query, so the engine re-applies it in
+   * memory and refuses over the row cap. Only the engine's own manifest
+   * install path used to carry the id, so a datasource registered through
+   * this member — the datasource-connection service on a connect, and again
+   * after a reconnect, whose eviction drops the stored def — read as "not a
+   * plugin driver" and was served unfloored. Optional because a caller that
+   * registers only the write-gate facts keeps the id stored before it; the
+   * engine never reads an absent key as "built in".
+   */
+  driver?: string;
   schemaMode?: string;
   external?: {
     /** Datasource-wide write gate — ADR-0015 §5.3 Gate 3. */

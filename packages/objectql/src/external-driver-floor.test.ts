@@ -380,3 +380,102 @@ describe('[#27277] a re-registration that names no driver keeps the floor', () =
     expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
   });
 });
+
+describe('[#27666] the datasource-connection service\'s registrations floor a plugin driver, and a reconnect keeps it', () => {
+  const TREE_PKG = {
+    id: 'tree_pkg',
+    name: 'Tree',
+    objects: [{
+      name: 'tree_node',
+      datasource: 'tree',
+      external: { remoteName: 'nodes', writable: true },
+      fields: { kind: { type: 'text' }, label: { type: 'text' }, weight: { type: 'number' } },
+    }],
+  };
+  /** What `DatasourceConnectionService.connect` registers after `registerDriver`: the def WITH its driver id. */
+  const connectDef = (driver: string) => ({ name: 'tree', driver, schemaMode: 'external', external: { allowWrites: true } });
+
+  it('a runtime-origin datasource (no manifest def): driver, then the connect def naming the driver id', async () => {
+    const engine = new ObjectQL();
+    const remote = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(remote.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+    const held = engine.getDriverByName('tree')!;
+    expect(isExternalDriverFloor(held)).toBe(true);
+    expect(unwrapExternalDriverFloor(held)).toBe(remote.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+  });
+
+  it('a reconnect (unregisterDriver, then the connect sequence) is still floored', async () => {
+    const engine = new ObjectQL();
+    const first = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(first.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+    expect(isExternalDriverFloor(engine.getDriverByName('tree')!)).toBe(true);
+
+    // `reconnect`: the eviction door drops the driver AND the stored def …
+    expect(engine.unregisterDriver('tree')).toBe(true);
+    expect(engine.getDriverByName('tree')).toBeUndefined();
+    // … then `connect` registers the rebuilt pool and the def again, driver id included.
+    const rebuilt = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(rebuilt.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+
+    const held = engine.getDriverByName('tree')!;
+    expect(isExternalDriverFloor(held)).toBe(true);
+    expect(unwrapExternalDriverFloor(held)).toBe(rebuilt.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+    expect(rebuilt.sent).toHaveLength(1);
+  });
+
+  it('the failed-rebuild restore (unregisterDriver, then the OLD pool and its def back) is still floored', async () => {
+    const engine = new ObjectQL();
+    const old = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(old.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+
+    engine.unregisterDriver('tree');
+    // `restoreOldPool`: the kept driver instance and the def it was serving under, `previous.driver` included.
+    engine.registerDriver(old.driver, false);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+
+    const held = engine.getDriverByName('tree')!;
+    expect(isExternalDriverFloor(held)).toBe(true);
+    expect(unwrapExternalDriverFloor(held)).toBe(old.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+  });
+
+  it('control: after the eviction a re-registration that names no driver has nothing to keep, and the where-ignoring driver answers every row', async () => {
+    // The defect's mechanism, pinned so the positive cases above are known to
+    // depend on the driver id reaching `registerDatasourceDef`: the engine's
+    // "keep the stored id" only keeps what the eviction left, which is nothing.
+    const engine = new ObjectQL();
+    const first = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(first.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+    engine.unregisterDriver('tree');
+    const rebuilt = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(rebuilt.driver);
+    engine.registerDatasourceDef({ name: 'tree', schemaMode: 'external', external: { allowWrites: true } });
+    expect(engine.getDriverByName('tree')).toBe(rebuilt.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toHaveLength(TREE_ROWS.length);
+  });
+
+  it('a built-in driver through the same connect and reconnect sequences stays the registered instance itself', () => {
+    const engine = new ObjectQL();
+    const first = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(first.driver);
+    engine.registerDatasourceDef(connectDef('sqlite'));
+    engine.registerApp(TREE_PKG as any);
+    expect(engine.getDriverByName('tree')).toBe(first.driver);
+    engine.unregisterDriver('tree');
+    const rebuilt = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(rebuilt.driver);
+    engine.registerDatasourceDef(connectDef('sqlite'));
+    expect(engine.getDriverByName('tree')).toBe(rebuilt.driver);
+  });
+});

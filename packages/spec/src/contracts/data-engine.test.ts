@@ -603,6 +603,15 @@ describe('Data Engine Contract', () => {
         schemaMode: 'read-only',
         external: { allowWrites: false, credentialsRef: 'secrets/warehouse' },
       });
+      // [#27666] The driver id travels with the def: the engine keys its
+      // plugin-driver floor on it, and the datasource-connection service's
+      // registration is the only one a runtime-origin datasource gets (and
+      // the only one left after a reconnect's eviction). Before this key the
+      // literal below was refused here with TS2353 while the engine already
+      // read and kept the value from its own manifest path.
+      register({ name: 'warehouse', driver: 'driver.port_schedule', schemaMode: 'external' });
+      // @ts-expect-error - the driver id is a string, never a driver instance
+      register({ name: 'warehouse', driver: { name: 'warehouse' }, schemaMode: 'external' });
       // @ts-expect-error - a datasource definition without a name registers nothing
       register({ schemaMode: 'read-only' });
       // The widening is exactly the ruled key, not an open door: an inline

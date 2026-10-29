@@ -2,7 +2,7 @@
 
 /**
  * [#27277] The two refusals the engine's floor over a plugin driver raises
- * (`external-driver-floor.ts`, ADR-0015 Tier A, epic #27261 P1).
+ * (`external-driver-floor.ts`, epic #27261 Tier A, P1; ruling 6487532394 on #27277).
  *
  * Both are 4xx: the caller can change the request and try again, and the
  * message is theirs to read. That is what keeps them apart from the third
