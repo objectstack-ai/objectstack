@@ -171,23 +171,24 @@ describe('a failed settings read is retried; a read that finds no default is per
     const REFUSAL =
         'TEMPLATE_INVALID: email template crm.large_deal_won (locale=en-US): the hole {{ amount | currency }} has no currency argument and the organization has no default currency; set localization.currency, or write currency:EUR';
 
-    /** The plugin's `data` engine: the `sys_setting` read throws while `broken`, else answers `rows`. */
-    function settingsEngine(state: { broken: boolean }, rows: Array<Record<string, unknown>> = []) {
+    /** The plugin's `data` engine: its `sys_setting` read answers `rows`, or throws when `broken`. */
+    function settingsEngine(opts: { broken: boolean }, rows: Array<Record<string, unknown>> = []) {
         const base = fakeData();
-        const counts = { sys_setting: 0 };
-        return {
-            counts,
-            engine: {
-                ...base,
-                async find(object: string, query: any) {
-                    if (object !== 'sys_setting') return [];
-                    counts.sys_setting += 1;
-                    if (state.broken) throw new Error('connection reset reading sys_setting');
-                    const where = query?.where ?? {};
-                    return rows.filter((r) => r.organization_id === where.organization_id && where.key?.$in?.includes(r.key));
-                },
-            },
+        const reads: string[] = [];
+        const healthyFind = async (object: string, query: any) => {
+            if (object !== 'sys_setting') return [];
+            reads.push(object);
+            const where = query?.where ?? {};
+            const matched = rows.filter((r) => r.organization_id === where.organization_id && where.key?.$in?.includes(r.key));
+            // Hold the caller's bound, after the filter and by presence.
+            return typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
         };
+        const brokenFind = async (object: string): Promise<unknown[]> => {
+            if (object !== 'sys_setting') return [];
+            reads.push(object);
+            throw new Error('connection reset reading sys_setting');
+        };
+        return { reads, engine: { ...base, find: opts.broken ? brokenFind : healthyFind } };
     }
 
     /** The render the real `email` service does: a no-argument hole needs a `currency`. */
@@ -234,7 +235,7 @@ describe('a failed settings read is retried; a read that finds no default is per
                 const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
                 const channel = messaging.getChannel(channelId)!;
                 const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
-                expect(data.counts.sys_setting).toBe(1);
+                expect(data.reads).toHaveLength(1);
                 expect(mail.calls).toHaveLength(1);
                 expect(mail.calls[0]).not.toHaveProperty('currency');
                 expect(r.ok).toBe(false);
@@ -250,7 +251,7 @@ describe('a failed settings read is retried; a read that finds no default is per
                 const channel = messaging.getChannel(channelId)!;
                 await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
                 const again = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
-                expect(data.counts.sys_setting).toBe(1);
+                expect(data.reads).toHaveLength(1);
                 expect(channel.classifyError?.(again.error)).toBe('retryable');
             });
 
@@ -260,7 +261,7 @@ describe('a failed settings read is retried; a read that finds no default is per
                 const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
                 const channel = messaging.getChannel(channelId)!;
                 const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
-                expect(data.counts.sys_setting).toBe(1);
+                expect(data.reads).toHaveLength(1);
                 expect(r).toEqual({ ok: false, error: REFUSAL });
                 expect(channel.classifyError?.(r.error)).toBe('permanent');
             });
