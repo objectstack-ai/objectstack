@@ -1795,6 +1795,8 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'cbpDetails', // #26591: the resolving details by name — JS Map methods.
       'policies', // one set's `rowLevelSecurity` records — `.length`, a JS property.
       'predicate', // a policy's `using` / `check` text, a string — `.trim`.
+      // #27472: `externalOwnershipGap`'s answer — `.column`, a field of that helper's own return value.
+      'ownershipGap',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
