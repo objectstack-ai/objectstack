@@ -57,6 +57,11 @@
  * A sign-in that is refused mints no session, and the staged claim dies with
  * its request.
  *
+ * A sign-in that never passes through those seams (a host's own session
+ * hand-off, such as the cloud's) applies the same rule through
+ * `AuthManager.applyIdpLocaleClaim`, which calls {@link IdpLocaleSync.apply}:
+ * the very method the settle step calls, so the rule has one owner.
+ *
  * A failure here never fails a sign-in. It is a functional degradation — the
  * user sees the deployment default instead of the IdP's language, visibly —
  * so it is reported at `warn`.
@@ -91,7 +96,12 @@ export function idpLocaleRecordIdentifier(userId: string): string {
   return `${IDP_LOCALE_RECORD_PREFIX}:${userId}`;
 }
 
-/** What one IdP sign-in asserted about the user's language. */
+/**
+ * What one IdP sign-in asserted about the user's language. Applying it
+ * ({@link IdpLocaleSync.apply}, published as `AuthManager.applyIdpLocaleClaim`)
+ * writes `sys_user.locale` only while it is unset or still the value an IdP
+ * sign-in last wrote, so a local choice is kept; applying it never throws.
+ */
 export interface IdpLocaleClaim {
   /** The provider that asserted it, for the record and the logs. */
   providerId?: string;
@@ -195,6 +205,22 @@ export class IdpLocaleSync {
     this.staged.delete(ctx);
     const userId = (session as { userId?: unknown } | null)?.userId;
     if (typeof userId !== 'string' || !userId) return;
+    await this.apply(userId, claim, ctx);
+  }
+
+  /**
+   * Apply one IdP sign-in's locale claim to a user, under the rule in the
+   * module header: `sys_user.locale` is written while it is unset or still
+   * holds the value the IdP path last wrote, and a local choice is kept. The
+   * `idp-locale:` record beside it is written in the same step. The OIDC JIT
+   * path reaches it through {@link settle}; a sign-in that never runs through
+   * better-auth's OIDC seams calls it with the claim it holds. `ctx` is the
+   * better-auth endpoint context when there is one; without it the auth store
+   * is resolved off the auth instance. Never throws: a failure is reported at
+   * `warn` and the user keeps the language preference they had.
+   */
+  async apply(userId: string, claim: IdpLocaleClaim, ctx?: unknown): Promise<void> {
+    if (typeof userId !== 'string' || !userId || !claim) return;
     try {
       const supported = this.deps.getSupportedLocales();
       if (!supported || supported.length === 0) {
