@@ -2642,6 +2642,32 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     goToStep(currentStep + 1);
   };
 
+  /**
+   * A submit the browser blocks (objectstack-ai/objectstack#27496), such as a
+   * malformed `type="email"`, never reaches `handleSubmit`, so the banner kept
+   * an earlier attempt's text. It describes the current attempt instead: this
+   * page's own checks run again over the rows the submit would judge (nothing
+   * refused clears the banner), and each control the browser refused is marked
+   * with the browser's own message. `invalid` fires once per refused control,
+   * so the marks are re-read from the whole form each time.
+   */
+  const handleNativeInvalid = (e: FormEvent<HTMLFormElement>) => {
+    if (!loaded) return;
+    const refusals = findSubmitRefusals(
+      wizardView && !onLastStep ? [sections[currentStep]] : sections,
+      values,
+      loaded.record,
+      isCreateForm,
+      predicateScope,
+    );
+    if (!reportRefusals(loaded.object, refusals)) setError(null);
+    const native: Record<string, string> = {};
+    for (const el of Array.from(e.currentTarget.elements) as HTMLInputElement[]) {
+      if (el.name && el.validity && !el.validity.valid) native[el.name] = el.validationMessage;
+    }
+    setFieldErrors((prev) => ({ ...prev, ...native }));
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!loaded) return;
@@ -3168,7 +3194,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           <p className="mt-1 text-sm text-muted-foreground">{loaded.form.description}</p>
         )}
       </header>
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} onInvalidCapture={handleNativeInvalid} className="space-y-6">
         {wizardView ? renderWizardSteps() : tabbedView ? renderTabbedSections() : sections.map((sec, i) => {
           // A section conditioned away is skipped IN PLACE rather than filtered
           // out of the list first (objectui#5627). The key here is the section's
