@@ -113,7 +113,7 @@ import {
   useExternalWriteState,
 } from '../previews/external-object.js';
 import { CelPredicateField } from '../CelPredicateField.js';
-import type { CelLintIssue } from '../celAuthoring.js';
+import type { CelLintIssue, CelValueType } from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import { FilterConditionField } from './FilterConditionField.js';
 import type { FilterCondition } from './datasetFilterCondition.js';
@@ -627,6 +627,20 @@ export function ObjectFieldInspector({
   React.useEffect(() => {
     formulaEdited.current = false;
   }, [name]);
+  // objectstack#27485 — the formula editor's two verdicts on one source, its
+  // lint and its inferred type, which arrive separately and in either order.
+  // The stamp is settled once both are in for the source the draft holds: a
+  // source with a lint error proves no type, so the stored `returnType` stays
+  // (it was cleared on every keystroke that broke the formula, and the broken
+  // body then reached the server without it); a source that lints clean
+  // stamps the proven type, or clears it, as before.
+  const formulaVerdictRef = React.useRef<{
+    field: string;
+    source: string;
+    errors?: number;
+    typed?: boolean;
+    inferred?: CelValueType | null;
+  }>({ field: '', source: '' });
 
   /* ─── Who owns the API name (objectui#7615) ──────────────────────────────
    *
@@ -791,6 +805,20 @@ export function ObjectFieldInspector({
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: nextDef };
     writeView({ shape: view.shape, entries: nextEntries });
+  };
+
+  /** objectstack#27485 — records one of the formula's verdicts and settles `returnType` (see `formulaVerdictRef`). */
+  const settleFormulaType = (verdict: { errors: number } | { typed: true; inferred: CelValueType | null }) => {
+    const source = readPredicate(def.expression ?? def.formula);
+    const was = formulaVerdictRef.current;
+    const same = was.field === entry.name && was.source === source;
+    const now = { ...(same ? was : { field: entry.name, source }), ...verdict };
+    formulaVerdictRef.current = now;
+    if (!formulaEdited.current || now.errors === undefined || !now.typed || now.errors > 0) return;
+    // Spec: `returnType` carries only a PROVEN concrete type —
+    // an ambiguous (`unknown`) or unavailable verdict clears it.
+    const next = now.inferred && now.inferred !== 'unknown' ? now.inferred : undefined;
+    if (def.returnType !== next) patchDef({ returnType: next });
   };
 
   /**
@@ -1264,14 +1292,11 @@ export function ObjectFieldInspector({
                   ...(v.trim() ? {} : { returnType: undefined }),
                 });
               }}
-              onLintChange={(issues) => reportCel('formula', issues)}
-              onInferredTypeChange={(inferred) => {
-                if (!formulaEdited.current) return;
-                // Spec: `returnType` carries only a PROVEN concrete type —
-                // an ambiguous (`unknown`) or unavailable verdict clears it.
-                const next = inferred && inferred !== 'unknown' ? inferred : undefined;
-                if (def.returnType !== next) patchDef({ returnType: next });
+              onLintChange={(issues) => {
+                reportCel('formula', issues);
+                settleFormulaType({ errors: issues.filter((i) => i.severity === 'error').length });
               }}
+              onInferredTypeChange={(inferred) => settleFormulaType({ typed: true, inferred })}
               disabled={readOnly}
               placeholder="record.amount * 0.2"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
