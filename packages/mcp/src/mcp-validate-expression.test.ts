@@ -2,6 +2,11 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 
+import {
+  EVALUATED_EXPRESSION_SOURCE_REQUIRED,
+  TYPED_EXPRESSION_SOURCE_REQUIRED,
+} from '@objectstack/spec/shared';
+
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 
@@ -115,6 +120,50 @@ describe('validate_expression MCP tool (#1928)', () => {
     const { json } = await call(runtime, toolsCall(1, 'validate_expression', { objectName: 'nope', expression: 'record.x > 1' }), bridge);
     expect(json.result.isError).toBe(true);
     expect(json.result.content[0].text).toMatch(/not found/i);
+  });
+
+  // A blank source is refused by the save/build gate (the spec's evaluated-slot
+  // and template-slot input schemas). The tool's verdict must be that gate's:
+  // ok:false, the schema's own issue code, and its published sentence.
+  describe('a blank or whitespace-only expression gets the save gate verdict', () => {
+    for (const expression of ['', '   ', '\t\n ']) {
+      for (const site of ['formula', 'validation', 'flow_condition'] as const) {
+        it(`refuses ${JSON.stringify(expression)} at site ${site}`, async () => {
+          const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression, site });
+          expect(r.ok).toBe(false);
+          expect(r.errors).toHaveLength(1);
+          expect(r.errors[0].code).toBe('invalid_union');
+          expect(r.errors[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+          expect(r.warnings).toHaveLength(0);
+          expect(r.inferredType).toBeUndefined();
+          // The scope context still comes back, so the agent can self-correct.
+          expect(r.inScope.fields).toContain('amount');
+        });
+      }
+      it(`refuses ${JSON.stringify(expression)} at site template with the template sentence`, async () => {
+        const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression, site: 'template' });
+        expect(r.ok).toBe(false);
+        expect(r.errors).toHaveLength(1);
+        expect(r.errors[0].code).toBe('invalid_union');
+        expect(r.errors[0].message).toBe(TYPED_EXPRESSION_SOURCE_REQUIRED.template);
+      });
+    }
+
+    it('defaults to the formula site when none is given', async () => {
+      const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: '' });
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    });
+
+    it('keeps the verdict of a non-blank control expression unchanged', async () => {
+      const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: ' record.amount / 100 ', site: 'formula' });
+      expect(r.ok).toBe(true);
+      expect(r.errors).toHaveLength(0);
+      expect(r.inferredType).toBeDefined();
+      const t = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'Hi {{ record.title }}', site: 'template' });
+      expect(t.ok).toBe(true);
+      expect(t.errors).toHaveLength(0);
+    });
   });
 
   it('refuses system objects (fail-closed guard)', async () => {
