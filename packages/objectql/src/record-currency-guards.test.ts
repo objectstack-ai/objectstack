@@ -13,9 +13,10 @@
 // The fixture is the measurement round's `fx_invoice` (epic #8345, comment
 // 6041378776), with the sibling code field DECLARED as the record currency.
 // Every refusal here precedes the driver, so the driver is the rows-shaped
-// in-memory double the roll-up suite uses; the same probes on driver-memory and
-// on SqlDriver over better-sqlite3 are packages/qa/dogfood's
-// `record-currency-probes.dogfood.test.ts`.
+// in-memory double the roll-up suite uses; the same probes on SqlDriver over
+// better-sqlite3 and on SqliteWasmDriver are packages/qa/dogfood's
+// `test/record-currency-probes.test.ts`. The write's blank-code refusal is
+// also the `validate()` preview's finding (changeset 26684's parity).
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { EngineAggregateOptions, EngineUpdateOptions } from '@objectstack/spec/data';
@@ -194,6 +195,32 @@ describe('a record-mode amount is stored with its currency code (ERR_CURRENCY_CO
     // The control: the same write carrying the code.
     await engine.update('fx_invoice', { amount: 9, currency_code: 'EUR' }, BATCH);
     expect(storeFor('fx_invoice').get(b.id)).toMatchObject({ amount: 9, currency_code: 'EUR' });
+  });
+  it('validate(): the insert and by-id update previews refuse what the write refuses, as the row\'s finding', async () => {
+    const insertPreview = await engine.validate('fx_invoice', [
+      { title: 'p1', amount: 100 },
+      { title: 'p2', amount: 100, currency_code: 'USD' },
+      { title: 'p3' },
+    ]);
+    expect(insertPreview.valid).toBe(false);
+    expect(insertPreview.results?.map((r) => r.valid)).toEqual([false, true, true]);
+    expect(insertPreview.results?.[0]?.errors).toEqual([
+      { field: 'currency_code', code: 'ERR_CURRENCY_CODE_REQUIRED', message: expect.stringContaining("'currency_code' is blank") },
+    ]);
+
+    const withCode = await engine.insert('fx_invoice', { title: 'i1', amount: 100, currency_code: 'USD' });
+    storeFor('fx_invoice').set('legacy', { id: 'legacy', title: 'old', amount: 100, currency_code: null });
+    const cleared = await engine.validate('fx_invoice', { id: withCode.id, currency_code: null }, { mode: 'update' });
+    expect(cleared.valid).toBe(false);
+    expect(cleared.results?.[0]?.errors).toEqual([
+      { field: 'currency_code', code: 'ERR_CURRENCY_CODE_REQUIRED', message: expect.stringContaining(`(record ${withCode.id})`) },
+    ]);
+
+    // The controls, answered as the write answers them: the stored code covers
+    // a new amount, and a codeless legacy row's unrelated edit is not judged.
+    expect((await engine.validate('fx_invoice', { id: withCode.id, amount: 250 }, { mode: 'update' })).valid).toBe(true);
+    expect((await engine.validate('fx_invoice', { id: 'legacy', title: 'renamed' }, { mode: 'update' })).valid).toBe(true);
+    expect(storeFor('fx_invoice').get(withCode.id)).toMatchObject({ amount: 100, currency_code: 'USD' });
   });
 });
 

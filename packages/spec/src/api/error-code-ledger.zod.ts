@@ -786,7 +786,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE',
     // [ADR-0144 D8 rule 4, Open item 9] A write would store a `record`-mode
     // currency amount beside a blank currency code — a number in no currency.
-    // 400, refused before the driver is asked (`RecordCurrencyCodeRequiredError`,
+    // 400; the driver is never asked to write the row (`RecordCurrencyCodeRequiredError`,
     // `validation/record-currency-code.ts`); `field` names the code field to
     // fill. The server never fills a currency in.
     'ERR_CURRENCY_CODE_REQUIRED',
