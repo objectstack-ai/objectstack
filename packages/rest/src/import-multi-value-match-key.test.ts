@@ -107,7 +107,7 @@ async function boot() {
   const tasks = async () =>
     (await engine.find(TASK.name, {}))
       .map((r: any) => ({ id: r.id, code: r.code, title: r.title, work_object: r.work_object }))
-      .sort((a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id));
+      .sort((a: { code: string }, b: { code: string }) => a.code.localeCompare(b.code));
   return { engine, importInto, tasks, reads, writes };
 }
 
