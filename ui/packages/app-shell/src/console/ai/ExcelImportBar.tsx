@@ -42,6 +42,7 @@ interface WizardField {
   type: string;
   required?: boolean;
   options?: Array<{ label?: string; value?: string | number } | string>;
+  multiple?: boolean;
 }
 
 interface ExcelImportBarProps {
@@ -71,6 +72,7 @@ function normalizeFields(schema: any): WizardField[] {
       type: (def?.type ?? 'text') as string,
       required: !!def?.required,
       options: def?.options,
+      multiple: def?.multiple === true,
     }))
     .filter((f) => f.name && !NON_WRITABLE_TYPES.includes(f.type));
 }

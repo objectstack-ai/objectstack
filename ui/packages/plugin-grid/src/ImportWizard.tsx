@@ -16,7 +16,8 @@ import { resolveAffordance, sanitizeFileNameBase } from '@object-ui/core';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
-  BOOLEAN_VALUE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, SINGLE_OPTION_TYPES,
+  BOOLEAN_VALUE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, SINGLE_OPTION_TYPES, STRUCTURED_JSON_TYPES,
+  isMultiValueField,
 } from '@objectstack/spec/data';
 import {
   BOOLEAN_IMPORT_TOKENS, REFERENCE_IMPORT_TYPES, isIdentityEmail, isImportableDateCell, isImportableTimeCell,
@@ -362,6 +363,11 @@ export interface ImportWizardProps {
     /** Allowed values for select/enum fields. Accepts option objects or bare
      *  strings. */
     options?: Array<{ label?: string; value?: string | number } | string>;
+    /** The object schema's `multiple` flag: a `select` / `radio` / `lookup` /
+     *  `user` / `file` / `image` field flagged `multiple: true` stores a list.
+     *  "Match on" reads it, as the server does, to leave such a field out
+     *  (`isMatchKeyField`). */
+    multiple?: boolean;
     /** Storage-backed but non-writable target (autonumber / readonly): mappable
      *  so update/upsert can MATCH rows on it (e.g. "update the row whose record
      *  number already exists"), rendered with a "(match only)" hint. The value
@@ -605,6 +611,17 @@ function formatDryRunError(
 type ImportTargetField = ImportWizardProps['fields'][number];
 type ImportTargetOption = NonNullable<ImportTargetField['options']>[number];
 
+/**
+ * Whether the server takes this field as a match key. It refuses a field whose
+ * value is a list or a structured payload, as one value per field is what a
+ * match key compares: the server's `multiValueMatchKeyRefusal` reads the same
+ * two spec definitions, `STRUCTURED_JSON_TYPES` and `isMultiValueField`.
+ */
+function isMatchKeyField(field: Pick<ImportTargetField, 'type' | 'multiple'>): boolean {
+  if (STRUCTURED_JSON_TYPES.has(field.type)) return false;
+  return !isMultiValueField({ type: field.type, multiple: field.multiple === true });
+}
+
 /** The only comma a numeric cell may carry: a thousands grouping of its integer part. */
 const THOUSANDS_GROUPED_INTEGER = /^[+-]?\d{1,3}(?:,\d{3})+(?![\d,])[^,]*$/;
 
@@ -671,9 +688,9 @@ function splitImportMultiValue(cell: string): string[] {
  *
  * One reading is not the server's exactly, and it errs towards taking a cell:
  * a `select` / `radio` flagged `multiple: true` is split by the server as well,
- * and the wizard's field shape does not carry `multiple`. So a single-option
- * cell is refused only when both readings refuse it: as one value, and as a
- * split list.
+ * and a host may leave the field shape's `multiple` out, so this check does not
+ * read it. So a single-option cell is refused only when both readings refuse
+ * it: as one value, and as a split list.
  *
  * With *Keep unknown option values* on (the request's `createMissingOptions`),
  * the server takes every option cell, on a writable field and a `matchOnly`
@@ -1962,9 +1979,13 @@ const ImportOptions: React.FC<{
   showBackground, backgroundImport, onBackgroundImport,
 }) => {
   const { t } = useImportTranslation();
-  // Only fields that are actually mapped can serve as match keys.
+  // Only fields that are actually mapped, and that the server takes as a
+  // match key, can serve as match keys.
   const mappedFieldNames = useMemo(() => new Set(Object.values(mapping)), [mapping]);
-  const matchable = useMemo(() => fields.filter((f) => mappedFieldNames.has(f.name)), [fields, mappedFieldNames]);
+  const matchable = useMemo(
+    () => fields.filter((f) => mappedFieldNames.has(f.name) && isMatchKeyField(f)),
+    [fields, mappedFieldNames],
+  );
   const needsMatch = writeMode !== 'insert';
 
   return (
