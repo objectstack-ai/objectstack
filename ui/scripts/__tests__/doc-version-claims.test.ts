@@ -300,7 +300,7 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  * NOT ONE of the four earned an inventory entry, and that is the half of this change
  * worth carrying forward. They were not a floor this project declares — of the 46
  * workspace manifests, ZERO declare `engines.node` or `engines.pnpm`, the only
- * `engines` block outside the root being `packages/vscode-extension`'s `engines.vscode`
+ * `engines` block outside the root being the VS Code extension's `engines.vscode`
  * — and not one it tests: 26 of the 27 `node-version:` declarations in
  * `.github/workflows` read `'22.x'` and the 27th reads `'22'`, so nothing anywhere runs
  * the Node 20 those bullets named. A number a reader will act on, restating no manifest

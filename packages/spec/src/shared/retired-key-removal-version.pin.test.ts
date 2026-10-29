@@ -92,7 +92,7 @@ import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { TursoConfigSchema } from '../data/driver/turso.zod';
 import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
+import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema, VIEW_METADATA_MEMBERS } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -396,6 +396,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   // #26677: value-level retirements — each retired member is refused by the
   // enum's own error map with its prescription, so the refusal is the parse.
+  'list-view-options-bag-folded': [tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'options')],
   'navigation-mode-overlay-values-removed': [
     ...(['modal', 'split', 'popover'] as const).map((mode) =>
       refusal(`navigation.mode '${mode}'`, () => NavigationModeSchema.safeParse(mode)),
@@ -405,6 +406,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       () => InterfacePageConfigSchema.safeParse({ source: 'crm_contact', recordAction: 'modal' }),
       'recordAction',
     ),
+  ],
+  // #27153: `buttons.reset`, tombstoned inside the live `buttons` block.
+  'form-view-buttons-reset-removed': [
+    tombstone((FormViewSchema.shape.buttons as unknown as { unwrap: () => unknown }).unwrap(), 'view.form.buttons', 'reset'),
   ],
   // #27155: the form view `type` narrowed to the form's layout — each retired
   // member refused by the enum's own error map, plus the three split-only keys
@@ -483,6 +488,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       "page template 'full-width'",
       () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [{ name: 'main', components: [] }] }),
       'template',
+    ),
+  ],
+  // The slotted page's `tabs` slot, tombstoned in the slot map; the page is
+  // otherwise complete, so `slots` is the only issue path.
+  'page-slots-tabs-removed': [
+    refusal(
+      'a slotted page authoring slots.tabs',
+      () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', kind: 'slotted', regions: [], slots: { tabs: { type: 'page:tabs' } } }),
+      'slots',
     ),
   ],
   // #23543 F3: a loose `config` key under a sibling-block node type, refused by

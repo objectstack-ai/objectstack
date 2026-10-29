@@ -7,33 +7,26 @@
  */
 
 /**
- * objectui#6152 round 12 — a list view's legacy `options` bag is the
- * `@objectstack/spec` list overlay's own bag, BY REFERENCE.
+ * objectstack#25923 — a list view's legacy `options` bag is RETIRED, and the
+ * mirror takes the `@objectstack/spec` list overlay's tombstone BY REFERENCE.
  *
- * The spec's authoring list view declares no `options`. Its one home is the
- * flattened LIST OVERLAY on the view write door (`VIEW_METADATA_MEMBERS.listOverlay`):
- * a strict object of the eight kinds that name a block, each judged by its own
- * list-view slot with every key optional. `ListViewSchema.options` was a record
- * of `any` with three named refusals, so every door and the TypeScript face
- * accepted what that door refuses. objectui#8327 forbids that, and the seat
- * answered the round's census Q1 → A (objectui#6152, 6070475966). The blocks below:
+ * From objectui#6152 round 12 until #25923 the bag was the list overlay's own
+ * judged underlay: a strict object of the eight kinds that name a block, each
+ * judged by its list-view slot with every key optional, and this mirror took it
+ * by reference (objectui#8327 forbids accepting what that door refuses). The
+ * spec retired the bag: the overlay member is a `retiredKey()` tombstone that
+ * refuses `options` by name with the move-to-the-top-level prescription, and a
+ * stored bag is folded onto the top-level blocks by the ADR-0087 D2 conversion
+ * `list-view-options-bag-folded` before a row is served. The readers retired in
+ * the same change. The blocks below:
  *
- *   1. the overlay's bag, measured on the INSTALLED spec — its key set derived
- *      by the spec's own rule, each kind strict and fully optional, so a spec bump
- *      that moves any of that reds here by name;
- *   2. the mirror IS that bag: strict, the same key set and error map, each kind
- *      the slot `.partial()`, with this package's round-11 blocks (and only their
- *      named refusal arms) in four of them;
- *   3. verdict equality with the spec's bag over accepted and refused documents,
- *      and the sanctioned differences, each named;
- *   4. every named refusal under `options.KIND`, through every door, with ONE
- *      message in both nestings;
- *   5. undeclared keys and kinds, through every door (`options.grid` with the
- *      spec's guidance);
- *   6. the TypeScript face, closed the same way, and the two config types.
- *
- * ⛔ The READERS are not this round's: `ListView` still merges and spreads the
- * bag. Nothing here asserts them.
+ *   1. the overlay's `options`, on the INSTALLED spec: a tombstone;
+ *   2. the mirror IS that tombstone, by reference;
+ *   3. every door refuses a bag at `options`, whatever it holds, with the
+ *      spec's text — and the same blocks written top-level parse;
+ *   4. each named refusal that used to apply under `options.KIND` applies at the
+ *      top-level block, the one nesting left, with its canonical hint;
+ *   5. the TypeScript face: no bag compiles.
  */
 import { describe, it, expect } from 'vitest';
 
@@ -56,48 +49,26 @@ type Parse = (doc: unknown) => Parsed;
 type Zod = {
   safeParse: Parse;
   unwrap: () => Zod;
+  description?: string;
   shape: Record<string, Zod>;
-  _zod: { def: { type: string; innerType?: Zod; catchall?: Zod; error?: unknown; values?: unknown[]; entries?: Record<string, unknown> } };
+  _zod: { def: { type: string; innerType?: Zod } };
 };
 
-const verdict = (r: Parsed) => ({
-  success: r.success,
-  issues: r.success ? [] : r.error!.issues.map((i) => ({ code: i.code, path: i.path, message: i.message, keys: i.keys })),
-});
 const codeAndPath = (r: Parsed) => (r.success ? [] : r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.') })));
-const catchallOf = (object: Zod) => object._zod.def.catchall?._zod.def.type;
-/** The members an object REQUIRES: those whose schema refuses `undefined`. */
-const requiredOf = (object: Zod) => Object.keys(object.shape).filter((k) => !object.shape[k].safeParse(undefined).success).sort();
 
 const SPEC_SLOTS = (SpecListViewSchema as unknown as Zod).shape;
-/** The spec's list overlay bag, read off the overlay member (the bag's own schema is module-private). */
-const SPEC_BAG_OPTIONAL = (VIEW_METADATA_MEMBERS.listOverlay as unknown as Zod).shape.options;
-const SPEC_BAG = SPEC_BAG_OPTIONAL.unwrap();
-const MIRROR_BAG_OPTIONAL = (ListViewSchema as unknown as Zod).shape.options;
-const MIRROR_BAG = MIRROR_BAG_OPTIONAL.unwrap();
-
-/** The spec's own rule for the bag's key set: a value of the list view's `type` enum that also names a block. */
-const typeValues = (): string[] => {
-  let cur: Zod | undefined = SPEC_SLOTS.type;
-  while (cur && !cur._zod.def.entries) cur = cur._zod.def.innerType;
-  return Object.keys(cur!._zod.def.entries!);
-};
-const KINDS = typeValues().filter((t) => t in SPEC_SLOTS).sort();
-
-/** The four kinds that are this package's round-11 blocks, with their named refusal arms. */
-const ARMS: Record<string, readonly string[]> = {
-  kanban: ['groupField', 'cardFields', 'groupBy'],
-  calendar: ['defaultView', 'dateField', 'endField'],
-  gallery: ['imageField'],
-  timeline: ['dateField'],
-};
+/** The spec's list overlay `options` member (the overlay's own schema is module-private). */
+const SPEC_OPTIONS = (VIEW_METADATA_MEMBERS.listOverlay as unknown as Zod).shape.options;
+const MIRROR_OPTIONS = (ListViewSchema as unknown as Zod).shape.options;
+/** The tombstone's refusal text, read off the spec. */
+const REFUSAL = SPEC_OPTIONS.safeParse({}).error!.issues[0].message;
 
 const NODE = { type: 'list-view', objectName: 'deal' };
 /**
  * The mirror is the `ListView` component's props; the three published faces
  * judge the authored PAGE node since objectui#12670, its props in the
  * `properties` bag, so each re-spells the node and reads its paths relative to
- * the bag (`onPageSpelling`). The bag's `options` is the mirror's, by reference.
+ * the bag (`onPageSpelling`).
  */
 const DOORS: ReadonlyArray<readonly [string, Parse]> = [
   ['the list-view mirror', (d) => ListViewSchema.safeParse(d)],
@@ -106,24 +77,27 @@ const DOORS: ReadonlyArray<readonly [string, Parse]> = [
   ['safeValidateSchema', onPageSpelling((d) => safeValidateSchema(d) as Parsed)],
 ];
 
-/* ── 1. The overlay's bag, on the installed protocol (the precondition) ──────── */
+/** The blocks app-shell's object page relays, each in full. */
+const RELAYED_BLOCKS: Record<string, Record<string, unknown>> = {
+  kanban: { groupByField: 'stage', titleField: 'name', columns: ['name'] },
+  calendar: { startDateField: 'starts_at' },
+  timeline: { startDateField: 'starts_at', titleField: 'name' },
+  map: { locationField: 'address', titleField: 'name' },
+  gallery: { coverField: 'logo', titleField: 'name' },
+  gantt: { startDateField: 'starts_at', endDateField: 'ends_at', titleField: 'name' },
+  tree: { parentField: 'parent', labelField: 'name' },
+  chart: { chartType: 'bar', dataset: 'deal_ds', dimensions: ['stage'], values: ['total'] },
+};
 
-describe('objectui#6152 round 12 — the installed list overlay\'s `options` bag', () => {
-  it('is `optional` around a STRICT object whose keys are exactly the kinds that name a block', () => {
-    expect(SPEC_BAG_OPTIONAL._zod.def.type).toBe('optional');
-    expect(SPEC_BAG._zod.def.type).toBe('object');
-    expect(catchallOf(SPEC_BAG)).toBe('never');
-    // The kinds this package's blocks cover, by name (#26238); the bag's key
-    // set is then compared with the spec's own rule, derived on both sides.
-    for (const kind of Object.keys(ARMS)) expect(KINDS).toContain(kind);
-    expect(Object.keys(SPEC_BAG.shape).sort()).toEqual(KINDS);
-  });
+/* ── 1. The overlay's `options`, on the installed protocol (the precondition) ── */
 
-  it.each(KINDS)('%s is the list-view slot with every key optional, strict', (k) => {
-    const block = SPEC_BAG.shape[k].unwrap();
-    expect(catchallOf(block)).toBe('never');
-    expect(Object.keys(block.shape).sort()).toEqual(Object.keys(SPEC_SLOTS[k].unwrap().shape).sort());
-    expect(requiredOf(block)).toEqual([]);
+describe('#25923 — the installed list overlay\'s `options` is a tombstone', () => {
+  it('is `optional` around `never`, described `[REMOVED]`, and refuses a bag with the move-to-the-top-level prescription', () => {
+    expect(SPEC_OPTIONS._zod.def.type).toBe('optional');
+    expect(SPEC_OPTIONS.unwrap()._zod.def.type).toBe('never');
+    expect(SPEC_OPTIONS.description).toMatch(/^\[REMOVED\] /);
+    expect(REFUSAL).toMatch(/^A list view's `options` bag was removed in @objectstack\/spec /);
+    expect(REFUSAL).toContain('Move each `options.KIND` block to `KIND`');
   });
 
   it('the authoring list view declares no bag at all', () => {
@@ -131,90 +105,42 @@ describe('objectui#6152 round 12 — the installed list overlay\'s `options` bag
   });
 });
 
-/* ── 2. The mirror IS the bag ────────────────────────────────────────────────── */
+/* ── 2. The mirror IS the tombstone ──────────────────────────────────────────── */
 
-describe('objectui#6152 round 12 — `ListViewSchema.options` takes the overlay\'s bag by reference', () => {
-  it('is `optional` around a STRICT object with the bag\'s key set and the bag\'s own error map', () => {
-    expect(MIRROR_BAG_OPTIONAL._zod.def.type).toBe('optional');
-    expect(catchallOf(MIRROR_BAG)).toBe('never');
-    expect(Object.keys(MIRROR_BAG.shape).sort()).toEqual(KINDS);
-    expect(MIRROR_BAG._zod.def.error).toBe(SPEC_BAG._zod.def.error);
-  });
-
-  it.each(KINDS)('%s: strict, fully optional, every slot member present, nothing beside them but refusal arms', (k) => {
-    const block = MIRROR_BAG.shape[k].unwrap();
-    expect(catchallOf(block)).toBe('never');
-    expect(requiredOf(block)).toEqual([]);
-    const slotKeys = Object.keys(SPEC_SLOTS[k].unwrap().shape);
-    expect(slotKeys.filter((key) => !(key in block.shape))).toEqual([]);
-    const local = Object.keys(block.shape).filter((key) => !slotKeys.includes(key)).sort();
-    expect(local).toEqual([...(ARMS[k] ?? [])].sort());
-    for (const key of local) {
-      expect(block.shape[key].safeParse(undefined).success).toBe(true);
-      for (const value of ['x', 1, true, ['x'], {}]) expect(block.shape[key].safeParse(value).success).toBe(false);
-    }
-  });
-
-  it('kanban, gallery and timeline ARE this package\'s top-level blocks; calendar is its block made partial', () => {
-    const top = (ListViewSchema as unknown as Zod).shape;
-    for (const k of ['kanban', 'gallery', 'timeline']) expect(MIRROR_BAG.shape[k].unwrap(), k).toBe(top[k].unwrap());
-    expect(Object.keys(MIRROR_BAG.shape.calendar.unwrap().shape).sort()).toEqual(Object.keys(top.calendar.unwrap().shape).sort());
-    expect(requiredOf(top.calendar.unwrap())).toEqual(['startDateField']);
+describe('#25923 — `ListViewSchema.options` takes the overlay\'s tombstone by reference', () => {
+  it('is the very member the spec declares', () => {
+    expect(MIRROR_OPTIONS).toBe(SPEC_OPTIONS);
   });
 });
 
-/* ── 3. Verdict equality with the spec's bag ─────────────────────────────────── */
+/* ── 3. Every door refuses a bag, whatever it holds ──────────────────────────── */
 
-/** Bag documents none of which names a refusal arm (section 4 is where the faces differ on purpose). */
-const EQUALITY: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+const BAGS: ReadonlyArray<readonly [string, unknown]> = [
   ['an empty bag', {}],
-  ['the bag app-shell\'s object page relays', {
-    kanban: { groupByField: 'stage', titleField: 'name', columns: ['name'] },
-    calendar: { startDateField: 'starts_at' },
-    timeline: { startDateField: 'starts_at', titleField: 'name' },
-    map: { locationField: 'address', titleField: 'name' },
-    gallery: { coverField: 'logo', titleField: 'name' },
-    gantt: { startDateField: 'starts_at', endDateField: 'ends_at', titleField: 'name' },
-    tree: { parentField: 'parent', labelField: 'name' },
-    chart: { chartType: 'bar', dataset: 'deal_ds', dimensions: ['stage'], values: ['total'] },
-  }],
-  ['partial blocks (no required member asked)', { kanban: { titleField: 'name' }, timeline: { titleField: 'name' }, calendar: { titleField: 'name' }, chart: { chartType: 'bar' } }],
+  ['the bag app-shell\'s object page used to relay', RELAYED_BLOCKS],
+  ['partial blocks', { kanban: { titleField: 'name' }, chart: { chartType: 'bar' } }],
   ['`options.grid`', { grid: {} }],
-  ['a key that is no kind', { zzqxNotAKind: true }],
-  ['kanban: an undeclared key', { kanban: { swimlaneField: 'owner' } }],
-  ['gallery: an undeclared key', { gallery: { zzqxNoSuchField: 1 } }],
-  ['timeline: `descriptionField`', { timeline: { descriptionField: 'notes' } }],
-  ['timeline: `endField`', { timeline: { endField: 'ends_at' } }],
-  ['tree: `titleField`', { tree: { titleField: 'name' } }],
-  ['chart: the legacy axes', { chart: { chartType: 'bar', xAxisField: 'stage', yAxisFields: ['amount'], aggregation: 'sum' } }],
-  ['map: an undeclared key', { map: { locationField: 'address', zzqxNoSuchField: 1 } }],
-  ['gantt: an undeclared key', { gantt: { startDateField: 's', zzqxNoSuchField: 1 } }],
-  ['a kind that is not an object', { kanban: 42 }],
-  ['a field name that is a number', { kanban: { groupByField: 5 } }],
-  ['an unknown gallery card size', { gallery: { cardSize: 'huge' } }],
-  ['an unknown timeline scale', { timeline: { scale: 'decade' } }],
+  ['a bag that is not an object', 'kanban'],
 ];
 
-describe('objectui#6152 round 12 — verdict equality: the mirror answers as the spec\'s bag does', () => {
-  it.each(EQUALITY)('%s', (_label, bag) => {
-    expect(verdict(MIRROR_BAG.safeParse(bag))).toEqual(verdict(SPEC_BAG.safeParse(bag)));
-  });
+describe('#25923 — every door refuses `options` at `options`, with the spec\'s text', () => {
+  for (const [door, parse] of DOORS) {
+    it.each(BAGS)(`${door}: %s`, (_label, options) => {
+      const r = parse({ ...NODE, options });
+      expect(r.success).toBe(false);
+      const issue = r.error!.issues.find((i) => i.path.join('.') === 'options');
+      expect(issue, JSON.stringify(r.error!.issues)).toBeDefined();
+      expect(issue!.message).toBe(REFUSAL);
+    });
 
-  it('LIT CONTROL: the table holds accepted AND refused rows', () => {
-    const outcomes = EQUALITY.map(([, bag]) => SPEC_BAG.safeParse(bag).success);
-    expect(outcomes).toContain(true);
-    expect(outcomes).toContain(false);
-  });
-
-  it('SANCTIONED DIFFERENCE: the mirror writes no default into a bag that did not carry it', () => {
-    // The spec's chart slot defaults `chartType`; this package strips imported
-    // defaults at its boundary (objectui#8317), so the parse returns the bag as written.
-    expect(SPEC_BAG.safeParse({ chart: {} }).data).toEqual({ chart: { chartType: 'bar' } });
-    expect(MIRROR_BAG.safeParse({ chart: {} }).data).toEqual({ chart: {} });
-  });
+    it(`${door}: LIT CONTROL — the same blocks written top-level parse`, () => {
+      const r = parse({ ...NODE, ...RELAYED_BLOCKS });
+      expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    });
+  }
 });
 
-/* ── 4. The named refusals, under `options.KIND` ─────────────────────────────── */
+/* ── 4. The named refusals, at the top-level block ───────────────────────────── */
 
 const REFUSED: ReadonlyArray<readonly [string, string, string | null]> = [
   ['kanban', 'groupField', 'groupByField'],
@@ -236,113 +162,33 @@ const TOP_BASE: Record<string, Record<string, unknown>> = {
   timeline: { startDateField: 'starts_at', titleField: 'name' },
 };
 
-describe('objectui#6152 round 12 — every named refusal applies under `options.KIND`, with ONE message', () => {
-  it.each(REFUSED)('%s.%s: the spec\'s bag refuses it as an unrecognized key', (k, key) => {
-    const r = SPEC_BAG.safeParse({ [k]: { [key]: valueOf(key) } });
-    expect(r.success).toBe(false);
-    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), keys: i.keys }))).toEqual([
-      { code: 'unrecognized_keys', path: k, keys: [key] },
-    ]);
-  });
-
-  it.each(REFUSED)('%s.%s: the mirror refuses it at its own path, with the top-level block\'s message (canonical: %s)', (k, key, canonical) => {
-    const nested = ListViewSchema.safeParse({ ...NODE, options: { [k]: { [key]: valueOf(key) } } }) as Parsed;
-    const issue = nested.error?.issues.find((i) => i.path.join('.') === `options.${k}.${key}`);
-    expect(issue?.code).toBe('invalid_type');
-    const topLevel = ListViewSchema.safeParse({ ...NODE, [k]: { ...TOP_BASE[k], [key]: valueOf(key) } }) as Parsed;
-    const top = topLevel.error?.issues.find((i) => i.path.join('.') === `${k}.${key}`);
-    expect(top?.code).toBe('invalid_type');
-    expect(issue?.message).toBe(top?.message);
-    if (canonical) expect(issue?.message).toContain(`Did you mean \`${key}\` → \`${canonical}\`?`);
-  });
-
+describe('#25923 — every named refusal the bag carried applies at the top-level block', () => {
   for (const [door, parse] of DOORS) {
-    it.each(REFUSED)(`${door}: a list-view node with options.%s.%s is refused at that key`, (k, key) => {
-      const r = parse({ ...NODE, options: { [k]: { [key]: valueOf(key) } } });
+    it.each(REFUSED)(`${door}: %s.%s is refused at that key (canonical: %s)`, (k, key, canonical) => {
+      const r = parse({ ...NODE, [k]: { ...TOP_BASE[k], [key]: valueOf(key) } });
       expect(r.success).toBe(false);
-      expect(codeAndPath(r)).toContainEqual({ code: 'invalid_type', path: `options.${k}.${key}` });
-    });
-
-    it(`${door}: LIT CONTROL — the bag app-shell's object page relays parses`, () => {
-      const r = parse({ ...NODE, options: EQUALITY[1][1] });
-      expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+      expect(codeAndPath(r)).toContainEqual({ code: 'invalid_type', path: `${k}.${key}` });
+      const issue = r.error!.issues.find((i) => i.path.join('.') === `${k}.${key}`);
+      if (canonical) expect(issue?.message).toContain(`Did you mean \`${key}\` → \`${canonical}\`?`);
     });
   }
 });
 
-/* ── 5. Undeclared keys and kinds, through every door ────────────────────────── */
+/* ── 5. The TypeScript face ──────────────────────────────────────────────────── */
 
-describe('objectui#6152 round 12 — what the bag does not declare is refused with the spec\'s own `unrecognized_keys`', () => {
-  const UNDECLARED: ReadonlyArray<readonly [string, Record<string, unknown>, string, string]> = [
-    ['`options.grid`', { grid: {} }, 'options', 'grid'],
-    ['a key that is no kind', { zzqxNotAKind: true }, 'options', 'zzqxNotAKind'],
-    ['kanban.swimlaneField', { kanban: { swimlaneField: 'owner' } }, 'options.kanban', 'swimlaneField'],
-    ['timeline.descriptionField', { timeline: { descriptionField: 'notes' } }, 'options.timeline', 'descriptionField'],
-    ['tree.titleField', { tree: { titleField: 'name' } }, 'options.tree', 'titleField'],
-    ['chart.xAxisField', { chart: { xAxisField: 'stage' } }, 'options.chart', 'xAxisField'],
-  ];
-  for (const [door, parse] of DOORS) {
-    it.each(UNDECLARED)(`${door}: %s`, (_label, bag, path, key) => {
-      const r = parse({ ...NODE, options: bag });
-      expect(r.success).toBe(false);
-      const issue = r.error!.issues.find((i) => i.path.join('.') === path);
-      expect({ code: issue?.code, keys: issue?.keys }).toEqual({ code: 'unrecognized_keys', keys: [key] });
-    });
-  }
-
-  it('`options.grid` is refused with the spec\'s guidance: a grid has no per-kind block', () => {
-    const r = ListViewSchema.safeParse({ ...NODE, options: { grid: {} } }) as Parsed;
-    const message = r.error?.issues.find((i) => i.path.join('.') === 'options')?.message ?? '';
-    expect(message).toContain('A grid has no per-kind block');
-    expect(message).toBe(SPEC_BAG.safeParse({ grid: {} }).error!.issues[0].message);
-  });
-});
-
-/* ── 6. The TypeScript face ──────────────────────────────────────────────────── */
-
-type Bag = NonNullable<TsListViewSchema['options']>;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 
-describe('objectui#6152 round 12 — the TypeScript face is closed the same way', () => {
-  it('the bag type has the eight kinds and no index signature', () => {
-    // `closed` is the no-index-signature half. The eight kinds are members, not
-    // a closed list: the bag's keys are the spec's, so a kind the spec adds is
-    // not a red here.
-    const closed: string extends keyof Bag ? 'open' : 'closed' = 'closed';
-    const kinds: Equal<
-      Exclude<'kanban' | 'calendar' | 'gallery' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree', keyof Bag>,
-      never
-    > = true;
-    expect([closed, kinds]).toEqual(['closed', true]);
-  });
-
-  it('refuses each narrowed key at the authoring site, and compiles the lit control', () => {
-    const live: Bag = {
-      kanban: { groupByField: 'stage', columns: ['name'], titleField: 'name' },
-      calendar: { titleField: 'name' },
-      gallery: { coverField: 'logo' },
-      timeline: { titleField: 'name' },
-      map: { locationField: 'address' },
-      chart: { chartType: 'bar' },
-    };
-    const refused: Bag[] = [
-      // @ts-expect-error — `grid` is not a kind of the bag.
-      { grid: {} },
-      // @ts-expect-error — `cardFields` is a refusal arm.
-      { kanban: { cardFields: ['name'] } },
-      // @ts-expect-error — `groupField` is a refusal arm.
-      { kanban: { groupField: 'stage' } },
-      // @ts-expect-error — `imageField` is a refusal arm.
-      { gallery: { imageField: 'logo' } },
-      // @ts-expect-error — `descriptionField` is not a member of the timeline block.
-      { timeline: { descriptionField: 'notes' } },
-      // @ts-expect-error — the chart block is dataset-bound; the legacy axes are not members.
-      { chart: { xAxisField: 'stage' } },
-      // @ts-expect-error — `titleField` is not a member of the tree block.
-      { tree: { titleField: 'name' } },
+describe('#25923 — the TypeScript face carries no bag', () => {
+  it('no bag compiles on a list view, and the same block compiles top-level', () => {
+    const live: TsListViewSchema = { type: 'list-view', objectName: 'deal', kanban: { groupByField: 'stage', columns: ['name'] } };
+    const refused: TsListViewSchema[] = [
+      // @ts-expect-error — the bag is retired: write the block top-level.
+      { type: 'list-view', objectName: 'deal', options: { kanban: { groupByField: 'stage', columns: ['name'] } } },
+      // @ts-expect-error — even an empty bag.
+      { type: 'list-view', objectName: 'deal', options: {} },
     ];
     expect(live.kanban?.groupByField).toBe('stage');
-    expect(refused).toHaveLength(7);
+    expect(refused).toHaveLength(2);
   });
 
   it('`ListViewTimelineConfig` is the list view\'s own `timeline` block, closed, with `dateField` refused', () => {

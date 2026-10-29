@@ -2175,11 +2175,12 @@ export function compileSnippets({
  * read by nothing: `tsc` sees a STRING, `tsup` copies it through, and every doc
  * gate's scan surface — this one's `listDocuments()` included — stops at
  * `content/docs`, the per-app docs trees and the package READMEs. The class has
- * two known members. `packages/vscode-extension/src/extension.ts`'s
- * `generateReactComponent()` emitted a phantom `registerDefaultRenderers`
- * import into every file the *Export to React* command ever wrote for a user
- * (fixed by PR objectui#7863, measured there as `tsc` exit 2 / TS2305 on the
- * emitted file); `packages/cli/src/utils/app-generator.ts` is objectui#7472,
+ * two known members. The VS Code extension's `generateReactComponent()`
+ * emitted a phantom `registerDefaultRenderers` import into every file the
+ * *Export to React* command ever wrote for a user (fixed by PR objectui#7863,
+ * measured there as `tsc` exit 2 / TS2305 on the emitted file; the package
+ * left the workspace with objectstack#25910);
+ * `packages/cli/src/utils/app-generator.ts` is objectui#7472,
  * still open and still unfixed.
  *
  * ⭐ REPORT-ONLY, and the CENSUS is the deliverable. The card's binding
@@ -2895,8 +2896,9 @@ export function deriveEmittedManifestPaths(root = repoRoot, byPackage = {}, pack
  * Both halves, because on this corpus neither is enough on its own: the
  * directory is what the walk collected and what a reader greps for, and the
  * manifest name is what the rest of this gate's output is keyed by — and they
- * disagree. `packages/vscode-extension` publishes under the name `object-ui`,
- * so a split keyed on the name alone prints a row nobody can find on disk.
+ * can disagree (the VS Code extension's `object-ui` did, until objectstack#25910
+ * removed it), so a split keyed on the name alone prints a row nobody can find
+ * on disk.
  *
  * @param {string} file
  * @param {Record<string, string>} packageDirOf

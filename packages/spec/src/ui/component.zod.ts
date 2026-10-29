@@ -8337,11 +8337,12 @@ const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', 
  *   {@link ListViewSchema} keeps `columns` required, because an authored list
  *   view is a full config. The row judges `properties` only, so it cannot see
  *   the node's binding: `columns` is optional whatever the binding.
- * - `options` judged PER KIND — the overlay member's own bag, by reference
- *   (`VIEW_METADATA_MEMBERS.listOverlay.shape.options`): each `options.KIND` is
- *   judged by that kind's block, an unknown key refused by name, and
- *   `options.grid` refused with its own guidance (a grid has no per-kind
- *   block).
+ * - `options` — the overlay member's own key, by reference
+ *   (`VIEW_METADATA_MEMBERS.listOverlay.shape.options`). [#25923] The bag is
+ *   retired there, so it is a tombstone here too: a page `list-view` node's
+ *   `options` is flagged whole with the overlay's prescription (each
+ *   `options.KIND` block moves to `KIND`). The row is the lint's judge, so a
+ *   stored page still loads and the finding names the move.
  *
  * ## The retired aliases
  *

@@ -182,7 +182,6 @@ export const DESIGNER_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'appDesigner.fieldDesigner.unique': 'Unique',
   'appDesigner.fieldDesigner.readOnly': 'Read Only',
   'appDesigner.fieldDesigner.hidden': 'Hidden',
-  'appDesigner.fieldDesigner.externalId': 'External ID',
   'appDesigner.fieldDesigner.trackHistory': 'Track History',
   'appDesigner.fieldDesigner.defaultValue': 'Default Value',
   'appDesigner.fieldDesigner.placeholder': 'Placeholder',

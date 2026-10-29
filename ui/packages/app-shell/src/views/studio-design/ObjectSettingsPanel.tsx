@@ -27,7 +27,10 @@
  *     first (`7a90afdf9`).
  *  3. Semantic roles (ADR-0085) — the cross-surface presentation roles:
  *     `nameField`, `stageField` (string | false | unset), `highlightFields`
- *     (an ordered list with a strip preview — `HighlightFieldsEditor`).
+ *     (an ordered list with a strip preview — `HighlightFieldsEditor`), and
+ *     `relatedLists` (objectstack#27069), the business order of the record
+ *     page's related lists, over the object's inbound relationships
+ *     (`RelatedListsEditor`).
  *     These are the ONLY presentation knobs the protocol carries, so the
  *     builder must make them directly editable — otherwise designers fall
  *     back to guessing which heuristic picked their title/stepper/columns.
@@ -54,6 +57,7 @@ import { readFields, type FieldEntry } from '../metadata-admin/previews/object-f
 import { t, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { cbpMasterRefusal, requireCbpMasterDetails } from './owd-sharing.js';
 import { HighlightFieldsEditor } from './HighlightFieldsEditor.js';
+import { RelatedListsEditor } from './RelatedListsEditor.js';
 
 /** The item a stored value none of a picker's options carries is shown by. */
 const OUTSIDE_OPTIONS = 'outside';
@@ -381,6 +385,34 @@ export function ObjectSettingsPanel({
                   options={[
                     { value: '', label: t('engine.studio.settings.addFieldOption', locale) },
                     ...highlightCandidates.map(fieldOption),
+                  ]}
+                />
+              )}
+            />
+          </div>
+
+          {/* relatedLists (objectstack#27069) */}
+          <div>
+            <span className="mb-1 block text-[11px] text-muted-foreground">
+              {t('engine.studio.settings.relatedLists', locale)}
+            </span>
+            <RelatedListsEditor
+              name={name}
+              draft={draft}
+              onChange={(next) => onPatch({ relatedLists: next })}
+              disabled={disabled}
+              locale={locale}
+              renderAdd={(options, add) => (
+                <SettingsPicker
+                  testId="related-lists-add-select"
+                  value=""
+                  onPick={(v) => {
+                    if (v) add(v);
+                  }}
+                  className={PICKER_INLINE}
+                  options={[
+                    { value: '', label: t('engine.studio.settings.relatedListsAdd', locale) },
+                    ...options,
                   ]}
                 />
               )}

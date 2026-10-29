@@ -109,7 +109,7 @@ const ROWS: ReadonlyArray<{ key: string; valid: unknown; wrong: unknown }> = [
   { key: 'modalSize', valid: 'lg', wrong: 'huge' },
   { key: 'modalCloseButton', valid: false, wrong: 'no' },
   { key: 'mobile', valid: { stickyActions: true, stepper: 'auto', stepperMinFields: 6 }, wrong: { stepper: 'sometimes' } },
-  { key: 'buttons', valid: { submit: { show: true, label: 'Save' }, reset: { show: false } }, wrong: { submit: { show: 'yes' } } },
+  { key: 'buttons', valid: { submit: { show: true, label: 'Save' }, cancel: { show: false } }, wrong: { submit: { show: 'yes' } } },
   { key: 'defaults', valid: { status: 'open', priority: 2 }, wrong: ['status'] },
   { key: 'subforms', valid: [{ childObject: 'order_line', minRows: 1 }], wrong: [{ relationshipField: 'order' }] },
 ];

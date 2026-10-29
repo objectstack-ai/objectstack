@@ -26,12 +26,13 @@ metadata:
 - You need a **state machine** or **approval process** for a business object.
 - You are setting up **event-driven triggers** (record create/update/delete).
 - You need **scheduled automation** (daily reports, data cleanup).
+- You are **integrating a vendor system** or receiving its callback.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` here is an **Expression** envelope evaluated
 > by `@objectstack/formula`. A slot takes a plain CEL string; the
 > `P\`...\`` / `cel\`...\`` tags wrap the same string with author-time validation.
-> Both parse — pick one per file (the example apps use plain strings). See
+> Both parse — pick one per file. See
 > **objectstack-formula** for the CEL contract, stdlib and legacy → CEL table.
 
 ---
@@ -46,14 +47,14 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 |:-----|:------------|
 | `autolaunched` | Runs without user interaction — triggered by events, APIs, or other flows |
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
-| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** (daily cleanup, weekly reports) — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
-| `record_change` | Fires automatically on record create/update/delete (bind via the `start` node's `triggerType`). `autolaunched` + the same `record-*` binding behaves identically — the engine reads the start node either way; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secret` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
+| `record_change` | Fires automatically on record create/update/delete (bind via the `start` node's `triggerType`). `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
+| `api` | Inbound **webhook** — needs a start-node `secretRef` (or a literal `secret`; see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
 
 ### Flow Node Types
 
-Flows are built from **20 built-in node types** (plugins register more via
-`registerNodeExecutor`, e.g. `approval` below):
+Flows are built from **20 built-in node types** (plugins register more, e.g.
+`approval`):
 
 #### Control Flow
 
@@ -61,14 +62,14 @@ Flows are built from **20 built-in node types** (plugins register more via
 |:-----|:--------|
 | `start` | Entry point — every flow has exactly one |
 | `end` | Exit point — can have multiple (early exit, error exit) |
-| `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config (see the approval example below) |
+| `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
 | `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope (`{ dialect: 'cel', source: 'rows' }`) or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end — no split/join pair to mis-wire |
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke a subflow once per item of `config.collection` (shaped as `loop`'s); each iteration may pause (batch approvals) |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
 | `subflow` | Invoke another flow (reusable composition) |
-| `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms the mapper lowers a `parallel` / `try_catch` container INTO (`automation/control-flow.zod.ts`). Author the container |
+| `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
 
@@ -84,9 +85,9 @@ Flows are built from **20 built-in node types** (plugins register more via
 
 | Node | Purpose |
 |:-----|:--------|
-| `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there. Route by shape — a header credential → a declarative connector (`bearer` / `basic` / `api-key`) with `auth.credentialRef`; a query-string key → `api-key` with `paramName`; a path-secret webhook url → a token-authenticated connector such as `slack` — called via `connector_action` |
-| `notify` | Send a notification through the messaging service (inbox channel by default) |
-| `connector_action` | Invoke a pre-built integration connector |
+| `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action` |
+| `notify` | Send a notification through the messaging service (inbox by default) |
+| `connector_action` | Dispatch an action of a declared connector (a `connectors:` entry with a `provider`, § *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is sent as written — no CEL or `{{ }}` in it |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused; never hand-roll a button label or step counter into `fields` |
 
@@ -94,12 +95,12 @@ Flows are built from **20 built-in node types** (plugins register more via
 
 | Node | Purpose |
 |:-----|:--------|
-| `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch (contributed by `plugin-approvals`) |
+| `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch (from `plugin-approvals`) |
 
 ### `notify` — the most-used node type
 
-`NotifyConfigSchema` (`automation/io-node-config.zod.ts`) is `strictObject` — an
-undeclared key is a named parse error. **RAW** keys are read as written: a
+`NotifyConfigSchema` is `strictObject` — an undeclared key is a named parse
+error. **RAW** keys are read as written: a
 `{token}` in one is refused.
 
 ```ts
@@ -120,37 +121,25 @@ undeclared key is a named parse error. **RAW** keys are read as written: a
 
 ### Flow Variables
 
-Every flow defines input/output variables. `variables` is an **array** of
-`{ name, type, isInput, isOutput }` entries — not a name-keyed map, and there
-is no `label` property on a variable:
+`variables` is an **array** of `{ name, type, isInput, isOutput }` entries —
+not a name-keyed map; a variable has no `label`:
 
 ```typescript
 variables: [
-  {
-    name: 'case_id',
-    type: 'text',
-    isInput: true,    // passed in when flow is invoked
-    isOutput: false,
-  },
-  {
-    name: 'approval_result',
-    type: 'boolean',
-    isInput: false,
-    isOutput: true,   // returned when flow completes
-  },
+  { name: 'case_id', type: 'text', isInput: true },             // passed in when invoked
+  { name: 'approval_result', type: 'boolean', isOutput: true }, // returned on completion
 ],
 ```
 
-→ Moved to [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
+→ [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
 
 ### Failure routing & `runAs`
 
 > **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
 > routes a failed node to a handler instead of ending the run. **`type: 'fault'`
-> is what routes — a `label: 'error'` alone does nothing:** the edge stays
-> ordinary, and every unconditional out-edge traverses on SUCCESS, so the
-> handler would run when the node succeeds and never when it fails
-> (`objectstack validate` reports `flow-error-label-not-fault`).
+> is what routes — a `label: 'error'` alone does nothing:** an ordinary edge
+> traverses on SUCCESS, so the handler would run on success and never on
+> failure (`objectstack validate` reports `flow-error-label-not-fault`).
 > A handled failure does NOT consume a flow-level `errorHandling.retry`, which
 > replays the flow from the start — prefer a fault edge when the failure is
 > local. The handler reads `{{ <nodeId>.error }}` (or run-wide
@@ -167,10 +156,10 @@ variables: [
 > `update_record` alike — the step reports success but the value never lands,
 > and the drop is named in the step's warnings. A flow that
 > maintains a `readonly` field (approval stamps, conversion flags, SLA
-> markers, rollups) must run `runAs: 'system'`, the trusted-writer channel.
+> markers, rollups) must run `runAs: 'system'`.
 > `os validate` / `os build` fail a `runAs:'user'` `update_record` that writes
-> a `readonly` field, so the mismatch surfaces at build time, not as wrong data
-> days later. (`readonlyWhen` fields are the same story, per record state —
+> a `readonly` field, so it surfaces at build time. (`readonlyWhen` fields are
+> the same story, per record state —
 > flagged as a warning.) Do **not** work around this by removing `readonly`;
 > that loses the field's edit protection.
 
@@ -232,8 +221,8 @@ variables: [
 
 ## Valid-but-silently-wrong (passes build, fails at runtime)
 
-Legal metadata that authors — AI especially — get wrong; most are caught by
-`objectstack build`, but write them right the first time:
+Legal metadata authors get wrong; most are caught by `objectstack build` —
+write them right the first time:
 
 1. **A value slot takes a literal or a CEL envelope — never a `{…}` token.**
    In `assignments.*`, `fields.*`, `subflow` / `map` `input.*`, `script`
@@ -272,11 +261,10 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
 3. **`script` nodes call a registered function — that is all they do.** Set
    `config.function` to a function registered via
    `defineStack({ functions: { my_fn: (ctx) => … } })`. It is **required**: an
-   empty `script` node refuses at execute, and one pointing at an unregistered
-   function fails loudly.
+   empty `script` node refuses at execute; an unregistered function fails loudly.
 
-   There is no other dispatch form: use **`notify`** for delivery, a
-   **`connector_action`** on the `slack` connector for Slack, a function for logic.
+   There is no other dispatch form: `notify` for delivery, `connector_action`
+   for a vendor system, a function for logic.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
    database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
@@ -297,8 +285,8 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
    } },
    ```
 
-   If you genuinely need data-lifecycle **side effects** (read/write other records),
-   that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`.
+   Data-lifecycle **side effects** (read/write other records) are an L2 **hook**
+   (objectstack-data) — hooks get `ctx.api`.
 
    A function that writes where the platform cannot see **declares** it, so the
    run reports "cannot say" rather than `acted: 0`:
@@ -324,7 +312,7 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
 
 ---
 
-→ State Machines & Approvals moved to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
+→ State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
 
 ---
 
@@ -363,7 +351,7 @@ node `config`**:
 
 - **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under the secret; refused when `t` is over 300 s from the server clock.
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
-- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer, never in-band.
+- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
 
 ### Trigger Types (start-node `config.triggerType`)
@@ -405,47 +393,58 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > `previous` (before the change) vs `record` (after) in an update trigger's
 > condition: see [objectstack-formula](../objectstack-formula/SKILL.md) §5.
 
-→ Moved to [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
+→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
+
+---
+
+## Integrations are declared, not coded
+
+A vendor system reachable over HTTP (OpenAPI, remote MCP, plain REST) is a
+`connectors:` entry inside the app — `provider: 'openapi' | 'mcp' | 'rest'`, a
+packaged spec, `auth.credentialRef` (the customer's administrator supplies the
+value) — dispatched by `connector_action`; an inbound vendor callback is an
+`api` flow. Never a plugin, never an `http` node holding a credential. Recipes,
+credential hand-off, loader limits: [references/integration-recipes.md](./references/integration-recipes.md).
+Platform code only when one holds — and then it is the platform's, filed as
+a card; the app still writes none: the protocol is not HTTP; the work writes
+identity objects (users, units, positions); it processes files or binaries
+locally; one fixed action contract must span several vendors; the callback's
+signature is outside the `api` door's HMAC. A document the loader cannot take
+yet (YAML, Swagger 2.0, `$ref`, OAuth, request signing) is a gap named against
+its platform card, never a reason to write code.
 
 ---
 
 ## CRM Automation Blueprint
 
-Default approach for metadata apps — model the business lifecycle in
-Flow/Approval metadata first, reserve custom code for edge-case integrations —
-in this CRM-style structure:
+Default approach — model the business lifecycle in Flow/Approval metadata
+first (integrations: above) — in this CRM-style structure:
 
 | Automation Type | Typical Location | Pattern |
 |:--|:--|:--|
-| Screen flow | `src/flows/*.flow.ts` | Use explicit `variables`, node graph (`nodes` + `edges`), and decision branches |
-| Approval flow | `src/flows/*.flow.ts` | A flow with `approval` node(s) — config and branching in the approvals reference |
+| Flow (screen / approval / scheduled) | `src/flows/*.flow.ts` | explicit `variables`, `nodes` + `edges`; approval config in the approvals reference |
 | Flow registry | `src/flows/index.ts` | Export `allFlows: Flow[]` and register centrally in `defineStack({ flows })` |
 
 ---
 
 ## Verify your work
 
-A bare ref (`status == 'open'`) resolves — the engine flattens the record's
-fields into scope — so a typo there is only an advisory did-you-mean.
-`record.status` stays canonical, and `os validate` errors on an unknown
-`record.<field>`:
+A bare ref (`status == 'open'`) resolves (fields are flattened into scope), so
+a typo there is only an advisory did-you-mean; `record.status` stays canonical
+and `os validate` errors on an unknown `record.<field>`:
 
 ```bash
-os validate     # CEL/predicate validation (record.<field> existence) + schema
+os validate     # CEL/predicate validation + schema
 # or: os build  # the same gates, plus emits dist/
 ```
 
-It runs the ADR-0032 gate over every condition, edge guard, validation and
-sharing rule. In a scaffolded project: `npm run validate`.
+In a scaffolded project: `npm run validate`.
 
 ---
 
 ## References
 
-The send-back shape has a graded eval at
-[evals/approvals/test-revise-loop.md](./evals/approvals/test-revise-loop.md).
-
-See [references/_index.md](./references/_index.md) for the Zod schemas (one-line
-descriptions, pointers into `node_modules/@objectstack/spec/src/`). Always `Read`
-the source for exact field shapes; do not rely on memory of property names.
+See [references/_index.md](./references/_index.md) for pointers to the Zod
+schemas in `node_modules/@objectstack/spec/src/` — `Read` the source for exact
+field shapes; never rely on memory.
 

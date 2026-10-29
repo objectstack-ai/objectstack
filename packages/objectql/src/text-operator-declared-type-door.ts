@@ -262,17 +262,21 @@ export function assertTextOperatorTargetsAreStringCapable(
   const declared = hit.returnType === undefined
     ? `${hit.declaredType} field`
     : `${hit.declaredType} field returning ${hit.returnType}`;
+  // [#27173] The verdict, the prescription, then the consequence: a client
+  // reads 500 characters of this (`CLIENT_MESSAGE_MAX`, `@objectstack/types`),
+  // so what to write instead has to land inside them, and only the reasoning
+  // after it may be cut. Pinned in `filter-refusal-prescription-cap.test.ts`.
   throw invalidFilterError(
     `${operation}('${object}'): filter on '${hit.field}' aims the text operator `
     + `${hit.operator} at a declared ${declared} at ${hit.path}. A ${hit.declaredType} value is `
-    + 'never a string on any backend, so no record can be matched by reading one as text — the '
-    + 'operator can only be aimed at this field by mistake. The filter was NOT applied: beneath '
+    + `never a string on any backend. Compare '${hit.field}' with an operator its declared `
+    + 'type can answer ($eq / $ne / $in / $gt / $gte / $lt / $lte, a range for a temporal or '
+    + 'numeric field), or aim the text operator at a text-valued field. The filter was NOT '
+    + 'applied. No record can be matched by reading one as text, so the operator can only be '
+    + 'aimed at this field by mistake; beneath this door the predicate is answered by the '
     // The stored-value row is #14079's; the id stays in this comment rather than in
     // the message, which reaches authors and operators who cannot resolve a tracker id.
-    + 'this door the predicate is answered by the declared no-match rule — a positive '
-    + 'text operator matches NO row and $notContains matches EVERY row — an answer no caller can '
-    + `tell apart from a real result set. Compare '${hit.field}' with an operator its declared `
-    + 'type can answer ($eq / $ne / $in / $gt / $gte / $lt / $lte, a range for a temporal or '
-    + 'numeric field), or aim the text operator at a text-valued field.',
+    + 'declared no-match rule — a positive text operator matches NO row and $notContains '
+    + 'matches EVERY row — an answer no caller can tell apart from a real result set.',
   );
 }

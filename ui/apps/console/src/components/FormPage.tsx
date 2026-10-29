@@ -1432,8 +1432,8 @@ export function readPrefill(
  * One `FormView.buttons` entry as this page draws it (objectstack-ai/objectstack#26843):
  * shown unless the author wrote `show: false`, and the authored label — an
  * `I18nLabel`, resolved against the visitor's language — or `''` when there is
- * none, so the caller's own label shows. `buttons.reset` is never read: this
- * page draws no reset button.
+ * none, so the caller's own label shows. A form has no reset button: the spec
+ * refuses `buttons.reset` (objectstack-ai/objectstack#27153).
  */
 export function readFormButton(
   config: { show?: boolean; label?: unknown } | undefined,

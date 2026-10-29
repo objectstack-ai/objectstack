@@ -27,7 +27,7 @@ type Rec = Record<string, unknown>;
 const OWN_RECORD = 'has(record.id) && record.id == ctx.user.id';
 
 describe('sys_user_detail — the Security tab is gated to the viewer\'s own record', () => {
-  const tabs = (SysUserDetailPage.slots as Rec).tabs as Rec;
+  const tabs = (SysUserDetailPage.regions![0]!.components as Rec[]).find((c) => c.type === 'page:tabs') as Rec;
   const items = (tabs.properties as Rec).items as Rec[];
   const security = items.find((it) => (it.label as Rec).en === 'Security')!;
 

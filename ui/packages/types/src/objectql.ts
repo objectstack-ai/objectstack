@@ -2078,16 +2078,15 @@ export interface ObjectFormSchema extends BaseSchema {
 
   /**
    * Structured, spec-aligned form action-button config — the authoring surface
-   * for submit/cancel/reset visibility + labels, mirroring `@objectstack/spec`
+   * for submit/cancel visibility + labels, mirroring `@objectstack/spec`
    * `FormViewSchema.buttons` (framework#1894 / objectstack-ai/objectstack#2998). ObjectForm normalizes
-   * this down onto the flat `showSubmit`/`submitText`/`showCancel`/`cancelText`/
-   * `showReset` props at render, so prefer this over those flat keys (which
+   * this down onto the flat `showSubmit`/`submitText`/`showCancel`/`cancelText`
+   * props at render, so prefer this over those flat keys (which
    * remain only as deprecated back-compat). An explicitly-set flat key wins.
    */
   buttons?: {
     submit?: { show?: boolean; label?: string };
     cancel?: { show?: boolean; label?: string };
-    reset?: { show?: boolean; label?: string };
   };
 
   /**
@@ -2596,8 +2595,8 @@ export interface ObjectViewSchema extends BaseSchema {
    * `filter` as `{ field, operator, value }` rules and declares each view kind's
    * config in the top-level block of that kind (`kanban`, `calendar`, …).
    * ⛔ The legacy `options` bag is not a member: a stored body that carries one
-   * is folded onto the top-level blocks by `@object-ui/app-shell`'s
-   * `ViewPreview` before it reaches this record. `NamedListView` is no longer
+   * is folded onto the top-level blocks by the server's ADR-0087 conversion
+   * `list-view-options-bag-folded` before it reaches this record (objectstack#25923). `NamedListView` is no longer
    * this member's type, and its retirement follows objectui#7924.
    */
   listViews?: Record<string, z.input<typeof SpecObjectListViewSchema>>;
@@ -2878,8 +2877,13 @@ export interface NamedListView {
   /** Sort configuration */
   sort?: Array<{ field: string; order: 'asc' | 'desc' }>;
   
-  /** Type-specific options (kanban groupField, calendar startDateField, etc.) */
-  options?: Record<string, any>;
+  /**
+   * @deprecated RETIRED (objectstack#25923) — write each per-kind block at the
+   * top level of the view (`kanban`, `calendar`, `gallery`, `timeline`, `gantt`,
+   * `map`, `tree`, `chart`). The protocol retired the legacy `options` bag, and
+   * the server folds a stored one onto those blocks before the row is served.
+   */
+  options?: never;
 
   /* ── objectui#7924 — RETIRED on the authoring face (director-seat ruling,
    * bucket ② A and bucket ③) ────────────────────────────────────────────────
@@ -3642,7 +3646,7 @@ export interface ObjectMapSchema extends BaseSchema {
    * Field containing location data (or lat/long pair).
    *
    * INTERNAL FORM. This is the flat spelling ObjectView / ListView produce when
-   * they flatten `options.map`; it predates the `map` block and stays declared
+   * they flatten the view's `map` block; it predates that block and stays declared
    * only so that already-published authoring keeps type-checking. New authoring
    * belongs in `map.locationField`, which wins when both are present
    * (objectui#5018).

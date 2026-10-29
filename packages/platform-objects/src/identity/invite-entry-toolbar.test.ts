@@ -10,13 +10,13 @@
 // ⚠️ Where that tab order is DECLARED (#16270 measured that it is not declared
 // here): `SysOrganizationDetailPage` in `../pages/sys-organization.page.ts`,
 // handed to the runtime by plugin-auth's `pages: [...]`. It is a
-// `kind: 'slotted'` record page whose `slots.tabs` override REPLACES the
-// synthesized tab strip outright — objectui's `buildDefaultPageSchema` pushes
-// the authored node and never calls `buildDefaultTabs` — giving exactly
-// Members / Invitations / Teams with Members at index 0. The `relatedList:
-// 'primary'` prominence key is a different mechanism and no object under
-// `identity/` declares it; with the `tabs` slot present it would not move this
-// page if one did. So this pin's premise is declared metadata, not folklore —
+// `kind: 'full'` record page that authors its own `page:tabs` strip, drawn as
+// authored (no synthesized strip, no `buildDefaultTabs`), giving exactly
+// Members / Invitations / Teams with Members at index 0. (It was a slotted page
+// whose `tabs` slot replaced the strip until that slot retired,
+// objectstack#27053.) The `relatedList: 'primary'` prominence key is a
+// different mechanism and no object under `identity/` declares it; on a full
+// page it would not move this page if one did. So this pin's premise is declared metadata, not folklore —
 // but the declaration is one directory over, not in the objects it constrains.
 //
 // Two halves are pinned here, because the fix has two failure modes and they

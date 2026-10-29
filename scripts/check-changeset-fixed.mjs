@@ -35,18 +35,14 @@ const repoRoot = resolve(__dirname, '..');
  * Private workspace packages that belong in the `fixed` group anyway, each with
  * the reason it is there. Every other name in the group must be public.
  *
- * `object-ui` is the VS Code extension (`ui/packages/vscode-extension`). It is
- * never published to npm, but it ships at the release's version: Tesla's ruling
- * of 2026-10-25 (decision 17b, ruling B, objectstack#25711) keeps it in the one
- * version group 「同一个版本号组」 the objectui merge created, as objectui's own
- * group had. A private package outside this list is still refused in the group,
- * so a package marked private by mistake cannot hide in it.
+ * Empty today: its one row, the VS Code extension, left the workspace under
+ * objectstack#25910's ruling. A private package outside this list is refused in
+ * the group, so a package marked private by mistake cannot hide in it; a new
+ * row needs its reason and the ruling that put it there.
  *
  * @type {Readonly<Record<string, string>>}
  */
-export const PRIVATE_FIXED_MEMBERS = Object.freeze({
-  'object-ui': 'the VS Code extension: never on npm, versioned with the release (decision 17b, objectstack#25711)',
-});
+export const PRIVATE_FIXED_MEMBERS = Object.freeze({});
 
 /**
  * Names of all non-private workspace packages.

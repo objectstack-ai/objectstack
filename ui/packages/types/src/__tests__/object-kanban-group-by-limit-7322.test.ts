@@ -148,7 +148,8 @@ const RETIRED_VIEW_LEVEL_ALIAS_SITES: ReadonlyArray<readonly [file: string, reti
   [
     'packages/plugin-list/src/ListView.tsx',
     'schema.options?.kanban?.groupField',
-    'if (schema.kanban?.groupByField || schema.options?.kanban?.groupByField) {',
+    // objectstack#25923 retired the bag leg of this gate: the block is read alone.
+    'if (schema.kanban?.groupByField) {',
   ],
   ['packages/plugin-view/src/ObjectView.tsx', 'kanbanCfg.groupField ||', 'kanbanCfg.groupByField ||'],
 ];

@@ -17,10 +17,11 @@ import { Task } from '../src/data/objects/task.object.js';
  *  - Task Detail is `kind: 'full'`. Such a page renders exactly the nodes it
  *    declares, and it declared no `page:header`, so there was no title bar for
  *    `record_header` actions and no ⋯ overflow for `record_more` ones.
- *  - Project Detail overrides the `tabs` slot with a `record:line_items` grid.
- *    That slot is a full replacement, so the synthesized Tasks related list
- *    went with it, and `record_related` actions render only on the rows of a
- *    related list inside a parent record.
+ *  - Project Detail authors its own tab strip with a `record:line_items` grid
+ *    (a `kind: 'full'` page; until #27053 a slotted page's `tabs` slot). An
+ *    authored strip replaces the synthesized one, so the synthesized Tasks
+ *    related list went with it, and `record_related` actions render only on
+ *    the rows of a related list inside a parent record.
  *
  * The assertions pin each host on the page the console picks for the object,
  * and hold the authored lists equal to the declarations they copy, so a new

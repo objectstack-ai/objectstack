@@ -176,7 +176,9 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
 
   it('answers null — keep the tabs — for a strip it cannot read', () => {
     const tabsSlot = { type: 'page:tabs', properties: { items: [{ label: 'Overview', value: 'overview', children: [] }] } };
-    expect(buildDefaultPageColumns(buildDefaultPageSchema(leadDef, { slots: { tabs: tabsSlot } }))).toBeNull();
+    // An authored strip (a `kind: 'full'` page's own; the slotted `tabs` slot
+    // that once carried one retired, objectstack#27053).
+    expect(buildDefaultPageColumns({ type: 'record', regions: [{ name: 'main', components: [tabsSlot] }] })).toBeNull();
 
     const gated = buildDefaultPageSchema(leadDef, { related: RELATED });
     const main = gated.regions.find((r: any) => r.name === 'main');

@@ -52,7 +52,7 @@ import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
-import { useRecordApprovals, recordLockedByApproval, isSubmitterOf } from '../hooks/useRecordApprovals.js';
+import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
@@ -902,18 +902,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   }, [assignedPage, assignedSlots, objectDef, namedPageBlocked]);
   const effectivePage = assignedPage || synthesizedPage;
   // ─── One page at two widths (objectstack#26678) ──────────────────────
-  // The synthesized default page — and a slotted page that keeps the default
-  // tab strip — is laid out by the width of the container it occupies: three
-  // resident columns from 1280 px, two from 1024 px, the tab strip below that
-  // and whenever this view is embedded (drawer / split pane), whatever the
+  // The synthesized default page — and a slotted page, which always keeps the
+  // default tab strip — is laid out by the width of the container it occupies:
+  // three resident columns from 1280 px, two from 1024 px, the tab strip below
+  // that and whenever this view is embedded (drawer / split pane), whatever the
   // screen. Measured on this view's root, never the viewport. An authored full
-  // page and an authored `slots.tabs` strip are drawn as authored, so they
-  // never measure. `null` until the first reading lands (a layout effect, so
-  // never painted): the page body is held for that one commit rather than
-  // mounting the tab strip only to replace it.
+  // page is drawn as authored, so it never measures (the slotted `tabs` slot
+  // that once opted a page out too retired, objectstack#27053). `null` until
+  // the first reading lands (a layout effect, so never painted): the page body
+  // is held for that one commit rather than mounting the tab strip only to
+  // replace it.
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
-  const pageColumnsEligible =
-    !assignedPage && !namedPageBlocked && !(assignedSlots && (assignedSlots as { tabs?: unknown }).tabs !== undefined);
+  const pageColumnsEligible = !assignedPage && !namedPageBlocked;
   const recordPageTier = useRecordPageTier(pageRootEl, { embedded: !!embedded, enabled: pageColumnsEligible });
   const pageInColumnTier = recordPageTier === 'two-column' || recordPageTier === 'three-column';
   // ─── The reader's column switches (objectstack#27052) ────────────────
@@ -1860,9 +1860,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const lockedForReader = !approvals.pendingRequest && approvals.recordLock?.locked === true;
   const { pending: approvalPending, locked: approvalLocked } = resolveApprovalLock({
     readAnswered: approvals.answered,
-    openApproval: approvals.pendingRequest
-      ? { locked: recordLockedByApproval(approvals.pendingRequest) }
-      : lockedForReader ? { locked: true } : null,
+    openApproval: openApprovalOf(approvals),
     recordStatus: (pageRecord as any)?.approval_status,
   });
   // How far the pending node's tally has got (objectstack#4478). Multi-approver

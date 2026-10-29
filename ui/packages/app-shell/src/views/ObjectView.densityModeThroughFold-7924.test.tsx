@@ -159,7 +159,7 @@ async function objectPageSchema(view: Record<string, unknown>): Promise<any> {
   // arrival is the signal the relay ran; waiting on the density itself would
   // hang rather than fail on a regression.
   await waitFor(() => {
-    expect(captured?.options).toBeTruthy();
+    expect(captured?.kanban).toBeTruthy();
   });
   return captured;
 }

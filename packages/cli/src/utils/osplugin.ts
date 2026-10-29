@@ -14,12 +14,10 @@
  *                               until `os plugin sign`; ADR §3.4)
  *
  * The control plane (cloud) stores this blob opaquely. The per-file
- * `integrity` map is computed here at build time and self-checked by the
- * `os plugin publish` preflight; re-verification at install/load-time
- * unpack is not implemented in this repo and is owned by the
- * future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
- * control plane (#11331). This module owns the two contracts the
- * runtime and cloud must agree on byte-for-byte:
+ * `integrity` map is computed here at build time, self-checked by the
+ * `os plugin publish` preflight, and re-verified at unpack by
+ * `os plugin install` (ADR-0025 §3.5 M1). This module owns the two
+ * contracts the runtime and cloud must agree on byte-for-byte:
  *
  *   1. The integrity digest STRING FORMAT — Subresource-Integrity style
  *      `sha256-<base64>` (matches ADR-0025 §3.2's example). See
@@ -28,7 +26,7 @@
  *      reader (node-tar, GNU tar) can unpack it. See {@link createTarGz}.
  *
  * Everything here is pure (no oclif / filesystem) so it can be unit-tested
- * and reused by `os plugin sign` / `publish`.
+ * and reused by `os plugin sign` / `publish` / `install`.
  */
 
 import { createHash } from 'node:crypto';
@@ -43,10 +41,9 @@ export interface ArchiveFile {
 /**
  * Subresource-Integrity-style digest of `bytes`: `sha256-<base64>`.
  * This is the canonical per-file integrity string written into the
- * compiled manifest's `integrity` map and checked back at the
- * `os plugin publish` preflight (unpack-time re-verification is owned
- * by the future runtime loader — ADR-0025 §3.5 steps 4–7 — not by the
- * cloud control plane, #11331).
+ * compiled manifest's `integrity` map, checked back at the
+ * `os plugin publish` preflight and again at unpack by `os plugin install`
+ * (ADR-0025 §3.5 M1).
  */
 export function sriDigest(bytes: Uint8Array): string {
   return 'sha256-' + createHash('sha256').update(bytes).digest('base64');

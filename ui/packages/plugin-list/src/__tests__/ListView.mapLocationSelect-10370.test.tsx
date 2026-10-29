@@ -20,8 +20,10 @@
  *
  * WHICH SPELLINGS — exactly the ones the map actually reads. The render branch
  * and the switcher's capability gate both take the map config from
- * `resolveListMapConfig`: the spec's view-level `map` block merged per key over
- * the producer's `options.map` bag. The projection now asks that same resolver,
+ * `resolveListMapConfig`: the spec's view-level `map` block (merged per key over
+ * the producer's `options.map` bag until objectstack#25923 retired the bag; a
+ * stored bag is folded onto `map` by the server now, and the resolver reads the
+ * block alone). The projection asks that same resolver,
  * so it requests what the markers are drawn from and nothing the renderer never
  * sees: a key shadowed by the view-level block is not requested, and a
  * top-level `locationField` — which the spec's list view refuses by name and
@@ -151,27 +153,27 @@ describe('ListView — a map view projects its location bindings (objectui#10370
     expect(sorted(params.$select)).toEqual(['id', 'lat', 'lng', 'subject']);
   });
 
-  it('projects `options.map.locationField` (the producer bag)', async () => {
+  it('RETIRED (objectstack#25923): `options.map.locationField` widens nothing — the markers no longer read the bag', async () => {
     const params = await paramsFor({ options: { map: { locationField: 'geo' } } });
-    expect(sorted(params.$select)).toEqual(['geo', 'id', 'subject']);
+    expect(sorted(params.$select)).toEqual(['id', 'subject']);
   });
 
-  it('projects the `options.map.latitudeField` + `options.map.longitudeField` pair', async () => {
+  it('RETIRED (objectstack#25923): nor does the `options.map.latitudeField` + `options.map.longitudeField` pair', async () => {
     const params = await paramsFor({
       options: { map: { latitudeField: 'lat', longitudeField: 'lng' } },
     });
-    expect(sorted(params.$select)).toEqual(['id', 'lat', 'lng', 'subject']);
+    expect(sorted(params.$select)).toEqual(['id', 'subject']);
   });
 
-  it('projects a split pair — one half on the view-level block, one in the bag', async () => {
+  it('projects only the block half of a pair split with a bag', async () => {
     const params = await paramsFor({
       map: { latitudeField: 'lat' },
       options: { map: { longitudeField: 'lng' } },
     });
     expect(
       sorted(params.$select),
-      'the resolver merges the two sources per key, and the markers read both halves',
-    ).toEqual(['id', 'lat', 'lng', 'subject']);
+      'the resolver reads the block alone, so the bag half is requested by nothing',
+    ).toEqual(['id', 'lat', 'subject']);
   });
 
   it('projects the marker title and description bindings too', async () => {
@@ -204,7 +206,7 @@ describe('ListView — a map view projects its location bindings (objectui#10370
 
   it('drops the denied half of a coordinate pair and keeps the readable half', async () => {
     const params = await paramsFor({
-      options: { map: { latitudeField: 'secret_lat', longitudeField: 'lng' } },
+      map: { latitudeField: 'secret_lat', longitudeField: 'lng' },
     });
     expect(sorted(params.$select)).toEqual(['id', 'lng', 'subject']);
     expect(params.$select).not.toContain('secret_lat');

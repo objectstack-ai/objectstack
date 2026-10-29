@@ -28,7 +28,7 @@
  * statement about the OTHER key.
  *
  * The string half matters just as much and is easy to lose: `ObjectView` /
- * `ListView` flatten `options.map`'s CONTENTS to the top level, so a view
+ * `ListView` flatten a view's `map` block's CONTENTS to the top level, so a view
  * authored with `map: { style: '<url>' }` reaches this component as a top-level
  * STRING `style`. That shape is not spec-authorable — `@objectstack/spec@17`'s
  * list-view schemas are strict and declare no `map` block at all, so a view

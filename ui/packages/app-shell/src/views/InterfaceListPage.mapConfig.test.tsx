@@ -14,12 +14,17 @@
  * declared-but-inert shape the card is about, on the path the showcase map page
  * actually renders through.
  *
- * The block is forwarded as `map` rather than folded into `mapCfg` with `??`
- * like the sibling bindings, and the third case here is why: `??` would let a
- * PARTIAL authored block replace the derivation wholesale, so
- * `map: { titleField: 'title' }` alone would drop the auto-derived
- * `locationField` and the page would render no markers at all. Forwarding both
- * lets `ListView` merge them per key, which is the precedence the card settled.
+ * The block is not folded into the derivation with `??` like the sibling
+ * bindings, and the third case here is why: `??` would let a PARTIAL authored
+ * block replace the derivation wholesale, so `map: { titleField: 'title' }`
+ * alone would drop the auto-derived `locationField` and the page would render
+ * no markers at all. The two are merged per key, the authored key winning,
+ * which is the precedence the card settled.
+ *
+ * objectstack#25923 moved that merge onto this page. The derivation used to
+ * travel under `options.map` for `ListView` to lay the block over; the list
+ * view's `options` bag is retired, so the page now sends ONE `map` block, the
+ * derivation with the authored keys laid over it, and no `options` at all.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -52,7 +57,7 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
     <div
       data-testid="list-view-map-config"
       data-map={JSON.stringify(props?.schema?.map ?? null)}
-      data-options-map={JSON.stringify(props?.schema?.options?.map ?? null)}
+      data-has-options={String(Boolean(props?.schema && 'options' in props.schema))}
     />
   ),
 }));
@@ -106,7 +111,7 @@ async function renderWith(view: Record<string, unknown>) {
   const el = screen.getByTestId('list-view-map-config');
   return {
     map: JSON.parse(el.getAttribute('data-map') || 'null'),
-    optionsMap: JSON.parse(el.getAttribute('data-options-map') || 'null'),
+    hasOptions: el.getAttribute('data-has-options') === 'true',
   };
 }
 
@@ -125,41 +130,52 @@ describe('InterfaceListPage forwards the view-level `map` block (objectui#5042)'
     expect(map).toEqual({ locationField: 'location', titleField: 'title', zoom: 9 });
   });
 
-  it('CONTROL: with no view-level block, no `map` key is emitted at all', async () => {
-    const { map, optionsMap } = await renderWith({});
+  it('CONTROL: with no view-level block, the derivation alone is the `map` block', async () => {
+    const { map, hasOptions } = await renderWith({});
 
-    expect(map).toBeNull();
-    // …and the ADR-0047 auto-derivation still fires — with `locationField`, the
-    // map's own required binding, and nothing else. The derived `titleField`
-    // that objectui#5909 added to this product was removed in objectui#6343:
-    // it reached `getRecordDisplayName` as `options.titleField`, i.e. step 0,
+    // The ADR-0047 auto-derivation fires — with `locationField`, the map's own
+    // required binding, and nothing else. The derived `titleField` that
+    // objectui#5909 added to this product was removed in objectui#6343: it
+    // reached `getRecordDisplayName` as `options.titleField`, i.e. step 0,
     // where a name this page guessed outranked the object's own declaration.
-    expect(optionsMap).toEqual({ locationField: 'location' });
+    expect(map).toEqual({ locationField: 'location' });
+    // objectstack#25923: the derivation no longer rides an `options` bag.
+    expect(hasOptions).toBe(false);
   });
 
   it('keeps the auto-derived binding ALONGSIDE a partial authored block', async () => {
-    // The case that rules out folding the block into `mapCfg` with `??`: the
-    // author declared only a marker-title field, and the coordinate binding
-    // still has to come from the derivation. `ListView` merges the two per
-    // key; a `??` here would have discarded one of them.
+    // The case that rules out folding the block into the derivation with
+    // `??`: the author declared only a marker-title field, and the coordinate
+    // binding still has to come from the derivation. A `??` here would have
+    // discarded one of them.
     //
     // Sharper since objectui#6343 removed the derived title: the two sides no
     // longer overlap at all. The AUTHOR owns `titleField` — declared, and
     // honoured at the resolver's step 0 — and the derivation owns
     // `locationField`. Each key has exactly one source.
-    const { map, optionsMap } = await renderWith({ map: { titleField: 'title' } });
+    const { map, hasOptions } = await renderWith({ map: { titleField: 'title' } });
 
-    expect(map).toEqual({ titleField: 'title' });
-    expect(optionsMap).toEqual({ locationField: 'location' });
+    expect(map).toEqual({ locationField: 'location', titleField: 'title' });
+    expect(hasOptions).toBe(false);
   });
 
-  it('CONTROL: the legacy `options.map` bag is still forwarded on its own path', async () => {
-    const { map, optionsMap } = await renderWith({
+  it('PRECEDENCE: where the author and the derivation name the same key, the authored value wins', async () => {
+    const { map } = await renderWith({ map: { locationField: 'hq_location' } });
+
+    expect(map).toEqual({ locationField: 'hq_location' });
+  });
+
+  it('RETIRED (objectstack#25923): a legacy `options.map` bag is not forwarded — stored rows are folded on read', async () => {
+    // The server folds a stored bag onto the top-level `map` block (ADR-0087
+    // D2 `list-view-options-bag-folded`) before the row is served, so a bag
+    // never reaches this page from storage. One written inline is not read:
+    // the page sends the derivation alone and no `options`.
+    const { map, hasOptions } = await renderWith({
       options: { map: { locationField: 'location', titleField: 'legacy_title' } },
     });
 
-    expect(map).toBeNull();
-    expect(optionsMap).toEqual({ locationField: 'location', titleField: 'legacy_title' });
+    expect(map).toEqual({ locationField: 'location' });
+    expect(hasOptions).toBe(false);
   });
 });
 

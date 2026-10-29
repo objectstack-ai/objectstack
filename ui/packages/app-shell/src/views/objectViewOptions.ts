@@ -1,7 +1,8 @@
 /**
  * The view-options family of the Console `ObjectView` (`./ObjectView.tsx`):
- * the per-kind `options` blocks it hands `ListView`, the stored legacy bag,
- * the by-value options comparison and the view-patch dispatcher, moved out of
+ * the per-kind blocks it hands `ListView` (inside the legacy `options` bag
+ * until #25923, at the top level since), the by-value options comparison and
+ * the view-patch dispatcher, moved out of
  * that file verbatim (objectstack#25992, slice 2). `ObjectView.tsx` re-exports
  * every name it exported before.
  */
@@ -9,7 +10,7 @@
 import { detectStatusField } from '@object-ui/types';
 
 /**
- * The `options.timeline` config this page hands to `ListView`.
+ * The `timeline` block this page hands to `ListView`.
  *
  * Deliberately does NOT resolve the date axis. `ListView.resolveTimelineDateBinding`
  * is the single read-site that decides which field a timeline buckets by, and it
@@ -77,7 +78,7 @@ export function timelineViewOptions(viewDef: any): Record<string, unknown> {
 }
 
 /**
- * The `options.calendar` config this page hands to `ListView` — or NOTHING.
+ * The `calendar` block this page hands to `ListView` — or NOTHING.
  *
  * objectui#7029 (ruled on objectstack#13748, director batch #19, option A).
  * This face used to fabricate `startDateField: 'due_date'` and
@@ -119,7 +120,7 @@ export function calendarViewOptions(viewDef: any): Record<string, unknown> | und
 }
 
 /**
- * The `options.gantt` config this page hands to `ListView`.
+ * The `gantt` block this page hands to `ListView`.
  *
  * `5f4514f7b` — the same class objectui#7029 removed from the calendar branch,
  * reported separately by PR #7062 rather than fixed alongside it. This face used
@@ -158,7 +159,7 @@ export function ganttViewOptions(viewDef: any): Record<string, unknown> {
 }
 
 /**
- * The `options.gallery` config this page hands to `ListView`.
+ * The `gallery` block this page hands to `ListView`.
  *
  * objectui#7547 — the last surviving member of the objectui#7029 / `5f4514f7b` /
  * #7500 class on this face. It floored `imageField` at `'image'` for EVERY
@@ -259,7 +260,8 @@ export function galleryViewOptions(viewDef: any): Record<string, unknown> {
  * `{groupBy, groupByField}` did not. The gate now reads both spellings out of
  * the bag, the same one-question-two-sites repair objectui#5042 made for `map`
  * and objectui#7544 for `chart`. Pinned in `ObjectView.kanbanLane-8193` here
- * and in `ListView.kanbanOptionsBagCanonical-8193` in `plugin-list`.
+ * and in `ListView.kanbanOptionsBagCanonical-8193` in `plugin-list` (renamed
+ * `ListView.kanbanBlockCanonical-8193` when objectstack#25923 retired the bag).
  *
  * ⭐ `groupBy` IS RETIRED HERE (objectui#8213) — the THIRD spelling of the one
  * concept this expression already writes canonically. Measured against
@@ -276,7 +278,8 @@ export function galleryViewOptions(viewDef: any): Record<string, unknown> {
  * found NO runtime producer but this one; the lit control on the same
  * instrument (`groupByField` in the same position) returned 58 sites, so the
  * empty reading is a reading. The only other authors are FIXTURES: the two arms
- * of `ListView.kanbanOptionsBagCanonical-8193` that pin this very bag, and one
+ * of `ListView.kanbanOptionsBagCanonical-8193` (now `kanbanBlockCanonical-8193`)
+ * that pin this very bag, and one
  * stale metadata payload in `data-objectstack`'s `updateView.draft.test.ts`.
  * The sibling producer `defaultKanbanFromObject` emits `{ groupByField }` alone
  * and always has.
@@ -325,8 +328,7 @@ export function galleryViewOptions(viewDef: any): Record<string, unknown> {
  *
  * objectui#11629: `summarizeField` (the spec's "Field to sum at top of column")
  * is relayed only when the view declares it. This block is the only kanban
- * config `ListView` receives on this page when the stored row carries no
- * `options.kanban` bag. Without the relay, the key never reached `ListView`'s
+ * config `ListView` receives on this page. Without the relay, the key never reached `ListView`'s
  * projection or the board's column headers, so a view that declared it
  * rendered counts with no totals. Like the lane, an absent key stays absent:
  * no default field is invented.
@@ -351,46 +353,13 @@ export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, 
 }
 
 /**
- * objectui#10380 — the stored row's legacy `options` bag, as this page hands it
- * to `ListView`. A row with no bag (or a bag that is not an object) gives `{}`.
+ * objectui#10046 — is `a` the same set of per-kind blocks as `b` (the `options`
+ * bag until #25923), compared by VALUE? (objectui#7237 holds the resolved
+ * `filter` through the same comparison.)
  *
- * `@objectstack/spec`'s flattened list overlay declares this bag
- * (`ListViewOverlayOptionsSchema`). The view write door judges each
- * `options.KIND` block key by key with that kind's own block schema, refuses
- * an out-of-contract key by name, and stores what it accepts. The spec
- * describes the bag as an underlay: the top-level `KIND` block "wins per key
- * where both set one". The interface page has always forwarded the bag, so one
- * stored row rendered two ways. Ruling A on objectui#10380 (comment
- * 5824043998) keeps that forward ("what passes the door is legal"), so the
- * object page now forwards the bag too.
- *
- * The relay below does three things with it, and none of them merges keys:
- *   - `options` carries the bag. For each kind the bag carries, the bag's block
- *     REPLACES this page's synthesized block (`kanbanViewOptions` and its
- *     siblings). This is the rule `InterfaceListPage` applies to its `mapCfg`
- *     (`view.options.map ?? derived`). A synthesized block stands in only for a
- *     kind the bag does not carry, so a row with no bag is relayed exactly as
- *     before.
- *   - For each kind the bag carries, the view's own top-level block also goes
- *     out at the top level, where `InterfaceListPage` puts it as well.
- *   - `ListView` then lays the top-level block over the bag per key. That merge
- *     already exists in each render branch (`{ ...options.KIND, ...KIND }`),
- *     and it is the spec's precedence. ⛔ No second merge is written here.
- *
- * Exported for the pin test.
- */
-export function storedLegacyOptions(viewDef: unknown): Record<string, any> {
-    const bag = viewDef && typeof viewDef === 'object' ? (viewDef as { options?: unknown }).options : undefined;
-    return bag && typeof bag === 'object' && !Array.isArray(bag) ? (bag as Record<string, unknown>) : {};
-}
-
-/**
- * objectui#10046 — is `a` the same `options` bag as `b`, compared by VALUE?
- * (objectui#7237 holds the resolved `filter` through the same comparison.)
- *
- * `renderListView` rebuilds `fullSchema.options` as a fresh object literal on
+ * `renderListView` rebuilds the per-kind blocks as fresh object literals on
  * every call, and `plugin-view`'s `ObjectView` calls it on every one of its
- * renders. `ListView` names `schema.options` BY IDENTITY in its fetch effect's
+ * renders. `ListView` names each block BY IDENTITY in its fetch effect's
  * dependency list (objectui#4567 ruled that dependency correct and put
  * stabilisation at the PRODUCER), so each host re-render that changed nothing
  * re-issued the identical `dataSource.find`: one extra at mount (the record

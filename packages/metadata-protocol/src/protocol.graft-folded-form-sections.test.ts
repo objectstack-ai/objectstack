@@ -383,22 +383,22 @@ describe('graftFoldedFormSections — structural safety, no save involved', () =
 });
 
 /**
- * [#20051] The view write door judges a flat list overlay's legacy `options`
- * bag — driven through the REAL `saveMetaItem`, riding this file's pinned
- * engine double rather than minting a second one (the double is the reason
- * these cases live here, not the `groups` fold).
+ * [#25923] The view write door refuses a flat list overlay's `options` bag by
+ * name — driven through the REAL `saveMetaItem`, riding this file's pinned
+ * engine double rather than minting a second one. The read half (a STORED bag
+ * served folded) is pinned in `protocol.stored-conversions.test.ts`.
  *
- * Measured before the change on `origin/main` @ `8d1f7ab`, through this same
- * harness: `options: { timeline: { metaFields: ['region'] } }` on a flat list
- * overlay saved `success: true` and the row held the bag byte-for-byte, while
- * the direct `timeline.metaFields` was refused. `saveMetaItem` stores the
- * request body, not the parse output, so what the door does not judge is what
- * reaches storage.
+ * From #20051 until #25923 the door judged the bag key by key and stored a
+ * legal one byte-for-byte (`options.map`, the path objectui pinned). The bag
+ * is retired now: the save is refused with the tombstone's prescription, and
+ * a row written before is replayed through `list-view-options-bag-folded` on
+ * every stored-row read.
  *
  * Refusals assert the envelope (`code` + `status`) and that NO row was written.
  */
-describe('[#20051] the save door judges a flat list overlay\'s `options` bag', () => {
-    const TIMELINE = { startDateField: 'created_at', titleField: 'name', metaFields: ['region'] };
+describe('[#25923] the save door refuses a flat list overlay\'s `options` bag', () => {
+    const TIMELINE = { startDateField: 'created_at', titleField: 'name' };
+    const MAP = { locationField: 'location', titleField: 'legacy_title' };
     const flatList = (extra: Record<string, unknown>) => ({
         name: 'crm_lead.timeline',
         object: 'crm_lead',
@@ -418,50 +418,25 @@ describe('[#20051] the save door judges a flat list overlay\'s `options` bag', (
         return { err, rowsWritten: Array.from(rows.values()).filter((r) => r.type === 'view').length };
     }
 
-    it('a direct and an `options`-wrapped out-of-contract key get the same refusal, and nothing is stored', async () => {
-        const direct = await refusal(flatList({ timeline: TIMELINE }));
-        const wrapped = await refusal(flatList({ options: { timeline: TIMELINE } }));
-        for (const { err, rowsWritten } of [direct, wrapped]) {
-            expect(err?.code).toBe('INVALID_METADATA');
-            expect(err?.status).toBe(422);
-            expect(rowsWritten).toBe(0);
-        }
-        const hit = (err: any, path: string) =>
-            (err.issues as Array<{ path: string; code?: string; message: string }>)
-                .find((i) => i.path === path && i.code === 'unrecognized_keys');
-        const directHit = hit(direct.err, 'timeline');
-        const wrappedHit = hit(wrapped.err, 'options.timeline');
-        expect(directHit, JSON.stringify(direct.err.issues)).toBeDefined();
-        expect(wrappedHit, JSON.stringify(wrapped.err.issues)).toBeDefined();
-        // Refused by NAME, on the same surface text as the direct spelling.
-        expect(wrappedHit!.message).toBe(directHit!.message);
-        expect(wrappedHit!.message).toContain('`metaFields`');
-    });
-
-    it('an unknown key in the bag itself is refused by name, not dropped', async () => {
-        const { err, rowsWritten } = await refusal(flatList({ timeline: { startDateField: 'created_at', titleField: 'name' }, options: { foo: 1 } }));
+    it.each([
+        ['a legal `options.timeline` block', { options: { timeline: TIMELINE } }],
+        ['the legacy `options.map` bag objectui pinned', { type: 'map', options: { map: MAP } }],
+        ['a bag beside the same top-level block', { timeline: TIMELINE, options: { timeline: { titleField: 'subject' } } }],
+    ])('%s: 422 at `options` with the move-to-the-top-level prescription, and nothing is stored', async (_label, extra) => {
+        const { err, rowsWritten } = await refusal(flatList(extra));
         expect(err?.code).toBe('INVALID_METADATA');
         expect(err?.status).toBe(422);
         expect(rowsWritten).toBe(0);
-        expect((err.issues as Array<{ path: string; message: string }>).some((i) => i.path === 'options' && i.message.includes('`foo`')))
-            .toBe(true);
+        const hit = (err.issues as Array<{ path: string; message: string }>).find((i) => i.path === 'options');
+        expect(hit, JSON.stringify(err.issues)).toBeDefined();
+        expect(hit!.message).toMatch(/^A list view's `options` bag was removed in @objectstack\/spec 18\.3\.0/);
+        expect(hit!.message).toContain('Move each `options.KIND` block to `KIND`');
     });
 
-    it('a legal legacy `options.map` bag (the path objectui pins) saves, and the row carries it unchanged', async () => {
-        const authored = {
-            name: 'showcase_task.work_map',
-            object: 'showcase_task',
-            viewKind: 'list',
-            label: 'Work Map',
-            type: 'map',
-            columns: ['title', 'location'],
-            options: { map: { locationField: 'location', titleField: 'legacy_title' } },
-        };
-        const body = await storedViewBody('showcase_task.work_map', authored);
-        expect(body.options).toEqual(authored.options);
-        // …and the stored row passes the same door again: a GET → PUT of it is
-        // not refused by the judgement it was saved under.
-        expect((ViewMetadataSchema as any).safeParse(body).success).toBe(true);
+    it('CONTROL: the same block written top-level saves, and the row carries it', async () => {
+        const body = await storedViewBody('crm_lead.timeline', flatList({ timeline: TIMELINE }));
+        expect(body.timeline).toEqual(TIMELINE);
+        expect('options' in body).toBe(false);
     });
 });
 

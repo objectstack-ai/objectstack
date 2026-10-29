@@ -57,7 +57,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `coordinator` | 以协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
-| `batch:<n>` | 席位同时在飞的子代理总上限,按 `Agent` 调用、`create_session` 与卡线程计:dev、复核、普查皆计,⛔ 只读不豁免 | 默认 `3`;`n` 的维护者天花板 `5` |
+| `batch:<n>` | 运行中槽位的上限:一槽 = 一个正在运行的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、在合并队列、等 CI、等裁决四态不占槽;dev、复核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 默认 `3`;`n` 的维护者天花板 `5` |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
 | `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread` |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
@@ -167,8 +167,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
 - 退役 `domain:*` 只退流通,对象保留;`domain:engine`/`domain:services`/`domain:cli` 读作 `domain:server`。
-- `domain:*` 只由分诊产出,两例外:sub-issue 承父卡域、main-red 锚卡;无标签的卡 ⛔ 不得认领。
-- 预贴标签只是建议,队列与级别只由分诊落笔;无分诊审计评论 ⛔ 不得认领;两例外豁免。
+- `domain:*`、队列与级别只由分诊落笔;两例外:sub-issue 承父卡域、main-red 锚卡,免审计评论。
+- 无分诊审计评论 ⛔ 不得认领;车道席自分诊是队列与级别的第三例外,住 `triage-duties.md`。
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
 - 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 排该 PR 之后串行或让行。

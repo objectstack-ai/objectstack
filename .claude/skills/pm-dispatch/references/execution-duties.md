@@ -9,7 +9,6 @@
 - 席改标:卡余项实测路径整落本席包树 ⇒ 本席改 `domain:*`,审计评论列路径与新旧标同笔。
 - 席改标限未派发卡;带 `needs-user-decision`、open `Blocked-by:` 或 `security` 的 ⛔ 不改,仍问分诊。
 - 无分诊审计评论即非候选;例外:sub-issue 承父卡首触,main-red 锚卡见 `landing-operations.md`。
-- 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
 - 维护者裁决逐字引入派发词裁决分区作约束,无则写明无裁决。
 - 派发前做前提过时检查,裁决同罪,三面都查:动作面、卡引用面、工作项面。
@@ -18,7 +17,8 @@
 - 卡引用面:裁决/卡片点名的每张 issue 逐个读当前 open/closed/assignee。
 - 引用读到的现状,⛔ 不引用裁决写作时的描述。
 - 工作项面:卡片与分诊评论列的每条工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
-- `batch` 封顶全部子代理,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
+- `batch` 等待不填槽,四态见 SKILL.md 该行;同批独立按文件面不相交判,⛔ 不按包或 check 名。
+- 软顶:本席已验收等人批的 Tier H PR 逾 5 ⇒ 停派 Tier H,S/非受管照常,轮报列积压;两周复测。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
 - 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
@@ -143,9 +143,9 @@
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
 - `mode:cloud` 只保留给 L/XL、活过 PM 会话的工作、浏览器/dogfood 验证;build 重的 M 卡逐卡判。
 - 申报文件面写 `packages/spec/src/**` 且至少另一包 ⇒ build 重,派 `mode:cloud`,一卡一容器。
-- 一容器同时至多跑一个 build 重子代理;云会话建闭包拉 turbo 远程缓存。
-- 首张这类派发实测固定开销(安装 + 拉缓存)并记在其卡上。
+- 一容器同时仅一个 build 重子代理;云会话建闭包拉 turbo 远程缓存,首张实测固定开销记卡。
 - 归档义务只落在云卡;OOM 死的单独重派;判定连同档位写进认领评论。
+- 桌面 `start_session` 起的云卡照 runbook〈云卡五课〉五;席位看不见其会话,归档落维护者。
 - 一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire;trigger 流只留给定时/重复型。
 - 接手中断的 dev:先试 SendMessage 复活,不可用才走接手协议,⛔ 不重跑原派发词。
 

@@ -810,7 +810,12 @@ describe('AuthPlugin', () => {
         await boot({ settings, email, i18nDefault: 'en', registerRoutes });
 
         expect(mockContext.getService).toHaveBeenCalledWith('email');
-        expect(setEmailServiceSpy).toHaveBeenCalledWith(email);
+        // Wired wrapped (the tenant default currency on `sendTemplate`, see
+        // mail-tenant-currency.ts): every other call reaches the transport.
+        expect(setEmailServiceSpy).toHaveBeenCalledTimes(1);
+        const wired = setEmailServiceSpy.mock.calls[0]![0] as { send: (input: unknown) => unknown };
+        wired.send({ to: 'a@x.com' });
+        expect(email.send).toHaveBeenCalledWith({ to: 'a@x.com' });
         expect(settings.get).toHaveBeenCalledWith('localization', 'locale', {});
         expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
         expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');

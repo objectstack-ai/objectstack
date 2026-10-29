@@ -262,6 +262,84 @@ describe('resolveBookTree — the Uncategorized group holds only the book\'s own
   });
 });
 
+// [#27091] ADR-0046 §6.4 rolls up docs "left unplaced"; a doc a SIBLING book
+// places is placed. Two books over one package (split by audience, §6.7) used
+// to list each other's pages under *Uncategorized*, because "claimed" was
+// judged against the book's own groups only.
+describe('resolveBookTree — a doc a sibling book claims is not this book\'s orphan (§6.4)', () => {
+  const corpus: ResolverDoc[] = [
+    { name: 'crm_overview', packageId: 'crm' },
+    { name: 'crm_sales_leads', packageId: 'crm' },
+    { name: 'crm_admin_access', packageId: 'crm' },
+    { name: 'crm_admin_automation', packageId: 'crm' },
+  ];
+  const withStray: ResolverDoc[] = [...corpus, { name: 'crm_stray', packageId: 'crm' }];
+  const userManual: Book & { packageId?: string } = {
+    name: 'crm_manual',
+    packageId: 'crm',
+    groups: [
+      { key: 'start', label: 'Start', include: 'crm_overview' },
+      { key: 'sales', label: 'Sales', include: 'crm_sales_*' },
+    ],
+  };
+  const adminManual: Book & { packageId?: string } = {
+    name: 'crm_admin_manual',
+    packageId: 'crm',
+    audience: { permissionSet: 'system_admin' },
+    groups: [{ key: 'admin', label: 'Admin', include: 'crm_admin_*' }],
+  };
+  const books = [userManual, adminManual];
+  const keysAndDocs = (tree: ResolvedBook) =>
+    Object.fromEntries(tree.groups.map((g) => [g.key, g.entries.map((e) => e.doc)]));
+  const docsOf = (tree: ResolvedBook) => tree.groups.flatMap((g) => g.entries.map((e) => e.doc));
+
+  it('two books with disjoint includes over one package: neither tree has an Uncategorized group', () => {
+    expect(keysAndDocs(resolveBookTree(userManual, corpus, 'crm', books))).toEqual({
+      start: ['crm_overview'],
+      sales: ['crm_sales_leads'],
+    });
+    expect(keysAndDocs(resolveBookTree(adminManual, corpus, 'crm', books))).toEqual({
+      admin: ['crm_admin_access', 'crm_admin_automation'],
+    });
+  });
+
+  it('a doc NO book claims still rolls up under Uncategorized, in every book of its package', () => {
+    expect(keysAndDocs(resolveBookTree(userManual, withStray, 'crm', books)).uncategorized).toEqual(['crm_stray']);
+    expect(keysAndDocs(resolveBookTree(adminManual, withStray, 'crm', books)).uncategorized).toEqual(['crm_stray']);
+  });
+
+  it('an audience-gated sibling\'s docs never reach the other book\'s tree, and nothing appears anywhere new', () => {
+    const userDocs = docsOf(resolveBookTree(userManual, withStray, 'crm', books));
+    expect(userDocs).not.toContain('crm_admin_access');
+    expect(userDocs).not.toContain('crm_admin_automation');
+    // The catch-all only shrinks: every entry with siblings was an entry without them.
+    for (const book of books) {
+      const before = docsOf(resolveBookTree(book, withStray, 'crm'));
+      expect(before).toEqual(expect.arrayContaining(docsOf(resolveBookTree(book, withStray, 'crm', books))));
+    }
+  });
+
+  it('the §6.7 audience union is unmoved: the claim sets never read the catch-all', () => {
+    expect(Object.fromEntries(resolveDocAudiences(books, withStray))).toEqual({
+      crm_overview: ['org'],
+      crm_sales_leads: ['org'],
+      crm_admin_access: [{ permissionSet: 'system_admin' }],
+      crm_admin_automation: [{ permissionSet: 'system_admin' }],
+      crm_stray: ['org'],
+    });
+    for (const book of books) {
+      const authored = resolveBookTree(book, withStray, 'crm', books).groups.filter((g) => g.key !== 'uncategorized');
+      expect([...resolveBookClaimedDocs(book, withStray, 'crm')]).toEqual(authored.flatMap((g) => g.entries.map((e) => e.doc)));
+    }
+  });
+
+  it('a single-book package is byte-identical to the tree without `books`', () => {
+    const alone = resolveBookTree(userManual, withStray, 'crm');
+    expect(JSON.stringify(resolveBookTree(userManual, withStray, 'crm', [userManual]))).toBe(JSON.stringify(alone));
+    expect(keysAndDocs(alone).uncategorized).toEqual(['crm_admin_access', 'crm_admin_automation', 'crm_stray']);
+  });
+});
+
 describe('deriveImplicitPackageBook + audience', () => {
   it('synthesizes a one-group book including every doc of the package', () => {
     const book = deriveImplicitPackageBook('app_todo', 'Todo');
