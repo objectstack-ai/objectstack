@@ -1204,7 +1204,7 @@ function buildSankeyCellFlows(
   xAxisKey: string,
   flowSeries: readonly NormalizedSeries[],
   palette: readonly string[],
-): { nodes: SankeyArmNode[]; links: SankeyCellLink[]; omitted: SankeyOmittedColumn[] } {
+): { nodes: Array<{ name: string; fill: string }>; links: SankeyCellLink[]; omitted: SankeyOmittedColumn[] } {
   const cells = data.map((row) =>
     flowSeries.map((s) => {
       const carried = row != null && Object.prototype.hasOwnProperty.call(row, s.dataKey);
@@ -1213,7 +1213,7 @@ function buildSankeyCellFlows(
   );
   const sourceRows = data.flatMap((_, i) => (cells[i].some((c) => c.value > 0) ? [i] : []));
   const targetColumns = flowSeries.flatMap((_, j) => (cells.some((r) => r[j].value > 0) ? [j] : []));
-  const nodes: SankeyArmNode[] = [
+  const nodes = [
     ...sourceRows.map((i, n) => ({
       name: String(data[i]?.[xAxisKey] ?? ''),
       fill: resolveColor(palette[n % palette.length]),
