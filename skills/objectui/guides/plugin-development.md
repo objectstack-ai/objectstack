@@ -92,7 +92,7 @@ Sixteen keys in total: the eleven on `ComponentMeta` (`@object-ui/types`
 ```typescript
 import type { ComponentInput, ComponentInputControlType } from '@object-ui/types';
 
-// The eleven control kinds, taken from the published union rather than retyped.
+// The control kinds, taken from the published union rather than retyped.
 const controlTypes: ComponentInputControlType[] = [
   'string', 'number', 'boolean', 'enum', 'array', 'object',
   'color', 'date', 'code', 'file', 'slot',
