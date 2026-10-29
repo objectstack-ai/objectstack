@@ -144,6 +144,12 @@
           "evidence": "packages/services/service-datasource/src/datasource-connection-service.ts#attemptConnect (`const credentialsRef = record.external?.credentialsRef`, resolved through the configured secret resolver into a `secret` spread onto the factory call and never stored on the record — three distinct failure states are named rather than swallowed: no secret store configured, resolver threw, resolved to nothing)",
           "note": "dereferenced through the SecretBinder to cleartext for the duration of one connect; never persisted or logged (ADR-0015 Addendum). 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:457` had rotted onto a docblock about threading a value through an instance field rather than the ConnectResult, ~95 lines above the read. Re-closed by hand against c459da6bc; DATED for the first time."
         },
+        "connector": {
+          "status": "planned",
+          "verifiedAt": "2026-10-29",
+          "evidence": "packages/spec/src/stack.zod.ts#collectDatasourceConnectorErrors (a name the stack does not declare, a catalog descriptor or an instance with no auth credential is REFUSED at build); packages/spec/src/data/datasource.zod.ts#DatasourceSchema (beside a bound `credentialsRef`, on a built-in database driver and on a managed datasource it is REFUSED at parse)",
+          "note": "PLANNED, not `dead`: ADR-0015 amendment D7 (ruling 6486136301) landed the spec half first, and the runtime half — the datasource connection service handing the named instance's credential, resolved per dispatch through ADR-0143 D4's resolver, to the API-backed driver — is its own server card, blocked by this one. Until it lands no runtime reads the key; every pairing that could never work is already refused at authoring, and the only accepted shape is a plugin-contributed driver, none of which ships in this repository today. Flip to `live` with the connection-service anchor when the server card lands, in the same release."
+        },
         "queryTimeoutMs": {
           "status": "live",
           "verifiedAt": "2026-08-28",

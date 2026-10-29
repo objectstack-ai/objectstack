@@ -272,6 +272,16 @@ export type SchemaMode = z.input<typeof SchemaModeSchema>;
  * `credentialsRef` alone is also valid on a managed datasource (#8153) —
  * the Studio wizard's `createDatasource` stores the secret in the secrets
  * store and keeps the reference here, whatever the schema mode.
+ *
+ * `connector` is the other credential channel (ADR-0015 amendment D7, ruling
+ * 6486136301): an API-backed datasource names a declared connector instance
+ * and borrows that instance's credential, so one Connect per vendor serves
+ * both flows and virtual objects. The two channels are exclusive, and the
+ * datasource-level refinement below refuses the pairings that can never work
+ * (both channels at once, a built-in database driver, a managed datasource);
+ * whether the named instance is declared is judged where the stack's
+ * `connectors` are visible ({@link collectDatasourceConnectorErrors} in
+ * `stack.zod.ts`).
  */
 export const ExternalDatasourceSettingsSchema = strictObject(
   {
@@ -283,6 +293,10 @@ export const ExternalDatasourceSettingsSchema = strictObject(
       allowwrite: 'allowWrites',
       credentials: 'credentialsRef',
       secretref: 'credentialsRef',
+      connectorname: 'connector',
+      connectorid: 'connector',
+      connectorref: 'connector',
+      connectorinstance: 'connector',
       timeoutms: 'queryTimeoutMs',
       querytimeout: 'queryTimeoutMs',
     },
@@ -347,11 +361,18 @@ export const ExternalDatasourceSettingsSchema = strictObject(
   credentialsRef: z.string().optional()
     .describe('Reference into the secrets store; never inline credentials. '
       + 'Valid in every schemaMode — the one `external` key a managed datasource may carry.'),
+  connector: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional()
+    .describe('Name of a declared connector instance (a `connectors` entry with a `provider`) whose '
+      + 'credential this API-backed datasource borrows — static, `oauth2`, `app-credential` and '
+      + '`signed` kinds alike, resolved the way the connector resolves it. One Connect serves '
+      + 'both the connector\'s actions and this datasource\'s records. Exclusive with '
+      + '`credentialsRef`; refused on a built-in database driver and on a managed datasource.'),
   queryTimeoutMs: z.number().default(30_000)
     .describe('Hard cap on per-query execution time.'),
 })
   .describe('External datasource settings: federation policy (schemaMode != "managed") '
-    + 'plus the secrets-store credentials reference (valid in every schemaMode)');
+    + 'plus the secrets-store credentials reference (valid in every schemaMode) or the connector '
+    + 'instance an API-backed datasource borrows its credential from');
 
 export type ExternalDatasourceSettings = z.input<typeof ExternalDatasourceSettingsSchema>;
 /** Post-parse shape of {@link ExternalDatasourceSettings} — defaults applied, transforms run (ADR-0122). */
@@ -498,6 +519,48 @@ const CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED =
   + 'by the URL-branch refusal, not by this one.)';
 
 /**
+ * The three pairings `external.connector` can never serve (ADR-0015 amendment
+ * D7). Each refuses at the authoring door instead of at the first read, where
+ * the runtime would otherwise pick one credential silently or present an HTTP
+ * credential to a database.
+ *
+ *  - **both channels** — `connector` and a bound `credentialsRef` name two
+ *    sources for one credential. The ruling made them exclusive rather than
+ *    ranking them: a precedence rule would leave the loser written and
+ *    ignored, the silent no-op the closed shapes in this module exist to stop.
+ *    An empty-string `credentialsRef` is not a binding (the connect path's
+ *    test is truthy), so it does not count as the second channel.
+ *  - **a built-in driver** — every driver in `DRIVER_VOCABULARY` connects to a
+ *    database with a database credential. A connector instance lends an HTTP
+ *    credential (a bearer token, an API key, an OAuth grant, a request
+ *    signer), which only an API-backed, plugin-contributed driver can present.
+ *  - **a managed datasource** — an API-backed datasource's schema lives in the
+ *    remote system, so `schemaMode: 'managed'` is the wrong mode, and the
+ *    prescription is the mode, not the deletion the generic managed-block
+ *    message would give.
+ */
+const CONNECTOR_WITH_CREDENTIALS_REF_REFUSED =
+  'this datasource names two credential channels: `external.connector` borrows the credential of '
+  + 'a declared connector instance, and `external.credentialsRef` binds a secret of its own. Exactly '
+  + 'one of them supplies the credential. For an API-backed datasource whose vendor a connector '
+  + 'instance already authorizes, keep `connector` and remove `credentialsRef`; to give the '
+  + 'datasource a secret of its own, remove `connector`.';
+
+function connectorOnBuiltinDriverRefusal(driverId: string): string {
+  return `\`external.connector\` lends a connector instance's HTTP credential (a bearer token, an `
+    + `API key, an OAuth grant or a request signer), which only an API-backed driver presents; the `
+    + `'${driverId}' driver connects to a database with a database credential. Bind that secret with `
+    + '`external.credentialsRef` (the Setup → Datasources connection form mints the handle) and '
+    + 'remove `connector`.';
+}
+
+const CONNECTOR_ON_MANAGED_REFUSED =
+  '`external.connector` belongs to an API-backed datasource, whose schema lives in the remote '
+  + "system and is never ObjectStack's to manage: set `schemaMode: 'external'` (or "
+  + "`'validate-only'` to warn on drift instead of failing) on this datasource. A managed "
+  + "datasource's `external` block may carry only `credentialsRef`.";
+
+/**
  * Replay a driver-config parse onto the datasource's own issue list (#4410).
  *
  * A no-op for a driver the platform ships no contract for — `known: false` is
@@ -549,6 +612,10 @@ export const DatasourceSchema = lazySchema(() => strictObject(
       filename: belongsInConfig('filename'),
       url: belongsInConfig('url'),
       connectionString: belongsInConfig('connectionString', 'url'),
+      connector:
+        '`connector` is not a datasource key — it belongs in the `external` block, where it names '
+        + 'the declared connector instance whose credential this API-backed datasource borrows '
+        + '(e.g. `external: { connector: "sap_s4" }`).',
       // Not "move it into `config`": every driver contract refuses
       // `config.password` (and a `user:password@` URL), so that prescription
       // led straight into a second refusal. `external.credentialsRef` is valid
@@ -772,6 +839,35 @@ export const DatasourceSchema = lazySchema(() => strictObject(
     }
   }
 
+  // ADR-0015 amendment D7 — the pairings `external.connector` can never serve.
+  // Whether the named instance is declared needs the stack's `connectors`, so
+  // that half runs in `stack.zod.ts` (`collectDatasourceConnectorErrors`).
+  if (ds.external?.connector !== undefined) {
+    if (ds.external.credentialsRef) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['external', 'connector'],
+        message: CONNECTOR_WITH_CREDENTIALS_REF_REFUSED,
+      });
+    }
+    const builtinDriver = resolveDriverId(ds.driver);
+    if (builtinDriver !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['external', 'connector'],
+        message: connectorOnBuiltinDriverRefusal(builtinDriver),
+      });
+    } else if (ds.schemaMode === 'managed') {
+      // Skipped on a built-in driver: that refusal already says to drop the
+      // key, and this one would prescribe a mode the key still cannot use.
+      ctx.addIssue({
+        code: 'custom',
+        path: ['external', 'connector'],
+        message: CONNECTOR_ON_MANAGED_REFUSED,
+      });
+    }
+  }
+
   if (ds.schemaMode !== 'managed' && !ds.external) {
     ctx.addIssue({
       code: 'custom',
@@ -818,7 +914,9 @@ let parsedEmptyExternal: ExternalDatasourceSettingsParsed | undefined;
 function managedFederationContentKeys(external: ExternalDatasourceSettingsParsed): string[] {
   const baseline = (parsedEmptyExternal ??= ExternalDatasourceSettingsSchema.parse({}));
   return Object.keys(external)
-    .filter((key) => key !== 'credentialsRef')
+    // `connector` on a managed datasource has its own refusal, which prescribes
+    // the schema mode rather than the deletion this list's message gives.
+    .filter((key) => key !== 'credentialsRef' && key !== 'connector')
     .filter((key) => !sameParsedValue(
       (external as Record<string, unknown>)[key],
       (baseline as Record<string, unknown>)[key],
