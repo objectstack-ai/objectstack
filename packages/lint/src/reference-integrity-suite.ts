@@ -405,6 +405,10 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // artifact's scope. MEASURED over the shipped object corpus: the two keys
   // are new and no shipped object declares either, so 0 findings; the door
   // controls in `runtime-gate.object-writes.test.ts` are the lit probe.
+  // [#27478] The same member refuses a field group naming a relationship that
+  // is not a body table (`related-list-group-not-body`), on the same children;
+  // a write of the child that turns a placed body table into a side card is
+  // refused too, the finding being new on the stored parent. Same census: 0.
   {
     name: 'validateRelatedListRefs',
     runtimeTypes: ['flow', 'object'],

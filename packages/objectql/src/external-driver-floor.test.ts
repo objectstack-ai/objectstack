@@ -12,8 +12,11 @@
 
 import { describe, it, expect } from 'vitest';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { ObjectQL } from './engine';
-import { EXTERNAL_ROW_CAP, ExternalRowCapExceededError, ExternalWriteRefusedError } from './external-driver-errors.js';
+import {
+  EXTERNAL_ROW_CAP, ExternalReadRefusedError, ExternalRowCapExceededError, ExternalWriteRefusedError,
+} from './external-driver-errors.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import { isExternalDriverFloor, needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';
 
@@ -233,6 +236,108 @@ describe('[#27277] reads: the engine applies the query', () => {
   });
 });
 
+describe('[#27471] a read the driver refuses with a request-shaped 4xx is 400', () => {
+  const refusingRead = (error: unknown) => makeEngine({ extra: { async find() { throw error; } } });
+  /** The virtual-objects guide's `refuse()`: a by-name refusal carrying the status the floor reads. */
+  const refuse = (what: string) =>
+    Object.assign(new Error(`tree driver: the remote cannot run ${what}`), { status: 400 });
+  /** A `where` a merge boundary vouched for as the caller's own. */
+  const authored = <T>(where: T): T => markFilterSubtreeProvenance(where, 'author');
+
+  it('the guide\'s refuse() answers INVALID_QUERY / 400 naming what the remote cannot run, on every read', async () => {
+    const { engine } = refusingRead(refuse('the operator $gte on \'weight\''));
+    for (const read of [
+      () => engine.find('tree_node', { where: authored({ weight: { $gte: 2 } }) }),
+      () => engine.findOne('tree_node', { where: authored({ weight: { $gte: 2 } }) }),
+      () => engine.count('tree_node', { where: authored({ weight: { $gte: 2 } }) }),
+    ]) {
+      const err = await read().then(() => undefined, (e) => e);
+      expect(err).toBeInstanceOf(ExternalReadRefusedError);
+      expect(err.code).toBe('INVALID_QUERY');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain("the remote cannot run the operator $gte on 'weight'");
+      expect(err.details).toEqual({ datasource: 'tree', object: 'tree_node', operation: 'find', remoteStatus: 400 });
+    }
+  });
+
+  for (const status of [400, 404, 422]) {
+    it(`${status} (as \`status\` or \`statusCode\`) is 400 carrying the driver's message`, async () => {
+      for (const key of ['status', 'statusCode']) {
+        const { engine } = refusingRead(Object.assign(new Error(`remote said ${status}`), { [key]: status }));
+        const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+        expect(err).toBeInstanceOf(ExternalReadRefusedError);
+        expect(err.code).toBe('INVALID_QUERY');
+        expect(err.status).toBe(400);
+        expect(err.message).toContain(`remote said ${status}`);
+        expect(err.details.remoteStatus).toBe(status);
+      }
+    });
+  }
+
+  it('a registered code the driver declared is kept (ADR-0112), and remoteCode names it', async () => {
+    const { engine } = refusingRead(
+      Object.assign(new Error('tree driver: $regex is not a filter'), { status: 400, code: 'INVALID_FILTER' }),
+    );
+    const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(ExternalReadRefusedError);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.details.remoteCode).toBe('INVALID_FILTER');
+  });
+
+  it('a code that is not registered answers INVALID_QUERY, and remoteCode still names it', async () => {
+    const { engine } = refusingRead(
+      Object.assign(new Error('tree driver: no such filter'), { status: 400, code: 'TREE_BAD_FILTER' }),
+    );
+    const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+    expect(err.code).toBe('INVALID_QUERY');
+    expect(err.details.remoteCode).toBe('TREE_BAD_FILTER');
+  });
+
+  it('a where no boundary vouched for is refused 400 with its reason withheld and logged', async () => {
+    const warned: Array<Record<string, unknown> | undefined> = [];
+    const { engine } = refusingRead(refuse("a filter on 'region' with comparand EMEA"));
+    (engine as unknown as { logger: { warn: (m: string, meta?: Record<string, unknown>) => void } }).logger.warn =
+      (_m, meta) => { warned.push(meta); };
+    const err = await engine.find('tree_node', { where: { kind: 'leaf' } }).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(ExternalReadRefusedError);
+    expect(err.status).toBe(400);
+    expect(err.message).not.toContain('EMEA');
+    expect(err.message).toContain('server log');
+    expect(warned.some((meta) => String(meta?.error).includes('EMEA'))).toBe(true);
+  });
+
+  it('a policy arm under an author root withholds the reason (#7929 fail-closed)', async () => {
+    const { engine } = refusingRead(refuse("a filter on 'region' with comparand EMEA"));
+    const where = authored({
+      $and: [authored({ kind: 'leaf' }), markFilterSubtreeProvenance({ region: 'EMEA' }, 'policy')],
+    });
+    const err = await engine.find('tree_node', { where }).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(ExternalReadRefusedError);
+    expect(err.status).toBe(400);
+    expect(err.message).not.toContain('EMEA');
+    expect(err.details.remoteStatus).toBe(400);
+  });
+
+  for (const status of [401, 403, 407, 429, 500, 502, 503, 409, 412]) {
+    it(`${status} stays ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld`, async () => {
+      const { engine } = refusingRead(Object.assign(new Error('token sk_live_123 rejected'), { status }));
+      const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+      expect(err).toBeInstanceOf(DatasourceUnavailableError);
+      expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+      expect(err.kind).toBe('remote');
+      expect(err.message).not.toContain('sk_live_123');
+    });
+  }
+
+  it('a throw that declares no status stays ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld', async () => {
+    const { engine } = refusingRead(new Error('tree driver: the remote cannot run the combinator $or'));
+    const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(DatasourceUnavailableError);
+    expect(err.message).not.toContain('$or');
+  });
+});
+
 describe('[#27277] writes pass through; a remote refusal is 422', () => {
   it('a write the remote accepts is the remote\'s answer', async () => {
     const { engine } = makeEngine({
@@ -378,5 +483,104 @@ describe('[#27277] a re-registration that names no driver keeps the floor', () =
     expect(unwrapExternalDriverFloor(held)).toBe(remote.driver);
     // The where-ignoring driver still answers only the matching rows.
     expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+  });
+});
+
+describe('[#27666] the datasource-connection service\'s registrations floor a plugin driver, and a reconnect keeps it', () => {
+  const TREE_PKG = {
+    id: 'tree_pkg',
+    name: 'Tree',
+    objects: [{
+      name: 'tree_node',
+      datasource: 'tree',
+      external: { remoteName: 'nodes', writable: true },
+      fields: { kind: { type: 'text' }, label: { type: 'text' }, weight: { type: 'number' } },
+    }],
+  };
+  /** What `DatasourceConnectionService.connect` registers after `registerDriver`: the def WITH its driver id. */
+  const connectDef = (driver: string) => ({ name: 'tree', driver, schemaMode: 'external', external: { allowWrites: true } });
+
+  it('a runtime-origin datasource (no manifest def): driver, then the connect def naming the driver id', async () => {
+    const engine = new ObjectQL();
+    const remote = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(remote.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+    const held = engine.getDriverByName('tree')!;
+    expect(isExternalDriverFloor(held)).toBe(true);
+    expect(unwrapExternalDriverFloor(held)).toBe(remote.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+  });
+
+  it('a reconnect (unregisterDriver, then the connect sequence) is still floored', async () => {
+    const engine = new ObjectQL();
+    const first = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(first.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+    expect(isExternalDriverFloor(engine.getDriverByName('tree')!)).toBe(true);
+
+    // `reconnect`: the eviction door drops the driver AND the stored def …
+    expect(engine.unregisterDriver('tree')).toBe(true);
+    expect(engine.getDriverByName('tree')).toBeUndefined();
+    // … then `connect` registers the rebuilt pool and the def again, driver id included.
+    const rebuilt = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(rebuilt.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+
+    const held = engine.getDriverByName('tree')!;
+    expect(isExternalDriverFloor(held)).toBe(true);
+    expect(unwrapExternalDriverFloor(held)).toBe(rebuilt.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+    expect(rebuilt.sent).toHaveLength(1);
+  });
+
+  it('the failed-rebuild restore (unregisterDriver, then the OLD pool and its def back) is still floored', async () => {
+    const engine = new ObjectQL();
+    const old = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(old.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+
+    engine.unregisterDriver('tree');
+    // `restoreOldPool`: the kept driver instance and the def it was serving under, `previous.driver` included.
+    engine.registerDriver(old.driver, false);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+
+    const held = engine.getDriverByName('tree')!;
+    expect(isExternalDriverFloor(held)).toBe(true);
+    expect(unwrapExternalDriverFloor(held)).toBe(old.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+  });
+
+  it('control: after the eviction a re-registration that names no driver has nothing to keep, and the where-ignoring driver answers every row', async () => {
+    // The defect's mechanism, pinned so the positive cases above are known to
+    // depend on the driver id reaching `registerDatasourceDef`: the engine's
+    // "keep the stored id" only keeps what the eviction left, which is nothing.
+    const engine = new ObjectQL();
+    const first = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(first.driver);
+    engine.registerDatasourceDef(connectDef('spike_tree'));
+    engine.registerApp(TREE_PKG as any);
+    engine.unregisterDriver('tree');
+    const rebuilt = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(rebuilt.driver);
+    engine.registerDatasourceDef({ name: 'tree', schemaMode: 'external', external: { allowWrites: true } });
+    expect(engine.getDriverByName('tree')).toBe(rebuilt.driver);
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toHaveLength(TREE_ROWS.length);
+  });
+
+  it('a built-in driver through the same connect and reconnect sequences stays the registered instance itself', () => {
+    const engine = new ObjectQL();
+    const first = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(first.driver);
+    engine.registerDatasourceDef(connectDef('sqlite'));
+    engine.registerApp(TREE_PKG as any);
+    expect(engine.getDriverByName('tree')).toBe(first.driver);
+    engine.unregisterDriver('tree');
+    const rebuilt = remoteDriver('tree', TREE_ROWS);
+    engine.registerDriver(rebuilt.driver);
+    engine.registerDatasourceDef(connectDef('sqlite'));
+    expect(engine.getDriverByName('tree')).toBe(rebuilt.driver);
   });
 });

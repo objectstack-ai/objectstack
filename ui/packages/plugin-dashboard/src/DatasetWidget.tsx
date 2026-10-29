@@ -473,10 +473,13 @@ const MEASURE_AXIS_CHART_FAMILIES: ReadonlySet<string> = new Set(DASHBOARD_WIDGE
  * The chart families that draw ONE series, whatever the widget declares
  * (objectui#11417). The shared chart renderer (`AdvancedChartImpl` in
  * `@object-ui/plugin-charts`) binds `series[0]` on its `pie` / `donut`,
- * `funnel`, `treemap` and `sankey` arms and reads no other series there, so a
- * chart of one of these families WITH a dimension draws its first measure and
- * drops every other one, although this widget hands each measure on as a
- * series. (Without a dimension these families take the tile, `isMetric`.)
+ * `funnel` and `treemap` arms and reads no other series there, so a chart of
+ * one of these families WITH a dimension draws its first measure and drops
+ * every other one, although this widget hands each measure on as a series.
+ * Its `sankey` arm reads the series past the first as the groups of a pivoted
+ * second dimension (objectstack#27460), so a sankey is handed only the measure
+ * it renders (see `chartSeries`). (Without a dimension these families take the
+ * tile, `isMetric`.)
  *
  * Read off the family a widget renders AS (`CHART_TYPE_MAP`), so a `pyramid`
  * widget, which renders as a `funnel`, is in it too.
@@ -2091,9 +2094,18 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
           ...(aggregate !== undefined ? { aggregate } : {}),
         };
       });
-  const chartSeries = comparisonSeries.length > 0
+  const comparedChartSeries = comparisonSeries.length > 0
     ? [...series.map((s) => ({ ...s, variant: 'current' as const })), ...comparisonSeries]
     : series;
+  // objectstack#27460 — a sankey draws every series past its first as a group
+  // of a pivoted second dimension, one flow per cell. A sankey that declares
+  // several measures (refused by the spec's single-series arm, so only a stored
+  // document reaches here) is handed the one measure it renders, so its other
+  // measures are not drawn as groups and the dropped-measure warning above
+  // stays true. A pivot carries one measure, so nothing is dropped from it.
+  const chartSeries = chartType === 'sankey'
+    ? comparedChartSeries.filter((s) => !droppedMeasures.includes(s.dataKey))
+    : comparedChartSeries;
 
   // Ordered-sequence charts (funnel/pyramid) need a DEFINED stage order.
   // `options.stageOrder` wins when the author states one explicitly; otherwise

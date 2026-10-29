@@ -2,7 +2,7 @@
 
 /**
  * [#27277] The engine's correctness floor over a plugin driver on an external
- * datasource (ADR-0015 Tier A, epic #27261 P1).
+ * datasource (epic #27261 Tier A, P1; ruling 6487532394 on #27277).
  *
  * ## Which drivers
  *
@@ -38,10 +38,15 @@
  * - Writes pass through, by id: `updateMany` / `deleteMany` are hidden too, so
  *   no `where` the engine cannot re-check reaches a write. A write the remote
  *   refuses with a request-shaped 4xx (`EXTERNAL_WRITE_REFUSED_STATUSES`) is
- *   {@link ExternalWriteRefusedError} (422, the remote's message); any other
- *   failure of a read or a write — an auth or rate-limit 4xx included — is
- *   `ERR_DATASOURCE_UNAVAILABLE` (503, reason `remote`), with the cause in the
- *   server log and never on the wire.
+ *   {@link ExternalWriteRefusedError} (422, the remote's message); a `find`
+ *   the driver refuses with one (`EXTERNAL_READ_REFUSED_STATUSES`, #27471) is
+ *   {@link ExternalReadRefusedError} (400, the driver's registered code or
+ *   `INVALID_QUERY`; the driver's message only when the sent `where` is
+ *   attested as the caller's own, else a fixed sentence and the message in the
+ *   server log). Any other
+ *   failure of a read or a write — an auth or rate-limit 4xx, or a throw that
+ *   declares no status, included — is `ERR_DATASOURCE_UNAVAILABLE` (503,
+ *   reason `remote`), with the cause in the server log and never on the wire.
  * - Everything else (`connect`, `supports`, `syncSchema`, `introspectSchema`,
  *   `beginTransaction`, …) is the driver's own, unchanged.
  *
@@ -55,13 +60,15 @@
  */
 
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { resolveDriverId } from '@objectstack/spec/data';
+import { filterSubtreeProvenanceOf, resolveDriverId } from '@objectstack/spec/data';
 import { applyDriverQueryInMemory, assertDriverWhereEvaluableInMemory } from './driver-query-in-memory.js';
 import { declaredFieldClasses, declaredJsonStoredFields } from './having-filter.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import {
+  EXTERNAL_READ_REFUSED_STATUSES,
   EXTERNAL_ROW_CAP,
   EXTERNAL_WRITE_REFUSED_STATUSES,
+  ExternalReadRefusedError,
   ExternalRowCapExceededError,
   ExternalWriteRefusedError,
   type ExternalWriteOperation,
@@ -159,6 +166,29 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
     return refusal;
   };
 
+  /**
+   * [#27471] A `find` the driver refused with a request-shaped 4xx. Its sentence
+   * reaches the caller only when every predicate it can be about is the
+   * caller's own ({@link whereIsCallersOwn}); otherwise it goes to the log, as
+   * a remote failure's cause does, and the caller reads a fixed sentence.
+   */
+  const readRefusal = (object: string, where: unknown, status: number, error: unknown): Error => {
+    const message = error instanceof Error ? error.message : String(error);
+    const disclosed = whereIsCallersOwn(where);
+    if (!disclosed) {
+      host.logger.warn(
+        `[ObjectQL] the plugin driver of datasource '${host.datasource}' refused a find on '${object}'; `
+        + 'the caller was answered without this reason, because the read carries a predicate the caller did not write',
+        { datasource: host.datasource, object, operation: 'find', status, error: message },
+      );
+    }
+    const { code } = (error ?? {}) as { code?: unknown };
+    return new ExternalReadRefusedError(host.datasource, object, status, disclosed ? message : null, {
+      cause: error,
+      ...(typeof code === 'string' ? { remoteCode: code } : {}),
+    });
+  };
+
   const readCapped = async (object: string, query: DriverQuery | undefined, options: unknown) => {
     assertDriverWhereEvaluableInMemory(query?.where);
     const routed = (query as { object?: unknown } | undefined)?.object;
@@ -172,6 +202,10 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
     try {
       rows = await inner.find(object, sent, options as Parameters<IDataDriver['find']>[2]);
     } catch (error) {
+      const status = declaredStatus(error);
+      if (status !== undefined && EXTERNAL_READ_REFUSED_STATUSES.has(status)) {
+        throw readRefusal(object, sent.where, status, error);
+      }
       throw remoteFailure(object, 'find', error);
     }
     if (!Array.isArray(rows)) {
@@ -243,6 +277,32 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
 function withoutRouting(query: DriverQuery): DriverQuery {
   const { object: _object, expand: _expand, ...rest } = query as DriverQuery & { object?: unknown; expand?: unknown };
   return rest as DriverQuery;
+}
+
+/**
+ * [#27471] Is every predicate in `where` the caller's own, so a driver's refusal
+ * of it may be quoted back? Yes when there is no `where`, or when its root is
+ * marked `'author'` and no node under it is marked `'policy'`. Anything else —
+ * an unmarked root (no merge boundary vouched for it), a policy arm under an
+ * author root — answers no, the fail-closed direction
+ * `filter-subtree-provenance.ts` requires. Walks plain objects and arrays, and
+ * stops on a cycle.
+ */
+function whereIsCallersOwn(where: unknown): boolean {
+  if (where === undefined) return true;
+  if (filterSubtreeProvenanceOf(where) !== 'author') return false;
+  const onPath = new Set<object>();
+  const carriesPolicy = (node: unknown): boolean => {
+    if (node === null || typeof node !== 'object' || onPath.has(node)) return false;
+    if (filterSubtreeProvenanceOf(node) === 'policy') return true;
+    onPath.add(node);
+    try {
+      return Object.values(node as Record<string, unknown>).some(carriesPolicy);
+    } finally {
+      onPath.delete(node);
+    }
+  };
+  return !carriesPolicy(where);
 }
 
 /** The HTTP status a thrown error declares, read as the repo's HTTP exits read it: `status`, then `statusCode`. */

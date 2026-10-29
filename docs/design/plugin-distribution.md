@@ -110,16 +110,14 @@ A `tar.gz`:
 ```
 <id>-<version>.osplugin
 ├── objectstack.plugin.json   # compiled manifest (below)
-├── dist/                     # pre-built ESM bundle (tsup); @objectstack/* externalized
-├── package.json              # only for the manifest-deps strategy
-├── pnpm-lock.yaml            # only for the manifest-deps strategy
+├── dist/                     # pre-built ESM bundle (esbuild → dist/index.mjs); @objectstack/* externalized
 ├── assets/ README LICENSE icon
 └── SIGNATURE                 # detached signature + publisher cert chain
 ```
 
 Compiled manifest adds four blocks to the existing `ObjectStackManifest`:
 `engines` (protocol + platform ranges), `runtime` (`node|sandbox|worker`),
-`packaging` (`bundled|manifest-deps`), `permissions` (services/hooks/network/fs
+`packaging` (`bundled`, the one strategy and the default — §4.3), `permissions` (services/hooks/network/fs
 + RLS data scopes), and `integrity` (per-file hashes).
 
 ### 4.2 UI plugin (`runtime: 'ui'` — ADR-0026 §3.1)
@@ -135,15 +133,27 @@ client-scoped `permissions` (data read/write via SDK, network → CSP, navigatio
 > `ManifestSchema` and `PluginSchema` refuse `ui-plugin`; this section and
 > worked example C in §10 use `ui`.
 
-### 4.3 Packaging strategies (default: bundled)
+### 4.3 Packaging strategy: bundled only
 
-- **Bundled (default).** `tsup --noExternal` bundles third-party JS into `dist`;
-  no npm at install time. **`@objectstack/*` is externalized** as a host-provided
-  peer-dep singleton (bundling it forks the engine — duplicate registries / broken
-  `instanceof` / double Zod validation). Native addons disallowed.
-- **manifest-deps (opt-in).** Ships `package.json` + lockfile; install runs
-  `pnpm install --frozen-lockfile --ignore-scripts`. For native addons / huge
-  deps only; disallowed for unverified publishers.
+- **Bundled — the one strategy, and the default.** `os plugin build` inlines
+  every dependency the entry imports into `dist/index.mjs`, so install is unpack +
+  verify with no npm or toolchain at install time: `os plugin install` and the
+  boot-time loader import `dist/index.mjs` as packed, and the artifact carries
+  neither `package.json` nor a lockfile. **`@objectstack/*` is externalized** as a
+  host-provided peer-dep singleton (bundling it forks the engine — duplicate
+  registries / broken `instanceof` / double Zod validation). A native (`.node`)
+  addon is refused by name at build, before any artifact is written.
+
+> **Note (2026-10-29, #27679).** This section used to list a second, opt-in
+> strategy, `manifest-deps`, which shipped `package.json` + a lockfile for an
+> install-time `pnpm install`. Nothing ever ran that install, so an artifact
+> built with it could not load the dependencies it left out. It is retired
+> (ADR-0025 v2 §3.3): `PluginPackagingSchema`
+> (`packages/spec/src/kernel/manifest.zod.ts`) accepts `bundled` alone and
+> refuses `packaging: 'manifest-deps'` by name with its migration prescription
+> (delete the key), and `os plugin build` no longer forks on the value. A plugin
+> that needs a native addon or a very large dependency is a fresh ADR-0025 M3
+> decision, not a strategy here. §4.1, §5, §6 and §8 name no second strategy.
 
 ## 5. Build → Sign → Publish
 
@@ -151,7 +161,8 @@ client-scoped `permissions` (data read/write via SDK, network → CSP, navigatio
 os plugin build  →  os plugin sign  →  os plugin publish
 ```
 
-1. **build** — run `tsup` (externalize `@objectstack/*`); validate the manifest
+1. **build** — esbuild-bundle the entry to `dist/index.mjs` (externalize `@objectstack/*`,
+   inline every other dependency); validate the manifest
    (Zod + the new `permissions` schema); gate on protocol/engine compatibility;
    compute per-file `integrity`; emit `<id>-<version>.osplugin`.
 2. **sign** — sign with the publisher key (`PluginMetadata.signature`); may be
@@ -164,8 +175,8 @@ os plugin build  →  os plugin sign  →  os plugin publish
      `sys_plugin_version` (`status: pending_review → published`).
    - **Server gates:** schema validation; secret/malware/known-vuln scan;
      **permission audit** (sensitive permissions → human review); **publish-time
-     tier enforcement** (an unverified publisher cannot ship `runtime: 'node'` or
-     `manifest-deps`); marketplace **counter-signs** with the platform key on
+     tier enforcement** (an unverified publisher cannot ship `runtime: 'node'`);
+     marketplace **counter-signs** with the platform key on
      approval.
    - Listed in the **contribution catalog** (not the consumer App Marketplace),
      with a "contains code" badge and a permission-disclosure screen.
@@ -191,8 +202,8 @@ resolve → compat check → permission consent → download+verify → material
    are wired to the KV secret store (ADR-0007) — never stored in the artifact.
 4. **Download + verify.** Verify signature (publisher + marketplace keys) and each
    file against `integrity`; reject on mismatch.
-5. **Materialize.** Unpack to `<OS_HOME>/plugins/<env>/<id>/<version>/`;
-   manifest-deps runs `pnpm install --frozen-lockfile --ignore-scripts` here.
+5. **Materialize.** Unpack to `<OS_HOME>/plugins/<env>/<id>/<version>/`. No
+   dependency install runs here: the bundle is imported as packed (§4.3).
 6. **Register.** Write `sys_plugin_installation` (env_id, plugin_id, version_id,
    granted_permissions incl. RLS scopes, status, is_preview). Persist to a local
    store so installs survive restarts (the ADR-0016 §9.7 disable-state pattern).
@@ -242,8 +253,9 @@ Reuses existing components, adds two compositions:
 - **Secrets.** `configuration` secret fields → KV secret store (ADR-0007) via
   secret-refs; the artifact never carries credentials; the plugin reads them
   through `PluginContext` gated by the network/service permission.
-- **Supply chain.** Lockfile + per-file integrity; server-side secret/vuln scans;
-  SBOM on the version row; **always `--ignore-scripts`** (no `postinstall`).
+- **Supply chain.** Per-file integrity; server-side secret/vuln scans; SBOM on
+  the version row; **no install-time package manager at all** (bundled only,
+  §4.3), so no dependency's `postinstall` ever runs.
 - **Server-authoritative UI data.** UI plugins read/write only via the client SDK
   under the user's session → every access re-checked by server RLS; manifest
   `permissions.data` is a UI hint/guard, not the boundary. U1 iframes cannot read

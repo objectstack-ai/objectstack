@@ -27,6 +27,7 @@ import {
   EmptyValue,
   hasDeclaredVisibilityGate,
   resolveIcon,
+  Skeleton,
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
@@ -54,6 +55,8 @@ import {
   columnIdentity,
   columnHeader,
   compareSortValues,
+  declaredNameField,
+  deriveTitleField,
   getRecordDisplayName,
   getSortValue,
   isEmptyValue,
@@ -84,8 +87,10 @@ import {
   RELATED_CARD_DROP_LINE,
   RecordBodyTablesContext,
   RelatedCardChromeContext,
+  RelatedCardCountContext,
   RelatedEnlargeContext,
   RelatedListCompactContext,
+  useSeenOnce,
 } from './relatedListCompact';
 import { relatedCardId } from './synth/relatedArrangement';
 import { RelatedCardMenu } from './RelatedCardMenu';
@@ -860,7 +865,20 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     [toolbarActions, mayInvoke],
   );
 
-  const effectivePageSize = pageSize && pageSize > 0 ? pageSize : 0;
+  // In the record page's related column (objectstack#26678) the list is a
+  // ~20rem card that names its first rows: the identity column alone, since a
+  // second column does not fit beside it and the table would be cut off at the
+  // column's edge.
+  const compact = React.useContext(RelatedListCompactContext);
+  // objectstack#27056 — the card's count, asked up front with the column's
+  // other cards (`RelatedCardStack`); `null` when nothing counted it.
+  const cardCount = React.useContext(RelatedCardCountContext);
+  // The card reads only the rows it names (`$top` 3), and only once it is in
+  // view (Target 2); a card counted at 0 reads none at all.
+  const [compactCard, setCompactCard] = React.useState<HTMLElement | null>(null);
+  const cardSeen = useSeenOnce(compactCard, compact);
+  const rowsWanted = !compact || (cardSeen && cardCount !== 0);
+  const effectivePageSize = compact ? COMPACT_RELATED_ROWS : pageSize && pageSize > 0 ? pageSize : 0;
   // The built-in contains-filter is a CLIENT-side sweep over the list's
   // unmasked columns (objectui#10728, `unmaskedColumnKeysKey`) — inexpressible
   // as a generic server filter. While the user is typing in it
@@ -1139,6 +1157,69 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    */
   const selectKey = selectFields ? selectFields.join(',') : '';
 
+  /**
+   * The compact card's chip (objectstack#27055, Target 4): ONE status or date
+   * field per row. Among the list's authored columns (the relationship's
+   * `relatedListColumns`) when it has any — the status field when it is one
+   * of them, else the first date column; otherwise the object's status field,
+   * else its first date field.
+   */
+  const compactChipField = React.useMemo((): string | undefined => {
+    if (!compact || !objectSchema) return undefined;
+    const fields = objectSchema.fields;
+    const isDate = (key: string): boolean => {
+      const type = (parentRelationshipFieldDef(fields, key) as { type?: unknown } | undefined)?.type;
+      return type === 'date' || type === 'datetime';
+    };
+    const authored = dropRedactedColumns(Array.isArray(columns) ? columns : [], redactedFields)
+      .map(drawnColumnKey)
+      .filter((key): key is string => !!key);
+    const statusField = detectStatusField(objectSchema as any) ?? undefined;
+    if (authored.length > 0) {
+      return statusField && authored.includes(statusField) ? statusField : authored.find(isDate);
+    }
+    if (statusField) return statusField;
+    const declared = Array.isArray(fields)
+      ? fields.map((f: any) => f?.name).filter((n: unknown): n is string => typeof n === 'string')
+      : fields && typeof fields === 'object'
+        ? Object.keys(fields)
+        : [];
+    return declared.find((key) => !redactedFields.has(key) && isDate(key));
+  }, [compact, objectSchema, columns, redactedFields]);
+
+  /**
+   * The compact card's projection (objectstack#27056, Target 2): `id`, the
+   * record's name field and the chip — what the card draws, nothing more. A
+   * field only when the child declares it (or it is a platform column) and
+   * the principal may read it. `undefined` — the list's own projection — when
+   * the name cannot be read off a known field: no child definition, a legacy
+   * `titleFormat` template (it may read any field), or no name field at all.
+   */
+  const compactSelect = React.useMemo((): string[] | undefined => {
+    if (!compact || !objectSchema) return undefined;
+    const declared = declaredNameField(objectSchema);
+    const declaredName = typeof declared === 'string' && declared ? declared : undefined;
+    if (!declaredName && objectSchema.titleFormat) return undefined;
+    const derivedName = deriveTitleField(objectSchema);
+    if (!declaredName && !derivedName) return undefined;
+    const relatedObjectName = objectName || api || '';
+    const projection = new Set<string>(['id']);
+    for (const field of [declaredName, derivedName, compactChipField]) {
+      if (!field || redactedFields.has(field)) continue;
+      const known = parentRelationshipFieldDef(objectSchema.fields, field) !== undefined;
+      if (!known && !PLATFORM_RECORD_COLUMNS.has(field)) continue;
+      if (known && perms?.isLoaded && relatedObjectName && !perms.checkField(relatedObjectName, field, 'read')) continue;
+      projection.add(field);
+    }
+    return Array.from(projection);
+  }, [compact, objectSchema, objectName, api, perms, redactedFields, compactChipField]);
+  // What goes on the wire: the card's projection, and the reference roots it
+  // names, when it has one; the list's own otherwise.
+  const wireSelect = compactSelect ?? selectFields;
+  const wireExpand = compactSelect ? expandFields.filter((root) => compactSelect.includes(root)) : expandFields;
+  const wireSelectKey = wireSelect ? wireSelect.join(',') : '';
+  const wireExpandKey = wireExpand.join(',');
+
   // Sync internal state when data prop changes (e.g., parent fetches async data)
   React.useEffect(() => {
     if (dataProvided) {
@@ -1218,7 +1299,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // reader sort and no refresh since the mount — and held in this ref, so the
   // definition settling re-runs the effect without reading. Any other read is
   // the card's own, as before.
-  const compactCard = React.useContext(RelatedListCompactContext);
   const seededRead = React.useRef<{ key: string; read: Promise<{ total: number; rows: unknown[] }> } | null>(null);
 
   React.useEffect(() => {
@@ -1260,7 +1340,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       }
       setLoading(true);
       if (
-        compactCard
+        compact
         && windowed
         && fetchPage === 0
         && !fetchSortField
@@ -1310,6 +1390,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // spending a query. Removing either half restores the double read, or
       // strands the rows. The loading placeholder is held while it waits.
       if (!objectSchemaReady) return;
+      // objectstack#27056 — a compact card out of view, or counted at 0,
+      // reads nothing; it reads once it comes into view (`rowsWanted` in the
+      // dependency list). The placeholder holds meanwhile.
+      if (!rowsWanted) return;
       // The parent-relationship condition, compiled to match the field's ARITY
       // (objectui#7299). A multi-valued relationship asks a MEMBERSHIP question
       // — "is this parent among the stored values" — and `$contains` is the
@@ -1338,11 +1422,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // the tree does (objectui#10112). Omitted entirely when there is
         // nothing to expand, so a child object with no reference column sends
         // the byte-identical query it always sent.
-        if (expandFields.length > 0) params.$expand = expandFields;
+        if (wireExpand.length > 0) params.$expand = wireExpand;
         // Ask only for what the principal may read and the list draws or its
         // row predicates read (objectui#10186). Omitted on a derived-columns
         // list — see `selectFields` for why that path sends no projection.
-        if (selectFields) params.$select = selectFields;
+        if (wireSelect) params.$select = wireSelect;
         if (windowed) {
           params.$top = effectivePageSize;
           params.$skip = fetchPage * effectivePageSize;
@@ -1490,12 +1574,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // compared by value, that re-runs the effect when the child definition
     // settles. The definition itself reaches the query through `expandKey`,
     // `selectKey` and the arity flag, never named here by identity
-    // (commandment #10).
-    //
-    // `compactCard` decides whether the record page's payload may serve the
-    // read (objectstack#27627); a boolean context value, compared by value.
+    // (commandment #10). `wireExpandKey` / `wireSelectKey` are those two keys
+    // as a compact card narrows them (objectstack#27056), and `rowsWanted` the
+    // card's in-view / non-zero gate, a boolean. `compact` decides whether the
+    // record page's payload may serve the read (objectstack#27627), a boolean.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, objectSchemaReady, compactCard]);
+  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
 
   // Windowed mode: a page beyond the (shrunken) collection — e.g. the last
   // row of the last page was just deleted — comes back empty. Step back one
@@ -2480,11 +2564,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const hasCustomRowActions = Array.isArray(rowActions) && rowActions.length > 0;
   const hasRowActions = !!onRowEdit || !!onRowDelete || hasCustomRowActions;
   const isMobile = useIsMobile();
-  // In the record page's related column (objectstack#26678) the list is a
-  // ~20rem card that names its first rows: the identity column alone, since a
-  // second column does not fit beside it and the table would be cut off at the
-  // column's edge. Display only — the read, filter and sort are unchanged.
-  const compact = React.useContext(RelatedListCompactContext);
   // objectstack#27055 — the reader's controls over this card (drag, ⋯ menu,
   // enlarge), handed down by the arranged stack that draws it; `null`
   // anywhere else.
@@ -2603,16 +2682,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const SectionIcon = resolveIconComponent(icon);
   // Badge shows the COLLECTION size: the server total in windowed mode (only
   // one page is in memory), the loaded row count otherwise.
-  const recordCount = windowed && total != null ? total : relatedData.length;
+  // objectstack#27056 — a compact card counted up front answers from that
+  // count until its rows land (out of view, or counted at 0, they never do).
+  const countAnswers = compact && cardCount !== null && !loadFailure && (loading || !rowsWanted);
+  const recordCount = countAnswers ? cardCount! : windowed && total != null ? total : relatedData.length;
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).
-  const isEmpty = !loading && !loadFailure && relatedData.length === 0 && (!windowed || currentPage === 0);
+  const isEmpty = countAnswers
+    ? cardCount === 0
+    : !loading && !loadFailure && relatedData.length === 0 && (!windowed || currentPage === 0);
   // The same answer, for a caller that arranges several lists (#25895). Before
   // the early return below, so the hook order never changes. A failed read
   // answers `false`, as a refused filter does, so the stack's empty fold
   // leaves it in its own row instead of hiding the failure in the fold line.
-  const emptyAnswer: boolean | null = filterRefusal || loadFailure ? false : loading ? null : isEmpty;
+  const emptyAnswer: boolean | null =
+    filterRefusal || loadFailure ? false : countAnswers ? isEmpty : loading ? null : isEmpty;
   React.useEffect(() => {
     onEmptyChange?.(emptyAnswer);
   }, [emptyAnswer, onEmptyChange]);
@@ -2729,46 +2814,48 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // objectstack#27055, Target 4 — the compact card of the record page's
   // related column: title + count + ＋ in one row, no table header, up to
   // three rows of the record's name and ONE status / date chip, ⤢ to enlarge
-  // the list in place. The read, filter and sort are the list's own; only the
-  // face changes. No 「查看全部」 footer: the one way to the whole list is ⤢
-  // (Target 9) — the child's list page is reached from navigation.
+  // the list in place. The filter and sort are the list's own; the read asks
+  // for the rows the card names and the fields it draws (objectstack#27056).
+  // No 「查看全部」 footer: the one way to the whole list is ⤢ (Target 9) — the
+  // child's list page is reached from navigation. A card counted at 0 is its
+  // title row alone.
   if (compact) {
     const rows = paginatedData.slice(0, COMPACT_RELATED_ROWS);
-    const statusField = detectStatusField(objectSchema as any);
     const chipOf = (row: any): React.ReactNode => {
-      const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
-      if (statusField && !isEmptyValue(row?.[statusField])) {
-        const raw = row[statusField];
-        const option = Array.isArray(fields[statusField]?.options)
-          ? fields[statusField].options.find((o: any) => o?.value === raw)
-          : undefined;
-        return (
-          <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[11px] font-normal" data-related-card-chip="status">
-            {option?.label ?? String(raw)}
-          </Badge>
-        );
-      }
-      for (const col of effectiveColumns ?? []) {
-        const key = col?.accessorKey || columnIdentity(col);
-        const type = key ? fields[key]?.type : undefined;
-        if (!key || (type !== 'date' && type !== 'datetime') || isEmptyValue(row?.[key])) continue;
+      const key = compactChipField;
+      if (!key || isEmptyValue(row?.[key])) return null;
+      const def = parentRelationshipFieldDef(objectSchema?.fields, key) as
+        | { type?: unknown; options?: unknown }
+        | undefined;
+      if (def?.type === 'date' || def?.type === 'datetime') {
         const date = new Date(row[key]);
-        if (Number.isNaN(date.getTime())) continue;
+        if (Number.isNaN(date.getTime())) return null;
         return (
           <span className="shrink-0 text-[11px] text-muted-foreground" data-related-card-chip="date">
             {date.toLocaleDateString(displayLocale, { month: 'short', day: 'numeric' })}
           </span>
         );
       }
-      return null;
+      const raw = row[key];
+      const option = Array.isArray(def?.options) ? def.options.find((o: any) => o?.value === raw) : undefined;
+      return (
+        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[11px] font-normal" data-related-card-chip="status">
+          {option?.label ?? String(raw)}
+        </Badge>
+      );
     };
     const enlarge = cardChrome?.onEnlarge;
+    // Rows still to come: one placeholder per row the count says the card
+    // names, so the card does not grow when they land.
+    const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
     return (
       <section
+        ref={setCompactCard}
         className={cn('rounded-[10px] border border-border bg-card', RELATED_CARD_DROP_LINE, className)}
         data-related-card=""
         data-related-card-id={cardChrome?.id}
         aria-label={title}
+        aria-busy={pendingRows > 0 || undefined}
       >
         <div
           className={cn(
@@ -2845,7 +2932,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           <div className="border-t border-border px-3 py-2">
             <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
           </div>
-        ) : loading && relatedData.length === 0 ? (
+        ) : pendingRows > 0 ? (
+          Array.from({ length: pendingRows }, (_, index) => (
+            <div
+              key={index}
+              className="flex h-8 items-center gap-2 border-t border-border px-3"
+              data-related-card-row-pending=""
+            >
+              <Skeleton className="h-3 w-2/3 rounded" />
+            </div>
+          ))
+        ) : isEmpty && countAnswers ? null : loading && relatedData.length === 0 ? (
           <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{t('detail.loading')}</div>
         ) : isEmpty ? (
           <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{t('detail.noRelatedRecords')}</div>

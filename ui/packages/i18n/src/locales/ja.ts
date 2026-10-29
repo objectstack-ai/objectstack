@@ -2608,6 +2608,9 @@ const ja = {
       invitationPreviewTitle: "{{inviter}} さんから {{organization}} への招待が届いています",
       invitationPreviewTitleNoInviter: "{{organization}} への招待が届いています",
       invitationPreviewDescription: "招待を受け取ったメールアドレス（{{email}}）をご利用ください。",
+      invitationGoneTitle: "この招待リンクは無効になりました",
+      invitationGoneDescription: "招待の期限切れ、使用済み、または取り消しの可能性があります。招待した方に新しい招待の送信を依頼してください。",
+      invitationGoneSignIn: "サインインへ",
       showPasswordText: "パスワードを表示",
       hidePasswordText: "パスワードを非表示",
       footer: {
@@ -2641,6 +2644,8 @@ const ja = {
         userExists: "このメールアドレスのアカウントはすでに存在します。代わりにサインインしてください。",
         selfRegistrationClosed: "このシステムではセルフ登録を受け付けていません。管理者に招待を依頼してください。",
         emailDomainNotAllowed: "このメールアドレスのドメインはここでの登録が許可されていません。組織のメールアドレスを使用するか、管理者に招待を依頼してください。",
+        invitationSentTo: "この招待は {{email}} 宛てに送信されました。招待を承諾するには、そのアドレスで登録してください。",
+        invitationAddressOnly: "この招待は送信先のアドレスでのみ承諾できます。そのアドレスで登録してください。",
       },
       verifyInbox: {
         title: "受信箱を確認してください",
@@ -2779,6 +2784,7 @@ const ja = {
         submit: "パスワードを変更して続行",
         submitting: "更新しています…",
         mismatch: "新しいパスワードが一致しません。",
+        sameAsTemporary: "仮パスワードとは異なる新しいパスワードを設定してください。",
         failed: "パスワードを変更できませんでした。",
       },
       mfa: {
@@ -4162,6 +4168,9 @@ const ja = {
     progressEligible: '承認可能者 {{count}} 名',
     progressEligible_one: '承認可能者 {{count}} 名',
     progressEligible_other: '承認可能者 {{count}} 名',
+    approverSlots: '承認枠 {{count}} 件を兼任',
+    approverSlots_one: '承認枠 {{count}} 件を兼任',
+    approverSlots_other: '承認枠 {{count}} 件を兼任',
     progressBar: '承認の進捗',
     declaredActions: 'アクション',
     decisionPanelOffRequestPage: '承認の決定パネルは承認リクエストのページでのみ機能します。',

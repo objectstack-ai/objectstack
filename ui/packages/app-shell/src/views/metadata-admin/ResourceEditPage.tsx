@@ -478,6 +478,75 @@ interface SaveRefusal {
   summary: string;
 }
 
+/** The value at a dot-joined path (numeric segments index arrays), or `undefined`. */
+function valueAtPath(root: unknown, path: string): unknown {
+  let cursor: unknown = root;
+  for (const seg of path === '' ? [] : path.split('.')) {
+    if (Array.isArray(cursor) && /^\d+$/.test(seg)) cursor = cursor[Number(seg)];
+    else if (cursor && typeof cursor === 'object') cursor = (cursor as Record<string, unknown>)[seg];
+    else return undefined;
+  }
+  return cursor;
+}
+
+const SELECTION_IDENTITY_KEYS = ['id', 'name', 'key'] as const;
+
+/** The path of the first object under `node` that a selection `id` names, depth-first. */
+function findSelectionPath(node: unknown, id: string, path: string[], depth: number): string | null {
+  if (!node || typeof node !== 'object' || depth > 8) return null;
+  const entries: Array<[string, unknown]> = Array.isArray(node)
+    ? node.map((v, i) => [String(i), v])
+    : Object.entries(node as Record<string, unknown>);
+  for (const [seg, child] of entries) {
+    if (!child || typeof child !== 'object' || Array.isArray(child)) continue;
+    const named =
+      (!Array.isArray(node) && seg === id) ||
+      SELECTION_IDENTITY_KEYS.some((k) => (child as Record<string, unknown>)[k] === id);
+    if (named) return [...path, seg].join('.');
+  }
+  for (const [seg, child] of entries) {
+    const found = findSelectionPath(child, id, [...path, seg], depth + 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * objectstack#27629 — the draft slice a scoped inspector's selection edits, as
+ * a path `issueSliceFingerprint` reads: the selection id read as a path
+ * (a page block's `regions[0].components[0]`), else the first object whose
+ * `id` / `name` / `key`, or map key, is the id (an object's field). `''`, the
+ * whole document, for the default inspector and for an id no draft value
+ * carries: any edit then ends the hold, so it can release early but can never
+ * wedge Save.
+ */
+function selectionSlicePath(draft: Record<string, unknown>, selection: MetadataSelection | null): string {
+  if (!selection || selection.id === '') return '';
+  const asPath = selection.id.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+  const atPath = valueAtPath(draft, asPath);
+  if (atPath && typeof atPath === 'object') return asPath;
+  return findSelectionPath(draft, selection.id, [], 0) ?? '';
+}
+
+/** What the held line calls a kept selection: its own label, the item's identity, or its id. */
+function heldSelectionLabel(
+  draft: Record<string, unknown>,
+  held: { selection: MetadataSelection | null; slicePath: string },
+  itemName: string,
+): string {
+  const { selection } = held;
+  if (!selection) return itemName;
+  if (selection.label && selection.label.trim() !== '') return selection.label.trim();
+  const item = valueAtPath(draft, held.slicePath);
+  if (held.slicePath !== '' && item && typeof item === 'object') {
+    for (const k of [...SELECTION_IDENTITY_KEYS, 'label']) {
+      const v = (item as Record<string, unknown>)[k];
+      if (typeof v === 'string' && v.trim() !== '') return v.trim();
+    }
+  }
+  return selection.id;
+}
+
 interface MetadataResourceEditPageImplProps {
   type: string;
   name: string;
@@ -899,10 +968,10 @@ function MetadataResourceEditPageImpl({
   // formula that does not parse) — Save must refuse them rather than publish a
   // malformed definition (objectui#4306).
   //
-  // The count is STAMPED with the selection it describes, so it expires by
-  // construction when the selection changes or the inspector unmounts: a
-  // component that has gone away cannot retract its last verdict, and a host
-  // that waited for one would wedge Save shut.
+  // The count is STAMPED with the selection it describes: it is the open
+  // inspector's live verdict, and never reads as another selection's. A
+  // component that has gone away cannot retract its last verdict, so the host
+  // never waits for one.
   const [blockingReport, setBlockingReport] = React.useState({ key: '', count: 0 });
   // Covers BOTH inspector branches. With no selection the editor renders the
   // registered DEFAULT inspector instead, and that surface hosts CEL too (a
@@ -912,7 +981,42 @@ function MetadataResourceEditPageImpl({
   const selectionKey = selection
     ? `${type}:${name}:${selection.kind}:${selection.id}`
     : `${type}:${name}:default`;
-  const inspectorBlocking = blockingReport.key === selectionKey ? blockingReport.count : 0;
+  // objectstack#27629 — the verdict belongs to the DRAFT, not to the selection
+  // (the ruling on objectstack#27485, ported here from Studio's Data pillar).
+  // Expiring it with the selection released Save and the autosave the moment
+  // the author cleared or changed it, while the broken text stayed in the
+  // draft. So each selection's last live verdict is kept with the stamp of the
+  // draft slice it judged (`selectionSlicePath`, fingerprinted the way a server
+  // refusal's slice is) and holds, with the inspector closed, while the draft
+  // still carries that slice: an edit to it, the item's removal or the next
+  // load ends it. Nothing is left shut with nothing to fix: the held line names
+  // the item and its "Show me" reopens it, and the open inspector's live
+  // verdict always wins.
+  const [inspectorVerdicts, setInspectorVerdicts] = React.useState<
+    Record<string, { selection: MetadataSelection | null; slicePath: string; count: number; stamp: string | undefined }>
+  >({});
+  const liveInspectorReport = blockingReport.key === selectionKey;
+  const openSlicePath = React.useMemo(() => selectionSlicePath(draft, selection), [draft, selection]);
+  const openSliceStamp = issueSliceFingerprint(draft, openSlicePath);
+  React.useEffect(() => {
+    if (!liveInspectorReport) return;
+    const kept = { selection, slicePath: openSlicePath, count: blockingReport.count, stamp: openSliceStamp };
+    setInspectorVerdicts((prev) => {
+      const was = prev[selectionKey];
+      if (was && was.count === kept.count && was.stamp === kept.stamp && was.slicePath === kept.slicePath) return prev;
+      return { ...prev, [selectionKey]: kept };
+    });
+  }, [liveInspectorReport, selection, selectionKey, openSlicePath, blockingReport.count, openSliceStamp]);
+  // The kept verdicts that hold, and the open inspector's live one.
+  const inspectorHeld: Array<{ selection: MetadataSelection | null; slicePath: string }> = [];
+  let inspectorBlocking = liveInspectorReport ? blockingReport.count : 0;
+  for (const [key, kept] of Object.entries(inspectorVerdicts)) {
+    if (key === selectionKey && liveInspectorReport) continue;
+    if (kept.count > 0 && kept.stamp !== undefined && issueSliceFingerprint(draft, kept.slicePath) === kept.stamp) {
+      inspectorHeld.push({ selection: kept.selection, slicePath: kept.slicePath });
+      inspectorBlocking += kept.count;
+    }
+  }
 
   // ── The SERVER's refusal is not advisory — and it is DOCUMENT-scoped ──
   //
@@ -935,9 +1039,10 @@ function MetadataResourceEditPageImpl({
   // ⭐ Why it is DOCUMENT-scoped where `inspectorBlocking` is SELECTION-scoped.
   // The measured wedge (`9073cf018`) is an author who adds a Lookup field
   // with an empty target, then selects an unrelated already-saved field and
-  // renames it. `inspectorBlocking` above expires when the selection changes —
-  // BY DESIGN, and that design is right for what it gates — so it is already
-  // gone by that second step, and every later auto-save PUTs the half-filled
+  // renames it. `inspectorBlocking` above expired with the selection then (it
+  // keeps a verdict with the draft since objectstack#27629, but only one an
+  // inspector reported, and the server's refusal is not one) — so it was
+  // already gone by that second step, and every later auto-save PUTs the half-filled
   // document again and is refused again, while the designer renders the rename
   // as applied and the server has none of it. ⛔ The fix is NOT to widen that
   // stamp: a selection-scoped term cannot carry a document-scoped invariant.
@@ -973,6 +1078,7 @@ function MetadataResourceEditPageImpl({
   // because the state it clears is declared here.
   React.useEffect(() => {
     setSaveRefusal(null);
+    setInspectorVerdicts({});
   }, [type, name]);
   React.useEffect(() => {
     if (!editing) setSelection(null);
@@ -1235,6 +1341,8 @@ function MetadataResourceEditPageImpl({
         const initial = config.toDraft ? config.toDraft(rawInitial) : rawInitial;
         setDraft(initial);
         draftSnapshotRef.current = initial;
+        // objectstack#27629 — kept inspector verdicts judged the buffer this load replaces.
+        setInspectorVerdicts({});
         // objectui#11773 — the next save is pinned to what the draft read
         // served: its version, or "no draft row" when none was pending.
         recordDraftRead(type, name, draftPackage, draftRead.pin);
@@ -2583,8 +2691,9 @@ function MetadataResourceEditPageImpl({
           still neither of them — that asymmetry is on purpose. The
           discriminator is who refused, not how bad it looks:
             - `inspectorBlocking` — an author-time fault the server does NOT
-              catch (a CEL predicate that does not parse), SELECTION-scoped
-              (objectui#4306 / #6980);
+              catch (a CEL predicate that does not parse), live for the open
+              selection and kept with the draft slice it judged after that
+              (objectui#4306 / #6980, objectstack#27629);
             - `refusalBlocking` — a 422 the server DID return for this exact
               document, DOCUMENT-scoped so it survives a selection change
               (`9073cf018`).
@@ -2971,6 +3080,34 @@ function MetadataResourceEditPageImpl({
                 </div>
               );
             })()}
+            {/* objectstack#27629 — the held line: an inspector verdict kept with
+                the draft after its inspector closed names the item, and "Show me"
+                reopens it (the field inspector's rule in Studio, objectstack#27485). */}
+            {inspectorHeld.length > 0 && (isDirty || createMode) && (
+              <div
+                data-testid="inspector-held"
+                role="status"
+                className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground"
+              >
+                <p data-testid="inspector-held-message" className="min-w-0 flex-1">
+                  {tFormat('engine.studio.held.line', locale, {
+                    clause: tFormat('engine.studio.held.inspectorInvalid', locale, {
+                      item: heldSelectionLabel(draft, inspectorHeld[0], name || type),
+                    }),
+                  })}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInspectorTab('properties');
+                    setSelection(inspectorHeld[0].selection);
+                  }}
+                  className="shrink-0 rounded border px-1.5 py-0.5 font-medium text-foreground hover:bg-muted"
+                >
+                  {t('engine.studio.refusal.show', locale)}
+                </button>
+              </div>
+            )}
             {PreviewComponent ? (
               <div
                 className={

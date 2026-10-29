@@ -74,6 +74,8 @@ let draftRows: Record<string, Record<string, unknown>>;
 let refuse: Record<string, Error>;
 
 const mockClient = {
+  // The Studio's dataset pickers read the draft-overlaid catalog (objectstack#27518).
+  withPreviewDrafts: vi.fn((): unknown => mockClient),
   save: vi.fn(async (type: string, name: string, body: Record<string, unknown>) => {
     if (refuse[type]) throw refuse[type];
     draftRows[`${type}:${name}`] = body;

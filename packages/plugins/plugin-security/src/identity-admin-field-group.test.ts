@@ -39,6 +39,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import { SysUser } from '@objectstack/platform-objects/identity';
 import { PermissionEvaluator } from './permission-evaluator.js';
+import { FieldMasker } from './field-masker.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 const IDENTITY = 'sys_user';
@@ -57,6 +58,12 @@ const DECLARED_ADMIN_GROUP: string[] = Object.entries(SysUser.fields as Record<s
  * field is refused. Moving it back into the group is red here.
  */
 const PEER_DIRECTORY_FIELDS = ['name', 'email', 'image', 'banned'];
+
+/**
+ * The better-auth phone sign-in identifier and its verified flag — account
+ * administration data, declared inside the group so org peers are withheld it.
+ */
+const SIGN_IN_PHONE_FIELDS = ['phone_number', 'phone_number_verified'];
 
 const ADMIN_SETS = [ADMIN_FULL_ACCESS, ...ORGANIZATION_ADMIN_GRANTS];
 const WITHHOLDING_SETS = ['member_default', 'viewer_readonly', 'external_default'];
@@ -88,6 +95,12 @@ describe('[#21237] the identity object Admin group — withheld from org peers, 
     expect(DECLARED_ADMIN_GROUP.length).toBeGreaterThan(0);
     expect(DECLARED_ADMIN_GROUP).toContain('last_login_ip');
     for (const control of PEER_DIRECTORY_FIELDS) expect(DECLARED_ADMIN_GROUP).not.toContain(control);
+  });
+
+  it('the sign-in phone number and its verified flag are declared inside the group (a sign-in identifier is not directory data)', () => {
+    // Moving either back out of the group serves a colleague's sign-in phone
+    // number to every org member through the user directory.
+    for (const field of SIGN_IN_PHONE_FIELDS) expect(DECLARED_ADMIN_GROUP, field).toContain(field);
   });
 
   it.each(WITHHOLDING_SETS)('%s withholds exactly the declared group (readable: false), and nothing else on the identity object', (name) => {
@@ -142,6 +155,21 @@ describe('[#21237] the identity object Admin group — withheld from org peers, 
     it('a read-only viewer (baseline + viewer_readonly) is withheld every group field', () => {
       const perms = mask(['member_default', 'viewer_readonly']);
       for (const field of DECLARED_ADMIN_GROUP) expect(perms[field]?.readable, field).toBe(false);
+    });
+
+    it('an org member is withheld the sign-in phone fields, and the masker strips them from a colleague row it serves', () => {
+      const perms = mask(['member_default']);
+      for (const field of SIGN_IN_PHONE_FIELDS) expect(perms[field], field).toEqual({ readable: false, editable: false });
+      const colleague = { id: 'u2', name: 'Colleague', email: 'c@example.test', phone_number: '+15550000002', phone_number_verified: true };
+      const served = new FieldMasker().maskResults([colleague], perms, IDENTITY) as Record<string, unknown>[];
+      expect(served[0]).toEqual({ id: 'u2', name: 'Colleague', email: 'c@example.test' });
+    });
+
+    it.each(ADMIN_SETS)('an admin holding %s keeps the sign-in phone fields, and the masker serves them', (name) => {
+      const perms = mask(['member_default', name]);
+      for (const field of SIGN_IN_PHONE_FIELDS) expect(perms[field], field).toEqual({ readable: true, editable: true });
+      const colleague = { id: 'u2', name: 'Colleague', phone_number: '+15550000002', phone_number_verified: true };
+      expect(new FieldMasker().maskResults([colleague], perms, IDENTITY)).toEqual([colleague]);
     });
 
     it.each(ADMIN_SETS)('an admin holding %s on top of the baseline keeps every group field, readable and editable', (name) => {

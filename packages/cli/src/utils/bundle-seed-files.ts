@@ -80,7 +80,7 @@ const SEED_FILE_TYPES: Readonly<Record<string, string>> = {
 };
 
 /** One dataset of the artifact, as far as this pass reads it. */
-interface DatasetLike {
+export interface DatasetLike {
   records?: unknown;
   files?: Record<string, SeedFileContent>;
 }
@@ -91,7 +91,7 @@ interface DatasetLike {
  * position, off the objects themselves, because {@link placeSeedFiles} writes
  * into these very datasets — the ones the artifact serializes.
  */
-function datasetsOf(stack: Record<string, unknown>): Array<{ dataset: DatasetLike; location: string }> {
+export function datasetsOf(stack: Record<string, unknown>): Array<{ dataset: DatasetLike; location: string }> {
   const found: Array<{ dataset: DatasetLike; location: string }> = [];
   const seen = new Set<unknown>();
   const take = (list: unknown, location: string): void => {

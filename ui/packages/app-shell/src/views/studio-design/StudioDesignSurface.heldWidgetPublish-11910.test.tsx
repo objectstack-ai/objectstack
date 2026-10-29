@@ -50,6 +50,8 @@ const DATASETS = [
 ];
 
 const mockClient = vi.hoisted(() => ({
+  // The Studio's dataset pickers read the draft-overlaid catalog (objectstack#27518).
+  withPreviewDrafts: vi.fn((): unknown => mockClient),
   list: vi.fn(async (type: string) => {
     if (type === 'app') return [{ name: 'acme_app', label: 'Acme' }];
     return [];

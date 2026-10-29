@@ -19,7 +19,7 @@
  * effect runs, and every reader takes its part from it. Pinned here: one page
  * request per open, no count probe, no separate verdict / field-access /
  * approval / lock / record read, one wave of data requests; the badges draw the
- * payload's totals; and a stepper's neighbour is asked ahead, so stepping to it
+ * payload's totals; and the record a drawer step shows next is asked ahead, so stepping to it
  * asks nothing for the record it opens.
  */
 import * as React from 'react';
@@ -49,7 +49,7 @@ import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { __clearRecordEditableCache } from '../../../plugin-detail/src/useRecordEditable';
 import { __resetRecordApprovalsStore } from '../hooks/useRecordApprovals';
 import { RecordDetailView } from './RecordDetailView';
-import { RecordNeighborsContext } from './recordDrawerStack';
+import { RecordDrawerUpcomingContext } from './recordDrawerStack';
 
 const BASE = 'http://test.local';
 const OBJECT = 'os_27627_contact';
@@ -172,13 +172,13 @@ async function boot() {
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
-  const open = (rec: string, neighbors: readonly string[] = []) => render(
+  const open = (rec: string, upcoming: string | null = null) => render(
     <React.StrictMode>
       <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${rec}`]}>
         <MetadataCtx.Provider value={metadata}>
-          <RecordNeighborsContext.Provider value={neighbors}>
+          <RecordDrawerUpcomingContext.Provider value={upcoming ? { objectName: OBJECT, recordId: upcoming } : null}>
             <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride={rec} />
-          </RecordNeighborsContext.Provider>
+          </RecordDrawerUpcomingContext.Provider>
         </MetadataCtx.Provider>
       </MemoryRouter>
     </React.StrictMode>,
@@ -225,27 +225,23 @@ describe('objectstack#27627 — one request opens a record page', () => {
     expect(held.map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c2/page`]);
   });
 
-  it("asks a stepper's neighbours ahead, so stepping to one sends nothing", async () => {
+  it("asks the record a drawer step shows next ahead, so stepping to it sends nothing", async () => {
     const { held, state, open } = await boot();
-    const first = open('c1', ['c0', 'c2']);
+    const first = open('c1', 'c2');
     await runWaves(held, state);
     const pages = held.filter(isPage).map((h) => h.path);
     expect(pages).toEqual([
       `/api/v1/data/${OBJECT}/c1/page`,
-      `/api/v1/data/${OBJECT}/c0/page`,
       `/api/v1/data/${OBJECT}/c2/page`,
     ]);
     const asked = held.filter(isPage).map((h) => JSON.stringify(h.body));
     expect(new Set(asked).size).toBe(1);
     first.unmount();
     held.length = 0;
-    open('c2', ['c1', 'c3']);
+    open('c2', 'c3');
     await runWaves(held, state);
-    // The step's own page is the prefetched answer; only its neighbours are asked.
-    expect(held.filter(isPage).map((h) => h.path)).toEqual([
-      `/api/v1/data/${OBJECT}/c1/page`,
-      `/api/v1/data/${OBJECT}/c3/page`,
-    ]);
+    // The step's own page is the prefetched answer; only the next one is asked.
+    expect(held.filter(isPage).map((h) => h.path)).toEqual([`/api/v1/data/${OBJECT}/c3/page`]);
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
   });
 });

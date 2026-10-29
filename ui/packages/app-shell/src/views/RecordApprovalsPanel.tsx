@@ -132,6 +132,12 @@ export { formatIdentity };
 export interface ApproverChip {
   label: string;
   group?: string;
+  /**
+   * How many of the step's slots this chip stands for. Above one, both panels
+   * draw it in words (`approvalsInbox.approverSlots`, "holds 3 approver
+   * slots"), so it reads with the eligible-approver count beside the tally,
+   * which counts that person once (objectui#12781).
+   */
   count: number;
   title: string;
   /**
@@ -460,7 +466,14 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
                   {chip.label}
                   {chip.detail && <span className="ml-1 text-muted-foreground">· {chip.detail}</span>}
                   {chip.group && <span className="ml-1 text-muted-foreground">· {chip.group}</span>}
-                  {chip.count > 1 && <span className="ml-1 text-muted-foreground">×{chip.count}</span>}
+                  {chip.count > 1 && (
+                    <span className="ml-1 text-muted-foreground">
+                      · {String(t('approvalsInbox.approverSlots', {
+                        defaultValue: 'holds {{count}} approver slot(s)',
+                        count: chip.count,
+                      }))}
+                    </span>
+                  )}
                 </Badge>
               ))}
               {isSubmitter && (

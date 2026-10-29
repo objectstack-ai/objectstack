@@ -154,6 +154,14 @@ describe('a field group places a body table at its position (objectstack#27069, 
     ]);
   });
 
+  it('a group only positions a body table: naming a side card promotes nothing (objectstack#27478)', () => {
+    // The spec refuses this group (`isBodyTableRelationship`, ruling B on
+    // objectstack#27055); the renderer never second-guesses body-ness either.
+    const tabs = buildDefaultTabs(placed('task'), { related: [LINES, TASKS] });
+    expect(shape(items(tabs)[0].children)).toEqual(['details(basic)', 'table(quote_line_item)', 'details(terms,notes)']);
+    expect(items(tabs)[1].children.map((n: any) => n.properties.objectName)).toEqual(['task']);
+  });
+
   it('the host-passed sections place the same way (the `{ group }` sections RecordDetailView passes)', () => {
     const def = placed('quote_line_item');
     // The `{ group }` reference form, as the host writes it (the options type

@@ -261,14 +261,36 @@ describe('ActionEngine.getActionsForLocation — visibility filter', () => {
       }
     });
 
-    it('keeps the bare-string predicate on the legacy JS path (no regression)', () => {
-      // The same predicate text as a bare string is NOT a CEL envelope, so it
-      // stays on the legacy `${…}` path — `null < null` is `false` there, so
-      // the action shows. This is the assertion that makes the case above a
-      // real engine discriminator rather than a predicate that hides anyway.
+    it('routes the bare-string spelling to CEL too — it is the envelope\'s shorthand (objectstack#27457)', () => {
+      // The spec defines a bare string as `{ dialect: 'cel', source }`
+      // shorthand, so the same text as a bare string reaches the SAME verdict
+      // as its envelope above: the null comparison faults on CEL and the
+      // fail-closed gate hides. It used to stay on the legacy `${…}` path,
+      // where `null < null` is `false` and the action showed.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const engine = new ActionEngine(NULLS);
+        engine.registerAction(
+          { name: 'bare_nulls', type: 'api', visible: NULL_PRED } as any,
+          { locations: ['record_section'] },
+        );
+        expect(engine.getActionsForLocation('record_section')).toHaveLength(0);
+        const hits = warn.mock.calls.filter(c => String(c[0]).includes('bare_nulls'));
+        expect(hits).toHaveLength(1);
+        expect(String(hits[0][0])).toContain(NULL_PRED);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('keeps a `${…}` template on the legacy JS path (the discriminator\'s control)', () => {
+      // The template spelling is not CEL shorthand and still reads on the
+      // legacy engine — `null < null` is `false` there, so the action shows.
+      // This is what makes the two cases above a real engine discriminator
+      // rather than a predicate that hides anyway.
       const engine = new ActionEngine(NULLS);
       engine.registerAction(
-        { name: 'js_nulls', type: 'api', visible: NULL_PRED } as any,
+        { name: 'js_nulls', type: 'api', visible: `\${${NULL_PRED}}` } as any,
         { locations: ['record_section'] },
       );
       expect(engine.getActionsForLocation('record_section').map(a => a.name)).toEqual(['js_nulls']);

@@ -551,7 +551,8 @@ function reportAppShellVisibleFault(
  * - `{ dialect: 'cel', source }` envelopes — the shape the spec's
  *   `ExpressionInputSchema` normalizes every authored `visible` string into,
  *   which is what nav/area items carry after the server serves the app schema
- * - bare expression strings (evaluated as one boolean expression)
+ * - bare expression strings — CEL shorthand by the spec, evaluated on the
+ *   same CEL engine as the envelope (objectstack#27457)
  *
  * Everything non-literal is delegated to `evaluator.evaluateCondition`, which
  * routes CEL envelopes to the canonical `@objectstack/formula` engine. The

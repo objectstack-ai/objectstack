@@ -2492,8 +2492,18 @@ export class ObjectStackClient {
     /**
      * Send a message. Returns the service outcome verbatim — branch on
      * `status` (`sent` / `queued` / `failed`); the route answers 200 for all
-     * three so failures carry their diagnostic body. `sentBy` defaults
-     * server-side to the authenticated user.
+     * three so failures carry their diagnostic body.
+     *
+     * The caller must hold `manage_platform_settings`. `sentBy` is always the
+     * authenticated user, the sender is the deployment's configured sender,
+     * and the message is recorded under the caller's active organization.
+     * Omit `from`, `sentBy`, `organizationId` and `identityMail`: a `from`
+     * naming another address, a `sentBy` naming another user, an
+     * `organizationId` naming another organization, any `identityMail` other
+     * than `false`, and a custom `From` / `Sender` / `Return-Path` header are
+     * each refused `403 PERMISSION_DENIED`. `headers`, when sent, is a plain
+     * object mapping header names to single-line string values; any other
+     * shape is refused the same way.
      */
     send: async (message: {
         to: string | Array<string | { name?: string; address: string }>;
