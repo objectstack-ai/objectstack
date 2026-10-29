@@ -270,87 +270,157 @@ export async function defaultRecordPageSaveRefusal(
 }
 
 /**
+ * The packages the engine registry says hold the permission-set name `name` —
+ * the registry's OWN reading of who holds a security-catalog name: the package
+ * half of the reading its cold-boot check refuses with, a name held through an
+ * item a package registered under its id (its composite slot) or through the
+ * package's install claim, never through the bare slot, built-in names skipped.
+ * One reading of "who holds a name", never a second one beside the cold boot's
+ * (maintainer ruling letter B on #22371, record 6074838935).
+ *
+ * `@objectstack/objectql` exports that reading as
+ * `findPackageHeldSecurityCatalogNames(registry)`, which answers
+ * `registry.packageHeldSecurityCatalogNames()`. This package cannot import
+ * `@objectstack/objectql` — it would form a cycle (`host-engine.ts`) — so it
+ * asks the same member of the host's registry, the way it asks the registry's
+ * `defaultRecordPageHoldersOf` for the default-record-page rule. The objectql
+ * suite `protocol-permission-set-name-registry-reading.test.ts` holds the seam
+ * from the side that sees both: it drives the doors over a real
+ * `SchemaRegistry`, so a rename of the member reds there. A host registry with
+ * no such member answers no package-held name, as one without `getItem` did.
+ *
+ * Not caught: the reading is in memory, and a throw from it is a fault to
+ * surface, never "nobody holds the name".
+ */
+function registryPackageHoldersOf(registry: unknown, name: string): readonly string[] {
+    const read = (registry as { packageHeldSecurityCatalogNames?: unknown } | null | undefined)
+        ?.packageHeldSecurityCatalogNames;
+    if (typeof read !== 'function') return [];
+    const held: unknown = read.call(registry);
+    if (!Array.isArray(held)) return [];
+    const holders = new Set<string>();
+    for (const entry of held as Array<{ catalogType?: unknown; name?: unknown; packageIds?: unknown } | null>) {
+        if (entry?.catalogType !== 'permission' || entry.name !== name || !Array.isArray(entry.packageIds)) continue;
+        for (const id of entry.packageIds) if (typeof id === 'string' && id !== '') holders.add(id);
+    }
+    return [...holders];
+}
+
+/**
  * The body of `ObjectStackProtocolImplementation#permissionSetNameCollisionRefusal`;
  * the method's docblock there is its contract.
  *
  * A `permission` set's name is its identity across the whole deployment: a
  * grant (`sys_user_permission_set.permission_set`) resolves its set by that
- * name alone (ADR-0131 D4), and the security catalog answers one definition per
- * name. So a name may belong to exactly one owner, and a write that would
- * publish a SECOND set of a name an ACTIVE set already holds under a DIFFERENT
- * owner is refused here, with nothing written — a package never writes into a
- * record another owns (ADR-0086 D4).
+ * name alone (ADR-0131 D4), so positions, permission sets and capabilities each
+ * hold one name per deployment (maintainer ruling Q4 = A on #15196, record
+ * 6050490870). A write that would make a set of a name ACTIVE under an owner
+ * other than the one already holding the name is refused here, with nothing
+ * written — a package never writes into a record another owns (ADR-0086 D4).
  *
- * `owner` is the publishing package (`package_id` / `_packageId`), or `null`
- * for an environment-authored runtime set; `permission` takes no environment
- * overlay (`allowEnvironmentOverlay: false`, ADR-0005), so a name a package
- * holds is never an environment author's to re-use either, and the predicate is
- * symmetric: a write's owner that is not an active holder's owner is foreign.
- * The same-owner edit path (the owning package re-authoring its own set) is
- * untouched. The active holders are read from BOTH the stored environment rows
- * (a set published through the metadata door) and the engine registry (a set a
- * package ships in code); a registry item is counted only when it names its
- * owner, so an item of unprovable provenance never invents a rejection — the
- * stance the store-unavailable branch takes too ({@link rethrowUnlessMetadataStoreUnprovisioned}).
+ * ## The owner
+ *
+ * `owner` is the binding the write LANDS IN: the package its row is written
+ * under, or `null` for the package-unbound (environment) row. Each door hands
+ * the binding its own write resolves, never the request's spelling.
+ * `permission` takes no environment overlay (`allowEnvironmentOverlay: false`,
+ * ADR-0005), so a name a package holds is never an environment author's to
+ * re-use either, and the predicate is symmetric on the owner: a write by the
+ * owner already holding the name — the owning package, or the environment,
+ * re-authoring its own set — is untouched.
+ *
+ * ## The holders: two readings, met
+ *
+ *  - **The stored active rows** of the environment (ADR-0131 D6), by
+ *    `package_id`. A set published through the metadata door is stored, and
+ *    the registry holds it in the bare slot with no package (hydration and the
+ *    write-through register a stored row without one), so only the row says
+ *    which package it belongs to — the half the registry's reading cannot see,
+ *    and why this door's reading is wider than the cold boot's.
+ *  - **The registry's package half** ({@link registryPackageHoldersOf}): a set
+ *    a package ships in code, or names in its install claim, read through the
+ *    registry's own reading and never re-derived (ruling letter B on #22371).
+ *
+ * A package-less row stored beside the rows of exactly ONE package is that
+ * package's, not a second owner — #23165's rule for the write address ("a
+ * package-less row beside the package's row is not a second package", which
+ * `packagelessAddress` resolves), applied to ownership: the direct save that
+ * minted such a row was re-addressed into the package. It is read as that
+ * package's on both sides, so it makes no foreign holder of the package's own
+ * edit, and a write that lands in it is the package's write. Beside two or
+ * more packages' rows, or none, a package-less row is the environment's.
+ *
+ * An UNPROVISIONED store counts as "no stored sets"; any other read failure
+ * propagates — answering "no other owner" from a read that never happened
+ * would accept the very second set this exists to refuse.
+ *
+ * ## The envelope
+ *
+ * `NAMESPACE_CONFLICT` / 422, worded as the registry's own refusal of a second
+ * holder is (`SecurityCatalogNameConflictError`, `@objectstack/objectql`): the
+ * rulings fix this rule's envelope at that code and status on every path a
+ * second holder can arrive by (ruling A on #22307, record 6063176077: "one
+ * name, one holder, on every path"), and the metadata doors are such paths. A
+ * client reads one code for the rule whichever door it met. The prescription
+ * precedes the reason because a 4xx message crosses the REST boundary bounded
+ * at 500 characters with its tail truncated.
  */
 export async function permissionSetNameCollisionRefusal(
     this: Pick<SaveDoorRefusalHost, 'engine' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'storedOverlayEntries'>,
     singularType: string,
     name: string,
-    writePackageId: string | null | undefined,
-    verb: 'save' | 'publish',
-): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
+    owner: string | null | undefined,
+    verb: 'save' | 'publish' | 'restore',
+): Promise<(Error & { code: 'NAMESPACE_CONFLICT'; status: 422 }) | undefined> {
     if (singularType !== 'permission') return undefined;
-    const writeOwner = typeof writePackageId === 'string' && writePackageId !== '' ? writePackageId : null;
 
-    // Every owner that already holds an ACTIVE set under this name.
-    const owners = new Set<string | null>();
     let records: any[] = [];
     try {
-        // [ADR-0131 D6] A save lands environment-wide, so the sets it meets are
-        // the environment-wide rows. An UNPROVISIONED store counts as "no
-        // stored sets"; any other read failure propagates — answering "no
-        // other owner" from a read that never happened would accept the very
-        // second set this exists to refuse.
+        // [ADR-0131 D6] A write lands environment-wide, so the sets it meets
+        // are the environment-wide rows.
         records = await this.readActiveOverlayRows({ type: singularType });
     } catch (error) {
         this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
     }
+    const storedPackages = new Set<string>();
+    let storedUnbound = false;
     for (const entry of this.storedOverlayEntries({ type: singularType }, records)) {
         if (entry.name !== name) continue;
-        owners.add(entry.packageId ?? null);
+        if (typeof entry.packageId === 'string' && entry.packageId !== '') storedPackages.add(entry.packageId);
+        else storedUnbound = true;
     }
-    const registry = this.engine.registry;
-    if (typeof registry?.getItem === 'function') {
-        let registered: unknown;
-        try {
-            registered = registry.getItem(singularType, name);
-        } catch {
-            registered = undefined;
-        }
-        if (registered && typeof registered === 'object') {
-            const owner = (registered as { _packageId?: unknown })._packageId;
-            // Count a registry holder only when it names its owner: an item of
-            // unprovable provenance is not proof of a foreign owner.
-            if (typeof owner === 'string' && owner !== '') owners.add(owner);
-        }
-    }
+    // [#23165] A package-less row beside exactly one package's row is that package's.
+    const residueOf = storedUnbound && storedPackages.size === 1 ? [...storedPackages][0] : undefined;
 
-    const foreign = [...owners].filter((owner) => owner !== writeOwner);
+    const holders = new Set<string | null>(storedPackages);
+    for (const packageId of registryPackageHoldersOf(this.engine?.registry, name)) holders.add(packageId);
+    if (storedUnbound && residueOf === undefined) holders.add(null);
+
+    const written = typeof owner === 'string' && owner !== '' ? owner : residueOf ?? null;
+    const foreign = [...holders]
+        .filter((holder) => holder !== written)
+        // Packages by id, the environment last, so the sentence is the same on every driver.
+        .sort((a, b) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1));
     if (foreign.length === 0) return undefined;
 
-    const describe = (owner: string | null) => (owner === null ? 'this environment' : `package '${owner}'`);
-    const held = [...new Set(foreign.map(describe))].join(' and ');
-    const mine = describe(writeOwner);
+    const holderPhrase = (holder: string | null) => (holder === null ? 'the environment catalog' : `package "${holder}"`);
+    const writer = written === null ? 'this environment' : `package "${written}"`;
+    const releases = foreign
+        .map((holder) => (holder === null ? 'rename or delete the environment catalog\'s set' : `rename it in package "${holder}"`))
+        .join(', or ');
+    const remedy = verb === 'restore'
+        ? `Restore it once the name is free (${releases} first), or save this version's body as a set of a name no other `
+          + 'holder holds.'
+        : `Rename this set to a name no other holder holds (prefix it with your own module prefix), or ${releases} first.`;
     const err = new Error(
-        `A permission set named '${name}' already belongs to ${held}. ${mine} cannot ${verb === 'publish' ? 'publish' : 'save'} `
-        + `a second set of that name: a permission set's name is its identity across the whole deployment — a grant resolves `
-        + `its set by name alone (ADR-0131 D4), and no package writes into a record another owns (ADR-0086 D4), so one name `
-        + `must resolve to exactly one set. Nothing was written. Rename this set to a name ${mine} owns (prefix it with your `
-        + `own module prefix), or edit the existing set in the package that owns it and re-publish.`,
-    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
-    err.code = 'RESOURCE_CONFLICT';
-    err.status = 409;
+        `Security catalog name conflict: ${writer} cannot ${verb} the permission set "${name}" — it is already held by `
+        + `${foreign.map(holderPhrase).join(' and ')}. Nothing was ${verb === 'publish' ? 'published' : 'written'}. ${remedy} `
+        + 'Positions, permission sets and capabilities each hold one name per deployment: an assignment names a '
+        + 'permission set by its bare name, with no package to tell two definitions apart, so with two holders which '
+        + 'definition grants would depend on registration order. See ADR-0048.',
+    ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
+    err.code = 'NAMESPACE_CONFLICT';
+    err.status = 422;
     return err;
 }
 
