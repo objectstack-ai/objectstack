@@ -124,6 +124,7 @@ export const en: TranslationData = {
         // Configuration
         nav_settings_hub: { label: 'All Settings' },
         nav_settings_localization: { label: 'Localization' },
+        nav_exchange_rates: { label: 'Exchange Rates' },
         nav_settings_company: { label: 'Company' },
         nav_settings_mail: { label: 'Email' },
         nav_settings_branding: { label: 'Branding' },
