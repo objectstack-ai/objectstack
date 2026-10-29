@@ -3,7 +3,7 @@
 /**
  * `applyDriverQueryInMemory` — the engine's own reading of a driver query over
  * rows already in memory: `where`, `orderBy`, `offset` / `limit` and `fields`,
- * in that order (ADR-0015 Tier A, epic #27261 P1).
+ * in that order (epic #27261 Tier A, P1).
  *
  * ## Why the engine owns this
  *
