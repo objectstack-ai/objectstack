@@ -1154,12 +1154,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       revoke_api_key: {
         label: "API キーを失効",
         confirmText: "この API キーを失効しますか？使用中のクライアントはすぐにアクセスを失います。",
-        successMessage: "API キーを失効しました"
+        successMessage: "API キー「{{ record.name }}」を失効しました"
       },
       restore_api_key: {
         label: "API キーを復元",
         confirmText: "この失効済み API キーを復元しますか？キーを保持する既存のクライアントはアクセスを回復します。",
-        successMessage: "API キーを復元しました"
+        successMessage: "API キー「{{ record.name }}」を復元しました"
       }
     }
   },
