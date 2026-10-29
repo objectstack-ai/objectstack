@@ -12,7 +12,9 @@
  *  - `isAnotherPackagesObject` — whether a code package other than the
  *    container's owns its object;
  *  - `registryTakesStoredRows` — whether this protocol's engine registry takes
- *    the rows this kernel stores.
+ *    the rows this kernel stores;
+ *  - `overlaidShippedContainerViewNames` — the view names of the shipped
+ *    container a container row overlays by its own name.
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
@@ -49,6 +51,7 @@ export interface RegistryViewPredicatesHost {
     readonly environmentId: ObjectStackProtocolImplementation['environmentId'];
     readonly expandRuntimeViewContainer: ObjectStackProtocolImplementation['expandRuntimeViewContainer'];
     readonly runtimeViewContainerObject: ObjectStackProtocolImplementation['runtimeViewContainerObject'];
+    readonly runtimeViewContainerPackage: ObjectStackProtocolImplementation['runtimeViewContainerPackage'];
     readonly shippedViewContainerOf: ObjectStackProtocolImplementation['shippedViewContainerOf'];
     readonly storeHydratedIntoRegistry: ObjectStackProtocolImplementation['storeHydratedIntoRegistry'];
 }
@@ -101,4 +104,19 @@ export function isAnotherPackagesObject(this: Pick<RegistryViewPredicatesHost, '
 /** The body of `ObjectStackProtocolImplementation#registryTakesStoredRows`; the method's docblock there is its contract. */
 export function registryTakesStoredRows(this: Pick<RegistryViewPredicatesHost, 'environmentId' | 'storeHydratedIntoRegistry'>): boolean {
     return this.environmentId === undefined || this.storeHydratedIntoRegistry;
+}
+
+/** The body of `ObjectStackProtocolImplementation#overlaidShippedContainerViewNames`; the method's docblock there is its contract. */
+export function overlaidShippedContainerViewNames(
+    this: Pick<RegistryViewPredicatesHost, 'expandRuntimeViewContainer' | 'runtimeViewContainerPackage' | 'shippedViewContainerOf'>,
+    type: string,
+    container: Record<string, unknown>,
+    packageId: string | null | undefined,
+): ReadonlySet<string> {
+    const ownPackageId = this.runtimeViewContainerPackage(type, container, { packageId });
+    const shipped = this.shippedViewContainerOf(type, container.name, ownPackageId);
+    if (shipped === undefined) return new Set();
+    return new Set(
+        this.expandRuntimeViewContainer(type, shipped, { packageId: ownPackageId }).map((view) => String(view.name)),
+    );
 }

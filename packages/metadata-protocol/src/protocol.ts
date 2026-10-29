@@ -425,12 +425,14 @@ import { overlayLockLayerAt, resolveOverlayPackageBinding, storedRowKnownDatasou
 import { throwMetadataServiceUnavailable, warnClosureReadUnavailable } from './protocol-loud-degradations.js';
 // [#25467 cut 33] The overlay-uniqueness indexes and the bundle-member backfill, once per process.
 import { ensureOverlayIndex, ensureOverlayMembersBackfilled } from './protocol-overlay-index.js';
-// [#25467 cut 33] The registry and view-container predicates: stored container expansion, binding, ownership, registry scope.
-import { copiesOwnShippedViewContainer, expandStoredViewContainers, isAnotherPackagesObject, registryTakesStoredRows, runtimeViewContainerObject } from './protocol-registry-view-predicates.js';
+// [#25467 cut 33] The registry and view-container predicates: stored container expansion, binding, ownership, registry scope, overlaid views.
+import { copiesOwnShippedViewContainer, expandStoredViewContainers, isAnotherPackagesObject, overlaidShippedContainerViewNames, registryTakesStoredRows, runtimeViewContainerObject } from './protocol-registry-view-predicates.js';
 // [#25467 cut 33] The ADR-0067 commit row of a publish or revert turn, and its named INSERT.
 import { persistPackageCommitRow, recordPackageCommit } from './protocol-package-commit-record.js';
 // [#25467 cut 33] Package scope: the writable base, the named-base rule, storage teardown, the app package-id key.
 import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstalledNamedBaseRefusal } from './protocol-package-scope.js';
+// [#25467 cut 33] The /meta save door's refusal of a `:type` that is no metadata type at all.
+import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 
@@ -19410,23 +19412,11 @@ export class ObjectStackProtocolImplementation implements
      * existence claim (see {@link metaTypeNamespaceExists}).
      */
     private async refuseUnmintableMetaType(request: { type: string, name: string }): Promise<void> {
-        const unrecognised = unrecognisedMetaTypeRefusal(request.type);
-        if (!unrecognised) return;
-        // The old exemption 1 (skip when the name contains a slash) was
-        // removed by commit 311433f6b — the grammar verdict upstream refuses every
-        // slash-bearing name before this probe runs. See the header.
-        // Exemption 2 — the namespace predates this write.
-        if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
-        const err = new Error(
-            `'${unrecognised.type}' is not a metadata type. The platform declares `
-            + `no such type, and a plugin cannot declare one either: 'additionalTypes' was retired because `
-            + `nothing ever read it — so this write would mint a sys_metadata namespace under `
-            + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
-            + `metadata type; GET /api/v1/meta/types lists the ones this deployment carries.`,
-        );
-        (err as any).code = 'INVALID_REQUEST';
-        (err as any).status = 400;
-        throw err;
+        // [#25467 cut 33] The body moved to `protocol-unmintable-meta-type.ts` (see `UnmintableMetaTypeHost`).
+        const host: ThisParameterType<typeof refuseUnmintableMetaType> = {
+            metaTypeNamespaceExists: (...a) => this.metaTypeNamespaceExists(...a),
+        };
+        return refuseUnmintableMetaType.call(host, request);
     }
 
     /**
@@ -19937,12 +19927,13 @@ export class ObjectStackProtocolImplementation implements
         container: Record<string, unknown>,
         packageId: string | null | undefined,
     ): ReadonlySet<string> {
-        const ownPackageId = this.runtimeViewContainerPackage(type, container, { packageId });
-        const shipped = this.shippedViewContainerOf(type, container.name, ownPackageId);
-        if (shipped === undefined) return new Set();
-        return new Set(
-            this.expandRuntimeViewContainer(type, shipped, { packageId: ownPackageId }).map((view) => String(view.name)),
-        );
+        // [#25467 cut 33] The body moved to `protocol-registry-view-predicates.ts` (see `RegistryViewPredicatesHost`).
+        const host: ThisParameterType<typeof overlaidShippedContainerViewNames> = {
+            expandRuntimeViewContainer: (...a) => this.expandRuntimeViewContainer(...a),
+            runtimeViewContainerPackage: (...a) => this.runtimeViewContainerPackage(...a),
+            shippedViewContainerOf: (...a) => this.shippedViewContainerOf(...a),
+        };
+        return overlaidShippedContainerViewNames.call(host, type, container, packageId);
     }
 
     /**
