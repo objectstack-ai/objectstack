@@ -46,9 +46,12 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { CAP_REACT_PAGES, disableCapability, enableCapability } from '@object-ui/core';
 
 let datasets: Array<Record<string, unknown>>;
+// The Studio's dataset pickers read the draft-overlaid catalog, and their New
+// dataset entry reads the object catalog (objectstack#27518).
 const mockClient = {
-  list: vi.fn(async () => datasets),
+  list: vi.fn(async (type: string) => (type === 'dataset' ? datasets : [])),
   get: vi.fn(async () => undefined),
+  withPreviewDrafts: () => mockClient,
 };
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -96,7 +99,9 @@ function renderPage(value: PageSourceKind = 'html') {
 
 async function renderReport(value: ReportBinding) {
   const onChange = vi.fn();
-  const utils = render(<ReportCreateFields value={value} onChange={onChange} locale="en-US" />);
+  const utils = render(
+    <ReportCreateFields value={value} onChange={onChange} authoring={{ packageId: 'pkg' }} locale="en-US" />,
+  );
   await screen.findByTestId('create-report-dataset');
   if (value.dataset !== '' && datasets.some((d) => d.name === value.dataset)) {
     await screen.findByTestId('create-report-measure');

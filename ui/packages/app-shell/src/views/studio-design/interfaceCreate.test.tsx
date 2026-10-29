@@ -21,9 +21,12 @@ import { SchemaRenderer } from '@object-ui/react';
 import '@object-ui/components';
 
 let datasets: Array<Record<string, unknown>>;
+// The Studio's dataset pickers read the draft-overlaid catalog, and their New
+// dataset entry reads the object catalog (objectstack#27518).
 const mockClient = {
-  list: vi.fn(async () => datasets),
+  list: vi.fn(async (type: string) => (type === 'dataset' ? datasets : [])),
   get: vi.fn(async () => undefined),
+  withPreviewDrafts: () => mockClient,
 };
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -171,7 +174,7 @@ describe('ReportCreateFields (objectui#11823 step 2)', () => {
     const [value, setValue] = React.useState<ReportBinding>(initial);
     return (
       <>
-        <ReportCreateFields value={value} onChange={setValue} locale="en-US" />
+        <ReportCreateFields value={value} onChange={setValue} authoring={{ packageId: 'pkg' }} locale="en-US" />
         <output data-testid="binding">{JSON.stringify(value)}</output>
       </>
     );
@@ -193,11 +196,14 @@ describe('ReportCreateFields (objectui#11823 step 2)', () => {
     expect(screen.getByTestId('binding')).toHaveTextContent('{"dataset":"tickets_ds","measure":""}');
   });
 
-  it('says so when there is no dataset to report on', async () => {
+  it('offers to create one when there is no dataset to report on (objectstack#27518)', async () => {
     datasets = [];
     render(<Host />);
-    expect(await screen.findByTestId('create-report-no-datasets')).toHaveTextContent(
-      'There is no dataset to report on yet.',
+    expect(await screen.findByTestId('create-report-new-dataset-hint')).toHaveTextContent(
+      t('engine.studio.interfaces.newDataset.noPackageDatasets', 'en-US'),
+    );
+    expect(screen.getByTestId('create-report-new-dataset-open')).toHaveTextContent(
+      t('engine.studio.interfaces.newDataset.open', 'en-US'),
     );
     expect(screen.queryByTestId('create-report-dataset')).toBeNull();
   });
