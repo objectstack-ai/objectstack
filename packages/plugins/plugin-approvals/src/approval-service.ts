@@ -2426,24 +2426,30 @@ export class ApprovalService implements IApprovalService {
     const crossOrg = directoryOrg !== organizationId;
 
     if (type === 'user') {
-      // #27397: the value is the slot only when someone can take it — the ONE
-      // "does this address resolve to a person" predicate the reassign door
-      // asks ({@link reassignTargetRefusal}): a `sys_user` row carries the id
-      // (or the email, as stored), and that user is not provably a member of
-      // other organizations only. A banned account still resolves, as a banned
-      // team or unit member does. One that resolves to no one falls through to
-      // the graph types' "expanded to nobody" warning below and adds no slot,
-      // so a slate it leaves empty reaches the node's onEmptyApprovers. A
-      // failed read proves nothing, so the slot stays: this file's
-      // addressing-path posture (fail open, never empty a live slate on a
-      // hiccup). A value spelled as a `type:value` literal is not asked:
-      // `slateNamesAPerson` already reads it as naming no one.
+      // #27397: the value is the slot only when an account carries it — asked
+      // through the ONE "does this address resolve to a person" predicate the
+      // reassign door asks ({@link reassignTargetRefusal}): a `sys_user` row
+      // carries the id (or the email, as stored). Asked with NO organization,
+      // so the predicate's tenancy screen does not run: `user` is
+      // directory-less and ADR-0105 D9 leaves it untouched — a person of
+      // another organization's directory named outright stays named. A banned
+      // account still resolves, as a banned team or unit member does (neither
+      // expansion reads the flag). What is asked is the slot the route ENDS
+      // on: an out-of-office hop that carries the request to a delegate has
+      // named someone (a removed account's delegation still routes, #24065).
+      // One that resolves to no one falls through to the graph types'
+      // "expanded to nobody" warning below and adds no slot, so a slate it
+      // leaves empty reaches the node's onEmptyApprovers. A failed read proves
+      // nothing, so the slot stays: this file's addressing-path posture (fail
+      // open, never empty a live slate on a hiccup). A value spelled as a
+      // `type:value` literal is not asked: `slateNamesAPerson` already reads it
+      // as naming no one.
       const value = String(a.value);
+      const routed = await this.applyOooDelegation(value, now, organizationId, substitutions);
+      if (routed.length !== 1 || routed[0] !== value || value.includes(':')) return routed;
       let refusal: string | undefined;
-      if (!value.includes(':')) {
-        try { refusal = await this.reassignTargetRefusal(value, organizationId ?? null); } catch { refusal = undefined; }
-      }
-      if (refusal === undefined) return this.applyOooDelegation(value, now, organizationId, substitutions);
+      try { refusal = await this.reassignTargetRefusal(value, null); } catch { refusal = undefined; }
+      if (refusal === undefined) return routed;
     }
     if (type === 'field' && record) {
       // #3447: a record field can name MANY approvers — a multi-select user

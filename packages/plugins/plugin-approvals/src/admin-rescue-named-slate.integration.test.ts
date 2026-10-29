@@ -329,9 +329,9 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
       expect(row.pending_approvers).toEqual(['u_alice@example.com']);
     });
 
-    it('a user who is provably a member of another organization only is dropped too', async () => {
-      const row = await open('phantom_other_org', [{ type: 'user', value: 'u_other_owner' }]);
-      expect([...row.pending_approvers].sort()).toEqual(['u_admin', 'u_owner']);
+    it('CONTROL: a person of another organization\'s directory, named outright, keeps the slot (ADR-0105 D9)', async () => {
+      const row = await open('other_org_user', [{ type: 'user', value: 'u_other_owner' }]);
+      expect(row.pending_approvers).toEqual(['u_other_owner']);
     });
 
     it('CONTROL: a real user keeps the slot and no expanded-to-nobody line is logged', async () => {
