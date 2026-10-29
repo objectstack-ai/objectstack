@@ -88,6 +88,7 @@
 
 import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
 import type { GetMetaItemsRequest } from '@objectstack/spec/api';
+import { truncateClientMessage } from '@objectstack/types';
 import { handleRouteError, sendFieldVisibilityFault } from './error-response.js';
 import * as metaReadGate from './meta-item-read-gate.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
@@ -187,6 +188,29 @@ export interface MetaCollectionRouteHost {
     refuseUnknownMetaListType: RestServer['refuseUnknownMetaListType'];
     metaListAnswerSources: RestServer['metaListAnswerSources'];
     metaTypeSingular: (typeof RestServer)['metaTypeSingular'];
+}
+
+/**
+ * [#27514] A `GET {metaPath}/diagnostics` refusal of a query value the sweep
+ * cannot honour: `400 INVALID_REQUEST`, the status and code of the [#8924]
+ * near-miss type refusal it extends. Thrown, so it leaves through the route's
+ * one refusal writer ({@link isDiagnosticsRefusal}) with the refusals the
+ * list door and the sweep throw.
+ */
+function diagnosticsRefusal(message: string): Error {
+    return Object.assign(new Error(message), { code: 'INVALID_REQUEST', status: 400 });
+}
+
+/**
+ * [#27514] Is this a classified `400 INVALID_REQUEST` refusal of the
+ * diagnostics request: {@link diagnosticsRefusal}, the list door's
+ * unknown-type verdict, or the sweep's near-miss spelling and unknown package?
+ * Those are the refusals the route answers in its nested envelope; anything
+ * else keeps `handleRouteError`'s classification.
+ */
+function isDiagnosticsRefusal(error: unknown): error is Error {
+    const e = error as { status?: unknown; code?: unknown } | null | undefined;
+    return error instanceof Error && e?.status === 400 && e?.code === 'INVALID_REQUEST';
 }
 
 /**
@@ -291,8 +315,19 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // value each; the `as string` casts are exactly the
                     // laundering that kept `tsc` silent about the array arm.
                     if (refuseRepeatedQueryParams(req, res, ['severity', 'type', 'package'])) return;
-                    const severityParam = (req.query?.severity as string | undefined) ?? 'error';
-                    const severity = severityParam === 'warning' ? 'warning' : 'error';
+                    // [#27514] The sweep reports one of two severities, and any
+                    // other value used to be read as `error` and answered 200:
+                    // a caller asking for something this sweep does not have
+                    // got the error sweep with nothing saying so. An empty value
+                    // states nothing and keeps the default, as an empty `type`
+                    // keeps the full sweep.
+                    const severity = (req.query?.severity as string | undefined) || 'error';
+                    if (severity !== 'error' && severity !== 'warning') {
+                        throw diagnosticsRefusal(
+                            `'${severity}' is not a diagnostics severity. Use 'error' (the default: the entries that `
+                            + `fail validation) or 'warning' (those, and the entries that carry warnings).`,
+                        );
+                    }
                     const diagnosticsType = (req.query?.type as string | undefined) || undefined;
                     // [ADR-0131 D6] No organization: the sweep reads each
                     // type environment → code, the partition every `/meta`
@@ -305,8 +340,34 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                         // each swept type is a list read, so `all` names no package.
                         packageId: metaItemPackageBinding(req.query?.package),
                     });
+                    // [#27514] A named type that is not a metadata type at all
+                    // was swept as one empty type: `200 {scannedTypes: 1}` with
+                    // zero issues, an all-clear over nothing. Refused by the
+                    // list door's own verdict ({@link refuseUnknownMetaListType}:
+                    // the static spelling contract, then the live type set), so
+                    // the two doors cannot disagree about which names are types.
+                    // Asked AFTER the sweep on purpose: the sweep's [#8924]
+                    // refusal of a near-miss spelling (`viewes`) names the
+                    // spellings the caller was reaching for, and it keeps
+                    // answering first.
+                    if (diagnosticsType !== undefined) await this.refuseUnknownMetaListType(p, diagnosticsType);
                     res.json(result);
                 } catch (error: any) {
+                    // [#27514] ONE envelope for every refusal this route
+                    // answers. The repeated-parameter refusal above writes the
+                    // ADR-0112 nested `{ error: { code, message } }`, and the
+                    // classified 400s that are THROWN (the severity check above,
+                    // the list door's unknown-type verdict, and the sweep's
+                    // [#8924] near-miss spelling and unknown package) used to
+                    // leave through `handleRouteError` as `{ error: '…', code }`,
+                    // so a client reading `body.error.code` found it on one
+                    // refusal and `undefined` on the next.
+                    if (isDiagnosticsRefusal(error)) {
+                        res.status(400).json({
+                            error: { code: 'INVALID_REQUEST', message: truncateClientMessage(error.message) },
+                        });
+                        return;
+                    }
                     handleRouteError(res, error);
                 }
             },

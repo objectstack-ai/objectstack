@@ -3760,6 +3760,13 @@ const de = {
       countSeedData: "Beispieldaten",
       extendTarget: "Wird zur bestehenden App hinzugefügt: {{app}}",
       awaitingConfirm: "Wartet auf Bestätigung",
+      iterateOrNew: {
+        question: "Das überschneidet sich mit „{{app}}“, einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
+        questionUnnamed: "Das überschneidet sich mit einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
+        extend: "„{{app}}“ weiter verbessern",
+        buildNew: "Separate App erstellen",
+        replyHint: "Antworten Sie, welche Option Sie wählen.",
+      },
       objectsAndFields: "Objekte und Felder",
       views: "Ansichten",
       suggestedField: "ergänzt",
