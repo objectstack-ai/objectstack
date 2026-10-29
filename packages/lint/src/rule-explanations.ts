@@ -743,7 +743,8 @@ const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
       'the remote database owns the table and the platform creates no column for either. So the remote row ' +
       'answers no `owner_id` (record sharing refuses) and no `created_by` equal to the caller (the floor ' +
       'refuses). A member whose permission set grants `allowEdit` is refused every edit and every delete ' +
-      'with 403 `PERMISSION_DENIED`, unless an app-authored row-level policy admits the row; otherwise only ' +
+      'with 403 `PERMISSION_DENIED` (404 on `private`, where reads are scoped by the same owner and no row is ' +
+      'in reach), unless an app-authored row-level policy admits the row; otherwise only ' +
       'an administrator can write. An object with no `sharingModel` is ' +
       'judged as \'private\', the value the runtime falls back to.',
     '`ownership: \'none\'` (or `\'org\'`, `\'business_unit\'`) is not a way out: without `owner_id` record ' +
@@ -756,8 +757,9 @@ const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
       'that name, so the owner edits and deletes the row and other members are refused. A built-in SQL ' +
       'driver does that through `external.columnMap` (remote column to `owner_id`); `columnMap` is applied ' +
       'by those drivers, not by the engine, so a plugin driver must return the field itself. Declaring ' +
-      'the field matters for reads too: the platform\'s own `owner_id` is treated as unstored, and reads ' +
-      'are not scoped by owner. On an object without `owner_id`, declare `created_by` the same way instead, ' +
+      'the field matters for reads too: the platform\'s own `owner_id`, with no field or `columnMap` entry ' +
+      'naming it, proves no owner, so on `private` a member reads no row at all. On an object without ' +
+      '`owner_id`, declare `created_by` the same way instead, ' +
       'so the creator writes the row.',
     'A `columnMap` entry for the column without a declared field is reported too, with its own wording: ' +
       'it serves the check on a built-in SQL driver and does nothing on a plugin driver, and the ' +

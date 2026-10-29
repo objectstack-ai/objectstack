@@ -11,7 +11,8 @@ import {
 /**
  * The two external objects of `packages/runtime/src/plugin-driver-external-object.spike.test.ts`,
  * copied verbatim (fields trimmed to what the rule reads). That spike measures the runtime half:
- * on `spike_owned` (no `sharingModel`) a member holding `allowEdit` gets 403 on every PATCH,
+ * on `spike_owned` (no `sharingModel`) a member holding `allowEdit` is refused every PATCH (404
+ * since #27425: the read scope admits no row),
  * step (e3); on `spike_node` (`public_read_write`) the same member's write reaches the driver.
  */
 const SPIKE_STACK = defineStack({
@@ -133,6 +134,14 @@ describe('security-external-owner-unmapped — which objects it judges', () => {
     expect(findings.map((f) => f.rule)).toEqual([SECURITY_EXTERNAL_OWNER_UNMAPPED]);
     expect(findings[0]!.message).toContain("'owner_id'");
     expect(findings[0]!.message).toContain('columnMap');
+  });
+
+  it('[#27425] names the refusal the model produces: 404 on private (reads are scoped too), 403 on public_read', () => {
+    for (const obj of [ext(), ext({ sharingModel: 'private' }), ext({ sharingModel: 'private' }, { columnMap: { assignee: 'owner_id' } })]) {
+      expect(findingsFor(obj)[0]!.message).toContain("refused (404: the member's read scope admits no row)");
+    }
+    expect(findingsFor(ext({ sharingModel: 'public_read' }))[0]!.message).toContain('refused (403)');
+    expect(findingsFor(ext({ sharingModel: 'private', ownership: 'none' }))[0]!.message).toContain('refused (403)');
   });
 
   it('a columnMap that maps only created_by does not serve the owner check', () => {

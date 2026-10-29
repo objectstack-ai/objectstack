@@ -653,8 +653,8 @@ export class SharingService implements ISharingService {
     // [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
     // 6148183570 on #23266] The GUEST never takes the OWD branch below: not the
     // object's `sharingModel` (a `public_read` or `public_read_write` object, a
-    // `controlled_by_parent` detail), and not its owner-less or phantom-anchor
-    // fall-throughs, which read as OWD-public. `externalSharingModel` is not
+    // `controlled_by_parent` detail), and not its owner-less fall-through,
+    // which reads as OWD-public. `externalSharingModel` is not
     // read here for anyone (#23268). The guest owns nothing (ADR-0138 D1), so
     // it reaches rows only through share links — and a link is redeemed at its
     // own door, which checks the token and `publicSharing.eligibility` and
@@ -671,16 +671,6 @@ export class SharingService implements ISharingService {
     // baseline never widens it.
     if (owdForPrincipal(schema, context, object, 'read') !== 'private') return null;
     if (!hasOwnerField(schema)) return null;
-    // [#7858] …and an `owner_id` the REGISTRY injected into a FEDERATED object
-    // is not an owner column at all: the platform provisions no storage for one,
-    // so the column exists in the schema and in no store. Scoping by it composes
-    // a predicate the remote table cannot resolve — constant-false on SQLite
-    // (0 rows, HTTP 200), a hard error on Postgres/MySQL — which is why this
-    // reads as "ownership contributes nothing", exactly like the owner-less
-    // object one line up, rather than as a narrower filter. A federated object
-    // that DECLARES a real remote owner column keeps its scoping, and every
-    // local object is untouched; see `federated-phantom-anchors.ts`.
-    if (hasPhantomOwnerAnchor(schema)) return null;
     if (!context.userId) {
       // Authenticated context with no user id is a degenerate case
       // (e.g. anonymous API key). Restrict to nothing rather than
@@ -702,6 +692,24 @@ export class SharingService implements ISharingService {
     // seam as authorable, client-supplied vocabulary.
     const readScope = (context as any).__readScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (readScope === 'org') return null;
+    // [#27425] …and an `owner_id` the REGISTRY injected into a FEDERATED object
+    // proves nothing about the remote row: the platform provisions no storage
+    // for it, so whether any column answers to `owner_id` is up to the driver
+    // (a remote column of that name, or a plugin driver returning it on its
+    // own), and nothing declared says so. #7858 read that as "ownership
+    // contributes nothing" and returned `null` — every row to every member, on
+    // the object whose author chose `private`. The scope NARROWS instead: no
+    // owner predicate can be proven, so the owner arm admits nothing, and share
+    // rows are not consulted either (a grant on such an object is refused as
+    // inert, see `inertGrantReason`). The pending-approval arm stays: it is an
+    // id list the approvals service vouches for, not an owner read. `org` above
+    // never reads the owner column, so it is unchanged. A federated object that
+    // DECLARES its owner column keeps ordinary scoping, and every local object
+    // is untouched; see `federated-phantom-anchors.ts`.
+    if (hasPhantomOwnerAnchor(schema)) {
+      const approvalIds = [...(await this.pendingApproverReadGrants(object, context)).keys()];
+      return approvalIds.length > 0 ? { id: { $in: approvalIds } } : { id: '__deny_all__' };
+    }
     const ownerIds = await this.resolveOwnerScopeIds(context, readScope);
     const ownerMatch: Record<string, unknown> = ownerIds.length === 1
       ? { [OWNER_FIELD]: ownerIds[0] }
@@ -803,12 +811,6 @@ export class SharingService implements ISharingService {
     // an external unless a held grant's RLS speaks for it.
     if (owdForPrincipal(schema, context, object, 'write') === 'public') return null;
     if (!hasOwnerField(schema)) return null;
-    // [#7858] The write half of the same phantom-anchor test the read filter
-    // applies — the card measured BOTH gates. Fixing only the read half would
-    // leave a bulk `update`/`delete` AND-composing `owner_id = <caller>` onto a
-    // federated table that has no such column: the same constant-false /
-    // hard-error split, here silently touching zero rows instead of refusing.
-    if (hasPhantomOwnerAnchor(schema)) return null;
     if (!context.userId) {
       // Authenticated but principal-less → edit nothing (fail closed),
       // mirroring buildReadFilter's degenerate-context handling.
@@ -818,6 +820,11 @@ export class SharingService implements ISharingService {
     // Middleware-stamped, not a field of the envelope — see buildReadFilter().
     const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (writeScope === 'org') return null;
+    // [#27425] The write half of the read filter's phantom-anchor narrowing.
+    // `null` here (#7858) let a bulk `update`/`delete` touch every row while the
+    // single-record gates refuse each one (`matchesOwnerScope` reads no owner);
+    // the bulk scope admits nothing either, and no share row is consulted.
+    if (hasPhantomOwnerAnchor(schema)) return { id: '__deny_all__' };
     const ownerIds = await this.resolveOwnerScopeIds(context, writeScope);
     const ownerMatch: Record<string, unknown> = ownerIds.length === 1
       ? { [OWNER_FIELD]: ownerIds[0] }

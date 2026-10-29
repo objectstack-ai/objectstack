@@ -91,6 +91,11 @@ export const Customer = ObjectSchema.create({
 That's it. `GET /api/v1/data/ext_customer` now returns live rows from the remote
 `customers` table; filters (`?region=EU`) push down to the remote query.
 
+`private` keys reads to the row's owner, and only an `owner_id` declared in `fields`,
+or named by an `external.columnMap` entry, counts as one. Without it a member reads
+no row, while a holder of View All (`viewAllRecords`) still reads them all. For a
+table everyone may read, choose `sharingModel: 'public_read'`.
+
 The object's **own** `datasource` must name a datasource declared
 `schemaMode: 'external'` or `'validate-only'` (ADR-0015 §4.2). An `external` binding on
 `'default'` (also the value when `datasource` is omitted) is refused by `ObjectSchema.create()`,

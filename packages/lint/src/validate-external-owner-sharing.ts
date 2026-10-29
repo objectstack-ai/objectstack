@@ -163,6 +163,13 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
         : 'with no owner_id, the ownership floor reads created_by == the caller';
     const mapped = columnMapTargets(external as AnyRec, column);
     const role = column === OWNER_COLUMN ? 'owner' : 'creator';
+    // [#27425] On `private`, record sharing also scopes READS by owner_id, and
+    // an owner it cannot read admits no row: the edit's pre-image read finds
+    // none, so the refusal is a 404 rather than the write check's 403.
+    const refusal =
+      column === OWNER_COLUMN && effectiveSharingModelOf(obj) === 'private'
+        ? "(404: the member's read scope admits no row)"
+        : '(403)';
     const declareWayOut =
       `declare ${column} in fields and have the driver return the remote ${role} under that name ` +
       '(a built-in SQL driver does it through external.columnMap; a plugin driver must return it itself)';
@@ -178,10 +185,10 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
       message: mapped
         ? `external object on sharing model ${model} maps a remote column to '${column}' through ` +
           `external.columnMap but declares no '${column}' field; ${check} before every edit and delete, ` +
-          'and only a built-in SQL driver applies columnMap, so on a plugin driver every member write is refused (403) ' +
+          `and only a built-in SQL driver applies columnMap, so on a plugin driver every member write is refused ${refusal} ` +
           'unless an app-authored row-level policy admits the row'
         : `external object on sharing model ${model} declares no '${column}' field a remote row serves; ` +
-          `${check} before every edit and delete, so every member write is refused (403) unless an app-authored ` +
+          `${check} before every edit and delete, so every member write is refused ${refusal} unless an app-authored ` +
           'row-level policy admits the row',
       hint: mapped
         ? `Declare ${column} in fields (a plugin driver must return the remote ${role} under that name itself), ` +

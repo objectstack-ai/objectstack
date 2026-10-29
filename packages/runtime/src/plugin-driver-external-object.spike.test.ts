@@ -589,19 +589,22 @@ describe('(e) PATCH /data/spike_node/:id runs `beforeUpdate` first, then `driver
     const mark = calls.length;
     const res = await as(plannerToken, 'PATCH', `/data/${OWNED}/o_1`, { name: 'Renamed' });
     const body = await readJson(res);
-    expect(res.status, JSON.stringify(body)).toBe(403);
-    expect(body?.code).toBe('PERMISSION_DENIED');
+    // [#27425] The undeclared `owner_id` proves no owner, so the member's read
+    // scope admits no row and the edit's pre-image read finds none: 404, not
+    // the 403 it answered while the read went unscoped.
+    expect(res.status, JSON.stringify(body)).toBe(404);
+    expect(body?.code).toBe('RECORD_NOT_FOUND');
     const seen = calls.slice(mark).filter((c) => c.object === OWNED);
     expect(seen.map((c) => c.method)).not.toContain('update');
-    // What the remote is asked for: `owner_id` (the sharing check) and
-    // `created_by == current_user.id` (the platform ownership floor).
+    // What the remote is asked for: `owner_id` by id (the sharing check), and
+    // the scoped pre-image read, which carries the deny-all sentinel.
     // [#27277] Under the floor the remote sees each as a capped `find`; the
     // engine applies the projection and `limit: 1` itself.
     expect(seen).toContainEqual({ method: 'find', object: OWNED, query: { where: { id: 'o_1' }, limit: EXTERNAL_ROW_CAP + 1, object: OWNED } });
     expect(seen).toContainEqual({
       method: 'find',
       object: OWNED,
-      query: { where: { $and: [{ id: 'o_1' }, { created_by: plannerId }] }, object: OWNED, limit: EXTERNAL_ROW_CAP + 1 },
+      query: { where: { $and: [{ id: 'o_1' }, { id: '__deny_all__' }] }, object: OWNED, limit: EXTERNAL_ROW_CAP + 1 },
     });
     expect(owned[0]).toEqual({ id: 'o_1', name: 'Remote row' });
   });
