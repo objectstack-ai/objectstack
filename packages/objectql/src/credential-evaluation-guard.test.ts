@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { isCredentialPresenceCondition } from './credential-evaluation-guard.js';
+import type { EngineAggregateOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 
 function makeRecordingDriver() {
   const rows = new Map<string, Record<string, unknown>[]>();
@@ -30,7 +31,9 @@ function makeRecordingDriver() {
     async execute() { return null; },
     async find(object: string, ast: any) {
       calls.push(`find:${object}`);
-      return (rows.get(object) ?? []).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+      const found = (rows.get(object) ?? []).filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? found.slice(0, ast.limit) : found;
+      return page.map((r) => ({ ...r }));
     },
     async findOne(object: string, ast: any) {
       calls.push(`findOne:${object}`);
@@ -88,8 +91,8 @@ const vault = {
   },
 };
 
-const USER = { userId: 'u1', roles: ['admin'] };
-const SYSTEM = { isSystem: true };
+const USER: EngineQueryOptions['context'] = { userId: 'u1', roles: ['admin'] };
+const SYSTEM: EngineQueryOptions['context'] = { isSystem: true };
 
 async function buildEngine() {
   const engine = new ObjectQL();
@@ -119,7 +122,7 @@ describe('ADR-0100 credential-column guard — filter and sort keys', () => {
   let ctx: Awaited<ReturnType<typeof buildEngine>>;
   beforeEach(async () => { ctx = await buildEngine(); });
 
-  const refusedWheres: Array<[string, unknown, string]> = [
+  const refusedWheres: Array<[string, EngineQueryOptions['where'], string]> = [
     ['equality', { pin: 'p@ssw0rd!' }, 'pin'],
     ['$eq with a value', { pin: { $eq: 'p@ssw0rd!' } }, 'pin'],
     ['$ne with a value', { pin: { $ne: 'x' } }, 'pin'],
@@ -137,7 +140,7 @@ describe('ADR-0100 credential-column guard — filter and sort keys', () => {
 
   for (const [label, where, field] of refusedWheres) {
     it(`find refuses ${label} on a credential column, before the driver is asked`, async () => {
-      await expectRefused(() => ctx.engine.find('cg_vault', { where: where as any, context: USER as any }), field, 'where');
+      await expectRefused(() => ctx.engine.find('cg_vault', { where, context: USER }), field, 'where');
       expect(ctx.calls).toEqual([]);
     });
   }
@@ -148,43 +151,43 @@ describe('ADR-0100 credential-column guard — filter and sort keys', () => {
 
   it('refuses orderBy on a password and on a secret column', async () => {
     await expectRefused(
-      () => ctx.engine.find('cg_vault', { orderBy: [{ field: 'pin', order: 'asc' }], context: USER as any }), 'pin', 'orderBy',
+      () => ctx.engine.find('cg_vault', { orderBy: [{ field: 'pin', order: 'asc' }], context: USER }), 'pin', 'orderBy',
     );
     await expectRefused(
-      () => ctx.engine.find('cg_vault', { orderBy: [{ field: 'token', order: 'desc' }], context: USER as any }), 'token', 'orderBy',
+      () => ctx.engine.find('cg_vault', { orderBy: [{ field: 'token', order: 'desc' }], context: USER }), 'token', 'orderBy',
     );
     expect(ctx.calls).toEqual([]);
   });
 
   it('refuses on findOne, count, aggregate (where and per-aggregation filter), update and delete', async () => {
-    await expectRefused(() => ctx.engine.findOne('cg_vault', { where: { pin: 'x' }, context: USER as any }), 'pin', 'where');
-    await expectRefused(() => ctx.engine.count('cg_vault', { where: { pin: 'x' }, context: USER as any }), 'pin', 'where');
+    await expectRefused(() => ctx.engine.findOne('cg_vault', { where: { pin: 'x' }, context: USER }), 'pin', 'where');
+    await expectRefused(() => ctx.engine.count('cg_vault', { where: { pin: 'x' }, context: USER }), 'pin', 'where');
     await expectRefused(
-      () => ctx.engine.aggregate('cg_vault', { where: { pin: 'x' }, aggregations: [{ function: 'count', alias: 'n' }] } as any, { context: USER as any }),
+      () => ctx.engine.aggregate('cg_vault', { where: { pin: 'x' }, aggregations: [{ function: 'count', alias: 'n' }] }, { context: USER }),
       'pin', 'where',
     );
     await expectRefused(
       () => ctx.engine.aggregate('cg_vault', {
         aggregations: [{ function: 'count', alias: 'n', filter: { pin: { $gt: 'o' } } }],
-      } as any, { context: USER as any }),
+      } satisfies EngineAggregateOptions, { context: USER }),
       'pin', 'aggregations[0].filter',
     );
     await expectRefused(
-      () => ctx.engine.update('cg_vault', { name: 'z' }, { where: { pin: 'x' }, multi: true, context: USER } as any), 'pin', 'where',
+      () => ctx.engine.update('cg_vault', { name: 'z' }, { where: { pin: 'x' }, multi: true, context: USER } satisfies EngineUpdateOptions), 'pin', 'where',
     );
     await expectRefused(
-      () => ctx.engine.delete('cg_vault', { where: { pin: 'x' }, multi: true, context: USER } as any), 'pin', 'where',
+      () => ctx.engine.delete('cg_vault', { where: { pin: 'x' }, multi: true, context: USER } satisfies EngineDeleteOptions), 'pin', 'where',
     );
     expect(ctx.calls).toEqual([]);
   });
 
   it('refuses a credential column in an expand entry, judged against the target object', async () => {
     await expectRefused(
-      () => ctx.engine.find('cg_vault', { expand: { holder: { object: 'cg_person', where: { pin: '1234' } } }, context: USER } as any),
+      () => ctx.engine.find('cg_vault', { expand: { holder: { object: 'cg_person', where: { pin: '1234' } } }, context: USER } satisfies EngineQueryOptions),
       'pin', 'expand.holder.where',
     );
     await expectRefused(
-      () => ctx.engine.find('cg_vault', { expand: { holder: { object: 'cg_person', orderBy: [{ field: 'pin' }] } }, context: USER } as any),
+      () => ctx.engine.find('cg_vault', { expand: { holder: { object: 'cg_person', orderBy: [{ field: 'pin' }] } }, context: USER } satisfies EngineQueryOptions),
       'pin', 'expand.holder.orderBy',
     );
     expect(ctx.calls).toEqual([]);
@@ -192,11 +195,11 @@ describe('ADR-0100 credential-column guard — filter and sort keys', () => {
 
   it('refuses a nested-relation condition on the related object’s credential column', async () => {
     await expectRefused(
-      () => ctx.engine.find('cg_vault', { where: { holder: { pin: '1234' } }, context: USER as any }), 'pin', 'where',
+      () => ctx.engine.find('cg_vault', { where: { holder: { pin: '1234' } }, context: USER }), 'pin', 'where',
     );
   });
 
-  const presence: Array<[string, unknown]> = [
+  const presence: Array<[string, EngineQueryOptions['where']]> = [
     ['bare null', { pin: null }],
     ['$null: true', { pin: { $null: true } }],
     ['$null: false', { pin: { $null: false } }],
@@ -208,31 +211,31 @@ describe('ADR-0100 credential-column guard — filter and sort keys', () => {
   ];
   for (const [label, where] of presence) {
     it(`serves a has-a-value check (${label})`, async () => {
-      await expect(ctx.engine.find('cg_vault', { where: where as any, context: USER as any })).resolves.toBeInstanceOf(Array);
+      await expect(ctx.engine.find('cg_vault', { where, context: USER })).resolves.toBeInstanceOf(Array);
       expect(ctx.calls).toContain('find:cg_vault');
     });
   }
 
   it('serves a system context unchanged — the server’s own match on a credential column', async () => {
-    const rows = await ctx.engine.find('cg_vault', { where: { pin: 'p@ssw0rd!' }, context: SYSTEM as any });
+    const rows = await ctx.engine.find('cg_vault', { where: { pin: 'p@ssw0rd!' }, context: SYSTEM });
     expect(rows.map((r: any) => r.id)).toEqual(['v1']);
-    await expect(ctx.engine.find('cg_vault', { orderBy: [{ field: 'pin', order: 'asc' }], context: SYSTEM as any })).resolves.toHaveLength(1);
-    await expect(ctx.engine.count('cg_vault', { where: { pin: 'p@ssw0rd!' }, context: SYSTEM as any })).resolves.toBe(1);
+    await expect(ctx.engine.find('cg_vault', { orderBy: [{ field: 'pin', order: 'asc' }], context: SYSTEM })).resolves.toHaveLength(1);
+    await expect(ctx.engine.count('cg_vault', { where: { pin: 'p@ssw0rd!' }, context: SYSTEM })).resolves.toBe(1);
   });
 
   it('leaves every non-credential field unaffected', async () => {
     const rows = await ctx.engine.find('cg_vault', {
-      where: { name: 'alpha', holder: 'p1' }, orderBy: [{ field: 'name', order: 'asc' }], context: USER as any,
+      where: { name: 'alpha', holder: 'p1' }, orderBy: [{ field: 'name', order: 'asc' }], context: USER,
     });
     expect(rows.map((r: any) => r.id)).toEqual(['v1']);
-    await expect(ctx.engine.count('cg_vault', { where: { name: 'alpha' }, context: USER as any })).resolves.toBe(1);
+    await expect(ctx.engine.count('cg_vault', { where: { name: 'alpha' }, context: USER })).resolves.toBe(1);
   });
 
   it('a search never scans a credential column, even one the author listed as searchable', async () => {
     let seenWhere: unknown;
     const original = ctx.driver.find;
     ctx.driver.find = async (object: string, ast: any) => { seenWhere = ast?.where; return original.call(ctx.driver, object, ast); };
-    await ctx.engine.find('cg_vault', { search: 'p@ss', context: USER } as any);
+    await ctx.engine.find('cg_vault', { search: 'p@ss', context: USER });
     expect(JSON.stringify(seenWhere)).toContain('"name"');
     expect(JSON.stringify(seenWhere)).not.toContain('"pin"');
   });

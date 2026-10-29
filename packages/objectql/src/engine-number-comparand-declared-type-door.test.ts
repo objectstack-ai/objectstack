@@ -81,7 +81,7 @@ import {
  * the one caller the guard serves — and the door is still the thing measured.
  */
 const CREDENTIAL_COLUMN_TYPES: ReadonlySet<string> = new Set(['password', 'secret']);
-const readAs = (declaredType: string, where: unknown): any =>
+const readAs = (declaredType: string, where: EngineQueryOptions['where']): EngineQueryOptions =>
   (CREDENTIAL_COLUMN_TYPES.has(declaredType) ? { where, context: { isSystem: true } } : { where });
 
 const OBJECT = NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT;
