@@ -44,7 +44,7 @@ import { EXPANDABLE_FIELD_TYPES } from '@object-ui/core';
 // The one currency precedence every field / measure / cell face shares
 // (objectui#10463), read from its home package as `ObjectGrid` and
 // `ObjectMetricWidget` read it.
-import { resolveFieldCurrency } from '@object-ui/i18n';
+import { resolveFieldCurrency, recordCurrencyField, type FieldCurrencyConfig } from '@object-ui/i18n';
 
 /**
  * Framework / system audit fields hidden from auto-derived columns and the
@@ -281,6 +281,14 @@ export interface FieldMeta {
   format?: string;
   currency?: string;
   /**
+   * A `record`-mode amount's currency config (ADR-0144 D2), copied from the
+   * SCHEMA field def by {@link buildFieldMeta} and only for that mode: such an
+   * amount has no field-level `currency`, and its cell reads the code from the
+   * row's sibling field through it. Absent for `dynamic` / `fixed`, whose code
+   * `currency` already carries. Never an authored column override.
+   */
+  currencyConfig?: FieldCurrencyConfig;
+  /**
    * The field def's declared upper bound, which on a `percent` field is its
    * STORAGE statement: the spec's `percentScaleOf` reads a fraction unless
    * `max` is above 1 (objectui#11475). Copied from the SCHEMA field def by
@@ -395,6 +403,7 @@ export function buildFieldMeta(params: BuildFieldMetaParams): FieldMeta {
     options,
     format: overrides.format ?? meta?.format,
     currency: overrides.currency ?? resolveFieldCurrency(meta),
+    ...(recordCurrencyField(meta) !== undefined && { currencyConfig: meta.currencyConfig }),
     // The storage statement of a `percent` field (objectui#11475), from the
     // schema def only — see `FieldMeta.max`.
     ...(typeof meta?.max === 'number' && { max: meta.max }),
@@ -443,9 +452,16 @@ export function renderFieldValue(
   // had. This is a plain function rather than a component, so the locale has to
   // arrive as an argument — there is no hook to read it from here.
   displayLocale?: string,
+  // The record the value sits in. A `record`-mode amount (ADR-0144 D2) reads
+  // its currency from the record's code field; without the record it shows a
+  // plain number, never the tenant default.
+  record?: Readonly<Record<string, unknown>> | null,
 ): React.ReactNode {
   if (value == null || value === '') return '';
   const fmt = fieldMeta.format;
+  if (recordCurrencyField(fieldMeta) !== undefined && typeof value === 'number') {
+    return formatCurrency(value, resolveFieldCurrency(fieldMeta, tenantCurrency, record), displayLocale);
+  }
   if (typeof fmt === 'string' && /^\$|¥|€|£/.test(fmt) && typeof value === 'number') {
     // Honor explicit `currency`; else infer from the leading symbol so we never
     // silently fall back to USD when the author wrote `¥`/`€`; finally fall back
