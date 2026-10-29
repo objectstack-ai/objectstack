@@ -32,6 +32,7 @@ import {
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
+import { useDefaultRecordPage } from './defaultRecordPage';
 
 export interface HeaderHighlightProps {
   fields: HighlightField[];
@@ -74,6 +75,10 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
   // The host predicate scope a declared deadline's `settledWhen` is judged in
   // (objectui#11815), against the staged record below.
   const predicateScope = usePredicateScope();
+  // objectstack#27055 — on the synthesized default record page the strip is
+  // an equal-width grid (up to six highlights, 「要点 6 项等宽」): every chip
+  // takes one cell, two to a row on a narrow strip, three, then all six.
+  const gridFace = useDefaultRecordPage();
 
   // The STAGED record: the saved record this strip receives, overlaid with the
   // edit session's draft by the same spread `DetailView` gives the details body
@@ -118,7 +123,8 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
         aria-label={t('detail.highlightsLabel')}
       >
         <div
-          className={cn(
+          data-highlights-face={gridFace ? 'grid' : undefined}
+          className={gridFace ? 'grid grid-cols-2 gap-x-4 gap-y-3 @lg:grid-cols-3 @3xl:grid-cols-6' : cn(
             'flex flex-wrap gap-y-4',
             // A chip's left border separates it from the chip BEFORE it on its
             // line (objectui#12523). The first chip of every WRAPPED line used
@@ -342,7 +348,7 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             return (
               <div
                 key={field.name}
-                className={cn(
+                className={gridFace ? 'group flex min-w-0 flex-col gap-1' : cn(
                   'group flex flex-col gap-1 px-5 border-l border-border/60',
                   'grow max-w-max',
                   useWide

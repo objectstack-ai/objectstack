@@ -47,7 +47,7 @@ const htmlSource = `
       <h2 style={{"fontSize":"1.5rem","fontWeight":"600"}}>What shipped</h2>
       <ul style={{"paddingLeft":"var(--space-6)","listStyleType":"disc","lineHeight":"1.9","color":"hsl(var(--muted-foreground))"}}>
         <li>Full HTML tag set in the <em style={{"fontStyle":"italic"}}>html</em> tier.</li>
-        <li>A trusted <a href="https://objectui.org" style={{"fontWeight":"500","color":"hsl(var(--primary))","textDecoration":"underline"}}>react tier</a> behind a flag.</li>
+        <li>A trusted <a href="https://objectstack.ai/docs/frontend" style={{"fontWeight":"500","color":"hsl(var(--primary))","textDecoration":"underline"}}>react tier</a> behind a flag.</li>
         <li>Author writes markup; the platform renders it.</li>
       </ul>
     </flex>

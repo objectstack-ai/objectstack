@@ -35,10 +35,9 @@
  * The card and the 2026-09-04 ruling both name `onClick` as the second
  * declared-but-unwired key. It is neither, on this tree: objectui#6124 (PR
  * #7339, landed 2026-09-02) RETIRED it — `onClick?: never` on the TypeScript
- * face, `handlerKeyRefusal('onClick', 'retired', …)` on the mirror, and a
- * `never` row on the docs page. Wiring it would be an un-retirement, decided at
- * `packages/types`, not here. `button-group-doc-surface-6347.test.ts` already
- * pins the refusal.
+ * face, `handlerKeyRefusal('onClick', 'retired', …)` on the mirror. Wiring it
+ * would be an un-retirement, decided at `packages/types`, not here.
+ * `handler-keys-json-refusal-6124.test.ts` already pins the refusal.
  */
 
 import { describe, it, expect } from 'vitest';

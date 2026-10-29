@@ -7,7 +7,7 @@
  */
 
 /**
- * `actions` on a `page` NODE is refused at parse, and `content/docs/guide/layout.md`
+ * `actions` on a `page` NODE is refused at parse, and `content/docs/frontend/layout.mdx`
  * no longer teaches it (objectui#7926, maintainer ruling 2026-09-09, decision batch
  * #107 item 2 — option A; B "declare + render" and C "docs only" were both refused).
  *
@@ -59,7 +59,7 @@ import { resolve } from 'node:path';
 import { PageNodeSchema } from '../zod/layout.zod.js';
 import type { PageNodeSchema as TsPageNodeSchema } from '../layout.js';
 
-const GUIDE_PATH = resolve(__dirname, '../../../../content/docs/guide/layout.md');
+const GUIDE_PATH = resolve(__dirname, '../../../../../content/docs/frontend/layout.mdx');
 
 /** The document the guide used to teach, verbatim in shape. */
 const RETIRED_DOC = {
@@ -110,7 +110,7 @@ describe('objectui#7926 — the `page` node refuses `actions` (contract half)', 
   });
 
   it('the remedy the message names actually parses — buttons as nodes in `children`', () => {
-    // The guide's remedy, as `content/docs/guide/layout.md` teaches it: the
+    // The guide's remedy, as `content/docs/frontend/layout.mdx` teaches it: the
     // `flex` row takes its props, its child list included, in its `properties`
     // bag (objectui#11276).
     const r = PageNodeSchema.safeParse({
@@ -195,25 +195,15 @@ describe('objectui#7926 — the guide no longer authors `actions` on a `page` no
   const isPageNode = (d: unknown): d is Record<string, unknown> =>
     !!d && typeof d === 'object' && (d as Record<string, unknown>).type === 'page';
 
-  it('LIT CONTROL — the scan can see JSON fences, page nodes, and an `actions` key', () => {
-    // Three separate ways this scan could report a vacuous zero, so three
-    // controls. The last one is the important one: `page:header`'s `actions` is
-    // the READ action-id channel (objectui#7182) and it must STILL be here — a
-    // refusal that took it with it would be the collateral damage the census
-    // exists to prevent. It is read where the guide authors it since
-    // objectui#3906: on the canonical `page:header` node, inside `properties`
-    // (this control used to look for the `page-header` alias, which the guide
-    // no longer teaches).
+  it('LIT CONTROL — the scan can see JSON fences and page nodes', () => {
+    // Two separate ways this scan could report a vacuous zero, so two controls.
+    // A third used to read `page:header`'s own `actions` (the READ action-id
+    // channel, objectui#7182) off the guide's `## Page Header` example. That
+    // section moved to the platform's page reference, `/docs/ui/pages#the-page-header`,
+    // when the guide joined the monorepo docs (objectstack#27145), and the guide
+    // no longer authors a `page:header` with `actions`, so the control went too.
     expect(fences.length).toBeGreaterThan(5);
     expect(fences.filter((f) => isPageNode(f.doc)).length).toBeGreaterThan(3);
-    expect(
-      fences.some((f) => {
-        if (!f.doc || typeof f.doc !== 'object') return false;
-        const doc = f.doc as Record<string, unknown>;
-        const properties = doc.properties as Record<string, unknown> | undefined;
-        return doc.type === 'page:header' && Array.isArray(properties?.actions);
-      }),
-    ).toBe(true);
   });
 
   it('no `page` node on the page carries `actions`', () => {

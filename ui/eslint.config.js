@@ -19,11 +19,8 @@ export default tseslint.config({
     '**/.next',
     '**/node_modules',
     '**/public',
-    // fumadocs-mdx codegen for apps/site (gitignored — see apps/site/.gitignore).
-    // Linting generated output only reports on the generator's choices.
-    '**/.source',
-    // objectui#8592 — the three remaining build artefacts that `eslint .`
-    // still walked. Same principle as `**/.source` and `**/dist` directly
+    // objectui#8592 — the remaining build artefacts that `eslint .`
+    // still walked. Same principle as `**/dist` directly
     // above: linting generated output only reports on the generator's
     // choices, and the report names a file:line nobody wrote. Measured on
     // 290de3724 after a full `turbo run build`:
@@ -32,7 +29,7 @@ export default tseslint.config({
     // reported 0 in the same invocation — the two zeros are what make the 1
     // a reading rather than a broken invocation.
     //
-    // Why three literal paths and not a `.gitignore` import: the claim this
+    // Why literal paths and not a `.gitignore` import: the claim this
     // change has to keep true is that ONLY git-ignored build output leaves
     // the linted population and not one source file does. A literal path is
     // auditable one entry at a time against `git check-ignore` /
@@ -47,13 +44,10 @@ export default tseslint.config({
     //     `tsc -p tsconfig.plugin.json` (apps/console `build:plugin`),
     //     git-ignored at `apps/console/.gitignore` under "Compiled plugin
     //     output".
-    //   - `apps/site/next-env.d.ts` — minted by Next's build/typegen,
-    //     git-ignored at `apps/site/.gitignore`.
     // ⛔ Not a suppression at the report's site: the files are regenerated on
     // every build, so an inline disable would vanish and the finding return.
     'apps/console/plugin.js',
     'apps/console/plugin.d.ts',
-    'apps/site/next-env.d.ts',
   ],
 }, {
   // objectui#4853 — a stale `eslint-disable` is an ERROR, not a warning.

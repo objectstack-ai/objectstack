@@ -820,6 +820,25 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#27277] The engine's floor over a plugin driver on an external
+    // datasource (ADR-0015 Tier A, `external-driver-floor.ts`). Both are 422
+    // with their status declared on the thrown error (the
+    // `driver-connect-errors.ts` pattern), and neither is an ADR-0015 gate
+    // refusal: `EXTERNAL_WRITE_FORBIDDEN` (403, `@objectstack/spec/shared`)
+    // is the platform's own write switch being off; these are fixed by
+    // changing the payload or the filter.
+    //
+    // The remote system refused a write with a 4xx (its validation, a lock,
+    // a missing record). The message is the remote's own; `details` carries
+    // `remoteStatus`. A remote that failed or did not answer is
+    // ERR_DATASOURCE_UNAVAILABLE / 503 above, not this.
+    'EXTERNAL_WRITE_REFUSED',
+    // A read matched more rows than the engine reads from a plugin driver
+    // for one request (1000). The engine applies the query to the rows the
+    // driver returns, so it refuses rather than answer over a set it only
+    // partly holds. The message prescribes narrowing the filter or mirroring
+    // the data with DataSync.
+    'EXTERNAL_ROW_CAP_EXCEEDED',
     // [#15823] an `afterFind` handler REPLACED `ctx.result` with something that
     // is not an array, breaking `find()`'s declared `Promise<any[]>`. It was the
     // FIRST of the four `return hookContext.result` sites in `engine.ts` to be

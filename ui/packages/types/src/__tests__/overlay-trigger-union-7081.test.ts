@@ -53,7 +53,10 @@
  *   renderer source, is an array, equals the typed copy in `SHIPPED`, and
  *   parses through the mirror. The typed copy is what compiles against the
  *   declaration -- the card's own complaint, made a pin.
- * - the docs: each page's `trigger` row publishes the union.
+ * - the docs: each page's `trigger` row published the union, until
+ *   objectstack#27145 retired the `content/docs/components/**` pages (the
+ *   overlay renderers are one row each on `content/docs/frontend/renderers.mdx`,
+ *   with no interface fence to read), so that leg is gone.
  *
  * ## Ablation
  *
@@ -108,7 +111,6 @@ const read = (relative: string): string => readFileSync(join(REPO_ROOT, relative
 const DECLARATION = 'packages/types/src/overlay.ts';
 const MIRROR = 'packages/types/src/zod/overlay.zod.ts';
 const RENDERERS = 'packages/components/src/renderers/overlay';
-const DOCS = 'content/docs/components/overlay';
 const RENDER_CHILDREN = 'packages/components/src/lib/utils.tsx';
 
 /* -- Type-level leg: compiled by `tsc -p packages/types/tsconfig.test.json` -- */
@@ -298,18 +300,6 @@ interface Member {
   readonly typeText: string;
 }
 
-/**
- * A page's one `ts` fence. objectui#5867 batch 8 re-fenced every overlay page
- * this file reads from `plaintext`, so `check-doc-snippet-types` now compiles
- * them; each page declares its own interface, so that compile does not judge
- * the `trigger` row against the shipped schema. This file still does.
- */
-function schemaFence(doc: string, path: string): string {
-  const fences = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((match) => match[1]);
-  if (fences.length !== 1) throw new Error(`expected exactly one ts fence in ${path}, found ${fences.length}`);
-  return fences[0];
-}
-
 function interfaceBody(source: string, opener: string, path: string): string {
   const start = source.indexOf(opener);
   if (start === -1) throw new Error(`no \`${opener}\` block in ${path}`);
@@ -453,12 +443,6 @@ describe.each(FAMILY.map((member) => [member.name, member] as const))('%s.trigge
     expect(read(`${RENDERERS}/${type}.tsx`)).toMatch(
       /renderChildren\(\s*schema\.trigger|renderTriggerSlot\([A-Za-z]+Trigger,\s*schema\.trigger\)/,
     );
-  });
-
-  it('the docs page publishes the union', () => {
-    const path = `${DOCS}/${type}.mdx`;
-    const row = members(interfaceBody(schemaFence(read(path), path), `interface ${name} {`, path)).get('trigger');
-    expect(row?.typeText).toBe('SchemaNode | SchemaNode[]');
   });
 });
 

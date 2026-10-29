@@ -285,10 +285,17 @@ export function chainProbes(destination) {
 /**
  * Run all three assertions over a table and a content root.
  *
- * @param {{ table: [string, string][], contentRoot: string }} options
+ * `chainTable` is the table a destination would be matched against when the
+ * redirected request arrives: the table itself for `docsRedirects`, whose
+ * destinations are served on the same host as its sources. A host-scoped table
+ * (`objectuiRedirects`) sends its requests to ANOTHER host, so its own rows can
+ * never fire a second time -- its catch-all `/:path*` matches every destination
+ * it names -- and what a second hop would meet there is `docsRedirects`.
+ *
+ * @param {{ table: [string, string][], contentRoot: string, chainTable?: [string, string][] }} options
  * @returns {{ findings: Finding[], stats: Record<string, number> }}
  */
-export function checkTable({ table, contentRoot }) {
+export function checkTable({ table, contentRoot, chainTable = table }) {
   /** @type {Finding[]} */
   const findings = [];
   const stats = { entries: table.length, pages: 0, wildcards: 0, unresolvable: 0, probes: 0 };
@@ -345,13 +352,14 @@ export function checkTable({ table, contentRoot }) {
     // ── 3: no chains ───────────────────────────────────────────────────────
     for (const probe of chainProbes(destination)) {
       stats.probes++;
-      const hit = firstMatchingSource(table, probe);
+      const hit = firstMatchingSource(chainTable, probe);
       if (!hit) continue;
       const via = probe === destination ? '' : ` (probed as ${probe})`;
+      const where = chainTable === table ? '' : ' of the table its destination is served by';
       add(
         'CHAIN',
-        `destination${via} is itself matched by the source at entry ${hit.index + 1}, `
-          + `${JSON.stringify(hit.source)} -> ${JSON.stringify(table[hit.index][1])}. `
+        `destination${via} is itself matched by the source at entry ${hit.index + 1}${where}, `
+          + `${JSON.stringify(hit.source)} -> ${JSON.stringify(chainTable[hit.index][1])}. `
           + 'Next matches this table once per request, so the old URL pays a second round trip and every '
           + `hop is SEO signal lost. Point entry ${index + 1} at the FINAL destination instead `
           + '(the retired-deployment-pages block in the table does exactly this, on the 2026-08-15 ruling).',
@@ -368,23 +376,25 @@ export function checkTable({ table, contentRoot }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Import `docsRedirects` from a redirects module and validate its SHAPE.
+ * Import one table (`docsRedirects` unless `exportName` says otherwise) from a
+ * redirects module and validate its SHAPE.
  *
  * Every failure here is thrown, never softened into an empty table: a gate that
  * printed OK because it loaded nothing is the vacuous green this whole file
  * exists to prevent (#4690).
  *
  * @param {string} file absolute path to a redirects module
+ * @param {string} [exportName] the table's export
  * @returns {Promise<[string, string][]>}
  */
-export async function loadTable(file) {
+export async function loadTable(file, exportName = 'docsRedirects') {
   const module = await import(pathToFileURL(file).href);
-  const table = module.docsRedirects;
+  const table = module[exportName];
   if (!Array.isArray(table)) {
-    throw new Error(`${file} does not export a \`docsRedirects\` array (got ${typeof table})`);
+    throw new Error(`${file} does not export a \`${exportName}\` array (got ${typeof table})`);
   }
   if (table.length === 0) {
-    throw new Error(`${file} exports an EMPTY \`docsRedirects\` table -- refusing to report OK over nothing`);
+    throw new Error(`${file} exports an EMPTY \`${exportName}\` table -- refusing to report OK over nothing`);
   }
   table.forEach((entry, index) => {
     if (!Array.isArray(entry) || entry.length !== 2 || entry.some((part) => typeof part !== 'string')) {
@@ -477,11 +487,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The matcher\'s Next semantics, asserted directly': 20,
   'The loader refuses to report OK over nothing (#4690)': 3,
   'The green states its own scope': 1,
+  'A host-scoped table chains against the table its destinations are served by': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -721,6 +732,53 @@ async function selfTest() {
       line.includes('7 page destination(s)') && line.includes('1 wildcard destination(s)') && line.includes('10 chain probe(s)'),
       `the summary names every count, so a green can be read for its scope -- got "${line}"`,
     );
+
+    // ── A host-scoped table chains against the table its destinations are served by ──
+    battery('A host-scoped table chains against the table its destinations are served by');
+    const hostTable = [
+      ['/docs/old-page', '/docs/plain'],
+      ['/docs/old-section', '/docs/section#heading'],
+      ['/docs/old-retired', '/docs/retired'],
+      ['/docs/old-gone', '/docs/gone'],
+      ['/:path*', '/docs/section'],
+    ];
+    const servedBy = [['/docs/retired', '/docs/plain']];
+    write('content/docs/retired.mdx', '# Retired, still on disk\n');
+    write(
+      'host-redirects.mjs',
+      `export const docsRedirects = ${JSON.stringify(servedBy)};\n`
+        + `export const objectuiRedirects = ${JSON.stringify(hostTable, null, 2)};\n`,
+    );
+    const hostLoaded = await loadTable(join(dir, 'host-redirects.mjs'), 'objectuiRedirects');
+    const servedLoaded = await loadTable(join(dir, 'host-redirects.mjs'));
+    const host = checkTable({ table: hostLoaded, contentRoot, chainTable: servedLoaded });
+    const hostKinds = host.findings.map((f) => `${f.kind}@${f.index + 1}`).sort();
+    assert(
+      JSON.stringify(hostKinds) === JSON.stringify(['CHAIN@3', 'DEAD@4']),
+      `exactly the served-by chain and the dead page are reported -- got ${JSON.stringify(hostKinds)}`,
+    );
+    // Its own catch-all matches every destination it names; judged against
+    // itself, every row would be a CHAIN.
+    const selfJudged = checkTable({ table: hostLoaded, contentRoot });
+    assert(
+      selfJudged.findings.filter((f) => f.kind === 'CHAIN').length === hostTable.length,
+      'the same table judged against ITSELF chains on every row through its catch-all (the control)',
+    );
+    assert(
+      host.stats.entries === 5 && host.stats.pages === 5 && host.stats.wildcards === 0,
+      `the host-scoped table was examined, every row -- got ${JSON.stringify(host.stats)}`,
+    );
+    assert(
+      host.findings.find((f) => f.kind === 'CHAIN')?.detail.includes('of the table its destination is served by'),
+      'a served-by chain names which table it hit',
+    );
+    let missingThrew = false;
+    try {
+      await loadTable(join(dir, 'clean-redirects.mjs'), 'objectuiRedirects');
+    } catch {
+      missingThrew = true;
+    }
+    assert(missingThrew, 'a module with no objectuiRedirects export is rejected when that table is asked for');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -787,9 +845,17 @@ async function selfTest() {
 
 async function main() {
   const root = scriptRepoRoot();
-  const table = await loadTable(join(root, 'apps/docs/redirects.mjs'));
-  const { findings, stats } = checkTable({ table, contentRoot: join(root, 'content/docs') });
-  process.exit(report(findings, stats, 'apps/docs/redirects.mjs'));
+  const file = join(root, 'apps/docs/redirects.mjs');
+  const contentRoot = join(root, 'content/docs');
+  const table = await loadTable(file);
+  const docs = checkTable({ table, contentRoot });
+  // The objectui.org rows answer on another host and land on this one, so they
+  // chain against `docsRedirects` (see `checkTable`).
+  const objectuiTable = await loadTable(file, 'objectuiRedirects');
+  const objectui = checkTable({ table: objectuiTable, contentRoot, chainTable: table });
+  const exitDocs = report(docs.findings, docs.stats, 'apps/docs/redirects.mjs docsRedirects');
+  const exitObjectui = report(objectui.findings, objectui.stats, 'apps/docs/redirects.mjs objectuiRedirects');
+  process.exit(exitDocs || exitObjectui);
 }
 
 /* Run only when invoked as a program — `docsRelative`, `pageCandidates` and

@@ -1229,7 +1229,7 @@ The plugin includes these field components:
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-form)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-form)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-form)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

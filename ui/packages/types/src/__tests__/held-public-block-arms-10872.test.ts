@@ -245,7 +245,7 @@ describe('objectui#10872 batch 4 — the two handler keys the action renderers r
 
 /** Rooted on this file, never on `process.cwd()`. */
 const HERE = dirname(fileURLToPath(import.meta.url));
-const QUICK_START = join(HERE, '..', '..', '..', '..', 'content', 'docs', 'guide', 'quick-start.md');
+const QUICK_START = join(HERE, '..', '..', '..', '..', '..', 'content', 'docs', 'frontend', 'quick-start.mdx');
 
 /**
  * The quick-start's "Add Actions" node — the one AGENTS.md #4 teaches, read from

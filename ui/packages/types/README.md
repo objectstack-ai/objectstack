@@ -502,7 +502,7 @@ We follow these constraints for this package:
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/api/schema-reference)
+- 📚 [Documentation](https://objectstack.ai/docs/ui/components)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/types)
 - 📝 [Changelog](./CHANGELOG.md)
 - 💻 [GitHub repository](https://github.com/objectstack-ai/objectui)

@@ -256,7 +256,7 @@ const aiSchema = {
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-chatbot)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-chatbot)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-chatbot)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

@@ -194,7 +194,7 @@ describe('record:path with only statusField derives its stages from the picklist
   });
 
   it('ONE RULE: the synthesized default page\'s record:path node renders the stages the authored node derives', () => {
-    const synthesized = buildDefaultHighlights(OPPORTUNITY, { statusField: 'stage', hideHighlights: true });
+    const synthesized = buildDefaultHighlights(OPPORTUNITY, { statusField: 'stage', highlightFields: [] });
     expect(synthesized).toHaveLength(1);
     expect(synthesized[0].type).toBe('record:path');
 

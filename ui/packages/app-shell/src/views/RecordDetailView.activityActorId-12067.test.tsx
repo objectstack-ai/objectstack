@@ -149,7 +149,7 @@ describe('the record page feed names the actor of an id-only activity row (objec
   it('reads `sys_activity` with `actor_id` expanded and shows the user, not "System"', async () => {
     const dataSource = makeDataSource();
     render(
-      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
           <RecordDetailView
             dataSource={dataSource}

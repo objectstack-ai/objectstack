@@ -105,7 +105,7 @@ your `type` selected — the `1.1`-style entries under a numbered issue are that
 arm's own diagnosis, at the real path of the node that failed. When no component
 type matches, the report names the nearest few of the accepted values instead of
 listing all of them. See the
-[docs](https://www.objectui.org/docs/utilities/cli) for worked output.
+[docs](https://objectstack.ai/docs/frontend/cli) for worked output.
 
 ### `objectui check`, `objectui doctor`, `objectui analyze`
 
@@ -130,7 +130,7 @@ await init('my-app', { template: 'dashboard' });
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/utilities/cli)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/cli)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/cli)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

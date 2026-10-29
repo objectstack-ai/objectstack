@@ -1,8 +1,0 @@
-{
-  "pages": [
-    "cli",
-    "create-plugin",
-    "runner",
-    "data-objectstack"
-  ]
-}

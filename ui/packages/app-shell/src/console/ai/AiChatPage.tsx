@@ -13,7 +13,7 @@
  * turns are appended to `ai_messages` automatically.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -68,6 +68,7 @@ import {
   detectAuthoringVerdict,
   detectBuiltAppPackage,
   buildProgressFromDraftReview,
+  chartsFromParts,
   // The authoring/honest -> runtime message seam (objectui#4399 / PR #4416),
   // consumed here one hop up from the plugin's own renderers (objectui#4437).
   // See `runtimeMessages` below for why this host calls it exactly once.
@@ -294,12 +295,20 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
       }
     }
 
+    // objectstack#25908 — the answer's charts, read off the `data-chart`
+    // parts the cache wrote or the `visualize_data` results the server
+    // persisted, each at the offset into `content` where its part sat. The
+    // live stream's chart part is never stored, so this is the only way a
+    // chart survives a reload.
+    const charts = message.role === 'assistant' ? chartsFromParts(message.parts) : undefined;
+
     return {
       id: message.id,
       role: message.role,
       content,
       ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
       ...(buildProgress ? { buildProgress } : {}),
+      ...(charts ? { charts } : {}),
     };
   });
 }
@@ -569,6 +578,17 @@ export function clampChatPaneWidth(
   return Math.min(Math.max(desired, opts.min), upper);
 }
 
+/**
+ * True when a container cannot hold the chat and the preview side by side at
+ * their minimums (`CHAT_PANE_MIN_WIDTH + CHAT_PREVIEW_MIN_WIDTH`). The pane
+ * then previews the way a phone does (#2481) instead of pushing the preview
+ * past the container's edge, as the console dock at a 1024 px window did.
+ * Pure + exported for tests. `containerWidth <= 0` (unmeasured) is not narrow.
+ */
+export function isTooNarrowForSplit(containerWidth: number): boolean {
+  return containerWidth > 0 && containerWidth < CHAT_PANE_MIN_WIDTH + CHAT_PREVIEW_MIN_WIDTH;
+}
+
 interface ResizableChatPane {
   /** Current chat-column width in px (clamped). */
   width: number;
@@ -582,6 +602,8 @@ interface ResizableChatPane {
   onHandleKeyDown: (e: React.KeyboardEvent) => void;
   /** Reset to the default width (double-click the divider). */
   reset: () => void;
+  /** The container is too narrow for the split (`isTooNarrowForSplit`), measured whether or not it is open. */
+  tooNarrow: boolean;
 }
 
 /**
@@ -632,6 +654,23 @@ export function useResizableChatPane(active: boolean): ResizableChatPane {
     return () => ro.disconnect();
   }, [active, clampToContainer]);
 
+  // Whether the split fits at all. Read from the same container in both
+  // presentations and observed even while the split is closed, so the answer
+  // never depends on which presentation is showing: the container's width does
+  // not change when the pane switches, so there is no threshold to oscillate on.
+  // A layout effect, so a narrow container never paints the split first.
+  const [tooNarrow, setTooNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const read = () => setTooNarrow(isTooNarrowForSplit(el.clientWidth));
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const onHandlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
@@ -673,7 +712,7 @@ export function useResizableChatPane(active: boolean): ResizableChatPane {
     persist(next);
   }, [clampToContainer, persist]);
 
-  return { width, dragging, containerRef, onHandlePointerDown, onHandleKeyDown, reset };
+  return { width, dragging, containerRef, onHandlePointerDown, onHandleKeyDown, reset, tooNarrow };
 }
 
 export type AiChatShortcut = 'toggle-list' | 'new-chat';
@@ -1762,6 +1801,10 @@ export function ChatPane({
   }, [canvasOpen, onCanvasOpenChange]);
   // Draggable chat ↔ preview split (active only while the preview is open).
   const split = useResizableChatPane(canvasOpen);
+  // A pane too narrow for the split (the console dock at a laptop width, the
+  // Studio copilot's slot) previews the way a phone does: full-width chat, the
+  // pill, the full-surface overlay. Every phone switch below reads this.
+  const phonePreview = isMobile || split.tooNarrow;
   const handleDraftArtifacts = useCallback((artifacts: Array<{ type: string; name: string }>, appSegment?: string) => {
     const app = artifacts.find((a) => a.type === 'app');
     // Route the preview on the app's package id (ADR-0048), not its name.
@@ -2452,9 +2495,10 @@ export function ChatPane({
     </div>
   );
 
-  // The beside-chat split is DESKTOP-only: on a phone the chat keeps full width
-  // and the canvas becomes a full-screen overlay instead (see #2481 below).
-  const desktopSplit = canvasApp !== null && !isMobile;
+  // The beside-chat split needs room for both panes: on a phone, or in a pane
+  // narrower than that (`phonePreview`), the chat keeps full width and the
+  // canvas becomes a full-surface overlay instead (see #2481 below).
+  const desktopSplit = canvasApp !== null && !phonePreview;
 
   // objectui#5694 — the standing unpublished-changes affordance: shown while
   // the bound package has pending drafts, so the publish entry point survives
@@ -2478,7 +2522,7 @@ export function ChatPane({
   // remounts the bar (its count would re-read and blink). That column exists
   // only then: without a preview the slot holds the bar alone, as before, and
   // stays empty, taking no space, while the bar renders nothing.
-  const mobilePreviewAvailable = canvasApp !== null && isMobile;
+  const mobilePreviewAvailable = canvasApp !== null && phonePreview;
   const promptHeaderRows = mobilePreviewAvailable ? (
     <div className="flex w-full flex-col items-center gap-2">
       {!mobileCanvasOpen ? (
@@ -2842,7 +2886,7 @@ export function ChatPane({
           setCanvasApp({ name: appName, segment: opts?.appSegment, materialized: opts?.materialized === true });
           // #2481 — a Preview tap is an explicit request to SEE it, so on a
           // phone open the full-screen overlay (desktop shows the split pane).
-          if (isMobile) setMobileCanvasOpen(true);
+          if (phonePreview) setMobileCanvasOpen(true);
         }}
         // objectui#12968 (objectstack#24324 ruling A) — any other draft's
         // Preview: the Live Canvas opens the affected surface (a page, the
@@ -2856,7 +2900,7 @@ export function ChatPane({
             materialized: false,
             path: draftPreviewPath(items, appSegment),
           });
-          if (isMobile) setMobileCanvasOpen(true);
+          if (phonePreview) setMobileCanvasOpen(true);
         }}
         // ADR-0045: build materialized → canvas leaves the draft overlay for
         // the real (unlisted) app; the reload shows live seed rows.
@@ -2913,12 +2957,12 @@ export function ChatPane({
         </>
       ) : null}
       {/* #2481 — MOBILE preview. The beside-chat split has no room on a phone,
-          so the canvas is opt-in and full-screen: the pill above the composer
+          nor in a pane too narrow for it (`phonePreview`), so the canvas is opt-in and full-screen: the pill above the composer
           (`promptHeaderRows`) offers it (build streams uninterrupted in the
           chat), and tapping it — or a Preview button on a draft card — takes
           over the screen. Closing the overlay returns to the chat with the
           preview still one tap away. */}
-      {canvasApp && isMobile && mobileCanvasOpen ? (
+      {canvasApp && phonePreview && mobileCanvasOpen ? (
         <div
           className="absolute inset-0 z-30 flex flex-col bg-background"
           data-testid="ai-chat-mobile-canvas"

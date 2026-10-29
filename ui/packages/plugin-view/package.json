@@ -3,7 +3,7 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Object View plugin for Object UI",
+  "description": "Object View plugin for ObjectUI",
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -74,7 +74,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-view",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-view",
   "publishConfig": {
     "access": "public"
   },

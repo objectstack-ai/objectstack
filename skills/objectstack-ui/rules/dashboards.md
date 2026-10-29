@@ -246,9 +246,9 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 ```
 
 * **Metric widgets** — a delta arrow plus a trend label from the kind (`vs
-  previous period`). Its colour follows the measure's `polarity`: `'lower'`
-  (turnaround, cost) draws a rise red, `'neutral'` uncoloured; undeclared =
-  rise green. `options.trend` reaches no renderer; `compareTo` is the trend.
+  previous period`). Its colour follows `polarity` (the measure's; an inline
+  `object-metric` declares its own): `'lower'` (turnaround, cost) draws a rise
+  red, `'neutral'` uncoloured; undeclared = rise green. `compareTo` is the trend.
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
   `scatter`) — the comparison series is appended after the primary series
   with `variant: 'comparison'`, muted per family (dashed `'4 4'` on

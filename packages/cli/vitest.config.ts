@@ -651,6 +651,7 @@ import {
 } from '../qa/vitest-filter-preflight/src/index.js';
 import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 import { readTierMode } from '../../scripts/nightly-tiers.mjs';
+import { memoryBackedTmpEnv } from '../../scripts/vitest-memory-tmp.mjs';
 
 // The two tiers, DERIVED from what the files DO — never written down — over
 // the population `OS_TEST_TIERS` selects. `vitest-tiers.ts` holds the
@@ -989,6 +990,15 @@ export default defineConfig({
     // `server.deps.external` entry above; each repeats the console-intercept
     // disarm — and, since #17647, the registry log level — because a
     // root-level value is inert under projects.
+    //
+    // Each project's `env` also moves `os.tmpdir()` onto /dev/shm when it is
+    // writable (#27306; scripts/vitest-memory-tmp.mjs). Every SQLite database
+    // these tests migrate lives in an `mkdtemp` under it. Measured on the
+    // fifteen `organization-ownership-*` files beside four `dd … conv=fsync`
+    // writers on the same disk: 145 of 232 cases timed out and the run took
+    // 1,809 s, against 232 of 232 green in 68 s idle; with TMPDIR there, under
+    // the same writers, 232 of 232 green in 59 s. Assertions and budgets are
+    // untouched.
     projects: [
       {
         extends: true,
@@ -999,7 +1009,9 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          // TMPDIR on a memory-backed directory (#27306): see the root `test`
+          // block's note above `projects`.
+          env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
           include: UNIT_FILES,
         },
       },
@@ -1012,7 +1024,9 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          // TMPDIR on a memory-backed directory (#27306): see the root `test`
+          // block's note above `projects`.
+          env: { OS_REGISTRY_LOG: 'warn', ...memoryBackedTmpEnv() },
           include: INTEGRATION_FILES,
         },
       },

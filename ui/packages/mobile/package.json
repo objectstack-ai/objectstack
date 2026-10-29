@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Mobile optimization for Object UI with responsive components, PWA support, and touch gesture handling.",
-  "homepage": "https://www.objectui.org/docs/packages/mobile",
+  "description": "Mobile optimization for ObjectUI with responsive components, PWA support, and touch gesture handling.",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

@@ -1,9 +1,9 @@
 {
   "name": "@object-ui/cli",
   "version": "18.2.0",
-  "description": "Standalone CLI for Object UI — scaffold, develop, build and validate JSON/YAML schema-driven applications.",
+  "description": "Standalone CLI for ObjectUI — scaffold, develop, build and validate JSON/YAML schema-driven applications.",
   "type": "module",
-  "homepage": "https://www.objectui.org/docs/utilities/cli",
+  "homepage": "https://objectstack.ai/docs/frontend/cli",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

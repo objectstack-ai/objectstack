@@ -143,17 +143,22 @@ const tempRoots: string[] = [];
  * handler — plus one static file under `public/`.
  */
 const SITE_FIXTURE: Record<string, string> = {
-  'apps/site/app/(home)/page.tsx': 'export default () => null',
-  'apps/site/app/playground/page.tsx': 'export default () => null',
-  'apps/site/app/docs/[[...slug]]/page.tsx': 'export default () => null',
-  'apps/site/app/api/search/route.ts': 'export const GET = () => null',
-  'apps/site/public/img/guide/shot.png': 'PNG',
+  '../apps/docs/app/(home)/page.tsx': 'export default () => null',
+  '../apps/docs/app/playground/page.tsx': 'export default () => null',
+  '../apps/docs/app/docs/[[...slug]]/page.tsx': 'export default () => null',
+  '../apps/docs/app/api/search/route.ts': 'export const GET = () => null',
+  '../apps/docs/public/img/guide/shot.png': 'PNG',
 };
 
-/** Materialises `{ 'content/docs/guide/a.md': '...' }` into a throwaway repo. */
+/** Materialises `{ 'examples/a/README.md': '...' }` into a throwaway repo rooted at its `ui/`. */
 function repoWith(files: Record<string, string>): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-links-'));
-  tempRoots.push(root);
+  // The root is a `ui/` inside the temp dir: the docs collection and the site
+  // that serves it sit one level above it (objectstack#27145), so a fixture
+  // keyed `../content/docs/...` or `../apps/docs/...` lands inside the tree.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-links-'));
+  tempRoots.push(base);
+  const root = path.join(base, 'ui');
+  fs.mkdirSync(root);
   for (const [rel, contents] of Object.entries(files)) {
     const full = path.join(root, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -162,10 +167,17 @@ function repoWith(files: Record<string, string>): string {
   return root;
 }
 
-/** Docs-only sugar: keys are relative to `content/docs`, site fixture implied. */
+/**
+ * Docs-only sugar: keys are relative to the docs collection, site fixture
+ * implied. The collection is `../content/docs`, but the `docs` row scans only
+ * its `frontend/` section, so that is where the keys land and what is
+ * returned: a fixture's `/docs/...` route therefore reads `/docs/frontend/...`.
+ */
 function docsRootWith(files: Record<string, string>): string {
-  const prefixed = Object.fromEntries(Object.entries(files).map(([rel, body]) => [`content/docs/${rel}`, body]));
-  return path.join(repoWith({ ...SITE_FIXTURE, ...prefixed }), 'content/docs');
+  const prefixed = Object.fromEntries(
+    Object.entries(files).map(([rel, body]) => [`../content/docs/frontend/${rel}`, body]),
+  );
+  return path.join(repoWith({ ...SITE_FIXTURE, ...prefixed }), '../content/docs/frontend');
 }
 
 function scan(repo: string): { file: string; href: string; line: number; reason: string }[] {
@@ -180,7 +192,7 @@ function rejections(files: Record<string, string>): [string, string][] {
 /** The hrefs reported broken, in file order. */
 function brokenHrefs(files: Record<string, string>): string[] {
   const docsRoot = docsRootWith(files);
-  const repo = path.resolve(docsRoot, '../..');
+  const repo = path.resolve(docsRoot, '../../../ui');
   return scan(repo).map((item) => item.href);
 }
 
@@ -190,6 +202,7 @@ interface ScanRoot {
   readonly rule: string;
   readonly exclude?: string[];
   readonly collect?: string[];
+  readonly diskRoot?: string;
 }
 
 /** Every file the real scan opens, tagged with the row that opened it. */
@@ -343,7 +356,7 @@ describe('absolute /docs hrefs stay strict — they are routes, not files', () =
   it('accepts an extensionless route', () => {
     expect(
       brokenHrefs({
-        'guide/a.md': '[plugins](/docs/plugins/plugin-charts)',
+        'guide/a.md': '[plugins](/docs/frontend/plugins/plugin-charts)',
         'plugins/plugin-charts.mdx': '# Charts',
       }),
     ).toEqual([]);
@@ -363,7 +376,10 @@ describe('absolute /docs hrefs stay strict — they are routes, not files', () =
   });
 
   it('accepts /docs itself when the root has an index page', () => {
-    expect(brokenHrefs({ 'index.md': '[home](/docs)' })).toEqual([]);
+    // The collection's own index, which is above the scanned `frontend/` section.
+    expect(
+      rejections({ '../content/docs/index.md': '# Docs', '../content/docs/frontend/a.md': '[home](/docs)' }),
+    ).toEqual([]);
   });
 
   it('is checked before the site-route table, so the /docs rule stays the strict one', () => {
@@ -494,7 +510,7 @@ describe('the repo it guards', () => {
     );
 
     expect(Object.keys(scanned)).toEqual([
-      'content/docs',
+      '../content/docs/frontend',
       'examples',
       'docs',
       'packages/*/README.md',
@@ -507,6 +523,7 @@ describe('the repo it guards', () => {
       'CHANGELOG.md',
       'CLAUDE.md',
       'LICENSE-THIRD-PARTY.md',
+      '../skills/objectui',
     ]);
     // `README.md`, `CONTRIBUTING.md`, `ROADMAP.md` and `QUICK_REFERENCE.md` left
     // the table with the files themselves (objectstack#26080): folded into the
@@ -516,17 +533,20 @@ describe('the repo it guards', () => {
     // so deleting one example leaves it green.
     expect(scanned['examples']).toBeGreaterThanOrEqual(2);
     expect(scanned['docs']).toBeGreaterThanOrEqual(15);
-    expect(scanned['content/docs']).toBeGreaterThanOrEqual(100);
+    // 100 until objectstack#27145 moved the SDK pages to the monorepo's
+    // `content/docs/frontend` as fewer, larger ones: 34 when re-measured.
+    expect(scanned['../content/docs/frontend']).toBeGreaterThanOrEqual(25);
     // objectui#3622. This row is the only one whose path needs expanding before
     // anything is opened, so a floor here is also the floor under
     // `expandWildcard()`. Every published package carries a README, so the
     // shared published-package floor bounds it (39 READMEs measured on
     // objectstack 6a7c0fe3); deleting a package moves no floor.
     expect(scanned['packages/*/README.md']).toBeGreaterThanOrEqual(UI_PUBLISHED_PACKAGE_FLOOR);
-    // objectui#4148. Both apps carry one today; the floor is 2 rather than the
-    // exact count because this row exists precisely so the NEXT app is scanned
-    // without anyone editing the table.
-    expect(scanned['apps/*/README.md']).toBeGreaterThanOrEqual(2);
+    // objectui#4148. The floor is not the exact count because this row exists
+    // precisely so the NEXT app is scanned without anyone editing the table.
+    // 2 until objectstack#27145 deleted `apps/site` with its README; the
+    // console's is the one left.
+    expect(scanned['apps/*/README.md']).toBeGreaterThanOrEqual(1);
     // objectui#4938. Measured at 15 files (12 under packages/*, 3 under
     // apps/*) the day the row landed; a floor rather than an exact count for
     // the same reason as every wildcard row above — the surface is meant to
@@ -550,6 +570,9 @@ describe('the repo it guards', () => {
     // requires every one of them to be opened, so an `apps/*` row that stopped
     // expanding would fail there the day it started mattering.
     expect(scanned['packages/*/*']).toBeGreaterThanOrEqual(4);
+    // objectstack#27369. The skill bundle: 16 markdown files when the row
+    // landed (`SKILL.md` plus its guides and rules); a floor, not a census.
+    expect(scanned['../skills/objectui']).toBeGreaterThanOrEqual(10);
     for (const rootFile of ['AGENTS.md', 'CHANGELOG.md', 'CLAUDE.md', 'LICENSE-THIRD-PARTY.md']) {
       expect(scanned[rootFile], `${rootFile} is a SCAN_ROOTS row that opened no file`).toBe(1);
     }
@@ -592,8 +615,13 @@ describe('the repo it guards', () => {
     // the SECOND wildcard segment in each path, which is the whole reason the
     // top-level README cannot be reached from these rows. A row quietly losing
     // that segment would start double-parsing every package README.
+    //
+    // objectstack#27369 added the objectui skill bundle, `disk` — it is read on
+    // GitHub and by agents, never served by the site — with `diskRoot` set to
+    // the bundle itself, because the bundle ships to customer projects as one
+    // directory: a relative href that leaves it resolves nowhere there.
     expect(SCAN_ROOTS).toEqual([
-      { path: 'content/docs', rule: 'docs' },
+      { path: '../content/docs/frontend', rule: 'docs' },
       { path: 'examples', rule: 'disk' },
       { path: 'docs', rule: 'disk' },
       { path: 'packages/*/README.md', rule: 'disk' },
@@ -606,6 +634,30 @@ describe('the repo it guards', () => {
       { path: 'CHANGELOG.md', rule: 'disk' },
       { path: 'CLAUDE.md', rule: 'disk' },
       { path: 'LICENSE-THIRD-PARTY.md', rule: 'disk' },
+      { path: '../skills/objectui', rule: 'disk', diskRoot: '../skills/objectui' },
+    ]);
+  });
+
+  it('judges the skill bundle inside the bundle — objectstack#27369', () => {
+    // The bundle sits outside this tree, so the default `disk` boundary (this
+    // tree's root) would reject every intra-bundle link; `diskRoot` moves the
+    // boundary to the bundle. A link that leaves it is still rejected, and a
+    // site URL is judged against the route table as it is everywhere else.
+    // One accepted and one rejected case per branch, so neither half can pass
+    // by the row never being scanned.
+    const repo = repoWith({
+      ...SITE_FIXTURE,
+      '../skills/objectui/SKILL.md': '[setup](./guides/setup.md) and [gone](./guides/NOWHERE.md)',
+      '../skills/objectui/guides/setup.md':
+        '[back](../SKILL.md), [out](../../../ui/packages/core/README.md), '
+        + '[site](https://objectstack.ai/docs/frontend/theming) and [dead](https://objectstack.ai/nowhere/at/all)',
+      '../content/docs/frontend/theming.mdx': '# Theming',
+      'packages/core/README.md': '# Core',
+    });
+    expect(scan(repo).map((item) => [path.relative(repo, item.file), item.href, item.reason])).toEqual([
+      [path.join('..', 'skills', 'objectui', 'SKILL.md'), './guides/NOWHERE.md', 'example-relative'],
+      [path.join('..', 'skills', 'objectui', 'guides', 'setup.md'), '../../../ui/packages/core/README.md', 'example-relative'],
+      [path.join('..', 'skills', 'objectui', 'guides', 'setup.md'), 'https://objectstack.ai/nowhere/at/all', 'site-absolute-url'],
     ]);
   });
 
@@ -619,7 +671,7 @@ describe('the repo it guards', () => {
     const repo = repoWith({
       ...SITE_FIXTURE,
       'docs/ARCHITECTURE.md': '[core](../packages/core/README.md) and [gone](./NOWHERE.md)',
-      'content/docs/guide/a.md': '[core](../../../packages/core/README.md)',
+      '../content/docs/frontend/guide/a.md': '[core](../../../packages/core/README.md)',
       'packages/core/README.md': '# Core',
     });
 
@@ -629,7 +681,7 @@ describe('the repo it guards', () => {
     // nothing about the half it exists to test. One rejection from EACH tree
     // cannot pass that way.
     expect(scan(repo).map((item) => [path.relative(repo, item.file), item.href, item.reason])).toEqual([
-      [path.join('content', 'docs', 'guide', 'a.md'), '../../../packages/core/README.md', 'escapes-collection'],
+      [path.join('..', 'content', 'docs', 'frontend', 'guide', 'a.md'), '../../../packages/core/README.md', 'escapes-collection'],
       [path.join('docs', 'ARCHITECTURE.md'), './NOWHERE.md', 'example-relative'],
     ]);
   });
@@ -649,7 +701,13 @@ describe('the repo it guards', () => {
       }
     }
 
-    expect(targets.size).toBeGreaterThanOrEqual(25);
+    // 25 until objectstack#27145: the SDK pages that carried most of them left
+    // this workspace, and the monorepo copies link the docs site instead. The
+    // last two went with the vscode-extension package (#27275), so the tree
+    // holds none today and there is no population floor to keep. What stops
+    // this from passing over a broken extractor is the `selfRepoPath` unit
+    // test further down, which feeds it the URL shapes directly; this case
+    // keeps the gate for the next self-repo URL someone writes.
     expect([...targets].filter((target) => !fs.existsSync(path.join(repoRoot, target)))).toEqual([]);
   });
 
@@ -661,14 +719,17 @@ describe('the repo it guards', () => {
     expect(routeExists('../plugins/plugin-charts.md', { fromFile, docsRoot: root })).toBe(false);
   });
 
-  it('reads the real apps/site tree as its route truth source', () => {
+  it('reads the real docs site tree as its route truth source', () => {
     // The coupling objectui#3490 deliberately bought, pinned against the actual
-    // site: the enumerator must understand this router's shapes (a `(home)`
-    // group serving `/`, dot-named literal segments, an optional catch-all) and
-    // must NOT invent the prefixes the 17 dead links assumed.
-    const site = collectSiteRoutes(path.join(repoRoot, 'apps/site'));
+    // site: the enumerator must understand this router's shapes (the hidden
+    // `[lang]` segment serving `/`, dot-named literal segments, an optional
+    // catch-all) and must NOT invent the prefixes the 17 dead links assumed.
+    // The site is the monorepo's docs site since objectstack#27145. Its
+    // `[lang]` segment is dynamic, so a single unknown segment (`/playground`)
+    // matches it: the table is lenient there, and strict from two segments on.
+    const site = collectSiteRoutes(path.join(repoRoot, '../apps/docs'), { hiddenSegments: new Set(['[lang]']) });
 
-    for (const served of ['/', '/playground', '/llms.txt', '/docs/guide/expressions', '/logo.svg']) {
+    for (const served of ['/', '/llms.txt', '/blog', '/api/search', '/logo.svg']) {
       expect([served, siteUrlExists(served, site)]).toEqual([served, true]);
     }
     for (const dead of ['/spec/component.md', '/protocol/overview', '/api/core', '/api/react', '/examples/crm']) {
@@ -726,15 +787,15 @@ describe('absolute non-/docs hrefs are resolved against the site — objectui#34
 
 describe('the route table follows Next.js segment semantics', () => {
   function tableFor(files: Record<string, string>) {
-    return collectSiteRoutes(path.join(repoWith(files), 'apps/site'));
+    return collectSiteRoutes(path.join(repoWith(files), '../apps/docs'));
   }
 
   it('drops route groups, skips private and slot folders, and needs a page or route file', () => {
     const site = tableFor({
-      'apps/site/app/(marketing)/pricing/page.tsx': 'x',
-      'apps/site/app/_internal/secret/page.tsx': 'x',
-      'apps/site/app/components/Thing.tsx': 'x',
-      'apps/site/app/feed/route.ts': 'x',
+      '../apps/docs/app/(marketing)/pricing/page.tsx': 'x',
+      '../apps/docs/app/_internal/secret/page.tsx': 'x',
+      '../apps/docs/app/components/Thing.tsx': 'x',
+      '../apps/docs/app/feed/route.ts': 'x',
     });
 
     expect(siteUrlExists('/pricing', site)).toBe(true);
@@ -746,9 +807,9 @@ describe('the route table follows Next.js segment semantics', () => {
 
   it('matches dynamic, catch-all and optional catch-all segments by arity', () => {
     const site = tableFor({
-      'apps/site/app/blog/[slug]/page.tsx': 'x',
-      'apps/site/app/og/[...slug]/page.tsx': 'x',
-      'apps/site/app/wiki/[[...slug]]/page.tsx': 'x',
+      '../apps/docs/app/blog/[slug]/page.tsx': 'x',
+      '../apps/docs/app/og/[...slug]/page.tsx': 'x',
+      '../apps/docs/app/wiki/[[...slug]]/page.tsx': 'x',
     });
 
     expect(siteUrlExists('/blog/hello', site)).toBe(true);
@@ -773,13 +834,16 @@ describe('relative hrefs may not leave the collection — objectui#3490 A-class'
     // so this test fails if existence is ever allowed to decide the verdict.
     const repo = repoWith({
       ...SITE_FIXTURE,
-      'content/docs/guide/data-source.md': '[adapter README](../../../packages/data-objectstack/README.md#batch)',
+      // One level deeper than it was: the page sits in the collection's
+      // `frontend/` section, and the target is this workspace's own package.
+      '../content/docs/frontend/guide/data-source.md':
+        '[adapter README](../../../../ui/packages/data-objectstack/README.md#batch)',
       'packages/data-objectstack/README.md': '# Adapter',
     });
 
     expect(fs.existsSync(path.join(repo, 'packages/data-objectstack/README.md'))).toBe(true);
     expect(scan(repo).map((item) => [item.href, item.reason])).toEqual([
-      ['../../../packages/data-objectstack/README.md#batch', 'escapes-collection'],
+      ['../../../../ui/packages/data-objectstack/README.md#batch', 'escapes-collection'],
     ]);
   });
 
@@ -941,15 +1005,16 @@ describe('examples/** and the root README are scanned as DISK paths — objectui
     // these four verdicts flips.
     const repo = repoWith({
       ...SITE_FIXTURE,
-      'content/docs/guide/a.md': '[out](../../../packages/core/README.md) and [bare](../plugins/plugin-charts)',
-      'content/docs/plugins/plugin-charts.mdx': '# Charts',
-      'examples/README.md': '[out](../packages/core/README.md) and [bare](../content/docs/plugins/plugin-charts)',
+      '../content/docs/frontend/guide/a.md':
+        '[out](../../../packages/core/README.md) and [bare](../plugins/plugin-charts)',
+      '../content/docs/frontend/plugins/plugin-charts.mdx': '# Charts',
+      'examples/README.md': '[out](../packages/core/README.md) and [bare](../packages/core/README)',
       'packages/core/README.md': '# Core',
     });
 
     expect(scan(repo).map((item) => [path.relative(repo, item.file), item.href, item.reason])).toEqual([
-      ['content/docs/guide/a.md', '../../../packages/core/README.md', 'escapes-collection'],
-      ['examples/README.md', '../content/docs/plugins/plugin-charts', 'example-relative'],
+      [path.join('..', 'content', 'docs', 'frontend', 'guide', 'a.md'), '../../../packages/core/README.md', 'escapes-collection'],
+      ['examples/README.md', '../packages/core/README', 'example-relative'],
     ]);
   });
 });
@@ -1101,7 +1166,7 @@ describe("this repo's own GitHub blob/tree URLs are resolved offline — objectu
     expect(
       rejections({
         ...SITE_FIXTURE,
-        'content/docs/guide/building-crud-app.md': [
+        '../content/docs/frontend/guide/building-crud-app.md': [
           '[CRM](https://github.com/objectstack-ai/objectui/tree/main/examples/crm)',
           '[Catalog](https://github.com/objectstack-ai/objectui/tree/main/examples/schema-catalog)',
         ].join('\n\n'),
@@ -1122,7 +1187,7 @@ describe("this repo's own GitHub blob/tree URLs are resolved offline — objectu
     expect(
       rejections({
         ...SITE_FIXTURE,
-        'content/docs/plugins/plugin-charts.mdx': [
+        '../content/docs/frontend/plugins/plugin-charts.mdx': [
           '[README](https://github.com/objectstack-ai/objectui/blob/main/packages/plugin-charts/README.md)',
           '[Packages](https://github.com/objectstack-ai/objectui/tree/main/packages)',
         ].join('\n\n'),
@@ -1139,7 +1204,7 @@ describe("this repo's own GitHub blob/tree URLs are resolved offline — objectu
     expect(
       rejections({
         ...SITE_FIXTURE,
-        'content/docs/guide/a.md': [
+        '../content/docs/frontend/guide/a.md': [
           '[live](https://github.com/objectstack-ai/objectui/blob/main/packages/core/README.md#install)',
           '[raw](https://github.com/objectstack-ai/objectui/blob/main/packages/core/README.md?plain=1)',
           '[dead](https://github.com/objectstack-ai/objectui/blob/main/packages/gone/README.md#install)',
@@ -1193,13 +1258,13 @@ describe('every failure carries the reason that rejected it', () => {
     // test pins that.
     const repo = repoWith({
       ...SITE_FIXTURE,
-      'content/docs/guide/a.md': [
+      '../content/docs/frontend/guide/a.md': [
         '[out](../../../elsewhere/README.md)',
         '[site](/spec/component.md)',
         '[docs](/docs/guide/a.md)',
         '[rel](./nowhere.md)',
         '[self](https://github.com/objectstack-ai/objectui/blob/main/packages/gone/README.md)',
-        '[origin](https://www.objectui.org/docs/guide/gone)',
+        '[origin](https://www.objectstack.ai/docs/guide/gone)',
       ].join('\n\n'),
       'examples/README.md': '[disk](./nowhere.md) and [abs](/packages/core)',
     });
@@ -1246,34 +1311,35 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
     // the namespace 7 package READMEs invented; it has never existed.
     expect(
       brokenHrefs({
-        'guide/a.md': '[docs](https://www.objectui.org/docs/packages/auth)',
+        'guide/a.md': '[docs](https://www.objectstack.ai/docs/frontend/packages/auth)',
       }),
-    ).toEqual(['https://www.objectui.org/docs/packages/auth']);
+    ).toEqual(['https://www.objectstack.ai/docs/frontend/packages/auth']);
   });
 
   it('accepts the same URL once it names a real page', () => {
     expect(
       brokenHrefs({
-        'guide/a.md': '[renderer](https://www.objectui.org/docs/core/schema-renderer)',
+        'guide/a.md': '[renderer](https://www.objectstack.ai/docs/frontend/core/schema-renderer)',
         'core/schema-renderer.mdx': '# SchemaRenderer',
       }),
     ).toEqual([]);
   });
 
   it('judges both host spellings — this tree really carries www and bare', () => {
-    // 109 `www.objectui.org` against 9 bare `objectui.org` on main. Accepting
-    // only the majority spelling would leave the other 9 in the blind spot the
-    // whole change exists to close.
+    // 109 `www.` against 9 bare URLs on main when objectui#3603 landed, on the
+    // site's old host. Accepting only the majority spelling would leave the
+    // other 9 in the blind spot the whole change exists to close; the site's
+    // current host (objectstack#27145) is accepted under both spellings too.
     expect(
       brokenHrefs({
         'guide/a.md': [
-          '[www dead](https://www.objectui.org/docs/gone)',
-          '[bare dead](https://objectui.org/docs/gone)',
-          '[www live](https://www.objectui.org/docs/guide/a)',
-          '[bare live](https://objectui.org/docs/guide/a)',
+          '[www dead](https://www.objectstack.ai/docs/frontend/gone)',
+          '[bare dead](https://objectstack.ai/docs/frontend/gone)',
+          '[www live](https://www.objectstack.ai/docs/frontend/guide/a)',
+          '[bare live](https://objectstack.ai/docs/frontend/guide/a)',
         ].join('\n\n'),
       }),
-    ).toEqual(['https://www.objectui.org/docs/gone', 'https://objectui.org/docs/gone']);
+    ).toEqual(['https://www.objectstack.ai/docs/frontend/gone', 'https://objectstack.ai/docs/frontend/gone']);
   });
 
   it('INHERITS /docs strictness — an extension 404s here exactly as it does origin-less', () => {
@@ -1282,10 +1348,10 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
     // `guide/b.md` is materialised: only the strict `/docs` branch rejects it.
     expect(
       brokenHrefs({
-        'guide/a.md': '[b](https://www.objectui.org/docs/guide/b.md)',
+        'guide/a.md': '[b](https://www.objectstack.ai/docs/frontend/guide/b.md)',
         'guide/b.md': '# B',
       }),
-    ).toEqual(['https://www.objectui.org/docs/guide/b.md']);
+    ).toEqual(['https://www.objectstack.ai/docs/frontend/guide/b.md']);
   });
 
   it('INHERITS the apps/site route table for non-/docs paths', () => {
@@ -1294,13 +1360,13 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
     expect(
       brokenHrefs({
         'guide/a.md': [
-          '[examples](https://www.objectui.org/examples)',
-          '[playground](https://www.objectui.org/playground)',
-          '[home](https://www.objectui.org)',
-          '[home slash](https://www.objectui.org/)',
+          '[examples](https://www.objectstack.ai/examples)',
+          '[playground](https://www.objectstack.ai/playground)',
+          '[home](https://www.objectstack.ai)',
+          '[home slash](https://www.objectstack.ai/)',
         ].join('\n\n'),
       }),
-    ).toEqual(['https://www.objectui.org/examples']);
+    ).toEqual(['https://www.objectstack.ai/examples']);
   });
 
   it('checks site URLs in the disk surfaces too, not only content/docs', () => {
@@ -1309,28 +1375,28 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
     // if the check never ran on the disk rule, and would prove nothing.
     const repo = repoWith({
       ...SITE_FIXTURE,
-      'content/docs/guide/a.md': '[gone](https://www.objectui.org/docs/gone)',
+      '../content/docs/frontend/guide/a.md': '[gone](https://www.objectstack.ai/docs/frontend/gone)',
       // A root-level file on the disk rule; the root README was one until
       // objectstack#26080 folded it into the repository root's.
-      'AGENTS.md': '[gone](https://objectui.org/docs/gone)',
-      'examples/hello-world/README.md': '[live](https://www.objectui.org/docs/guide/a)',
+      'AGENTS.md': '[gone](https://objectstack.ai/docs/frontend/gone)',
+      'examples/hello-world/README.md': '[live](https://www.objectstack.ai/docs/frontend/guide/a)',
     });
 
     expect(scan(repo).map((item) => [path.relative(repo, item.file), item.reason])).toEqual([
-      [path.join('content', 'docs', 'guide', 'a.md'), 'site-absolute-url'],
+      [path.join('..', 'content', 'docs', 'frontend', 'guide', 'a.md'), 'site-absolute-url'],
       ['AGENTS.md', 'site-absolute-url'],
     ]);
   });
 
   it('leaves every other origin alone, a lookalike host included', () => {
-    // The regex is anchored at both ends precisely so `objectui.org.example.com`
+    // The regex is anchored at both ends precisely so `objectstack.ai.example.com`
     // cannot borrow this repo's route table — it is somebody else's host, and
     // resolving it here would invent 404s that are not ours to report.
     expect(
       brokenHrefs({
         'guide/a.md': [
-          '[lookalike](https://objectui.org.example.com/docs/gone)',
-          '[prefixed](https://notobjectui.org/docs/gone)',
+          '[lookalike](https://objectstack.ai.example.com/docs/gone)',
+          '[prefixed](https://notobjectstack.ai/docs/frontend/gone)',
           '[other](https://example.com/docs/gone)',
           '[docs of another](https://react.dev/docs/gone)',
         ].join('\n\n'),
@@ -1347,31 +1413,31 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
         'guide/a.md': [
           '# A',
           '## Install',
-          '[live](https://www.objectui.org/docs/guide/a#install)',
-          '[live q](https://www.objectui.org/docs/guide/a?x=1)',
-          '[dead](https://www.objectui.org/docs/gone#install)',
+          '[live](https://www.objectstack.ai/docs/frontend/guide/a#install)',
+          '[live q](https://www.objectstack.ai/docs/frontend/guide/a?x=1)',
+          '[dead](https://www.objectstack.ai/docs/frontend/gone#install)',
         ].join('\n\n'),
       }),
-    ).toEqual(['https://www.objectui.org/docs/gone#install']);
+    ).toEqual(['https://www.objectstack.ai/docs/frontend/gone#install']);
   });
 
   it('reports a site URL whose route resolves but whose anchor does not', () => {
     expect(
       brokenHrefs({
-        'guide/a.md': '# A\n\n## Install\n\n[moved](https://www.objectui.org/docs/guide/a#installation)',
+        'guide/a.md': '# A\n\n## Install\n\n[moved](https://www.objectstack.ai/docs/frontend/guide/a#installation)',
       }),
-    ).toEqual(['https://www.objectui.org/docs/guide/a#installation']);
+    ).toEqual(['https://www.objectstack.ai/docs/frontend/guide/a#installation']);
   });
 
   it('exposes siteAbsoluteRoute: the path it extracts, and the shapes it declines', () => {
-    expect(siteAbsoluteRoute('https://www.objectui.org/docs/guide/plugins')).toBe('/docs/guide/plugins');
-    expect(siteAbsoluteRoute('https://objectui.org/api/core')).toBe('/api/core');
-    expect(siteAbsoluteRoute('http://objectui.org/docs')).toBe('/docs');
+    expect(siteAbsoluteRoute('https://www.objectstack.ai/docs/guide/plugins')).toBe('/docs/guide/plugins');
+    expect(siteAbsoluteRoute('https://objectstack.ai/api/core')).toBe('/api/core');
+    expect(siteAbsoluteRoute('http://objectstack.ai/docs')).toBe('/docs');
     // No path at all is the site ROOT, not the empty string — `routeExists()`
     // reads '' as a pure in-page anchor and would wave it through.
-    expect(siteAbsoluteRoute('https://www.objectui.org')).toBe('/');
-    expect(siteAbsoluteRoute('https://www.objectui.org/docs/guide/a#x')).toBe('/docs/guide/a');
-    expect(siteAbsoluteRoute('https://objectui.org.example.com/docs')).toBeNull();
+    expect(siteAbsoluteRoute('https://www.objectstack.ai')).toBe('/');
+    expect(siteAbsoluteRoute('https://www.objectstack.ai/docs/guide/a#x')).toBe('/docs/guide/a');
+    expect(siteAbsoluteRoute('https://objectstack.ai.example.com/docs')).toBeNull();
     expect(siteAbsoluteRoute('https://example.com/docs')).toBeNull();
     expect(siteAbsoluteRoute('/docs/guide/plugins')).toBeNull();
   });
@@ -1404,8 +1470,13 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
       }
     }
 
+    // objectstack#27145 moved the site to objectstack.ai and the SDK pages to
+    // the monorepo's `content/docs/frontend`, which link the origin-less
+    // `/docs/...` form throughout: 0 site-absolute URLs there when re-measured,
+    // so the per-root floor that pinned #3603's six is gone. The sweep that
+    // rewrote this tree's objectui.org links left 61 objectstack.ai ones, every
+    // one a `/docs/...` route, so the two floors below still bite.
     expect(seen.length).toBeGreaterThanOrEqual(11);
-    expect(seen.filter((item) => item.root === 'content/docs').length).toBeGreaterThanOrEqual(5);
     expect(seen.filter((item) => item.route.startsWith('/docs')).length).toBeGreaterThanOrEqual(3);
   });
 });
@@ -1427,11 +1498,11 @@ describe('packages/*/README.md joined the disk surface — objectui#3622', () =>
     expect(
       rejections({
         ...SITE_FIXTURE,
-        'content/docs/core/schema-renderer.mdx': '# SchemaRenderer',
+        '../content/docs/frontend/core/schema-renderer.mdx': '# SchemaRenderer',
         'packages/core/README.md': [
-          '[api](https://objectui.org/api/core)',
-          '[group](https://www.objectui.org/docs/core)',
-          '[renderer](https://www.objectui.org/docs/core/schema-renderer)',
+          '[api](https://objectstack.ai/api/core)',
+          '[group](https://www.objectstack.ai/docs/frontend/core)',
+          '[renderer](https://www.objectstack.ai/docs/frontend/core/schema-renderer)',
           '[sync](../../docs/SHADCN_SYNC.md)',
           '[changelog](./CHANGELOG.md)',
           '[licence](./LICENSE)',
@@ -1439,8 +1510,8 @@ describe('packages/*/README.md joined the disk surface — objectui#3622', () =>
         'packages/core/CHANGELOG.md': '# Changelog',
       }),
     ).toEqual([
-      ['https://objectui.org/api/core', 'site-absolute-url'],
-      ['https://www.objectui.org/docs/core', 'site-absolute-url'],
+      ['https://objectstack.ai/api/core', 'site-absolute-url'],
+      ['https://www.objectstack.ai/docs/frontend/core', 'site-absolute-url'],
       ['../../docs/SHADCN_SYNC.md', 'example-relative'],
       ['./LICENSE', 'example-relative'],
     ]);
@@ -1500,13 +1571,13 @@ describe('packages/*/README.md joined the disk surface — objectui#3622', () =>
     // extensionless spelling the docs rule accepts is a 404 on GitHub.
     const repo = repoWith({
       ...SITE_FIXTURE,
-      'content/docs/guide/a.md': '[readme](../../../packages/core/README.md)',
+      '../content/docs/frontend/guide/a.md': '[readme](../../../packages/core/README.md)',
       'content/docs/fields/lookup.mdx': '# Lookup',
       'packages/core/README.md': '[lookup](../../content/docs/fields/lookup.mdx) and [bare](../../content/docs/fields/lookup)',
     });
 
     expect(scan(repo).map((item) => [path.relative(repo, item.file), item.href, item.reason])).toEqual([
-      [path.join('content', 'docs', 'guide', 'a.md'), '../../../packages/core/README.md', 'escapes-collection'],
+      [path.join('..', 'content', 'docs', 'frontend', 'guide', 'a.md'), '../../../packages/core/README.md', 'escapes-collection'],
       [path.join('packages', 'core', 'README.md'), '../../content/docs/fields/lookup', 'example-relative'],
     ]);
   });
@@ -1578,7 +1649,7 @@ describe('objectui#4148 — the app READMEs and the rest of the repo root', () =
       ...SITE_FIXTURE,
       'ROADMAP.md': '# Roadmap',
       'apps/console/README.md': '[roadmap](../../ROADMAP.md) and [gone](./CONSOLE_ROADMAP.md)',
-      'apps/site/README.md': '[roadmap](../../ROADMAP.md)',
+      '../apps/docs/README.md': '[roadmap](../../ROADMAP.md)',
     });
 
     expect(scan(repo).map((item) => [path.relative(repo, item.file), item.href, item.reason])).toEqual([
@@ -1951,7 +2022,9 @@ describe('objectui#6026 — the nested READMEs', () => {
       .map(([file, rows]) => `${file} <- ${rows.join(' + ')}`);
 
     expect(twice, 'these files are opened by more than one SCAN_ROOTS row').toEqual([]);
-    expect(rowsByFile.size, 'floor under the floor: nothing scanned would make the line above vacuous').toBeGreaterThanOrEqual(250);
+    // 250 until objectstack#27145 moved the SDK pages to the monorepo's docs
+    // collection as fewer, larger pages: 119 files opened when re-measured.
+    expect(rowsByFile.size, 'floor under the floor: nothing scanned would make the line above vacuous').toBeGreaterThanOrEqual(90);
   });
 });
 
@@ -2029,7 +2102,7 @@ describe('in-page and cross-document anchors are resolved — objectui#7644', ()
     expect(
       rejections({
         ...SITE_FIXTURE,
-        'content/docs/guide/a.md': [
+        '../content/docs/frontend/guide/a.md': [
           '[ok](https://github.com/objectstack-ai/objectui/blob/main/packages/core/README.md#install)',
           // fixture-address: fixture document content handed to the link reader, ⛔ not a pointer into this tree
           '[line](https://github.com/objectstack-ai/objectui/blob/main/packages/core/README.md#L42)',
@@ -2046,9 +2119,10 @@ describe('in-page and cross-document anchors are resolved — objectui#7644', ()
     expect(
       rejections({
         ...SITE_FIXTURE,
-        'content/docs/guide/a.md': '[play](/playground#tab-two)',
-        'examples/demo/README.md': '[src](./App.tsx#L10) and [img](../../apps/site/public/img/guide/shot.png#x)',
+        '../content/docs/frontend/guide/a.md': '[play](/playground#tab-two)',
+        'examples/demo/README.md': '[src](./App.tsx#L10) and [img](./shot.png#x)',
         'examples/demo/App.tsx': 'export default null',
+        'examples/demo/shot.png': 'PNG',
       }),
     ).toEqual([]);
   });
@@ -2066,7 +2140,7 @@ describe('in-page and cross-document anchors are resolved — objectui#7644', ()
 // them, so neither is a phantom dependency of the repo root:
 //   fumadocs-core  — declared by `apps/site`, the docs renderer itself
 //   github-slugger — declared by `@object-ui/plugin-markdown`
-const siteRequire = createRequire(path.join(repoRoot, 'apps/site/package.json'));
+const siteRequire = createRequire(path.join(repoRoot, '../apps/docs/package.json'));
 const markdownRequire = createRequire(path.join(repoRoot, 'packages/plugin-markdown/package.json'));
 
 const loadToc = async (): Promise<(content: string, plugins: unknown[]) => Promise<{ url: string; title: string }[]>> =>
@@ -2200,8 +2274,17 @@ describe('the anchor rule is the renderers’ own, not this gate’s — objectu
 
     expect(disagreeing).toEqual([]);
     // A zero above is only a reading if something was actually compared.
-    expect(docsFiles).toBeGreaterThan(150);
+    // 150 until objectstack#27145: 34 SDK pages in content/docs/frontend now.
+    expect(docsFiles).toBeGreaterThan(25);
     expect(diskFiles).toBeGreaterThan(50);
+  });
+
+  it('reads a heading inside a blockquote, as both renderers do — objectstack#27369', () => {
+    // The skill bundle writes `> ### …` callouts; GitHub and fumadocs anchor
+    // them, so the gate must too, or a link to one reads as dead.
+    expect([...headingAnchors('> ### Quoted title\n>\n> body\n', { customId: false })]).toEqual(['quoted-title']);
+    expect([...headingAnchors('>> ## Twice quoted\n', { customId: false })]).toEqual(['twice-quoted']);
+    expect([...headingAnchors('> not a heading\n', { customId: false })]).toEqual([]);
   });
 
   it('has no setext headings, which the ATX-only scan would not see', () => {
@@ -2215,7 +2298,9 @@ describe('the anchor rule is the renderers’ own, not this gate’s — objectu
       const lines = body.split('\n');
       // Every heading fumadocs found must have been written in ATX form; the
       // TOC carries no position, so compare counts against the ATX scan.
-      const atx = lines.filter((line, index) => /^#{1,6}\s+\S/.test(line) && !inFence(lines, index)).length;
+      // A blockquoted ATX heading (`> ### Title`) counts: the gate strips the
+      // markers before its own ATX test (objectstack#27369).
+      const atx = lines.filter((line, index) => /^(?: {0,3}>\s?)*#{1,6}\s+\S/.test(line) && !inFence(lines, index)).length;
       if (toc.length > atx) setext.push(`${path.relative(repoRoot, file)}: ${toc.length} headings, ${atx} ATX`);
     }
     expect(setext).toEqual([]);

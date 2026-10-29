@@ -131,7 +131,7 @@ exported for hand-assembled shells: `presentNotificationToast` (the `onToast`
 delegate) and `ConsoleNotificationBanners` (the banners, guarded by
 `useHasNotificationProvider()` so a layout without the provider renders no
 banners instead of throwing). See the
-[notifications guide](https://objectui.org/docs/guide/notifications).
+[notifications guide](https://objectstack.ai/docs/build-without-code).
 
 ## Read-rate report (environment admin)
 
@@ -1173,7 +1173,7 @@ For a per-row **Edit** that follows the record under the cursor, use the
 list or detail view's built-in **Edit** entry point instead: under
 `editMode: 'page'` it already routes to the same URL.
 
-See [`content/docs/guide/record-edit-modes.md`](../../content/docs/guide/record-edit-modes.md)
+See [Modal or page (`editMode`)](https://objectstack.ai/docs/ui/create-vs-edit-form#modal-or-page-editmode)
 for a longer walkthrough.
 
 ## Record approval visibility (Approvals tab / `record:approvals`)
@@ -1319,7 +1319,7 @@ The sidebar's Pinned section keeps the user's order, stored with the pins:
 drag a pinned row, or move it from the keyboard. The app's own menu is not
 reorderable: its order is authored in Studio.
 
-See [User-Scoped State Persistence](../../content/docs/guide/user-state-persistence.md)
+See [A user's list state never writes the view](https://objectstack.ai/docs/ui/views#a-users-list-state-never-writes-the-view)
 for the adapter contract, backend schema, and how to plug in your own backend.
 
 ## Command palette (⌘K)
@@ -1545,7 +1545,7 @@ const request: Pick<AppShellRuntimeConfig, 'hideSingleAppSwitcher'> = {
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/layout/app-shell)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/app-shell)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/app-shell)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
