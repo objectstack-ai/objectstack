@@ -5,51 +5,23 @@
  * (`RecordPageRequestSchema` → `RecordPageResponseSchema`, `@objectstack/spec/api`).
  *
  * One request answers what a record page asked of the server in up to three
- * serial stages when it opened: the record, the count and first rows of every
- * related list it draws, the caller's field projection of the record, the
- * record-grained access verdicts its header gates on, and its approval state.
+ * serial stages when it opened. Every part is the answer of the read it
+ * replaces, asked as the same caller through the same call, and the route adds
+ * no judgement of its own (the part-to-read table is the spec module's header):
+ * the record is `getData` after the object-exposure gate, and its refusal is
+ * the whole answer, before any other part is asked; a related list is
+ * `findData` with `count` after the child's own exposure gate, filtered by the
+ * parent condition this route composes AND the list's declared scope; then
+ * `getRecordFieldAccess`, the security service's `explain` and the approval
+ * service's `listRequests` / `getRequest` / `getRecordLock`. Object
+ * permissions, row-level security, sharing and field-level security are
+ * therefore whatever those calls apply, by construction.
  *
- * ## Every part is the answer of the read it replaces
- *
- * The route composes the calls those reads make, as the same caller, and adds
- * no judgement of its own:
- *
- *   - the record — `getData`, as `GET /data/:object/:id` reads it, after the
- *     same object-exposure gate. A refusal here refuses the whole request with
- *     that read's answer, before any other part is asked, so no part answers
- *     for a record the caller could not open;
- *   - a related list — `findData` on the child with `count`, as
- *     `GET /data/:child` reads it, after the child's own exposure gate. The
- *     filter is the parent condition this route composes (the child's
- *     relationship field holding this record's id, compiled to the field's
- *     arity) AND the list's declared scope, so a declared scope can only narrow
- *     it. A list whose read refuses carries the refusal and neither a count nor
- *     rows; the other parts are still answered;
- *   - `fieldAccess` — `getRecordFieldAccess`, as
- *     `GET /data/:object/:id/field-access` asks it;
- *   - `explain` — the security service's `explain` with this record id, as
- *     `POST /security/explain` asks it, one decision per operation;
- *   - `approvals` — `listRequests` for the record (the pending row folded with
- *     its `getRequest` read, as the console folds it) and `getRecordLock`, as
- *     `GET /approvals/requests` and `GET /approvals/records/:object/:id/lock`
- *     ask them.
- *
- * Object permissions, row-level security, sharing and field-level security are
- * therefore whatever those calls apply, by construction; the equivalence is
- * pinned per part in `record-page-routes.test.ts`.
- *
- * ## The page names the lists
- *
- * Which related lists a page draws is the page's derivation (declared order,
- * declared scope, which ones the reader may see), so the body names them and
- * this route answers each one. It never derives a list of its own. What it does
- * own is the meaning of a list entry: the child field must be a relationship
- * that points at this object, or the request is refused — an entry is a related
- * list of THIS record, not an arbitrary query.
- *
+ * The page names the lists (which ones it draws is its own derivation); this
+ * route never derives one. It owns the meaning of an entry: the child field
+ * must be a relationship that points at this object, or the request is refused.
  * The closed query-parameter set is empty (AGENTS.md, Route & surface
- * ownership 5): everything the route reads is the path and the body, and the
- * body is parsed strictly.
+ * ownership 5), and the body is parsed strictly.
  */
 
 import {
