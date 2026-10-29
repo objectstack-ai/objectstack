@@ -39,6 +39,7 @@
  */
 
 import {
+  createContext,
   Fragment,
   useCallback,
   useEffect,
@@ -257,6 +258,25 @@ export function useRecordDrawerStack({
 export type RecordDrawerStack = ReturnType<typeof useRecordDrawerStack>;
 
 /**
+ * objectstack#27627 — the records the stepper steps to from the record shown
+ * (its previous and next sibling), so the record page can ask their payload
+ * ahead of the step (`DataSource.prefetchRecordPage`). Empty where there is no
+ * stepper.
+ */
+export const RecordNeighborsContext = createContext<readonly string[]>([]);
+
+const NO_NEIGHBORS: readonly string[] = [];
+
+/** The previous and next sibling of the level shown, as the stepper steps. */
+function neighborsOf(level: RecordDrawerLevel | null | undefined): readonly string[] {
+  const siblings = level?.siblings;
+  if (!level || !siblings || siblings.length === 0) return NO_NEIGHBORS;
+  const index = siblings.indexOf(level.recordId);
+  if (index < 0) return NO_NEIGHBORS;
+  return [siblings[index - 1], siblings[index + 1]].filter((id): id is string => typeof id === 'string');
+}
+
+/**
  * The drawer itself: the shared `NavigationOverlay` with the stack's bar —
  * `←` and the path on the left, `↑` `↓` / `⤢` / `✕` on the right — drawing
  * the current level through the host's `renderRecord`, inside the context
@@ -289,6 +309,8 @@ export function RecordStackDrawer({
   const { objectLabel } = useObjectLabel();
   const { path, depth, current, push, popTo, stepper } = stack;
   const api = useMemo<RecordDrawerApi>(() => ({ open: push }), [push]);
+  const neighborKey = stepper ? JSON.stringify(neighborsOf(current)) : '[]';
+  const neighbors = useMemo<readonly string[]>(() => JSON.parse(neighborKey), [neighborKey]);
   const labelOf = (objectName: string) => {
     const def = objects.find((o) => (o as { name?: unknown } | null)?.name === objectName);
     return def ? objectLabel(def as never) : objectName;
@@ -334,12 +356,14 @@ export function RecordStackDrawer({
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
-          {/* Keyed by level and object: a step to a sibling swaps the record
-              in place (the view follows `recordIdOverride`), while a level
-              change is a different record page. */}
-          <Fragment key={`${depth}:${current?.objectName}`}>
-            {current ? renderRecord(current) : null}
-          </Fragment>
+          <RecordNeighborsContext.Provider value={neighbors}>
+            {/* Keyed by level and object: a step to a sibling swaps the record
+                in place (the view follows `recordIdOverride`), while a level
+                change is a different record page. */}
+            <Fragment key={`${depth}:${current?.objectName}`}>
+              {current ? renderRecord(current) : null}
+            </Fragment>
+          </RecordNeighborsContext.Provider>
         </RecordDrawerContext.Provider>
       )}
     </NavigationOverlay>

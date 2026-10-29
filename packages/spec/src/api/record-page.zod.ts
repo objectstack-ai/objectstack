@@ -41,6 +41,8 @@ import { GetRecordFieldAccessResponseSchema } from './protocol.zod';
 export const RECORD_PAGE_MAX_RELATED = 50;
 /** The most rows one related list may ask for. */
 export const RECORD_PAGE_MAX_RELATED_ROWS = 50;
+/** The most sort keys one related list may order its rows by. */
+export const RECORD_PAGE_MAX_RELATED_SORT = 8;
 
 /** The record-grained operations a record page's header asks about. */
 export const RecordPageExplainOperationSchema = z.enum(['update', 'delete', 'transfer']);
@@ -59,6 +61,12 @@ export const RecordPageRelatedRequestSchema = lazySchema(() => z.object({
   ),
   top: z.number().int().min(0).max(RECORD_PAGE_MAX_RELATED_ROWS).describe(
     'How many of the list\'s first rows to return with its count; 0 returns the count alone.',
+  ),
+  sort: z.array(z.object({
+    field: z.string().min(1).describe('A field of the child object.'),
+    order: z.enum(['asc', 'desc']).describe('The direction.'),
+  }).strict()).max(RECORD_PAGE_MAX_RELATED_SORT).optional().describe(
+    'The order of the list\'s first rows, as `GET /data/{object}` orders them by `$orderby`. Absent for the default order.',
   ),
 }).strict());
 export type RecordPageRelatedRequest = z.input<typeof RecordPageRelatedRequestSchema>;

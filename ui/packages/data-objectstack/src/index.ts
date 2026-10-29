@@ -48,6 +48,8 @@ import type { AnalyticsResult, DatasetSelection } from '@objectstack/spec/contra
 import type {
   DataSource,
   RecordFieldAccess,
+  RecordPagePayload,
+  RecordPageRequest,
   ConnectionState,
   // #4564 — the canonical `deleteView` receipt shapes, declared beside the
   // `DataSource` interface they belong to. Imported for the local uses below
@@ -1009,6 +1011,17 @@ export function readTransactionalBatchCapability(
  * any of these as a 404 so callers can degrade gracefully instead of
  * tripping on the property-name mismatch.
  */
+/**
+ * How many prefetched record page payloads an adapter holds (objectstack#27627):
+ * the previous and the next record of the one open, and the pair before a step.
+ */
+const PREFETCHED_RECORD_PAGES = 4;
+
+/** The identity of one record page read: resource, record id and request. */
+function recordPageKey(resource: string, id: string, request: RecordPageRequest): string {
+  return `${resource}::${JSON.stringify(String(id))}::${stableStringify(request)}`;
+}
+
 export function is404Error(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const err = error as Record<string, unknown>;
@@ -3296,6 +3309,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // write to a resource drops that resource's entries (see `emitMutation`),
   // so a read asked after a save is never answered by one sent before it.
   private inflightFindOnes = new Map<string, Promise<T | null>>();
+  // objectstack#27627 — record page payloads (`getRecordPage`) on the wire,
+  // keyed by resource + record id + serialized request, shared the same way;
+  // and the ones a stepper asked for ahead of the open (`prefetchRecordPage`),
+  // each taken once by the open it was asked for. A write to ANY resource
+  // drops both (see `dropInflightReads`): a payload carries the counts and
+  // rows of other objects' records, so no write leaves it current.
+  private inflightRecordPages = new Map<string, Promise<RecordPagePayload | null>>();
+  private prefetchedRecordPages = new Map<string, Promise<RecordPagePayload | null>>();
   // Resources that have responded 404 at least once (collection not installed
   // on this backend). Subsequent find() calls short-circuit to an empty result
   // so optional collections like sys_presence don't hammer the server with
@@ -3918,6 +3939,8 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     for (const key of Array.from(this.inflightFindOnes.keys())) {
       if (key.startsWith(prefix)) this.inflightFindOnes.delete(key);
     }
+    this.inflightRecordPages.clear();
+    this.prefetchedRecordPages.clear();
   }
 
   /** Hand one event to every mutation subscriber, each isolated. */
@@ -7261,6 +7284,57 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       return access ?? null;
     } catch (error: unknown) {
       if (is404Error(error) || isNotImplementedError(error)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Everything a record page asks when it opens, in one read
+   * (objectstack#27627): `POST /data/{object}/{id}/page` through the client's
+   * `data.recordPage`. A payload a stepper prefetched for the same arguments
+   * is taken (once); a read already on the wire for them is joined.
+   *
+   * `null` for a record the caller cannot see (the route answers the record
+   * read's own 404), as {@link findOne} answers it. Any other failure is
+   * thrown, as a read's.
+   */
+  async getRecordPage(resource: string, id: string, request: RecordPageRequest): Promise<RecordPagePayload | null> {
+    const key = recordPageKey(resource, id, request);
+    const prefetched = this.prefetchedRecordPages.get(key);
+    if (prefetched) {
+      // Taken once, and shared like a read of its own while it is out, so a
+      // second asker of the same open (StrictMode's replayed effect) joins it.
+      this.prefetchedRecordPages.delete(key);
+      return this.shareInFlight(this.inflightRecordPages, key, () => prefetched);
+    }
+    return this.shareInFlight(this.inflightRecordPages, key, () => this.readRecordPage(resource, id, request));
+  }
+
+  /**
+   * Ask {@link getRecordPage} ahead of the open it serves — the previous and
+   * next record of a stepper. Holds at most {@link PREFETCHED_RECORD_PAGES}
+   * answers, the newest; a write to any resource drops them all.
+   */
+  prefetchRecordPage(resource: string, id: string, request: RecordPageRequest): void {
+    const key = recordPageKey(resource, id, request);
+    if (this.prefetchedRecordPages.has(key) || this.inflightRecordPages.has(key)) return;
+    const read = this.readRecordPage(resource, id, request);
+    // Nobody may be waiting on it; a failure is the open's to see, when it asks.
+    read.catch(() => undefined);
+    this.prefetchedRecordPages.set(key, read);
+    while (this.prefetchedRecordPages.size > PREFETCHED_RECORD_PAGES) {
+      const oldest = this.prefetchedRecordPages.keys().next().value as string;
+      this.prefetchedRecordPages.delete(oldest);
+    }
+  }
+
+  /** The one round trip behind {@link getRecordPage}, unshared. */
+  private async readRecordPage(resource: string, id: string, request: RecordPageRequest): Promise<RecordPagePayload | null> {
+    await this.connect();
+    try {
+      return (await this.client.data.recordPage(resource, String(id), request as any)) as unknown as RecordPagePayload;
+    } catch (error: unknown) {
+      if (is404Error(error)) return null;
       throw error;
     }
   }

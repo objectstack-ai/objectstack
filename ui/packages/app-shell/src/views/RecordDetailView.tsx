@@ -8,7 +8,7 @@
  * (`buildDefaultPageSchema`).
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
@@ -33,7 +33,8 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
-import { RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
+import { RecordDrawerReturnLink, RecordNeighborsContext, RecordPageDrawerHost } from './recordDrawerStack.js';
+import { recordPageRelatedLists, recordPageRequestOf, seedRecordPageReaders } from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 
@@ -52,7 +53,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // framework-injected bookkeeping columns are hidden from the body outright.
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
-import type { DataSource, FeedItem, Reaction } from '@object-ui/types';
+import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
@@ -1032,6 +1033,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // same request, same cancellation guard — rather than a second read path.
   // Cleared with the effect, so a Retry can never run a superseded load.
   const reloadPageRecordRef = useRef<(() => void) | null>(null);
+  // objectstack#27627 — the record page payload the open asked (the layout
+  // effect after the header gates below), for the record-load effect to take
+  // the record from: `recordKey` is the read it answers (object, record and
+  // `$expand`), `generation` the invalidation count when it was asked, so a
+  // load after any change reads the record again instead.
+  const recordPageRead = useRef<{
+    recordKey: string;
+    generation: number;
+    payload: Promise<RecordPagePayload | null>;
+  } | null>(null);
   // objectstack#26589 — the record this viewer just decided an approval on,
   // as `objectName` + `recordId`. A pending approver with no standing access
   // reads the record only while their step waits (objectstack#26180): the
@@ -1130,11 +1141,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const decidedKey = `${objectName}:${pureRecordId}`;
     const expandFields: string[] = JSON.parse(pageRecordExpand);
     const params = expandFields.length > 0 ? { $expand: expandFields } : undefined;
-    const loadRecord = () => {
+    // objectstack#27627 — the open's record comes with the page payload when
+    // one was asked for this very read and nothing has changed since; a load
+    // after a change, a Retry and a `record-changed` signal read it alone.
+    const opened = recordPageRead.current;
+    const openPayload =
+      opened
+      && opened.recordKey === JSON.stringify([objectName, pureRecordId, pageRecordExpand])
+      && opened.generation === recordInvalidationNonce + childInvalidationNonce
+        ? opened.payload
+        : null;
+    const loadRecord = (fresh = false) => {
       setPageRecordStatus('loading');
-      const findOnePromise = params
-        ? dataSource.findOne(objectName, pureRecordId, params)
-        : dataSource.findOne(objectName, pureRecordId);
+      const findOnePromise = !fresh && openPayload
+        ? openPayload.then((page) => page?.record ?? null)
+        : params
+          ? dataSource.findOne(objectName, pureRecordId, params)
+          : dataSource.findOne(objectName, pureRecordId);
       findOnePromise
         .then((rec: any) => {
           if (cancelled) return;
@@ -1156,7 +1179,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           setPageRecordStatus(classifyLoadError(err) === 'forbidden' ? 'forbidden' : 'failed');
         });
     };
-    reloadPageRecordRef.current = loadRecord;
+    const reload = () => loadRecord(true);
+    reloadPageRecordRef.current = reload;
     loadRecord();
 
     // Re-sync when any descendant signals the record changed (e.g.
@@ -1166,12 +1190,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const onChanged = (ev: Event) => {
       const detail = (ev as CustomEvent).detail || {};
       if (detail.objectName !== objectName || String(detail.recordId) !== String(pureRecordId)) return;
-      loadRecord();
+      loadRecord(true);
     };
     window.addEventListener('objectui:record-changed', onChanged as EventListener);
     return () => {
       cancelled = true;
-      if (reloadPageRecordRef.current === loadRecord) reloadPageRecordRef.current = null;
+      if (reloadPageRecordRef.current === reload) reloadPageRecordRef.current = null;
       window.removeEventListener('objectui:record-changed', onChanged as EventListener);
     };
     // #2269: recordInvalidationNonce re-runs this fetch in place whenever the
@@ -2092,6 +2116,71 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // claimed it", never pre-judged here.
   const sittingInQueue = recordSitsInQueue(pageRecord);
   const claimOffered = useQueueClaimOffered(objectDef?.name, pureRecordId, sittingInQueue !== null);
+
+  // ─── The record page payload (objectstack#27627) ─────────────────────
+  // Everything this page asks of the server when it opens, in ONE read
+  // (`DataSource.getRecordPage`): the record with the `$expand` above, each
+  // related list's total and first rows, the field projection, the header's
+  // verdicts (the ones the gates above ask) and the approval state. It goes out
+  // in a LAYOUT effect, which React runs before any passive effect of the
+  // commit, so every reader of a part — this view's own hooks, a tab badge, a
+  // related card, the details block — finds its part on the wire and joins it
+  // (`seedRecordPageReaders`) instead of asking. The record-load effect above
+  // takes the record from it. Keyed on the plan's CONTENT (AGENTS.md #10).
+  // An adapter without `getRecordPage` leaves every reader asking on its own.
+  const recordPagePlan = useMemo(() => {
+    if (!hasPage || !objectName || !pureRecordId || typeof dataSource?.getRecordPage !== 'function') return '';
+    const explain: RecordPageOperation[] = [];
+    if (objectDef?.name && !editOffByObject) explain.push('update');
+    if (objectDef?.name && !deleteOffByObject) explain.push('delete');
+    // Claim asks a transfer verdict only of a record sitting in a queue; the
+    // payload asks it of every record of an object that has the column.
+    if (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue')) explain.push('transfer');
+    return JSON.stringify({
+      expand: JSON.parse(pageRecordExpand) as string[],
+      related: recordPageRelatedLists(effectivePage, assignedPage ? undefined : childRelations),
+      explain,
+      fieldAccess: typeof dataSource.getRecordFieldAccess === 'function',
+      approvals: objectName !== SYS_APPROVAL_REQUEST_OBJECT,
+    });
+  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, pageRecordExpand, effectivePage, assignedPage, childRelations]);
+  const recordPagePrincipal = perms.userId ?? null;
+  const recordPageGeneration = recordInvalidationNonce + childInvalidationNonce;
+  const recordPageGenerationRef = useRef(recordPageGeneration);
+  recordPageGenerationRef.current = recordPageGeneration;
+  useLayoutEffect(() => {
+    if (!recordPagePlan || !objectName || !pureRecordId || typeof dataSource?.getRecordPage !== 'function') {
+      recordPageRead.current = null;
+      return;
+    }
+    const plan = JSON.parse(recordPagePlan);
+    const payload = dataSource.getRecordPage(objectName, pureRecordId, recordPageRequestOf(plan));
+    recordPageRead.current = {
+      recordKey: JSON.stringify([objectName, pureRecordId, JSON.stringify(plan.expand)]),
+      generation: recordPageGenerationRef.current,
+      payload,
+    };
+    seedRecordPageReaders({ payload, objectName, recordId: pureRecordId, principal: recordPagePrincipal, ...plan });
+  }, [recordPagePlan, objectName, pureRecordId, dataSource, recordPagePrincipal]);
+
+  // The stepper's previous and next record: their payloads are asked once this
+  // record's has answered, so a step opens from an answer already on its way.
+  const recordNeighbors = useContext(RecordNeighborsContext);
+  useEffect(() => {
+    const opened = recordPageRead.current;
+    if (!opened || !recordPagePlan || recordNeighbors.length === 0 || !objectName) return;
+    if (typeof dataSource?.prefetchRecordPage !== 'function') return;
+    let cancelled = false;
+    const request = recordPageRequestOf(JSON.parse(recordPagePlan));
+    const prefetch = () => {
+      if (cancelled) return;
+      for (const id of recordNeighbors) dataSource.prefetchRecordPage!(objectName, id, request);
+    };
+    opened.payload.then(prefetch, prefetch);
+    return () => {
+      cancelled = true;
+    };
+  }, [recordPagePlan, recordNeighbors, objectName, dataSource]);
   const [claiming, setClaiming] = useState(false);
   const claimingRef = useRef(false);
   const handleClaim = useCallback(async () => {

@@ -374,6 +374,68 @@ export interface RecordFieldAccess {
   writable?: boolean;
 }
 
+/** A record-grained operation a record page's header asks a verdict for. */
+export type RecordPageOperation = 'update' | 'delete' | 'transfer';
+
+/** One related list a record page draws, as {@link RecordPageRequest} names it. */
+export interface RecordPageRelatedRequest {
+  /** The child object. */
+  object: string;
+  /** The child's lookup or master-detail field that points at the record. */
+  field: string;
+  /** The list's own declared scope, AND-composed with the parent condition. */
+  filter?: unknown;
+  /** How many first rows to return with the count (0 = the count alone). */
+  top: number;
+  /** The order of the first rows, as the list's row read sends `$orderby`; absent for the default order. */
+  sort?: Array<{ field: string; order: 'asc' | 'desc' }>;
+}
+
+/**
+ * What a record page asks of the server when it opens
+ * (`POST /data/{object}/{id}/page`, `RecordPageRequest` in `@objectstack/spec`).
+ */
+export interface RecordPageRequest {
+  /** Lookup fields of the record to resolve, as `findOne`'s `$expand`. */
+  expand?: string[];
+  /** The related lists the page draws, in order. */
+  related?: RecordPageRelatedRequest[];
+  /** The operations to answer a record-grained access verdict for. */
+  explain?: RecordPageOperation[];
+  /** Return the caller's field projection of the record. */
+  fieldAccess?: boolean;
+  /** Return the record's approval requests and its approval lock. */
+  approvals?: boolean;
+}
+
+/** The refusal a replaced read answers, carried in place of a part's answer. */
+export interface RecordPagePartRefusal {
+  code: string;
+  status: number;
+  message: string;
+}
+
+/**
+ * The answer to {@link RecordPageRequest} (`RecordPageResponse` in
+ * `@objectstack/spec`): each part is what the read it replaces answers the same
+ * caller, or that read's refusal.
+ */
+export interface RecordPagePayload {
+  object: string;
+  id: string;
+  record: Record<string, any>;
+  related: Array<{
+    object: string;
+    field: string;
+    total?: number;
+    records?: Record<string, any>[];
+    error?: RecordPagePartRefusal;
+  }>;
+  fieldAccess?: RecordFieldAccess | { error: RecordPagePartRefusal };
+  explain?: Partial<Record<RecordPageOperation, unknown>>;
+  approvals?: { requests: Record<string, any>[]; lock: { locked: boolean } | null } | { error: RecordPagePartRefusal };
+}
+
 /**
  * The backend-agnostic data contract every adapter implements.
  *
@@ -634,6 +696,29 @@ export interface DataSource<T = any> {
    * Optional — adapters that don't speak to an ObjectStack server can omit it.
    */
   getRecordFieldAccess?(resource: string, id: string): Promise<RecordFieldAccess | null>;
+
+  /**
+   * Everything a record page asks of the server when it opens, in ONE read
+   * (objectstack#27627): the record, each related list's count and first rows,
+   * the field projection, the header's access verdicts and the approval state.
+   * Every part passes the permission, row-level and field-level filters of the
+   * read it replaces.
+   *
+   * `null` when the record is absent or hidden from the caller, as
+   * {@link findOne} answers it. A refused read is thrown.
+   *
+   * Optional — adapters that don't speak to an ObjectStack server omit it, and
+   * the page then asks each part on its own.
+   */
+  getRecordPage?(resource: string, id: string, request: RecordPageRequest): Promise<RecordPagePayload | null>;
+
+  /**
+   * Start {@link getRecordPage} for a record the reader is likely to open next
+   * (the previous / next record of a stepper), so its open is served from the
+   * answer already on its way. Fire-and-forget; a later `getRecordPage` with
+   * the same arguments takes it, and a write to the object drops it.
+   */
+  prefetchRecordPage?(resource: string, id: string, request: RecordPageRequest): void;
 
   /**
    * Get object schema/metadata.

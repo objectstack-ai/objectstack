@@ -8,7 +8,7 @@
  * - every part is the call the read it replaces makes, asked as the same
  *   caller: the record is `getData` as `GET /data/:object/:id` asks it, a
  *   related list is `findData` on the child with the parent condition AND the
- *   list's declared filter and `count`, the projection is
+ *   list's declared filter, its declared order and `count`, the projection is
  *   `getRecordFieldAccess`, a verdict is `explain` with the record id, the
  *   approval part is `listRequests` + `getRecordLock`;
  * - the answer parses against `RecordPageResponseSchema` (the route ledger's
@@ -151,7 +151,7 @@ describe('[#27627] POST /data/:object/:id/page', () => {
             related: [
                 { object: 'note', field: 'account', top: 3 },
                 { object: 'note', field: 'account', filter: { title: 'x' }, top: 0 },
-                { object: 'note', field: 'watchers', top: 1 },
+                { object: 'note', field: 'watchers', top: 1, sort: [{ field: 'title', order: 'desc' }] },
             ],
             fieldAccess: true,
             explain: ['update', 'delete'],
@@ -170,7 +170,7 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         expect(findData.mock.calls.map(([req]) => req)).toEqual([
             { object: 'note', query: { filter: { account: 'a1' }, top: 3, count: true }, context: CTX },
             { object: 'note', query: { filter: { $and: [{ account: 'a1' }, { title: 'x' }] }, top: 0, count: true }, context: CTX },
-            { object: 'note', query: { filter: { watchers: { $contains: 'a1' } }, top: 1, count: true }, context: CTX },
+            { object: 'note', query: { filter: { watchers: { $contains: 'a1' } }, top: 1, count: true, orderBy: [{ field: 'title', order: 'desc' }] }, context: CTX },
         ]);
         expect(data.related.map((r) => [r.field, r.total, r.records])).toEqual([
             ['account', 7, [{ id: 'note-1' }]],
@@ -296,6 +296,7 @@ describe('[#27627] POST /data/:object/:id/page', () => {
             { relatedLists: [] },
             { related: [{ object: 'note', field: 'account', top: 3, extra: 1 }] },
             { related: [{ object: 'note', field: 'account', top: 51 }] },
+            { related: [{ object: 'note', field: 'account', top: 3, sort: [{ field: 'title', order: 'up' }] }] },
             { explain: ['read'] },
         ]) {
             const answer = await call(body);

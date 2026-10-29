@@ -222,7 +222,12 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                         const where = declared === undefined ? parentScope : { $and: [parentScope, declared] };
                         const found: any = await p.findData({
                             object: entry.object,
-                            query: { filter: where, top: entry.top, count: true } as any,
+                            query: {
+                                filter: where,
+                                top: entry.top,
+                                count: true,
+                                ...(entry.sort && entry.sort.length > 0 ? { orderBy: entry.sort } : {}),
+                            } as any,
                             ...scope,
                         } satisfies ServerScopedDataRequest<FindDataRequest>);
                         const records = Array.isArray(found?.records) ? found.records : [];
