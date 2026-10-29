@@ -7,35 +7,34 @@
  */
 
 /**
- * `page:header` — the manual refresh ⟳ (objectui#3460).
+ * `page:header` — the manual refresh (objectui#3460), drawn as the first item
+ * of the `⋯` menu (objectstack#27055).
  *
  * MES shop-floor scenario: operator A sits on a work-order detail page while
  * operator B starts/reports the same order. A had no way to see it but F5.
- * The header now offers a ⟳ that publishes on the #2269 invalidation bus, so
- * the record, its related lists and the tab-count badges refetch IN PLACE.
+ * The header offers a Refresh that publishes on the #2269 invalidation bus,
+ * so the record, its related lists and the tab-count badges refetch IN PLACE.
  *
- * What this file pins, and why each one is a separate failure mode:
+ * The v3 header (objectstack#27055, the maintainer-approved design: 「1 主 +
+ * 2 次 + ⋯（刷新收进 ⋯）」) moved it from a ⟳ button at the end of the row
+ * into the `⋯`. What this file pins, and why each one is a separate failure
+ * mode:
  *
- *   1. The button is HOST-OPTED-IN — it renders iff `RecordContext.refresh`
- *      exists. Every other host (previews, the embedded drawer, non-record
- *      pages) must render byte-for-byte what it rendered before, so the
- *      no-refresh cases assert the *absence* of the button AND the survival of
- *      the `data-page-actions-slot` layout div.
- *   2. It is page CHROME, not a header action: it lives OUTSIDE the actions
- *      `role="toolbar"`, at the far end of the row, and therefore cannot be
- *      collapsed into the `⋯` overflow when an object declares more actions
- *      than `maxVisible`. That property is the whole reason it isn't wired
- *      through the action pipeline, so it is asserted rather than assumed.
+ *   1. It is HOST-OPTED-IN — it renders iff `RecordContext.refresh` exists.
+ *      Every other host (previews, the embedded drawer, non-record pages)
+ *      must render what it rendered before, so the no-refresh cases assert
+ *      the *absence* of the item AND the survival of the
+ *      `data-page-actions-slot` layout div.
+ *   2. It is the FIRST item of the `⋯` and never takes an inline slot: the
+ *      row is 1 primary + 2 secondary, the rest folds. With no action at all
+ *      the `⋯` still draws, holding the refresh alone.
  *   3. Its accessible name comes from `common.refresh` — an existing key in all
- *      ten packs — so an icon-only button is not English-only for the nine
- *      other locales (the same failure objectstack#5407 fixed for `⋯`).
- *   4. Clicking calls the host's refresh exactly once and spins for a floor of
- *      ~650ms. The bus is fire-and-forget, so without the floor a warm backend
- *      renders the click as "nothing happened".
+ *      ten packs.
+ *   4. Choosing it calls the host's refresh exactly once.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { act, render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 import { I18nProvider } from '@object-ui/i18n';
@@ -43,9 +42,6 @@ import { I18nProvider } from '@object-ui/i18n';
 // cold transform is billed to `hookTimeout`
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../renderers';
-
-/** Must track MANUAL_REFRESH_SPIN_MS in `renderers/layout/containers.tsx`. */
-const SPIN_MS = 650;
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -87,167 +83,115 @@ function renderHeader(opts: Opts = {}) {
   );
 }
 
-const refreshButton = () => document.querySelector('[data-page-refresh]') as HTMLButtonElement | null;
-const spinIcon = () => refreshButton()?.querySelector('svg')?.getAttribute('class') ?? '';
+const refreshItem = () => document.querySelector('[data-page-refresh]') as HTMLElement | null;
+const moreTrigger = () => screen.queryByRole('button', { name: /More actions|更多操作|その他の操作/ });
+
+async function openMore(): Promise<void> {
+  const trigger = moreTrigger();
+  expect(trigger, 'the ⋯ trigger is drawn').toBeTruthy();
+  fireEvent.pointerDown(trigger!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  await waitFor(() => expect(screen.getByRole('menu')).toBeTruthy());
+}
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
 });
 
-describe('page:header — the ⟳ is host-opted-in (objectui#3460)', () => {
-  it('renders no ⟳ when the host provides no refresh', () => {
+describe('page:header — the refresh is host-opted-in (objectui#3460)', () => {
+  it('draws no ⋯ and no refresh when the host provides no refresh and the page no action', () => {
     renderHeader();
 
-    expect(refreshButton()).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(moreTrigger()).toBeNull();
+    expect(refreshItem()).toBeNull();
   });
 
   it('leaves a no-refresh header exactly as it was — actions slot included', () => {
     const { container } = renderHeader();
 
-    // The empty-actions layout placeholder must still be the header's own
-    // trailing child, not moved inside a new wrapper: this is the regression
-    // guard for every host that never opts in.
     const slot = container.querySelector('[data-page-actions-slot]');
     expect(slot).toBeTruthy();
     expect(slot!.parentElement?.tagName).toBe('HEADER');
   });
 
-  it('renders the ⟳ once the host provides refresh', () => {
+  it('draws the ⋯ holding the refresh alone once the host provides refresh', async () => {
     renderHeader({ refresh: vi.fn() });
 
-    expect(refreshButton()).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy();
+    // No ⟳ in the row any more (objectstack#27055).
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    await openMore();
+    const items = screen.getAllByRole('menuitem');
+    expect(items.map((item) => item.textContent)).toEqual(['Refresh']);
   });
 
-  it('renders the ⟳ before the record has loaded (bare-title header branch)', () => {
-    // A record page's first paint has no `ctx.data`, so `page:header` takes its
-    // non-record layout. The button must not pop in and out between branches.
+  it('draws it before the record has loaded (bare-title header branch)', async () => {
     renderHeader({ refresh: vi.fn(), record: undefined });
 
-    expect(refreshButton()).toBeTruthy();
+    await openMore();
+    expect(refreshItem()).toBeTruthy();
   });
 });
 
-describe('page:header — the ⟳ is chrome, not an action (objectui#3460)', () => {
-  it('sits at the far end of the header row, after the ⋯ overflow trigger', () => {
-    // Four actions against the default maxVisible of 3 → three inline buttons
-    // plus the ⋯ trigger. The ⟳ comes last of all.
+describe('page:header — 1 primary + 2 secondary + ⋯, refresh first in the ⋯ (objectstack#27055)', () => {
+  it('four actions → one filled primary, two outline buttons, the fourth and the refresh in the ⋯', async () => {
     renderHeader({
       refresh: vi.fn(),
       actions: [
         { name: 'start', locations: ['record_header'], label: 'Start' },
         { name: 'expedite', locations: ['record_header'], label: 'Expedite' },
-        { name: 'edit', locations: ['record_header'], label: 'Edit' },
+        { name: 'report', locations: ['record_header'], label: 'Report' },
         { name: 'archive', locations: ['record_header'], label: 'Archive' },
       ],
     });
 
-    const buttons = Array.from(document.querySelectorAll('header button'));
-    expect(buttons.length).toBeGreaterThan(4);
-    expect(buttons[buttons.length - 1]).toBe(refreshButton());
-    // …and the one before it is the overflow trigger, i.e. the ⟳ did not steal
-    // an inline slot from the actions.
-    expect(buttons[buttons.length - 2]?.getAttribute('aria-label')).toBe('More actions');
+    const toolbar = document.querySelector('[role="toolbar"]')!;
+    const rowNames = Array.from(toolbar.querySelectorAll(':scope > button, :scope > span > button')).map(
+      (button) => button.getAttribute('aria-label') ?? button.textContent,
+    );
+    expect(rowNames).toEqual(['Start', 'Expedite', 'Report', 'More actions']);
+    await openMore();
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items).toEqual(['Refresh', 'Archive']);
   });
 
-  it('stays out of the actions toolbar so the overflow budget cannot swallow it', () => {
+  it('a record_more-only action folds behind the refresh', async () => {
     renderHeader({
       refresh: vi.fn(),
       actions: [
-        { name: 'a', locations: ['record_header'], label: 'A' },
-        { name: 'b', locations: ['record_header'], label: 'B' },
-        { name: 'c', locations: ['record_header'], label: 'C' },
-        { name: 'd', locations: ['record_header'], label: 'D' },
+        { name: 'start', locations: ['record_header'], label: 'Start' },
+        { name: 'clone', locations: ['record_more'], label: 'Clone' },
       ],
     });
 
-    const toolbar = document.querySelector('[role="toolbar"]');
-    expect(toolbar).toBeTruthy();
-    expect(toolbar!.contains(refreshButton())).toBe(false);
-    // Not routed into the ⋯ menu either — it is still a visible button.
-    expect(refreshButton()).toBeTruthy();
-  });
-
-  it('renders alongside the actions when the host also injects system actions', () => {
-    renderHeader({
-      refresh: vi.fn(),
-      actions: [{ name: 'start', locations: ['record_header'], label: 'Start' }],
-    });
-
     expect(screen.getByRole('button', { name: 'Start' })).toBeTruthy();
-    expect(refreshButton()).toBeTruthy();
+    await openMore();
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Refresh', 'Clone']);
   });
 });
 
-describe('page:header — the ⟳ speaks the session locale (objectui#3460)', () => {
-  it('reads common.refresh under a zh session', () => {
+describe('page:header — the refresh speaks the session locale (objectui#3460)', () => {
+  it('reads common.refresh under a zh session', async () => {
     renderHeader({ refresh: vi.fn(), language: 'zh' });
 
-    expect(screen.getByRole('button', { name: '刷新' })).toBeTruthy();
-    // The English literal asserted negatively too — a re-inlined default would
-    // otherwise pass the positive assertion on a header with two buttons.
-    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    await openMore();
+    expect(screen.getByRole('menuitem', { name: '刷新' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: 'Refresh' })).toBeNull();
   });
 
-  it('reads common.refresh under a ja session', () => {
+  it('reads common.refresh under a ja session', async () => {
     renderHeader({ refresh: vi.fn(), language: 'ja' });
 
-    expect(screen.getByRole('button', { name: '更新' })).toBeTruthy();
-  });
-
-  it('still reads English under an en session', () => {
-    renderHeader({ refresh: vi.fn(), language: 'en' });
-
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy();
+    await openMore();
+    expect(screen.getByRole('menuitem', { name: '更新' })).toBeTruthy();
   });
 });
 
-describe('page:header — clicking the ⟳ (objectui#3460)', () => {
-  it("calls the host's refresh exactly once per click", () => {
+describe('page:header — choosing Refresh (objectui#3460)', () => {
+  it("calls the host's refresh exactly once per choice", async () => {
     const refresh = vi.fn();
     renderHeader({ refresh });
 
-    fireEvent.click(refreshButton()!);
-    expect(refresh).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(refreshButton()!);
-    expect(refresh).toHaveBeenCalledTimes(2);
-  });
-
-  it('spins for the whole feedback floor, then stops', () => {
-    const refresh = vi.fn();
-    renderHeader({ refresh });
-    expect(spinIcon()).not.toContain('animate-spin');
-
-    vi.useFakeTimers();
-    fireEvent.click(refreshButton()!);
-    expect(spinIcon()).toContain('animate-spin');
-
-    // Still spinning just short of the floor…
-    act(() => { vi.advanceTimersByTime(SPIN_MS - 50); });
-    expect(spinIcon()).toContain('animate-spin');
-
-    // …and stopped once it elapses.
-    act(() => { vi.advanceTimersByTime(60); });
-    expect(spinIcon()).not.toContain('animate-spin');
-  });
-
-  it('restarts the floor on a second click instead of ending early', () => {
-    const refresh = vi.fn();
-    renderHeader({ refresh });
-
-    vi.useFakeTimers();
-    fireEvent.click(refreshButton()!);
-    act(() => { vi.advanceTimersByTime(SPIN_MS - 100); });
-    fireEvent.click(refreshButton()!);
-    // The first click's timer would have fired here; the second click's floor
-    // must still be running.
-    act(() => { vi.advanceTimersByTime(150); });
-    expect(spinIcon()).toContain('animate-spin');
-
-    act(() => { vi.advanceTimersByTime(SPIN_MS); });
-    expect(spinIcon()).not.toContain('animate-spin');
+    await openMore();
+    fireEvent.click(refreshItem()!);
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   });
 });

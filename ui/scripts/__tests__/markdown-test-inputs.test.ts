@@ -142,12 +142,13 @@ describe('the derived class', () => {
   });
 
   it('a declared tree covers a document added inside it, and never a non-markdown sibling', () => {
-    expect(declaredEntries()).toContain('content/docs/**');
-    expect(markdownTestInputsAmong(['content/docs/guide/a-page-added-today.md'])).toHaveLength(1);
+    // The ObjectUI pages' tree, outside this root since objectstack#27145.
+    expect(declaredEntries()).toContain('../content/docs/frontend/**');
+    expect(markdownTestInputsAmong(['../content/docs/frontend/a-page-added-today.mdx'])).toHaveLength(1);
     // The extension is the discriminator that survives objectui#9096: the class
     // is total over markdown and empty over everything else, so a JSON file
     // beside a declared document is still not an input.
-    expect(markdownTestInputsAmong(['content/docs/guide/a-page-added-today.json'])).toHaveLength(0);
+    expect(markdownTestInputsAmong(['../content/docs/frontend/a-page-added-today.json'])).toHaveLength(0);
     expect(markdownTestInputsAmong(['apps/site/src/app/page.tsx'])).toHaveLength(0);
   });
 });
@@ -165,8 +166,9 @@ describe('objectui#9096 — `scripts` is a scan root, and the class is now total
     // tree's root README, ROADMAP.md and QUICK_REFERENCE.md, the literals
     // several of these tests only matched against those files; 27 once
     // objectstack#26944 deleted objectui's CI guide page, the one document eight
-    // more of them named.
-    expect(fromScripts.length).toBeGreaterThanOrEqual(27);
+    // more of them named; 25 once objectstack#27145 retired `content/docs`, the
+    // pages two more of them named.
+    expect(fromScripts.length).toBeGreaterThanOrEqual(25);
   });
 
   it('names the card\'s instance: three gate tests read `AGENTS.md`, so it is an input', () => {
@@ -192,8 +194,9 @@ describe('objectui#9096 — `scripts` is a scan root, and the class is now total
       .filter((line) => line.trim() !== '');
 
     // Floor under the floor: an empty `git ls-files` would pass the next
-    // assertion while proving nothing (objectui#8468).
-    expect(tracked.length).toBeGreaterThanOrEqual(300);
+    // assertion while proving nothing (objectui#8468). 196 once objectstack#27145
+    // moved the docs pages out of this tree.
+    expect(tracked.length).toBeGreaterThanOrEqual(150);
 
     const uncovered = tracked.filter((file) => markdownTestInputsAmong([file]).length === 0);
     expect(

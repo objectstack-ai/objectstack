@@ -201,7 +201,7 @@ const navGroups: NavGroup[] = [
 Note that `SidebarNav` is a plain React component: unlike the keys listed under
 [Registration](#registration) it is **not** on the `ComponentRegistry`, so it is
 composed in JSX rather than authored as a JSON node. Full guide:
-[SidebarNav docs](https://www.objectui.org/docs/layout/sidebar-nav).
+[SidebarNav docs](https://objectstack.ai/docs/frontend/sidebar-nav).
 
 ## Usage with React Router
 
@@ -275,11 +275,11 @@ import { AppShell } from '@object-ui/layout';
 
 ## API Reference
 
-For detailed API documentation, visit the [Object UI Documentation](https://www.objectui.org/docs/layout/app-shell).
+For detailed API documentation, visit the [Object UI Documentation](https://objectstack.ai/docs/frontend/app-shell).
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/guide/layout)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/layout)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/layout)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

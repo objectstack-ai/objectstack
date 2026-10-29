@@ -76,7 +76,7 @@ lists in three packages, or silently corrupting data.
 The spec does export three per-type value schemas — and they make things
 worse, not better, because **all three are dead and two contradict reality**:
 
-- `CurrencyValueSchema` (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`) declares `{value, currency}`;
+- `CurrencyValueSchema` (in `data/field.zod.ts`; deleted 2026-10-28, see the note under "Reality wins") declares `{value, currency}`;
   the validator, the SQL driver, import-coerce, and the field-zoo round-trip
   all treat currency as a **bare number**.
 - `LocationCoordinatesSchema` (`packages/spec/src/data/field.zod.ts#LocationCoordinatesSchema`) declares
@@ -163,12 +163,29 @@ Directive #2. It exports:
 **Reality wins.** Where the de-facto stored shape is coherent, the contract
 adopts it — deployed data is a wire contract we don't get to rewrite by
 editing Zod. Concretely: `currency` **is a scalar number** —
-`CurrencyValueSchema` is deleted (tombstoned in `UNKNOWN_KEY_GUIDANCE` /
-changelog with the FROM → TO note); `location` adopts the stored `{lat, lng}`
+`CurrencyValueSchema` is deleted (registered in `RETIRED_DEFS_BY_MAJOR` with a
+D3 semantic entry and the changelog carrying the FROM → TO note — see the
+2026-10-28 note below); `location` adopts the stored `{lat, lng}`
 and `LocationCoordinatesSchema` is rewritten to match; `AddressSchema` is
 either adopted by the contract and enforced, or deleted — it does not remain
 exported-but-dead. An exported-but-unconsumed value schema is exactly the
 inert metadata ADR-0078 forbids.
+
+> **Note (2026-10-28, #27182, PR #27233) — `CurrencyValueSchema` is deleted.**
+> The deletion this paragraph decided had not happened: through 18.2.0 the
+> schema and its `CurrencyValue` type stayed exported from
+> `@objectstack/spec/data`, `@deprecated`, with zero readers. They are now
+> removed, ahead of the multi-currency epic #8345 (ruling 6465431966 on
+> #27119), so that no author reads `{value, currency}` as the shape that
+> records a currency. The schema had no carrier key, so there is no
+> `retiredKey()` tombstone and no guidance-map entry: the
+> FROM → TO note (a currency value is a bare number; the code is
+> `currencyConfig.defaultCurrency`) is carried by `RETIRED_DEFS_BY_MAJOR[18]`
+> (`data/CurrencyValue`, entry file
+> `packages/spec/src/migrations/entries/retired-defs/18.data__CurrencyValue.ts`),
+> the D3 semantic entry `currency-value-schema-retired` (entry file
+> `packages/spec/src/migrations/entries/semantic/18.currency-value-schema-retired.ts`)
+> and the changelog.
 
 **Consumers converge on the contract** (each keeps its role, loses its private
 type lists):
@@ -195,6 +212,14 @@ encodes the intended wire shapes as a hand-written MATRIX; it gains an
 assertion that every MATRIX entry `parse`s under `valueSchemaFor` — so the
 contract and the executable oracle cannot drift apart, and a contract change
 that would break the wire fails a test instead of shipping silently.
+
+> **Note 2026-10-28 (#27183; [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md)) — multi-currency keeps D1's currency value.**
+> ADR-0144 (ruling `6465431966` on #27119) puts a record's currency in a
+> sibling ISO 4217 code field that the amount names through `currencyField`,
+> never in the value. A `currency` value therefore stays a bare number, as
+> the "Reality wins" paragraph above decides. The `CurrencyValueSchema`
+> retirement that paragraph records belongs to #27182, whose own dated note
+> (PR #27233) goes under that paragraph.
 
 ### D2 — Typed action handlers: declared params become the enforced, typed handler input
 

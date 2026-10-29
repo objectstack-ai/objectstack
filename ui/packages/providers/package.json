@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "description": "Reusable context providers for ObjectUI applications",
-  "homepage": "https://www.objectui.org/docs/packages/providers",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

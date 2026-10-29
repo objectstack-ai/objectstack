@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Kanban board plugin for Object UI, powered by dnd-kit",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-kanban",
+  "description": "Kanban board plugin for ObjectUI, powered by dnd-kit",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-kanban",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

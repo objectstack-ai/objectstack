@@ -10,7 +10,6 @@ Canonical JSON schema catalog for ObjectUI. **Private** (not published to npm).
 This package is the **single source of truth** for every schema example we ship.
 It is consumed by:
 
-- 📚 The docs site (`apps/site`) — via the `<SchemaExample id="..." />` MDX component
 - 🧪 Smoke tests — every entry is mounted with `SchemaRenderer` and asserted not to throw
 - 🤖 AI agents (RAG / few-shot) — structured, machine-readable schema corpus
 
@@ -18,7 +17,7 @@ It is consumed by:
 
 Previously, schema examples were duplicated across:
 
-- `content/docs/**/*.mdx` (inline JSX object literals — easy to corrupt, no validation)
+- the docs pages' MDX (inline JSX object literals — easy to corrupt, no validation)
 - `apps/console/src/schemas/*.ts` (real app usage)
 
 They drifted, no one validated them, and the docs versions were a maintenance nightmare

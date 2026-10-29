@@ -300,6 +300,63 @@
  * there. Comments and assignees travel with the card and the old URL
  * redirects — GitHub's documented transfer semantics.
  *
+ * ## The two rows that write an issue's hierarchy — `sub_issue_add` and `sub_issue_remove`
+ *
+ * An epic's queue is its parent's open sub-issues, and the half-state patrol
+ * reads a parent's `sub_issues_summary`; the link both reads see is written by
+ * `POST /repos/{o}/{r}/issues/{parent}/sub_issues` and taken back by
+ * `DELETE /repos/{o}/{r}/issues/{parent}/sub_issue`, each with the body
+ * `{ sub_issue_id }` — the child's REST `id`, never its number (GitHub's REST
+ * OpenAPI description, operations `issues/add-sub-issue` and
+ * `issues/remove-sub-issue`, read 2026-10-29). GitHub's permission ledger (the
+ * file cited below) lists both under `issues: write`, server-to-server, with
+ * no additional permission, so both rows spend `issues`, a literal grant on
+ * every stroke: the mint widens nothing, and neither row travels `alone`.
+ *
+ * The payload carries two issue NUMBERS — `issue` the parent, `sub_issue` the
+ * child — and never an id: the executor resolves the child's `id` from the
+ * child's own `GET /repos/{o}/{r}/issues/{child}`, the read its fences need
+ * anyway, so the action speaks the vocabulary every other row speaks and a
+ * seat never hand-copies an opaque id. An action naming one issue as both is
+ * refused by the validator (`distinct`). `replace_parent`, the add endpoint's
+ * flag that moves a child off its current parent, is never sent: a move is a
+ * remove from the old parent and an add to the new one, two actions a seat
+ * names.
+ *
+ * The fences (`SUB_ISSUE_FENCES`) are facts about the two cards, so the
+ * EXECUTOR judges them on its own reads immediately before the write
+ * (`subIssuePreflight`, `execute.mjs`) — a card moved, or a link another actor
+ * wrote, between the seat's request and the run is refused there with zero
+ * writes:
+ *
+ *   - PARENT and CHILD: each number answers `GET /repos/{o}/{r}/issues/{n}`
+ *     as an issue — never a pull request — on the stroke's own repository (a
+ *     transferred card answers from its new home and is refused by name), the
+ *     child with an integer `id`;
+ *   - FREE (`sub_issue_add`): the child's own
+ *     `GET /repos/{o}/{r}/issues/{child}/parent` answers 404 (no parent —
+ *     measured 2026-10-29: "No parent issue found"; the issue's own answer
+ *     omits `parent_issue_url` then, so absence is read on this endpoint,
+ *     never inferred from a missing field) or this parent. A child under
+ *     ANOTHER parent is refused naming it; one under THIS parent is a measured
+ *     no-op — nothing sent, landed only when the parent's list reads it back;
+ *   - LISTED (`sub_issue_remove`): the parent's own sub-issue list
+ *     (`GET /repos/{o}/{r}/issues/{parent}/sub_issues`, every page) lists the
+ *     child's `id`. A child it does not list is refused, never sent as a
+ *     DELETE the platform might answer either way.
+ *
+ * The write's answer is an acceptance, not a landing: the action LANDS only
+ * on `subIssueReadBack` — the parent's list, read whole after the write,
+ * lists the child's `id` (add) or no longer does (remove), re-read inside a
+ * bounded window. A list that never settles is a FAILED action saying
+ * UNCONFIRMED: read the parent, ⛔ never re-send. Neither row carries prose or
+ * creates or moves a card, so neither is content-creating for rule ⑤ nor
+ * annotated, and neither carries a `body` the seat reads back — the
+ * executor's read-back IS the confirmation, as for `pr_update_branch`.
+ * `validate.mjs --self-test` pins both rows, the fences and the read-back's
+ * judgment; `execute.mjs --self-test` pins the reads, the one write, every
+ * refusal and the landing.
+ *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
  * "The maximum number of top-level properties is 10. The total size of the
@@ -541,6 +598,114 @@ export function rerunFailedLandedText(v) {
   return `attempt ${v.attempt} · re-run: ${jobs}${later}`;
 }
 
+/** The two modes of the hierarchy rows (header: "The two rows that write an issue's hierarchy") — the descriptor's `subIssue.mode`. */
+export const SUB_ISSUE_MODES = Object.freeze(['add', 'remove']);
+
+const sameRepo = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+/** `owner/name` an issue answer says it is on NOW (its `repository_url`), or null. Pure. */
+const answeredRepo = (json) => /\/repos\/([^/]+\/[^/]+)$/.exec(String(json?.repository_url ?? ''))?.[1] ?? null;
+
+/**
+ * Why one `GET /repos/{repo}/issues/{n}` answer is NOT a card a hierarchy link may name — or null when it is an
+ * issue on `repo` answering as #`number` with an integer `id`. `answer` is `{ status, json }`. Pure.
+ */
+export function subIssueCardFailure(answer, repo, number) {
+  if (!answer || answer.status !== 200 || !isObject(answer.json)) return `#${number} could not be read (HTTP ${answer?.status ?? 'none'})`;
+  const card = answer.json;
+  if (card.pull_request) return `#${number} is a pull request — only an issue is a parent or a sub-issue`;
+  const at = answeredRepo(card);
+  if (!sameRepo(at, repo)) return `#${number} no longer answers from ${repo}: ${at ? `it answers from ${at}${Number.isInteger(card.number) ? ` as #${card.number}` : ''} — transferred` : 'its repository could not be read'}`;
+  if (!Number.isSafeInteger(card.id) || card.id < 1) return `#${number} answers with no integer id, so no sub_issue_id can be sent for it`;
+  return null;
+}
+
+/**
+ * Does the child's own parent read (`GET /repos/{repo}/issues/{child}/parent`, `{ status, json }`) name THIS
+ * parent — the add's measured no-op? Pure.
+ */
+export function subIssueAlreadyHere({ repo, parentNumber, childParent } = {}) {
+  return childParent?.status === 200 && isObject(childParent.json) && childParent.json.number === parentNumber && sameRepo(answeredRepo(childParent.json), repo);
+}
+
+/**
+ * The fences on the two cards (the header's hierarchy section), each judged on what the executor READ —
+ * `ctx` is `{ mode, repo, parentNumber, childNumber, parent, child, childParent, list }`: `parent` and `child`
+ * the two issue answers, `childParent` the child's parent read (add), `list` the parent's sub-issue list read
+ * whole (remove) as `{ items }` or `{ fail }`. A read the executor did not take is `undefined`, and a fence
+ * whose read is missing FAILS, naming that — an unread fact is never a pass. `modes` the rows a fence binds.
+ */
+export const SUB_ISSUE_FENCES = Object.freeze([
+  Object.freeze({
+    fence: 'parent',
+    modes: SUB_ISSUE_MODES,
+    wants: "the parent number answering as an issue — never a pull request — on the stroke's own repository",
+    fails: (c) => subIssueCardFailure(c.parent, c.repo, c.parentNumber),
+  }),
+  Object.freeze({
+    fence: 'child',
+    modes: SUB_ISSUE_MODES,
+    wants: "the child number answering as an issue with an integer id — never a pull request — on the stroke's own repository",
+    fails: (c) => subIssueCardFailure(c.child, c.repo, c.childNumber),
+  }),
+  Object.freeze({
+    fence: 'free',
+    modes: Object.freeze(['add']),
+    wants: "a child with no parent (its parent read answers 404) or this parent already — the relay never sends replace_parent",
+    fails: (c) => {
+      const r = c.childParent;
+      if (r === undefined) return "the child's parent was not read, because the cards above did not pass";
+      if (r?.status === 404) return null;
+      if (r?.status === 200 && isObject(r.json)) {
+        if (subIssueAlreadyHere(c)) return null;
+        const at = answeredRepo(r.json) ?? 'an unknown repository';
+        return `#${c.childNumber} is already a sub-issue of ${at}#${r.json.number ?? '?'} — remove it there first (a sub_issue_remove), the relay never moves it`;
+      }
+      return `the child's parent read answered HTTP ${r?.status ?? 'none'}${typeof r?.json?.message === 'string' ? ` (${r.json.message})` : ''}, neither a parent nor 404`;
+    },
+  }),
+  Object.freeze({
+    fence: 'listed',
+    modes: Object.freeze(['remove']),
+    wants: "a child the parent's own sub-issue list lists, by its id",
+    fails: (c) => {
+      if (c.list === undefined) return "the parent's sub-issue list was not read, because the cards above did not pass";
+      if (c.list?.fail) return c.list.fail;
+      const id = c.child?.json?.id;
+      const items = Array.isArray(c.list?.items) ? c.list.items : [];
+      return items.some((i) => i?.id === id) ? null : `#${c.parentNumber}'s sub-issue list (${items.length}) does not list #${c.childNumber} (id ${id ?? '?'})`;
+    },
+  }),
+]);
+
+/** The fences `ctx` fails for its mode: `[{ fence, wants, got }]` in `SUB_ISSUE_FENCES` order; `[]` when all hold. Pure. */
+export function subIssueFenceFailures(ctx = {}) {
+  return SUB_ISSUE_FENCES.filter((f) => f.modes.includes(ctx.mode)).map((f) => ({ fence: f.fence, wants: f.wants, got: f.fails(ctx) })).filter((f) => f.got !== null);
+}
+
+/** The sentence a hierarchy fence refusal prints — every failing fence by name, what was read, what the relay links. Pure. */
+export function subIssueFenceText(failures) {
+  return failures.map((f) => `fence \`${f.fence}\`: ${f.got}, and the relay links only ${f.wants}`).join('; ');
+}
+
+/**
+ * What LANDED means for a hierarchy row (the header's section): the parent's sub-issue list, read whole after
+ * the write, lists the child's `id` (add) or does not (remove). `items` the list's entries. Answers
+ * `{ ok, listed, count, why }`. Pure.
+ */
+export function subIssueReadBack({ mode, childId, items = [] } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const listed = list.some((i) => i?.id === childId);
+  const ok = mode === 'add' ? listed : mode === 'remove' ? !listed : false;
+  const why = ok ? '' : mode === 'add' ? `the parent's sub-issue list (${list.length}) does not list the child's id ${childId}` : mode === 'remove' ? `the parent's sub-issue list (${list.length}) still lists the child's id ${childId}` : `no hierarchy mode ${JSON.stringify(mode)}`;
+  return { ok, listed, count: list.length, why };
+}
+
+/** The row a landed hierarchy action prints: the link as the parent's list reads it back. Pure. */
+export function subIssueLandedText({ mode, parentNumber, childNumber, childId, count, noop = false }) {
+  if (mode === 'add') return `${noop ? 'no-op, nothing sent: ' : ''}#${childNumber} (id ${childId}) is a sub-issue of #${parentNumber} · its list reads ${count} sub-issue(s)${noop ? ' — the child already answered to this parent' : ''}`;
+  return `#${childNumber} (id ${childId}) is no longer a sub-issue of #${parentNumber} · its list reads ${count} sub-issue(s)`;
+}
+
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
 export const TRANSPORTS = Object.freeze(['direct', 'dispatch', 'auto']);
@@ -626,6 +791,8 @@ export const FIELDS = Object.freeze({
   workflow: Object.freeze({ kind: 'enum', values: WORKFLOW_DISPATCH_ALLOWLIST }),
   ref: Object.freeze({ kind: 'enum', values: Object.freeze([WORKFLOW_DISPATCH_REF]) }),
   inputs: Object.freeze({ kind: 'inputs' }),
+  // The child of a hierarchy link, by NUMBER — the executor resolves its REST id (header: "The two rows that write an issue's hierarchy").
+  sub_issue: Object.freeze({ kind: 'int' }),
 });
 
 /**
@@ -774,8 +941,11 @@ export function transferRemedy(source, target) {
  *                 and `pr_ready`, the two moments a seat opens or readies a pull;
  *                 the executor reads the pull's files and sends what
  *                 `governedReviewRequests` spells, on a Tier H hit alone;
+ *   `distinct`    (optional) two keys the action must give different values —
+ *                 the hierarchy rows' `issue` and `sub_issue`: an issue is
+ *                 never its own sub-issue (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, fromAnswer?, assigned?, labelled? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, subIssue?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
@@ -785,7 +955,12 @@ export function transferRemedy(source, target) {
  *                 the answer against; a `rerunFailed` descriptor carries the
  *                 run whose fences the executor reads before the POST and
  *                 whose new attempt it reads back after it
- *                 (`confirmRerunFailed`, execute.mjs); a `fromAnswer` descriptor names the
+ *                 (`confirmRerunFailed`, execute.mjs); a `subIssue` descriptor
+ *                 carries the mode, the parent and the child whose fences the
+ *                 executor reads before the write, whose `id` is the body it
+ *                 sends, and whose listing it reads back after it
+ *                 (`subIssuePreflight` / `confirmSubIssue`, execute.mjs) — it
+ *                 carries no `body`, the id is the child's answer's; a `fromAnswer` descriptor names the
  *                 field of its action's FIRST request's answer that fills the
  *                 `answerPlaceholder` in its path (`fillFromAnswer`,
  *                 execute.mjs); an `assigned` descriptor lists the logins its
@@ -935,6 +1110,24 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     secondRepo: 'target_repo',
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'transferIssue', query: TRANSFER_MUTATION, issue: a.issue, target_repo: a.target_repo } }],
+  }),
+  // The two hierarchy rows — see the header. `issue` the parent, `sub_issue` the child, both NUMBERS; the body
+  // `{ sub_issue_id }` is built by the executor from the child's own answer, after the fences, and never carries
+  // `replace_parent`. Both spend `issues: write` (GitHub's ledger), a literal grant: no `alone`, no scoped mint.
+  sub_issue_add: Object.freeze({
+    permission: 'issues',
+    required: Object.freeze(['issue', 'sub_issue']),
+    optional: Object.freeze([]),
+    distinct: Object.freeze(['issue', 'sub_issue']),
+    requests: (a, repo) => [{ verb: 'POST', path: `${issues(repo, a.issue)}/sub_issues`, subIssue: { mode: 'add', parent: a.issue, child: a.sub_issue } }],
+  }),
+  sub_issue_remove: Object.freeze({
+    permission: 'issues',
+    required: Object.freeze(['issue', 'sub_issue']),
+    optional: Object.freeze([]),
+    distinct: Object.freeze(['issue', 'sub_issue']),
+    // `sub_issue`, singular: the platform's remove path, not a typo of the add's.
+    requests: (a, repo) => [{ verb: 'DELETE', path: `${issues(repo, a.issue)}/sub_issue`, subIssue: { mode: 'remove', parent: a.issue, child: a.sub_issue } }],
   }),
   // The one row whose token carries `actions: write`, minted for a stroke carrying this op alone — see the header.
   // `workflow` and `ref` are closed enums, and so are a workflow's `inputs`: exactly its `WORKFLOW_DISPATCH_INPUTS`

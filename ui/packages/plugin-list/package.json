@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "ListView plugin for Object UI - unified view component with view type switching",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-list",
+  "description": "ListView plugin for ObjectUI - unified view component with view type switching",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-list",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

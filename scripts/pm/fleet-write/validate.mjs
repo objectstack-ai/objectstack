@@ -58,6 +58,15 @@
  *     (`RERUN_FAILED_FENCES` in `ops.mjs`) — are facts this file cannot see:
  *     the executor judges them on the run and the pull's own answer, read
  *     immediately before its POST;
+ *   - a `sub_issue_add` or `sub_issue_remove` names two issue NUMBERS,
+ *     `issue` the parent and `sub_issue` the child, each a positive integer,
+ *     and never the same one twice (the row's `distinct`); a `sub_issue_id`,
+ *     a `replace_parent` or any other key beside them is refused by name. The
+ *     fences on the two CARDS — each an issue on the repository, the child
+ *     free of any other parent (add) or listed by this one (remove) — are
+ *     facts this file cannot see: the executor judges them on its own reads
+ *     before the write (`SUB_ISSUE_FENCES` in `ops.mjs`). Both spend
+ *     `issues: write`, so they ride any stroke with the other issue ops;
  *   - a `pr_create` may carry `assignees` and `labels`, the typed lists
  *     `assign` and `labels_add` take — judged here as every list is — and the
  *     op table turns each into a later request of the SAME action, sent by
@@ -125,6 +134,8 @@ import {
   SESSION_SHAPE,
   SHA_SHAPE,
   STROKE_SCOPED_PERMISSIONS,
+  SUB_ISSUE_FENCES,
+  SUB_ISSUE_MODES,
   TARGET_OWNER,
   TARGET_REPO_SHAPE,
   TRANSFER_TARGETS,
@@ -142,6 +153,12 @@ import {
   rerunFailedLandedText,
   rerunFailedPullNumber,
   rerunFailedReadBack,
+  subIssueAlreadyHere,
+  subIssueCardFailure,
+  subIssueFenceFailures,
+  subIssueFenceText,
+  subIssueLandedText,
+  subIssueReadBack,
 } from './ops.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -233,6 +250,13 @@ export function validateAction(action, index) {
   }
   if (spec.closedInputs && !refusedKeys.has('inputs') && typeof action.workflow === 'string' && Object.hasOwn(spec.closedInputs, action.workflow)) {
     errors.push(...closedInputsErrors(action, spec.closedInputs[action.workflow], where));
+  }
+  // Two keys the row needs DIFFERENT (`distinct`, ops.mjs): judged only on values the field kinds admitted.
+  if (spec.distinct) {
+    const [a, b] = spec.distinct;
+    if (a in action && b in action && !refusedKeys.has(a) && !refusedKeys.has(b) && action[a] === action[b]) {
+      errors.push(`${where}.${b} is ${quote(action[b])}, the same as ${a} — \`${op}\` links two different issues, and an issue is never its own sub-issue`);
+    }
   }
   return errors;
 }
@@ -779,9 +803,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call and the failed-jobs re-run the ONLY actions paths any row reaches': 18,
   "the release.yml entry: refresh_version_pr true and nothing beside it — force, false, absent, a string or any other input refused by name; the wire spells the table's value as a string; every entry's inputs declared on disk; and the file's own guards, evaluated, start the bookkeeping lane alone": 22,
   "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the five fences on the run and its pull, each accepted and refused — the head by the pull's own answer, never the run's embedded copy, and a run naming no pull refused by name; the read-back's judgment; and every other actions path still refused": 33,
+  "the hierarchy rows: sub_issue_add and sub_issue_remove name a parent and a child by NUMBER — two different positive integers and nothing that widens them; one POST to the parent's sub_issues and one DELETE to its sub_issue, the body left to the executor; issues write, riding any stroke on the literal grants; the fences on the two cards, each accepted and refused — an issue on the repository, never a pull or a transferred card, the child free of any other parent or listed by this one; and the read-back's judgment by the child's id": 23,
 });
-// Raised 11 → 12 with the run_rerun_failed battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 12;
+// Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 13;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -914,6 +939,8 @@ export async function selfTest() {
       automerge_enable: { pull: 1 },
       automerge_disable: { pull: 1 },
       transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      sub_issue_add: { issue: 1, sub_issue: 2 },
+      sub_issue_remove: { issue: 1, sub_issue: 2 },
       workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
       run_rerun_failed: { run_id: 1 },
     };
@@ -940,7 +967,7 @@ export async function selfTest() {
   {
     const sample = {
       issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`,
-      workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF, run_id: 7,
+      workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF, run_id: 7, sub_issue: 8,
     };
     const everyRequest = OP_NAMES.flatMap((op) => {
       const spec = OPS[op];
@@ -1076,7 +1103,7 @@ export async function selfTest() {
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
-      run_rerun_failed: { run_id: 1 },
+      run_rerun_failed: { run_id: 1 }, sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
     t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
@@ -1231,6 +1258,7 @@ export async function selfTest() {
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
     };
     const spendsNoActions = OP_NAMES.filter((op) => OPS[op].permission !== 'actions');
     t('…the ledger of ops spending no actions grant is every op but the two that do, no more and no less', [Object.keys(minimalOf).sort(), [...spendsNoActions].sort()], [[...spendsNoActions].sort(), [...spendsNoActions].sort()]);
@@ -1292,6 +1320,60 @@ export async function selfTest() {
     t('⛔ …with zero writes: a payload naming any of them as an op is refused as no op the relay executes', ['run_rerun', 'job_rerun', 'run_cancel', 'run_delete', 'cache_delete', 'artifact_delete', 'secret_set', 'variable_set'].map((op) => refuses(one({ op, run_id: 7 }), 'is not an op the relay executes')), [true, true, true, true, true, true, true, true]);
   }
 
+  // ── the hierarchy rows ────────────────────────────────────────────────────
+  battery("the hierarchy rows: sub_issue_add and sub_issue_remove name a parent and a child by NUMBER — two different positive integers and nothing that widens them; one POST to the parent's sub_issues and one DELETE to its sub_issue, the body left to the executor; issues write, riding any stroke on the literal grants; the fences on the two cards, each accepted and refused — an issue on the repository, never a pull or a transferred card, the child free of any other parent or listed by this one; and the read-back's judgment by the child's id");
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const one = (action) => fixturePayload({ actions: [action] });
+    // The measured parent and child (2026-10-29, read-only): #26709 answered to #27293, which listed it by its REST id.
+    const PARENT = 27293;
+    const CHILD = 26709;
+    const CHILD_ID = 6060227467;
+    const add = (extra = {}) => ({ op: 'sub_issue_add', issue: PARENT, sub_issue: CHILD, ...extra });
+    const remove = (extra = {}) => ({ op: 'sub_issue_remove', issue: PARENT, sub_issue: CHILD, ...extra });
+    // The row and its one request, for each of the two.
+    t('the rows: issue and sub_issue required and nothing optional, both integer fields, distinct, spending issues as their permission and nothing beside it, never alone, reaching no second repository, with no closed inputs', ['sub_issue_add', 'sub_issue_remove'].map((op) => [OPS[op].required, OPS[op].optional, OPS[op].distinct, OPS[op].permission, OPS[op].alsoSpends ?? null, OPS[op].alone ?? false, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]).concat([[FIELDS.issue, FIELDS.sub_issue]]), [[['issue', 'sub_issue'], [], ['issue', 'sub_issue'], 'issues', null, false, null, null], [['issue', 'sub_issue'], [], ['issue', 'sub_issue'], 'issues', null, false, null, null], [{ kind: 'int' }, { kind: 'int' }]]);
+    const addReq = OPS.sub_issue_add.requests(add(), REPO);
+    const removeReq = OPS.sub_issue_remove.requests(remove(), REPO);
+    t("sub_issue_add's one request is POST /repos/{repo}/issues/{parent}/sub_issues carrying NO body of the payload's — the executor sends { sub_issue_id } from the child's own answer — and the parent and child it fences and reads back", [addReq.length, addReq[0].verb, addReq[0].path, 'body' in addReq[0], addReq[0].subIssue], [1, 'POST', `/repos/${REPO}/issues/${PARENT}/sub_issues`, false, { mode: 'add', parent: PARENT, child: CHILD }]);
+    t("sub_issue_remove's one request is DELETE /repos/{repo}/issues/{parent}/sub_issue — the platform's singular path — the same way", [removeReq.length, removeReq[0].verb, removeReq[0].path, 'body' in removeReq[0], removeReq[0].subIssue], [1, 'DELETE', `/repos/${REPO}/issues/${PARENT}/sub_issue`, false, { mode: 'remove', parent: PARENT, child: CHILD }]);
+    t('…neither path reaches a refused family, reads an earlier answer or carries a placeholder brace, and the two modes are exactly add and remove', [[...addReq, ...removeReq].filter((r) => REFUSED_PATH_FAMILIES.some((re) => re.test(r.path)) || r.fromAnswer !== undefined || /[{}]/.test(r.path)).map((r) => r.path), [...SUB_ISSUE_MODES]], [[], ['add', 'remove']]);
+    // Accepted, and refused by value and by key.
+    const ok = [validatePayload(one(add())), validatePayload(one(remove()))];
+    t('accepted: the minimal strokes, whose normalised actions are op, issue and sub_issue alone', ok.map((v) => [v.ok, v.payload?.actions[0]]), [[true, add()], [true, remove()]], ok.flatMap((v) => v.errors).join(' | '));
+    t('⛔ refused: sub_issue as a numeric string, zero, a negative, a float or an object — the integer kind, judged here', [String(CHILD), 0, -1, 1.5, { number: CHILD }].map((sub_issue) => refuses(one(add({ sub_issue })), 'actions[0].sub_issue must be a positive integer')), [true, true, true, true, true]);
+    t('⛔ refused: a missing sub_issue or a missing issue, on either row — both are named on every request, never defaulted', [refuses(one({ op: 'sub_issue_add', issue: PARENT }), 'actions[0].sub_issue is required by `sub_issue_add`'), refuses(one({ op: 'sub_issue_remove', sub_issue: CHILD }), 'actions[0].issue is required by `sub_issue_remove`')], [true, true]);
+    t('⛔ refused BY NAME: a sub_issue_id, the replace_parent flag, a pull or a body beside the two numbers — no request-time key carries an id or moves a child', ['sub_issue_id', 'replace_parent', 'pull', 'body'].map((key) => refuses(one(add({ [key]: key === 'replace_parent' ? true : key === 'body' ? 'b' : 1 })), `actions[0].${key} is not a key \`sub_issue_add\` takes (it takes issue, sub_issue)`)), [true, true, true, true]);
+    t('⛔ refused: one issue as both parent and child, on either row, naming the two keys', [refuses(one(add({ sub_issue: PARENT })), 'actions[0].sub_issue is 27293, the same as issue — `sub_issue_add` links two different issues'), refuses(one(remove({ sub_issue: PARENT })), 'actions[0].sub_issue is 27293, the same as issue — `sub_issue_remove` links two different issues')], [true, true]);
+    t('…and a pair the field kind already refused is not judged twice: "7" and "7" read as two kind errors, no sameness sentence', validatePayload(one(add({ issue: '7', sub_issue: '7' }))).errors.map((e) => e.includes('the same as')), [false, false]);
+    // The grant: issues write, the literal one — the rows ride any stroke, and the mint widens nothing.
+    const mixed = validatePayload(fixturePayload({ actions: [{ op: 'comment', issue: PARENT, body: 'b' }, add(), remove({ sub_issue: 26702 }), { op: 'labels_add', issue: PARENT, labels: ['epic'] }] }));
+    t('a stroke carrying both rows beside a comment and a label is accepted — no alone — and mints the five literal grants for ONE repository, permission_actions EMPTY', [mixed.ok, mixed.payload ? tokenPermissionsOf(mixed.payload) : null, mixed.payload ? tokenRepositoriesOf(mixed.payload) : null, mixed.payload ? githubOutputLines(mixed.payload).split('\n').at(-2) : null], [true, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read' }, [REPO], 'permission_actions='], mixed.errors.join(' | '));
+    // The fences on the two cards — the roster, then each accepted and refused on the executor's reads.
+    t('the fences: parent and child on both rows, free on the add alone, listed on the remove alone', SUB_ISSUE_FENCES.map((f) => [f.fence, [...f.modes]]), [['parent', ['add', 'remove']], ['child', ['add', 'remove']], ['free', ['add']], ['listed', ['remove']]]);
+    const card = (number, extra = {}) => ({ status: 200, json: { id: number === CHILD ? CHILD_ID : 6081407279, number, repository_url: `https://api.github.com/repos/${REPO}`, ...extra } });
+    const NO_PARENT = { status: 404, json: { message: 'No parent issue found' } };
+    const listOf = (...ids) => ({ items: ids.map((id) => ({ id })) });
+    const ctx = (mode, patch = {}) => ({ mode, repo: REPO, parentNumber: PARENT, childNumber: CHILD, parent: card(PARENT), child: card(CHILD), ...(mode === 'add' ? { childParent: NO_PARENT } : { list: listOf(6060051871, CHILD_ID) }), ...patch });
+    const fenced = (c) => subIssueFenceFailures(c).map((f) => f.fence);
+    t('accepted: an add whose child answers 404 to its parent read, and a remove whose child the parent lists by id — every fence holds', [fenced(ctx('add')), fenced(ctx('remove'))], [[], []]);
+    t('⛔ fence parent and child, refused: a pull request, a transferred card and an unread one — each naming its own fence alone', [fenced(ctx('add', { parent: card(PARENT, { pull_request: { url: 'x' } }) })), fenced(ctx('add', { parent: card(PARENT, { repository_url: `https://api.github.com/repos/${TARGET_OWNER}/cloud` }) })), fenced(ctx('add', { child: { status: 404, json: { message: 'Not Found' } } })), fenced(ctx('add', { child: card(CHILD, { id: '6060227467' }) }))], [['parent'], ['parent'], ['child'], ['child']]);
+    t('…and the sentences say why: a pull request, the repository it answers from now, an id that cannot be sent', [subIssueCardFailure(card(PARENT, { pull_request: {} }), REPO, PARENT), subIssueCardFailure(card(PARENT, { repository_url: `https://api.github.com/repos/${TARGET_OWNER}/cloud`, number: 41 }), REPO, PARENT), subIssueCardFailure(card(CHILD, { id: null }), REPO, CHILD)], [`#${PARENT} is a pull request — only an issue is a parent or a sub-issue`, `#${PARENT} no longer answers from ${REPO}: it answers from ${TARGET_OWNER}/cloud as #41 — transferred`, `#${CHILD} answers with no integer id, so no sub_issue_id can be sent for it`]);
+    const here = { status: 200, json: { id: 6081407279, number: PARENT, repository_url: `https://api.github.com/repos/${REPO}` } };
+    const elsewhere = { status: 200, json: { id: 1, number: 27000, repository_url: `https://api.github.com/repos/${REPO}` } };
+    t('fence free: a child already under THIS parent holds — the measured no-op — and is the one shape subIssueAlreadyHere answers true', [fenced(ctx('add', { childParent: here })), subIssueAlreadyHere(ctx('add', { childParent: here })), subIssueAlreadyHere(ctx('add')), subIssueAlreadyHere(ctx('add', { childParent: elsewhere }))], [[], true, false, false]);
+    t('⛔ fence free, refused: a child under ANOTHER parent (named, never moved), a parent read that answers neither a parent nor 404, and one not taken', [subIssueFenceFailures(ctx('add', { childParent: elsewhere }))[0]?.got, fenced(ctx('add', { childParent: { status: 503, json: { message: 'down' } } })), fenced(ctx('add', { childParent: undefined }))], [`#${CHILD} is already a sub-issue of ${REPO}#27000 — remove it there first (a sub_issue_remove), the relay never moves it`, ['free'], ['free']]);
+    t('⛔ fence listed, refused: a child the parent does not list, a list that could not be read whole, and a list not taken', [subIssueFenceFailures(ctx('remove', { list: listOf(6060051871) }))[0]?.got, subIssueFenceFailures(ctx('remove', { list: { fail: 'the list hit its cap' } }))[0]?.got, fenced(ctx('remove', { list: undefined }))], [`#${PARENT}'s sub-issue list (1) does not list #${CHILD} (id ${CHILD_ID})`, 'the list hit its cap', ['listed']]);
+    t('each mode judges its own fence alone: an add never reads the list, a remove never reads the parent of its child', [fenced({ ...ctx('add'), list: { fail: 'x' } }), fenced({ ...ctx('remove'), childParent: elsewhere })], [[], []]);
+    const all = subIssueFenceFailures(ctx('add', { parent: card(PARENT, { pull_request: {} }), child: { status: 404, json: {} }, childParent: undefined }));
+    t('every failing fence is named in ONE pass, and the sentence quotes what was read beside what the relay links', [all.map((f) => f.fence), subIssueFenceText(all).split('; ').length, subIssueFenceText(all).startsWith(`fence \`parent\`: #${PARENT} is a pull request`)], [['parent', 'child', 'free'], 3, true]);
+    // The read-back's judgment, on the measured list.
+    const listed = listOf(6060227467, 6060051871, 6060244604).items;
+    t('⭐ the read-back: an add lands when the list lists the child\'s id, a remove when it no longer does — and each is pending otherwise, naming the id', [subIssueReadBack({ mode: 'add', childId: CHILD_ID, items: listed }).ok, subIssueReadBack({ mode: 'add', childId: CHILD_ID, items: listed.slice(1) }), subIssueReadBack({ mode: 'remove', childId: CHILD_ID, items: listed.slice(1) }).ok, subIssueReadBack({ mode: 'remove', childId: CHILD_ID, items: listed }).why], [true, { ok: false, listed: false, count: 2, why: `the parent's sub-issue list (2) does not list the child's id ${CHILD_ID}` }, true, `the parent's sub-issue list (3) still lists the child's id ${CHILD_ID}`]);
+    t('…judged by the REST id, never the number, and never for a mode it does not know', [subIssueReadBack({ mode: 'add', childId: CHILD_ID, items: [{ id: 1, number: CHILD }] }).ok, subIssueReadBack({ mode: 'move', childId: CHILD_ID, items: listed }).ok], [false, false]);
+    t('the landed rows name the link as the list reads it back, a no-op saying nothing was sent', [subIssueLandedText({ mode: 'add', parentNumber: PARENT, childNumber: CHILD, childId: CHILD_ID, count: 3 }), subIssueLandedText({ mode: 'add', parentNumber: PARENT, childNumber: CHILD, childId: CHILD_ID, count: 3, noop: true }).startsWith('no-op, nothing sent: '), subIssueLandedText({ mode: 'remove', parentNumber: PARENT, childNumber: CHILD, childId: CHILD_ID, count: 2 })], [`#${CHILD} (id ${CHILD_ID}) is a sub-issue of #${PARENT} · its list reads 3 sub-issue(s)`, true, `#${CHILD} (id ${CHILD_ID}) is no longer a sub-issue of #${PARENT} · its list reads 2 sub-issue(s)`]);
+  }
+
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const floor = [];
@@ -1325,7 +1407,8 @@ export async function selfTest() {
       'closed keys per op with typed values, the platform\'s own client_payload ceilings pinned with their source, no row that can reach a refused family, ' +
       'a token list of ONE repository for every op but transfer, whose second is one governed target, and actions write reaching one dispatch call on one allowlisted file ' +
       "with that file's closed inputs — release.yml's bookkeeping lane and no other, read from its own guards — or one failed-jobs re-run of a run named by its id alone, " +
-      'each minted for its stroke alone, every other actions path still refused.',
+      'each minted for its stroke alone, every other actions path still refused, and an issue-hierarchy link named by two different issue numbers, ' +
+      'fenced on its two cards and landed only when the parent\'s list reads the child back.',
   );
   selfTestReachedVerdict = true;
   return 0;

@@ -633,7 +633,7 @@ string columns.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-report)
+- 📚 [Documentation](https://objectstack.ai/docs/ui/reports)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-report)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

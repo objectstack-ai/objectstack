@@ -84,7 +84,11 @@ vi.mock('./MetadataInspector', () => ({
 
 import { RecordDetailView } from './RecordDetailView';
 
-const EMPTY_COMMENTS = 'No comments yet';
+// The record page's feed is the Timeline tab's one stream (objectstack#27055);
+// its empty copy is the stream's.
+const EMPTY_COMMENTS = 'No activity recorded';
+/** An AUTHORED `record:discussion` keeps its own panel and its own empty copy. */
+const AUTHORED_EMPTY_COMMENTS = 'No comments yet';
 const OBJECT_NAME = 'crm_account';
 const RECORD_ID = 'rec-alpha';
 
@@ -158,7 +162,7 @@ function makeMetadata(pages: any[]) {
 
 function renderDetail(dataSource: any, pages: any[] = []) {
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
       <MetadataCtx.Provider value={makeMetadata(pages)}>
         <RecordDetailView
           dataSource={dataSource}
@@ -347,7 +351,7 @@ describe('RecordDetailView — an AUTHORED discussion node is on the same chain 
     renderDetail(dataSource, [AUTHORED_PAGE_WITH_DISCUSSION]);
 
     expect(await screen.findByTestId('activity-loading')).toBeTruthy();
-    expect(screen.queryByText(EMPTY_COMMENTS)).toBeNull();
+    expect(screen.queryByText(AUTHORED_EMPTY_COMMENTS)).toBeNull();
   });
 
   it('settles onto the empty copy once both reads answer', async () => {
@@ -358,7 +362,7 @@ describe('RecordDetailView — an AUTHORED discussion node is on the same chain 
 
     renderDetail(dataSource, [AUTHORED_PAGE_WITH_DISCUSSION]);
 
-    expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+    expect(await screen.findByText(AUTHORED_EMPTY_COMMENTS)).toBeTruthy();
     expect(screen.queryByTestId('activity-loading')).toBeNull();
   });
 
@@ -370,7 +374,7 @@ describe('RecordDetailView — an AUTHORED discussion node is on the same chain 
 
     renderDetail(dataSource, [AUTHORED_PAGE_WITH_DISCUSSION]);
 
-    expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+    expect(await screen.findByText(AUTHORED_EMPTY_COMMENTS)).toBeTruthy();
     expect(screen.queryByTestId('activity-loading')).toBeNull();
   });
 });

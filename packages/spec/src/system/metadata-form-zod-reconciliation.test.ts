@@ -586,6 +586,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'relatedList',
     why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'primary'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never places the list in the record's body (`'primary'`)",
   },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'externalId',
+    why: "graded `dead` (`liveness/field.json`): no upsert, import or seed matches on a field's `externalId`, so a control would invite an author to rely on a flag nothing reads, and `os lint` then warns on the value the form offered. The schema still parses the key, so a stored value stays valid. A seed dataset names its match field in its own `externalId`, an import mapping in its `upsertKey`",
+  },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no
   // liveness verdict at any coordinate. `liveness/view.json` cannot hold them:

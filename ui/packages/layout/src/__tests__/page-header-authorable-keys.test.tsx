@@ -25,8 +25,7 @@
  *   - the retirement itself — `registerLayout()` publishes neither spelling, and
  *     the lit control is a layout key it still publishes under both
  *     (`app-schema-renderer`; it was `responsive-grid` until objectui#11441
- *     retired that key), the far end the docs site's registrar relies on
- *     (`scripts/__tests__/site-playground-layout-registration-3904.test.ts`);
+ *     retired that key);
  *   - the rendered half of objectui#3789, on the exported component: a lone
  *     `description` draws nothing, and `subtitle` wins when both are passed.
  *     That is a fact about `PageHeader`, which hosts still compose in JSX.

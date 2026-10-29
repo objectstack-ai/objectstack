@@ -99,17 +99,6 @@ const PAGE_CONTAINER_INPUTS: ComponentInput[] = [
   },
 ];
 
-/**
- * How long the header's manual-refresh icon keeps spinning after a click
- * (objectui#3460).
- *
- * The refresh itself is fire-and-forget — it publishes on the #2269
- * invalidation bus and every mounted reader refetches in place, so there is no
- * completion signal to spin until. Against a warm backend the whole round trip
- * can finish inside one frame, which would render the click as "nothing
- * happened". This floor makes the click visibly land.
- */
-const MANUAL_REFRESH_SPIN_MS = 650;
 
 /**
  * Copy for the `page:tabs` count badge (objectstack#5506).
@@ -221,6 +210,7 @@ const KNOWN_LABEL_DICT: Record<string, Record<string, string>> = {
   'zh-TW': {
     Details: '詳情',
     Related: '相關',
+    Timeline: '時間線',
     Activity: '活動',
     History: '歷史',
     Notes: '備註',
@@ -268,6 +258,8 @@ const KNOWN_LABEL_KEYS: Record<string, string> = {
   Related: 'detail.related',
   Activity: 'detail.activity',
   History: 'detail.history',
+  // The synthesized record page's one timeline stream tab (objectstack#27055).
+  Timeline: 'detail.timeline',
   Attachments: 'detail.attachments',
   Approvals: 'detail.approvalsPanelTitle',
   Discussion: 'detail.discussion',
@@ -1737,6 +1729,18 @@ export interface PageHeaderActionsProps {
   mobileMaxVisible?: unknown;
   /** Drawn in place of the action row when no action survives the gates. */
   emptySlot?: React.ReactNode;
+  /**
+   * The host's manual refresh (`RecordContext.refresh`), drawn as the first
+   * item of the `⋯` menu (objectstack#27055, the v3 header: 「1 主 + 2 次 + ⋯
+   * （刷新收进 ⋯）」). With a refresh and no action, the row is the `⋯` alone.
+   */
+  refresh?: PageHeaderRefreshItem;
+}
+
+/** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
+export interface PageHeaderRefreshItem {
+  label: string;
+  onSelect: () => void;
 }
 
 /**
@@ -1759,6 +1763,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   maxVisible: rawMaxVisible,
   mobileMaxVisible: rawMobileMaxVisible,
   emptySlot = null,
+  refresh,
 }) => {
   const ctx = useRecordContext();
   // Record-level inline-edit session (objectui#2572 item 4): while a shared
@@ -2204,7 +2209,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   }, [record, execute]);
 
   const renderHeaderActions = () => {
-    if (headerActions.length === 0) return null;
+    if (headerActions.length === 0 && !refresh) return null;
     // The label is already resolved — the `headerActions` memo above ran every
     // action through the shared localizer (`{ns}.objects.{objectName}
     // ._actions.{name}.label`, authored literal as fallback), together with the
@@ -2332,7 +2337,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // The first destructive entry gets a separator above it, unless it opens
     // the menu (a separator under nothing sets nothing apart).
     const firstDestructiveIdx = overflowActions.findIndex(isDestructiveAction);
-    const useOverflow = overflowActions.length > 0;
+    const useOverflow = overflowActions.length > 0 || !!refresh;
     // Resolve a `disabled` predicate against the record — a boolean OR an
     // expression (`'record.status == …'` or the `{ dialect, source }`
     // envelope). Without this a CEL `disabled` silently did nothing (only
@@ -2462,6 +2467,16 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
+              {refresh && (
+                <>
+                  {/* Not `preventDefault`: a refresh closes the menu. */}
+                  <DropdownMenuItem onSelect={() => refresh.onSelect()} className="gap-2" data-page-refresh="">
+                    <RefreshCw className="h-4 w-4" />
+                    <span>{refresh.label}</span>
+                  </DropdownMenuItem>
+                  {overflowActions.length > 0 && <DropdownMenuSeparator />}
+                </>
+              )}
               {overflowActions.map((action, idx) => {
                 const label = resolveLabel(action);
                 const disabled = isActionDisabled(action);
@@ -2535,30 +2550,20 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // Console-supplied chrome copy (objectstack#5407): the ⟳ button's label.
   // The action row's copy is read by `PageHeaderActions` above.
   const tt = useSafeTranslate();
-  // ── Manual refresh (objectui#3460) ────────────────────────────────────────
-  // Rendered as page CHROME at the far end of the header row, NOT as a header
-  // action: business/system actions come and go per object and record state,
-  // while refresh has to sit in the same place on every record page. Keeping it
-  // out of the action pipeline also keeps it out of that pipeline's capability
-  // gating and `maxVisible` overflow budget — reading a record you are already
-  // looking at is not a permissioned operation, and the button must never be
-  // the one that gets collapsed into `⋯`.
+  // ── Manual refresh (objectui#3460, objectstack#27055) ─────────────────────
+  // The first item of the header's `⋯` menu: the v3 header is 「1 主 + 2 次 +
+  // ⋯（刷新收进 ⋯）」, the maintainer-approved design that moved it out of the
+  // row it used to hold as page chrome. It stays OUT of the action pipeline —
+  // no capability gate, no `maxVisible` budget: reading a record you are
+  // already looking at is not a permissioned operation, and it never folds
+  // away, it IS in the menu on every record page that offers it.
   //
   // The host opts in by providing `RecordContext.refresh`; hosts that don't
   // (previews, embedded drawers, non-record pages) render exactly as before.
   const hostRefresh = ctx?.refresh;
-  const [manualRefreshing, setManualRefreshing] = React.useState(false);
-  const refreshSpinTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  React.useEffect(() => () => clearTimeout(refreshSpinTimer.current), []);
   const handleManualRefresh = React.useCallback(() => {
     if (!hostRefresh) return;
     void hostRefresh();
-    setManualRefreshing(true);
-    clearTimeout(refreshSpinTimer.current);
-    refreshSpinTimer.current = setTimeout(
-      () => setManualRefreshing(false),
-      MANUAL_REFRESH_SPIN_MS,
-    );
   }, [hostRefresh]);
   // Spec bridge may either inline `properties.*` onto the node or preserve
   // the raw bag (see record:quick_actions for the same pattern). Read from
@@ -2612,65 +2617,22 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   const rawHeaderActions = schema?.actions ?? schema?.properties?.actions;
 
   /**
-   * The ⟳ button (objectui#3460), or `null` when the host provides no
-   * `refresh`.
-   *
-   * Styled as the `⋯` overflow trigger's twin — same `outline` variant, same
-   * `size="sm"`, same padding — so the whole row reads as ONE button family
-   * (`[Start][Expedite][Edit][⋯][⟳]`). A bare ghost icon next to a row of
-   * bordered pills read as detached from it.
-   */
-  const renderRefreshButton = (): React.ReactNode => {
-    if (!hostRefresh) return null;
-    const refreshLabel = tt('common.refresh', 'Refresh');
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1 px-2"
-              onClick={handleManualRefresh}
-              aria-label={refreshLabel}
-              data-page-refresh
-            >
-              <RefreshCw className={cn('h-4 w-4', manualRefreshing && 'animate-spin')} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{refreshLabel}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  };
-
-  /**
    * The header's trailing slot: the action row (or the empty layout slot that
-   * stands in for it) followed by the refresh chrome.
-   *
-   * Both header layouts below funnel through this so the ⟳ keeps the same
-   * position whether or not the record chip is rendered — including the first
-   * paint of a record page, before `ctx.data` lands. When no host provides
-   * `refresh` the slot is returned untouched, byte for byte what it was.
+   * stands in for it), whose `⋯` menu leads with the host's refresh when the
+   * host provides one (objectstack#27055). Both header layouts below funnel
+   * through this, so the row is the same whether or not the record chip is
+   * rendered — including the first paint of a record page, before `ctx.data`
+   * lands.
    */
-  const renderHeaderTail = (emptySlot: React.ReactNode): React.ReactNode => {
-    const actions = (
-      <PageHeaderActions
-        actions={rawHeaderActions}
-        maxVisible={schema?.maxVisible ?? schema?.properties?.maxVisible}
-        mobileMaxVisible={schema?.mobileMaxVisible ?? schema?.properties?.mobileMaxVisible}
-        emptySlot={emptySlot}
-      />
-    );
-    const refreshButton = renderRefreshButton();
-    if (!refreshButton) return actions;
-    return (
-      <div className="flex items-center gap-2 shrink-0">
-        {actions}
-        {refreshButton}
-      </div>
-    );
-  };
+  const renderHeaderTail = (emptySlot: React.ReactNode): React.ReactNode => (
+    <PageHeaderActions
+      actions={rawHeaderActions}
+      maxVisible={schema?.maxVisible ?? schema?.properties?.maxVisible}
+      mobileMaxVisible={schema?.mobileMaxVisible ?? schema?.properties?.mobileMaxVisible}
+      emptySlot={emptySlot}
+      refresh={hostRefresh ? { label: tt('common.refresh', 'Refresh'), onSelect: handleManualRefresh } : undefined}
+    />
+  );
 
   // Decide whether to render the record chip. Conditions:
   //   1. There's a live RecordContext with data + an object schema.

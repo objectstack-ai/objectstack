@@ -42,6 +42,8 @@
   "src/data/cube-member-inner-name-retirement.test.ts",
   "src/data/cube-refresh-key-retirement.test.ts",
   "src/data/currency-mode-family-closure.pin.test.ts",
+  "src/data/currency-value-retirement.test.ts",
+  "src/data/data-engine-rpc-protocol-retirement.test.ts",
   "src/data/document-schemas-retirement.test.ts",
   "src/data/driver/turso-encryption-key-retirement.test.ts",
   "src/data/object-external-sharing-model-retirement.test.ts",

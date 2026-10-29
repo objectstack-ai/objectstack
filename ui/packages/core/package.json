@@ -4,8 +4,8 @@
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
-  "description": "Core logic, types, and validation for Object UI. Zero React dependencies.",
-  "homepage": "https://www.objectui.org/docs/core",
+  "description": "Core logic, types, and validation for ObjectUI. Zero React dependencies.",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

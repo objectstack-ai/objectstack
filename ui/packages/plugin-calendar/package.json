@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Calendar view plugins for Object UI - includes both ObjectQL-integrated and standalone calendar components",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-calendar",
+  "description": "Calendar view plugins for ObjectUI - includes both ObjectQL-integrated and standalone calendar components",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-calendar",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

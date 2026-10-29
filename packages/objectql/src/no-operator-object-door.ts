@@ -259,9 +259,19 @@ function describeObject(keys: readonly string[]): string {
   return `an object with no operator key (keys ${shown}${more})`;
 }
 
-/** The column, as the words name it at its position. */
-function describeColumn(refusal: NoOperatorObjectRefusal): string {
+/**
+ * The column, as the words name it at its position. `named: false` is the
+ * short form the verdict uses: the head has already named the field twice
+ * (`filter on 'F' … at PATH.F`), and a third copy would cost the prescription
+ * its room inside the client cap.
+ */
+function describeColumn(refusal: NoOperatorObjectRefusal, named = true): string {
   const { field, column } = refusal;
+  if (!named) {
+    if (refusal.aggregated) return `an aggregated ${column.type} column`;
+    if (column.provisioned) return `a platform-provisioned ${column.type} column`;
+    return `a ${column.type} field`;
+  }
   if (refusal.aggregated) return `the aggregated column '${field}', which carries a ${column.type} value`;
   if (column.provisioned) return `the platform-provisioned ${column.type} column '${field}'`;
   return `the declared ${column.type} field '${field}'`;
@@ -271,18 +281,27 @@ function describeColumn(refusal: NoOperatorObjectRefusal): string {
  * The scalar kind's words (#20546), less the context and the object.
  *
  * [#20745] Every kind's words put the verdict and the route FIRST and the
- * reasoning after: the REST door bounds a 4xx message at 500 characters by
- * truncation (`CLIENT_MESSAGE_MAX`, `@objectstack/rest`'s
- * `error-response.ts`), so what a caller must do next has to land inside it.
+ * reasoning after: a client reads at most 500 characters of a 4xx message
+ * (`CLIENT_MESSAGE_MAX`, `@objectstack/types`' `mapDataError`, cut with `…`),
+ * so what a caller must do next has to land inside it.
+ *
+ * [#27337] Every kind is ordered the same way, and the cap stays: the verdict
+ * (short — the column by its type, since the head names the field), then the
+ * route, then "NOT applied" and the reasoning, which is the part a cut may
+ * take. The relation kind printed its `$in` route after the reasoning, past
+ * the cut on an aggregation's `filter` and `having`; with a long field name
+ * every kind did. `no-operator-object-prescription-cap.test.ts` pins each
+ * kind's route inside the cap, with margin, the same rule the temporal and
+ * text-operator doors follow.
  */
 function scalarWords(refusal: NoOperatorObjectRefusal): string {
-  const { field, column } = refusal;
+  const { field } = refusal;
   return (
-    `where a value of ${describeColumn(refusal)} belongs. An object with no "$" operator is filter `
-    + 'structure, not a value. The filter was NOT applied. Compare '
-    + `'${field}' with a value ({ "${field}": VALUE }) or an operator ({ "${field}": { "$eq": VALUE } }). `
-    + `A ${column.type} column holds scalar values — one, or a list of them — so no record can match an `
-    + 'object there, and an empty answer would read exactly like a real one.'
+    `where a value of ${describeColumn(refusal, false)} belongs. Compare '${field}' with a value `
+    + `({ "${field}": VALUE }) or an operator ({ "${field}": { "$eq": VALUE } }). The filter was NOT `
+    + `applied. An object with no "$" operator is filter structure, not a value: ${describeColumn(refusal)} `
+    + 'holds scalar values — one, or a list of them — so no record can match an object there, and an '
+    + 'empty answer would read exactly like a real one.'
   );
 }
 
@@ -297,24 +316,26 @@ function scalarWords(refusal: NoOperatorObjectRefusal): string {
  * value, so neither `$in` nor `$contains` matches a member of it — so `where`
  * is its only route. An aggregated column (`having`) names no declaration to
  * read either from, so it is given the single-valued spelling.
+ *
+ * [#27337] The route comes right after the verdict, ahead of "NOT applied".
  */
 function relationWords(refusal: NoOperatorObjectRefusal): string {
   const { field, column } = refusal;
   const def = column.def as { type: string; multiple?: boolean } | undefined;
   const target = def === undefined ? undefined : referenceTargetOf(def);
-  const related = target === undefined ? 'the related object' : `the related object '${target}'`;
+  const related = target === undefined ? 'the related object' : `'${target}'`;
   const multiple = def !== undefined && isMultiValueField(def);
   const position = refusal.aggregated ? "'having'" : "an aggregation's 'filter'";
   const route = multiple
-    ? `Put the condition in 'where' instead: here the stored list of ids is compared as one value, so no `
+    ? `Move the condition to 'where': here the stored list of ids is compared as one value, so no `
       + 'operator matches one member of it.'
-    : `Put the condition in 'where' instead, or filter ${related} first and match '${field}' against `
-      + `the ids it returns: { "${field}": { "$in": [ID, …] } }.`;
+    : `Move the condition to 'where', or filter ${related} first and match the ids it returns: `
+      + `{ "${field}": { "$in": [ID, …] } }.`;
   return (
-    `beneath ${describeColumn(refusal)} — the nested-relation form, which the engine serves in 'where' `
-    + `and not in ${position}. The filter was NOT applied. ${route} An object with no "$" operator is `
-    + `filter structure, not a value, here: '${field}' holds the related record's id, and an empty answer `
-    + 'would read exactly like a real one.'
+    `beneath ${describeColumn(refusal, false)} — the nested-relation form, which the engine serves in `
+    + `'where' only. ${route} The filter was NOT applied. The engine evaluates ${position} itself, and `
+    + `there ${describeColumn(refusal)} holds the related record's id, so an object with no "$" operator `
+    + 'is filter structure, not a value, and an empty answer would read exactly like a real one.'
   );
 }
 
@@ -323,15 +344,18 @@ function relationWords(refusal: NoOperatorObjectRefusal): string {
  * answers alike: presence of the whole value, or a stored field of its own for
  * the part the filter is about (the dotted path into a JSON value is live on
  * some backends and silently empty on others, so it is not offered).
+ *
+ * [#27337] The route comes right after the verdict, ahead of "NOT applied".
  */
 function jsonWords(refusal: NoOperatorObjectRefusal): string {
   const { field } = refusal;
   return (
-    `as the value of ${describeColumn(refusal)} — a whole-value match, which the engine does not `
-    + `serve. The filter was NOT applied. Test the whole value's presence with { "${field}": { "$null": `
-    + 'false } }, or store the part you filter on in a field of its own and filter that field. An object '
-    + 'with no "$" operator is filter structure, not a value, and the drivers share no meaning for a '
-    + 'whole-value match: one compares the documents, another refuses the bind.'
+    `as the value of ${describeColumn(refusal, false)} — a whole-value match the engine does not serve. `
+    + `Test the whole value's presence with { "${field}": { "$null": false } }, or store the part you `
+    + 'filter on in a field of its own and filter that field. The filter was NOT applied. Here '
+    + `${describeColumn(refusal)} is matched whole: an object with no "$" operator is filter structure, `
+    + 'not a value, and the drivers share no meaning for a whole-value match — one compares the '
+    + 'documents, another refuses the bind.'
   );
 }
 

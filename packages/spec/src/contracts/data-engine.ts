@@ -58,8 +58,8 @@ import type { IntrospectedSchema } from './schema-diff-service.js';
  *
  * Lives on the TS contract — NOT in the serializable Zod options schemas
  * (`EngineUpdateOptionsSchema` etc.): a function is unrepresentable in JSON
- * Schema and cannot cross the RPC (Virtual Data Engine) boundary, so remote
- * callers simply never receive these events. The event payload itself is
+ * Schema and cannot be serialized, so remote callers (REST, the client SDK)
+ * simply never receive these events. The event payload itself is
  * Zod-first: `DroppedFieldsEventSchema` in `data/data-engine.zod.ts`.
  *
  * A listener that throws must never break the write — engines catch and log.

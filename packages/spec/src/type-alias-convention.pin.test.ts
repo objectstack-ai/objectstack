@@ -285,7 +285,7 @@ import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 799 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 795 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -803,12 +803,9 @@ export type Iso_data_dataEngine__BaseEngineOptionsSchema = Assert<Eq< z.input< t
 export type Iso_data_dataEngine__DataEngineAggregateOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineAggregateOptionsSchema >, z.infer< typeof M56.DataEngineAggregateOptionsSchema > >>;
 export type Iso_data_dataEngine__DataEngineCountOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineCountOptionsSchema >, z.infer< typeof M56.DataEngineCountOptionsSchema > >>;
 export type Iso_data_dataEngine__DataEngineDeleteOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineDeleteOptionsSchema >, z.infer< typeof M56.DataEngineDeleteOptionsSchema > >>;
-export type Iso_data_dataEngine__DataEngineExecuteRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineExecuteRequestSchema >, z.infer< typeof M56.DataEngineExecuteRequestSchema > >>;
 export type Iso_data_dataEngine__DataEngineFilterSchema = Assert<Eq< z.input< typeof M56.DataEngineFilterSchema >, z.infer< typeof M56.DataEngineFilterSchema > >>;
 export type Iso_data_dataEngine__DataEngineInsertOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineInsertOptionsSchema >, z.infer< typeof M56.DataEngineInsertOptionsSchema > >>;
-export type Iso_data_dataEngine__DataEngineInsertRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineInsertRequestSchema >, z.infer< typeof M56.DataEngineInsertRequestSchema > >>;
 export type Iso_data_dataEngine__DataEngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineUpdateOptionsSchema >, z.infer< typeof M56.DataEngineUpdateOptionsSchema > >>;
-export type Iso_data_dataEngine__DataEngineVectorFindRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineVectorFindRequestSchema >, z.infer< typeof M56.DataEngineVectorFindRequestSchema > >>;
 export type Iso_data_dataEngine__DroppedFieldsEventSchema = Assert<Eq< z.input< typeof M56.DroppedFieldsEventSchema >, z.infer< typeof M56.DroppedFieldsEventSchema > >>;
 export type Iso_data_dataEngine__EngineDeleteOptionsSchema = Assert<Eq< z.input< typeof M56.EngineDeleteOptionsSchema >, z.infer< typeof M56.EngineDeleteOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineUpdateOptionsSchema >, z.infer< typeof M56.EngineUpdateOptionsSchema > >>;
@@ -881,7 +878,6 @@ export type Iso_data_fieldValue__ReferenceIdValueSchema = Assert<Eq< z.input< ty
 // optional-free ints — no transform, no defaults, so input === infer and the
 // bare alias needs no Parsed.
 export type Iso_data_field__AddressSchema = Assert<Eq< z.input< typeof M66.AddressSchema >, z.infer< typeof M66.AddressSchema > >>;
-export type Iso_data_field__CurrencyValueSchema = Assert<Eq< z.input< typeof M66.CurrencyValueSchema >, z.infer< typeof M66.CurrencyValueSchema > >>;
 export type Iso_data_field__FieldMaskingKeepSchema = Assert<Eq< z.input< typeof M66.FieldMaskingKeepSchema >, z.infer< typeof M66.FieldMaskingKeepSchema > >>;
 export type Iso_data_field__FieldType = Assert<Eq< z.input< typeof M66.FieldType >, z.infer< typeof M66.FieldType > >>;
 export type Iso_data_field__LocationCoordinatesSchema = Assert<Eq< z.input< typeof M66.LocationCoordinatesSchema >, z.infer< typeof M66.LocationCoordinatesSchema > >>;
@@ -1733,7 +1729,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 799 isomorphic pins', () => {
+  it('still declares all 795 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2664,7 +2660,16 @@ describe('ADR-0122 type-alias convention', () => {
     // a required id and an optional name, no default and no transform — so it
     // is pinned here (Iso_api_protocol__MetadataAuthoringClientSchema) rather
     // than given a `…Parsed` synonym. +1 added.
-    expect(pins).toHaveLength(799);
+    // 799 -> 798 is #27182: `CurrencyValueSchema` (`data/field.zod.ts`), the
+    // never-consumed `{value, currency}` shape a currency value never had (it
+    // is a bare number, ADR-0104 D1), is deleted, and its pin
+    // (Iso_data_field__CurrencyValueSchema) goes with it. -1 removed.
+    // 798 -> 795 is #27028: the Virtual ObjectQL request protocol retired whole
+    // (`data/data-engine.zod.ts`), and with it the three isomorphic arms pinned
+    // here (Iso_data_dataEngine__DataEngineExecuteRequestSchema,
+    // Iso_data_dataEngine__DataEngineInsertRequestSchema,
+    // Iso_data_dataEngine__DataEngineVectorFindRequestSchema). -3 removed.
+    expect(pins).toHaveLength(795);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

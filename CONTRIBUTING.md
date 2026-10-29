@@ -199,7 +199,7 @@ same list.
 | `content/docs/references/` | Generated from the Zod schemas by `packages/spec/scripts/build-docs.ts`. Never edit it by hand. |
 | `content/docs/releases/` | Written at release time from changesets. Never edit it in a code pull request. |
 | `examples/` | The example apps. The *Examples* table in the [package directory](#package-directory) describes each one. |
-| `ui/` | ObjectUI: the `@object-ui/*` packages, the Console's source and the objectui.org docs site. [UI Workspace](#ui-workspace-ui) below covers working there. |
+| `ui/` | ObjectUI: the `@object-ui/*` packages and the Console's source. Their guides live in `content/docs/frontend/`. [UI Workspace](#ui-workspace-ui) below covers working there. |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Design details, the plugin lifecycle and the dependency graph. |
 
 AGENTS.md (*Documentation Guardrails*) has the rules for every docs path, including what a
@@ -207,8 +207,8 @@ new page needs before it shows up in the navigation.
 
 ## UI Workspace (`ui/`)
 
-`ui/` holds ObjectUI, the view layer: the `@object-ui/*` packages, the Console
-(`ui/apps/console`) and the objectui.org docs site (`ui/apps/site`). It is a member of this
+`ui/` holds ObjectUI, the view layer: the `@object-ui/*` packages and the Console
+(`ui/apps/console`). It is a member of this
 workspace, so the root `pnpm install` above installs it too, and
 [ui/AGENTS.md](./ui/AGENTS.md) adds that tree's own rules to AGENTS.md: the spec-first and
 contract-first commandments, Shadcn-native styling, actions as data. Its code is MIT-licensed
@@ -219,13 +219,12 @@ contract-first commandments, Shadcn-native styling, actions as data. Its code is
 Run these from `ui/`:
 
 ```bash
-pnpm exec turbo run build --filter='./*/*' --filter='!@object-ui/site'  # Build every ui package (turbo, parallel & cached)
-pnpm exec turbo run type-check --filter='./*/*'                          # Run tsc --noEmit across the ui packages (turbo)
-pnpm exec turbo run lint --filter='./*/*'                                # Run eslint across the ui packages (turbo)
-pnpm dev                                                                 # The Console's Vite dev server, on :5180
-pnpm site:dev                                                            # The docs site, on http://localhost:3000
-pnpm docs:check-links                                                    # The internal-link check CI runs on ui docs
-pnpm test:e2e                                                            # End-to-end tests (playwright)
+pnpm exec turbo run build --filter='./*/*'       # Build every ui package (turbo, parallel & cached)
+pnpm exec turbo run type-check --filter='./*/*'  # Run tsc --noEmit across the ui packages (turbo)
+pnpm exec turbo run lint --filter='./*/*'        # Run eslint across the ui packages (turbo)
+pnpm dev                                         # The Console's Vite dev server, on :5180
+pnpm docs:check-links                            # The internal-link check CI runs on the ui docs and READMEs
+pnpm test:e2e                                    # End-to-end tests (playwright)
 ```
 
 turbo resolves a relative filter against the directory it is launched from, so the filter above
@@ -290,32 +289,31 @@ use as a few-shot corpus. Neither declares a `dev` script.
 | --- | --- |
 | `ui/packages/*` | The published `@object-ui/*` packages, plus the private `test-support` (test-only, never released), `runner` (workspace demo app, never released) and `app-shell` (the Console's shell and views, no longer published after 18.2.0) |
 | `ui/apps/console` | The Console app (Vite + React), which `pnpm console:build` builds into the `@objectstack/console` package |
-| `ui/apps/site` | The public docs site at <https://www.objectui.org> (fumadocs) |
 | `ui/examples/*` | The snippet and the schema catalog, see [UI examples](#ui-examples) |
-| `ui/content/docs/` | The docs site's pages |
-| `ui/docs/` | Internal engineering material (ADRs, audits); not part of the site |
+| `ui/docs/` | Internal engineering material (ADRs, audits, design records); not part of the docs site |
 | `ui/e2e/` | Playwright end-to-end tests |
 
 The [package directory](#package-directory) lists every `@object-ui/*` package by layer.
 
 ### UI documentation
 
-The docs site's pages live in `ui/content/docs/`, and a page's path below it becomes its
-route under the site's /docs base, so an internal link between pages is written
-`[Quick Start](/docs/guide/quick-start)`, with the prefix. `ui/docs/` is not part of the site.
+ObjectUI's guides are pages of the documentation site, in its *Custom Front-end* section
+([content/docs/frontend](./content/docs/frontend)), and follow the documentation rules above.
+`ui/docs/` is not part of the site.
 
 - **A code block in an ADR or a dated audit is a specimen, not an example to copy.** Fence it
-  `plaintext`, never `ts` / `tsx`: a gate compiles the code fences of `ui/content/docs/`, and
-  a record edited until it compiles says something it never said. Code a reader may copy
-  belongs in `ui/content/docs/` or the skills tree.
+  `plaintext`, never `ts` / `tsx`: a gate compiles the code fences of the Custom Front-end
+  pages, and a record edited until it compiles says something it never said. Code a reader may
+  copy belongs in those pages or the skills tree.
 - **A `json` fence must pass a strict `JSON.parse`.** A block annotated with comments or
   trailing commas is fenced `jsonc`, and must still be one JSON document once those are
   removed; a `${…}` expression stays on one line inside its string.
 - **Internal links are checked offline.** `pnpm docs:check-links` resolves every relative
-  path and site route against the checkout, and CI runs it on every change.
+  path and site route on the Custom Front-end pages, the ui READMEs and `ui/docs/` against the
+  checkout, and CI runs it on every change.
 
-ObjectUI's [Quick Start](./ui/content/docs/guide/quick-start.md) and
-[Component Registry](./ui/content/docs/guide/component-registry.md) guides are the place to
+ObjectUI's [Quick Start](./content/docs/frontend/quick-start.mdx) and
+[Component Registry](./content/docs/frontend/component-registry.mdx) guides are the place to
 start when you add a component.
 
 ## Package Directory
