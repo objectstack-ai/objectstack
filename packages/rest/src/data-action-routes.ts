@@ -165,6 +165,18 @@ import {
  */
 export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
 
+/** [#27489] A JSON object: what the clone door reads as a field map. Arrays and `null` are not. */
+function isFieldMap(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** [#27489] The kind of a refused clone body or `overrides`, named without echoing the value. */
+function describeNonFieldMap(value: unknown): string {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'an array';
+    return `a ${typeof value}`;
+}
+
 /** [#27500] The formats `GET /data/:object/export` serves, csv first as the default. */
 const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
 type ExportFormatServed = typeof EXPORT_FORMATS[number];
@@ -311,6 +323,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // object's `enable.clone` capability, default on). Optional JSON body
     // `{ overrides?: {...} }` (or a bare field map) is applied on top of
     // the copied values, e.g. to set a new name or clear a unique field.
+    // Any other `overrides` (or bare body) is a 400.
     // Distinct path segment (`/clone`) keeps it clear of the greedy
     // `/data/:object/:id` matchers.
     this.routeManager.register({
@@ -331,13 +344,29 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const body = req.body ?? {};
                 // Accept both `{ overrides: {...} }` and a bare field map so
                 // callers can POST overrides directly without nesting.
-                const overrides = (body && typeof body === 'object' && 'overrides' in body)
-                    ? body.overrides
-                    : body;
+                const nested = isFieldMap(body) && 'overrides' in body;
+                const overrides = nested ? body.overrides : body;
+                // [#27489] Refused, not dropped: a non-object `overrides`
+                // (`"x"`, `1`, `true`, `null`) used to be skipped and answer
+                // `201` with a plain copy, and an array passed the `typeof`
+                // test and reached `cloneData`, which merged it index-wise.
+                // Refused here, at the door, before `cloneData` is called. An
+                // absent body or member is still a plain copy; `null` is a
+                // value the caller wrote, so it is refused rather than read as
+                // absent.
+                if (overrides !== undefined && !isFieldMap(overrides)) {
+                    const got = describeNonFieldMap(overrides);
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR', nested
+                        ? `The clone body's "overrides" must be an object of field values, got ${got}. `
+                            + 'Omit it for a plain copy.'
+                        : `The clone body must be an object, { "overrides": {...} } or a bare field map, got ${got}. `
+                            + 'Send no body for a plain copy.');
+                    return;
+                }
                 const result = await cloneData.call(p, {
                     object: req.params.object,
                     id: req.params.id,
-                    ...(overrides && typeof overrides === 'object' ? { overrides } : {}),
+                    ...(overrides !== undefined ? { overrides } : {}),
                     ...(environmentId ? { environmentId } : {}),
                     ...(context ? { context } : {}),
                 });
