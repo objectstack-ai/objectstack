@@ -111,6 +111,9 @@ function answerFor(h: Held): unknown {
   if (meta) return { success: true, data: ALL.find((o) => o.name === meta[1]) ?? null };
   const page = /\/api\/v1\/data\/[^/?]+\/([^/?]+)\/page$/.exec(h.path);
   if (page) return pageAnswer(page[1], h.body);
+  // The record read of an adapter without the payload (`findOne`).
+  const one = new RegExp(`/api/v1/data/${OBJECT}\\?.*\\["id","=","([^"]+)"\\]`).exec(h.path);
+  if (one) return { success: true, data: { records: [{ id: one[1], name: `Contact ${one[1]}`, email: 'a@b.c', account: 'a1' }], total: 1 } };
   return { success: true, data: { records: [], total: 0 } };
 }
 
@@ -172,18 +175,18 @@ async function boot() {
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
-  const open = (rec: string, upcoming: string | null = null) => render(
+  const open = (rec: string, upcoming: string | null = null, embedded = false) => render(
     <React.StrictMode>
       <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${rec}`]}>
         <MetadataCtx.Provider value={metadata}>
           <RecordDrawerUpcomingContext.Provider value={upcoming ? { objectName: OBJECT, recordId: upcoming } : null}>
-            <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride={rec} />
+            <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride={rec} embedded={embedded} />
           </RecordDrawerUpcomingContext.Provider>
         </MetadataCtx.Provider>
       </MemoryRouter>
     </React.StrictMode>,
   );
-  return { held, state, open };
+  return { held, state, open, ds };
 }
 
 describe('objectstack#27627 — one request opens a record page', () => {
@@ -243,5 +246,31 @@ describe('objectstack#27627 — one request opens a record page', () => {
     // The step's own page is the prefetched answer; only the next one is asked.
     expect(held.filter(isPage).map((h) => h.path)).toEqual([`/api/v1/data/${OBJECT}/c3/page`]);
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
+  });
+  // Merge resolution with objectstack#27056 (#27636): in a drawer, that card
+  // warms the next record's related counts; the payload's prefetch carries
+  // them, so only one of the two runs.
+  const countProbesFor = (held: Held[], rec: string) =>
+    held.filter((h) => h.method === 'GET' && CHILDREN.some((c) => h.path.startsWith(`/api/v1/data/${c}?`)) && h.path.includes(`"contact","=","${rec}"`));
+
+  it('in a drawer, an adapter that answers the payload asks the next record once, as a page, and sends no count warm-up', async () => {
+    const { held, state, open } = await boot();
+    open('c1', 'c2', true);
+    await runWaves(held, state);
+    expect(held.filter(isPage).map((h) => h.path)).toEqual([
+      `/api/v1/data/${OBJECT}/c1/page`,
+      `/api/v1/data/${OBJECT}/c2/page`,
+    ]);
+    expect(countProbesFor(held, 'c2')).toEqual([]);
+  });
+
+  it('in a drawer, an adapter without the payload keeps the count warm-up: each of the next record\'s counts is asked once', async () => {
+    const { held, state, open, ds } = await boot();
+    Object.assign(ds, { getRecordPage: undefined, prefetchRecordPage: undefined });
+    open('c1', 'c2', true);
+    await runWaves(held, state);
+    expect(held.filter(isPage)).toEqual([]);
+    const warm = countProbesFor(held, 'c2').map((h) => /\/api\/v1\/data\/([^/?]+)/.exec(h.path)![1]).sort();
+    expect(warm).toEqual([...CHILDREN].sort());
   });
 });
