@@ -160,6 +160,21 @@ function uploadScopeRefusalMessage(scope: unknown): string {
 }
 
 /**
+ * [#27413] The presigned door's declared `size`: a finite, non-negative JSON
+ * number, the byte count `GetPresignedUrlRequestSchema.size` declares. A
+ * string (even a numeric one), `NaN`, an infinity or a negative count is
+ * refused `400` / `INVALID_REQUEST` before the pending `sys_file` row is
+ * written — the code the door already answers a request missing its size
+ * with. `0` is a legal empty file.
+ */
+function isDeclaredByteCount(size: unknown): size is number {
+  return typeof size === 'number' && Number.isFinite(size) && size >= 0;
+}
+
+const PRESIGNED_SIZE_REFUSAL_MESSAGE =
+  'size must be the file size in bytes: a non-negative number, sent as a JSON number';
+
+/**
  * [#27412] The chunk door's `chunkIndex` path segment, read strictly: decimal
  * digits only, so `-1`, `0.5`, `1e2` and `0x1` are not indexes. `null` ⇒ not
  * a whole number. The range half — below the upload's declared
@@ -940,6 +955,13 @@ export function registerStorageFamily(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
+      // [#27413] Not a byte count ⇒ refused before anything is stored: a
+      // non-numeric size otherwise failed the `sys_file` insert as a 500, and
+      // a negative one was stored on a pending row.
+      if (!isDeclaredByteCount(size)) {
+        sendError(res, 400, 'INVALID_REQUEST', PRESIGNED_SIZE_REFUSAL_MESSAGE);
+        return;
+      }
       // [#22470] A scope outside the upload vocabulary is refused before
       // anything is stored or minted.
       if (!requireAcceptedUploadScope(scope, res)) return;
@@ -948,7 +970,7 @@ export function registerStorageFamily(
       // bytes are judged again at `_local/raw`; an S3 URL takes them straight
       // to the bucket, so this is the platform's one look at that upload.
       const { presignedTtl, maxUploadBytes } = currentLimits();
-      if (!requireWithinUploadLimit(Number(size), maxUploadBytes, (n) => `The declared file size is ${n} bytes`, res)) return;
+      if (!requireWithinUploadLimit(size, maxUploadBytes, (n) => `The declared file size is ${n} bytes`, res)) return;
 
       const fileId = randomUUID();
       const key = buildKey(scope ?? 'user', fileId, filename);
