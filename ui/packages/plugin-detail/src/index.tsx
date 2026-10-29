@@ -230,8 +230,8 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
-// objectstack#27056 — the related lists' counts, asked up front: a drawer
-// host warms the next record's before the reader steps to it.
+// objectstack#27056 — for the app-shell record drawer's prefetch: it warms
+// the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn, relatedCountTargetOf } from './useRelatedCounts';
 export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts';
 // The tabbed tier's 关联 tab in the reader's arrangement (objectstack#27055).

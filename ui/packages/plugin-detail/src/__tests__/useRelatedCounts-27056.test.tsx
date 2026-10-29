@@ -97,6 +97,50 @@ describe('useRelatedCounts (objectstack#27056)', () => {
     expect(dataSource.find).toHaveBeenCalledTimes(3);
   });
 
+  it('the store answering is not the set settling: the cards wait for their own set', async () => {
+    const { reads, dataSource } = heldSource();
+    const { result } = renderHook(() =>
+      useRelatedCounts(TARGETS, { parentId: 'acc-1', dataSource, fieldsOf: () => FIELDS }),
+    );
+    await flush();
+    // Another reader (a tab badge) fills the store while the set is out.
+    act(() => {
+      TARGETS.forEach((t, i) => RelatedCountStore.set(t.objectName, t.relationshipField, 'acc-1', i + 5));
+    });
+    expect(TARGETS.map((t) => result.current.stateOf(t.id).kind)).toEqual(['pending', 'pending', 'pending']);
+
+    await act(async () => reads.forEach((r, i) => r.resolve(i + 5)));
+    await flush();
+    expect(TARGETS.map((t) => result.current.stateOf(t.id).kind)).toEqual(['counted', 'counted', 'counted']);
+  });
+
+  it('a drawer stepping back to a settled record draws its counts at once', async () => {
+    const { reads, dataSource } = heldSource();
+    // Every render's states, so a placeholder flash between two acts shows.
+    const drawn: string[] = [];
+    const { rerender } = renderHook(
+      ({ parentId }) => {
+        const counts = useRelatedCounts(TARGETS, { parentId, dataSource, fieldsOf: () => FIELDS });
+        drawn.push(`${parentId}:${TARGETS.map((t) => counts.stateOf(t.id).kind).join(',')}`);
+        return counts;
+      },
+      { initialProps: { parentId: 'acc-1' } },
+    );
+    await flush();
+    await act(async () => reads.forEach((r) => r.resolve(1)));
+    await flush();
+    TARGETS.forEach((t) => RelatedCountStore.set(t.objectName, t.relationshipField, 'acc-2', 2));
+    rerender({ parentId: 'acc-2' });
+    await flush();
+    drawn.length = 0;
+    rerender({ parentId: 'acc-1' });
+    await flush();
+    // Every render back has them: no placeholder flash.
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(new Set(drawn)).toEqual(new Set(['acc-1:counted,counted,counted']));
+    expect(dataSource.find).toHaveBeenCalledTimes(3);
+  });
+
   it('a failed count leaves its card to read for itself; the others are counted', async () => {
     const { reads, dataSource } = heldSource();
     const { result } = renderHook(() =>

@@ -38,7 +38,10 @@ import { relatedCardId, type RelatedCardId } from './synth/relatedArrangement';
 /** A list's declared scope, as the count store keys it. */
 type CountScopeFilter = Record<string, any> | any[];
 
-/** One related list to count: a `record:related_list` node's relationship and declared scope. */
+/**
+ * One related list to count: a `record:related_list` node's relationship and
+ * declared scope. Exported for the app-shell record drawer's prefetch.
+ */
 export interface RelatedCountTarget {
   /** The relationship id, `CHILD_OBJECT.FK_FIELD`. */
   id: RelatedCardId;
@@ -63,6 +66,9 @@ const asNode = (value: unknown): PageNode | null =>
  * `parentDataSource` binding (another parent record), or a parent link through
  * a field other than `id` (read off the record body) — keeps reading for
  * itself, exactly as before.
+ *
+ * Exported for the app-shell record drawer's prefetch: the rule
+ * {@link relatedCountTargetsIn} applies to each node it walks.
  */
 export function relatedCountTargetOf(node: unknown): RelatedCountTarget | null {
   const raw = asNode(node);
@@ -87,6 +93,9 @@ export function relatedCountTargetOf(node: unknown): RelatedCountTarget | null {
  * itself or on a tab item that holds it) is left out: whether it shows is the
  * next record's own answer, and counting it could spend a read on a list that
  * never draws.
+ *
+ * Exported for the app-shell record drawer's prefetch: it names the lists of
+ * the page drawn now, which the next record of the same object draws too.
  */
 export function relatedCountTargetsIn(page: unknown): RelatedCountTarget[] {
   const out: RelatedCountTarget[] = [];
@@ -116,7 +125,10 @@ export function relatedCountTargetsIn(page: unknown): RelatedCountTarget[] {
   return out;
 }
 
-/** Where the counts are read from: the parent record and its data source. */
+/**
+ * Where the counts are read from: the parent record and its data source.
+ * Exported for the app-shell record drawer's prefetch.
+ */
 export interface RelatedCountsSource {
   /** The parent record's id — the record the lists hang off. */
   parentId: string | number | null | undefined;
@@ -204,6 +216,9 @@ async function countTargets(
  * from the store instead of waiting a round trip for them. `scope` is the
  * session scope the lists' declared filters resolve in; the record token
  * resolves to `parentId`, the record that page will show.
+ *
+ * Exported for the app-shell record drawer, which calls it once the record on
+ * screen has loaded.
  */
 export function prefetchRelatedCounts(
   targets: readonly RelatedCountTarget[],
@@ -283,6 +298,11 @@ export function useRelatedCounts(
   const [lastKnown, setLastKnown] = React.useState<ReadonlyMap<string, number>>(() => new Map());
   const outRef = React.useRef(new Set<string>());
   const failedRef = React.useRef({ parentKey: '', keys: new Set<string>() });
+  // The parent whose first set this hook asked: its cards stay placeholders
+  // until that set settles, even once the store holds every count.
+  const firstAskRef = React.useRef('');
+  const settledRef = React.useRef(settledParent);
+  settledRef.current = settledParent;
   const liveParentRef = React.useRef(parentKey);
   liveParentRef.current = parentKey;
   const fieldsOfRef = React.useRef(source.fieldsOf);
@@ -305,6 +325,7 @@ export function useRelatedCounts(
       if (!resolved.some((t) => outRef.current.has(storeKeyOf(t)))) setSettledParent(parentKey);
       return;
     }
+    if (settledRef.current !== parentKey) firstAskRef.current = parentKey;
     for (const t of missing) outRef.current.add(storeKeyOf(t));
     void countTargets(missing, { parentId: parentKey, dataSource: ds, fieldsOf: fieldsOfRef.current }, true).then(() => {
       const seen = new Map<string, number>();
@@ -318,26 +339,41 @@ export function useRelatedCounts(
       // A drawer that stepped on while this set was out keeps its new
       // parent's state; this parent's numbers stay in the store.
       if (liveParentRef.current !== parentKey) return;
-      if (seen.size > 0) {
-        setLastKnown((prev) => {
-          const next = new Map(prev);
-          for (const [k, n] of seen) next.set(k, n);
-          return next;
-        });
-      }
-      setSettledParent(parentKey);
+      // The cards' faces mount in a transition: the record's own read, landing
+      // meanwhile, renders the details first and the faces yield to it.
+      React.startTransition(() => {
+        if (seen.size > 0) {
+          setLastKnown((prev) => {
+            const next = new Map(prev);
+            for (const [k, n] of seen) next.set(k, n);
+            return next;
+          });
+        }
+        setSettledParent(parentKey);
+      });
     });
     // `targetsKey` is the content of `resolved` (AGENTS.md #10: never a memo's
     // identity); `storeVersion` re-runs the effect after an invalidation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ds, parentKey, targetsKey, storeVersion]);
 
+  // A settled parent draws from the store when the drawer steps back to it.
+  React.useEffect(() => {
+    if (firstAskRef.current === settledParent) firstAskRef.current = '';
+  }, [settledParent]);
+
   const stateOf = (id: RelatedCardId): RelatedCountState => {
     const target = resolved.find((t) => t.id === id);
     if (!target || !ds || !parentKey) return UNCOUNTED;
     // A parent's first set draws together: no card leaves its skeleton until
-    // every card of the set has answered (or was already in the store).
-    if (settledParent !== parentKey && resolved.some((t) => countOf(t) === undefined && !failed(t))) return PENDING;
+    // every card of the set has answered (or was already in the store). The
+    // store answering is not enough: the set settles in its transition.
+    if (
+      settledParent !== parentKey &&
+      (firstAskRef.current === parentKey || resolved.some((t) => countOf(t) === undefined && !failed(t)))
+    ) {
+      return PENDING;
+    }
     const count = countOf(target);
     if (count !== undefined) return { kind: 'counted', count };
     return failed(target) ? UNCOUNTED : PENDING;
