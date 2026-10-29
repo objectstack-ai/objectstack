@@ -6,7 +6,7 @@
 
 feat(lint)!: `searchable-field-unsearchable` reports a `searchableFields` entry that names a `secret` or `password` field, which the engine leaves out of every search without a word
 
-Clause-②: no (narrowing) — `os validate`, `os build`, `os lint` and the metadata publish door refuse a `searchableFields` entry whose field type is `secret` or `password`, on the object's own set, on every list view surface and on a react page's `<ListView searchableFields>`, which they accepted before. The finding takes the severity of the `formula`-entry finding (`error`). No rule id is added or removed.
+Clause-②: no (narrowing) — `os validate`, `os build`, `os lint` and the metadata publish door refuse a `searchableFields` entry whose field type is `secret` or `password`, on the object's own set, on every list view surface and on a react page's ListView `searchableFields` prop, which they accepted before. The finding takes the severity of the `formula`-entry finding (`error`). No rule id is added or removed.
 Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: a searchableFields entry the engine already withheld from every search (ADR-0100) is now refused where it is authored. The one remedy is to delete the entry, which a conversion cannot decide for the author, so there is no key for a migration to rewrite and no tombstone. -->
