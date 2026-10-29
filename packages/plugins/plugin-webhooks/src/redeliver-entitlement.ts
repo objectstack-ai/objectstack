@@ -18,9 +18,9 @@
  * Two readings were weighed and refused:
  *
  *  - **Signed in is enough.** The door's original posture, written as a
- *    deferral ("finer RBAC is future work"), never as a decision. It admitted
- *    a caller who may not read a single delivery or webhook row, and let that
- *    caller reach answers carrying row-specific detail.
+ *    deferral ("finer RBAC is future work"), never as a decision. It left the
+ *    door unaligned with webhook administration, and answered row-level
+ *    refusals to callers who administer nothing.
  *  - **Read access to `sys_http_delivery`.** The object the button sits on,
  *    but READ is the wrong axis for an act that writes the row and sends a
  *    request: a read-only principal would gain a write-shaped action.
