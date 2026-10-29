@@ -2107,6 +2107,8 @@ async function flowWriteRefusal(
  * What is saved is the definition as the caller's door built it — never the
  * engine's parsed copy, whose materialized schema defaults would freeze on
  * disk (the save canonicalizes it the way it does every `/meta` flow write).
+ * It is saved under the caller's user id as `actor` [#27414], as the `/meta`
+ * door's save is.
  */
 async function registerAndSaveFlow(
     deps: DomainHandlerDeps,
@@ -2129,8 +2131,16 @@ async function registerAndSaveFlow(
         };
     }
     if (typeof store?.saveMetaItem === 'function') {
+        // [#27414, ADR-0073 D3] The save names who asked: the caller's user id
+        // as the save's `actor`, which the store records in
+        // `sys_metadata.created_by` / `updated_by` and the row's history. Read
+        // through the toggle door's `activationCaller`: the signed-in user's
+        // id off the execution context and nothing else, never off the body,
+        // so the flow doors cannot disagree about who a write names. A context
+        // with no user passes no actor, an unattributed write as before.
+        const { userId: actor } = activationCaller(context);
         try {
-            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition });
+            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition, ...(actor ? { actor } : {}) });
         } catch (e) {
             restoreFlowRegistration(automationService, name, held);
             return {
