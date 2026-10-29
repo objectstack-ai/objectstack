@@ -108,7 +108,8 @@ class FixturePlugin implements Plugin {
             registry: { listItems: () => [], getObject: () => undefined },
             async find(object: string, query?: any) {
                 if (object !== 'sys_member') return [];
-                return memberships.filter((row) => matches(row, query?.where));
+                const rows = memberships.filter((row) => matches(row, query?.where));
+                return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
             },
             async findOne(object: string, opts?: any) {
                 assertEngineFindOnePredicate(object, opts);
