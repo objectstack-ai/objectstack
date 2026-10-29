@@ -366,6 +366,7 @@ describe('[#27495] a sys_secret row exists only while a committed row names it',
       expect(secrets().map((s) => s.id)).toEqual([before]);
       expect(errors).toHaveLength(1);
       expect(errors[0]).toContain(`${VAULT}.token`);
+      expect(errors[0]).not.toContain(before);
     });
   });
 });

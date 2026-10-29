@@ -250,14 +250,15 @@ export async function releaseSecretHandles(
 ): Promise<void> {
   if (slots.length === 0) return;
   const kept = (slot: SecretHandleSlot, why: string, error?: unknown): void => {
+    // The column, never the handle id: a handle is what a stored ref names.
     const what = occasion === 'refused'
-      ? `the sys_secret row "${slot.handleId}" sealed for a write on "${object}.${slot.field}" that did not complete`
-      : `the sys_secret row "${slot.handleId}" that "${object}.${slot.field}" named before this write`;
+      ? `the sys_secret row sealed for a write on "${object}.${slot.field}" that did not complete`
+      : `the sys_secret row that "${object}.${slot.field}" named before this write`;
     const redacted = error === undefined ? undefined : redactBoundStatement(error);
     this.logger.error(
       `Credential row kept: ${what} was not removed, because ${why}. The write's own answer is unchanged, `
         + 'but that ciphertext is still stored and decryptable with nothing pointing at it. '
-        + '`objectstack secret orphans` reports it.',
+        + '`os secret orphans` reports it.',
       redacted instanceof Error ? redacted : undefined,
       { object, field: slot.field },
     );
