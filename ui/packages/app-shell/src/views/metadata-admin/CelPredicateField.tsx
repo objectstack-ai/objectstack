@@ -54,7 +54,7 @@ import {
   type CelSuggestionKind,
   type CelValueType,
 } from './celAuthoring.js';
-import { useServerErrorsAt } from './draftVerdict.js';
+import { useServerErrorsAt, useServerHoldAt, type ServerDiagnosticEntry } from './draftVerdict.js';
 
 const LINT_DEBOUNCE_MS = 250;
 
@@ -124,11 +124,21 @@ export interface CelPredicateFieldProps {
    * the page holds (`rowLevelSecurity.0.using`). When the page's served verdict
    * (`DraftVerdictContext`) has an error at exactly that path — what publish
    * will refuse — the editor shows the server's message and withholds "Valid
-   * CEL". The lint, its findings and `onLintChange` are unaffected, as with
-   * `scopeIssue`. Omitted: no server verdict is read.
+   * CEL". The lint and its findings are unaffected, as with `scopeIssue`.
+   * Omitted: no server verdict is read.
+   *
+   * objectstack#27482 — and while the text on screen is the text that verdict
+   * judged (`DraftVerdictBodyContext`), each of those errors is also reported
+   * through `onLintChange` as a blocking error, so the host's Save gate holds
+   * on what publish will refuse exactly as on a parse fault. Once the author
+   * edits the text away the verdict no longer describes it and holds nothing:
+   * the save goes out, and its re-read brings the next verdict.
    */
   verdictPath?: string;
-  /** Reports the current lint issues up so the editor can gate Save on errors. */
+  /**
+   * Reports the current lint issues up so the editor can gate Save on errors —
+   * plus the server's errors at {@link verdictPath} on the judged text.
+   */
   onLintChange?: (issues: CelLintIssue[]) => void;
   /**
    * `role="value"` only: reports the inferred result type after each
@@ -206,13 +216,41 @@ export function CelPredicateField({
   const fieldsKey = fieldNames.join(',');
   const rootsKey = roots ? roots.join(',') : '';
 
+  // objectstack#27482 — the server's errors at this editor's path while the
+  // text on screen is the text they judged; they ride the lint report up.
+  const held = useServerHoldAt(verdictPath, value);
+  const heldKey = held.map((e) => e.message).join('\n');
+
   // Keep the reporters out of the lint effect deps (parent may not memoize them).
   const onLintChangeRef = React.useRef(onLintChange);
   const onInferredTypeChangeRef = React.useRef(onInferredTypeChange);
+  const heldRef = React.useRef<readonly ServerDiagnosticEntry[]>(held);
   React.useEffect(() => {
     onLintChangeRef.current = onLintChange;
     onInferredTypeChangeRef.current = onInferredTypeChange;
+    heldRef.current = held;
   });
+
+  // The last lint result, so a verdict that arrives or lapses between two
+  // lint passes is reported against it.
+  const lintRef = React.useRef<CelLintIssue[]>([]);
+  const report = React.useCallback((lint: CelLintIssue[]) => {
+    lintRef.current = lint;
+    const server = heldRef.current;
+    onLintChangeRef.current?.(
+      server.length === 0
+        ? lint
+        : [...lint, ...server.map((e): CelLintIssue => ({ severity: 'error', message: e.message }))],
+    );
+  }, []);
+  // Keyed on the messages, not on the array (rebuilt every render): report
+  // when the hold starts, changes or lapses, never on mount with none.
+  const reportedHeldRef = React.useRef('');
+  React.useEffect(() => {
+    if (heldKey === reportedHeldRef.current) return;
+    reportedHeldRef.current = heldKey;
+    report(lintRef.current);
+  }, [heldKey, report]);
 
   /* Debounced lint (and, for role="value", result-type inference). */
   React.useEffect(() => {
@@ -223,7 +261,7 @@ export function CelPredicateField({
         if (cancelled) return;
         setIssues(res);
         setLinted(true);
-        onLintChangeRef.current?.(res);
+        report(res);
       });
       if (role === 'value') {
         inferCelValueType(value, hint).then((res) => {
@@ -246,7 +284,7 @@ export function CelPredicateField({
       setIssues([]);
       setLinted(false);
       setInferredType(null);
-      onLintChangeRef.current?.([]);
+      report([]);
       if (role === 'value') onInferredTypeChangeRef.current?.(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

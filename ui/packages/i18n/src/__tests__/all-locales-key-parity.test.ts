@@ -116,6 +116,8 @@ const OUTBOUND_KEYS = new Set([
   'console.ai.planApproveMessage',
   'console.ai.planApproveDefaultsMessage',
   'console.ai.planAnswerMessage',
+  'console.ai.planExtendExistingMessage',
+  'console.ai.planBuildNewAppMessage',
   'console.ai.changesConfirmMessage',
 ]);
 
