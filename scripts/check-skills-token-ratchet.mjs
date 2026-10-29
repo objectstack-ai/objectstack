@@ -984,7 +984,24 @@ export const CEILINGS = new Map([
   // -> 1573 tokens, ceiling +169, pinned AT the measurement, zero headroom.
   // The raising PR's body carries the same arithmetic.
   //   ceil($(wc -c < skills/objectstack-data/evals/hooks-security-seeds-datasources.json) / 4) == ceil(6292 / 4)
-  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1573],
+  // 1573 -> 1666 (card #27660, the Skills-docs follow-up owed by the
+  // objectql PR that refuses a credential column as a filter or sort key):
+  // one case for a list view filtered on a `secret` field — expected the
+  // redirect to a has-a-value filter (`$null`) and the `INVALID_FIELD`
+  // refusal named; NO `$startsWith`. Seat decision on the card's open
+  // question, applying the standing maintainer ruling 2026-10-27 on the
+  // decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A,
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST:
+  // two clauses that restated their own case's `must_not_contain` — case 2's
+  // "Permission sets, not the object: " (restating `permissions: {`, 33
+  // bytes) and case 8's " — no picklist, counter or insert hook" (restating
+  // `assigned_to` / `beforeInsert`, 40 bytes), 73 bytes = 18 units; the case
+  // adds 447 bytes = 112 units. On `origin/main` the file was 6289 bytes
+  // (1573 tokens, headroom 0); the LANDED file is 6663 bytes -> 1666 tokens,
+  // ceiling +93, pinned AT the measurement, zero headroom. The raising PR's
+  // body carries the same arithmetic.
+  //   ceil($(wc -c < skills/objectstack-data/evals/hooks-security-seeds-datasources.json) / 4) == ceil(6663 / 4)
+  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1666],
   // 946 -> 1050 (#26297): the invoice-line case gains the owner opt-in
   // (`ownerMayEdit` on the controlled_by_parent line) and pins `added_by` as
   // `type: 'user'`, never a lookup to a `user` object. +104 tokens at
