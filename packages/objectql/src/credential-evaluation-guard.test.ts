@@ -91,7 +91,7 @@ const vault = {
   },
 };
 
-const USER: EngineQueryOptions['context'] = { userId: 'u1', roles: ['admin'] };
+const USER: EngineQueryOptions['context'] = { userId: 'u1' };
 const SYSTEM: EngineQueryOptions['context'] = { isSystem: true };
 
 async function buildEngine() {
