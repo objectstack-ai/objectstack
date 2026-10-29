@@ -505,8 +505,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // `recordHref`). A member reaches both under the Setup segment, so whether
   // they wait on Setup's verdict is a product decision, left open on
   // objectui#12706.
+  //
+  // objectstack#27507 — two more wait on it: the settings pages
+  // (`system/settings`, `system/settings/:namespace`, the console host's) and
+  // the marketplace (`system/marketplace[/:packageId]`, this file's). Without
+  // the verdict a member opening them got the default app's chrome around the
+  // page's own reading of the server's refusal: an empty settings hub ("No
+  // settings registered"), the raw capability error on a settings page, the
+  // marketplace's admin-only notice. Each now reads as the app root does; the
+  // pages' inner states stay for a caller the app lets in.
   const isSetupRootRoute = location.pathname === '/apps/setup' || location.pathname === '/apps/setup/';
-  const appSurfaceAwaitsVerdict = !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute);
+  const [appSubRoot, appSubPage] = appSubPath.split('/');
+  const isSettingsOrMarketplaceRoute =
+    appSubRoot === 'system' && (appSubPage === 'settings' || appSubPage === 'marketplace');
+  const appSurfaceAwaitsVerdict =
+    !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute || isSettingsOrMarketplaceRoute);
 
   // Post-publish readiness: when a requested app isn't in the loaded metadata,
   // re-check ONCE (the registry can lag a beat behind a publish) before

@@ -126,7 +126,7 @@ async function boot() {
     return { status: res.status, body: (await res.json()) as any };
   };
 
-  return { call, connection, build };
+  return { call, connection, build, records };
 }
 
 const listed = async (call: Awaited<ReturnType<typeof boot>>['call'], name: string) =>
@@ -192,7 +192,10 @@ describe('Test on a datasource whose connect failed', () => {
 
 describe('what does not move', () => {
   it('a datasource with no verdict and no driver keeps the driver-missing sentence', async () => {
-    const { call } = await boot();
+    const { call, records } = await boot();
+    // Saved, never connected. [#27510] It is a stored record because Test
+    // answers a name with no record 404 (`saved-datasource-test-unknown-name.test.ts`).
+    records.set('ghost', { name: 'ghost', driver: 'postgres', origin: 'runtime', config: UNREACHABLE });
 
     const test = await call('POST', '/ghost/test');
     expect(test.status).toBe(200);
@@ -234,7 +237,8 @@ describe('only a failed verdict is answered', () => {
       },
       liveDriver: () => undefined,
       connectionState: () => ({ availability, ...(reason ? { reason } : {}) }),
-      getDatasource: async () => undefined,
+      // [#27510] A saved datasource: Test answers a name with no record 404.
+      getDatasource: async (name) => ({ name }),
       getObject: async () => undefined,
       listObjects: async () => [],
     });

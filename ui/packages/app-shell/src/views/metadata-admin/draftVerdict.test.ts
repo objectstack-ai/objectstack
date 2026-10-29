@@ -1,7 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { draftEnvelopeDiagnostics, editedItemDiagnostics, withServerOnlyErrors } from './draftVerdict';
+import {
+  draftEnvelopeDiagnostics,
+  editedItemDiagnostics,
+  serverHoldAt,
+  valueAtPath,
+  withServerOnlyErrors,
+} from './draftVerdict';
 
 const refused = {
   valid: false,
@@ -27,5 +33,38 @@ describe('draftVerdict (objectstack#26707)', () => {
     const server = [{ path: 'label', message: 'Required' }, ...refused.errors];
     expect(withServerOnlyErrors(client, server)).toEqual([client[0], refused.errors[0]]);
     expect(withServerOnlyErrors(client, undefined)).toEqual(client);
+  });
+});
+
+describe('serverHoldAt — a verdict holds only the text it judged (objectstack#27482)', () => {
+  const USING = 'f_total > 5';
+  const judged = { name: 'sales_perms', rowLevelSecurity: [{ name: 'hot', using: USING }] };
+  const diagnostics = {
+    valid: false,
+    errors: [{ path: 'rowLevelSecurity.0.using', message: 'cannot filter on f_total', code: 'rls-predicate-unenforceable' }],
+  };
+
+  it('reads a dotted path through arrays and objects, and answers undefined off the body', () => {
+    expect(valueAtPath(judged, 'rowLevelSecurity.0.using')).toBe(USING);
+    expect(valueAtPath(judged, 'rowLevelSecurity.1.using')).toBeUndefined();
+    expect(valueAtPath(judged, 'rowLevelSecurity.x.using')).toBeUndefined();
+    expect(valueAtPath(judged, 'name.length')).toBeUndefined();
+  });
+
+  it('holds on the judged text, and not on any other', () => {
+    expect(serverHoldAt(diagnostics, judged, 'rowLevelSecurity.0.using', USING)).toEqual(diagnostics.errors);
+    expect(serverHoldAt(diagnostics, judged, 'rowLevelSecurity.0.using', 'f_total > 7')).toEqual([]);
+  });
+
+  it('holds nothing without a judged body, a path, or an error at that exact path', () => {
+    expect(serverHoldAt(diagnostics, undefined, 'rowLevelSecurity.0.using', USING)).toEqual([]);
+    expect(serverHoldAt(diagnostics, judged, undefined, USING)).toEqual([]);
+    expect(serverHoldAt(diagnostics, judged, 'rowLevelSecurity.0.check', '')).toEqual([]);
+    expect(serverHoldAt({ valid: true }, judged, 'rowLevelSecurity.0.using', USING)).toEqual([]);
+  });
+
+  it('reads an absent judged value as the empty text an editor shows', () => {
+    const atCheck = { valid: false, errors: [{ path: 'rowLevelSecurity.0.check', message: 'needed' }] };
+    expect(serverHoldAt(atCheck, judged, 'rowLevelSecurity.0.check', '')).toEqual(atCheck.errors);
   });
 });
