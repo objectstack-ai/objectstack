@@ -35,6 +35,8 @@ function makeDriver() {
       return (row[k] ?? null) === (v ?? null);
     });
   const copy = (r: Row | undefined) => (r == null ? r : { ...r });
+  /** The payload of every record statement, in order: which columns a write actually rewrote. */
+  const statements: Array<{ object: string; data: Row }> = [];
   let n = 0;
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
@@ -52,11 +54,13 @@ function makeDriver() {
       return copy(row);
     },
     async update(o: string, id: string, data: Row) {
+      statements.push({ object: o, data: { ...data } });
       const row = { ...storeFor(o).get(String(id)), ...data, id };
       storeFor(o).set(String(id), row);
       return copy(row);
     },
     async updateMany(o: string, ast: any, data: Row) {
+      statements.push({ object: o, data: { ...data } });
       let k = 0;
       for (const [id, row] of storeFor(o)) {
         if (!matches(row, ast?.where)) continue;
@@ -71,7 +75,11 @@ function makeDriver() {
     async bulkUpdate() { return []; }, async bulkDelete() {},
     async beginTransaction() { return {}; }, async commit() {}, async rollback() {},
   };
-  return { driver, rowsOf: (o: string) => Array.from(storeFor(o).values()) };
+  return {
+    driver,
+    rowsOf: (o: string) => Array.from(storeFor(o).values()),
+    lastStatement: (o: string) => [...statements].reverse().find((s) => s.object === o)?.data,
+  };
 }
 
 function makeCrypto(): ICryptoProvider & { encrypts: () => number } {
@@ -208,6 +216,9 @@ describe('[#27582] a non-system write may only seal a new value or keep its own 
       const before = secrets().map((s) => s.id);
       await engine.update(VAULT, { id: 'r1', name: 'renamed', token: own }, USER);
       expect(stored('r1')).toMatchObject({ name: 'renamed', token: own });
+      // Kept, not rewritten: the statement leaves the column alone, as for the echoed mask.
+      expect(d.lastStatement(VAULT)).toMatchObject({ name: 'renamed' });
+      expect(d.lastStatement(VAULT)).not.toHaveProperty('token');
       expect(secrets().map((s) => s.id)).toEqual(before);
       expect(await engine.resolveSecretField(VAULT, 'r1', 'token')).toBe('mine');
     });
@@ -282,6 +293,7 @@ describe('[#27582] a non-system write may only seal a new value or keep its own 
       expect(refOf('r2')).toBe(shared);
       await engine.update(VAULT, { name: 'renamed', token: shared }, multi({ tier: 'gold' }));
       expect(d.rowsOf(VAULT).map((r) => [r.name, r.token])).toEqual([['renamed', shared], ['renamed', shared]]);
+      expect(d.lastStatement(VAULT)).not.toHaveProperty('token');
       expect(await engine.resolveSecretField(VAULT, 'r2', 'token')).toBe('shared');
     });
 
