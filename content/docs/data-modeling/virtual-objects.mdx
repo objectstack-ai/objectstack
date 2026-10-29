@@ -372,10 +372,12 @@ What each piece does on a plugin driver:
   `PATCH /data/berth_slot/:id` above.
 
 <Callout type="warn" title="Choose the sharing model on purpose">
-On the default sharing model, **every member edit is refused** (`404`: the row is outside
-the member's read scope), even for a member whose permission set grants `allowEdit`.
-Before a write, the platform's ownership checks ask the remote for `owner_id` and for `created_by` equal to the caller — columns a
-remote row does not carry — so every row reads as someone else's
+On the default sharing model, **every member edit is refused**, even for a member whose
+permission set grants `allowEdit`. That model keys reads to the row's `owner_id`, a column
+a remote row does not carry, so the member's read scope admits no row: lists come back
+empty and an edit answers `404`. On `public_read` the rows are readable, but before a write
+the platform's ownership checks ask the remote for `owner_id` and for `created_by` equal to
+the caller, find neither, and refuse the edit with `403`
 ([#27332](https://github.com/objectstack-ai/objectstack/issues/27332)). Declare
 `sharingModel: 'public_read_write'` and decide who may edit in `beforeUpdate`, as above.
 Serving an owner column the checks can read is the other way out; the reference test

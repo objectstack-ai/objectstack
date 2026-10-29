@@ -585,7 +585,7 @@ describe('(e) PATCH /data/spike_node/:id runs `beforeUpdate` first, then `driver
     expect(body.record).toMatchObject({ id: 'n_cut', name: 'Cut', start_date: '2026-11-03', end_date: '2026-11-07', guard_note: 'checked', locked: false });
   });
 
-  it('(e3) on the default sharing model, a member holding allowEdit is refused every edit: the ownership checks read columns no remote row carries', async () => {
+  it('(e3) on the default sharing model, a member holding allowEdit is refused every edit: no declared owner, so the member\'s read scope admits no row (404)', async () => {
     const mark = calls.length;
     const res = await as(plannerToken, 'PATCH', `/data/${OWNED}/o_1`, { name: 'Renamed' });
     const body = await readJson(res);
