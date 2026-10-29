@@ -660,7 +660,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -674,7 +674,7 @@
         "app": "showcase",
         "requires": [
           "one seeded object per model, from the access-matrix sharingModel column: showcase_private_note (private), showcase_announcement (public_read), showcase_account + showcase_project (public_read_write), showcase_invoice_line under showcase_invoice (controlled_by_parent)",
-          "contributor invoice RLS owner == current_user.email (permission-sets.ts invoice_own_rows) — invoices must be created with owner set to the creating contributor's email"
+          "contributor invoice RLS owner == current_user.email (permission-sets.ts invoice_own_rows) — invoices must be created with owner set to the creating contributor's email — a contributor create (clone included) whose owner is absent or names anyone else is refused 403 PERMISSION_DENIED by the create-time check invoice_owner_on_create, nothing written"
         ]
       },
       "steps": [
@@ -791,6 +791,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[0]'s admin re-read of the refused PATCH and its non-2xx by-id read (showcase-private-owd); acceptance[1]'s >= 400 non-owner PATCH with the admin re-read (showcase-public-read-owd); acceptance[4] on the stock C1/C2 contributors with C2's list exclusion, and acceptance[5]'s auditor listing of derived lines (new showcase-invoice-line-contributor-pair). automated.ref also names the existing showcase-crud-persona-matrix cases that already pin acceptance[2] and acceptance[3], which revision 5 recorded as unpinned. acceptance[6] stays procedural. No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-29",
+          "change": "fixtures.requires[1] says what a contributor create with a foreign or absent owner answers: the showcase contributor set now carries the ownership check on insert as well as update (invoice_owner_on_create beside invoice_owner_immutable, examples/app-showcase/src/security/permission-sets.ts), so it is refused 403 PERMISSION_DENIED with nothing written, clone included. No clause changed",
+          "ref": "claude/harden-invoice-owner-check-on-create"
         }
       ]
     },
