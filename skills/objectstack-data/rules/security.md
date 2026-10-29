@@ -224,8 +224,9 @@ an import row naming it fails). Search never scans it: keep it out of
 fields: {
   api_key: { type: 'secret', label: 'API Key' },
 }
-filter: { api_key: { $null: false } }   // set? also `null`, `$exists`, `$empty`
-// filter: { api_key: 'sk_live_…' }     // 400 INVALID_FIELD
+// also `null`, `$exists`, `$empty` / `is_not_empty`
+where: { api_key: { $null: false } }  // ObjectQL, hook `query.filter`
+filter: [{ field: 'api_key', operator: 'is_not_null' }]  // list view
 ```
 
 **Per-field access gating — `requiredPermissions` (ADR-0066 D3).** A field

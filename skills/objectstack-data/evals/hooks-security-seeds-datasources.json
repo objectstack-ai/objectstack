@@ -84,11 +84,11 @@
     {
       "id": 9,
       "prompt": "A `vendor` list view of the rows whose `api_key` (a `secret` field) starts with `sk_live`.",
-      "expected_output": "Redirects: a credential is filtered only by presence, `{ api_key: { $null: false } }`; any other filter or sort is `400 INVALID_FIELD`.",
+      "expected_output": "Redirects: a credential is filtered only by presence, `filter: [{ field: 'api_key', operator: 'is_not_null' }]`; any other filter or sort is `400 INVALID_FIELD`.",
       "files": [],
       "assertions": {
-        "must_contain": ["INVALID_FIELD", "$null"],
-        "must_not_contain": ["$startsWith"]
+        "must_contain": ["INVALID_FIELD", "is_not_null"],
+        "must_not_contain": ["starts_with"]
       }
     }
   ]
