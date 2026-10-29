@@ -26,6 +26,8 @@ import {
   type MetadataValidationIssue,
 } from '@object-ui/data-objectstack';
 import { FlowSchema, resolveFlowTriggerKind } from '@objectstack/spec/automation';
+import { FieldSchema } from '@objectstack/spec/data';
+import { checkFieldCompleteness, FIELD_SUMMARY_WITHOUT_OPERATIONS } from '@objectstack/spec/kernel';
 import { ActionSchema, DashboardWidgetSchema, resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
@@ -700,10 +702,11 @@ function guardNeedOf(def: SentBody): 'options' | 'target' | null {
  * (an array entry with no name) or a refusal naming neither options nor target
  * is not held: the save is sent, and its refusal shows as it always did.
  * objectstack#26736 — when the guard lets the fields through, an action still
- * waiting for an input is held the same way ({@link actionHeldEdit}).
+ * waiting for an input is held the same way ({@link actionHeldEdit}); before
+ * it, objectstack#27461, a roll-up still being set up ({@link summaryHeldEdit}).
  */
 export function objectHeldEdit(body: SentBody, locale: string): StudioHeld | null {
-  if (guardMessageFor(body) === null) return actionHeldEdit(body, locale);
+  if (guardMessageFor(body) === null) return summaryHeldEdit(body, locale) ?? actionHeldEdit(body, locale);
   for (const { name, def, named } of guardFieldEntries(body.fields)) {
     if (guardMessageFor({ fields: { [name]: def } }) === null) continue;
     const need = guardNeedOf(def);
@@ -714,6 +717,72 @@ export function objectHeldEdit(body: SentBody, locale: string): StudioHeld | nul
         locale,
         { field: fieldLabelOf(name, def) },
       ),
+      target: { kind: 'field', id: name },
+    };
+  }
+  return null;
+}
+
+/**
+ * objectstack#27461 — the roll-up inputs the field inspector offers, by the
+ * `summaryOperations` key each writes, in the inspector's order: the label
+ * the held clause names.
+ */
+const SUMMARY_INPUT_KEYS: Readonly<Record<string, string>> = {
+  object: 'designer.field.summary.object',
+  function: 'designer.field.summary.function',
+  field: 'designer.field.summary.field',
+};
+
+/**
+ * objectstack#27461 — the catalogue key of the roll-up input a `summary` field
+ * still needs, or `null` when it is not merely unfinished.
+ *
+ * The write guard lets a roll-up through at any stage, and the server saves
+ * one with no `summaryOperations` (it reads 0 everywhere), so neither refusal
+ * reaches the author. The judges are the spec's own: its completeness rule
+ * (`field/summary-without-operations`, no `summaryOperations` at all), and its
+ * `FieldSchema`, asked of the field as it stands, for what a started roll-up
+ * still lacks: the child object, the function, and the child field when the
+ * function reads one (`summaryFunctionReadsField`). Unfinished means every
+ * issue under `summaryOperations` is one of those inputs holding no value yet;
+ * any other issue is finished but wrong, and the save is sent so its refusal
+ * shows.
+ */
+function summaryHeldInput(def: SentBody): string | null {
+  if (def.type !== 'summary') return null;
+  if (checkFieldCompleteness(def).some((f) => f.rule === FIELD_SUMMARY_WITHOUT_OPERATIONS)) {
+    return SUMMARY_INPUT_KEYS.object;
+  }
+  const ops = isSentBody(def.summaryOperations) ? def.summaryOperations : {};
+  const parsed = FieldSchema.safeParse(def);
+  if (parsed.success) return null;
+  const missing = new Set<string>();
+  for (const issue of parsed.error.issues) {
+    if (issue.path[0] !== 'summaryOperations') continue;
+    const key = String(issue.path[1] ?? '');
+    if (!(key in SUMMARY_INPUT_KEYS) || ops[key] !== undefined) return null;
+    missing.add(key);
+  }
+  const first = Object.keys(SUMMARY_INPUT_KEYS).find((key) => missing.has(key));
+  return first === undefined ? null : SUMMARY_INPUT_KEYS[first];
+}
+
+/**
+ * objectstack#27461 — the first named `summary` field of `body` that is still
+ * being set up ({@link summaryHeldInput}), held the way an action is: named by
+ * its label and the input it needs, with "Show me" opening the field.
+ */
+function summaryHeldEdit(body: SentBody, locale: string): StudioHeld | null {
+  for (const { name, def, named } of guardFieldEntries(body.fields)) {
+    if (!named) continue;
+    const input = summaryHeldInput(def);
+    if (input === null) continue;
+    return {
+      clause: tFormat('engine.studio.held.fieldNeedsInput', locale, {
+        input: t(input, locale),
+        field: fieldLabelOf(name, def),
+      }),
       target: { kind: 'field', id: name },
     };
   }

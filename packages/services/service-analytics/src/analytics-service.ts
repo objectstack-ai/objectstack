@@ -34,6 +34,7 @@ import {
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
 import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
+import { cubeNameRequiredError } from './cube-name-refusal.js';
 // The object-level read admission asked at this door, ahead of every strategy
 // — the layer the raw-SQL path could not inherit from the engine. See that
 // module's header for the request that reached the database without it.
@@ -2412,8 +2413,12 @@ export class AnalyticsService implements IAnalyticsService {
     queryInput: AnalyticsQuery,
     context?: ExecutionContext,
   ): Promise<AnalyticsResult> {
+    // A query that names no cube — `cube` absent or the empty string — is
+    // refused before any other gate, as the typed `VALIDATION_FAILED` / 400
+    // the HTTP doors answer for the same body; a plain Error here read as a
+    // 500 to the caller (`cube-name-refusal.ts`).
     if (!queryInput.cube) {
-      throw new Error('Cube name is required in analytics query');
+      throw cubeNameRequiredError(queryInput.cube);
     }
     // `analytics_cube.public` — first, ahead of token resolution, cube
     // inference, admission and every strategy: a hidden cube is refused
@@ -3358,8 +3363,9 @@ export class AnalyticsService implements IAnalyticsService {
    * Generate SQL for a query without executing it (dry-run).
    */
   async generateSql(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<{ sql: string; params: unknown[] }> {
+    // Same refusal as `queryIn`: no cube named, no statement compiled.
     if (!queryInput.cube) {
-      throw new Error('Cube name is required for SQL generation');
+      throw cubeNameRequiredError(queryInput.cube);
     }
     // Same gate as `query()`: the dry-run door must not hand out the
     // statement — the cube's measures, raw SQL included — of a hidden cube.
