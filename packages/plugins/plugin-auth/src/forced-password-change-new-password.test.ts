@@ -23,7 +23,11 @@
  *  - `/reset-password` refuses the current password while the flag is set, and
  *    completes with a different one;
  *  - the control: with no forced change outstanding and history off, the same
- *    password is still accepted — the history depth's behaviour is unchanged.
+ *    password is still accepted — the history depth's behaviour is unchanged;
+ *  - with history on (`passwordHistoryCount` > 0) the history ring's refusal
+ *    follows the same rule on `/change-password`: it is given only once the
+ *    request's current password is confirmed, and a wrong current password
+ *    gets the endpoint's own `INVALID_PASSWORD`.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -110,10 +114,10 @@ interface Deployment {
  * outstanding when `forced` — stamped the way the admin doors stamp it (the
  * row, then `noteMustChangePasswordIssued`). History depth left at its default.
  */
-async function deployment(forced: boolean): Promise<Deployment> {
+async function deployment(forced: boolean, config: Record<string, unknown> = {}): Promise<Deployment> {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const engine = await engines.take();
-  const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, dataEngine: engine as never } as never);
+  const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, dataEngine: engine as never, ...config } as never);
   const sent: Deployment['sent'] = [];
   manager.setEmailService({
     sendTemplate: async (input: any) => {
@@ -212,5 +216,41 @@ describe('a forced password change requires a password different from the curren
     const changed = await changePassword(d, TEMPORARY, TEMPORARY);
     expect(changed.status, await changed.clone().text()).toBe(200);
     expect((await signIn(d, TEMPORARY)).status).toBe(200);
+  }, 60_000);
+});
+
+describe('with history on, a reuse refusal is given only after the current password is confirmed', () => {
+  const HISTORY = { passwordHistoryCount: 3 };
+  /** A user who has changed TEMPORARY to CHOSEN, so TEMPORARY is in the history ring. */
+  async function withHistory(): Promise<Deployment> {
+    const d = await deployment(false, HISTORY);
+    const changed = await changePassword(d, TEMPORARY, CHOSEN);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+    return d;
+  }
+
+  it('a confirmed current password and a password from the history ring answers PASSWORD_REUSE', async () => {
+    const d = await withHistory();
+    const res = await refusal(await changePassword(d, CHOSEN, TEMPORARY));
+    expect(res.status).toBe(400);
+    expect(res.code).toBe('PASSWORD_REUSE');
+    expect((await signIn(d, CHOSEN)).status, 'the password is unchanged').toBe(200);
+  }, 60_000);
+
+  it('a confirmed current password reused as the new one answers PASSWORD_REUSE', async () => {
+    const d = await withHistory();
+    const res = await refusal(await changePassword(d, CHOSEN, CHOSEN));
+    expect(res.status).toBe(400);
+    expect(res.code).toBe('PASSWORD_REUSE');
+  }, 60_000);
+
+  it('a wrong current password answers the endpoint’s own INVALID_PASSWORD, whatever the new password is', async () => {
+    const d = await withHistory();
+    for (const next of [TEMPORARY, CHOSEN]) {
+      const res = await refusal(await changePassword(d, 'Not!The-Current-0ne', next));
+      expect(res.status, next).toBe(400);
+      expect(res.code, next).toBe('INVALID_PASSWORD');
+    }
+    expect((await signIn(d, CHOSEN)).status, 'the password is unchanged').toBe(200);
   }, 60_000);
 });

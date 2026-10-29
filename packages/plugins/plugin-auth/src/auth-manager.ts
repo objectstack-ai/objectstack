@@ -5450,9 +5450,11 @@ export class AuthManager {
    * included: completing the change clears the flag, and it must not clear
    * while the user keeps the password the administrator issued.
    * `currentPassword` is the caller's claim of the current password on
-   * `/change-password` (`''` when the body carries none); that refusal is
-   * answered only once the claim verifies. Omitted on a door that carries no
-   * claim (`/reset-password`, whose token is the authority).
+   * `/change-password` (`''` when the body carries none); every reuse refusal
+   * (the forced change's and the history ring's) is given only once the claim
+   * verifies against the current hash, and an unconfirmed claim is left to the
+   * endpoint's own refusal. Omitted on a door that carries no claim
+   * (`/reset-password`, whose token is the authority).
    */
   private assertPasswordNotReused(
     userId: string,

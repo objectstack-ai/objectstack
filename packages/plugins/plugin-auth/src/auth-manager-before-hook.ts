@@ -178,9 +178,10 @@ export async function globalBeforeHook(
     // better-auth's native password.verify — no bespoke crypto. Stashes
     // the old hash so the after-hook appends it to the bounded ring on
     // success. While an administrator's forced change is outstanding the
-    // current password is refused here whatever the history depth; the
-    // change door hands over its current-password claim so that refusal
-    // answers only a caller who proved it (see the method's docblock).
+    // current password is refused here whatever the history depth. The
+    // change door hands over its current-password claim, and every reuse
+    // refusal is given only once that claim is confirmed (see the method's
+    // docblock).
     if (
       candidate &&
       (ctx?.path === '/reset-password' || ctx?.path === '/change-password')

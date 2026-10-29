@@ -376,31 +376,29 @@ export async function assertPasswordNotReused(
   }
   if (!account?.id) return undefined;
   const currentHash = typeof account.password === 'string' ? account.password : '';
-  if (forced && currentHash) {
-    const matches = async (password: string) => {
-      try { return await verify({ password, hash: currentHash }); } catch { return false; }
-    };
-    // `/change-password` carries the caller's claim of the current password,
-    // and better-auth verifies that claim only AFTER this hook. Judge the new
-    // password only once the claim holds, so this refusal never tells a caller
-    // who does not know the current password whether a guess equals it; a
-    // wrong claim is left to the endpoint's own refusal. `/reset-password`
-    // carries no claim: its token is the caller's authority.
-    const claimHolds = currentPassword === undefined || await matches(currentPassword);
-    if (claimHolds && await matches(candidate)) {
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('BAD_REQUEST', {
-        message: FORCED_ROTATION_REUSE_MESSAGE,
-        code: 'PASSWORD_REUSE',
-      });
-    }
+  const matches = async (password: string, hash: string) => {
+    try { return await verify({ password, hash }); } catch { return false; }
+  };
+  // `/change-password` carries the caller's claim of the current password, and
+  // better-auth confirms that claim only AFTER this hook. Every reuse refusal
+  // below — the forced change's and the history ring's — is given only once
+  // the current password is confirmed; an unconfirmed claim is left to the
+  // endpoint's own refusal (`INVALID_PASSWORD`). `/reset-password` carries no
+  // claim (`currentPassword` undefined): its token is the caller's authority.
+  const claimHolds = currentPassword === undefined
+    || (!!currentHash && await matches(currentPassword, currentHash));
+  if (!claimHolds) return undefined;
+  if (forced && currentHash && await matches(candidate, currentHash)) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('BAD_REQUEST', {
+      message: FORCED_ROTATION_REUSE_MESSAGE,
+      code: 'PASSWORD_REUSE',
+    });
   }
   if (count <= 0) return undefined;
   const compareList = [currentHash, ...this.parseHashes(account.previous_password_hashes)].filter(Boolean);
   for (const h of compareList) {
-    let match = false;
-    try { match = await verify({ password: candidate, hash: h }); } catch { match = false; }
-    if (match) {
+    if (await matches(candidate, h)) {
       const { APIError } = await import('better-auth/api');
       throw new APIError('BAD_REQUEST', {
         message: `For security you can't reuse one of your last ${count} passwords. Please choose a different one.`,
