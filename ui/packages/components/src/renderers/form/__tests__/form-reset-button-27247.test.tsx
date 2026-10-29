@@ -14,7 +14,7 @@ import '../../../renderers';
 
 type Rec = Record<string, unknown>;
 
-function renderForm(schema: Rec, after?: React.ReactNode) {
+function renderForm(schema: Rec, after?: React.ReactNode, domProps: Rec = {}) {
   const Form = ComponentRegistry.get('form')!;
   return render(
     <>
@@ -25,6 +25,7 @@ function renderForm(schema: Rec, after?: React.ReactNode) {
           defaultValues: { title: 'Opening' },
           ...schema,
         }}
+        {...domProps}
       />
       {after}
     </>,
@@ -54,9 +55,12 @@ describe('form renderer — showReset (objectstack#27247)', () => {
   });
 
   it('a reset button outside the form reaches it through the form id', async () => {
+    // The `id` arrives the way `SchemaRenderer` delivers a node's DOM props —
+    // beside `schema` — which is how the drawer and modal forms get theirs.
     renderForm(
-      { id: 'f-27247', showActions: false },
+      { showActions: false },
       <button type="reset" form="f-27247">Outside</button>,
+      { id: 'f-27247' },
     );
     fireEvent.change(titleInput(), { target: { value: 'Edited' } });
     fireEvent.click(screen.getByRole('button', { name: 'Outside' }));
