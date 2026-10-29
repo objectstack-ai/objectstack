@@ -4,8 +4,10 @@
 
 fix(service-storage): the chunk upload door refuses a `chunkIndex` the upload did not declare, and the presigned upload door refuses a `size` that is not a byte count
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: none
+
+Narrowed: a negative `size`, which the spec number (`GetPresignedUrlRequestSchema.size`, a bare `z.number()`) admits, is now refused `400` at the presigned door.
 
 - **Chunk door** (`PUT /api/v1/storage/upload/chunked/:uploadId/chunk/:chunkIndex`). **Before:** the index was read with `parseInt`, so `0.5` was read as `0`, `-1` reached the storage backend as part number 0 and answered `500 INTERNAL`, and an index at or past the upload's `totalChunks` was stored, counted in the progress, and then made `POST .../complete` answer `409` for good, since no door removes a stored chunk. **Now:** the index must be a whole number (decimal digits only) in `[0, totalChunks)`; anything else answers `400 INVALID_REQUEST` naming the valid range, with `details: { chunkIndex, totalChunks }`. Nothing is stored and the progress is unchanged, so the upload can still be completed. The check runs after the resume-token check, so a caller without the token still gets `403 INVALID_RESUME_TOKEN` first.
 - **Presigned upload door** (`POST /api/v1/storage/upload/presigned`). **Before:** only a missing `size` was refused. A non-numeric `size` such as `"abc"` reached the `sys_file` insert and failed there as `500 INTERNAL`, and a negative `size` such as `-5` answered `200` and stored a pending `sys_file` row with that size. **Now:** `size` must be a finite, non-negative JSON number (the `GetPresignedUrlRequestSchema.size` number); a string (a numeric string such as `"100"` included), `NaN`, an infinity, a negative number or a boolean answers `400 INVALID_REQUEST` naming `size`, and no `sys_file` row is written. `0` and any positive number behave as before.
