@@ -82,8 +82,8 @@ ComponentRegistry.register('my-widget', MyWidgetRenderer, {
 | `tags` | `string[]` | Free-form grouping tags |
 | `description` | `string` | Longer description for the designer |
 
-Sixteen keys in total: the eleven on `ComponentMeta` (`@object-ui/types`
-`base.ts`) plus the five `RegistryComponentMetaExtras` the registry adds
+The keys in total: those on `ComponentMeta` (`@object-ui/types`
+`base.ts`) plus the `RegistryComponentMetaExtras` the registry adds
 (`tier`, `namespace`, `skipFallback`, `labelling`, `deprecated`).
 
 ### ComponentInput types
@@ -98,8 +98,8 @@ const controlTypes: ComponentInputControlType[] = [
   'color', 'date', 'code', 'file', 'slot',
 ];
 
-// A manifest's inputs, checked against the published type. SIX keys are
-// writable — `name`, `type`, `of`, `required`, `enum`, `description`.
+// A manifest's inputs, checked against the published type. The writable
+// keys — `name`, `type`, `of`, `required`, `enum`, `description`.
 const inputs: ComponentInput[] = [
   { name: 'title', type: 'string', required: true, description: 'Heading text' },
   // ONE control type, or an ARRAY of them when the input accepts several
