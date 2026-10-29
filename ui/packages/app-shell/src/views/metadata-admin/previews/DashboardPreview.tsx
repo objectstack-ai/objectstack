@@ -7,7 +7,8 @@
  *
  * Uses the same DashboardRenderer the runtime DashboardView uses, with
  * the adapter from app-shell's AdapterProvider so widgets can query
- * live data. `designMode` is ON whenever the host is editing —
+ * live data; in the Studio its dataset queries read the draft world
+ * (`useCanvasDataSource`, objectstack#27585). `designMode` is ON whenever the host is editing —
  * read-only / view mode falls back to a plain runtime preview so the
  * canvas looks identical to what end users see.
  *
@@ -18,7 +19,7 @@
 import * as React from 'react';
 import { Loader2, Pencil, X, Check } from 'lucide-react';
 import type { DashboardComponentSchema, DashboardWidgetSchema } from '@object-ui/types';
-import { useAdapter } from '../../../providers/AdapterProvider.js';
+import { useCanvasDataSource } from './canvasDataSource.js';
 import type { MetadataPreviewProps } from '../preview-registry.js';
 import { PreviewShell, PreviewErrorBoundary, PreviewMessage } from './PreviewShell.js';
 import { uniqueId, appendArray } from '../inspectors/_shared.js';
@@ -42,7 +43,7 @@ export function DashboardPreview({
   onSelectionChange,
   locale,
 }: MetadataPreviewProps) {
-  const adapter = useAdapter();
+  const dataSource = useCanvasDataSource();
   const widgets: DashboardWidgetSchema[] = Array.isArray((draft as any).widgets)
     ? (draft as any).widgets
     : [];
@@ -194,7 +195,7 @@ export function DashboardPreview({
             <div className={loneWidget ? undefined : 'min-w-[768px]'}>
               <DashboardRenderer
                 schema={renderedSchema as any}
-                dataSource={adapter as any}
+                dataSource={dataSource as any}
                 designMode={designMode}
                 selectedWidgetId={selectedWidgetId}
                 onWidgetClick={designMode ? handleWidgetClick : undefined}

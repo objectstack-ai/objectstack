@@ -320,8 +320,8 @@ node parses its config on entry — **not** at authoring time, and `os lint` has
 no pairing arm for this one. The refusal is loud, names both keys, and lands
 before the node opens any approval request.
 
-Prefer a fallback target that cannot itself resolve empty (a literal `user`, or
-the `owner` membership tier). If it does resolve empty the node degrades to
+Prefer a fallback target that cannot itself resolve empty (a `user` naming a
+real account, or the `owner` membership tier). If it does resolve empty the node degrades to
 `admin_rescue` — the request opens on the organization's administrators and the
 run is never killed — and the log says both that the fallback fired and that it
 found nobody.
@@ -422,8 +422,10 @@ organization's directory resolves them — see
 What an entry that resolves to nobody leaves on the slate depends on its kind:
 
 - **A person entry** (`manager`, `field`) adds no slot. Nor does a `queue`
-  with no members, or an `expression` that yields no ids. A `user` entry never
-  resolves to nobody: its value is the slot.
+  with no members, or an `expression` that yields no ids. A `user` entry's
+  value is the slot when an account carries that id or email; one that no
+  account carries adds no slot, and logs the same `expanded to nobody` warning
+  as a group entry.
 - **A group entry** (`position`, `team`, `department`, `org_membership_level`)
   keeps its `<type>:<value>` literal as a slot, and so does an
   `expression` value that `resolveAs` re-expands into a group with nobody in it.

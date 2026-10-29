@@ -279,6 +279,13 @@ describe('@mention notifications reach only mentioned users who can read the com
       expect(audiences(await comment(openTask, [CAROL.email]))).toEqual([[CAROL.id]]);
     });
 
+    it('resolves an email mention whatever its casing, the way sign-in finds the user', async () => {
+      // The stored address is the lowercased one identity writes; sign-in
+      // looks it up lowercased, and so must a mention.
+      expect(audiences(await comment(openTask, ['Carol@A.Test']))).toEqual([[CAROL.id]]);
+      expect(audiences(await comment(openTask, [` ${CAROL.email.toUpperCase()} `]))).toEqual([[CAROL.id]]);
+    });
+
     it('never notifies the author, by id or by email', async () => {
       expect(audiences(await comment(openTask, [ALICE.id, ALICE.email]))).toEqual([]);
     });
@@ -365,6 +372,20 @@ describe('@mention notifications reach only mentioned users who can read the com
         { reason: 'cannot_read_thread', userId: DAVE.id, commentId },
       ]);
       expect(JSON.stringify(warned)).not.toContain(String(row.body));
+    });
+
+    it('logs no unknown_email for a differently-cased address of a stored user', async () => {
+      const commentId = String((await post(openTask, [])).id);
+      const warned: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+      const admitted = await admitMentionRecipients(gate(warned), {
+        mentions: ['CAROL@A.TEST'],
+        threadId: `${TASK}:${openTask}`,
+        actorId: ALICE.id,
+        organizationId: ORG_A,
+        commentId,
+      });
+      expect(admitted).toEqual([CAROL.id]);
+      expect(warned).toEqual([]);
     });
 
     it('withholds every recipient when the comment cannot be read back by its id', async () => {
