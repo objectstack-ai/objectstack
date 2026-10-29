@@ -4156,6 +4156,7 @@ const de = {
     progressBar: 'Entscheidungsfortschritt',
     declaredActions: 'Aktionen',
     decisionPanelOffRequestPage: 'Der Entscheidungsbereich für Genehmigungen funktioniert nur auf Seiten von Genehmigungsanfragen.',
+    snapshotHeading: 'Wie eingereicht',
     attachmentChip: 'Anhang',
     attachmentOpenFailed: 'Anhang konnte nicht geöffnet werden – bitte erneut versuchen',
     approveOneTitle: '„{{title}}“ genehmigen?',

@@ -4241,6 +4241,7 @@ const es = {
     progressBar: 'Progreso de la decisión',
     declaredActions: 'Acciones',
     decisionPanelOffRequestPage: 'El panel de decisión de aprobación solo funciona en las páginas de solicitudes de aprobación.',
+    snapshotHeading: 'Tal como se envió',
     attachmentChip: 'Adjunto',
     attachmentOpenFailed: 'No se pudo abrir el archivo adjunto: inténtalo de nuevo',
     approveOneTitle: '¿Aprobar «{{title}}»?',

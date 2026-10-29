@@ -4237,6 +4237,7 @@ const fr = {
     progressBar: 'Avancement de la décision',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'Le panneau de décision d\'approbation ne fonctionne que sur les pages de demande d\'approbation.',
+    snapshotHeading: 'Tel que soumis',
     attachmentChip: 'Pièce jointe',
     attachmentOpenFailed: "Impossible d'ouvrir la pièce jointe — veuillez réessayer",
     approveOneTitle: 'Approuver « {{title}} » ?',
