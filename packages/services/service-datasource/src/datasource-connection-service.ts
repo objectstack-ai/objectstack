@@ -46,6 +46,8 @@ import {
 import { connectFailureRemedy } from './connect-failure-remedy.js';
 import type { Logger } from './logger.js';
 import type { IDataDriver, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { ConnectorCredentialHandle, IConnectorCredentialSource } from '@objectstack/types';
+import { borrowConnectorCredential, borrowedConnectorOf } from './datasource-connector-credential.js';
 
 /** A datasource definition this service can connect (code- or runtime-origin). */
 export interface ConnectableDatasource {
@@ -56,6 +58,8 @@ export interface ConnectableDatasource {
   config?: Record<string, unknown>;
   external?: (Record<string, unknown> & {
     credentialsRef?: string;
+    /** The declared connector instance whose credential this datasource borrows (ADR-0015 D7). */
+    connector?: string;
     validation?: { onMismatch?: 'fail' | 'warn' | 'ignore' };
   }) | undefined;
   pool?: Record<string, unknown>;
@@ -151,6 +155,13 @@ export interface DatasourceConnectionServiceConfig {
   engine: () => ConnectionEngineLike | undefined;
   /** Dereference `credentialsRef` → cleartext (Phase 2). Optional in Phase 1. */
   secrets?: ConnectionSecretResolver;
+  /**
+   * The connector credential source an `external.connector` datasource
+   * borrows through (ADR-0015 D7) — the automation service's, resolved lazily
+   * per connect. Absent, or answering `undefined`, refuses such a datasource
+   * at connect: nothing else can supply its credential.
+   */
+  connectorCredentials?: () => IConnectorCredentialSource | undefined;
   /** Injectable connect policy. Defaults to {@link allowAllConnectPolicy}. */
   policy?: DatasourceConnectPolicy;
   logger?: Logger;
@@ -620,6 +631,24 @@ export class DatasourceConnectionService {
       }
     }
 
+    // [ADR-0015 D7] The other credential channel, FAIL-CLOSED for the same
+    // reason as the block above: a datasource that names a connector instance
+    // has no credential but the one it borrows, so a connect that cannot
+    // borrow is refused here, naming why — never a driver built to fail its
+    // first read with an upstream 401. The borrow judges the declaration
+    // only (a runtime-created datasource never passed `defineStack`'s
+    // check); a credential not set yet is the handle's to refuse per request,
+    // and clears without a reconnect once it is set.
+    let credential: ConnectorCredentialHandle | undefined;
+    const connector = borrowedConnectorOf(record.external);
+    if (connector !== undefined) {
+      const borrow = await borrowConnectorCredential(this.cfg.connectorCredentials?.(), connector);
+      if (!borrow.ok) {
+        return this.handleFailure(record, 'failed-credentials', borrow.reason, opts.context, opts.objects, opts.mappedObjects, borrow.cause);
+      }
+      credential = borrow.handle;
+    }
+
     // #13578 — set to the registry key ONLY when this attempt is the thing that
     // put it there, so the rollback below can never evict a driver someone else
     // owns. `registerDriver` is a no-op on a name it already holds (it keeps the
@@ -628,7 +657,11 @@ export class DatasourceConnectionService {
     // "we called register" is not evidence that "we registered".
     let registeredByThisAttempt: string | undefined;
     try {
-      const handle = await factory.create({ ...toSpec(record), ...(secret ? { secret } : {}) });
+      const handle = await factory.create({
+        ...toSpec(record),
+        ...(secret ? { secret } : {}),
+        ...(credential ? { credential } : {}),
+      });
       if (typeof handle?.connect === 'function') await handle.connect();
 
       // The engine routes a datasource to a driver by `driver.name === <datasource>`.
