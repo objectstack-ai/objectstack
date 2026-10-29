@@ -127,6 +127,7 @@ async function boot(decorateDriver?: (driver: any) => void) {
     list: find('GET', '/api/v1/data/import/jobs'),
     cancel: find('POST', '/api/v1/data/import/jobs/:jobId/cancel'),
     undo: find('POST', '/api/v1/data/import/jobs/:jobId/undo'),
+    dataCreate: find('POST', '/api/v1/data/:object'),
   };
 }
 
@@ -458,5 +459,52 @@ describe('async import job — real engine + protocol integration', () => {
     const restoreWrites = seen.filter((s) => s.object === 'task');
     expect(restoreWrites.length).toBeGreaterThan(0);
     for (const w of restoreWrites) expect(w.context?.preserveAudit).toBeUndefined();
+  });
+});
+
+/**
+ * The async create door resolves the object BEFORE it persists a job: an
+ * object name the runtime does not register is refused up front with the
+ * answer the data door gives the same name (`POST /data/OBJ`, 404
+ * `OBJECT_NOT_FOUND`), and no `sys_import_job` row is written — rather than a
+ * 201, a job id and a job whose every row then fails on that same refusal.
+ */
+describe('async import job — an unregistered object is refused before a job exists', () => {
+  let ctx: Awaited<ReturnType<typeof boot>>;
+  beforeEach(async () => {
+    ctx = await boot();
+    expect(ctx.create && ctx.dataCreate).toBeTruthy();
+  });
+
+  const jobRows = async () => (await ctx.engine.find('sys_import_job', {}, { isSystem: true } as any)) as any[];
+  const call = (route: any, object: string, body: any) => {
+    const res = makeRes();
+    return route.handler({ params: { object }, body } as any, res).then(() => res);
+  };
+
+  it('answers 404 OBJECT_NOT_FOUND, the data door\'s answer, and persists no job row', async () => {
+    expect(await jobRows()).toHaveLength(0);
+
+    const res = await call(ctx.create, 'no_such_object', { format: 'csv', csv: 'title\nx\n' });
+    expect(res._status).toBe(404);
+    expect(res._json?.error?.code ?? res._json?.code).toBe('OBJECT_NOT_FOUND');
+
+    // The same envelope the data door answers for the same name, byte for byte.
+    const door = await call(ctx.dataCreate, 'no_such_object', { title: 'x' });
+    expect(door._status).toBe(404);
+    expect(res._json).toEqual(door._json);
+
+    // Counted at the engine: the refusal wrote no job.
+    expect(await jobRows()).toHaveLength(0);
+  });
+
+  it('control: a registered object still gets 201 and exactly one job row', async () => {
+    const res = await call(ctx.create, 'task', { format: 'json', rows: [{ id: 'k1', title: 'kept' }] });
+    expect(res._status).toBe(201);
+    expect(res._json).toMatchObject({ object: 'task', status: 'pending', total: 1 });
+    await waitForTerminal(ctx.progress, res._json.jobId);
+    const rows = await jobRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: res._json.jobId, object_name: 'task' });
   });
 });
