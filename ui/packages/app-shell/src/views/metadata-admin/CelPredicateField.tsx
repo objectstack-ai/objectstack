@@ -54,7 +54,7 @@ import {
   type CelSuggestionKind,
   type CelValueType,
 } from './celAuthoring.js';
-import { useServerErrorsAt, useServerHoldAt, type ServerDiagnosticEntry } from './draftVerdict.js';
+import { useServerHoldAt, type ServerDiagnosticEntry } from './draftVerdict.js';
 
 const LINT_DEBOUNCE_MS = 250;
 
@@ -133,6 +133,12 @@ export interface CelPredicateFieldProps {
    * on what publish will refuse exactly as on a parse fault. Once the author
    * edits the text away the verdict no longer describes it and holds nothing:
    * the save goes out, and its re-read brings the next verdict.
+   *
+   * objectstack#27452 — the message is shown on the same terms as the hold:
+   * only while the text on screen is the text the verdict judged. A save the
+   * lint holds never re-reads, so a verdict on the previous text stays served;
+   * it is not this text's, and is not shown under it. A page that provides no
+   * judged body shows no server verdict here.
    */
   verdictPath?: string;
   /**
@@ -404,12 +410,12 @@ export function CelPredicateField({
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity === 'warning');
   // objectstack#26858 — the server's errors at this editor's path, each one
-  // the lint does not already say in the same words.
-  const atPath = useServerErrorsAt(verdictPath);
-  const serverErrors = atPath.filter((e) => !issues.some((iss) => issueText(iss, t) === e.message));
+  // the lint does not already say in the same words. objectstack#27452 — the
+  // held ones: a verdict on text no longer on screen describes nothing here.
+  const serverErrors = held.filter((e) => !issues.some((iss) => issueText(iss, t) === e.message));
   // "Valid CEL" only when nothing — the lint, the host's scope verdict
   // (objectui#11789) or the server's verdict at this path — says otherwise.
-  const clean = linted && !!value.trim() && issues.length === 0 && !scopeIssue && atPath.length === 0;
+  const clean = linted && !!value.trim() && issues.length === 0 && !scopeIssue && held.length === 0;
   // Result-type affordance (role="value"): shown once the expression parses,
   // even alongside warnings — the type is what dataset measure eligibility
   // keys off, so the author should see it whenever it is known.
@@ -437,7 +443,7 @@ export function CelPredicateField({
           aria-expanded={open}
           aria-autocomplete="list"
           aria-controls={open ? listId : undefined}
-          aria-invalid={errors.length > 0 || atPath.length > 0 || undefined}
+          aria-invalid={errors.length > 0 || held.length > 0 || undefined}
           onChange={(e) => {
             onChange(e.target.value);
             refreshAc();
@@ -450,7 +456,7 @@ export function CelPredicateField({
           }}
           className={cn(
             'font-mono text-xs',
-            (errors.length > 0 || atPath.length > 0) && 'border-destructive focus-visible:ring-destructive/40',
+            (errors.length > 0 || held.length > 0) && 'border-destructive focus-visible:ring-destructive/40',
           )}
         />
         {open && suggestions.length > 0 && (
