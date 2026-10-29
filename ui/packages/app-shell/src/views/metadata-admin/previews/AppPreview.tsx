@@ -99,7 +99,9 @@ interface NavItem {
 
 /**
  * The target a nav item names, read from the key its own branch declares.
- * Returns undefined for branches that name nothing (`group`, `separator`).
+ * Returns undefined for branches that name nothing (`group`, `separator`). A
+ * `report` entry with no `reportName` names the app's report index, answered
+ * as its route segment `reports` (objectstack#27525).
  */
 function navTarget(it: Record<string, unknown>, kind?: NavKind): string | undefined {
   switch (kind) {
@@ -110,7 +112,7 @@ function navTarget(it: Record<string, unknown>, kind?: NavKind): string | undefi
     case 'page':
       return typeof it.pageName === 'string' ? it.pageName : undefined;
     case 'report':
-      return typeof it.reportName === 'string' ? it.reportName : undefined;
+      return typeof it.reportName === 'string' && it.reportName !== '' ? it.reportName : 'reports';
     case 'url':
       return typeof it.url === 'string' ? it.url : undefined;
     case 'component':

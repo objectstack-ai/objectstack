@@ -479,6 +479,16 @@ export function AppNavInspector({ selection, draft, name, onPatch, onClearSelect
         )
       )}
 
+      {/* objectstack#27525 — a `report` item with no `reportName` is the
+          app's report index, not an unbound item. */}
+      {navType === 'report' && !node.reportName && (
+        <p className="text-[11px] text-muted-foreground" data-testid="nav-report-index-hint">
+          <span className="font-medium">{t('engine.inspector.appNav.reportIndex', locale)}</span>
+          {' · '}
+          {t('engine.inspector.appNav.reportIndexHint', locale)}
+        </p>
+      )}
+
       {previewHref && (
         <div className="rounded border bg-muted/30 px-2 py-1.5" data-testid="nav-target-preview">
           <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

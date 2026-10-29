@@ -695,6 +695,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.appNav.choose': '— Choose —',
   'engine.inspector.appNav.noTargets': 'There is nothing of this type to link to yet.',
   'engine.inspector.appNav.unboundHint': 'Until a target is chosen, this item stays here but is left out of the saved navigation.',
+  'engine.inspector.appNav.reportIndex': 'Report index',
+  'engine.inspector.appNav.reportIndexHint': 'With no report chosen, this item opens the app\'s report index: every report the app ships that the member may open.',
   'engine.inspector.appNav.actionHint': 'Only actions not bound to an object can run from the menu.',
   'engine.inspector.appNav.docPage': 'Doc page',
   'engine.inspector.appNav.book': 'Book',

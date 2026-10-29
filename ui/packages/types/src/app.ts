@@ -212,7 +212,7 @@ export interface NavigationEntryItem {
   /** Target page name (for type: 'page') */
   pageName?: string;
 
-  /** Target report name (for type: 'report') */
+  /** Target report name (for type: 'report'); omitted, the entry opens the app's report index */
   reportName?: string;
 
   /** Target URL (for type: 'url') */
