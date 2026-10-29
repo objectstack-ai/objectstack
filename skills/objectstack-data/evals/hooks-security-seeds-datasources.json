@@ -3,8 +3,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Support agents want to search tasks by the name of the project they belong to.",
-      "expected_output": "Applies the one prescription: a stored `text` mirror field `project_name` on `task`, listed in `searchableFields: ['name', 'project_name']`, maintained by a `beforeInsert` / `beforeUpdate` hook on `task` (stamp the parent's name for the incoming `project_id`) and an `afterUpdate` hook on `project` (re-stamp on rename), plus a one-off backfill for rows written outside hooks.",
+      "prompt": "Support agents want to search tasks by their project's name.",
+      "expected_output": "A stored `text` mirror `project_name` on `task`, in `searchableFields: ['name', 'project_name']`; a `beforeInsert` / `beforeUpdate` hook on `task` stamps it, an `afterUpdate` hook on `project` re-stamps it on rename; rows written outside hooks get a backfill.",
       "files": [],
       "assertions": {
         "must_contain": ["searchableFields", "project_name", "beforeInsert", "afterUpdate"],
@@ -13,8 +13,8 @@
     },
     {
       "id": 2,
-      "prompt": "Sales reps may only see their own leads, sales managers see their unit and everything below it, and every signed-in user can read the `product` catalog.",
-      "expected_output": "Access is authored in permission sets, not on the object. `lead` gets `sharingModel: 'private'`; the rep set's grant on `lead` carries `readScope: 'own'`, the manager set's `readScope: 'unit_and_below'` — an ADR-0057 scope that needs the enterprise `@objectstack/security-enterprise` plugin and `requires: ['hierarchy-security']`, failing closed to `own` without it. `product` is `sharingModel: 'public_read'`.",
+      "prompt": "Sales reps see only their own leads, sales managers their unit and everything below it; every signed-in user reads the `product` catalog.",
+      "expected_output": "Permission sets, not the object: `lead` is `sharingModel: 'private'`; the rep grant carries `readScope: 'own'`, the manager grant `readScope: 'unit_and_below'` (`@objectstack/security-enterprise` + `requires: ['hierarchy-security']`, else fails closed to `own`); `product` is `sharingModel: 'public_read'`.",
       "files": [],
       "assertions": {
         "must_contain": ["sharingModel: 'private'", "readScope", "unit_and_below", "public_read", "hierarchy-security"],
@@ -23,8 +23,8 @@
     },
     {
       "id": 3,
-      "prompt": "Expose the existing `customers` table from our Postgres reporting database as a read-only `legacy_customer` object.",
-      "expected_output": "Declares a `defineDatasource` entry (credentials by `credentialsRef`, never inline) and points the object at it with `datasource: '<id>'`, mapping the physical table via `remoteName` and column names via `columnMap`. Sets the datasource's `schemaMode` so the platform never alters the remote schema, and keeps the external write gate closed.",
+      "prompt": "Expose the `customers` table of our Postgres reporting database as a read-only `legacy_customer` object.",
+      "expected_output": "A `defineDatasource` entry (`credentialsRef`, never inline credentials); the object sets `datasource: '<id>'`, `remoteName` for the table, `columnMap` for columns; `schemaMode` leaves the remote schema unaltered; the external write gate stays closed.",
       "files": [],
       "assertions": {
         "must_contain": ["defineDatasource", "datasource", "remoteName", "columnMap", "schemaMode"],
@@ -33,8 +33,8 @@
     },
     {
       "id": 4,
-      "prompt": "Seed the `country` reference table for every environment, and add demo `opportunity` rows (dev/test only) that close 45 days after install and are owned by whoever installs the package. A nightly job advances each opportunity's `stage`; replaying the seed must not reset it.",
-      "expected_output": "Uses `defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data and `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows, with lookups referenced by natural key and dynamic values as CEL: `close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``. Parents before children in the exported array. The job-owned column is declared `columns: { stage: { applyOn: 'create' } }`, so an `upsert` replay leaves it as the row holds it.",
+      "prompt": "Seed the `country` table for every environment; add demo `opportunity` rows (dev/test only) closing 45 days after install, owned by the installer. A nightly job advances `stage`; a seed replay must not reset it.",
+      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; `columns: { stage: { applyOn: 'create' } }` so an `upsert` replay leaves the job-owned column.",
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow", "applyOn: 'create'"],
@@ -43,8 +43,8 @@
     },
     {
       "id": 5,
-      "prompt": "Finance may edit a contract's legal terms (`governing_law`, `liability_cap`) while it is a draft, but not once it is approved, signing or active. Legal still edits them.",
-      "expected_output": "Field permission entries with a row condition on the finance set: `'clm_contract.governing_law': { readable: true, editable: false, when: \"status in ['approved', 'signing', 'active']\" }` and the same for `liability_cap`; the legal set keeps its edit grant.",
+      "prompt": "Finance may edit a contract's legal terms (`governing_law`, `liability_cap`) while it is a draft, not once approved, signing or active; legal still edits them.",
+      "expected_output": "Row-conditioned field permission entries on the finance set — `'clm_contract.governing_law': { readable: true, editable: false, when: \"status in ['approved', 'signing', 'active']\" }`, likewise `liability_cap`; legal keeps its edit grant.",
       "files": [],
       "assertions": {
         "must_contain": ["when:", "editable: false", "readable: true", "clm_contract.governing_law"],
@@ -53,8 +53,8 @@
     },
     {
       "id": 6,
-      "prompt": "Customers' staff sign in to our portal and may read only the orders of the accounts they belong to; staff of one account must never see another account's orders.",
-      "expected_output": "Declares the set on the roster object that defines it: `account_member` (`user` field + `account` lookup) with `membershipKeys: { portal_account_ids: { userField: 'user', valueField: 'account' } }`; a portal permission set whose `rowLevelSecurity` reads it (`using: 'account in current_user.portal_account_ids'`), distributed by a position naming it in `permissionSets`; portal staff are invited on the `external` membership tier, outside the `everyone` baseline. Never a policy per account, never an owner stamp on every order.",
+      "prompt": "Portal users may read only the orders of the accounts they belong to, never another account's.",
+      "expected_output": "On the roster object `account_member` (`user` + `account` lookup): `membershipKeys: { portal_account_ids: { userField: 'user', valueField: 'account' } }`; a portal permission set reads it (`using: 'account in current_user.portal_account_ids'`), a position names it in `permissionSets`, portal staff join on the `external` tier outside the `everyone` baseline. No policy per account, no owner stamp per order.",
       "files": [],
       "assertions": {
         "must_contain": ["membershipKeys", "current_user.portal_account_ids", "userField", "valueField", "permissionSets", "external"],
@@ -63,12 +63,22 @@
     },
     {
       "id": 7,
-      "prompt": "Our app serves English and Chinese users. An `order` whose `amount` exceeds its account's `credit_limit` must not be saved; API clients branch on the code `CREDIT_LIMIT`, and a zh-CN rep reads `超出账户信用额度`.",
-      "expected_output": "A `beforeInsert` / `beforeUpdate` hook on `order` declares the refusal once, `refusals: { CREDIT_LIMIT: { message: 'Over the account credit limit.' } }`, and its sandboxed `body: { language: 'js', source }` reads the account through `ctx.api` and refuses by code only: `throw Object.assign(new Error(), { code: 'CREDIT_LIMIT' })` — the body's own text is never shown. The zh-CN bundle carries `hooks: { <hook>: { refusals: { CREDIT_LIMIT: { message: '超出账户信用额度' } } } }`, served whole in the caller's locale; a catalogue on a hook without a `js` body is refused at save.",
+      "prompt": "We serve English and Chinese users. An `order` whose `amount` exceeds its account's `credit_limit` must not save; API clients branch on `CREDIT_LIMIT`, a zh-CN rep reads `超出账户信用额度`.",
+      "expected_output": "A `beforeInsert` / `beforeUpdate` hook on `order` declares `refusals: { CREDIT_LIMIT: { message: 'Over the account credit limit.' } }`; its sandboxed `body: { language: 'js', source }` reads the account via `ctx.api` and refuses by code only (`throw Object.assign(new Error(), { code: 'CREDIT_LIMIT' })`); the zh-CN bundle's `hooks: { <hook>: { refusals: { CREDIT_LIMIT: { message: '超出账户信用额度' } } } }` is served in the caller's locale; a catalogue on a hook without a `js` body is refused at save.",
       "files": [],
       "assertions": {
         "must_contain": ["refusals:", "CREDIT_LIMIT: {", "code: 'CREDIT_LIMIT'", "language: 'js'", "hooks: {", "超出账户信用额度"],
         "must_not_contain": ["new Error('", "handler:"]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "Web-form leads arrive ownerless; inside sales holds them until a rep takes one, and two reps must never own the same lead.",
+      "expected_output": "`queues: [defineQueue({ name: 'inside_sales', label: 'Inside Sales', members: [{ type: 'position', value: 'inside_sales_rep' }] })]` and an `assignmentRules` entry `assignTo: { type: 'queue', value: 'inside_sales' }` with no `strategy` park each lead in the injected `queue` column — no picklist, counter or insert hook; a rep claims by an ordinary by-id `{ owner_id: <self> }` update, the loser gets `409 CONCURRENT_UPDATE`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineQueue", "type: 'position'", "type: 'queue'", "CONCURRENT_UPDATE"],
+        "must_not_contain": ["assigned_to", "beforeInsert"]
       }
     }
   ]

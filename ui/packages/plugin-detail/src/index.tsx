@@ -211,6 +211,8 @@ export {
   buildDefaultPageColumns,
   bodyTableIdsOf,
 } from './synth/recordPageColumns';
+// objectstack#27069 — the one reading of a related-list entry.
+export { relatedListEntryNames } from './synth/relatedListEntry';
 export type {
   RecordPageTier,
   RecordPageColumn,

@@ -179,3 +179,37 @@ describe('the stored record', () => {
     expect('seen' in relatedArrangementToRecord(dragged())).toBe(false);
   });
 });
+
+describe('「恢复默认顺序」 is a standing entry once the column is not the default one (objectstack#27241)', () => {
+  it('rearranged: false for a reader who never chose, or only collapsed', () => {
+    expect(resolveRelatedArrangement(DEFAULT, undefined, NOW).rearranged).toBe(false);
+    const collapsedOnly = editRelatedArrangement(DEFAULT, undefined, { kind: 'collapse', id: B, collapsed: true }, NOW);
+    expect(resolveRelatedArrangement(DEFAULT, collapsedOnly, NOW).rearranged).toBe(false);
+  });
+
+  it('rearranged: true after a move or a hide; a move back to the default order reads as the default', () => {
+    expect(resolveRelatedArrangement(DEFAULT, dragged(), NOW).rearranged).toBe(true);
+    const hid = editRelatedArrangement(DEFAULT, undefined, { kind: 'hide', id: B }, NOW);
+    expect(resolveRelatedArrangement(DEFAULT, hid, NOW).rearranged).toBe(true);
+    const back = editRelatedArrangement(DEFAULT, dragged(), { kind: 'move', id: C, to: 2 }, NOW);
+    expect(resolveRelatedArrangement(DEFAULT, back, NOW).order).toEqual(DEFAULT);
+    expect(resolveRelatedArrangement(DEFAULT, back, NOW).rearranged).toBe(false);
+  });
+
+  it('restore-default-arrangement: the default order, every card shown, basedOn the current default; collapse stays', () => {
+    const moved = dragged();
+    const hidden = editRelatedArrangement(DEFAULT, moved, { kind: 'hide', id: A }, NOW);
+    const collapsed = editRelatedArrangement(DEFAULT, hidden, { kind: 'collapse', id: B, collapsed: true }, NOW);
+    // The author has since reordered the default too.
+    const current = [B, A, C];
+    const restored = editRelatedArrangement(current, collapsed, { kind: 'restore-default-arrangement' }, NOW);
+    expect(restored.order).toEqual([]);
+    expect(restored.hidden).toEqual([]);
+    expect(restored.basedOn).toBe(relatedDefaultOrderHash(current));
+    expect(restored.collapsed).toEqual([B]);
+    const resolved = resolveRelatedArrangement(current, restored, NOW);
+    expect(resolved.order).toEqual(current);
+    expect(resolved.rearranged).toBe(false);
+    expect(resolved.defaultChanged).toBe(false);
+  });
+});

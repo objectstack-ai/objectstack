@@ -59,6 +59,7 @@ import {
 import { RecordTitleChip } from '../../custom/RecordTitleChip';
 import { resolveFieldReadFace } from '../../lib/field-face';
 import { PageDescriptionContext } from './page-description-context';
+import { PageHeaderTrailingContext } from './page-header-trailing-context';
 import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
@@ -1735,6 +1736,13 @@ export interface PageHeaderActionsProps {
    * （刷新收进 ⋯）」). With a refresh and no action, the row is the `⋯` alone.
    */
   refresh?: PageHeaderRefreshItem;
+  /**
+   * Host chrome drawn as the row's last segment, after the `⋯` menu and set
+   * apart from the actions by a vertical hairline (objectstack#27241) — the
+   * console's record view hands in the reader's panel switches. With it and
+   * no action, the row is the trailing chrome alone.
+   */
+  trailing?: React.ReactNode;
 }
 
 /** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
@@ -1764,6 +1772,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   mobileMaxVisible: rawMobileMaxVisible,
   emptySlot = null,
   refresh,
+  trailing,
 }) => {
   const ctx = useRecordContext();
   // Record-level inline-edit session (objectui#2572 item 4): while a shared
@@ -2208,8 +2217,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     void execute(dispatch);
   }, [record, execute]);
 
+  const hasTrailing = trailing !== null && trailing !== undefined && trailing !== false;
   const renderHeaderActions = () => {
-    if (headerActions.length === 0 && !refresh) return null;
+    if (headerActions.length === 0 && !refresh && !hasTrailing) return null;
     // The label is already resolved — the `headerActions` memo above ran every
     // action through the shared localizer (`{ns}.objects.{objectName}
     // ._actions.{name}.label`, authored literal as fallback), together with the
@@ -2338,6 +2348,18 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // the menu (a separator under nothing sets nothing apart).
     const firstDestructiveIdx = overflowActions.findIndex(isDestructiveAction);
     const useOverflow = overflowActions.length > 0 || !!refresh;
+    // The trailing segment (objectstack#27241): the host's chrome after the
+    // actions, a hairline between the two so the switches do not read as one
+    // more action. `ml-auto`: when the row wraps (a narrow header), the
+    // segment ends its own line at the right edge.
+    const trailingSegment = hasTrailing ? (
+      <span className="ml-auto inline-flex shrink-0 items-center gap-2" data-page-header-trailing="">
+        {(inlineActions.length > 0 || useOverflow) && (
+          <span role="separator" aria-orientation="vertical" className="h-5 w-px bg-border" data-page-header-trailing-rule="" />
+        )}
+        {trailing}
+      </span>
+    ) : null;
     // Resolve a `disabled` predicate against the record — a boolean OR an
     // expression (`'record.status == …'` or the `{ dialect, source }`
     // envelope). Without this a CEL `disabled` silently did nothing (only
@@ -2449,7 +2471,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     };
     return (
       <div
-        className="flex flex-wrap items-center gap-2 shrink-0"
+        className="flex flex-wrap items-center gap-2 shrink-0 max-w-full"
         role="toolbar"
         aria-label={tt('detail.pageHeaderActions', 'Page header actions')}
       >
@@ -2530,6 +2552,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        {trailingSegment}
       </div>
     );
   };
@@ -2574,6 +2597,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // title (objectui#12624): drawn under the title and subtitle, the order the
   // console page header uses, instead of above the title by the page.
   const pageDescription = React.useContext(PageDescriptionContext);
+  // The host's trailing chrome for the action row (objectstack#27241).
+  const headerTrailing = React.useContext(PageHeaderTrailingContext);
   const headerObjectSchema: any = (ctx as any)?.objectSchema;
   const headerObjectName: string | undefined = ctx?.objectName || headerObjectSchema?.name;
   const explicitTitle = interpolate(
@@ -2631,6 +2656,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       mobileMaxVisible={schema?.mobileMaxVisible ?? schema?.properties?.mobileMaxVisible}
       emptySlot={emptySlot}
       refresh={hostRefresh ? { label: tt('common.refresh', 'Refresh'), onSelect: handleManualRefresh } : undefined}
+      trailing={headerTrailing}
     />
   );
 

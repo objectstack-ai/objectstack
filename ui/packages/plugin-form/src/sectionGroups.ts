@@ -83,9 +83,10 @@ function restatesGroupOwnedKey(section: ObjectFormSection, key: string): boolean
 /**
  * The keys the spec PERMITS beside `group`. They describe how THIS form lays
  * the section out, which is the form's business and not the group's, so the
- * authored value wins over the derived section.
+ * authored value wins over the derived section. (`pane` left with the split
+ * form, ADR-0050: `@objectstack/spec` refuses it on every section since 18.3.0.)
  */
-export const SECTION_LAYOUT_KEYS = ['columns', 'pane'] as const;
+export const SECTION_LAYOUT_KEYS = ['columns'] as const;
 
 /** Diagnostics already emitted, keyed so one typo is loud once, not per render. */
 const reported = new Set<string>();

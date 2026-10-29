@@ -10,7 +10,7 @@
  * recordInvalidation — how a record form reads the data-invalidation bus
  * (`notifyDataChanged` / `useDataInvalidation` from `@object-ui/react`), stated
  * ONCE for every layout `ObjectForm` routes to: its default arm (objectui#10572)
- * and `DrawerForm`, `ModalForm`, `SplitForm`, `TabbedForm` and `WizardForm`
+ * and `DrawerForm`, `ModalForm`, `TabbedForm` and `WizardForm`
  * (objectui#10715).
  *
  * The nonce moves on a change to the record the form reads, to its object as a

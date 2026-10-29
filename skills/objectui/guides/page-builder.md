@@ -325,7 +325,7 @@ Pick plugins by domain — each registers its own `type` strings in the Componen
 | Visualization | `plugin-charts`, `plugin-map` |
 | Editors | `plugin-editor`, `plugin-markdown` |
 | Views & Design | `plugin-view`, `plugin-tree`, `plugin-designer` |
-| AI | `plugin-ai`, `plugin-chatbot` |
+| AI | `plugin-chatbot` |
 
 For lazy loading, use `LazyPluginLoader` from `@object-ui/react` rather than top-level imports.
 

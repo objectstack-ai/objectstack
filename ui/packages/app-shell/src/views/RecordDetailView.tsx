@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, Rows3, LayoutGrid } from 'lucide-react';
+import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, Activity, PanelRight } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -136,11 +136,17 @@ const TOGGLE_RELATED_SHORTCUT: AdvertisedShortcut = {
 };
 
 /**
- * The physical key of each punctuation chord key. Shift changes the character
+ * How each punctuation chord key is recognised. Shift changes the character
  * those keys type (`.` becomes `>` on a US layout), so a chord that holds
- * Shift is matched by `KeyboardEvent.code`, the key itself, not by `key`.
+ * Shift is matched by `KeyboardEvent.code`, the physical key — and, beside it,
+ * by either character `key` reports for that key (objectstack#27241): an
+ * event that carries no `code` (synthetic or injected input, some IMEs and
+ * remote desktops) still names the key it typed.
  */
-const PANEL_CHORD_CODES: Readonly<Record<string, string>> = { '.': 'Period', ',': 'Comma' };
+const PANEL_CHORD_KEYS: Readonly<Record<string, { code: string; keys: readonly string[] }>> = {
+  '.': { code: 'Period', keys: ['.', '>'] },
+  ',': { code: 'Comma', keys: [',', '<'] },
+};
 
 function matchesPanelChord(
   e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
@@ -149,8 +155,9 @@ function matchesPanelChord(
   if (e.altKey) return false;
   if (Boolean(chord.mod) !== (e.metaKey || e.ctrlKey)) return false;
   if (Boolean(chord.shift) !== e.shiftKey) return false;
-  const code = PANEL_CHORD_CODES[chord.key];
-  return code !== undefined ? e.code === code : e.key.toLowerCase() === chord.key;
+  const punctuation = PANEL_CHORD_KEYS[chord.key];
+  if (punctuation) return e.code === punctuation.code || punctuation.keys.includes(e.key);
+  return e.key.toLowerCase() === chord.key;
 }
 
 /**
@@ -3428,12 +3435,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // its tab is shown (nothing is preloaded here), and header/row
     // affordances (+ New / View All / row navigation) are wired
     // downstream by `RelatedRecordActionsBridge`.
-    // The DEFAULT order of the related lists (objectstack#27055): the derived
-    // order with `relatedList: 'primary'` lists first, each group keeping
-    // `deriveRelatedLists`' order (owned before lookup, then declaration).
-    // ⛔ FENCE (objectstack#27069): the object's authored `relatedLists`
-    // order is not read — the spec key is not declared yet. When it lands,
-    // THIS is the one read point: order by it, then by this derived order.
+    // The DEFAULT order of the related lists (objectstack#27055,
+    // objectstack#27069): `relatedList: 'primary'` lists first, then the rest,
+    // each group in `deriveRelatedLists`' order — the object's declared
+    // `relatedLists` first, in that order (`resolveRelatedListOrder`), then
+    // the derived order (owned before lookup, then declaration). It is the
+    // order the related column's cards, the 关联 tab and the body tables
+    // show to a reader who never arranged them.
     const orderedRelations = [
       ...childRelations.filter((relation) => relation.isPrimary),
       ...childRelations.filter((relation) => !relation.isPrimary),
@@ -3975,15 +3983,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // no hook may run.
   const bodyTableIds = assignedPage || namedPageBlocked ? new Set<string>() : bodyTableIdsOf(renderedPage);
 
-  // objectstack#27052 — the panel toggles on the crumb row: one per column the
-  // page has content for, drawn only where the columns are (never in the
-  // drawer / split pane, never in the tabbed tier).
+  // objectstack#27052 / objectstack#27241 — the panel switches: ONE segmented
+  // control, one segment per column the page has content for, drawn at the end
+  // of the record header's action row (`PageHeaderTrailingContext`), only
+  // where the columns are (never in the drawer / split pane, never in the
+  // tabbed tier), in both column tiers.
   const panelToggleItems: PanelToggleItem[] = [];
   if (pageColumns && pageColumns.timeline.length > 0) {
     panelToggleItems.push({
       id: 'timeline',
       label: t('detail.timeline', { defaultValue: 'Timeline' }),
-      icon: Rows3,
+      icon: Activity,
       pressed: columnSwitches.timeline,
       onPressedChange: (pressed) => setTimelineSwitch(pressed ? 'on' : 'off'),
       shortcut: shortcutKeycaps(TOGGLE_TIMELINE_SHORTCUT.chord),
@@ -3996,7 +4006,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // Not `detail.related`: the rail toggle and the Related tab carry that
       // name, and a second control with the same name would announce as them.
       label: t('detail.relatedColumn', { defaultValue: 'Related column' }),
-      icon: LayoutGrid,
+      icon: PanelRight,
       pressed: columnSwitches.related,
       onPressedChange: (pressed) => setRelatedSwitch(pressed ? 'on' : 'off'),
       shortcut: shortcutKeycaps(TOGGLE_RELATED_SHORTCUT.chord),
@@ -4007,6 +4017,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     timeline: panelToggleItems.some((item) => item.id === 'timeline'),
     related: panelToggleItems.some((item) => item.id === 'related'),
   };
+  const panelToggles =
+    panelToggleItems.length > 0 ? (
+      <PanelToggles label={t('detail.panelToggles', { defaultValue: 'Panels' })} items={panelToggleItems} />
+    ) : null;
 
   // objectui#11958 (card ② of the objectstack#8346 ruling, M1, zero server) —
   // the record page's "print" action. The page this view renders for the
@@ -4173,33 +4187,30 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         >
           <div className="flex-1 overflow-hidden flex flex-row">
             <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
-              {/* The crumb row: the way back on the left — the origin link,
-                  and on a page a drawer's ⤢ opened, the way back into that
-                  drawer (objectstack#26679) — and, on a page in a column
-                  tier, the reader's panel toggles on the right
-                  (objectstack#27052). None of it is drawn inside a drawer:
-                  the drawer's own bar is its way back, and the page's
-                  history state is not its. */}
+              {/* The crumb row: the ways back only — the origin link on the
+                  left and, on a page a drawer's ⤢ opened, the way back into
+                  that drawer on the right (objectstack#26679). The reader's
+                  panel switches are not here: they end the record header's
+                  action row (objectstack#27241). With neither way back the
+                  row has no child, and `empty:hidden` takes it out of the
+                  flow. None of it is drawn inside a drawer: the drawer's own
+                  bar is its way back, and the page's history state is not
+                  its. */}
               {!embedded && (
-                <div className="flex items-center justify-between gap-3 empty:hidden" data-record-crumb-row="">
+                <div
+                  className="mb-3 flex items-center justify-between gap-3 empty:hidden [&>[data-testid=record-drawer-return]]:ml-auto"
+                  data-record-crumb-row=""
+                >
                   {originFrom?.pathname && originFrom?.label && (
                     <Link
                       to={originFrom.pathname}
-                      className="inline-flex items-center gap-1 mb-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <ChevronLeft className="h-4 w-4" />
                       <span>{originFrom.label}</span>
                     </Link>
                   )}
-                  <div className="mb-3 ml-auto flex items-center gap-2 empty:hidden">
-                    <RecordDrawerReturnLink />
-                    {panelToggleItems.length > 0 && (
-                      <PanelToggles
-                        label={t('detail.panelToggles', { defaultValue: 'Panels' })}
-                        items={panelToggleItems}
-                      />
-                    )}
-                  </div>
+                  <RecordDrawerReturnLink />
                 </div>
               )}
               {/* objectui#12906 — the print page's screen-only chrome. A page
@@ -4303,6 +4314,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     so it is read in the tabbed tier only. Nothing is drawn
                     while the tier is unmeasured (one unpainted commit). */}
                 {pageColumns && (recordPageTier === 'two-column' || recordPageTier === 'three-column') ? (
+                  <PageHeaderTrailingContext.Provider value={panelToggles}>
                   <RecordPageColumns
                     tier={recordPageTier}
                     columns={pageColumns}
@@ -4320,6 +4332,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                       />
                     }
                   />
+                  </PageHeaderTrailingContext.Provider>
                 ) : recordPageTier === null ? null : (
                   // objectstack#27055 — the synthesized default page is the
                   // record page v3 in its tabbed tier too (frameless sections,
