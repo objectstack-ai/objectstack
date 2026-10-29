@@ -34,6 +34,9 @@
 //     field-level write gate, and a mixed payload does not partially succeed;
 //   - the user picker's candidate query (the not-deactivated filter) as the
 //     member: served, deactivated peers excluded;
+//   - the user picker's `$search` as the member: a colleague's name finds the
+//     colleague, a colleague's sign-in phone number finds no row (the search
+//     set is narrowed, not refused), with the admin's search as the control;
 //   - the ORG OWNER and a PLATFORM ADMIN (who holds no org-admin grant): the
 //     full group on both doors, and the platform admin's write unchanged.
 //
@@ -239,6 +242,37 @@ describe('[#21237] the identity object Admin group at the HTTP door: org peers a
     expect(row).toHaveProperty('name');
     expect(row).toHaveProperty('email');
     for (const field of SIGN_IN_PHONE) expect(row, field).not.toHaveProperty(field);
+  });
+
+  // The user picker's `$search`: `phone_number` is `searchable: true`, so it is
+  // in the object's default search set. For a member the set is NARROWED to the
+  // fields the member may query (the queryable-field narrowing), never refused:
+  // the picker keeps answering on the name, and the colleague's number answers
+  // with no row. The admin search for the same number is the control that the
+  // term really matches the stored value when the column is scanned.
+  const searchIds = async (who: string, term: string) => {
+    const res = await stack.apiAs(token[who], 'GET', `/data/sys_user?$search=${encodeURIComponent(term)}&$top=100`);
+    return { status: res.status, ids: rowsOf(await res.json()).map((r) => String(r.id)) };
+  };
+  const COLLEAGUE_NAME = 'Org Peer colleague';
+  const COLLEAGUE_PHONE_DIGITS = String(SYNTHETIC.phone_number).replace(/^\+/, '');
+
+  it('a member user-picker search by a colleague name is served the colleague', async () => {
+    const { status, ids } = await searchIds('member', COLLEAGUE_NAME);
+    expect(status).toBe(200);
+    expect(ids).toContain(uid.colleague);
+  });
+
+  it('a member search by a colleague sign-in phone number is answered with no row, not refused', async () => {
+    const { status, ids } = await searchIds('member', COLLEAGUE_PHONE_DIGITS);
+    expect(status).toBe(200);
+    expect(ids).toEqual([]);
+  });
+
+  it('the platform admin search by the same phone number is served the colleague (the control for the empty answer above)', async () => {
+    const { status, ids } = await searchIds('admin', COLLEAGUE_PHONE_DIGITS);
+    expect(status).toBe(200);
+    expect(ids).toContain(uid.colleague);
   });
 
   it.each(['owner', 'admin'])('the %s reads the colleague sign-in phone fields as stored', async (who) => {
