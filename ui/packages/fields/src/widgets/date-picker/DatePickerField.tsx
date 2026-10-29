@@ -115,7 +115,9 @@ function TemporalPicker({
     ? t('fields.datePicker.invalid', { value: badText, format: pattern })
     : null;
   const reportInvalid = React.useRef(onInvalidInputChange);
-  reportInvalid.current = onInvalidInputChange;
+  React.useEffect(() => {
+    reportInvalid.current = onInvalidInputChange;
+  });
   const reported = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (reported.current === invalidMessage) return;
