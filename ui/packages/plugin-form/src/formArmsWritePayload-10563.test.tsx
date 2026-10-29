@@ -127,7 +127,6 @@ const sections = (extra: string[]) => [
 const ROUTES: Array<{ route: string; layout: (extra?: string[]) => Record<string, unknown>; steps: number }> = [
   { route: 'simple (control)', layout: (extra = []) => ({ fields: members(extra) }), steps: 1 },
   { route: 'tabbed (TabbedForm)', layout: (extra = []) => ({ formType: 'tabbed', sections: sections(extra) }), steps: 1 },
-  { route: 'split (SplitForm)', layout: (extra = []) => ({ formType: 'split', sections: sections(extra) }), steps: 1 },
   { route: 'wizard (WizardForm)', layout: (extra = []) => ({ formType: 'wizard', sections: sections(extra) }), steps: 2 },
   {
     route: 'simple + mobile.stepper (WizardForm)',

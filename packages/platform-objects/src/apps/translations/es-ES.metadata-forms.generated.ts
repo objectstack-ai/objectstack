@@ -618,15 +618,19 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "Configuración de moneda",
-        helpText: "En qué moneda está este campo: un campo de moneda, o una fórmula cuyo tipo de retorno es Moneda. Sin definir: modo dynamic. En ambos modos el valor es un número sin más."
+        helpText: "En qué moneda está este campo: un campo de moneda, o una fórmula cuyo tipo de retorno es Moneda. Sin definir: modo dynamic. En todos los modos el valor es un número sin más."
       },
       "currencyConfig.currencyMode": {
         label: "Modo de moneda",
-        helpText: "dynamic (predeterminado): el campo no tiene moneda propia y los importes se muestran en la moneda predeterminada del tenant (el ajuste localization.currency). fixed: el campo tiene una única moneda, defaultCurrency."
+        helpText: "dynamic (predeterminado): el campo no tiene moneda propia y los importes se muestran en la moneda predeterminada del tenant (el ajuste localization.currency). fixed: el campo tiene una única moneda, defaultCurrency. record: cada registro tiene su propia moneda, guardada en el campo que indica currencyField."
+      },
+      "currencyConfig.currencyField": {
+        label: "Campo de moneda",
+        helpText: "Solo en modo record, y obligatorio en él: el campo de este objeto que guarda el código ISO 4217 de cada registro — un campo de texto con valueDomain iso_4217_currency, por convención currency_code."
       },
       "currencyConfig.defaultCurrency": {
         label: "Moneda predeterminada",
-        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Obligatorio en modo fixed; no se rellena automáticamente. No se lee en modo dynamic."
+        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Obligatorio en modo fixed; no se rellena automáticamente. No se lee en modo dynamic; se rechaza en modo record."
       },
       step: {
         label: "Incremento",

@@ -17,8 +17,7 @@
 
 /* Shimmer keyframe + utility for skeleton loading placeholders.
  *
- * Usage:   <div class="animate-shimmer ..."> or via ShimmerSkeleton
- *          from @object-ui/components.
+ * Usage:   <div class="animate-shimmer ...">
  *
  * The keyframe slides a 200%-wide gradient across an element's
  * background. Pair with `bg-[length:200%_100%]` and a gradient that

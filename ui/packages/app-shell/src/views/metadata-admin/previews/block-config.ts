@@ -190,7 +190,6 @@ export const BLOCK_CONFIG: Record<string, BlockPropField[]> = {
         { value: 'simple', label: 'engine.inspector.pageBlock.option.formType.simple' },
         { value: 'tabbed', label: 'engine.inspector.pageBlock.option.formType.tabbed' },
         { value: 'wizard', label: 'engine.inspector.pageBlock.option.formType.wizard' },
-        { value: 'split', label: 'engine.inspector.pageBlock.option.formType.split' },
         { value: 'drawer', label: 'engine.inspector.pageBlock.option.formType.drawer' },
         { value: 'modal', label: 'engine.inspector.pageBlock.option.formType.modal' },
       ],

@@ -202,7 +202,7 @@ describe('object-form — the seven I18nLabel members resolve against the UI lan
     expect(container.innerHTML).not.toContain('[object Object]');
   });
 
-  it.each(['tabbed', 'split'] as const)(
+  it.each(['tabbed'] as const)(
     '%s: a locale-map `submitText` labels the Save button',
     async (formType) => {
       const { container } = await mount({ formType, sections: STEPS, submitText: SUBMIT_MAP });

@@ -86,7 +86,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, fireEvent, screen, cleanup } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from './ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from './ObjectFormContainer';
 import { MasterDetailForm } from './MasterDetailForm';
 import { NO_SUBMIT_TARGET_MESSAGE } from './submitTarget';
 import './index';
@@ -123,7 +125,7 @@ vi.mock('@object-ui/components/ui/sonner', async (orig) => {
 registerAllFields();
 
 /** The five renderers `ObjectForm` routes to that own an early-return submit. */
-const VARIANTS = ['tabbed', 'wizard', 'split', 'drawer', 'modal'] as const;
+const VARIANTS = ['tabbed', 'wizard', 'drawer', 'modal'] as const;
 /** The two of them that implement an inline-`customFields` field source. */
 const INLINE_RENDERERS = ['drawer', 'modal'] as const;
 /**
@@ -198,7 +200,7 @@ describe('1. a declared `submitHandler` is consulted even with NO dataSource', (
       const onError = vi.fn();
 
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={baseSchema(formType, { submitHandler, onSuccess, onError }) as any}
         />,
       );
@@ -222,7 +224,7 @@ describe('1. a declared `submitHandler` is consulted even with NO dataSource', (
     const onError = vi.fn();
 
     render(
-      <ObjectForm schema={simpleSchema({ submitHandler, onSuccess, onError }) as any} />,
+      <ObjectFormContainer schema={simpleSchema({ submitHandler, onSuccess, onError }) as any} />,
     );
     await fillAndSubmit();
 
@@ -259,7 +261,7 @@ describe('1. a declared `submitHandler` is consulted even with NO dataSource', (
     // the merged tree as well — the ordering defect was reachable only through
     // the `!dataSource` carve-out, and this case is what says so.
     render(
-      <ObjectForm
+      <ObjectFormContainer
         schema={simpleSchema({ submitHandler, onSuccess, onError }) as any}
         dataSource={dataSource}
       />,
@@ -281,7 +283,7 @@ describe('2. no seam, no adapter, no inline fields → refuse loudly', () => {
       const onSuccess = vi.fn();
       const onError = vi.fn();
 
-      render(<ObjectForm schema={baseSchema(formType, { onSuccess, onError }) as any} />);
+      render(<ObjectFormContainer schema={baseSchema(formType, { onSuccess, onError }) as any} />);
       await fillAndSubmit();
 
       // THE PIN — the false success is gone.
@@ -298,7 +300,7 @@ describe('2. no seam, no adapter, no inline fields → refuse loudly', () => {
       const onError = vi.fn();
 
       render(
-        <ObjectForm schema={baseSchema(formType, { onOpenChange, onError }) as any} />,
+        <ObjectFormContainer schema={baseSchema(formType, { onOpenChange, onError }) as any} />,
       );
       await fillAndSubmit();
 
@@ -322,7 +324,7 @@ describe('3. CARVE-OUT: a legitimate inline-fields form still works', () => {
       // and the one the `object-form` element gate exempts from
       // `requiresDataSource`.
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={{
             type: 'object-form',
             objectName: 'po',
@@ -357,7 +359,7 @@ describe('3. CARVE-OUT: a legitimate inline-fields form still works', () => {
       // published example throw. Measured before the guard existed: it rendered
       // and submitted.
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={baseSchema(formType, {
             sections: [{ name: 's1', label: 'Sec One', fields: INLINE_FIELDS }],
             onSuccess,
@@ -386,7 +388,7 @@ describe('3. CARVE-OUT: a legitimate inline-fields form still works', () => {
       // a narrower dress. Without this case the carve-out could quietly become a
       // blanket escape the moment any form declared one inline field.
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={baseSchema(formType, {
             sections: [{ name: 's1', label: 'Sec One', fields: [...INLINE_FIELDS, 'memo'] }],
             onSuccess,
@@ -413,7 +415,7 @@ describe('3. CARVE-OUT: a legitimate inline-fields form still works', () => {
     // and after the fix, deliberately — it is what makes block 1's `simple` pin
     // attributable to the declared seam rather than to the carve-out having
     // been narrowed or removed.
-    render(<ObjectForm schema={simpleSchema({ onSuccess, onError }) as any} />);
+    render(<ObjectFormContainer schema={simpleSchema({ onSuccess, onError }) as any} />);
     await fillAndSubmit();
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
@@ -435,7 +437,7 @@ describe('3. CARVE-OUT: a legitimate inline-fields form still works', () => {
       // variants do — the `simple` row is the one that goes red without the
       // members-only seeding in `SimpleObjectForm`'s schema and record effects.
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={baseSchema(formType, {
             initialValues: { ref: 'SEEDED' },
             sections: [{ name: 's1', label: 'Sec One', fields: INLINE_FIELDS }],
@@ -480,7 +482,7 @@ describe('4. DEGENERATE CONTROL: with a dataSource the write really happens', ()
       } as any;
 
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={baseSchema(formType, { onSuccess, onError }) as any}
           dataSource={dataSource}
         />,

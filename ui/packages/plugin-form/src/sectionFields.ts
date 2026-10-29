@@ -8,7 +8,7 @@
 
 /**
  * Shared section-field normalizer for every `object-form` arm that takes
- * sections: Tabbed / Wizard / Split / Drawer / Modal, and — since
+ * sections: Tabbed / Wizard / Drawer / Modal, and — since
  * objectui#10475, through `SectionFieldsContext.pool` — the default arm
  * (`SimpleObjectForm`).
  *
