@@ -175,13 +175,63 @@ describe('evaluatePlainCondition', () => {
   });
 
   it('should evaluate compound conditions', () => {
-    expect(evaluatePlainCondition("amount > 1000 && status === 'urgent'", { amount: 2000, status: 'urgent' })).toBe(true);
-    expect(evaluatePlainCondition("amount > 1000 && status === 'urgent'", { amount: 2000, status: 'normal' })).toBe(false);
+    expect(evaluatePlainCondition("amount > 1000 && status == 'urgent'", { amount: 2000, status: 'urgent' })).toBe(true);
+    expect(evaluatePlainCondition("amount > 1000 && status == 'urgent'", { amount: 2000, status: 'normal' })).toBe(false);
+  });
+
+  // objectstack#27605 — a bare string is CEL, as the spec defines it and
+  // `evaluateCondition` reads it.
+  it('reads a bare string as CEL: CEL-only constructs evaluate', () => {
+    expect(evaluatePlainCondition("status in ['overdue', 'urgent']", { status: 'urgent' })).toBe(true);
+    expect(evaluatePlainCondition("status in ['overdue', 'urgent']", { status: 'active' })).toBe(false);
+    expect(evaluatePlainCondition('size(tags) > 0', { tags: ['vip'] })).toBe(true);
+    expect(evaluatePlainCondition('size(tags) > 0', { tags: [] })).toBe(false);
+  });
+
+  it('refuses a JS-only spelling with false, even where it would hold on the JS grammar', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(evaluatePlainCondition("amount > 1000 && status === 'urgent'", { amount: 2000, status: 'urgent' })).toBe(false);
+      expect(evaluatePlainCondition("name.includes('Acme')", { name: 'Acme Corp' })).toBe(false);
+      // Control: the CEL spelling of the same two predicates holds.
+      expect(evaluatePlainCondition("amount > 1000 && status == 'urgent'", { amount: 2000, status: 'urgent' })).toBe(true);
+      expect(evaluatePlainCondition("name.contains('Acme')", { name: 'Acme Corp' })).toBe(true);
+      // The fault is answered by the return value, as before: no console line.
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('reads data.field in a bare CEL predicate as well as the bare field', () => {
+    expect(evaluatePlainCondition('data.amount > 1000', { amount: 2000 })).toBe(true);
+    expect(evaluatePlainCondition('data.amount > 1000', { amount: 500 })).toBe(false);
+  });
+
+  it('gives the verdict evaluateCondition gives for the same string and record', () => {
+    const cases: Array<[string, Record<string, any>]> = [
+      ["status == 'overdue'", { status: 'overdue' }],
+      ["status == 'overdue'", { status: 'active' }],
+      ['amount > 1000 && data.amount < 5000', { amount: 2000 }],
+      ['amount > 1000 && data.amount < 5000', { amount: 9000 }],
+      ["status in ['a', 'b']", { status: 'b' }],
+      ['size(tags) > 1', { tags: ['x'] }],
+    ];
+    for (const [source, record] of cases) {
+      const viaCondition = new ExpressionEvaluator({ ...record, data: record }).evaluateCondition(source);
+      expect(evaluatePlainCondition(source, record)).toBe(viaCondition);
+    }
   });
 
   it('should support data.field references in template expressions', () => {
     expect(evaluatePlainCondition('${data.amount > 1000}', { amount: 2000 })).toBe(true);
     expect(evaluatePlainCondition('${data.amount > 1000}', { amount: 500 })).toBe(false);
+  });
+
+  it('keeps a template on the legacy engine', () => {
+    // `===` is a JS-only spelling: still read inside a `${…}` template.
+    expect(evaluatePlainCondition("${data.status === 'urgent'}", { status: 'urgent' })).toBe(true);
+    expect(evaluatePlainCondition("${data.status === 'urgent'}", { status: 'normal' })).toBe(false);
   });
 
   it('should return false for invalid expressions', () => {
@@ -190,6 +240,11 @@ describe('evaluatePlainCondition', () => {
 
   it('should return false for non-boolean results', () => {
     expect(evaluatePlainCondition('status', { status: 'active' })).toBe(false);
+  });
+
+  it('should return false for a blank condition', () => {
+    expect(evaluatePlainCondition('', { status: 'active' })).toBe(false);
+    expect(evaluatePlainCondition('   ', { status: 'active' })).toBe(false);
   });
 });
 
