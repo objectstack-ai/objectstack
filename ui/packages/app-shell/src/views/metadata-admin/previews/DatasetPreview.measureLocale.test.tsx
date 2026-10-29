@@ -147,6 +147,25 @@ describe('DatasetPreview follows the display locale (objectui#4575)', () => {
     ).toBeInTheDocument();
   });
 
+  it('formats a record-mode column in each row\'s own currency (objectstack#27188, ADR-0144 D9)', async () => {
+    // A grouped answer over a `record`-mode amount: the measure column names
+    // the result column holding each row's code (objectstack#27338).
+    queryDataset.mockResolvedValue({
+      rows: [
+        { bucket: 1, currency_code: 'USD', revenue: 1234.5 },
+        { bucket: 2, currency_code: 'EUR', revenue: 99 },
+      ],
+      fields: [
+        { name: 'bucket', type: 'number', label: 'Bucket' },
+        { name: 'currency_code', type: 'text', label: 'Currency' },
+        { name: 'revenue', type: 'number', label: 'Revenue', format: '0.00', currencyField: 'currency_code' },
+      ],
+    });
+    renderIn('en-US', <DatasetPreview {...baseProps} draft={draft} />);
+    expect(await screen.findByText('$1,234.50', { normalizer: (t: string) => t.trim() })).toBeInTheDocument();
+    expect(screen.getByText('€99.00', { normalizer: (t: string) => t.trim() })).toBeInTheDocument();
+  });
+
   it('keeps the en currency form byte-identical (must-not-change)', async () => {
     queryDataset.mockResolvedValue({
       rows: [{ bucket: 1, revenue: 1234.5 }],
