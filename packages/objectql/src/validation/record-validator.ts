@@ -1961,6 +1961,50 @@ export function validateRecord(
 }
 
 /**
+ * [#27259] The insert write's verdict on the values a row SUPPLIES — what
+ * `ObjectQL.insert()` refuses about a value whatever defaults, hooks and the
+ * store go on to add. `os validate` and `os build` ask it about each seed
+ * record, so a seed value the load would refuse is refused at authoring time
+ * with the same code and the same sentence.
+ *
+ * ⛔ One judge, not a second one: the door's own two rewrites
+ * ({@link normalizeBlankTypedValues}, {@link normalizeNumericStringValues}),
+ * the multi-value wrap ({@link normalizeMultiValueFields}) and then
+ * {@link validateRecordInScope} with the insert path's `'include'` scope, in
+ * the insert path's order. A value the load accepts after a rewrite (a numeric
+ * string on a number field, a scalar on a multi-value one) passes here too.
+ *
+ * What it leaves to the load, by construction:
+ *  - a missing value (`undefined`, `null`, blank): whether the row needs one is
+ *    `required`, which a `defaultValue` or a hook may still satisfy;
+ *  - a name the schema does not declare: the undeclared-field refusal is
+ *    another door's;
+ *  - every non-value rule: validation rules, references resolving, permissions.
+ *
+ * Messages render as {@link validateRecord}'s do (`en` and the declared
+ * labels unless `options.messages` says otherwise). ADR-0104 value shapes keep
+ * the deployment's posture, so with the default options they warn, never
+ * refuse. Throws `ValidationError` on failure; never mutates `data`.
+ */
+export function validateInsertValues(
+  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  options: ValidateRecordOptions = {},
+): void {
+  const fields = objectSchema?.fields;
+  if (!fields || !data) return;
+  const row = { ...normalizeNumericStringValues(objectSchema, normalizeBlankTypedValues(objectSchema, data)) };
+  normalizeMultiValueFields(objectSchema, row, 'include');
+  const supplied: Record<string, FieldDef> = {};
+  for (const [name, value] of Object.entries(row)) {
+    // Own-property: a field name may be `constructor` / `valueOf`.
+    if (isMissing(value) || !Object.prototype.hasOwnProperty.call(fields, name)) continue;
+    supplied[name] = fields[name];
+  }
+  validateRecordInScope({ fields: supplied }, row, 'insert', 'include', options);
+}
+
+/**
  * [#21663] {@link validateRecord}, told where its payload stands relative to
  * the readonly strip — see {@link ReadonlyValueScope} for the three scopes,
  * the arms a readonly value reaches, and why it is never one of its
