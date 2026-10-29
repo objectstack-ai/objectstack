@@ -109,3 +109,55 @@ export function serverErrorsAt(
 export function useServerErrorsAt(path: string | undefined): readonly ServerDiagnosticEntry[] {
   return serverErrorsAt(React.useContext(DraftVerdictContext), path);
 }
+
+/**
+ * objectstack#27482 — the body the provided verdict JUDGED: the served draft
+ * (or layered) body the `_diagnostics` were computed on. A verdict describes
+ * that body and no other, so it may hold a save only while the field still
+ * shows the text it judged. A page that provides no body holds nothing.
+ */
+export const DraftVerdictBodyContext = React.createContext<unknown>(undefined);
+
+/**
+ * The value at a dotted `_diagnostics` path (`rowLevelSecurity.0.using`) in a
+ * served body; `undefined` when any segment is missing. A numeric segment
+ * indexes an array, every other segment names an own key.
+ */
+export function valueAtPath(body: unknown, path: string): unknown {
+  let cur: unknown = body;
+  for (const seg of path.split('.')) {
+    if (Array.isArray(cur)) {
+      if (!/^\d+$/.test(seg)) return undefined;
+      cur = cur[Number(seg)];
+    } else if (cur && typeof cur === 'object' && Object.prototype.hasOwnProperty.call(cur, seg)) {
+      cur = (cur as Record<string, unknown>)[seg];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+/**
+ * The served errors at `path` that hold the save of a field showing `text`:
+ * those errors while the judged body's value at `path` is that same text;
+ * none once the author has edited it away (the verdict no longer describes
+ * what is on screen, and only the save fetches the next one), and none
+ * without a judged body. An absent value reads as empty text, the way the
+ * editors show it. ⛔ No rule is restated: the server's errors are taken whole.
+ */
+export function serverHoldAt(
+  diagnostics: ServerDiagnostics | undefined,
+  judged: unknown,
+  path: string | undefined,
+  text: string,
+): readonly ServerDiagnosticEntry[] {
+  const hits = serverErrorsAt(diagnostics, path);
+  if (hits.length === 0 || judged === undefined || !path) return NO_ERRORS;
+  return (valueAtPath(judged, path) ?? '') === text ? hits : NO_ERRORS;
+}
+
+/** {@link serverHoldAt} against the verdict and judged body the enclosing page provides. */
+export function useServerHoldAt(path: string | undefined, text: string): readonly ServerDiagnosticEntry[] {
+  return serverHoldAt(React.useContext(DraftVerdictContext), React.useContext(DraftVerdictBodyContext), path, text);
+}

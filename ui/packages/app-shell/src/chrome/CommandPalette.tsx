@@ -245,9 +245,13 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   // objectui#13020 — the app's reports beyond its navigation: the ones it
   // ships that this member may open, the list the app's report index shows.
   // Read only while the palette is open inside an app; a report a navigation
-  // entry already names is offered through that entry, once.
+  // entry already names is offered through that entry, once. A `report` entry
+  // with no `reportName` is the app's report index (objectstack#27525): it is
+  // offered as itself, names no report, and leaves every report to this list.
   const navReportNames = new Set(
-    navItems.filter((item) => item.type === 'report').map((item) => item.reportName as string),
+    navItems
+      .filter((item) => item.type === 'report' && typeof item.reportName === 'string' && item.reportName !== '')
+      .map((item) => item.reportName as string),
   );
   const appReports = useAppReportEntries(activeApp, open && !inStudio, gates).entries.filter(
     (entry) => !navReportNames.has(entry.name) && matches(entry.label, entry.name),
@@ -553,7 +557,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
               .map(item => (
                 <CommandItem
                   key={item.id}
-                  value={`report ${navLabel(item)} ${item.reportName}`}
+                  value={`report ${navLabel(item)} ${item.reportName ?? ''}`}
                   onSelect={() => leaveTo(resolveHref(item, baseUrl, templateContext).href)}
                 >
                   <BarChart3 className="mr-2 h-4 w-4" />

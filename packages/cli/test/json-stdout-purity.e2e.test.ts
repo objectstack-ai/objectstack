@@ -18,8 +18,9 @@
  * The contract has one implementation face per command. A file that pinned
  * `migrate recorded-by` alone would go green while the others stayed broken,
  * and would say nothing at all about a new one. So the family is DISCOVERED
- * from the source tree — every command that calls `bootSchemaStack` and
- * declares a `--json` flag — and the discovered set is reconciled against
+ * from the source tree — every command that calls `bootSchemaStack`, itself or
+ * through a `src/utils` module that does, and declares a `--json` flag — and
+ * the discovered set is reconciled against
  * {@link FAMILY} below. Add a member and this file goes red until it is listed
  * here and passes; drop one and it goes red until it is removed. The seam
  * itself (`bootSchemaStack`'s required `jsonOutput` option) makes the mistake a
@@ -60,9 +61,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, relative, sep } from 'node:path';
+import { basename, join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generateEd25519KeyPair, signPayload } from '@objectstack/core';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
+import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from '../src/utils/osplugin.js';
 import { childEnv } from './helpers/serve-process.js';
 import { CONFIG_MISS_FAMILY, discoverConfigMissFamily } from './helpers/config-miss-family.js';
 
@@ -70,15 +73,16 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const COMMANDS_DIR = resolve(HERE, '../src/commands');
+const UTILS_DIR = resolve(HERE, '../src/utils');
 
 /**
  * The family, and how to drive each member into a boot.
  *
  * The value is the EXTRA argv a member needs beyond `--json`; `[]` means the
- * bare form already boots. Only one member needs anything: `os migrate meta`
- * migrates an authored config in memory and boots a kernel solely under
- * `--stored`, which is why the issue's own list names it as `migrate meta
- * --stored` rather than `migrate meta`.
+ * bare form already boots. `os migrate meta` migrates an authored config in
+ * memory and boots a kernel solely under `--stored`, which is why the issue's
+ * own list names it as `migrate meta --stored` rather than `migrate meta`. A
+ * member that needs a fixture as well as argv is prepared by {@link PREPARE}.
  */
 const FAMILY: Record<string, string[]> = {
   // Report-only is its DEFAULT and the only form driven here: without
@@ -146,6 +150,16 @@ const FAMILY: Record<string, string[]> = {
   // face driven here is its empty-work answer for a table not there yet.
   'migrate unmapped-columns': ['--object', 'jp_ticket'],
   'migrate value-shapes': [],
+  // It boots only to read the trusted key a SIGNED artifact names (through
+  // `utils/plugin-trust-read.ts`, which is why the discovery follows utils),
+  // so it is driven with one: `PREPARE` builds and signs the artifact and
+  // trusts its key in this member's database, and the face driven here is the
+  // full install, its `installed` document emitted after the read-only boot
+  // has shut down. An unsigned artifact would refuse without booting at all.
+  'plugin install': ['purity.osplugin'],
+  // Its bare form is read-only (`deferSchemaDdl` + `readOnlyProbe`). No
+  // database file exists, so the face driven here is its empty listing.
+  'plugin trust list': [],
   // Report-only is its DEFAULT and the only form driven here: without
   // `--delete` it boots, reports and writes nothing, so the family gains a
   // member without this fixture gaining a destructive run.
@@ -165,6 +179,41 @@ const BOOT_DIAGNOSTICS = [
   'Graceful shutdown complete',
 ];
 
+/**
+ * Members that need a fixture beyond argv to reach the face driven here. Each
+ * gets the project directory and its own environment, prepares what it needs,
+ * and returns the extra environment its run takes. A preparation that fails
+ * throws: the member would otherwise reach some other face and still pass.
+ */
+const PREPARE: Record<string, (dir: string, env: Record<string, string>) => Promise<Record<string, string>>> = {
+  // An artifact built and signed the way `os plugin build` / `os plugin sign`
+  // make one, its key trusted by `os plugin trust add` in this member's
+  // database. The install materializes under OS_HOME, so it gets one of its
+  // own inside the fixture rather than the runner's.
+  'plugin install': async (dir, env) => {
+    const keyId = 'purity-2026';
+    const publisher = generateEd25519KeyPair();
+    const files: ArchiveFile[] = [{ path: 'dist/index.mjs', data: new TextEncoder().encode('export const id = "com.purity.e2e";\n') }];
+    const manifest = {
+      id: 'com.purity.e2e',
+      version: '1.0.0',
+      type: 'plugin',
+      runtime: 'node',
+      packaging: 'bundled',
+      integrity: computeIntegrity(files),
+    };
+    const artifact = join(dir, 'purity.osplugin');
+    writeFileSync(artifact, createTarGz([...files, { path: MANIFEST_FILENAME, data: new TextEncoder().encode(JSON.stringify(manifest)) }]));
+    writeFileSync(`${artifact}.sig`, signPayload(new Uint8Array(readFileSync(artifact)), publisher.privateKeyPem, keyId));
+    writeFileSync(join(dir, 'purity.pub.pem'), publisher.publicKeyPem);
+    const trusted = await runCli(['plugin', 'trust', 'add', 'purity.pub.pem', '--key-id', keyId], dir, env);
+    if (trusted.code !== 0) {
+      throw new Error(`os plugin trust add exited ${trusted.code}:\n${trusted.stdout}\n${trusted.stderr}`);
+    }
+    return { OS_HOME: join(dir, 'os-home-plugin-install') };
+  },
+};
+
 /** Every `.ts` under `src/commands`, excluding tests. */
 function commandFiles(dir: string): string[] {
   const out: string[] = [];
@@ -181,12 +230,42 @@ function commandFiles(dir: string): string[] {
 }
 
 /**
+ * The `src/utils` modules that boot the shared stack on a command's behalf:
+ * those that call `bootSchemaStack(` (its own definition does not count), and
+ * those that import one that does, to a fixed point. `os plugin install` boots
+ * only through `plugin-trust-read.ts`, so a probe of the command's own text
+ * would drop it from the family while it still boots.
+ */
+function bootingUtils(): Set<string> {
+  const sources = new Map<string, string>();
+  for (const abs of commandFiles(UTILS_DIR)) {
+    sources.set(basename(abs, '.ts'), maskComments(readFileSync(abs, 'utf-8')));
+  }
+  const booting = new Set<string>();
+  for (const [name, src] of sources) {
+    if (src.replace(/function bootSchemaStack\(/g, '').includes('bootSchemaStack(')) booting.add(name);
+  }
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, src] of sources) {
+      if (booting.has(name)) continue;
+      if ([...booting].some((b) => src.includes(`from './${b}.js'`))) {
+        booting.add(name);
+        grew = true;
+      }
+    }
+  }
+  return booting;
+}
+
+/**
  * The family, read off the source rather than remembered: a command belongs iff
  * it boots the shared stack AND offers a machine-readable mode. Both halves are
  * needed — `os serve` boots a kernel with no `--json`, and `os lint --json`
  * emits JSON without booting one.
  */
 function discoverFamily(): string[] {
+  const utils = [...bootingUtils()];
   const ids: string[] = [];
   for (const abs of commandFiles(COMMANDS_DIR)) {
     // Masked: both halves are text probes, and both are satisfiable by prose. A
@@ -195,7 +274,9 @@ function discoverFamily(): string[] {
     // diagnostics it never writes — a red in a tier no pull request collects,
     // wearing this file's title rather than the docblock's (#18520).
     const src = maskComments(readFileSync(abs, 'utf-8'));
-    if (!src.includes('bootSchemaStack(')) continue;
+    const boots = src.includes('bootSchemaStack(')
+      || utils.some((u) => new RegExp(`from '(?:\\.\\./)+utils/${u}\\.js'`).test(src));
+    if (!boots) continue;
     if (!/\bjson:\s*Flags\.boolean\(/.test(src)) continue;
     const rel = relative(COMMANDS_DIR, abs).replace(/\.ts$/, '');
     const parts = rel.split(sep).filter((p) => p !== 'index');
@@ -256,10 +337,12 @@ beforeAll(async () => {
   runs = [];
   for (const [id, extra] of Object.entries(FAMILY)) {
     const slug = id.replace(/[^a-z0-9]+/gi, '-');
+    const env = { OS_DATABASE_URL: `file:${join(dir, `${slug}.db`)}` };
+    const prepared = PREPARE[id] ? await PREPARE[id](dir, env) : {};
     const { code, stdout, stderr } = await runCli(
       [...id.split(' '), '--json', ...extra],
       dir,
-      { OS_DATABASE_URL: `file:${join(dir, `${slug}.db`)}` },
+      { ...env, ...prepared },
     );
     runs.push({ id, code, stdout, stderr });
   }
