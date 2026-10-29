@@ -1512,10 +1512,11 @@ function FilterBuilder({
   }
 
   const removeCondition = (conditionId: string) => {
-    const companionId = currencyCompanionId(conditionId)
+    // The amount row's currency companion goes with it: `handleChange` settles
+    // the pairs, and a companion whose amount row is gone is dropped there.
     handleChange({
       ...filterGroup,
-      conditions: filterGroup.conditions.filter((c) => c.id !== conditionId && c.id !== companionId),
+      conditions: filterGroup.conditions.filter((c) => c.id !== conditionId),
     })
   }
 
