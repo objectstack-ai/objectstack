@@ -379,6 +379,25 @@ const DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-filter-binding-unknown',
+  covers: 'which keys a widget\'s filterBindings may name',
+  paragraphs: [
+    'A widget\'s `filterBindings` maps a dashboard filter\'s NAME to one of the widget\'s own fields ' +
+      '(re-target) or to `false` (opt out). The names a widget may bind are the ones its dashboard ' +
+      'declares: each `globalFilters` entry under its `name` (its `field` when `name` is omitted), and ' +
+      'the reserved name `dateRange` when the dashboard declares `dateRange`.',
+    'The runtime reads a binding by looking up each declared filter\'s name, so a key that names no ' +
+      'declared filter is never read. A misspelled opt-out leaves the widget scoped by the filter it ' +
+      'was meant to ignore, and a misspelled re-target leaves the filter on its default field. Either ' +
+      'way the widget counts different rows than the author wrote, with nothing on the page to say so, ' +
+      'which is why the rule is an error and is not suppressible.',
+    'To fix it, rename the key to a declared filter name (the finding names the nearest one), declare ' +
+      'the filter on the dashboard, or delete the entry. A `dateRange` key on a dashboard that declares ' +
+      'no `dateRange` is reported the same way: there is no date range for it to bind.',
+  ],
+};
+
 const DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
   rule: 'dashboard-filter-field-not-included',
   covers: 'why a filter\'s relationship prefix must be included',
@@ -5200,6 +5219,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION.rule]: WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,
+  [DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION.rule]: DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION,
   [WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [WIDGET_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: WIDGET_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,

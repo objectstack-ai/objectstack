@@ -279,7 +279,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 106 rows.
+ * CENSUS (generated): this list holds 109 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -533,6 +533,15 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: "authored metadata, so `manage_metadata` gates it: a flow definition lives on the metadata plane (ADR-0106), and this door now asks the capability every other door onto that plane already asks. Fail-closed by construction — an absent executionContext, an absent `systemPermissions` or an empty one all fall through to the refusal, 403 with code `PERMISSION_DENIED` (ADR-0112); only engine self-invocation (`isSystem`, never settable from the wire) bypasses. WHICH routes is one predicate, `isFlowAuthoringWrite` in `domains/automation.ts` — this row, PUT/DELETE `/:name` below, and, since the ruling that enablement is an authoring write, `POST /:name/toggle`, with the execution doors (trigger / execute / resume) deliberately outside it. Second layer, not the first: the domain-wide anonymous floor answers an unidentified caller 401 here, not 403. Pinned in `domains/automation-write-capability-gate.test.ts`" },
   { route: 'GET /automation/actions', domain: '/automation', disposition: 'sdk', client: 'automation.listActions' },
   { route: 'GET /automation/connectors', domain: '/automation', disposition: 'sdk', client: 'automation.listConnectors' },
+  // [#27237] The connector credential door (ruling A on #27230): an administrator
+  // fills the value a declarative connector's `auth.credentialRef` names. The
+  // store's `value` is a #7799 `Field.secret`; the posture refusal is S1 on #27230.
+  { route: 'GET /automation/connectors/credential-refs', domain: '/automation', disposition: 'server-only',
+    note: "Every `credentialRef` a declared provider-bound connector instance names, plus every stored reference no installed package declares any more, each with its `status` (`set` / `missing` / `rejected`), its `source` (`env` / `object` / `vault` / null), whether this door may write it, and the instances naming it with their registry state. ⛔ Never a value: the store is `sys_connector_credential`, whose `value` is a `Field.secret`, and this listing reads only its bookkeeping columns. ⚑ `manage_metadata`, the gate the flow definition writes ask, fail-closed, only `isSystem` bypassing; then, under the `group` / `isolated` postures, refused 403 naming the posture for every caller — environment-level credentials only. Closed query set: none. NOT JS-SDK surface on this leg: the driver is the Console's connector credential page, a console surface that calls the platform API directly. Adding a client method reclassifies this row to `sdk`. Pinned in `domains/automation-connector-credential-door.test.ts`" },
+  { route: 'PUT /automation/connectors/credential-refs/:ref', domain: '/automation', disposition: 'server-only',
+    note: "Store the value for one declared reference, then reconcile: every instance naming it re-materializes without a restart. Body is the closed `{ value }`. Answers the reference's listing entry after the reconcile, never the value. Refused, before anything is written: an undeclared reference 404 `RESOURCE_NOT_FOUND`, one an environment variable of the same name supplies 409 `RESOURCE_CONFLICT` (env wins in the chain, so a stored value would never be read), an empty or oversized value, one starting with `secret:` (the data engine would store it as a handle to another secret) or an unknown body key 400 `VALIDATION_ERROR`, and no crypto provider 503 `SERVICE_UNAVAILABLE`. Writes in one process run one at a time, with their reconcile; a concurrent first write from another replica answers 409 `RESOURCE_CONFLICT`. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-credential-door.test.ts`" },
+  { route: 'DELETE /automation/connectors/credential-refs/:ref', domain: '/automation', disposition: 'server-only',
+    note: "Remove the stored value for one reference, then reconcile: every instance naming it is torn down and registered degraded, naming the reference. 404 `RESOURCE_NOT_FOUND` when nothing is stored for it. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-credential-door.test.ts`" },
   { route: 'GET /automation/_status', domain: '/automation', disposition: 'sdk', client: 'automation.getRuntimeStatus' },
   { route: 'POST /automation/:name/trigger', domain: '/automation', disposition: 'sdk', client: 'automation.execute' },
   { route: 'POST /automation/:name/toggle', domain: '/automation', disposition: 'sdk', client: 'automation.toggle',

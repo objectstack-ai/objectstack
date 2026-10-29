@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` baseline dispatch + `engine.registerConnector()`), [ADR-0022](./0022-connectors-vs-messaging-channels.md) (Connector = transport/integration mechanism), [ADR-0023](./0023-openapi-to-connector-generator.md) (OpenAPI → Connector generator), [ADR-0024](./0024-mcp-connectors.md) (MCP servers as connectors)
 **Tracking**: framework#2977 (supersedes the interim descriptor-only contract from framework#2612)
 **Consumers**: `@objectstack/spec` (`stack.zod.ts`, `integration/connector.zod.ts`), `@objectstack/service-automation` (boot audit → provider binding), `@objectstack/connector-openapi`, `@objectstack/connector-mcp`, `@objectstack/connector-rest`, the Studio flow palette, AI authoring (stack generation)
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line". PR #26798 (2026-10-27, #26709 item 3(b)) — a credential the MCP server rejects (HTTP `401` / `403`) is a fatal configuration fault, not upstream-unavailable; see the note under "Upstream availability".
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line". PR #26798 (2026-10-27, #26709 item 3(b)) — a credential the MCP server rejects (HTTP `401` / `403`) is a fatal configuration fault, not upstream-unavailable; see the note under "Upstream availability". #27237 (2026-10-28, ruling A on #27230 and the ruling on #27237) — an unresolved `credentialRef` and a rejected credential degrade the instance instead of failing the boot (a refused stored credential holds its instance until it is set again or a restart; an environment or vault one is retried on the backoff), and the open tier reads a `sys_connector_credential` store between the environment and the host's resolver, except under a walled tenancy posture; see the notes under §6 and under "Upstream availability".
 
 ---
 
@@ -94,6 +94,18 @@ If a provider-bound instance and a plugin-registered connector share a `name`, b
 - An AI-generated app declares a connector instance (e.g. `provider: 'mcp'` pointing at an MCP server) as pure metadata; a flow `connector_action` dispatches one of its actions end-to-end.
 - The showcase demonstrates the declarative path live (upgrading the catalog-descriptor demo shipped with #2612) and `GET /connectors` lists the materialized instance.
 - Boot fails loudly for: unknown provider, invalid providerConfig, unresolvable credentialRef, name conflict with a plugin-registered connector.
+
+> **Amendment note (2026-10-28, #27237 — ruling A on #27230, comment 6468327468).** An
+> unresolvable `credentialRef` leaves this list. An administrator installs an app first and fills
+> its credentials after, so a reference no source answers for degrades the instance naming it (a
+> husk on `GET /connectors` whose reason names the reference), and the instance materializes,
+> without a restart, once the credential is set. The open-tier sources are, in order: an
+> environment variable of the same name, the `sys_connector_credential` store (a `Field.secret`
+> row written through `PUT /api/v1/automation/connectors/credential-refs/:ref`), then the host's
+> injected resolver. Environment-level only (S1 on #27230): under a walled tenancy posture
+> (`group` / `isolated`) the store is not read at all and its door refuses, naming the posture,
+> so a reference resolves from the environment or the host's resolver only. A host resolver that
+> throws stays fatal at boot.
 
 ---
 
@@ -208,6 +220,26 @@ exactly the plausible-but-dead shape this ADR exists to kill.
 > does every other connect / `tools/list` failure. Pinned against a real
 > Streamable-HTTP server in
 > `packages/connectors/connector-mcp/src/mcp-http-discovery-faults.test.ts`.
+
+> **Amendment note (2026-10-28, #27237 — ruling on #27237, comment 6470087293).** The note above
+> changes on two points. First, a rejected credential no longer fails the boot. The `mcp`
+> provider throws `ConnectorCredentialRejectedError` (`CONNECTOR_CREDENTIAL_REJECTED`) at
+> materialization; a `rest` or `openapi` instance reports it on the first call answering `401` /
+> `403`. Either way the instance is degraded with the upstream's message, never the value.
+> Second, whether it is retried follows where the value came from. A value stored in
+> `sys_connector_credential` is marked `rejected`, and its instance is held, with no timer retry,
+> until the credential is set again, the declaration changes, or the process restarts (a restart
+> lifts the hold). An instance with no `credentialRef`, whose credential is written in the
+> declaration, is held the same way. The `rejected` mark survives a re-materialization, since a
+> `rest` or `openapi` instance materializes without sending the value. Only proof clears it: a
+> provider answering `credentialVerified` at materialization (the `mcp` handshake over http), or
+> setting the value again. A call answered `2xx` is not proof, since the endpoint may not check
+> the credential (a public path, an operation with `security: []`); it only stamps the
+> last-verified time of a row still at `set`. A value from an environment variable or the host's
+> resolver can change where the process cannot see it (a rotation, or a `403` rate limit that
+> lifts), so its instance is retried on the backoff above instead, and the credential listing
+> reports the refusal until a provider proves the value, it stops resolving from that source, or
+> the process restarts.
 
 The `openapi` provider applies the same split to its **remote-URL spec fetch**:
 an unreachable endpoint (network error) or a transient HTTP status

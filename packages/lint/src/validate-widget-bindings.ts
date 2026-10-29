@@ -69,6 +69,19 @@ import {
  *   `filter`, at the position one level up — a separate id because the fix is a
  *   different edit (declare the join, versus point the filter somewhere real)
  *   and because the family keeps one id per class.
+ * - `dashboard-filter-binding-unknown` (#27445) — a widget `filterBindings`
+ *   KEY names no filter the dashboard declares. The runtime looks each binding
+ *   up BY the declared filter's name (objectui `resolveBoundField`:
+ *   `widget.filterBindings?.[def.name]`), so a key no def carries is never read:
+ *   a typo'd opt-out (`{ regoin: false }`) leaves the widget scoped by the very
+ *   filter the author opted it out of, and a typo'd re-target leaves the filter
+ *   on its default field. The key's whole meaning is WHICH rows the widget
+ *   counts, which is why this is an error and not the warning tier
+ *   `chart-field-unknown` took for its ignored keys (#15463): those re-dress
+ *   the same numbers, this one changes them. The declared names are the ones
+ *   {@link dashboardFilterDefs} builds, so the reserved `dateRange` key is
+ *   valid only on a dashboard that declares `dateRange` — the runtime, this
+ *   file and `@objectstack/verify`'s window proof all build that def only then.
  *
  * Advisory rules — severity `warning`, build stays green:
  *
@@ -435,6 +448,11 @@ export const DASHBOARD_FILTER_FIELD_UNPROVISIONED = 'dashboard-filter-field-unpr
  * prefix is not declared in the bound dataset's `include`.
  */
 export const DASHBOARD_FILTER_FIELD_NOT_INCLUDED = 'dashboard-filter-field-not-included';
+/**
+ * [#27445] A widget `filterBindings` key that names no filter the dashboard
+ * declares (`dateRange` counts only when the dashboard declares one).
+ */
+export const DASHBOARD_FILTER_BINDING_UNKNOWN = 'dashboard-filter-binding-unknown';
 /** [#14148] A key of the widget's OWN `filter` that resolves to no column. */
 export const WIDGET_FILTER_FIELD_UNKNOWN = 'widget-filter-field-unknown';
 /** [#14148] A widget filter key whose relationship prefix is not in `include`. */
@@ -833,6 +851,38 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             hint:
               `Delete the legacy key${plural ? 's' : ''} and select fields BY NAME through the ` +
               `widget's dataset: \`dataset\`, \`dimensions\`, \`values\`.`,
+          });
+        }
+      }
+
+      // ── (a-1) every filterBindings key names a declared filter (#27445) ──
+      // Judged before the dataset, because it needs none: the declared names
+      // are the dashboard's alone. The runtime reads a binding BY the def's
+      // name, so a key no def carries is never read, and the widget keeps the
+      // filter it meant to drop or re-target. Errored, not warned: what the
+      // key decides is which rows the widget counts. The fix is the author's
+      // own edit (rename or delete the entry), so no suppression is offered.
+      const bindings = w.filterBindings;
+      if (bindings && typeof bindings === 'object' && !Array.isArray(bindings)) {
+        const declared = dashFilterDefs.map((d) => d.name);
+        for (const key of Object.keys(bindings)) {
+          if (declared.includes(key)) continue;
+          push({
+            severity: 'error',
+            rule: DASHBOARD_FILTER_BINDING_UNKNOWN,
+            path: `${path}.filterBindings.${key}`,
+            message:
+              `widget "${widgetId}" binds \`filterBindings.${key}\`, but dashboard "${dashName}" ` +
+              (declared.length > 0
+                ? `declares no filter named \`${key}\` (${declaredFew(declared, 'filters')}), `
+                : `declares no filters, `) +
+              `so the binding is never read`,
+            hint:
+              key === DATE_RANGE_FILTER_NAME
+                ? `Declare \`dateRange\` on the dashboard, or delete the \`dateRange\` entry.`
+                : declared.length > 0
+                  ? `Rename the key to a declared filter name, or delete the entry.${suggestName(key, declared)}`
+                  : `Declare the filter in the dashboard's \`globalFilters\`, or delete the entry.`,
           });
         }
       }

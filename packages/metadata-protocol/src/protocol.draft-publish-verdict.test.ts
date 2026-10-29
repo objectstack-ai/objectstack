@@ -102,6 +102,12 @@ function matchesMetadataWhere(r: Row, where: Record<string, unknown>): boolean {
             continue;
         }
         if (v === undefined) continue;
+        // The active read asks `type: { $in: [type, plural] }`; no other
+        // operator reaches this stub.
+        if (v && typeof v === 'object' && Array.isArray((v as { $in?: unknown }).$in)) {
+            if (!(v as { $in: unknown[] }).$in.includes((r as any)[k])) return false;
+            continue;
+        }
         if ((r as any)[k] !== v) return false;
     }
     return true;
@@ -290,6 +296,23 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#27445] Not one of #26707's six: a widget `filterBindings` key that
+        // names no filter the dashboard declares (`regoin` for `region`). It
+        // saved, read valid:true and PUBLISHED before; the new rule's verdict
+        // rides the same draft-read and publish seams as its five siblings.
+        rule: 'dashboard-filter-binding-unknown',
+        type: 'dashboard',
+        item: {
+            name: 'deal_binding_board',
+            label: 'Deal Binding Board',
+            globalFilters: [{ name: 'region', field: 'name', type: 'select' }],
+            widgets: [{
+                id: 'kpi_deals', type: 'metric', title: 'Deals', dataset: 'deals_live',
+                values: ['deal_count'], filterBindings: { regoin: false },
+            }],
+        },
+    },
+    {
         // Reproduction 6: a dataset whose include names no relationship.
         rule: 'dataset-include-unknown',
         type: 'dataset',
@@ -438,5 +461,40 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect((await draftDiagnostics(protocol, 'flow', 'inbound_hook')).errors).toContainEqual(
             expect.objectContaining({ path: 'nodes.0.config.secret', code: 'flow-api-trigger-secret-missing' }),
         );
+    });
+});
+
+describe('[#27445] a stored dashboard carrying an undeclared filterBindings key', () => {
+    const board = CASES.find((c) => c.rule === 'dashboard-filter-binding-unknown')!.item;
+
+    it('still loads unchanged — the rule judges the authoring path, never the read', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        // A row written while no rule judged it: the save path with the
+        // authoring gate switched off, which stores the body verbatim exactly
+        // as a write made before this rule existed did.
+        process.env.OS_ALLOW_UNLINTED_METADATA_WRITES = '1';
+        try {
+            const saved: any = await (protocol as any).saveMetaItem({ type: 'dashboard', name: board.name, item: board, packageId: PKG });
+            expect(saved.success).toBe(true);
+        } finally {
+            delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+        }
+        expect([...rows.values()].filter((r) => r.name === board.name).map((r) => r.state)).toEqual(['active']);
+
+        const read: any = await protocol.getMetaItem({ type: 'dashboard', name: board.name, packageId: PKG } as any);
+        expect(read.item.widgets[0].filterBindings).toEqual({ regoin: false });
+    });
+
+    it('is refused on its next save, naming the key and the declared filters', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const err: any = await (protocol as any)
+            .saveMetaItem({ type: 'dashboard', name: board.name, item: board, packageId: PKG })
+            .then(() => null, (e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === 'dashboard-filter-binding-unknown');
+        expect(issue.message).toContain('`filterBindings.regoin`');
+        expect(issue.message).toContain('(declared: region)');
     });
 });

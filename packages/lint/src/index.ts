@@ -40,6 +40,10 @@ export {
   // field, now that it is resolved on the object graph rather than skipped
   // whenever it was dotted.
   DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+  // [#27445] A `filterBindings` KEY naming no filter the dashboard declares:
+  // the runtime reads a binding by the declared filter's name, so the entry is
+  // never read and the widget keeps the filter it meant to drop or re-target.
+  DASHBOARD_FILTER_BINDING_UNKNOWN,
   // [#14148] The widget's OWN two references, at the same site: the keys of its
   // presentation-scope `filter` (resolved on the #14105 object-graph seam, with
   // the ADR-0021 `include` clause its `runtimeFilter` really is subject to) and

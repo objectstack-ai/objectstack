@@ -466,6 +466,7 @@ They are two different namespaces:
 | :--- | :--- | :--- |
 | `globalFilters[].field` (after any `filterBindings` re-target) | The bound widget's `dataset.object` — a bare name against that object's own fields, a dotted `relationship.field` path hop by hop with its prefix declared in the dataset's `include` | `dashboard-filter-field-unknown`, severity **error** |
 | `widgets[].dimensions[]` | The dataset's declared `dimensions`, by name | `widget-dimension-unknown`, severity **error** |
+| `widgets[].filterBindings` keys | The dashboard's declared filters, by name: each `globalFilters[].name` (its `field` when unnamed), and `dateRange` only when the dashboard declares `dateRange` | `dashboard-filter-binding-unknown`, severity **error** |
 
 Two consequences follow, and their asymmetry is the part that surprises authors:
 
@@ -546,6 +547,12 @@ widgets: [
 Binding precedence: an explicit `filterBindings` entry (string override or
 `false` opt-out) → the filter's legacy `targetWidgets` allow-list → the
 filter's own `field`.
+
+Each key must name a filter the dashboard declares. The dashboard looks a
+binding up by the declared filter's name, so a misspelled key (`regoin` for
+`region`) is never read and the widget keeps the filter it was meant to drop
+or re-target. `os validate` and the publish door refuse such a key with
+`dashboard-filter-binding-unknown`, naming the declared filters.
 
 ### In the Console
 

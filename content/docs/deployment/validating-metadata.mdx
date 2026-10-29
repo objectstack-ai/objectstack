@@ -57,6 +57,13 @@ dashboard, widget, filter, field, and object. Opt a widget out with
 `filterBindings: { <name>: false }`, or re-target the filter to one of that
 object's own fields.
 
+The keys of `filterBindings` are checked too. Each must name a filter the
+dashboard declares (a `globalFilters[]` entry's `name`, or its `field` when it
+has none, and `dateRange` only when the dashboard declares one). A key naming
+anything else is never read at runtime, so a misspelled opt-out leaves the
+widget filtered after all; `os validate` refuses it as
+`dashboard-filter-binding-unknown`, listing the declared filters.
+
 This is no longer only a CLI verdict. Since #7529 the same rule also runs at the
 **runtime publish door** for `dashboard` writes, so a board published from
 Studio, `PUT /api/v1/meta/*` or an MCP/AI author is refused there too — the same

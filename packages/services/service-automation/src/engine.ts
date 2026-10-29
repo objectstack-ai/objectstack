@@ -10,7 +10,7 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest } from '@objectstack/spec/contracts';
 import type { MetadataActivationWriteOptions } from '@objectstack/core';
 import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
@@ -2524,6 +2524,18 @@ export interface FlowCredentialSource {
 }
 
 /**
+ * [#27237] The connector credential door the automation plugin attaches — the
+ * three `IAutomationService` credential members, served where the declared
+ * instances and the reconcile live. Every answer carries references and
+ * states, never a value.
+ */
+export interface ConnectorCredentialDoor {
+    list(): Promise<ConnectorCredentialRef[]>;
+    set(request: ConnectorCredentialSetRequest): Promise<ConnectorCredentialRef>;
+    clear(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef>;
+}
+
+/**
  * [#20790] One credential a registered flow holds, by class: a literal in its
  * definition (a packaged flow's source), or held by the credential channel.
  * What the clone door refuses on — never the value.
@@ -2670,6 +2682,8 @@ export class AutomationEngine implements IAutomationService {
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
     private connectorPullSource?: (request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>;
+    /** [#27237] The connector credential door — see {@link setConnectorCredentialDoor}. */
+    private connectorCredentialDoor?: ConnectorCredentialDoor;
     /** [#22450] The lazy `i18n` service reader — see {@link setI18nServiceSource}. */
     private i18nServiceSource?: () => RefusalI18nService | undefined;
     /**
@@ -4763,6 +4777,42 @@ export class AutomationEngine implements IAutomationService {
             );
         }
         return this.connectorPullSource(request);
+    }
+
+    /**
+     * [#27237] Attach the connector credential door — the automation plugin's,
+     * because the declared instances it lists and the reconcile a write runs
+     * are the plugin's, while the registered service is this engine.
+     */
+    setConnectorCredentialDoor(door: ConnectorCredentialDoor | undefined): void {
+        this.connectorCredentialDoor = door;
+    }
+
+    /** [#27237] The door, or the refusal a bare engine answers: nothing here can store a credential. */
+    private requireConnectorCredentialDoor(verb: string): ConnectorCredentialDoor {
+        if (this.connectorCredentialDoor) return this.connectorCredentialDoor;
+        throw Object.assign(
+            new Error(
+                `[Automation] ${verb}: this automation engine has no connector credential door attached — it is attached by `
+                + 'AutomationServicePlugin at init(); a bare engine has no declared connectors and no credential store.',
+            ),
+            { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
+    }
+
+    /** [#27237] `IAutomationService.listConnectorCredentialRefs` — references and states, never a value. */
+    async listConnectorCredentialRefs(): Promise<ConnectorCredentialRef[]> {
+        return this.requireConnectorCredentialDoor('listConnectorCredentialRefs()').list();
+    }
+
+    /** [#27237] `IAutomationService.setConnectorCredential` — store one value, re-materialize its instances. */
+    async setConnectorCredential(request: ConnectorCredentialSetRequest): Promise<ConnectorCredentialRef> {
+        return this.requireConnectorCredentialDoor(`setConnectorCredential('${request.ref}')`).set(request);
+    }
+
+    /** [#27237] `IAutomationService.clearConnectorCredential` — remove one value, degrade its instances. */
+    async clearConnectorCredential(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef> {
+        return this.requireConnectorCredentialDoor(`clearConnectorCredential('${request.ref}')`).clear(request);
     }
 
     /** [#20790] Does the credential channel hold the LIVE credential at this position? */
