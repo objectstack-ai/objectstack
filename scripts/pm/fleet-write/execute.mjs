@@ -159,6 +159,34 @@
  * zero writes. Every read is an unpaced GET, and the one write is paced like
  * every write verb.
  *
+ * ## The hierarchy link — `sub_issue_add` / `sub_issue_remove`, fenced on the CARDS and read back
+ *
+ * The fences on the two cards (`SUB_ISSUE_FENCES` in `ops.mjs`: parent,
+ * child, and free for an add or listed for a remove) are facts about the
+ * board, so this file is where they are AUTHORITATIVE (`subIssuePreflight`):
+ * it reads the parent's and the child's own `GET /repos/{repo}/issues/{n}`,
+ * then — only when both pass — the child's `GET …/issues/{child}/parent` for
+ * an add, or the parent's sub-issue list (`readSubIssues`: every page at the
+ * endpoint's maximum, to a cap; a walk past the cap is a truncated SUBSET and
+ * never read as absent) for a remove, and judges every fence on those
+ * answers. A fence that fails — every failing one named, with what was read —
+ * stops the action with the write NOT SENT: its row says `not sent`, zero
+ * writes, exit 5. The body the write carries is `{ sub_issue_id }`, the id
+ * the CHILD's own answer gave, ⛔ never a number and never `replace_parent`.
+ *
+ * An add whose child already answers to THIS parent sends nothing: it is a
+ * measured no-op, landed only when the parent's list reads the child back
+ * (row status `not sent`, its result saying `no-op`). Every other write's
+ * answer — 201 for the add, 200 for the remove — is an acceptance, not a
+ * landing: `confirmSubIssue` re-reads the parent's list every
+ * `SUB_ISSUE_POLL_MS` for up to `SUB_ISSUE_WINDOW_MS` and lands the action
+ * only on `subIssueReadBack` (`ops.mjs`): the list lists the child's id
+ * (add) or no longer does (remove). A non-2xx answer is a FAILED action with
+ * the platform's sentence and nothing read back; a list that never settles,
+ * or never reads whole, is a FAILED action whose sentence says UNCONFIRMED:
+ * read the parent and ⛔ never re-send. Every read is an unpaced GET, and the
+ * one write is paced like every write verb.
+ *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
  * The op table spells each leg's path with a placeholder and `fromAnswer:
@@ -284,6 +312,12 @@ import {
   rerunFailedLandedText,
   rerunFailedPullNumber,
   rerunFailedReadBack,
+  subIssueAlreadyHere,
+  subIssueCardFailure,
+  subIssueFenceFailures,
+  subIssueFenceText,
+  subIssueLandedText,
+  subIssueReadBack,
   transferRemedy,
 } from './ops.mjs';
 import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
@@ -623,6 +657,75 @@ export async function confirmRerunFailed(req, answer, pre, payload, api, t, { sl
   return { ok: false, why: `${platform} accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: the re-run may still start; read the run before anything else, ⛔ do not re-send (a second send meets attempt ${want} at the once fence and is refused)` };
 }
 
+/** The hierarchy link's read-back window and poll interval (header): the parent's list is re-read until it settles. */
+export const SUB_ISSUE_WINDOW_MS = 30_000;
+export const SUB_ISSUE_POLL_MS = 3_000;
+/** A parent's sub-issue list is walked at the endpoint's page maximum, to a cap — a walk past it is a truncated SUBSET. */
+export const SUB_ISSUE_LIST_PAGE_SIZE = 100;
+export const SUB_ISSUE_LIST_PAGE_CAP = 10;
+
+/**
+ * A parent's sub-issue list, every page: `{ items }`, or `{ fail }` — the sentence — for a page that did not answer
+ * 200 with an array, or a walk past `SUB_ISSUE_LIST_PAGE_CAP` pages. Never throws.
+ */
+async function readSubIssues(repo, parent, api, t) {
+  const items = [];
+  const call = `GET /repos/${repo}/issues/${parent}/sub_issues`;
+  for (let page = 1; page <= SUB_ISSUE_LIST_PAGE_CAP; page++) {
+    const r = await rest(api, `/repos/${repo}/issues/${parent}/sub_issues?per_page=${SUB_ISSUE_LIST_PAGE_SIZE}&page=${page}`, {}, t);
+    if (r.status !== 200 || !Array.isArray(r.json)) return { fail: `${call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}: #${parent}'s sub-issue list could not be read` };
+    items.push(...r.json);
+    if (r.json.length < SUB_ISSUE_LIST_PAGE_SIZE) return { items };
+  }
+  return { fail: `#${parent}'s sub-issue list hit its ${SUB_ISSUE_LIST_PAGE_CAP}-page cap with ${items.length} entries collected and more pending — a truncated list is a SUBSET, never read as absent` };
+}
+
+/**
+ * The fences, AUTHORITATIVE (header: "The hierarchy link"): the parent's and the child's own answers, then — only
+ * when both pass — the child's parent read (add) or the parent's whole list (remove), judged against
+ * `SUB_ISSUE_FENCES`. Returns `{ childId, already }` to proceed — `already` an add whose child answers to THIS
+ * parent, the no-op — or `{ fail: why }`, the sentence the row prints, the write NOT SENT. Never throws on a status.
+ */
+export async function subIssuePreflight(req, payload, api, t) {
+  const { mode, parent, child } = req.subIssue;
+  const repo = payload.repo;
+  const ctx = { mode, repo, parentNumber: parent, childNumber: child };
+  ctx.parent = await rest(api, `/repos/${repo}/issues/${parent}`, {}, t);
+  ctx.child = await rest(api, `/repos/${repo}/issues/${child}`, {}, t);
+  if (subIssueCardFailure(ctx.parent, repo, parent) === null && subIssueCardFailure(ctx.child, repo, child) === null) {
+    if (mode === 'add') ctx.childParent = await rest(api, `/repos/${repo}/issues/${child}/parent`, {}, t);
+    else ctx.list = await readSubIssues(repo, parent, api, t);
+  }
+  const failures = subIssueFenceFailures(ctx);
+  if (failures.length) return { fail: `REFUSED at the relay's fence on #${parent} ← #${child}, nothing sent — ${subIssueFenceText(failures)}` };
+  return { childId: ctx.child.json.id, already: mode === 'add' && subIssueAlreadyHere(ctx) };
+}
+
+/**
+ * Did the hierarchy link LAND? Judged by reading the parent's list back, never by the answer (header). `answer`
+ * is the write's, or null for the no-op, which sent nothing. Returns `{ ok, why, result }`. Never throws on a status.
+ */
+export async function confirmSubIssue(req, answer, pre, payload, api, t, { sleep, now, windowMs = SUB_ISSUE_WINDOW_MS, pollMs = SUB_ISSUE_POLL_MS } = {}) {
+  const { mode, parent, child } = req.subIssue;
+  const platform = answer ? `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}` : null;
+  if (answer && !(answer.status >= 200 && answer.status < 300)) return { ok: false, why: platform };
+  const started = now();
+  let last = 'nothing was read back';
+  for (;;) {
+    const list = await readSubIssues(payload.repo, parent, api, t);
+    if (list.fail) last = list.fail;
+    else {
+      const v = subIssueReadBack({ mode, childId: pre.childId, items: list.items });
+      if (v.ok) return { ok: true, why: '', result: subIssueLandedText({ mode, parentNumber: parent, childNumber: child, childId: pre.childId, count: v.count, noop: !answer }) };
+      last = v.why;
+    }
+    if (now() - started >= windowMs) break;
+    await sleep(pollMs);
+  }
+  if (!answer) return { ok: false, why: `nothing sent — #${child}'s parent read named #${parent}, but ${last} ${windowMs} ms later: the two reads disagree; read #${parent}'s sub-issues before anything else` };
+  return { ok: false, why: `${platform} accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: read #${parent}'s sub-issues before anything else, ⛔ do not re-send` };
+}
+
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
 export function resultOf(req, json, status = null) {
   if (status === 204 && (json === null || json === undefined)) return 'accepted (HTTP 204, no body)';
@@ -875,6 +978,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   const t = { fetch: deps.fetch, token, pace: deps.pace };
   const ub = { sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))), now: deps.now ?? (() => Date.now()), ...(deps.updateBranch ?? {}) };
   const rr = { sleep: ub.sleep, now: ub.now, ...(deps.rerunFailed ?? {}) };
+  const si = { sleep: ub.sleep, now: ub.now, ...(deps.subIssue ?? {}) };
 
   const judged = validatePayload(raw);
   if (!judged.ok) {
@@ -958,7 +1062,30 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         log(`  ✗ action ${i + 1} ${action.op}: ${why}`);
         break;
       }
-      let body = req.body ?? null;
+      // The hierarchy link (header): its fences on the two cards, judged HERE on the reads before the write — refused, NOT SENT.
+      const sub = req.subIssue ? await subIssuePreflight(req, payload, api, t) : null;
+      if (sub?.fail) {
+        const why = scrub(sub.fail, [token]);
+        rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
+        stoppedAt = { action: i + 1, op: action.op, why };
+        log(`  ✗ action ${i + 1} ${action.op}: ${why}`);
+        break;
+      }
+      if (sub?.already) {
+        // The measured no-op: the child already answers to this parent, so nothing is sent — landed only on the list's read-back.
+        const noop = await confirmSubIssue(req, null, sub, payload, api, t, si);
+        const call = `${req.verb} ${req.path}`;
+        rows.push({ action: i + 1, op: action.op, call, status: 'not sent', result: noop.ok ? scrub(noop.result, [token]) : `FAILED: ${scrub(noop.why, [token])}` });
+        if (!noop.ok) {
+          stoppedAt = { action: i + 1, op: action.op, why: scrub(noop.why, [token]) };
+          log(`  ✗ action ${i + 1} ${action.op}: ${call} -> ${stoppedAt.why}`);
+          break;
+        }
+        log(`  ✓ action ${i + 1} ${action.op}: ${call} -> not sent · ${rows[rows.length - 1].result}`);
+        continue;
+      }
+      // The body is the child's id from its own answer — the op table spells none for this row.
+      let body = sub ? { sub_issue_id: sub.childId } : (req.body ?? null);
       if (req.graphql) {
         const resolved = await graphqlVariables(req, payload, api, t);
         if (resolved.fail) {
@@ -975,7 +1102,14 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       if (opener === null) opener = r;
       // The base sync is confirmed by MEASURE (header): the head polled off the expected sha, or a 422 judged by the compare.
       // The failed-jobs re-run is confirmed by reading the run back (header): attempt 2, its failed jobs queued or in progress.
-      const landed = req.updateBranch ? await confirmUpdateBranch(req, r, payload, api, t, ub) : req.rerunFailed ? await confirmRerunFailed(req, r, pre, payload, api, t, rr) : requestLanded(req, r);
+      // The hierarchy link is confirmed by reading the parent's list back (header): the child's id listed, or no longer.
+      const landed = req.updateBranch
+        ? await confirmUpdateBranch(req, r, payload, api, t, ub)
+        : req.rerunFailed
+          ? await confirmRerunFailed(req, r, pre, payload, api, t, rr)
+          : sub
+            ? await confirmSubIssue(req, r, sub, payload, api, t, si)
+            : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
       rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
@@ -1046,9 +1180,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the governed-review follow-up: after pr_create (at the number the create answered) and after pr_ready, the pull's file list is read in full; a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 29,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
+  "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
 });
-// Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 19;
+// Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
+// hierarchy link battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 20;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1597,6 +1733,90 @@ export async function selfTest() {
       t('⛔ the validator is the executor\'s gate too: beside another action, or with run_id a string, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [stringId.exit, stringId.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
     }
 
+    // ── the hierarchy link ──────────────────────────────────────────────────
+    battery("the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops");
+    {
+      // The measured shapes (2026-10-29, read-only): #26709 answered to #27293 by REST id 6060227467; #26702 is a sibling.
+      const PARENT = 27293;
+      const CHILD = 26709;
+      const CHILD_ID = 6060227467;
+      const SIBLING_ID = 6060051871;
+      const at = (repo = REPO) => `https://api.github.com/repos/${repo}`;
+      const cardOf = (number, id, extra = {}) => ({ status: 200, json: { id, number, repository_url: at(), ...extra } });
+      const P_GET = `GET /repos/${REPO}/issues/${PARENT}`;
+      const C_GET = `GET /repos/${REPO}/issues/${CHILD}`;
+      const C_PARENT = `GET /repos/${REPO}/issues/${CHILD}/parent`;
+      const LIST = `GET /repos/${REPO}/issues/${PARENT}/sub_issues`;
+      const ADD = `POST /repos/${REPO}/issues/${PARENT}/sub_issues`;
+      const REMOVE = `DELETE /repos/${REPO}/issues/${PARENT}/sub_issue`;
+      const NO_PARENT = { status: 404, json: { message: 'No parent issue found' } };
+      const listOf = (...ids) => ({ status: 200, json: ids.map((id) => ({ id, number: id === CHILD_ID ? CHILD : 1 })) });
+      const parentAnswer = { status: 201, json: { id: 6081407279, number: PARENT, html_url: `https://github.test/${REPO}/issues/${PARENT}` } };
+      const cards = { ...allowed, [P_GET]: cardOf(PARENT, 6081407279), [C_GET]: cardOf(CHILD, CHILD_ID) };
+      const addHappy = { ...cards, [C_PARENT]: NO_PARENT, [ADD]: parentAnswer, [LIST]: listOf(SIBLING_ID, CHILD_ID) };
+      const removeHappy = { ...cards, [LIST]: [listOf(SIBLING_ID, CHILD_ID), listOf(SIBLING_ID)], [REMOVE]: { status: 200, json: { id: 6081407279, number: PARENT } } };
+      const addStroke = base([{ op: 'sub_issue_add', issue: PARENT, sub_issue: CHILD }]);
+      const removeStroke = base([{ op: 'sub_issue_remove', issue: PARENT, sub_issue: CHILD }]);
+      let clock = 0;
+      const timing = { sleep: async (ms) => { clock += ms; }, now: () => clock };
+      const notSent = (r) => [r.exit, writes(r.seen).length, r.rows[0]?.call, r.rows[0]?.status, /REFUSED at the relay's fence/.test(r.rows[0]?.result ?? '')];
+      const refusedRow = (write) => [EXIT_ACTION_FAILED, 0, write, 'not sent', true];
+
+      const added = await run(addStroke, addHappy, timing);
+      t("⭐ add: the sender gate, the parent's and the child's own answers, the child's parent read, then ONE POST, then the parent's list read back — exit 0", [added.exit, added.seen.map((s) => s.call)], [EXIT_OK, [PERM, P_GET, C_GET, C_PARENT, ADD, LIST]], added.logs.join(' | '));
+      t("…the one write's body is exactly { sub_issue_id } — the child's REST id from its own answer, never its number, never replace_parent — under the App token like every request", [writes(added.seen).map((s) => [s.call, s.body]), added.seen.every((s) => s.auth === `Bearer ${TOKEN}`)], [[[ADD, { sub_issue_id: CHILD_ID }]], true]);
+      const ADDED = `#${CHILD} (id ${CHILD_ID}) is a sub-issue of #${PARENT} · its list reads 2 sub-issue(s)`;
+      t('…the 201 is confirmed by the read-back: the row names the link as the list reads it, the summary row carries it, and no annotation is emitted', [added.rows[0]?.status, added.rows[0]?.result, added.summary.includes(`| 1 | \`sub_issue_add\` | \`${ADD}\` | 201 | ${ADDED} |`), added.annotations, added.logs.filter((l) => l.startsWith('::'))], [201, ADDED, true, [], []], added.summary);
+      const removed = await run(removeStroke, removeHappy, timing);
+      t("⭐ remove: the two answers, the parent's whole list (the fence), ONE DELETE carrying { sub_issue_id }, then the list read back without the child — exit 0", [removed.exit, removed.seen.map((s) => s.call), writes(removed.seen).map((s) => s.body), removed.rows[0]?.result], [EXIT_OK, [PERM, P_GET, C_GET, LIST, REMOVE, LIST], [{ sub_issue_id: CHILD_ID }], `#${CHILD} (id ${CHILD_ID}) is no longer a sub-issue of #${PARENT} · its list reads 1 sub-issue(s)`], removed.logs.join(' | '));
+      // The fences, refused at execute time: the board changed between the seat's request and this run — the write is NOT SENT.
+      const ELSEWHERE = { status: 200, json: { id: 1, number: 27000, repository_url: at() } };
+      const other = await run(addStroke, { ...addHappy, [C_PARENT]: ELSEWHERE });
+      t('⛔ fence free, refused HERE: a child already under ANOTHER parent — zero writes, the POST row not sent, the other parent named and the move refused', [notSent(other), other.rows[0]?.result.includes(`#${CHILD} is already a sub-issue of ${REPO}#27000`) && other.rows[0]?.result.includes('never moves it')], [refusedRow(ADD), true], other.rows[0]?.result);
+      const unlisted = await run(removeStroke, { ...removeHappy, [LIST]: listOf(SIBLING_ID) });
+      t('⛔ fence listed, refused HERE: a remove of a child the parent does not list — zero writes, the DELETE row not sent, never a blind DELETE', [notSent(unlisted), unlisted.rows[0]?.result.includes(`does not list #${CHILD} (id ${CHILD_ID})`)], [refusedRow(REMOVE), true], unlisted.rows[0]?.result);
+      const pullParent = await run(addStroke, { ...addHappy, [P_GET]: cardOf(PARENT, 6081407279, { pull_request: { url: 'x' } }) });
+      const movedChild = await run(addStroke, { ...addHappy, [C_GET]: cardOf(CHILD, CHILD_ID, { repository_url: at('objectstack-ai/cloud') }) });
+      t("⛔ fence parent and child, refused HERE: a parent that is a pull request, a child transferred away — zero writes, and the link's own read (the child's parent) never taken", [notSent(pullParent), notSent(movedChild), [...pullParent.seen, ...movedChild.seen].some((s) => s.call === C_PARENT), pullParent.rows[0]?.result.includes('is a pull request'), movedChild.rows[0]?.result.includes('— transferred')], [refusedRow(ADD), refusedRow(ADD), false, true, true]);
+      const unreadChild = await run(removeStroke, { ...removeHappy, [C_GET]: { status: 404, json: { message: 'Not Found' } } });
+      t("⛔ an unread child is never judged: zero writes, the parent's list never read, both the child and the unjudged listing named", [notSent(unreadChild), unreadChild.seen.some((s) => s.call === LIST), ['fence `child`', 'fence `listed`'].every((n) => unreadChild.rows[0]?.result.includes(n))], [refusedRow(REMOVE), false, true], unreadChild.rows[0]?.result);
+      const blindParent = await run(addStroke, { ...addHappy, [C_PARENT]: { status: 503, json: { message: 'down' } } });
+      t("⛔ a child's parent read that answers neither a parent nor 404 is never read as free: zero writes, the status named", [notSent(blindParent), blindParent.rows[0]?.result.includes('answered HTTP 503 (down), neither a parent nor 404')], [refusedRow(ADD), true]);
+      const truncated = await run(removeStroke, { ...removeHappy, [LIST]: { status: 200, json: Array.from({ length: SUB_ISSUE_LIST_PAGE_SIZE }, (_, k) => ({ id: CHILD_ID + 1 + k })) } });
+      t("⛔ a parent's list past its page cap is a SUBSET, never read as listed or absent: the remove is refused, zero writes, every page walked", [notSent(truncated), truncated.rows[0]?.result.includes('a truncated list is a SUBSET'), truncated.seen.filter((s) => s.call === LIST).length], [refusedRow(REMOVE), true, SUB_ISSUE_LIST_PAGE_CAP]);
+      // The no-op: the child already answers to THIS parent.
+      const HERE = { status: 200, json: { id: 6081407279, number: PARENT, repository_url: at() } };
+      const noop = await run(addStroke, { ...addHappy, [C_PARENT]: HERE }, timing);
+      t('an add whose child already answers to THIS parent sends NOTHING: zero writes, exit 0, the row not sent and saying no-op — landed only because the list read it back', [noop.exit, writes(noop.seen).length, noop.seen.at(-1)?.call, noop.rows[0]?.status, noop.rows[0]?.result.startsWith('no-op, nothing sent: ')], [EXIT_OK, 0, LIST, 'not sent', true], noop.rows[0]?.result);
+      clock = 0;
+      const split = await run(addStroke, { ...addHappy, [C_PARENT]: HERE, [LIST]: listOf(SIBLING_ID) }, timing);
+      t("⛔ …but a no-op the list does not read back is FAILED after the window — the two reads disagree — still with zero writes", [split.exit, writes(split.seen).length, split.rows[0]?.result.includes('the two reads disagree'), clock], [EXIT_ACTION_FAILED, 0, true, SUB_ISSUE_WINDOW_MS]);
+      // The write's answer, and the read-back that confirms it.
+      const refused = await run(addStroke, { ...addHappy, [ADD]: { status: 422, json: { message: 'Validation Failed' } } });
+      t("a 422 on the POST is a FAILED action with the platform's sentence, and nothing is read back after it", [refused.exit, refused.rows[0]?.status, refused.rows[0]?.result.includes('Validation Failed'), refused.seen.some((s) => s.call === LIST)], [EXIT_ACTION_FAILED, 422, true, false]);
+      clock = 0;
+      const never = await run(addStroke, { ...addHappy, [LIST]: listOf(SIBLING_ID) }, timing);
+      t("⛔ a read-back that never lists the child is a FAILED action — UNCONFIRMED, naming the id and never to re-send — after the window, polled at the interval", [never.exit, never.rows[0]?.status, ['UNCONFIRMED', `does not list the child's id ${CHILD_ID}`, 'do not re-send'].every((s) => never.rows[0]?.result.includes(s)), clock, never.seen.filter((s) => s.call === LIST).length], [EXIT_ACTION_FAILED, 201, true, SUB_ISSUE_WINDOW_MS, SUB_ISSUE_WINDOW_MS / SUB_ISSUE_POLL_MS + 1], never.rows[0]?.result);
+      clock = 0;
+      const late = await run(addStroke, { ...addHappy, [LIST]: [listOf(SIBLING_ID), listOf(SIBLING_ID), listOf(SIBLING_ID, CHILD_ID)] }, timing);
+      t('a link the list shows on a later read lands, read again at the interval until it does', [late.exit, late.rows[0]?.result, clock], [EXIT_OK, ADDED, 2 * SUB_ISSUE_POLL_MS]);
+      clock = 0;
+      const stuck = await run(removeStroke, { ...removeHappy, [LIST]: listOf(SIBLING_ID, CHILD_ID) }, timing);
+      t('⛔ a remove whose list still lists the child after the window is FAILED, UNCONFIRMED, naming the id', [stuck.exit, stuck.rows[0]?.result.includes(`still lists the child's id ${CHILD_ID}`), stuck.rows[0]?.result.includes('UNCONFIRMED')], [EXIT_ACTION_FAILED, true, true]);
+      clock = 0;
+      const blind = await run(addStroke, { ...addHappy, [LIST]: [listOf(SIBLING_ID), { status: 502, json: { message: 'Bad Gateway' } }] }, timing);
+      t("⛔ a read-back list that stops answering is FAILED, UNCONFIRMED, naming the read", [blind.exit, blind.rows[0]?.result.includes("sub-issue list could not be read"), blind.rows[0]?.result.includes('UNCONFIRMED')], [EXIT_ACTION_FAILED, true, true]);
+      const paged = await run(addStroke, { ...addHappy, [LIST]: [{ status: 200, json: Array.from({ length: SUB_ISSUE_LIST_PAGE_SIZE }, (_, k) => ({ id: k + 1 })) }, listOf(CHILD_ID)] }, timing);
+      t("the list is walked page by page: a child on page 2 of a full page 1 is read back, the row counting every entry", [paged.exit, paged.seen.filter((s) => s.call === LIST).length, paged.rows[0]?.result], [EXIT_OK, 2, `#${CHILD} (id ${CHILD_ID}) is a sub-issue of #${PARENT} · its list reads ${SUB_ISSUE_LIST_PAGE_SIZE + 1} sub-issue(s)`]);
+      // The stroke: the rows ride beside other issue ops — no alone — and the validator is the executor's gate too.
+      const mixed = await run(base([{ op: 'comment', issue: PARENT, body: 'x' }, { op: 'sub_issue_add', issue: PARENT, sub_issue: CHILD }]), { ...addHappy, [`POST /repos/${REPO}/issues/${PARENT}/comments`]: { status: 201, json: { id: 9 } } }, timing);
+      t('beside a comment in one stroke both land, in order — the rows spend the literal issues grant and travel with the other issue ops', [mixed.exit, writes(mixed.seen).map((s) => s.call)], [EXIT_OK, [`POST /repos/${REPO}/issues/${PARENT}/comments`, ADD]]);
+      const self = await run(base([{ op: 'sub_issue_add', issue: PARENT, sub_issue: PARENT }]), addHappy);
+      const widened = await run(base([{ op: 'sub_issue_add', issue: PARENT, sub_issue: CHILD, replace_parent: true }]), addHappy);
+      const byId = await run(base([{ op: 'sub_issue_remove', issue: PARENT, sub_issue: String(CHILD) }]), removeHappy);
+      t("⛔ the validator is the executor's gate too: an issue as its own sub-issue, a replace_parent flag, or the child as a string — refused with ZERO requests, exit 2", [[self.exit, self.seen.length], [widened.exit, widened.seen.length], [byId.exit, byId.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
+    }
+
     // ── the summary ─────────────────────────────────────────────────────────
     battery('the summary: request, sender and role, session, target, one row per request');
     {
@@ -1877,7 +2097,8 @@ export async function selfTest() {
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
       'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, ' +
       'a governed-review follow-up after pr_create and pr_ready that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
-      "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, one summary row per request, " +
+      "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, " +
+      "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, one summary row per request, " +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +
       'token that came back out of NO summary, log or error.',
