@@ -149,7 +149,7 @@ function headersRefusal(headers: unknown): string | undefined {
             return 'Custom `headers` must be keyed by header field names: printable ASCII with no space, control character or colon.';
         }
         if (typeof value !== 'string' || /[\r\n]/.test(value)) {
-            return `Custom header \`${name}\` must have a single-line string value.`;
+            return `Custom \`headers\` value for \`${name}\` must be a single-line string.`;
         }
         if (SENDER_HEADER_NAMES.has(name.toLowerCase())) {
             return `Custom header \`${name}\` cannot be set: the sender is the deployment's configured sender.`;
