@@ -17,11 +17,13 @@ export interface AskedEntitlement {
     readonly object: string;
     readonly operation: string;
     readonly userId: unknown;
+    /** The organization the caller's context was resolved in when the gate asked. */
+    readonly tenantId: unknown;
 }
 
 export interface WebhookAdministrationSecurityDouble {
     readonly asked: AskedEntitlement[];
-    explain(request: { object: string; operation: string }, context?: { userId?: unknown }): Promise<any>;
+    explain(request: { object: string; operation: string }, context?: { userId?: unknown; tenantId?: unknown }): Promise<any>;
 }
 
 /**
@@ -35,7 +37,12 @@ export function webhookAdministrationSecurity(
     return {
         asked,
         async explain(request, context) {
-            asked.push({ object: request.object, operation: request.operation, userId: context?.userId });
+            asked.push({
+                object: request.object,
+                operation: request.operation,
+                userId: context?.userId,
+                tenantId: context?.tenantId,
+            });
             const allowed = request.object === 'sys_webhook'
                 && request.operation === 'update'
                 && isAdministrator(context?.userId);
