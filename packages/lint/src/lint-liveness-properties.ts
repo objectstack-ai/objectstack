@@ -220,10 +220,10 @@ function isAuthored(value: unknown): boolean {
  * the ledger README keeps the historical worked example. Falling into `dead`
  * would have said "Remove it" about a key whose enforcement is real and
  * remote, i.e. exactly the most wrong sentence available: deleting it tears
- * out a live gate's input. Such a row is not
- * deletable, so `live-elsewhere` gets its own branch and its own rule id, and
- * its default hint points the author at the ledger row's `evidence` — the
- * enforcer's address — rather than at a delete key.
+ * out a live gate's input. Such a row is not deletable, so `live-elsewhere`
+ * gets its own branch and its own rule id, and its default hint points the
+ * author at the ledger row's `evidence` — the enforcer's address — rather
+ * than at a delete key.
  *
  * Each verdict below also carries its own DEFAULT hint (used when the ledger
  * entry has no `authorHint`; the row's `note` is never shown to an author, since
