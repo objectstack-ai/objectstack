@@ -1,15 +1,15 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/lint': patch
-'@object-ui/app-shell': patch
-'@object-ui/plugin-detail': patch
-'@object-ui/i18n': patch
+'@objectstack/spec': minor
+'@objectstack/lint': minor
+'@object-ui/app-shell': minor
+'@object-ui/plugin-detail': minor
+'@object-ui/i18n': minor
 ---
 
 feat(spec,lint,app-shell)!: a field group's `relatedList` names body tables only — a group naming a side card or a hidden list is refused, and Studio offers body tables only
 
 Clause-②: no (narrowing)
-Metadata-protocol: none
+Metadata-protocol: narrowed
 
 <!-- adr-0087: registered field-group-related-list-side-card-refused -->
 
