@@ -47,6 +47,7 @@
  */
 
 import type { CryptoHandle } from '@objectstack/spec/contracts';
+import type { DriverOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { redactBoundStatement, redactPropagatedDriverFault } from '@objectstack/types';
 import {
@@ -284,13 +285,14 @@ export async function releaseSecretHandles(
     try {
       // Verify, never infer: no row of the column may still name the handle —
       // a predicate write shares one handle across every row it matched.
+      const recordOptions: DriverOptions | undefined = recordInUnit ? { transaction: tx } : undefined;
       const refs = await this.getDriver(object).count(
         object,
         { where: { [slot.field]: makeSecretRef(slot.handleId) } },
-        (recordInUnit ? { transaction: tx } : undefined) as any,
+        recordOptions,
       );
       if (refs > 0) continue;
-      const storeOptions = (storeInUnit ? { transaction: tx } : undefined) as any;
+      const storeOptions: DriverOptions | undefined = storeInUnit ? { transaction: tx } : undefined;
       const secretDriver = this.getDriver('sys_secret');
       const found = await secretDriver.find('sys_secret', { where: { id: slot.handleId } }, storeOptions);
       const secret: any = Array.isArray(found) ? found[0] : found;
