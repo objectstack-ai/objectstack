@@ -1511,6 +1511,7 @@ const en = {
     relatedCardCount_other: '{{count}} records — enlarge',
     relatedDefaultChanged: 'Default order updated',
     relatedRestoreDefault: 'Restore default',
+    relatedRestoreDefaultOrder: 'Restore default order',
     relatedHiddenCount: '{{count}} hidden',
     relatedHiddenCount_one: '{{count}} hidden',
     relatedHiddenCount_other: '{{count}} hidden',

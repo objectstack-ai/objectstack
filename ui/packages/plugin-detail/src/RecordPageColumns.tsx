@@ -35,8 +35,10 @@ export interface RecordPageColumnsProps {
   footer?: React.ReactNode;
   /**
    * The reader's column switches (objectstack#27052): a column that is off is
-   * not drawn — the timeline folds into the related column's 「动态」 card, the
-   * related column into the rail (`recordPageArrangementFor`). Absent: both on.
+   * not drawn — the timeline folds into the related column's 「动态」 card; the
+   * related column is gone, rail and all (objectstack#27241). A related column
+   * that is on but has no room is the rail (`recordPageArrangementFor`).
+   * Absent: both on.
    */
   switches?: RecordPageColumnSwitches;
   /**
@@ -173,8 +175,9 @@ const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)
  * The reader's switches (objectstack#27052) take a column out: with the
  * timeline off the related column is resident in its place and the
  * timeline's blocks are its foot card (「动态」); with the related column off
- * it stays in the rail. `data-record-columns-shown` names the resident
- * columns.
+ * there is no related column and no rail toggle (objectstack#27241: the
+ * switch decides whether the column exists, the rail toggle only opens one
+ * the switch allows). `data-record-columns-shown` names the resident columns.
  */
 export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   tier,
@@ -205,7 +208,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const foldTimeline = arrangement.timelineFolded && hasTimeline;
   const hasRelated = hasRelatedLists || foldTimeline;
   const residentTimeline = hasTimeline && arrangement.columns.includes('timeline');
-  const residentRelated = hasRelated && !arrangement.relatedRail;
+  const residentRelated = hasRelated && arrangement.columns.includes('related');
   const relatedInRail = hasRelated && arrangement.relatedRail;
   const relatedLabel = t('detail.related');
   const foldedTimelineLabel = t('detail.timelineFolded');

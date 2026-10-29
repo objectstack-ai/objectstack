@@ -99,6 +99,9 @@ export { usePageTabCountReporter } from './renderers/layout/containers';
 // console's record view, which draws the row in its screen-only chrome on a
 // page that declares `print`, where `page:header` is not a printable block.
 export { PageHeaderActions } from './renderers/layout/containers';
+// The host slot at the end of that row (objectstack#27241): the console's
+// record view puts the reader's panel switches there.
+export { PageHeaderTrailingContext } from './renderers/layout/page-header-trailing-context';
 export type { PageHeaderActionsProps } from './renderers/layout/containers';
 
 // The field-face seam (objectui#13216): the slot `@object-ui/fields` fills

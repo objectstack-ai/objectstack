@@ -132,8 +132,9 @@ const FreshBadge: React.FC = () => {
  * its title and count and reads no rows. The order, collapsed and hidden
  * state are the reader's (the host's workspace preference), laid over the
  * default order by `resolveRelatedArrangement`; the column says when the
- * default changed under a dragged order (「默认顺序已更新 · 恢复默认」) and how
- * many cards are hidden (「已隐藏 N 张 · 显示」).
+ * default changed under a dragged order (「默认顺序已更新 · 恢复默认」), and its
+ * foot says how many cards are hidden (「已隐藏 N 张 · 显示」) and, once the
+ * reader has moved or hidden any, offers 「恢复默认顺序」 (objectstack#27241).
  *
  * ⛔ No wrapper element per card: the lists stay DOM siblings, so the
  * empty-list fold (`RelatedListEmptyFold`, which reads its stack off the
@@ -239,9 +240,12 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
       {rest.map((node, index) => (
         <SchemaRenderer key={`rest-${index}`} schema={toRenderableSchema(node as any)} />
       ))}
-      {resolved.hidden.length > 0 && (
-        <RelatedHiddenLine count={resolved.hidden.length} onShow={() => edit({ kind: 'show-hidden' })} />
-      )}
+      <RelatedFootLine
+        hiddenCount={resolved.hidden.length}
+        onShowHidden={() => edit({ kind: 'show-hidden' })}
+        rearranged={resolved.rearranged}
+        onRestoreDefault={() => edit({ kind: 'restore-default-arrangement' })}
+      />
     </>
   );
 };
@@ -263,16 +267,40 @@ export const RelatedDefaultChangedHint: React.FC<{ onRestore: () => void }> = ({
   );
 };
 
-/** 「已隐藏 N 张 · 显示」 — the cards the reader hid, brought back together (rule 6). */
-export const RelatedHiddenLine: React.FC<{ count: number; onShow: () => void }> = ({ count, onShow }) => {
+/**
+ * The related column's foot line (objectstack#27055 rule 6, objectstack#27241):
+ * 「已隐藏 N 张 · 显示」 — the cards the reader hid, brought back together — and,
+ * on the same line, 「恢复默认顺序」 whenever the column is not the default one
+ * (the reader moved or hid a card). Restoring lays the default order back and
+ * shows every card; it is always there, not only when the author's default
+ * changed (that is {@link RelatedDefaultChangedHint}). Draws nothing for a
+ * column in its default arrangement.
+ */
+export const RelatedFootLine: React.FC<{
+  hiddenCount: number;
+  onShowHidden: () => void;
+  rearranged: boolean;
+  onRestoreDefault: () => void;
+}> = ({ hiddenCount, onShowHidden, rearranged, onRestoreDefault }) => {
   const { t } = useDetailTranslation();
+  if (hiddenCount === 0 && !rearranged) return null;
   return (
-    <p className="text-xs text-muted-foreground" data-related-hidden-line="">
-      {t('detail.relatedHiddenCount', { count, defaultValue: '{{count}} hidden' })}
-      {' · '}
-      <button type="button" className={LINE_BUTTON} onClick={onShow}>
-        {t('detail.relatedShowHidden', { defaultValue: 'Show' })}
-      </button>
+    <p className="text-xs text-muted-foreground" data-related-foot-line="">
+      {hiddenCount > 0 && (
+        <span data-related-hidden-line="">
+          {t('detail.relatedHiddenCount', { count: hiddenCount, defaultValue: '{{count}} hidden' })}
+          {' · '}
+          <button type="button" className={LINE_BUTTON} onClick={onShowHidden}>
+            {t('detail.relatedShowHidden', { defaultValue: 'Show' })}
+          </button>
+        </span>
+      )}
+      {hiddenCount > 0 && rearranged && ' · '}
+      {rearranged && (
+        <button type="button" className={LINE_BUTTON} onClick={onRestoreDefault} data-related-restore-default-order="">
+          {t('detail.relatedRestoreDefaultOrder', { defaultValue: 'Restore default order' })}
+        </button>
+      )}
     </p>
   );
 };
