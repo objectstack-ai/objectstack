@@ -23,8 +23,10 @@
  * too, but provisions no storage for them, so a remote row carries neither:
  * `owner_id` reads as null (sharing answers `deny`) and `created_by` never
  * equals the caller (the floor refuses). A member whose permission set grants
- * `allowEdit` gets 403 `PERMISSION_DENIED` on every row, and only an
- * administrator can write. `ownership: 'none'` (or `'org'` /
+ * `allowEdit` gets 403 `PERMISSION_DENIED` on every row unless an
+ * app-authored row-level write policy admits it (sharing's
+ * `admitsByIdWrite` retracts its refusal for such a row), and otherwise only
+ * an administrator can write. `ownership: 'none'` (or `'org'` /
  * `'business_unit'`) is NOT a way out: it withholds `owner_id`, so record
  * sharing abstains, and the floor's `created_by` read refuses the same write
  * (measured: 403 on update and delete).
@@ -54,8 +56,10 @@
  *
  * ## Deliberately not judged
  *
- *  - A read-only binding (`external.writable` not `true`): no member can edit
- *    it whatever the sharing model says, so the refusal is not this one.
+ *  - A read-only binding (`external.writable` not `true`), or one on a
+ *    datasource this stack declares with `external.allowWrites: false`: no
+ *    member can edit it whatever the sharing model says, so the refusal is
+ *    not this one.
  *  - `public_read_write` and `controlled_by_parent`: the first lifts the floor
  *    for updates (who may edit is a hook's decision), the second hands row
  *    writes to the master's gate. Deletes on a `public_read_write` external
@@ -129,11 +133,23 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
   const out: ExternalOwnerSharingFinding[] = [];
   if (!stack || typeof stack !== 'object') return out;
   const objects = recordsOf(stack.objects);
+  // ADR-0015's datasource half of the double write opt-in: a datasource this
+  // stack declares with `external.allowWrites: false` (also the parsed
+  // default) lets no write through, so no ownership check is what refuses.
+  const readOnlyDatasources = new Set(
+    recordsOf(stack.datasources)
+      .filter((ds) => {
+        const ext = ds.external;
+        return !!ext && typeof ext === 'object' && (ext as AnyRec).allowWrites === false;
+      })
+      .map((ds) => ds.name),
+  );
 
   objects.forEach((obj, i) => {
     const external = obj.external;
     if (!external || typeof external !== 'object' || Array.isArray(external)) return;
     if ((external as AnyRec).writable !== true) return;
+    if (readOnlyDatasources.has(obj.datasource)) return;
     if (effectiveSharingModelOf(obj) === 'public') return;
     const undeclared = undeclaredOwnershipColumn(obj);
     if (!undeclared) return;
@@ -148,7 +164,6 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
     const mapped = columnMapTargets(external as AnyRec, column);
     const role = column === OWNER_COLUMN ? 'owner' : 'creator';
     const declareWayOut =
-      (undeclared.injected ? '' : 'let the platform inject the audit columns, ') +
       `declare ${column} in fields and have the driver return the remote ${role} under that name ` +
       '(a built-in SQL driver does it through external.columnMap; a plugin driver must return it itself)';
 
@@ -163,9 +178,11 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
       message: mapped
         ? `external object on sharing model ${model} maps a remote column to '${column}' through ` +
           `external.columnMap but declares no '${column}' field; ${check} before every edit and delete, ` +
-          'and only a built-in SQL driver applies columnMap, so on a plugin driver every member write is refused (403)'
+          'and only a built-in SQL driver applies columnMap, so on a plugin driver every member write is refused (403) ' +
+          'unless an app-authored row-level policy admits the row'
         : `external object on sharing model ${model} declares no '${column}' field a remote row serves; ` +
-          `${check} before every edit and delete, so every member write is refused (403)`,
+          `${check} before every edit and delete, so every member write is refused (403) unless an app-authored ` +
+          'row-level policy admits the row',
       hint: mapped
         ? `Declare ${column} in fields (a plugin driver must return the remote ${role} under that name itself), ` +
           `or ${PUBLIC_READ_WRITE_WAY_OUT}`

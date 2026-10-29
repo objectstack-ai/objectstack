@@ -743,7 +743,8 @@ const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
       'the remote database owns the table and the platform creates no column for either. So the remote row ' +
       'answers no `owner_id` (record sharing refuses) and no `created_by` equal to the caller (the floor ' +
       'refuses). A member whose permission set grants `allowEdit` is refused every edit and every delete ' +
-      'with 403 `PERMISSION_DENIED`; only an administrator can write. An object with no `sharingModel` is ' +
+      'with 403 `PERMISSION_DENIED`, unless an app-authored row-level policy admits the row; otherwise only ' +
+      'an administrator can write. An object with no `sharingModel` is ' +
       'judged as \'private\', the value the runtime falls back to.',
     '`ownership: \'none\'` (or `\'org\'`, `\'business_unit\'`) is not a way out: without `owner_id` record ' +
       'sharing stops judging the row, and the floor\'s `created_by` check refuses the same write. Turning ' +
@@ -764,7 +765,8 @@ const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
     'Deletes are not opened by `public_read_write`: that model opens edits, and the floor keeps deletes ' +
       'to the row\'s `created_by`. On an external object that column has no storage either, so member ' +
       'deletes stay refused unless the driver returns `created_by` or an authored policy or share grants them.',
-    'The rule judges only a writable binding (`external.writable: true`) on a model that keys writes to ' +
+    'The rule judges only a writable binding (`external.writable: true`, on a datasource this stack does ' +
+      'not declare with `external.allowWrites: false`) on a model that keys writes to ' +
       'an owner (`private`, `public_read`, or none on a custom object). `controlled_by_parent` is not judged: ' +
       'the master record\'s gate decides its writes. It is a warning, not an error: the stack is valid and ' +
       'an administrator can still write.',

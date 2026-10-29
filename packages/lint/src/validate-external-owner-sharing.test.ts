@@ -107,6 +107,15 @@ describe('security-external-owner-unmapped — which objects it judges', () => {
     expect(findingsFor({ ...ext({ sharingModel: 'private' }), external: { remoteName: 'rows' } })).toEqual([]);
   });
 
+  it('stays silent on a datasource this stack declares with allowWrites: false, and warns when it allows writes', () => {
+    const datasource = (allowWrites: boolean) => ({ name: 'remote', schemaMode: 'external', external: { allowWrites } });
+    const obj = ext({ sharingModel: 'private' });
+    expect(validateExternalOwnerSharing({ datasources: [datasource(false)], objects: [obj] })).toEqual([]);
+    expect(
+      validateExternalOwnerSharing({ datasources: [datasource(true)], objects: [obj] }).map((f) => f.rule),
+    ).toEqual([SECURITY_EXTERNAL_OWNER_UNMAPPED]);
+  });
+
   it('stays silent on an object the platform stores, and on a system object with no sharingModel', () => {
     const { external: _external, ...local } = ext({ sharingModel: 'private' });
     expect(findingsFor(local)).toEqual([]);
@@ -159,5 +168,46 @@ describe("security-external-owner-unmapped — ownership: 'none' moves the refus
 
   it('is silent on public_read_write whatever the ownership tier', () => {
     expect(findingsFor(ext({ sharingModel: 'public_read_write', ownership: 'none' }))).toEqual([]);
+  });
+});
+
+describe('security-external-owner-unmapped — the fix line', () => {
+  // The hint is the author's whole remedy: pinned whole, so a way out cannot be
+  // dropped or an unmeasured one added without this test saying so.
+  const hintOf = (obj: unknown) => findingsFor(obj).map((f) => f.hint);
+
+  it('names both ways out for an undeclared owner_id', () => {
+    expect(hintOf(ext({ sharingModel: 'private' }))).toEqual([
+      "Either declare sharingModel: 'public_read_write' and decide who may edit in a beforeUpdate hook, or " +
+        'declare owner_id in fields and have the driver return the remote owner under that name (a built-in ' +
+        'SQL driver does it through external.columnMap; a plugin driver must return it itself)',
+    ]);
+  });
+
+  it('asks for the declaration when columnMap alone targets owner_id', () => {
+    expect(hintOf(ext({ sharingModel: 'private' }, { columnMap: { assignee: 'owner_id' } }))).toEqual([
+      'Declare owner_id in fields (a plugin driver must return the remote owner under that name itself), ' +
+        "or declare sharingModel: 'public_read_write' and decide who may edit in a beforeUpdate hook",
+    ]);
+  });
+
+  it('names created_by on an object without owner_id, the audit columns on or off', () => {
+    const expected =
+      "Either declare sharingModel: 'public_read_write' and decide who may edit in a beforeUpdate hook, or " +
+      'declare created_by in fields and have the driver return the remote creator under that name (a built-in ' +
+      'SQL driver does it through external.columnMap; a plugin driver must return it itself)';
+    expect(hintOf(ext({ sharingModel: 'private', ownership: 'none' }))).toEqual([expected]);
+    expect(hintOf(ext({ sharingModel: 'private', ownership: 'none', systemFields: { audit: false } }))).toEqual([expected]);
+  });
+
+  it('a declared created_by with the audit columns off is enough', () => {
+    const fields = { ...NAME_FIELD, created_by: { type: 'lookup', reference: 'sys_user', label: 'Created by' } };
+    expect(findingsFor(ext({ sharingModel: 'private', ownership: 'none', systemFields: { audit: false }, fields }))).toEqual([]);
+  });
+
+  it('the verdict leaves room for an app-authored row-level policy', () => {
+    for (const f of findingsFor(ext({ sharingModel: 'private' }), ext({ sharingModel: 'private', ownership: 'none' }))) {
+      expect(f.message).toContain('unless an app-authored row-level policy admits the row');
+    }
   });
 });
