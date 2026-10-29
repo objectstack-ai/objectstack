@@ -290,6 +290,16 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         expect(findData).not.toHaveBeenCalled();
     });
 
+    it('a declared filter the list read refuses is a located 400 before anything is read', async () => {
+        const { call, getData, findData } = boot();
+        const answer = await call({ related: [{ object: 'note', field: 'account', top: 1, filter: { title: { $in: 'x' } } }] });
+        expect(answer.status).toBe(400);
+        expect(answer.body.error.code).toBe('VALIDATION_FAILED');
+        expect(answer.body.error.details.fields).toEqual([expect.objectContaining({ field: 'related.0.filter', code: 'invalid_filter' })]);
+        expect(getData).not.toHaveBeenCalled();
+        expect(findData).not.toHaveBeenCalled();
+    });
+
     it('the body is strict: an unknown key or an out-of-range top is a 400 and nothing is read', async () => {
         const { call, getData } = boot();
         for (const body of [

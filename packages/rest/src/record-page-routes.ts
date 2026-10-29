@@ -134,15 +134,26 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 };
 
                 // Each related entry must name a relationship of the child that
-                // points at THIS object. Judged before anything is read, so a
-                // malformed entry refuses the request without a single read.
-                // An entry whose child the caller may not reach through the API
-                // is not judged here: its read below answers that refusal.
+                // points at THIS object, and a declared filter must be one the
+                // list read's own lowering (`parseFilterAST`) takes. Judged
+                // before anything is read, so a malformed entry refuses the
+                // request without a single read. An entry whose child the
+                // caller may not reach through the API is not judged on its
+                // field: its read below answers that refusal.
                 const related = body.related ?? [];
                 const childItems = await measureServerTiming('meta', () => Promise.all(
                     related.map((entry) => this.loadObjectItem(p, environmentId, entry.object)),
                 ), 'Metadata reads');
                 const malformed: Array<{ field: string; code: string; message: string }> = [];
+                const declaredFilters = related.map((entry, index) => {
+                    if (entry.filter === undefined) return undefined;
+                    try {
+                        return parseFilterAST(entry.filter);
+                    } catch (error: any) {
+                        malformed.push({ field: `related.${index}.filter`, code: 'invalid_filter', message: String(error?.message ?? error) });
+                        return undefined;
+                    }
+                });
                 related.forEach((entry, index) => {
                     const item = childItems[index];
                     if (!item || apiAccessDenialFromEnable(item.enable, entry.object, 'list')) return;
@@ -184,7 +195,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     try {
                         const def = fieldDefOf(item, entry.field);
                         const parentScope = { [entry.field]: def && isMultiValueField(def) ? { $contains: id } : id };
-                        const declared = entry.filter === undefined ? undefined : parseFilterAST(entry.filter);
+                        const declared = declaredFilters[index];
                         const where = declared === undefined ? parentScope : { $and: [parentScope, declared] };
                         const found: any = await p.findData({
                             object: entry.object,
