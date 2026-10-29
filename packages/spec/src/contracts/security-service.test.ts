@@ -740,4 +740,22 @@ describe('Security Service Contract', () => {
     });
     await expect(gate(missingRow)).resolves.toBe('refuse');
   });
+
+  it('reopenAudienceBindingSuggestion is OPTIONAL — absence leaves every dismissal standing (compile-time)', async () => {
+    // A security service that predates the re-open door still satisfies the
+    // contract; a caller must feature-detect and answer "not served", never
+    // call into `undefined`. Absence re-opens nothing, so it grants nothing.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.reopenAudienceBindingSuggestion).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a caller must feature-detect first
+      withoutIt.reopenAudienceBindingSuggestion({}, 'sug_1');
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    const withIt = makeService({
+      reopenAudienceBindingSuggestion: async (_ctx, id) => ({ suggestion: { id, status: 'pending' } }),
+    });
+    await expect(withIt.reopenAudienceBindingSuggestion?.({ userId: 'u1' }, 'sug_1'))
+      .resolves.toEqual({ suggestion: { id: 'sug_1', status: 'pending' } });
+  });
 });

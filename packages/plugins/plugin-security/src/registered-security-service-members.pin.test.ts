@@ -79,6 +79,7 @@ const DECLARED_MEMBERS = {
   listAudienceBindingSuggestions: 'required',
   confirmAudienceBindingSuggestion: 'required',
   dismissAudienceBindingSuggestion: 'required',
+  reopenAudienceBindingSuggestion: 'optional',
   contributeOwnershipFloorAlternates: 'optional',
 } as const satisfies DeclaredOptionality;
 
