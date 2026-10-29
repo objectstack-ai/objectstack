@@ -33,8 +33,29 @@
  * `d4493fdbc`).
  */
 
-/** Numeric comparison operators and a number input. */
-export const FILTER_NUMBER_LIKE_TYPES = ['number', 'currency', 'percent', 'rating'] as const;
+import { NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+
+/**
+ * The literal members of the spec's numeric value family, for the TYPE face only.
+ * `NUMERIC_VALUE_TYPES` is a `ReadonlySet<string>`, so no compile-time reading of
+ * it yields literals; this union is the type-level half, and
+ * `__tests__/filter-builder-mirror-6939.test.ts` holds it equal to the spec set
+ * member for member. A type the spec adds reaches the runtime list below at once
+ * (the zod enum and the renderer follow it) and reddens that pin until it is
+ * named here too.
+ */
+type SpecNumericValueType = 'number' | 'currency' | 'percent' | 'rating' | 'slider' | 'progress' | 'summary';
+
+/**
+ * Numeric comparison operators and a number input: the spec's numeric value
+ * family, `NUMERIC_VALUE_TYPES` (`@objectstack/spec/data`), taken from that set
+ * rather than restated — the same set the server's filter doors read a field as
+ * numeric by, so the builder offers a numeric field the operators the server
+ * accepts for it (objectstack#27497, ruling C).
+ */
+export const FILTER_NUMBER_LIKE_TYPES: readonly SpecNumericValueType[] = Object.freeze(
+  [...NUMERIC_VALUE_TYPES] as SpecNumericValueType[],
+);
 
 /** `before` / `after` / `between` and a date, datetime-local or time input. */
 export const FILTER_DATE_LIKE_TYPES = ['date', 'datetime', 'time'] as const;
