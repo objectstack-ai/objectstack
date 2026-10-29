@@ -1800,6 +1800,13 @@ describe('runtime authoring gate on OBJECT writes — the validation-rule verdic
     const VALID = 'record.amount != null && record.amount > 100';
     /** Where the build locates a validation-rule finding — the rule the author edits. */
     const WHERE = "object 'fx_rule' · validation 'amount_rule'";
+    /**
+     * [#27643] The finding's key path: the judged slot, not the `WHERE` prose.
+     * The door re-spells the top-level index by name (`nameKeyFindingPath`);
+     * the draft read's `_diagnostics` spells it item-relative and dotted.
+     */
+    const PATH = 'objects.fx_rule.validations[0].condition';
+    const DIAGNOSTICS_PATH = 'validations.0.condition';
 
     const ruleRows = (rows: Map<string, Row>) =>
         Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_rule');
@@ -1825,7 +1832,7 @@ describe('runtime authoring gate on OBJECT writes — the validation-rule verdic
             expect(err.rulesRun).toContain('validateStackExpressions');
             const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
             expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
-            expect(issue.path).toBe(WHERE);
+            expect(issue.path).toBe(PATH);
             expect(issue.where).toBe(WHERE);
             expect(issue.severity).toBe('error');
             // The named subject: what the author typed, as the build names it.
@@ -1848,7 +1855,25 @@ describe('runtime authoring gate on OBJECT writes — the validation-rule verdic
         expect(err.code).toBe('INVALID_METADATA');
         const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
         expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
-        expect(issue.path).toBe(WHERE);
+        expect(issue.path).toBe(PATH);
+        expect(issue.where).toBe(WHERE);
+    });
+
+    it("[#27643] the draft read's `_diagnostics` locates each refusal at the rule's `condition`, item-relative", async () => {
+        for (const { condition } of REFUSED) {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.saveMetaItem({ type: 'object', name: 'fx_rule', item: fxRule(condition), mode: 'draft' }),
+            ).resolves.toMatchObject({ success: true });
+
+            const read: any = await protocol.getMetaItem({ type: 'object', name: 'fx_rule', state: 'draft' });
+            const diagnostics = read?.item?._diagnostics;
+
+            expect(diagnostics?.valid, condition).toBe(false);
+            const entries = (diagnostics?.errors ?? []).filter((e: any) => e.code === EXPRESSION_INVALID);
+            expect(entries, `${condition}: ${JSON.stringify(diagnostics)}`).toHaveLength(1);
+            expect(entries[0].path).toBe(DIAGNOSTICS_PATH);
+        }
     });
 
     it('(b) a valid, guarded `condition` still saves, and the row lands', async () => {
@@ -1876,9 +1901,13 @@ describe('runtime authoring gate on OBJECT writes — the validation-rule verdic
             expect(atDoor, condition).toHaveLength(1);
             // Compared key by key — the door reuses the build's call, so a reworded
             // or relocated door verdict is a second dialect, and red.
-            for (const key of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            for (const key of ['rule', 'where', 'message', 'hint'] as const) {
                 expect(atDoor[0][key], `door and build disagree on '${key}' for ${condition}`).toBe(atBuild[0]![key]);
             }
+            // [#27643] The path too, once the door's by-name spelling of the
+            // top-level index is applied to the build's positional one.
+            expect(atBuild[0]!.path, condition).toBe('objects[0].validations[0].condition');
+            expect(atDoor[0].path, condition).toBe(atBuild[0]!.path.replace(/^objects\[0\]/, 'objects.fx_rule'));
         }
         // And the valid rule is clean at the build too, not just at the door.
         expect(buildFindings(fxRule(VALID))).toEqual([]);
@@ -2778,12 +2807,14 @@ describe('runtime authoring gate on OBJECT writes — a conditional rule\'s nest
             label: 'an unregistered function in `then`',
             rule: outer({ then: { type: 'script', name: 'inner', condition: 'sqrt(record.amount) > 1', message: 'I' }, otherwise: GUARDED }),
             where: "object 'fx_nested' · validation rule 'outer' then → 'inner'",
+            path: 'objects.fx_nested.validations[0].then.condition',
             subject: '`sqrt` is not a callable name here',
         },
         {
             label: 'a bare field in `otherwise`',
             rule: outer({ then: GUARDED, otherwise: { type: 'script', name: 'other', condition: 'amont > 1', message: 'O' } }),
             where: "object 'fx_nested' · validation rule 'outer' otherwise → 'other'",
+            path: 'objects.fx_nested.validations[0].otherwise.condition',
             subject: 'bare reference `amont`',
         },
         {
@@ -2795,6 +2826,7 @@ describe('runtime authoring gate on OBJECT writes — a conditional rule\'s nest
                 },
             }),
             where: "object 'fx_nested' · validation rule 'outer' then → 'mid' then → 'deep'",
+            path: 'objects.fx_nested.validations[0].then.then.condition',
             subject: '`sqrt` is not a callable name here',
         },
     ] as const;
@@ -2816,7 +2848,7 @@ describe('runtime authoring gate on OBJECT writes — a conditional rule\'s nest
             .filter((f) => f.rule === EXPRESSION_INVALID);
     };
 
-    for (const { label, rule, where, subject } of REFUSED) {
+    for (const { label, rule, where, path, subject } of REFUSED) {
         it(`(a) REFUSES an active save of ${label} with a 422 carrying the build's finding at the nested rule`, async () => {
             const { protocol, rows } = makeProtocol();
 
@@ -2830,7 +2862,8 @@ describe('runtime authoring gate on OBJECT writes — a conditional rule\'s nest
             expect(err.rulesRun).toContain('validateStackExpressions');
             const issues = err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID);
             expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
-            expect(issues[0].path).toBe(where);
+            // [#27643] Located at the nested slot's key path; `where` stays the prose.
+            expect(issues[0].path).toBe(path);
             expect(issues[0].where).toBe(where);
             expect(issues[0].severity).toBe('error');
             // The named subject: what the author typed, as the build names it.
@@ -2853,7 +2886,7 @@ describe('runtime authoring gate on OBJECT writes — a conditional rule\'s nest
         expect(err.code).toBe('INVALID_METADATA');
         const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
         expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
-        expect(issue.path).toBe(REFUSED[0].where);
+        expect(issue.path).toBe(REFUSED[0].path);
     });
 
     it('(b) valid nested predicates — both branches, two levels down — still save, and the row lands', async () => {
@@ -2881,9 +2914,11 @@ describe('runtime authoring gate on OBJECT writes — a conditional rule\'s nest
             expect(atDoor, label).toHaveLength(1);
             // Compared key by key — the door reuses the build's call, so a reworded
             // or relocated door verdict is a second dialect, and red.
-            for (const key of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            for (const key of ['rule', 'where', 'message', 'hint'] as const) {
                 expect(atDoor[0][key], `door and build disagree on '${key}' for ${label}`).toBe(atBuild[0]![key]);
             }
+            // [#27643] The path too, once the door's by-name spelling of the top-level index is applied.
+            expect(atDoor[0].path, label).toBe(atBuild[0]!.path.replace(/^objects\[0\]/, 'objects.fx_nested'));
         }
         // And the valid rule is clean at the build too, not just at the door.
         expect(buildFindings(fxNested(VALID))).toEqual([]);
@@ -4185,6 +4220,8 @@ describe('runtime authoring gate on OBJECT writes — a validations[] predicate 
     const rule = (condition: string) => ({ name: 'paid_lock', type: 'script', condition, message: 'Locked.' });
     /** Where the build locates it — the rule the author edits. */
     const WHERE = "object 'fx_line' · validation 'paid_lock'";
+    /** [#27643] The judged slot's key path, the top-level index re-spelled by name at the door. */
+    const PATH = 'objects.fx_line.validations[0].condition';
 
     const hostWithHeader = () => {
         const { engine, rows } = makeStubEngine();
@@ -4206,7 +4243,8 @@ describe('runtime authoring gate on OBJECT writes — a validations[] predicate 
         expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
         const issues = err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID);
         expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
-        expect(issues[0].path).toBe(WHERE);
+        expect(issues[0].path).toBe(PATH);
+        expect(issues[0].where).toBe(WHERE);
         expect(issues[0].severity).toBe('error');
         expect(issues[0].message).toContain("validation rule 'paid_lock' reads `parent`");
         expect(lineRows(rows)).toEqual([]);
@@ -4216,9 +4254,11 @@ describe('runtime authoring gate on OBJECT writes — a validations[] predicate 
         const atBuild = runAuthoringRules('build', { normalized: stack, parsed: stack })
             .filter((f) => f.rule === EXPRESSION_INVALID);
         expect(atBuild).toHaveLength(1);
-        for (const key of ['rule', 'where', 'path', 'message', 'severity'] as const) {
+        for (const key of ['rule', 'where', 'message', 'severity'] as const) {
             expect(issues[0][key], `door and build disagree on '${key}'`).toBe(atBuild[0]![key]);
         }
+        // [#27643] The build spells the line at its index in this stack; the door by name.
+        expect(atBuild[0]!.path).toBe('objects[1].validations[0].condition');
     });
 
     it('(b) the same body still saves as a DRAFT, and its PROMOTION is refused', async () => {
@@ -4232,7 +4272,7 @@ describe('runtime authoring gate on OBJECT writes — a validations[] predicate 
         expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
         const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
         expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
-        expect(issue.path).toBe(WHERE);
+        expect(issue.path).toBe(PATH);
         expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
     });
 

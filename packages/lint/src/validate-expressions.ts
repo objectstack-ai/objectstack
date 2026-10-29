@@ -2985,7 +2985,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // author wrote, in the spelling a flow edge's findings use (#26858), so
       // a draft's `_diagnostics` reports it item-relative
       // (`validations.1.condition`). `where` stays the human locator.
-      const ruleIndex = objectIndex >= 0 && Array.isArray(validations) ? validations.indexOf(rule) : -1;
+      const ruleIndex = objectIndex >= 0 && Array.isArray(obj.validations) ? obj.validations.indexOf(rule) : -1;
       const rulePath = ruleIndex >= 0 ? `objects[${objectIndex}].validations[${ruleIndex}]` : undefined;
       const atSlot = (key: string, first: number): void => {
         if (!rulePath) return;
