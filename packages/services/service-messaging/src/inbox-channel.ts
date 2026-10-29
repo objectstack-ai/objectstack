@@ -62,7 +62,7 @@ export interface InboxChannelOptions {
      * wired) leaves the render without one, so such a hole refuses the delivery
      * with `TEMPLATE_INVALID` instead of formatting in a guessed currency.
      * REJECTS when the read itself failed: the render then runs without one,
-     * and a `TEMPLATE_INVALID` it answers is graded retryable, never permanent
+     * and a `TEMPLATE_INVALID` that a default would cure is graded retryable
      * (`templateRefusalAfterCurrencyReadFault` in `email-channel.ts`).
      */
     getTenantCurrency?(organizationId: string | undefined): Promise<string | undefined>;
@@ -223,7 +223,16 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                     // permanent — unless the currency read failed first.
                     return {
                         ok: false,
-                        error: templateRefusalAfterCurrencyReadFault((err as Error)?.message ?? String(err), currencyReadFault),
+                        error: await templateRefusalAfterCurrencyReadFault(
+                            (err as Error)?.message ?? String(err),
+                            currencyReadFault,
+                            (probe) => email.renderTemplate!({
+                                template: templateName,
+                                ...(templateData !== undefined ? { data: templateData } : {}),
+                                ...(templateLocale ? { locale: templateLocale } : {}),
+                                ...{ currency: probe },
+                            }),
+                        ),
                     };
                 }
             }

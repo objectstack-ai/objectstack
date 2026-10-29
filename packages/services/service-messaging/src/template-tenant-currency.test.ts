@@ -192,19 +192,33 @@ describe('a failed settings read is retried; a read that finds no default is per
     }
 
     /** The render the real `email` service does: a no-argument hole needs a `currency`. */
-    function mailService(opts: { refuses?: 'missing-currency' | 'not-found' } = {}) {
+    /** A refusal no default cures: a `currency:@path` hole whose value is not a code. */
+    const PATH_REFUSAL =
+        "TEMPLATE_INVALID: email template crm.large_deal_won (locale=en-US): the hole {{ amount | currency:@deal.code }} reads 'dollars' at deal.code, which is not an ISO 4217 code";
+
+    /**
+     * The render the real `email` service does. `missing-currency`: a no-argument
+     * hole needs a `currency`. `path-value`: an `@path` hole refuses whatever the
+     * default. `both`: the first refusal met is the missing default, and with a
+     * default the `@path` one still stands.
+     */
+    function mailService(opts: { refuses?: 'missing-currency' | 'path-value' | 'both' | 'not-found' } = {}) {
         const calls: any[] = [];
+        let sent = 0;
         const render = (input: any) => {
             calls.push(input);
             if (opts.refuses === 'not-found') throw new Error('TEMPLATE_NOT_FOUND: email template crm.large_deal_won');
-            if (opts.refuses === 'missing-currency' && !input.currency) throw new Error(REFUSAL);
+            const needsDefault = opts.refuses === 'missing-currency' || opts.refuses === 'both';
+            if (needsDefault && !input.currency) throw new Error(REFUSAL);
+            if (opts.refuses === 'path-value' || opts.refuses === 'both') throw new Error(PATH_REFUSAL);
             return { subject: 'Deal won', html: '<p>x</p>', text: `Won ${input.currency ?? ''}` };
         };
         return {
             calls,
+            sent: () => sent,
             service: {
                 async send() { return { id: 'x' }; },
-                async sendTemplate(input: any) { render(input); return { id: 'email_row_1', status: 'sent' }; },
+                async sendTemplate(input: any) { render(input); sent += 1; return { id: 'email_row_1', status: 'sent' }; },
                 async renderTemplate(input: any) { return render(input); },
             },
         };
@@ -236,8 +250,11 @@ describe('a failed settings read is retried; a read that finds no default is per
                 const channel = messaging.getChannel(channelId)!;
                 const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
                 expect(data.reads).toHaveLength(1);
-                expect(mail.calls).toHaveLength(1);
                 expect(mail.calls[0]).not.toHaveProperty('currency');
+                // The probe: rendered once more with the "no currency" code, never sent.
+                expect(mail.calls).toHaveLength(2);
+                expect(mail.calls[1].currency).toBe('XXX');
+                expect(mail.sent()).toBe(0);
                 expect(r.ok).toBe(false);
                 expect(r.error).not.toMatch(/TEMPLATE_/);
                 expect(r.error).toContain("organization 'org_apex'");
@@ -264,6 +281,27 @@ describe('a failed settings read is retried; a read that finds no default is per
                 expect(data.reads).toHaveLength(1);
                 expect(r).toEqual({ ok: false, error: REFUSAL });
                 expect(channel.classifyError?.(r.error)).toBe('permanent');
+            });
+
+            it('a failed read leaves a refusal no default cures as it stands: permanent, its own sentence on the row', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService({ refuses: 'path-value' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(r).toEqual({ ok: false, error: PATH_REFUSAL });
+                expect(channel.classifyError?.(r.error)).toBe('permanent');
+            });
+
+            it('a failed read, a template with the default hole AND a refusal no default cures: the standing refusal, permanent', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService({ refuses: 'both' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(r).toEqual({ ok: false, error: PATH_REFUSAL });
+                expect(channel.classifyError?.(r.error)).toBe('permanent');
+                expect(mail.sent()).toBe(0);
             });
 
             it('a failed read does not stop a template that needs no default: it is delivered', async () => {
