@@ -10,10 +10,13 @@
   wins and this record is corrected. The unit of parameter 4 was ruled afterwards, on 2026-10-28, in ruling
   [`6469382727`](https://github.com/objectstack-ai/objectstack/issues/27185#issuecomment-6469382727) on #27185. The maintainer chose the option 「小数点后 12 位(推荐)」.
 - **Builds on**: [ADR-0104](./0104-field-runtime-value-shape-contract.md) D1 (a `currency` value is a bare number,
-  kept here). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) governs the runtime refusals only: a blank record
-  currency code and a missing rate ([Open item](#open-items) 9). It sets their codes and envelope on the wire, and any
-  new code is registered in ADR-0112's extension ledger. The build-time refusals this record names are authoring
-  diagnostics, not wire errors.
+  kept here). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) governs every refusal that answers on the wire.
+  Two of them need new codes, a blank record currency code and a missing rate ([Open item](#open-items) 9): ADR-0112
+  sets their codes and envelope, and both are registered in its extension ledger. They are the only ledger additions.
+  "At build" in D1 and D6 covers the declared aggregates: a `summary` roll-up refuses at registration and a dataset
+  measure at compile, as authoring diagnostics, not wire errors. An ad-hoc aggregate is never built, so it meets the
+  same rule at the request door (the ObjectQL aggregate-by-field-type door and the analytics cube measure door, D6)
+  with an existing ADR-0112 catalog code, `INVALID_FIELD`.
   [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D1, D3 and D6 (a first-party
   capability owns its `sys_*` objects, one owner per object, and `platform-objects` is being decomposed) and
   [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (Deferred; the `sys` namespace design it records)
@@ -293,9 +296,9 @@ D8 already excludes a switch, injected columns, fixed field names and a setting 
 
 ## Consequences
 
-- **The change is additive.** `record` is a new mode, `dynamic` and `fixed` keep their meaning and stored rows are not
-  touched. An app that never writes `record` sees no change. Three cards declare `Metadata-protocol: added`: the two that add
-  authorable keys (#27184, #27191) and the seam card that adds the analytics wire key (#27187).
+- **`record` and `homeAmount` are additive.** `record` is a new mode, `dynamic` and `fixed` keep their meaning and
+  stored rows are not touched. This epic's one narrowing of what an author can write is #27157's: a `fixed` field
+  must name its code. Each consumer's semver is its own changeset's to declare, not this record's.
 - **Two steps cannot be undone once used** (design record §13). One is the home-currency lock. The other: an object
   with record-mode amounts and a home field returns to a single currency only through a data migration.
 - **Today's relabel hazard closes where the feature is used** (the measurement round's Q2 recommendation). Once the
@@ -350,6 +353,12 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     `packages/platform-objects/src`. ADR-0029 D1, D3 and D6 give a first-party capability ownership of its `sys_*`
     objects and decompose `platform-objects`, and ADR-0028 (Deferred) records the `sys` namespace design. #27185
     settles the owner against them.
+12. **Whether today's cross-currency arithmetic between `fixed` fields of different codes is refused** (epic #8345).
+    Two shapes: a measure `currency` that contradicts a `fixed` field's code, and a derived measure over two different
+    `fixed` codes, which Context §1 counts among today's silently wrong numbers. The ruling on #27119 did not decide
+    this: the ruled D1 sentence names only record-mode fields. The epic PM seat ruled that the R1 analytics card #27187
+    (PR #27338) confines its compile guards to record-mode amounts. The general `fixed`-versus-`fixed` guard stays
+    undecided. The authority is the maintainer's, and epic #8345 carries the question.
 
 ## Verification notes
 
