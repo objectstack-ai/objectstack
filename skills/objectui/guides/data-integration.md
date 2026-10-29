@@ -357,8 +357,9 @@ There is no mock-server plugin: the MSW plugin was removed in 12.0, and npm
 still serves its stale 11.x build — ⛔ do not install it. Two supported paths:
 
 - **No backend:** publish static values as a scope ("Static data (no backend)" above).
-- **Real API, locally:** run the server from your ObjectStack app and let the
-  Vite dev server proxy `/api` to it, so page and API share one origin:
+- **Real API, locally:** run `os dev` in the ObjectStack app whose
+  `objectstack.config.ts` declares your objects. In a project that runs Vite
+  itself (not `objectui dev`), proxy `/api` to it so page and API share one origin:
 
 ```bash
 os dev          # http://localhost:3000; if busy, the banner names the port taken
@@ -372,10 +373,10 @@ export default defineConfig({
 });
 ```
 
-`os dev` persists to a SQLite file and seeds a dev admin (`admin@objectos.ai` /
-`admin123`) on an empty database. It has no in-memory driver
-(`--database-driver memory` is refused); `--database :memory:` is SQLite's
-in-memory database. Commands and flags: the `objectstack-platform` skill.
+By default `os dev` persists to a SQLite file and seeds a dev admin
+(`admin@objectos.ai` / `admin123`) on an empty database. It has no in-memory
+driver (`--database-driver memory` is refused); `--database :memory:` is
+SQLite's in-memory database. Commands and flags: the `objectstack-platform` skill.
 
 ### Test DataSource helper
 
