@@ -237,6 +237,38 @@ describe('[ADR-0015 D7] a datasource borrows its connector instance\'s credentia
     expect(svc.getConnectionState('sap_orders')?.availability).toBe('failed');
   });
 
+  it('shows a datasource whose instance is disabled as failed, naming the instance — never a silent 401', async () => {
+    // The lender's refusal for `enabled: false`, in the words the real source
+    // gives it (`service-automation/src/connector-credential-source.ts`, whose
+    // own suite pins that it refuses exactly this).
+    const disabled: IConnectorCredentialSource = {
+      borrow: async (connector) => {
+        throw connectorCredentialRefusal(
+          `connector instance '${connector}' (named by this datasource's external.connector) is disabled (enabled: false), `
+            + "which turns the vendor off for this datasource's records as for the connector's actions. Enable the instance to read through it.",
+          'VALIDATION_ERROR',
+          422,
+        );
+      },
+    };
+    const api = upstream();
+    const { factory } = apiDriverFactory(api);
+    const engine = fakeEngine();
+    const marked: Array<{ name: string; kind: string }> = [];
+    engine.markDatasourceUnavailable = (info) => { marked.push(info); };
+    const svc = new DatasourceConnectionService({ factory: () => factory, engine: () => engine, connectorCredentials: () => disabled });
+
+    const result = await svc.connect(sapOrders, { context: { trigger: 'runtime-admin' } });
+    expect(result.status).toBe('failed-credentials');
+    expect(result.reason).toContain("connector instance 'sap_s4'");
+    expect(result.reason).toContain('is disabled (enabled: false)');
+    expect(svc.getConnectionState('sap_orders')).toMatchObject({ availability: 'failed', status: 'failed-credentials' });
+    expect(marked).toEqual([{ name: 'sap_orders', kind: 'failed' }]);
+    // Nothing was built, so nothing ever asked the upstream.
+    expect(factory.create).not.toHaveBeenCalled();
+    expect(api.seen).toEqual([]);
+  });
+
   it('refuses at connect when no lender is registered, naming the plugin that lends', async () => {
     const { factory } = apiDriverFactory(upstream());
     const { svc, engine } = service(factory, undefined);
