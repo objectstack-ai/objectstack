@@ -5,7 +5,7 @@
 
 fix(rest, core)!: an update or upsert import whose match key names a multi-value or structured field is refused with `400 INVALID_REQUEST` naming the field, instead of failing every row on a raw SQL-binding error (#27465)
 
-Clause-②: no (narrowing) — an update / upsert import request whose `matchFields`, or whose named mapping's `upsertKey`, names a field stored as a JSON column was accepted and then failed every row; it is now refused at the door before any row. Nothing is widened.
+Clause-②: yes (narrowing) — an update / upsert import request whose `matchFields`, or whose named mapping's `upsertKey`, names a field stored as a JSON column was accepted and then failed every row; it is now refused at the door before any row. The one widening is a new root export of `@objectstack/core`, `multiValueMatchKeyRefusal(matchFields, metaMap, keyedBy?)`, the rule both the door and the runner use.
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export is removed or retyped: a request the import door accepted and could never serve is now refused up front, with a refusal that names the field and the remedy. A request that worked before works the same, so there is nothing for a migration to rewrite and no tombstone. -->
