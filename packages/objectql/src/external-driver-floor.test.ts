@@ -13,7 +13,9 @@
 import { describe, it, expect } from 'vitest';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { ObjectQL } from './engine';
-import { EXTERNAL_ROW_CAP, ExternalRowCapExceededError, ExternalWriteRefusedError } from './external-driver-errors.js';
+import {
+  EXTERNAL_ROW_CAP, ExternalReadRefusedError, ExternalRowCapExceededError, ExternalWriteRefusedError,
+} from './external-driver-errors.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import { isExternalDriverFloor, needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';
 
@@ -230,6 +232,60 @@ describe('[#27277] reads: the engine applies the query', () => {
     expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
     expect(err.kind).toBe('remote');
     expect(err.message).not.toContain('tree.internal');
+  });
+});
+
+describe('[#27471] a read the driver refuses with a request-shaped 4xx is 400 with its message', () => {
+  const refusingRead = (error: unknown) => makeEngine({ extra: { async find() { throw error; } } });
+  /** The virtual-objects guide's `refuse()`: a by-name refusal carrying the status the floor reads. */
+  const refuse = (what: string) =>
+    Object.assign(new Error(`tree driver: the remote cannot run ${what}`), { status: 400 });
+
+  it('the guide\'s refuse() answers INVALID_QUERY / 400 naming what the remote cannot run, on every read', async () => {
+    const { engine } = refusingRead(refuse('the operator $gte on \'weight\''));
+    for (const read of [
+      () => engine.find('tree_node', { where: { weight: { $gte: 2 } } }),
+      () => engine.findOne('tree_node', { where: { weight: { $gte: 2 } } }),
+      () => engine.count('tree_node', { where: { weight: { $gte: 2 } } }),
+    ]) {
+      const err = await read().then(() => undefined, (e) => e);
+      expect(err).toBeInstanceOf(ExternalReadRefusedError);
+      expect(err.code).toBe('INVALID_QUERY');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain("the remote cannot run the operator $gte on 'weight'");
+      expect(err.details).toEqual({ datasource: 'tree', object: 'tree_node', operation: 'find', remoteStatus: 400 });
+    }
+  });
+
+  for (const status of [400, 404, 422]) {
+    it(`${status} (as \`status\` or \`statusCode\`) is INVALID_QUERY / 400 carrying the driver's message`, async () => {
+      for (const key of ['status', 'statusCode']) {
+        const { engine } = refusingRead(Object.assign(new Error(`remote said ${status}`), { [key]: status }));
+        const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+        expect(err).toBeInstanceOf(ExternalReadRefusedError);
+        expect(err.status).toBe(400);
+        expect(err.message).toContain(`remote said ${status}`);
+        expect(err.details.remoteStatus).toBe(status);
+      }
+    });
+  }
+
+  for (const status of [401, 403, 407, 429, 500, 502, 503, 409, 412]) {
+    it(`${status} stays ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld`, async () => {
+      const { engine } = refusingRead(Object.assign(new Error('token sk_live_123 rejected'), { status }));
+      const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+      expect(err).toBeInstanceOf(DatasourceUnavailableError);
+      expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+      expect(err.kind).toBe('remote');
+      expect(err.message).not.toContain('sk_live_123');
+    });
+  }
+
+  it('a throw that declares no status stays ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld', async () => {
+    const { engine } = refusingRead(new Error('tree driver: the remote cannot run the combinator $or'));
+    const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(DatasourceUnavailableError);
+    expect(err.message).not.toContain('$or');
   });
 });
 

@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#27277] The two refusals the engine's floor over a plugin driver raises
+ * [#27277] The refusals the engine's floor over a plugin driver raises
  * (`external-driver-floor.ts`, ADR-0015 Tier A, epic #27261 P1).
  *
- * Both are 4xx: the caller can change the request and try again, and the
+ * All are 4xx: the caller can change the request and try again, and the
  * message is theirs to read. That is what keeps them apart from the third
  * outcome of the same floor, a remote that failed or did not answer, which is
  * `ERR_DATASOURCE_UNAVAILABLE` / 503 (`DatasourceUnavailableError`, reason
@@ -13,11 +13,14 @@
  * Each declares its `status` on the thrown error (the convergent HTTP-exit
  * convention `driver-connect-errors.ts` and `concurrent-update-error.ts`
  * follow), so every door answers the same status and keeps the `code`.
- * ⛔ Neither is an ADR-0015 gate refusal: `EXTERNAL_WRITE_FORBIDDEN` (403) is
+ * ⛔ None is an ADR-0015 gate refusal: `EXTERNAL_WRITE_FORBIDDEN` (403) is
  * the platform's own write switch being off, fixed by turning it on; these are
  * fixed by changing the payload or the filter. They are registered under this
- * package in `ERROR_CODE_LEDGER`, beside the gate codes' own owner.
+ * package in `ERROR_CODE_LEDGER`, beside the gate codes' own owner; the read
+ * refusal carries the standard `INVALID_QUERY` and needs no row.
  */
+
+import { StandardErrorCode } from '@objectstack/spec/api';
 
 /** The `code` {@link ExternalWriteRefusedError} carries. */
 export const EXTERNAL_WRITE_REFUSED_CODE = 'EXTERNAL_WRITE_REFUSED' as const;
@@ -49,6 +52,53 @@ export type ExternalWriteOperation =
  * failure (`ERR_DATASOURCE_UNAVAILABLE`, 503), the cause in the server log only.
  */
 export const EXTERNAL_WRITE_REFUSED_STATUSES: ReadonlySet<number> = new Set([400, 404, 409, 412, 422]);
+
+/**
+ * [#27471] The statuses a plugin driver's `find` throw is read as a refusal of
+ * THIS read with: the remote (or the driver, before it asked — the guide's
+ * `refuse()`) judged the filter, the column or the resource, and a changed
+ * request may pass. Answered {@link ExternalReadRefusedError} with the driver's
+ * message. Every other status, and a throw that declares none, is a remote
+ * failure (`ERR_DATASOURCE_UNAVAILABLE`, 503, text withheld), for the reasons
+ * {@link EXTERNAL_WRITE_REFUSED_STATUSES} gives.
+ */
+export const EXTERNAL_READ_REFUSED_STATUSES: ReadonlySet<number> = new Set([400, 404, 422]);
+
+/**
+ * [#27471] A plugin driver refused a read with a request-shaped 4xx
+ * ({@link EXTERNAL_READ_REFUSED_STATUSES}): an operator, a combinator or a
+ * column the remote cannot run, a resource it does not map. 400 with the
+ * standard `INVALID_QUERY`: the caller's query is what has to change, so the
+ * message is the driver's own and a retry of the same read never clears it.
+ * `find`, `findOne` and `count` all read through `find`, so `operation` is
+ * always `find`.
+ */
+export class ExternalReadRefusedError extends Error {
+  readonly code = StandardErrorCode.enum.INVALID_QUERY;
+  readonly status = 400;
+  readonly httpStatus = 400;
+  readonly details: {
+    datasource: string;
+    object: string;
+    operation: 'find';
+    /** The status the driver declared on its throw. */
+    remoteStatus: number;
+  };
+
+  constructor(
+    datasource: string,
+    object: string,
+    remoteStatus: number,
+    remoteMessage: string,
+    options?: { cause?: unknown },
+  ) {
+    const said = remoteMessage.trim() || `it answered ${remoteStatus} with no message`;
+    super(`The plugin driver of datasource '${datasource}' refused this read on '${object}': ${said}`);
+    this.name = 'ExternalReadRefusedError';
+    if (options && 'cause' in options) (this as Error & { cause?: unknown }).cause = options.cause;
+    this.details = { datasource, object, operation: 'find', remoteStatus };
+  }
+}
 
 /**
  * The remote system behind a plugin driver refused a write with a request-shaped

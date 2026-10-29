@@ -38,10 +38,13 @@
  * - Writes pass through, by id: `updateMany` / `deleteMany` are hidden too, so
  *   no `where` the engine cannot re-check reaches a write. A write the remote
  *   refuses with a request-shaped 4xx (`EXTERNAL_WRITE_REFUSED_STATUSES`) is
- *   {@link ExternalWriteRefusedError} (422, the remote's message); any other
- *   failure of a read or a write — an auth or rate-limit 4xx included — is
- *   `ERR_DATASOURCE_UNAVAILABLE` (503, reason `remote`), with the cause in the
- *   server log and never on the wire.
+ *   {@link ExternalWriteRefusedError} (422, the remote's message); a `find`
+ *   the driver refuses with one (`EXTERNAL_READ_REFUSED_STATUSES`, #27471) is
+ *   {@link ExternalReadRefusedError} (400 `INVALID_QUERY`, the driver's
+ *   message, cut at the engine boundary like any driver error). Any other
+ *   failure of a read or a write — an auth or rate-limit 4xx, or a throw that
+ *   declares no status, included — is `ERR_DATASOURCE_UNAVAILABLE` (503,
+ *   reason `remote`), with the cause in the server log and never on the wire.
  * - Everything else (`connect`, `supports`, `syncSchema`, `introspectSchema`,
  *   `beginTransaction`, …) is the driver's own, unchanged.
  *
@@ -60,8 +63,10 @@ import { applyDriverQueryInMemory, assertDriverWhereEvaluableInMemory } from './
 import { declaredFieldClasses, declaredJsonStoredFields } from './having-filter.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import {
+  EXTERNAL_READ_REFUSED_STATUSES,
   EXTERNAL_ROW_CAP,
   EXTERNAL_WRITE_REFUSED_STATUSES,
+  ExternalReadRefusedError,
   ExternalRowCapExceededError,
   ExternalWriteRefusedError,
   type ExternalWriteOperation,
@@ -172,6 +177,12 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
     try {
       rows = await inner.find(object, sent, options as Parameters<IDataDriver['find']>[2]);
     } catch (error) {
+      const status = declaredStatus(error);
+      if (status !== undefined && EXTERNAL_READ_REFUSED_STATUSES.has(status)) {
+        throw new ExternalReadRefusedError(
+          host.datasource, object, status, error instanceof Error ? error.message : String(error), { cause: error },
+        );
+      }
       throw remoteFailure(object, 'find', error);
     }
     if (!Array.isArray(rows)) {
