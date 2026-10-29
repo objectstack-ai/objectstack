@@ -73,7 +73,7 @@ tr.hov td{background:var(--sidebar)}
       <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">销售</div>
       <div class="nav">线索</div><div class="nav">客户</div><div class="nav on">联系人</div><div class="nav">商机</div><div class="nav">报价</div>
       <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">我的工作</div>
-      <div class="nav">我的任务</div><div class="nav">我的商机</div>
+      <div class="nav">我的任务</div><div class="nav">我的商机</div><div class="nav">我的线索</div><div class="nav">我的日历</div>
     </aside>
 
     <section style="min-width:0;display:flex;flex-direction:column;position:relative">
@@ -86,16 +86,16 @@ tr.hov td{background:var(--sidebar)}
         <div style="display:flex;align-items:center;gap:6px"><span class="chip soft" style="height:26px;padding:0 10px">排序 1 ×</span><button type="button" class="iconbtn" aria-label="显示">⚙</button></div>
       </div>
       <table>
-        <thead><tr><th style="width:36px"></th><th>姓名</th><th>状态</th><th>负责人</th></tr></thead>
-        <tbody><tr class="sel"><td><span class="k" title="在整页打开">↗</span></td><td class="a">John Smith</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr>
-<tr class="hov"><td><span class="k" title="在整页打开">↗</span></td><td class="a">Sarah Johnson</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Emily Davis</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Michael Brown</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Olivia Chen</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Daniel Kim</td><td><span class="chip warn">待确认</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Lucas Martin</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Ava Wilson</td><td><span class="chip">活跃</span></td><td>Dev Admin</td></tr>
-<tr class=""><td></td><td class="a">Noah Garcia</td><td><span class="chip ok">活跃</span></td><td>Dev Admin</td></tr></tbody>
+        <thead><tr><th style="width:36px"></th><th>姓名</th><th>客户</th><th>职务</th></tr></thead>
+        <tbody><tr class="sel"><td><span class="k" title="在整页打开">↗</span></td><td class="a">John Smith</td><td>Acme Corp</td><td>VP Sales</td></tr>
+<tr class="hov"><td><span class="k" title="在整页打开">↗</span></td><td class="a">Sarah Johnson</td><td>TechStart</td><td>CTO</td></tr>
+<tr class=""><td></td><td class="a">Emily Davis</td><td>Cloud Nine</td><td>Procurement</td></tr>
+<tr class=""><td></td><td class="a">Michael Brown</td><td>Globex</td><td>COO</td></tr>
+<tr class=""><td></td><td class="a">Olivia Chen</td><td>Initech</td><td>Buyer</td></tr>
+<tr class=""><td></td><td class="a">Daniel Kim</td><td>Umbrella</td><td>Director</td></tr>
+<tr class=""><td></td><td class="a">Lucas Martin</td><td>Vandelay</td><td>Engineer</td></tr>
+<tr class=""><td></td><td class="a">Ava Wilson</td><td>Hooli</td><td>PM</td></tr>
+<tr class=""><td></td><td class="a">Noah Garcia</td><td>Soylent</td><td>CFO</td></tr></tbody>
       </table>
       <span class="ann" style="left:46px;top:150px">列表让出宽度（464）：只剩名字 · 状态 · 负责人；悬停行首列 ↗ 在整页打开；点行 = 右侧换记录，选中跟着走</span>
       <div style="margin-top:auto;height:36px;display:flex;align-items:center;padding:0 20px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">21 条记录</div>
@@ -110,23 +110,18 @@ tr.hov td{background:var(--sidebar)}
       <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="min-width:0"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px;font-weight:600">John Smith</span><span class="chip">联系人</span></div><div style="color:var(--muted-fg)">VP Sales · <a href="#">Acme Corp</a></div></div>
-          <div style="display:flex;gap:6px;flex:none"><button type="button" class="btn-primary">记录通话</button><button type="button" class="btn-outline">编辑</button><button type="button" class="iconbtn" aria-label="更多：在整页打开、刷新、克隆、共享、删除" title="更多">⋯</button></div>
+          <div style="display:flex;gap:6px;flex:none"><button type="button" class="btn-primary">记录通话</button><button type="button" class="btn-outline">安排会议</button><button type="button" class="iconbtn" aria-label="更多：记录会议、在整页打开、编辑、克隆、共享、删除" title="更多">⋯</button></div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px">
-          <div class="hl"><span class="l">状态</span><span class="v"><span class="chip ok">活跃</span></span></div><div class="hl"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">john.smith@acme.com</span></div><div class="hl"><span class="l">电话</span><span class="v">+1 555 0100</span></div><div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div>
-        </div>
-        <div class="rtabs"><span class="rtab on">概览</span><span class="rtab">动态 <span class="chip">12</span></span><span class="rtab">任务 <span class="chip">2</span></span><span class="rtab" style="color:var(--muted-fg)" title="商机 1 · 案例 0 · 报价 0 · 合同 0">+4 ▾</span><span class="ann" style="right:0;top:-10px">720 里放 3 个页签 + 「+4」下拉（带计数）</span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px;position:relative"><div class="hl"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">john.smith@acme.com</span></div><div class="hl"><span class="l">客户</span><span class="v" style="color:var(--primary)">Acme Corp</span></div><div class="hl"><span class="l">电话</span><span class="v">+1 555 0100</span></div><span class="ann" style="right:0;top:-10px">要点 = crm_contact.highlightFields [full_name, email, crm_account, phone]；联系人没有「状态」字段</span></div>
+        <div class="rtabs"><span class="rtab on">概览</span><span class="rtab">动态 <span class="chip">12</span></span><span class="rtab">任务 <span class="chip">2</span></span><span class="rtab" style="color:var(--muted-fg)" title="商机 1 · 活动 1 · 报价单 0 · 合同 0 · 工单 0 · 营销活动成员 0 · 活动参与者 0 · 转化自线索 0 · 重复线索 0">+8 ▾</span><span class="ann" style="right:0;top:-10px">页签 = 面板放大面的索引，可见数按容器宽度计算、当前页签永远可见、其余折进 +N（下拉带计数）；顺序与显隐跟面板排列走</span></div>
       </div>
 
       <div style="overflow:auto;padding:4px 16px 16px;position:relative">
         
-        <div class="sect">基本信息</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">姓名</span><span class="v">John Smith</span></div><div class="fld"><span class="l">公司</span><span class="v" style="color:var(--primary)">Acme Corp</span></div><div class="fld"><span class="l">职务</span><span class="v">VP Sales</span></div><div class="fld"><span class="l">部门</span><span class="v">销售</span></div><div class="fld"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">john.smith@acme.com</span></div><div class="fld"><span class="l">电话</span><span class="v">+1 555 0100</span></div></div>
-        <div class="sect" style="margin-top:8px">地址 <span class="k">显示 2 个空字段</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">城市</span><span class="v">San Francisco</span></div><div class="fld"><span class="l">国家</span><span class="v">US</span></div></div>
+        <div class="sect">身份信息</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">称谓</span><span class="v">Mr.</span></div><div class="fld"><span class="l">名</span><span class="v">John</span></div><div class="fld"><span class="l">姓</span><span class="v">Smith</span></div></div><div class="sect" style="margin-top:8px">客户与职务</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">客户</span><span class="v" style="color:var(--primary)">Acme Corp</span></div><div class="fld"><span class="l">职务</span><span class="v">VP Sales</span></div><div class="fld"><span class="l">部门</span><span class="v">销售</span></div><div class="fld"><span class="l">主要联系人</span><span class="v">✓ 是</span></div></div><div class="sect" style="margin-top:8px">采购中心</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">采购角色</span><span class="v">决策者</span></div><div class="fld"><span class="l">对我方态度</span><span class="v"><span class="chip ok">支持者</span></span></div><div class="fld"><span class="l">关系强度</span><span class="v">稳固</span></div></div><div class="sect" style="margin-top:8px">联系方式 <span class="k">显示 1 个空字段</span></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">john.smith@acme.com</span></div><div class="fld"><span class="l">电话</span><span class="v">+1 555 0100</span></div></div><div class="sect" style="margin-top:8px;color:var(--muted-fg);border-bottom:0">通讯地址 · 附加信息 · 沟通偏好 <span class="k">3 个分区 · 作者默认收起 · 展开</span></div>
         <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">创建于 10月20日 · 更新于 今天 · Dev Admin · <span class="k">C-1001</span></div>
-<div style="height:34px;display:flex;align-items:center;margin-top:10px;font-size:12.5px;font-weight:600;color:var(--muted-fg);position:relative">动态与关联 <span class="k" style="margin-left:8px;font-weight:400">右列按原顺序接在详情下面</span><span class="ann" style="right:0;top:-2px">720 &lt; 760 ⇒ 单列堆叠，不是页签</span></div>
-<div class="pnl"><div class="h">动态 <span class="chip">12</span><span class="chev">▾</span></div><div class="r" style="height:36px"><span style="flex:1;height:26px;border:1px solid var(--border);border-radius:6px;padding:0 8px;display:flex;align-items:center;color:var(--muted-fg)">写一条备注…</span></div><div class="r"><span>Dev Admin 记录了通话</span><span class="k">2 小时前</span></div><div class="r"><span>阶段 → 已联系</span><span class="k">昨天</span></div><div class="r"><span>邮件：报价已发送</span><span class="k">10月27日</span></div><div class="r"><a href="#">查看全部 12 条 →</a></div></div><div class="pnl"><div class="h">任务 <span class="chip">2</span><span class="chev">▾</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div><div class="pnl"><div class="h">商机 <span class="chip">1</span><span class="chev">▾</span></div><div class="r"><a href="#">Acme 年度续约</a><span class="chip ok">¥120,000</span></div></div><div class="pnl empty"><div class="h">还有 3 个空关联 · 案例 · 报价 · 合同 · <a href="#" style="font-weight:400">展开</a></div></div>
+<div style="height:34px;display:flex;align-items:center;margin-top:10px;font-size:12.5px;font-weight:600;color:var(--muted-fg);position:relative">右栏接在详情下面 <span class="k" style="margin-left:8px;font-weight:400">动态面板在前，关联面板按排列顺序</span><span class="ann" style="right:0;top:-2px">720 &lt; 760 ⇒ 单列堆叠，不是页签</span></div>
+<div class="pnl"><div class="h">动态 <span class="chip cnt">12</span></div><div class="r" style="height:36px"><span style="flex:1;height:26px;border:1px solid var(--border);border-radius:6px;padding:0 8px;display:flex;align-items:center;color:var(--muted-fg)">写一条备注… @ 提到同事</span></div><div class="r"><span>Dev Admin 记录了通话</span><span class="k">2 小时前</span></div><div class="r"><span>创建了任务「跟进报价」</span><span class="k">昨天</span></div><div class="r"><span>邮件：报价已发送</span><span class="k">10月27日</span></div><div class="r"><a href="#">查看全部 12 条 →</a><span class="k">= 动态页签</span></div></div><div class="pnl"><div class="h">任务 <span class="chip cnt">2</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div><div class="pnl"><div class="h">商机 <span class="chip cnt">1</span></div><div class="r"><a href="#">Acme 年度续约</a><span class="chip ok">¥120,000</span></div></div><div class="pnl"><div class="h">活动 <span class="chip cnt">1</span></div><div class="r"><a href="#">产品演示会议</a><span class="k">10月24日 14:00</span></div></div><div class="pnl empty"><div class="h">还有 7 个空关联 · 报价单 · 合同 · 工单 · 营销活动成员 · 活动参与者 · 转化自线索 · 重复线索 · <a href="#" style="font-weight:400">展开</a></div></div>
 
         <div style="margin-top:14px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">默认分栏：列表缩窄到剩余宽度、记录 720 在右（`size:'auto'` 不再按字段数撑到 960 / 1200），可拖到 60vw、按对象记忆，再宽就按 ⤢；窄层 = 单列堆叠（详情 → 动态 → 关联面板，即右列整体接在详情下面），页签层退役；列表全程可读可点；点另一行 = 换记录；↓↑ 步进后列表选中跟着走并滚入视口；内容区不足约 1000 时自动退回 overlay 抽屉（读者也可在显示菜单选 overlay）；⤢ 原地铺满，URL 仍是 ?recordId=；「在整页打开」只在列表行 ↗ 与头部 ⋯ 里。</div>
         

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>记录页 v4 · 两栏（带侧栏 1200 宽）· 时间线作为右栏顶部面板 · 无栏开关</title>
+<title>记录页 v4 · 两栏（带侧栏 1200 宽）· 动态作为右栏顶部面板 · 无栏开关</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -97,59 +97,44 @@ a{color:var(--primary);text-decoration:none}
       <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">销售</div>
       <div class="nav on">线索</div><div class="nav">客户</div><div class="nav">联系人</div><div class="nav">商机</div><div class="nav">报价</div>
       <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">我的工作</div>
-      <div class="nav">我的任务</div><div class="nav">我的商机</div>
+      <div class="nav">我的任务</div><div class="nav">我的商机</div><div class="nav">我的线索</div><div class="nav">我的日历</div>
     </aside>
     <main style="min-width:0;display:flex;flex-direction:column">
 <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 12px 0 20px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg);position:relative"><span style="display:inline-flex;align-items:center;gap:6px;min-width:0"><a href="#" style="color:var(--muted-fg)">线索</a><span class="k">›</span><span style="color:var(--fg);font-weight:600">Mira Costa</span></span><span style="display:inline-flex;gap:2px;align-items:center"><button type="button" class="iconbtn" aria-label="右栏 · ⌘⇧," title="右栏 · ⌘⇧," style="width:24px;height:24px;background:var(--primary-soft);color:var(--primary)">⊟</button></span><span class="ann" style="right:12px;top:40px">直接打开（无列表轨迹）：顶行右端只有 ⊟；没有 ↓↑、没有 ⤡</span></div>
       <div style="padding:16px 24px 12px;border-bottom:1px solid var(--border);position:relative">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
           <div style="min-width:0"><div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;width:36px;height:36px;align-items:center;justify-content:center;border-radius:18px;background:var(--primary-soft);color:var(--primary);font-weight:600">MC</span><span style="font-size:22px;font-weight:600">Mira Costa</span><span class="chip">线索</span><button type="button" class="iconbtn" aria-label="复制记录 ID" style="width:22px;height:22px">⧉</button></div><div style="color:var(--muted-fg);margin-left:46px">Atlas Construction · Director of Sales</div></div>
-          <div style="display:flex;gap:6px;flex:none;align-items:center"><button type="button" class="btn-primary">转化线索</button><button type="button" class="btn-outline">记录通话</button><button type="button" class="btn-outline">安排跟进</button><button type="button" class="btn-outline">编辑</button><button type="button" class="iconbtn" aria-label="更多：刷新、克隆、共享、删除">⋯</button></div>
+          <div style="display:flex;gap:6px;flex:none;align-items:center"><button type="button" class="btn-primary">转化线索</button><button type="button" class="btn-outline">安排跟进</button><button type="button" class="btn-outline">记录通话</button><button type="button" class="iconbtn" aria-label="更多：记录会议、安排会议、加入营销活动、编辑、克隆、共享、删除" title="更多">⋯</button></div>
         </div>
         <span class="ann" style="right:24px;top:-8px">动作行只放业务动作（1 主 + 2 次 + ⋯）；‹ 返回与 ⊟ 都在上面的顶行</span>
-        <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-          <div class="hl"><span class="l">状态</span><span class="v"><span class="chip warn">已联系</span></span></div>
-          <div class="hl"><span class="l">线索评分</span><span class="v">★★★★★</span></div>
-          <div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div>
-          <div class="hl"><span class="l">来源</span><span class="v">陌生拜访</span></div>
-          <div class="hl"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">mira.costa@atlasconstruction.example.com</span></div>
-          <div class="hl"><span class="l">最近联系</span><span class="v">2026/10/27</span></div>
-        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);position:relative"><div class="hl"><span class="l">公司</span><span class="v">Atlas Construction</span></div><div class="hl"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">mira.costa@atlasconstruction.example.com</span></div><div class="hl"><span class="l">线索状态</span><span class="v"><span class="chip warn">已联系</span></span></div><div class="hl"><span class="l">线索负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div><span class="ann" style="right:0;top:-10px">要点 = crm_lead.highlightFields [full_name, company, email, status, owner_id]，全名即标题不重复</span></div>
         <div style="margin-top:14px;display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center">
           <div><div class="stage"><span class="done"></span><span class="cur"></span><span></span><span></span></div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted-fg);margin-top:4px"><span style="color:var(--green)">✓ 新建</span><span style="color:var(--fg);font-weight:500">已联系 · 第 3 天</span><span>已确认</span><span>已转化</span></div></div>
           <span class="chip" style="background:var(--red-soft);color:var(--red)">✗ 未通过 · 终止态</span>
         </div>
-        <div class="rtabs"><span class="rtab on">概览</span><span class="rtab">动态 <span class="chip">6</span></span><span class="rtab">任务 <span class="chip">2</span></span><span class="rtab">营销活动 <span class="chip">1</span></span><span class="rtab" style="color:var(--muted-fg)" title="商机 0 · 转化联系人 0 · 重复联系人 0">+3 ▾</span><span class="ann" style="right:0;top:-10px">常驻页签行 = 面板放大面的索引：概览 · 每个面板一个页签（计数）· 放不下折进 +N（下拉带计数）；顺序与显隐跟面板排列走</span></div>
+        <div class="rtabs"><span class="rtab on">概览</span><span class="rtab">动态 <span class="chip">14</span></span><span class="rtab">任务 <span class="chip">2</span></span><span class="rtab">活动 <span class="chip">1</span></span><span class="rtab" style="color:var(--muted-fg)" title="营销活动成员 1 · 活动参与者 0 · 重复线索 0">+3 ▾</span><span class="ann" style="right:0;top:-10px">页签 = 面板放大面的索引，可见数按容器宽度计算、当前页签永远可见、其余折进 +N（下拉带计数）；顺序与显隐跟面板排列走</span></div>
       </div>
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;padding:4px 24px 24px;min-height:0">
         <div class="col" style="position:relative">
-          <div class="coltitle">详情 <span class="k">全部展开</span></div>
-          <div class="sect"><span>身份信息</span><span class="k">收起 ˄</span></div>
-          <div class="grid g2"><div class="fld"><span class="l">名</span><span class="v">Mira</span></div><div class="fld"><span class="l">姓</span><span class="v">Costa</span></div><div class="fld"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">mira.costa@atlasconstruction.example.com</span></div><div class="fld"><span class="l">电话</span><span class="v" style="color:var(--primary)">+1-555-0117-1119</span></div><div class="fld"><span class="l">称谓</span><span class="v" style="color:var(--muted-fg)">—</span></div></div>
-          <div class="sect"><span>公司信息</span><span><span class="cv">6 字段</span><span class="k">收起 ˄</span></span></div>
-          <div class="grid g3"><div class="fld"><span class="l">公司</span><span class="v">Atlas Construction</span></div><div class="fld"><span class="l">职位</span><span class="v">Director of Sales</span></div><div class="fld"><span class="l">行业</span><span class="v">建筑</span></div><div class="fld"><span class="l">网站</span><span class="v" style="color:var(--primary)">atlasconstruction.example.com</span></div><div class="fld"><span class="l">年营收</span><span class="v">$64,900,000</span></div><div class="fld"><span class="l">员工数</span><span class="v">2,354</span></div></div>
-          <div class="sect"><span>资格评估</span><span class="k">显示 4 个空字段</span></div>
-          <div class="grid g2"><div class="fld"><span class="l">转化审批</span><span class="v">无需审批</span></div><div class="fld"><span class="l">最近联系</span><span class="v">2026/10/27</span></div></div>
-          <div class="sect" style="color:var(--muted-fg);border-bottom:0"><span>地址 · 转化 · 附加信息</span><span class="k">3 个空分区 · 展开</span></div>
+                    <div class="sect"><span>身份信息</span><span class="k">收起 ˄</span></div><div class="grid g3"><div class="fld"><span class="l">称谓</span><span class="v">Ms.</span></div><div class="fld"><span class="l">名</span><span class="v">Mira</span></div><div class="fld"><span class="l">姓</span><span class="v">Costa</span></div></div><div class="sect"><span>公司信息</span><span class="k">收起 ˄</span></div><div class="grid g3"><div class="fld"><span class="l">公司</span><span class="v">Atlas Construction</span></div><div class="fld"><span class="l">职务</span><span class="v">Director of Sales</span></div><div class="fld"><span class="l">行业</span><span class="v">建筑</span></div><div class="fld"><span class="l">员工数</span><span class="v">2,354</span></div><div class="fld"><span class="l">年收入</span><span class="v">¥1.2 亿</span></div><div class="fld"><span class="l">网站</span><span class="v" style="color:var(--primary)">atlasconstruction.example.com</span></div></div><div class="sect"><span>联系方式</span><span class="k">收起 ˄</span></div><div class="grid g3"><div class="fld"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">mira.costa@atlasconstruction.example.com</span></div><div class="fld"><span class="l">电话</span><span class="v">+1 415 555 0142</span></div><div class="fld"><span class="l">手机</span><span class="v">+1 415 555 0199</span></div></div><div class="sect"><span>资格评估</span><span class="k">显示 2 个空字段</span></div><div class="grid g3"><div class="fld"><span class="l">线索状态</span><span class="v"><span class="chip warn">已联系</span></span></div><div class="fld"><span class="l">线索评分</span><span class="v">★★★★★</span></div><div class="fld"><span class="l">线索来源</span><span class="v">陌生拜访</span></div><div class="fld"><span class="l">需求类型</span><span class="v">新实施</span></div><div class="fld"><span class="l">预估金额</span><span class="v">¥480,000</span></div><div class="fld"><span class="l">转化审批</span><span class="v">无需审批</span></div></div><div class="sect"><span>分配</span><span class="k"></span></div><div class="grid g3"><div class="fld"><span class="l">线索负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div><div class="fld"><span class="l">下次跟进日期</span><span class="v">10月31日</span></div><div class="fld"><span class="l">最近联系时间</span><span class="v">2026/10/27</span></div></div><div class="sect" style="color:var(--muted-fg);border-bottom:0"><span>地址 · 附加信息 · 沟通偏好 · 转化 · 重复线索管理</span><span class="k">5 个分区 · 作者默认收起 · 展开</span></div>
           <div style="margin-top:auto;padding-top:14px;font-size:11.5px;color:var(--muted-fg)">创建于 10月16日 · 更新于 今天 10:20 · Dev Admin · <span class="k">L-1001</span></div>
         </div>
 
         <div class="col" style="position:relative">
-          <div class="coltitle">关联</div>
-          <div class="pnl tlp"><div class="h">时间线 <span class="chip cnt">14</span><span class="chev">▾</span><button type="button" class="iconbtn" title="作为独立列" aria-label="作为独立列" style="width:22px;height:22px;margin-left:auto">⊞</button></div>
+                    <div class="pnl tlp"><div class="h">动态 <span class="chip cnt">14</span></div>
             <div style="padding:8px 10px 0"><div style="display:flex;gap:8px;align-items:center;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;color:var(--muted-fg);font-size:12px">留下评论… <span class="k" style="margin-left:auto">Enter</span></div></div>
             <div class="r" style="border-top:0;height:auto;padding:8px 10px;align-items:flex-start"><div><div><strong style="font-weight:500">记录通话</strong> · 讨论价格区间</div><div class="m" style="font-size:11px;color:var(--muted-fg)">Dev Admin · 今天 10:20</div></div></div>
             <div class="r" style="height:auto;padding:6px 10px;color:var(--muted-fg);font-size:12px">✎ 状态 新建 → 已联系 · 昨天</div>
             <div class="r" style="height:auto;padding:8px 10px;align-items:flex-start"><div><div><strong style="font-weight:500">发现会议</strong> · 与 David Kim</div><div class="m" style="font-size:11px;color:var(--muted-fg)">10月24日 14:00</div></div></div>
             <div class="r" style="height:28px;font-size:12px"><a href="#">查看全部 14 条 →</a></div>
-            <span class="ann" style="right:8px;top:-8px">面板态的时间线只有三样：一行「留下评论…」（聚焦才展开）、最近 3 条、查看全部——无筛选 chip 无工具条；⊞ 升格为独立列</span>
+            <span class="ann" style="right:8px;top:-8px">动态面板只有三样：一行「留下评论…」（聚焦才展开）、最近 3 条、查看全部（= 动态页签）；不再升格为独立列</span>
           </div>
-          <div class="pnl"><div class="h">任务 <span class="chip cnt">2</span><span class="chev">▾</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div>
-          <div class="pnl"><div class="h">活动 <span class="chip cnt">1</span><span class="chev">▾</span></div><div class="r"><a href="#">发现会议</a><span class="k">10月24日</span></div></div>
-          <div class="pnl"><div class="h">营销活动 <span class="chip cnt">1</span><span class="chev">▸</span></div></div>
+          <div class="pnl"><div class="h">任务 <span class="chip cnt">2</span></div><div class="r"><a href="#">跟进报价</a><span class="chip warn">明天</span></div><div class="r"><a href="#">发送案例资料</a><span class="chip">10月30日</span></div></div>
+          <div class="pnl"><div class="h">活动 <span class="chip cnt">1</span></div><div class="r"><a href="#">发现会议</a><span class="k">10月24日</span></div></div>
+          <div class="pnl"><div class="h">营销活动 <span class="chip cnt">1</span></div></div>
           <div class="pnl empty"><div class="h">还有 3 个空关联 </div></div>
           <div class="foot"><span>审批 · 无需审批</span><span>·</span><span>附件 · 0</span></div>
-          <span class="ann" style="left:0;bottom:-6px">两栏层没有「相关 N」栏开关：右栏常驻，时间线折成面板</span>
+          <span class="ann" style="left:0;bottom:-6px">≥ 760 一条规则：详情 ｜ 右栏；动态是右栏第一个面板</span>
         </div>
       </div>
     </main>
