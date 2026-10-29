@@ -57,7 +57,11 @@ import {
   type EngineUpdateDispatchInput,
 } from '@objectstack/metadata-core';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
-import { SharingService, PHANTOM_ANCHOR_WRITE_DENY_NOTICE } from './sharing-service.js';
+import {
+  SharingService,
+  PHANTOM_ANCHOR_WRITE_DENY_NOTICE,
+  UNSERVED_OWNER_WRITE_DENY_NOTICE,
+} from './sharing-service.js';
 
 /** The caller: an ordinary member whose read/write DEPTH is narrower than `org`. */
 const MEMBER = 'usr_member_1';
@@ -819,5 +823,114 @@ describe('[#8418] the phantom-anchor write refusal is diagnosed, not changed', (
       ];
       expect(seen).toEqual(['deny', 'deny', 'allow', 'allow', 'allow', 'deny', 'abstain']);
     });
+  });
+});
+
+/**
+ * [#27662] The mapped owner column the driver never served is diagnosed too.
+ *
+ * #27425 counted an `external.columnMap` entry onto `owner_id` as the author
+ * declaring the owner column, which took the object out of
+ * `hasPhantomOwnerAnchor` — and so out of the #8418 line above. A plugin driver
+ * that does not apply the map answers with the remote column's own name, the
+ * pre-image carries no `owner_id`, and every member write is refused in
+ * silence again. The refusal is right and stays; the silence is what goes.
+ *
+ * The discrimination is the KEY, not the value: a driver that applies the map
+ * and serves a NULL owner is an ordinary owner-less row (silent, like
+ * `LOCAL_OWNERLESS` above), while a row with no `owner_id` key at all is the
+ * driver dropping the column.
+ */
+describe('[#27662] a mapped owner column the driver did not serve is diagnosed, not changed', () => {
+  const OTHER = 'usr_other';
+  const mapped = (name: string) =>
+    federatedSchema({ name, external: { remoteName: 'rows', columnMap: { assignee: 'owner_id' } } });
+
+  let svc: SharingService;
+  let warn: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    warn = vi.fn();
+    svc = new SharingService({
+      engine: makeEngine(
+        {
+          // A plugin driver that ignores the map: rows carry `assignee`, never `owner_id`.
+          ext_plugin_mapped: mapped('ext_plugin_mapped'),
+          ext_plugin_mapped_2: mapped('ext_plugin_mapped_2'),
+          // The SQL driver applies the map, so `owner_id` is served (possibly NULL).
+          ext_sql_mapped: mapped('ext_sql_mapped'),
+          ext_with_real_owner: DECLARED_REAL_OWNER,
+          sys_record_share: { name: 'sys_record_share' },
+        },
+        {
+          ext_plugin_mapped: [{ id: 'p1', assignee: MEMBER, name: 'Mine, unmapped' }],
+          ext_plugin_mapped_2: [{ id: 'q1', assignee: MEMBER, name: 'Also unmapped' }],
+          ext_sql_mapped: [
+            { id: 's_mine', owner_id: MEMBER, name: 'Mine' },
+            { id: 's_theirs', owner_id: OTHER, name: 'Theirs' },
+            { id: 's_nobody', owner_id: null, name: 'Owner-less' },
+          ],
+          ext_with_real_owner: [
+            { id: 'a1', owner_id: MEMBER, name: 'Acme' },
+            { id: 'a2', owner_id: OTHER, name: 'Globex' },
+          ],
+        },
+      ),
+      logger: { info: vi.fn(), warn, error: vi.fn() } as never,
+    });
+  });
+
+  const ctx = (scope = 'own') => ({ userId: MEMBER, __writeScope: scope }) as never;
+  const notices = () => warn.mock.calls.filter((c) => c[0] === UNSERVED_OWNER_WRITE_DENY_NOTICE);
+  const phantomNotices = () => warn.mock.calls.filter((c) => c[0] === PHANTOM_ANCHOR_WRITE_DENY_NOTICE);
+
+  it('a map-ignoring plugin driver: still DENIES, and says why once', async () => {
+    // The caller's id IS in the row — under `assignee`, where the gate cannot
+    // see it. So the refusal is the driver's doing, not the caller's.
+    expect(await svc.checkEdit('ext_plugin_mapped', 'p1', ctx())).toBe('deny');
+    expect(await svc.checkDelete('ext_plugin_mapped', 'p1', ctx())).toBe('deny');
+    expect(await svc.checkEdit('ext_plugin_mapped', 'p1', ctx('org'))).toBe('deny');
+
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0][1]).toMatchObject({ object: 'ext_plugin_mapped', ownerField: 'owner_id', userId: MEMBER });
+    // …and not the phantom wording, which would send the operator to the metadata.
+    expect(phantomNotices()).toHaveLength(0);
+  });
+
+  it('the wording names the driver and the mapped owner column', async () => {
+    await svc.checkEdit('ext_plugin_mapped', 'p1', ctx());
+    const [message] = notices()[0];
+    expect(message).toContain('the driver returned no value for the owner column');
+    expect(message).toContain('external.columnMap');
+  });
+
+  it('a SECOND map-ignoring object gets its own line; a different caller does not re-arm one', async () => {
+    await svc.checkEdit('ext_plugin_mapped', 'p1', ctx());
+    await svc.checkEdit('ext_plugin_mapped', 'p1', { userId: OTHER, __writeScope: 'own' } as never);
+    await svc.checkEdit('ext_plugin_mapped_2', 'q1', ctx());
+    expect(notices().map((c) => (c[1] as { object: string }).object)).toEqual([
+      'ext_plugin_mapped',
+      'ext_plugin_mapped_2',
+    ]);
+  });
+
+  it('a map-applying driver is silent: own row allows, another owner and a NULL owner deny', async () => {
+    expect(await svc.checkEdit('ext_sql_mapped', 's_mine', ctx())).toBe('allow');
+    expect(await svc.checkEdit('ext_sql_mapped', 's_theirs', ctx())).toBe('deny');
+    // The served-NULL row reaches the same `owner == null` arm as the plugin
+    // driver's row. The key is present, so it is an ordinary owner-less row.
+    expect(await svc.checkEdit('ext_sql_mapped', 's_nobody', ctx())).toBe('deny');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a declared-owner control is silent, allow and deny alike', async () => {
+    expect(await svc.checkEdit('ext_with_real_owner', 'a1', ctx())).toBe('allow');
+    expect(await svc.checkEdit('ext_with_real_owner', 'a2', ctx())).toBe('deny');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a record that does not exist says nothing about the driver', async () => {
+    expect(await svc.checkEdit('ext_plugin_mapped', 'missing', ctx())).toBe('deny');
+    expect(warn).not.toHaveBeenCalled();
   });
 });

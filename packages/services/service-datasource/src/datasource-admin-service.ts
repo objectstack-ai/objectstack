@@ -649,6 +649,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
 
   async createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary> {
     this.assertValidName(input?.name);
+    this.assertNoDraftCredentialsRef(input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
     this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
@@ -1173,6 +1174,29 @@ export class DatasourceAdminService implements IDatasourceAdminService {
         `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
       );
     }
+  }
+
+  /**
+   * [#27722] The #27582 rule at this door: a write may only seal a new value or
+   * keep its own record's stored reference. A create has no record of its own,
+   * so the only `external.credentialsRef` it stores is the one a supplied
+   * `secret` is bound under, and a draft that names one is refused. One answer
+   * whatever it names: the message names the key and never its value, and
+   * nothing about the reference is looked up. Thrown before anything is
+   * written (a `400` at the route).
+   *
+   * An update needs no such refusal: it keeps the stored reference unless a
+   * supplied secret rewraps it, whatever the patch's `external` says.
+   */
+  private assertNoDraftCredentialsRef(input: DatasourceDraft): void {
+    const external = input.external as { credentialsRef?: unknown } | undefined;
+    if (external?.credentialsRef === undefined) return;
+    throw new Error(
+      `Invalid datasource '${input.name}': \`external.credentialsRef\` is not accepted on create. `
+        + 'It names a credential already stored, and only the reference this door binds a supplied `secret` '
+        + 'under can be stored on a new datasource. Send the credential as `secret`, and leave '
+        + '`external.credentialsRef` out. Nothing was written.',
+    );
   }
 
   private toRecord(input: DatasourceDraft): StoredDatasource {

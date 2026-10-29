@@ -112,6 +112,8 @@ describe('approval override composite (#16679)', () => {
         // `{can_act:false, is_submitter:false, can_override:true}` triple the
         // #16679 measurement round read off the wire.
         const memberToken = await stack.signUp('override-composite-member@example.com');
+        // The departed approver's account exists, and its holder never acts.
+        await stack.signUp(DEPARTED_APPROVER);
         const createRes = await stack.apiAs(memberToken, 'POST', '/data/override_composite_request', {
           name: 'Stranded request',
           amount: 100,

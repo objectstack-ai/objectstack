@@ -54,6 +54,7 @@
  */
 
 import {
+  normalizePlatformAdminEmail,
   resolveReadableParentIds,
   resolveUserAuthzGrants,
   vetOrganizationClaim,
@@ -254,6 +255,13 @@ type MentionedUser = { ok: true; id: string } | { ok: false; reason: MentionWith
  * user may be notified is the read check's question, never this lookup's).
  * An audience expansion (`role:` / `team:` / `owner_of:`) names no single
  * person and is not a mention.
+ *
+ * An email is looked up the way sign-in looks one up: identity stores
+ * `sys_user.email` lowercased, and sign-in queries the lowercased address, so
+ * a mention normalises with the platform's one email normalisation
+ * (`normalizePlatformAdminEmail`: trim, then lowercase) before the exact
+ * match. ⛔ No second email matcher here — a differently-cased address must
+ * name the same user sign-in would.
  */
 async function resolveMentionedUser(engine: MentionRecipientGateEngine, raw: string): Promise<MentionedUser> {
   let value = raw.trim();
@@ -263,7 +271,7 @@ async function resolveMentionedUser(engine: MentionRecipientGateEngine, raw: str
   if (!value.includes('@')) return { ok: true, id: value };
   try {
     const rows = await engine.find(USER_OBJECT, {
-      where: { email: value },
+      where: { email: normalizePlatformAdminEmail(value) },
       fields: ['id'],
       limit: 1,
       context: SYSTEM_CONTEXT,
