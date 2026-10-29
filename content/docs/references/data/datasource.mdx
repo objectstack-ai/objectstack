@@ -38,7 +38,7 @@ const result = DatasourceSchema.parse(data);
 | **active** | `boolean` | optional (default: `true`) | Is datasource enabled |
 | **autoConnect** | `boolean` | optional (default: `false`) | Force a live driver connection at boot even when managed + unrouted (ADR-0062 D2). |
 | **schemaMode** | `Enum<'managed' \| 'external' \| 'validate-only'>` | optional (default: `"managed"`) | Schema ownership mode |
-| **external** | `{ allowedSchemas?: string[]; allowWrites?: boolean; validation?: object; credentialsRef?: string; … }` | optional | External datasource settings: federation policy (schemaMode != "managed") plus the secrets-store credentials reference (valid in every schemaMode) |
+| **external** | `{ allowedSchemas?: string[]; allowWrites?: boolean; validation?: object; credentialsRef?: string; … }` | optional | External datasource settings: federation policy (schemaMode != "managed") plus the secrets-store credentials reference (valid in every schemaMode) or the connector instance an API-backed datasource borrows its credential from |
 | **origin** | `Enum<'code' \| 'runtime'>` | optional (default: `"code"`) | Datasource provenance (server-managed, read-only) |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -75,6 +75,7 @@ const result = DatasourceSchema.parse(data);
 | **allowWrites** | `boolean` | optional (default: `false`) | Global write gate. Individual objects must also opt in via object.external.writable. |
 | **validation** | `{ onMismatch?: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot?: boolean; checkIntervalMs?: number }` | optional (default: `{"onMismatch":"fail","checkOnBoot":true}`) | Boot/drift validation policy |
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry. |
+| **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — static, `oauth2`, `app-credential` and `signed` kinds alike, resolved per dispatch as for the connector itself. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
 | **queryTimeoutMs** | `number` | optional (default: `30000`) | Hard cap on per-query execution time. |
 
 
@@ -106,7 +107,7 @@ Underlying driver identifier
 
 ## ExternalDatasourceSettings
 
-External datasource settings: federation policy (schemaMode != "managed") plus the secrets-store credentials reference (valid in every schemaMode)
+External datasource settings: federation policy (schemaMode != "managed") plus the secrets-store credentials reference (valid in every schemaMode) or the connector instance an API-backed datasource borrows its credential from
 
 ### Properties
 
@@ -116,6 +117,7 @@ External datasource settings: federation policy (schemaMode != "managed") plus t
 | **allowWrites** | `boolean` | optional (default: `false`) | Global write gate. Individual objects must also opt in via object.external.writable. |
 | **validation** | `{ onMismatch?: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot?: boolean; checkIntervalMs?: number }` | optional (default: `{"onMismatch":"fail","checkOnBoot":true}`) | Boot/drift validation policy |
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry. |
+| **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — static, `oauth2`, `app-credential` and `signed` kinds alike, resolved per dispatch as for the connector itself. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
 | **queryTimeoutMs** | `number` | optional (default: `30000`) | Hard cap on per-query execution time. |
 
 ### Nested Shape: `ExternalDatasourceSettings.validation`
