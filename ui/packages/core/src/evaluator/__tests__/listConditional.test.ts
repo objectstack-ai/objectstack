@@ -196,9 +196,9 @@ describe('evalRowPredicate', () => {
     });
 
     it('reports the legacy path fault with the legacy engine reason', () => {
-      // `===` routes to the legacy engine, which reports by throwing; the
-      // fail-closed report carries that message for the same reason.
-      evalRowPredicate('record.a === $$$', { a: 1 }, {
+      // A `${…}` template routes to the legacy engine, which reports by
+      // throwing; the fail-closed report carries that message for the same reason.
+      evalRowPredicate('${record.a === $$$}', { a: 1 }, {
         fallback: false,
         warnOnError: true,
         label: 'legacy-fault',
@@ -209,6 +209,22 @@ describe('evalRowPredicate', () => {
       expect(failure).toBeDefined();
       expect(failure).toContain('(legacy-fault)');
       expect(failure).toContain('Reason: [legacy]');
+    });
+
+    it('reports a bare `===` string as a CEL parse fault — it is CEL shorthand (objectstack#27457)', () => {
+      // The same text as a bare string no longer reaches the legacy engine: it
+      // faults on CEL, as on the server, and the report names the CEL reason.
+      evalRowPredicate('record.a === $$$', { a: 1 }, {
+        fallback: false,
+        warnOnError: true,
+        label: 'bare-fault',
+      });
+      const failure = warn.mock.calls
+        .map((c) => String(c[0]))
+        .find((m) => m.includes('failed to evaluate') && m.includes('(bare-fault)'));
+      expect(failure).toBeDefined();
+      expect(failure).toContain('Reason: [parse]');
+      expect(failure).not.toContain('[legacy]');
     });
 
     // The other half of objectui#3792: this function stopped being list-only
