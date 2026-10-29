@@ -68,7 +68,7 @@ function nestedPredicatePage(visibleWhen: unknown): AnyRec {
     kind: 'slotted',
     regions: [],
     slots: {
-      tabs: {
+      details: {
         type: 'page:tabs',
         properties: {
           items: [
@@ -125,7 +125,7 @@ describe('negative control — the detector fires, and every door earns its plac
     const page = nestedPredicatePage(BARE);
     const audit = auditPageExpressionEnvelopes(page, 'nc (nc_nested)');
     expect(audit.findings.map(f => f.path)).toEqual([
-      'slots.tabs.properties.items[0].children[0].visibleWhen',
+      'slots.details.properties.items[0].children[0].visibleWhen',
     ]);
     expect(audit.findings[0]!.door).toBe('PageComponentSchema');
 

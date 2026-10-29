@@ -64,7 +64,7 @@ import {
   advanceLoadedRecord,
   type LoadedRecordSnapshot,
 } from './sanitize';
-import { closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
+import { closedForRecord, closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
 import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
 import { seedCreateValues, omitServerResolvedDefaults } from './schemaDefaults';
@@ -269,6 +269,14 @@ export interface ModalFormProps {
   schema: ModalFormSchema;
   dataSource?: DataSource;
   className?: string;
+  /**
+   * A lock on the edited record that the host reads and the record's field
+   * projection leaves out: `'approval'` while a pending approval locks it
+   * (objectstack#27138). The dialog then draws the record read-only, says
+   * why, and offers no Save, as it does for a row the server answers
+   * `writable: false`. Read on an `edit` form with a `recordId` only.
+   */
+  lockedBy?: 'approval';
 }
 
 /**
@@ -323,8 +331,8 @@ const clampColumns = (n: unknown): number | undefined =>
  * An `edit` form for a stored record answers its field locks from that record
  * (objectstack#26594) — see `recordFieldAccess.tsx`.
  */
-export const ModalForm: React.FC<ModalFormProps> = ({ schema, ...rest }) => (
-  <RecordFieldAccessForForm schema={schema} dataSource={rest.dataSource}>
+export const ModalForm: React.FC<ModalFormProps> = ({ schema, lockedBy, ...rest }) => (
+  <RecordFieldAccessForForm schema={schema} dataSource={rest.dataSource} lockedBy={lockedBy}>
     {/* `schema=` by name, so the handler-key census follows the document into the body. */}
     <ModalFormBody schema={schema} {...rest} />
   </RecordFieldAccessForForm>
@@ -848,7 +856,16 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
 
   // Build base form schema
   // Actions are hidden inside the form renderer — we render them in a sticky footer instead
-  const showSubmit = schema.showSubmit !== false && schema.mode !== 'view';
+  // objectui#11000 — the form-wide lock's reason, read once for the notice
+  // above the fields and for Save: a record that refuses the update itself
+  // (objectstack#27138) takes no edit, so the dialog offers no Save on it.
+  const closedAffordance = closedFormAffordance({
+    perms,
+    objectName: schema.objectName,
+    mode: schema.mode,
+    objectSchema,
+  });
+  const showSubmit = schema.showSubmit !== false && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const showCancel = schema.showCancel !== false;
   const submitLabel = schema.submitText || (schema.mode === 'create' ? t('form.create') : t('form.update'));
   const cancelLabel = schema.cancelText || t('common.cancel');
@@ -1114,12 +1131,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // through the `ObjectForm` it renders.
   const closedAffordanceNotice = !error && !loading ? (
     <ClosedAffordanceNotice
-      affordance={closedFormAffordance({
-        perms,
-        objectName: schema.objectName,
-        mode: schema.mode,
-        objectSchema,
-      })}
+      affordance={closedAffordance}
       objectName={schema.objectName}
       objectSchema={objectSchema}
     />

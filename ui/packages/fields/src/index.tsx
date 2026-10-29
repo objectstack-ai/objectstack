@@ -5233,9 +5233,13 @@ export { objectRefOptionLabel } from './widgets/objectRefLabel.js';
 export {
   RECIPIENT_RECORD_KINDS,
   RECIPIENT_REGISTRY_KINDS,
+  RECIPIENT_REGISTRY_AND_RECORD_KINDS,
   FIELD_RECIPIENT_TYPE,
   recipientCandidateLabel,
 } from './widgets/recipientKinds.js';
+// The one two-source queue list (ADR-0142 D1): the recipient picker, its read
+// face and the flow designer's approver picker all build it here.
+export { mergeQueueCandidates, queueCandidateLabel, type QueueCandidate } from './widgets/queueCandidates.js';
 export * from './widgets/RecordPickerDialog.js';
 // Shared picker-column derivation (ADR-0085 highlightFields → displayFields →
 // schema walk) — consumed by LookupField AND by RelatedList's Add-picker so a

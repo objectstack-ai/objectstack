@@ -250,7 +250,7 @@ describe('objectui#10981 — the closure walk over this package\'s `src`', () =>
     for (const f of ['base.ts', 'data-display.ts', 'zod/form.zod.ts', 'zod/objectql.zod.ts']) expect(names).toContain(f);
     const text = (f: string) => texts.find(([p]) => p === `${SRC}/${f}`)?.[1] ?? '';
     expect(text('zod/navigation.zod.ts')).toContain(UNKNOWN_PROP_TAIL);
-    expect(text('ai.ts')).toContain("only the parser tier's `not-a-container` warning (objectui#9910) noticed it");
+    expect(text('views.ts')).toContain("only the parser tier's `not-a-container` warning (objectui#9910) noticed it");
   });
 
   it('no file still pairs "no error" with "no warning"', () => {

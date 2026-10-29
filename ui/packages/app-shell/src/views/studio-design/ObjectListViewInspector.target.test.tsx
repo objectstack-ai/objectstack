@@ -67,10 +67,13 @@ describe('namedListViewOf — the canvas copy of a view item (objectui#11823)', 
     ).toEqual({ type: 'grid', columns: ['x'], label: 'All' });
   });
 
-  it('folds a stored `options.KIND` bag as the Studio view preview folds it', () => {
-    expect(
-      namedListViewOf({ name: 'a.b', config: { type: 'kanban', columns: [], options: { kanban: { groupByField: 's' } } } }),
-    ).toEqual({ type: 'kanban', columns: [], kanban: { groupByField: 's' } });
+  it('lifts nothing out of an `options` bag: the server folds a stored bag before the row arrives (objectstack#25923)', () => {
+    // The Studio view preview folded the bag here until the spec retired it;
+    // the D2 conversion `list-view-options-bag-folded` now folds a stored bag
+    // onto the top-level blocks on read, so neither door does it again.
+    const view = namedListViewOf({ name: 'a.b', config: { type: 'kanban', columns: [], options: { kanban: { groupByField: 's' } } } });
+    expect(view).not.toHaveProperty('kanban');
+    expect(view).toMatchObject({ type: 'kanban', columns: [] });
   });
 });
 

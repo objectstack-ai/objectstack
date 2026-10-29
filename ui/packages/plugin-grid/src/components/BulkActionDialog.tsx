@@ -21,7 +21,7 @@ import {
 } from '@object-ui/components';
 import { AlertTriangle, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/react';
-import { useDisplayLocale } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization } from '@object-ui/i18n';
 import { getLazyFieldWidget } from '@object-ui/fields';
 // The two shared allow-tables of widgets that are fed the dialog's own
 // in-progress values as their record — one definition each for this dialog, the
@@ -165,6 +165,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
   // renderer and the console's action runners read: the confirm sentence's
   // formatters render in it (objectstack#26307). ⛔ No second resolution.
   const displayLocale = useDisplayLocale();
+  const { currency: tenantCurrency } = useLocalization();
   const params = def?.params ?? [];
 
   // Effective multi-value semantics for an `update` param: an explicit
@@ -415,7 +416,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
           </DialogTitle>
           {step === 'confirm' && (
             <DialogDescription>
-              {bulkConfirmText(def.confirmText, { count: rows.length, params, values, lookupLabels }, displayLocale) ?? t('grid.bulk.confirmDefault', { count: rows.length, defaultValue: `This will apply to ${rows.length} record(s).` })}
+              {bulkConfirmText(def.confirmText, { count: rows.length, params, values, lookupLabels }, displayLocale, tenantCurrency) ?? t('grid.bulk.confirmDefault', { count: rows.length, defaultValue: `This will apply to ${rows.length} record(s).` })}
             </DialogDescription>
           )}
         </DialogHeader>

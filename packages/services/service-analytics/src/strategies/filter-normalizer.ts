@@ -2332,6 +2332,27 @@ export function declaredDatetimeLowering(
 }
 
 /**
+ * [#27172] Is the column a `timeDimensions[].dateRange` member binds against
+ * declared `date`? Asked of the same hook and the same target as
+ * {@link declaredDatetimeLowering}, for `dateRangeWindowBounds`
+ * (`dataset-executor.ts`): a resolved preset filters a `date` column by the
+ * reference zone's calendar days, and every other column by its instants.
+ * A column the host cannot name a type for answers `false`, which keeps the
+ * instants it was filtered by before.
+ */
+export function declaredDateColumn(
+  ctx: StrategyContext,
+  target: (member: string) => { object: string; field: string },
+): (member: string) => boolean {
+  const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+  if (typeof declared !== 'function') return () => false;
+  return (member) => {
+    const { object, field } = target(member);
+    return declared.call(ctx, object, field) === 'date';
+  };
+}
+
+/**
  * [ADR-0053 D-D1 item 8, amended — #5930 step 4] A `timeDimensions[].dateRange`
  * window as the tree the strategies compile: the `{ $gte, $lte }` pair (or the
  * `{ $gte, $lt }` pair of a resolved preset that stops before its end) on the

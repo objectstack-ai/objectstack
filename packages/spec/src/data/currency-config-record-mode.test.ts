@@ -65,11 +65,10 @@ describe('`CurrencyConfigSchema`: `record` ⇔ `currencyField`', () => {
 
   it('`dynamic` and `fixed` outputs are byte-identical to before `record` existed', () => {
     const cases: Array<[unknown, string]> = [
-      [{}, '{"currencyMode":"dynamic","defaultCurrency":"CNY"}'],
-      [{ currencyMode: 'dynamic' }, '{"currencyMode":"dynamic","defaultCurrency":"CNY"}'],
+      [{}, '{"currencyMode":"dynamic"}'],
+      [{ currencyMode: 'dynamic' }, '{"currencyMode":"dynamic"}'],
       [{ currencyMode: 'dynamic', defaultCurrency: 'EUR' }, '{"currencyMode":"dynamic","defaultCurrency":"EUR"}'],
       [{ currencyMode: 'fixed', defaultCurrency: 'USD' }, '{"currencyMode":"fixed","defaultCurrency":"USD"}'],
-      [{ currencyMode: 'fixed' }, '{"currencyMode":"fixed","defaultCurrency":"CNY"}'],
     ];
     for (const [input, before] of cases) {
       expect(JSON.stringify(CurrencyConfigSchema.parse(input))).toBe(before);

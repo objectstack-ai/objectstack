@@ -61,16 +61,27 @@ export function recordCurrencyField(
  *
  * `currencyMode: 'dynamic'` — and a `currencyConfig` with no `currencyMode` at
  * all, which `@objectstack/spec` defaults to `'dynamic'` — skips step 2
- * (objectui#10422): a dynamic field reads the tenant default, never its
- * `defaultCurrency`. That matters beyond authored dynamic configs: until
+ * (objectui#10422). The spec describes that mode as "user selectable", and its
+ * `FieldSchema` guidance says a field without a fixed currency "uses the tenant
+ * default at runtime". No value carries a user-selected code today (a currency
+ * value is a bare number), so a dynamic field reads the tenant default, never
+ * its `defaultCurrency`. That matters beyond authored dynamic configs: until
  * @objectstack/spec dropped the `'CNY'` default (#27157), the spec parsed an
  * EMPTY `currencyConfig` to `{ currencyMode: 'dynamic', defaultCurrency: 'CNY' }`,
  * and rows stored or built by that parse still carry it until a rehydration
  * strips it; it must not render as yuan. The spec now refuses a `fixed`
  * config without a code at authoring and save, but a stored row saved that
  * way before is kept as authored and still loads with no code; step 2 skips
- * it and the tenant default shows, as it always did. A per-record currency is
- * step 0's, and only a `record`-mode field has one.
+ * it and the tenant default shows, as it always did. If a value ever carries
+ * its own selected code, that code is the one to win, ahead of the tenant
+ * default.
+ *
+ * `currencyMode: 'record'` (ADR-0144 D2) is step 0's alone: the field has no
+ * currency of its own — each record's code lives in the sibling field
+ * `currencyConfig.currencyField` names, which only a caller holding the row
+ * can pass. No other step applies, the tenant default included: a record whose
+ * code is blank, or a call with no record (a metric tile, an aggregate),
+ * shows no symbol rather than a currency it never named.
  *
  * This is the single resolution every field / measure / cell renderer shares -
  * ending the per-renderer drift where some read only `currency`, others only

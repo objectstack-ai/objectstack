@@ -484,6 +484,12 @@ other character is literal.
   formatter makes the rest explicit: `upper`, `lower`, `trim`, `number[:digits]`,
   `currency[:CODE]`, `percent[:digits]`, `date[:short|medium|long|iso]`,
   `datetime[:…]`, `truncate[:n]`, `default:'fallback'`, `json`.
+- `currency` with no code formats in the run's organization's default currency
+  (the `localization.currency` setting, which currency fields and dashboards
+  read too), read once when the run starts. When the organization has none, the
+  node fails with a refusal that names the hole, and no fault edge routes it:
+  nothing is sent with the amount in a guessed currency. Name the code
+  (`currency:EUR`) where the amount's currency is fixed.
 - A hole holds **no logic** — `{{ a + b }}` or `{{ round(x) }}` is refused at
   `objectstack validate` and `registerFlow`. Compute the value first, in an
   `assignment` node's CEL value envelope, and write the variable as a hole.

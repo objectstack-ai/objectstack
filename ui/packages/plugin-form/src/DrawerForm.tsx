@@ -60,7 +60,7 @@ import {
   advanceLoadedRecord,
   type LoadedRecordSnapshot,
 } from './sanitize';
-import { closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
+import { closedForRecord, closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
 import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
 import { seedCreateValues, omitServerResolvedDefaults } from './schemaDefaults';
@@ -728,7 +728,16 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   // `form.reset()` *before* invoking onCancel, which would wipe the user's
   // input before the "Discard changes?" prompt even appears — so "Keep editing"
   // would keep an already-emptied form. Mirrors ModalForm.
-  const showSubmit = schema.showSubmit !== false && schema.mode !== 'view';
+  // objectui#11000 — the form-wide lock's reason, read once for the notice
+  // above the fields and for Save: a record that refuses the update itself
+  // (objectstack#27138) takes no edit, so the drawer offers no Save on it.
+  const closedAffordance = closedFormAffordance({
+    perms,
+    objectName: schema.objectName,
+    mode: schema.mode,
+    objectSchema,
+  });
+  const showSubmit = schema.showSubmit !== false && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const showCancel = schema.showCancel !== false;
   const submitLabel = schema.submitText || (schema.mode === 'create' ? t('form.create') : t('form.update'));
   const cancelLabel = schema.cancelText || t('common.cancel');
@@ -910,12 +919,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   // through the `ObjectForm` it renders.
   const closedAffordanceNotice = !error && !loading ? (
     <ClosedAffordanceNotice
-      affordance={closedFormAffordance({
-        perms,
-        objectName: schema.objectName,
-        mode: schema.mode,
-        objectSchema,
-      })}
+      affordance={closedAffordance}
       objectName={schema.objectName}
       objectSchema={objectSchema}
     />

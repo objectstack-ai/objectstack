@@ -441,7 +441,7 @@ describe('discoverPublishedPackages', () => {
   it('drops packages npm never receives, and keeps the ones under apps/', () => {
     const root = makeWorkspace({
       'packages/core': { name: '@object-ui/core' },
-      'packages/vscode-extension': { name: 'object-ui', private: true },
+      'packages/editor-ext': { name: 'ext-x', private: true },
       'apps/console': { name: '@object-ui/console' },
     });
     expect(discoverPublishedPackages(root).map((p: { name: string }) => p.name)).toEqual([
@@ -461,9 +461,10 @@ describe('discoverPublishedPackages', () => {
   });
 
   it('excludes THIS repository’s private fixed-group member by name', () => {
-    // `packages/vscode-extension` is named `object-ui`, is in the fixed group
-    // (changesets versions it) and is `private`. Reading the fixed group alone
-    // would put an unpublishable package in scope.
+    // `object-ui` (the VS Code extension) was in the fixed group and `private`
+    // until objectstack#25910 removed it; the pin keeps the name out of scope
+    // should it return. Reading the fixed group alone would put an
+    // unpublishable package in scope.
     const names = discoverPublishedPackages(repoRoot).map((p: { name: string }) => p.name);
     expect(names).not.toContain('object-ui');
     expect(names).toContain('@object-ui/console');

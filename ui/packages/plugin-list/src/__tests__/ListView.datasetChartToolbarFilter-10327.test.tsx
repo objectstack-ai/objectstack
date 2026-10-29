@@ -19,8 +19,8 @@
  * object's rows. So each control changed a query nothing on screen draws.
  *
  * WHAT IS PINNED. The Filter builder AND the chips are absent on a dataset
- * chart, in both spellings of the block (`chart` and the legacy
- * `options.chart` bag), and absent only while the chart is ON SCREEN: a grid
+ * chart (the `chart` block, its one spelling since objectstack#25923 retired
+ * the legacy `options.chart` bag), and absent only while the chart is ON SCREEN: a grid
  * view that can switch to the same chart offers them on the grid. The CONTROL
  * is the `'unbound'` chart, whose node carries the effective filter
  * (objectui#10250) and which keeps both controls. (It was the object-bound
@@ -116,12 +116,14 @@ describe('objectui#10327 — no filter control on a dataset-bound chart view', (
     expect(chips()).not.toBeInTheDocument();
   });
 
-  it('withholds them on the legacy `options.chart` bag bound to a dataset — the same resolver', async () => {
+  it('RETIRED (objectstack#25923): a dataset block left in an `options` bag binds nothing — the chart is the unbound one, and keeps both controls', async () => {
+    // The bag is folded onto `chart` by the server before a stored row is
+    // served, so only an inline bag reaches here, and `ListView` reads none.
     mount({ viewType: 'chart', options: { chart: DATASET_BLOCK } });
     await chartOnScreen();
-    expect(chartNodes.at(-1)).toMatchObject({ type: 'object-chart', dataset: 'task_ds' });
-    expect(filterButton()).not.toBeInTheDocument();
-    expect(chips()).not.toBeInTheDocument();
+    expect(chartNodes.at(-1)).not.toMatchObject({ dataset: 'task_ds' });
+    expect(filterButton()).toBeInTheDocument();
+    expect(chips()).toBeInTheDocument();
   });
 
   it('keys on the view ON SCREEN: a grid that switches to the dataset chart loses them, and gets them back', async () => {

@@ -18,7 +18,9 @@
  * `position`) render a record lookup against the data API (with a manual-entry
  * escape hatch, so the never-trap rule still holds), `org-membership-level` is
  * a strict select over a closed enum, `manager` is auto-resolved (disabled
- * cell), and `queue` is free text naming the queue (ADR-0142 D6). A kind whose
+ * cell), and `queue` renders a select over BOTH of a queue's sources — the
+ * declared queues and the organization's `sys_queue` rows (ADR-0142 D6,
+ * `{ source: 'registry-and-data' }`), with the same escape hatch. A kind whose
  * published binding is the REGISTRY instead (`{ source: 'registry', type }`,
  * objectstack#22710 — `position` on a server carrying it) renders a select over
  * that metadata type's items and commits the item's name (objectui#7611 Q3b),
@@ -50,15 +52,19 @@ import { Pencil, Search } from 'lucide-react';
 import { APPROVER_VALUE_SOURCES } from '@objectstack/spec/automation';
 import { BUILTIN_MEMBERSHIP_ROLE_OPTIONS } from '@objectstack/spec/identity';
 import { useAdapter } from '@object-ui/react';
-import { LookupField } from '@object-ui/fields';
-import type { FormField, LookupFieldMetadata } from '@object-ui/types';
+import { LookupField, mergeQueueCandidates, queueCandidateLabel, type QueueCandidate } from '@object-ui/fields';
+import type { DataSource, FormField, LookupFieldMetadata } from '@object-ui/types';
 import type { FlowReferenceSpec, ReferenceKind, RefValueSource } from './flow-node-config.js';
 import { useMetadataClient } from '../useMetadata.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../i18n.js';
 import { flagUnknownValue, RequiredMarker } from './_shared.js';
 import { ObjectPicker } from './ObjectPicker.js';
-import { APPROVER_REGISTRY_TYPES } from '../../../utils/approverValueSources.js';
+import {
+  APPROVER_REGISTRY_TYPES,
+  APPROVER_TWO_SOURCE_BINDINGS,
+  type RegistryAndDataValueSource,
+} from '../../../utils/approverValueSources.js';
 import { isStudioHiddenSystemField } from '../../studio-design/studioHiddenSystemField.js';
 
 /** Context the reference picker needs to resolve dynamic option sources. */
@@ -355,6 +361,30 @@ export function registryTypeFor(resolved: ResolvedRef | undefined): string | und
   const published = resolved.source;
   if (published) return published.source === 'registry' ? published.type : undefined;
   return KIND_TO_REGISTRY_TYPE[resolved.kind];
+}
+
+/**
+ * The older-server fallback for a TWO-SOURCE kind (ADR-0142 D6), derived from
+ * the bundled spec exactly as {@link KIND_TO_REGISTRY_TYPE} is:
+ * `{ queue: { type: 'queue', object: 'sys_queue', valueField: 'name' } }`.
+ * Never a list written here.
+ */
+export const KIND_TO_TWO_SOURCE: Readonly<Partial<Record<ReferenceKind, RegistryAndDataValueSource>>> =
+  APPROVER_TWO_SOURCE_BINDINGS;
+
+/**
+ * The two-source binding a resolved reference lists its candidates from
+ * (`{ source: 'registry-and-data', type, object, valueField }`, ADR-0142 D6),
+ * else `undefined`. The same precedence as {@link registryTypeFor}: the
+ * server's published `xRef.sources` entry wins, and a kind it publishes as
+ * anything else never reaches this picker; with no published source the
+ * spec-derived {@link KIND_TO_TWO_SOURCE} answers.
+ */
+export function twoSourceFor(resolved: ResolvedRef | undefined): RegistryAndDataValueSource | undefined {
+  if (!resolved) return undefined;
+  const published = resolved.source;
+  if (published) return published.source === 'registry-and-data' ? published : undefined;
+  return KIND_TO_TWO_SOURCE[resolved.kind];
 }
 
 /** Read `node.config[key]` as a non-empty string, else undefined. */
@@ -761,6 +791,169 @@ function RegistryPickCell({ type, value, onPick, onCommit, onBlur, disabled, pla
   );
 }
 
+/**
+ * Both of a two-source binding's lists, merged into one by machine name
+ * (ADR-0142 D1): the declared items of `binding.type` through the designer's
+ * metadata client (`GET /api/v1/meta/<type>`) and the organization's rows of
+ * `binding.object` through the data adapter. `mergeQueueCandidates` is the one
+ * merge the sharing-rule recipient picker reads too, so the two pickers offer
+ * the same queues. The committed value is the candidate's `name`, which is the
+ * binding's `valueField` by the spec's own type.
+ *
+ * `enabled === false` (no adapter) reads nothing: one source alone would offer
+ * half of what the value can name. A failed half contributes nothing and the
+ * other is still offered.
+ */
+function useTwoSourceCandidates(
+  binding: RegistryAndDataValueSource,
+  adapter: DataSource | null,
+): { candidates: QueueCandidate[]; loading: boolean } {
+  const client = useMetadataClient();
+  const enabled = !!adapter && typeof adapter.find === 'function';
+  const [state, setState] = React.useState<{ candidates: QueueCandidate[]; loading: boolean }>({
+    candidates: [],
+    loading: enabled,
+  });
+  const { type, object, valueField } = binding;
+  React.useEffect(() => {
+    if (!enabled || !adapter) {
+      setState({ candidates: [], loading: false });
+      return;
+    }
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true }));
+    Promise.allSettled([
+      client.list<{ name?: string; label?: string }>(type),
+      adapter.find(object, { $top: 500, $orderby: { [valueField]: 'asc' } }),
+    ]).then(([declared, rows]) => {
+      if (cancelled) return;
+      setState({
+        candidates: mergeQueueCandidates(
+          declared.status === 'fulfilled' ? declared.value : [],
+          rows.status === 'fulfilled' ? rows.value : [],
+        ),
+        loading: false,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, adapter, enabled, type, object, valueField]);
+  return state;
+}
+
+/**
+ * A single-select picker cell for a TWO-SOURCE reference (ADR-0142 D6): the
+ * value is a queue machine name, and a queue is either declared by a package
+ * or authored by the organization as a `sys_queue` row, so the candidates are
+ * both lists merged by {@link useTwoSourceCandidates}. A choice commits the
+ * name.
+ *
+ * "Never trap the author" holds as it does for {@link RegistryPickCell}: with
+ * no adapter (offline preview) the cell is the plain text box, a pencil toggle
+ * switches to manual entry, an empty list leaves the text box, and a stored
+ * name neither source carries still renders, flagged `(not found)`. The queue
+ * hint says what the name resolves to, under every mode.
+ */
+function TwoSourcePickCell({ binding, value, onPick, onCommit, onBlur, disabled, placeholder, showHint, locale }: {
+  binding: RegistryAndDataValueSource;
+  value: unknown;
+  /** Immediate commit for a choice (there is no blur to flush on). */
+  onPick: (value: string) => void;
+  /** Keystroke-level commit for the manual-entry input (flushed via onBlur). */
+  onCommit: (value: unknown) => void;
+  onBlur?: () => void;
+  disabled?: boolean;
+  placeholder?: string;
+  showHint: boolean;
+  /** The designer locale the toggle buttons, the flag and the hint are worded in. */
+  locale: SupportedLocale;
+}) {
+  const adapter = useAdapter();
+  const { candidates, loading } = useTwoSourceCandidates(binding, adapter);
+  const [manual, setManual] = React.useState(false);
+  const current = value != null ? String(value) : '';
+  const listed = !loading && candidates.length > 0;
+  const hint = showHint ? (
+    <p className="text-[11px] leading-snug text-muted-foreground">
+      {t('engine.inspector.reference.queueHint', locale)}
+    </p>
+  ) : null;
+
+  if (manual || !listed) {
+    return (
+      <div className="w-full space-y-1">
+        <div className="flex w-full items-center gap-1" data-testid="two-source-pick" data-registry-type={binding.type} data-object={binding.object} data-mode="text">
+          <Input
+            value={current}
+            onChange={(e) => onCommit(e.target.value)}
+            onBlur={onBlur}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            }}
+            placeholder={loading ? t('engine.form.loadingOptions', locale) : placeholder}
+            disabled={disabled || loading}
+            className="h-8 flex-1 text-sm"
+          />
+          {listed && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+              onClick={() => setManual(false)}
+              disabled={disabled}
+              aria-label={t('engine.inspector.reference.pickFromQueues', locale)}
+              title={t('engine.inspector.reference.pickFromQueues', locale)}
+            >
+              <Search className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+        {hint}
+      </div>
+    );
+  }
+
+  const options: Option[] = candidates.map((c) => ({ value: c.name, label: queueCandidateLabel(c) }));
+  const shown = current && !options.some((o) => o.value === current)
+    ? [...options, { value: current, label: flagUnknownValue(current, t('engine.form.notFound', locale), locale) }]
+    : options;
+  return (
+    <div className="w-full space-y-1">
+      <div className="flex w-full items-center gap-1" data-testid="two-source-pick" data-registry-type={binding.type} data-object={binding.object} data-mode="select">
+        <div className="min-w-0 flex-1">
+          <Select value={current || undefined} onValueChange={onPick} disabled={disabled}>
+            <SelectTrigger className="h-8 w-full text-sm">
+              <SelectValue placeholder={placeholder ?? '—'} />
+            </SelectTrigger>
+            <SelectContent>
+              {shown.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+          onClick={() => setManual(true)}
+          disabled={disabled}
+          aria-label={t('engine.inspector.reference.enterManually', locale)}
+          title={t('engine.inspector.reference.enterManually', locale)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {hint}
+    </div>
+  );
+}
+
 export interface ReferenceComboboxProps {
   /** The resolved concrete reference, or undefined → plain free text. */
   resolved: ResolvedRef | undefined;
@@ -793,7 +986,8 @@ export interface ReferenceComboboxProps {
  * directory-backed kinds render a record lookup ({@link RecordLookupCell}),
  * registry-bound kinds a select over the registry ({@link RegistryPickCell}),
  * `org-membership-level` a strict select (closed enum), `manager` a disabled
- * auto-resolved cell, and `queue` free text naming the queue (ADR-0142 D6).
+ * auto-resolved cell, and two-source kinds (`queue`, ADR-0142 D6) a select over
+ * both of their sources ({@link TwoSourcePickCell}).
  * Hooks are called unconditionally (kind-gated args) so the
  * component is safe to use in a repeater where the kind changes per row.
  */
@@ -912,6 +1106,25 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
     );
   }
 
+  // Two-source kinds → a select over the declared items AND the organization's
+  // rows (ADR-0142 D6). Read off the published binding like the two above.
+  const twoSource = twoSourceFor(resolved);
+  if (twoSource) {
+    return (
+      <TwoSourcePickCell
+        binding={twoSource}
+        value={value}
+        onPick={commitSelection}
+        onCommit={onCommit}
+        onBlur={onBlur}
+        disabled={disabled}
+        placeholder={placeholder}
+        showHint={showHint}
+        locale={locale}
+      />
+    );
+  }
+
   // Closed enum → strict select, never free text: `sales_manager` typed into
   // a membership-tier box matches nobody at runtime. The vocabulary comes from
   // the SERVER when it publishes one and from the spec-derived fallback
@@ -962,9 +1175,9 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
   }
 
   // [ADR-0142 D6] A queue approver resolves to the queue's members when the
-  // step opens. Its value is a queue machine name with TWO sources — a declared
-  // queue and an organization's own `sys_queue` row — so the cell stays free
-  // text until the console's two-source queue picker lands.
+  // step opens. A server that publishes the two-source binding reached the
+  // picker above; this text box is for one that publishes `queue` as anything
+  // else, so a stored name stays editable.
   if (kind === 'queue') {
     return (
       <div className="w-full space-y-1">

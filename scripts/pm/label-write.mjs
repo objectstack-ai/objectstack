@@ -201,6 +201,7 @@ import {
   markerMatches,
   proxyRearmPlan,
   resolveSweepRepo,
+  stripSignatureLine,
 } from './check-half-states.mjs';
 // The comment half of a release, borrowed exactly as close-cards borrows it:
 // the one `comment` op, the stamp render, and the board-side read-back of the
@@ -477,9 +478,9 @@ const RESUME_FROM_SHAPE = /^([^\s@]+)@([0-9a-fA-F]{7,40})$/;
 /** Pages of 100 comments the silence read may walk before it refuses to judge an unexhausted thread. */
 export const RELEASE_COMMENT_PAGE_CAP = 30;
 
-/** The first line of a body with its markdown heading marks and surrounding whitespace removed. Pure. */
+/** The first line of a body — after one leading signature line (`stripSignatureLine`) — with its markdown heading marks and surrounding whitespace removed. Pure. */
 export function firstLineKeyText(body) {
-  const first = String(body ?? '').split(/\r?\n/)[0] ?? '';
+  const first = stripSignatureLine(body).split(/\r?\n/)[0] ?? '';
   return first.replace(/^\s*#+\s*/, '').trim();
 }
 
@@ -542,7 +543,8 @@ export function commentsAfter(comments, knock) {
 export function releaseTextRefusal(text) {
   const raw = String(text ?? '');
   if (raw.trim().length === 0) return 'the release comment is empty';
-  const first = raw.split(/\r?\n/)[0];
+  // One leading signature line stands above the `Release:` line, never in its place (`stripSignatureLine`, #27113).
+  const first = stripSignatureLine(raw).split(/\r?\n/)[0];
   if (!markerMatches(RELEASE_COMMENT_MARKER, first)) {
     return `the release comment's FIRST line must be the \`Release:\` line (session / reason / destination) — the state model's line-start key — got \`${first.slice(0, 80)}\``;
   }
@@ -1561,7 +1563,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
   'the CLI: what a typo must never be allowed to mean': 8,
   'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
-  'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 30,
+  'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 32,
 });
 const SELF_TEST_BATTERY_FLOOR = 11;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -1817,6 +1819,10 @@ export async function selfTest() {
       { op: 'unassign', issue: 7, assignees: ['os-tesla'] },
     ]);
     t('the release text is judged by the owning `Release:` reader on its FIRST line, and may not pre-write the resume line', [releaseTextRefusal(RELEASE_TEXT), typeof releaseTextRefusal('Released: x'), typeof releaseTextRefusal('note\nRelease: x'), typeof releaseTextRefusal('Release: x\nResume-from: a@b'), typeof releaseTextRefusal('')], [null, 'string', 'string', 'string', 'string']);
+    // One leading signature line (#27113) stands ABOVE the first-line key, never in its place.
+    const SIG = 'domain:skills#2 · os-justin · session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    t('a signed knock reads by the key on the line after its signature; a key on a later line, or under a near-miss signature, still does not', [isRecheckComment(`${SIG}\nOwned-24h re-check: x`), isRecheckComment(`${SIG}\n\n## Owned-24h re-check: x`), isRecheckComment(`${SIG}\nTriage\nOwned-24h re-check: x`), isRecheckComment('domain:skills#2 - os-justin - session_01ABCDEFGHJKMNPQRSTVWXYZ\nOwned-24h re-check: x')], [true, true, false, false]);
+    t('…and a signed release text is judged by its `Release:` line: accepted signed as unsigned, refused when no `Release:` line follows the signature', [releaseTextRefusal(`${SIG}\n${RELEASE_TEXT}`) === releaseTextRefusal(RELEASE_TEXT), typeof releaseTextRefusal(`${SIG}\nnote\nRelease: x`)], [true, 'string']);
 
     // The fixture card the protocol names, younger than the clock.
     const young = await driveRelease(RELEASE_ARGV, silentCard(5));

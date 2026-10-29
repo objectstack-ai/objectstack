@@ -142,15 +142,18 @@ in there with `--email` / `--password` (env `OS_RUNTIME_EMAIL` /
 
 Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. Runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the `os environments bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
 
-A code-bearing plugin — a directory carrying an `objectstack.plugin.json` manifest — is packaged and shipped through the `os plugin` command group (ADR-0025 §3.4, build → sign → publish):
+A code-bearing plugin — a directory carrying an `objectstack.plugin.json` manifest — is packaged and shipped through the `os plugin` command group (ADR-0025 §3.4, build → sign → publish), and installed locally from a signed artifact (ADR-0025 §3.5 M1, keygen → trust → install):
 
 | Command | Description |
 |---------|-------------|
 | `os plugin build [dir]` | Compile a plugin into a signed-ready `.osplugin` artifact (`--entry`, `--out`, `--minify`) |
 | `os plugin sign <artifact> --key <pem>` | Sign a built `.osplugin` with a publisher Ed25519 key, writing a detached `<artifact>.sig` |
 | `os plugin publish [artifact]` | Publish a signed `.osplugin` to ObjectOS Cloud |
+| `os plugin keygen --out <path>` | Generate a publisher Ed25519 key pair: `<path>.key.pem` (private, stays with you) and `<path>.pub.pem` |
+| `os plugin trust add <pub.pem> --key-id <id>` | Trust a publisher public key in this environment's database (`sys_trusted_key`); `trust list` shows the keys, `trust revoke <id>` revokes one |
+| `os plugin install <artifact>` | Verify a local `.osplugin`'s detached signature against the trusted keys and its per-file `integrity`, then unpack it to `<OS_HOME>/plugins/<env>/<id>/<version>/`; `--trust-unsigned` is the explicit dev override for an unsigned artifact |
 
-The group has no `install`: ADR-0025 records the code-plugin install half (download, verify, materialize, load) as not yet implemented. `os plugin` (singular) is unrelated to `os plugins` (plural), oclif's plugin manager, which this package does not ship — see [`os plugins` and `os help`](#os-plugins-and-os-help-not-commands).
+`os plugin install` refuses, by name, an unknown or revoked key, a signature over other bytes, a missing signature and an integrity mismatch. `os serve` does not load installed plugins yet: loading them at boot is the next step of ADR-0025's M1 install loop. `os plugin` (singular) is unrelated to `os plugins` (plural), oclif's plugin manager, which this package does not ship — see [`os plugins` and `os help`](#os-plugins-and-os-help-not-commands).
 
 ### Quality
 

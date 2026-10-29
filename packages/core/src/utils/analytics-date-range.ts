@@ -83,7 +83,8 @@ import {
   analyticsDateRangeRefusalMessage,
   type DateRangePreset,
 } from '@objectstack/spec/data';
-import { zonedDateStartToUtcMs } from './datetime.js';
+import type { LoweredDateRangeWindow } from './analytics-date-range-conformance.js';
+import { bucketDateKey, zonedDateStartToUtcMs } from './datetime.js';
 import { resolveFilterToken } from './filter-tokens.js';
 
 /**
@@ -279,4 +280,91 @@ export function resolveAnalyticsDateRangeString(
 ): ResolvedAnalyticsDateRange {
   if (!isDateRangePresetName(range)) throw analyticsDateRangeUnrecognizedError(range);
   return resolveAnalyticsDateRangePreset(range, options);
+}
+
+/**
+ * [#17973] The calendar days a resolved window covers in `timezone`, as the
+ * INCLUSIVE `[first, last]` pair.
+ *
+ * ⚠️ `endExclusive` is load-bearing: every preset reports the first instant
+ * AFTER the window (`this_month` ends at the next month's start), so the last
+ * day it covers is the one holding the instant before that bound. Reading that
+ * bound as inclusive makes every preset one day too long.
+ *
+ * [#18245] ⭐ `timezone` decides WHICH calendar. The bounds are INSTANTS, and
+ * every preset opens and closes at the reference zone's midnight
+ * ({@link tokenDayStart}), so reading them on the UTC calendar moves a boundary
+ * in opposite directions either side of the meridian. ⛔ That is a day-boundary
+ * projection, not an off-by-one: no constant makes both sides right.
+ *
+ * A bare `YYYY-MM-DD` bound is a calendar day already and is carried on the
+ * UTC proxy {@link zonedDateStartToUtcMs} yields for an unset zone.
+ *
+ * [#27272] Here, beside the lowering, for the reason the lowering is: the
+ * analytics faces of `driver-memory` and `@objectstack/service-analytics` both
+ * filter by it and cannot import each other.
+ */
+export function inclusiveCalendarDayWindow(
+  window: LoweredDateRangeWindow,
+  timezone?: string,
+): [string, string] {
+  const endMs = windowBoundMs(window.end);
+  return [
+    calendarDayOf(windowBoundMs(window.start), timezone),
+    calendarDayOf(window.endExclusive ? endMs - 1 : endMs, timezone),
+  ];
+}
+
+/**
+ * [#27172] The bound pair a lowered `dateRange` window filters one column by —
+ * the ONE spelling every analytics face shares (#27272: `driver-memory`'s cube
+ * face, and service-analytics' two strategies, drill and draft preview).
+ *
+ * ADR-0053's one rule: a `datetime` column compares INSTANTS and a `date`
+ * column compares CALENDAR DAYS in the reference zone.
+ *
+ * - A resolved preset (`endExclusive`) on a `date` column is the calendar days
+ *   it covers in `timezone` ({@link inclusiveCalendarDayWindow}), as the
+ *   inclusive `{ $gte, $lte }` day pair. Q3 is 2026-07-01 through 2026-09-30
+ *   in any zone.
+ * - A resolved preset on any other column stays the instant pair it resolved
+ *   to, stopping before its end: `{ $gte, $lt }`.
+ * - A caller's explicit `[a, b]` is handed back bound for bound, with its
+ *   inclusive upper reading (#16179); each face gives a bare-day end its
+ *   whole-day reading where the column needs one.
+ *
+ * ⛔ The preset's instants used to reach a `date` column as they are. A SQL
+ * `date` column reads an instant by its leading UTC day, so east of UTC the
+ * window slid one day early (#27172); `driver-memory` compared the instant to
+ * the stored bare day as TEXT, so from UTC westward it dropped the first day
+ * and counted the day after the last (#27272).
+ *
+ * @param dateColumn - Is the window's column declared `date`? A column whose
+ *   type the caller cannot name answers `false` and keeps the instants.
+ */
+export function dateRangeWindowBounds(
+  window: LoweredDateRangeWindow,
+  timezone: string | undefined,
+  dateColumn: boolean,
+): Record<string, string> {
+  if (!window.endExclusive) return { $gte: window.start, $lte: window.end };
+  if (!dateColumn) return { $gte: window.start, $lt: window.end };
+  const [first, last] = inclusiveCalendarDayWindow(window, timezone);
+  return { $gte: first, $lte: last };
+}
+
+/** The epoch ms one window bound denotes: a bare day on its UTC proxy, else the instant. */
+function windowBoundMs(bound: string): number {
+  const ms = bound.length === 10 ? zonedDateStartToUtcMs(bound) : Date.parse(bound);
+  if (Number.isNaN(ms)) {
+    throw new TypeError(`[analytics-date-range] invalid date in a dateRange window: "${bound}"`);
+  }
+  return ms;
+}
+
+/** The calendar day the instant at `ms` falls on in `timezone`: {@link bucketDateKey} at `'day'`. */
+function calendarDayOf(ms: number, timezone?: string): string {
+  // `ms` is always a finite epoch {@link windowBoundMs} just checked, so the
+  // labeller answers a key; `String` only narrows its `null` arm away.
+  return String(bucketDateKey(ms, 'day', timezone));
 }

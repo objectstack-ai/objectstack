@@ -9,9 +9,11 @@ import { useFieldTranslation } from './useFieldTranslation.js';
 import {
   FIELD_RECIPIENT_TYPE,
   RECIPIENT_RECORD_KINDS,
+  RECIPIENT_REGISTRY_AND_RECORD_KINDS,
   RECIPIENT_REGISTRY_KINDS,
   recipientCandidateLabel,
 } from './recipientKinds.js';
+import { mergeQueueCandidates } from './queueCandidates.js';
 
 /**
  * RecipientPickerField — dependent record picker for a polymorphic recipient
@@ -35,6 +37,12 @@ import {
  * `name` (matched against `sys_user_position.position` at evaluation time):
  *
  *   position              → the `position` registry, store `name`
+ *
+ * One kind lists BOTH sources under one name (ADR-0142 D7): a queue a package
+ * declares and one the organization authored as a `sys_queue` row, merged by
+ * `mergeQueueCandidates` (declared first, as the server resolves a name):
+ *
+ *   queue                 → the `queue` registry + sys_queue rows, store `name`
  *
  * One kind is NOT a record picker and therefore has no row above:
  *
@@ -134,8 +142,15 @@ export function RecipientPickerField({
   // different facts, and only the second degrades to the text input below.
   const metadataStore = React.useContext(MetadataCtx);
   const registryMapping = metadataStore ? RECIPIENT_REGISTRY_KINDS[recipientType] : undefined;
+  // The two-source kind needs BOTH readers: with either one absent the list
+  // would silently offer half the queues, so it degrades to the text input
+  // below instead, like an unknown kind.
+  const twoSourceMapping =
+    metadataStore && dataSource && typeof dataSource.find === 'function'
+      ? RECIPIENT_REGISTRY_AND_RECORD_KINDS[recipientType]
+      : undefined;
   const mapping: { storeField: 'id' | 'name'; labelFields: string[]; placeholderKey: string } | undefined =
-    recordMapping ?? registryMapping;
+    recordMapping ?? registryMapping ?? twoSourceMapping;
   const objectName = String(dependentValues.object_name ?? '');
   const isFieldRecipient = recipientType === FIELD_RECIPIENT_TYPE;
   // Only this data source can answer "which columns does that object declare?".
@@ -217,6 +232,36 @@ export function RecipientPickerField({
       cancelled = true;
     };
   }, [registryType]);
+
+  // The two-source kinds' load (ADR-0142 D7): the registry's declared items
+  // and the organization's rows, read together and merged by name. Keyed on
+  // the type and the object alone, reading the store through the same ref as
+  // the registry load above (AGENTS.md #10). A half that fails contributes
+  // nothing and the other half is still offered; the stored name stays
+  // visible either way (see `options`).
+  const twoSourceType = twoSourceMapping?.type;
+  const twoSourceObject = twoSourceMapping?.object;
+  React.useEffect(() => {
+    const store = metadataStoreRef.current;
+    if (!twoSourceType || !twoSourceObject || !store || !dataSource) return;
+    setRecords(null);
+    let cancelled = false;
+    Promise.allSettled([
+      store.ensureType(twoSourceType),
+      dataSource.find(twoSourceObject, { $top: 500, $orderby: { name: 'asc' } }),
+    ]).then(([declared, rows]) => {
+      if (cancelled) return;
+      setRecords(
+        mergeQueueCandidates(
+          declared.status === 'fulfilled' ? declared.value : [],
+          rows.status === 'fulfilled' ? rows.value : [],
+        ),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataSource, twoSourceType, twoSourceObject]);
 
   // The `field` mode's own load: the SHARED object's schema, keyed on the
   // sibling `object_name`. Re-run when the admin switches object, so the

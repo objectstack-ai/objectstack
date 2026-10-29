@@ -1,0 +1,141 @@
+---
+title: "Component reference — every component a page can place"
+navTitle: "Component Reference"
+description: "Every component in the public SDUI component manifest — 106 components with their inputs, generated from sdui.manifest.json."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Generated from sdui.manifest.json by node scripts/gen-sdui-reference.mjs; change the manifest or the generator, never this page. */}
+
+These are the 106 components of the public tier: the components an `html` page's
+`source` may use, and the types a page places in its regions. Each component lists its
+inputs, the props it accepts, with the coarse type, the allowed values of an enum and
+whether it is required. An `html` page source is checked against this same list when it is
+validated and saved, so an unknown component or a missing required input is reported
+there rather than drawn. See [Pages](/docs/ui/pages) for how a page is authored.
+
+<Callout type="info">
+This page is generated from the repo-root `sdui.manifest.json`, the component manifest CI
+regenerates from the renderer registry. Regenerate it with
+`node scripts/gen-sdui-reference.mjs`; `node scripts/gen-sdui-reference.mjs --check` fails when it is stale.
+</Callout>
+
+## Pages
+
+- [Layout & Basic](/docs/ui/components/ui): 14 components.
+- [Page Structure](/docs/ui/components/page): 7 components.
+- [Record](/docs/ui/components/record): 11 components.
+- [Elements](/docs/ui/components/element): 6 components.
+- [Actions](/docs/ui/components/action): 4 components.
+- [Plugin Blocks](/docs/ui/components/plugins): 16 components.
+- [HTML Elements](/docs/ui/components/html): 48 components.
+
+## Every component
+
+| Component | Namespace | Inputs | Page |
+| :--- | :--- | ---: | :--- |
+| [`a`](/docs/ui/components/html#a) | `ui` | 6 | [HTML Elements](/docs/ui/components/html) |
+| [`abbr`](/docs/ui/components/html#abbr) | `ui` | 3 | [HTML Elements](/docs/ui/components/html) |
+| [`accordion`](/docs/ui/components/ui#accordion) | `ui` | 4 | [Layout & Basic](/docs/ui/components/ui) |
+| [`action:button`](/docs/ui/components/action#action-button) | `action` | 28 | [Actions](/docs/ui/components/action) |
+| [`action:group`](/docs/ui/components/action#action-group) | `action` | 9 | [Actions](/docs/ui/components/action) |
+| [`action:icon`](/docs/ui/components/action#action-icon) | `action` | 25 | [Actions](/docs/ui/components/action) |
+| [`action:menu`](/docs/ui/components/action#action-menu) | `action` | 7 | [Actions](/docs/ui/components/action) |
+| [`address`](/docs/ui/components/html#address) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`alert`](/docs/ui/components/ui#alert) | `ui` | 5 | [Layout & Basic](/docs/ui/components/ui) |
+| [`article`](/docs/ui/components/html#article) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`aside`](/docs/ui/components/html#aside) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`b`](/docs/ui/components/html#b) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`badge`](/docs/ui/components/ui#badge) | `ui` | 4 | [Layout & Basic](/docs/ui/components/ui) |
+| [`blockquote`](/docs/ui/components/html#blockquote) | `ui` | 3 | [HTML Elements](/docs/ui/components/html) |
+| [`box`](/docs/ui/components/ui#box) | `ui` | 2 | [Layout & Basic](/docs/ui/components/ui) |
+| [`br`](/docs/ui/components/html#br) | `ui` | 1 | [HTML Elements](/docs/ui/components/html) |
+| [`button`](/docs/ui/components/ui#button) | `ui` | 5 | [Layout & Basic](/docs/ui/components/ui) |
+| [`card`](/docs/ui/components/ui#card) | `ui` | 4 | [Layout & Basic](/docs/ui/components/ui) |
+| [`cite`](/docs/ui/components/html#cite) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`code`](/docs/ui/components/html#code) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`container`](/docs/ui/components/ui#container) | `ui` | 5 | [Layout & Basic](/docs/ui/components/ui) |
+| [`dashboard`](/docs/ui/components/plugins#dashboard) | `plugin-dashboard` | 10 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`dd`](/docs/ui/components/html#dd) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`del`](/docs/ui/components/html#del) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`dl`](/docs/ui/components/html#dl) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`dt`](/docs/ui/components/html#dt) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`element:button`](/docs/ui/components/element#element-button) | `element` | 7 | [Elements](/docs/ui/components/element) |
+| [`element:definition-list`](/docs/ui/components/element#element-definition-list) | `element` | 3 | [Elements](/docs/ui/components/element) |
+| [`element:divider`](/docs/ui/components/element#element-divider) | `element` | 0 | [Elements](/docs/ui/components/element) |
+| [`element:number`](/docs/ui/components/element#element-number) | `element` | 6 | [Elements](/docs/ui/components/element) |
+| [`element:repeater`](/docs/ui/components/element#element-repeater) | `element` | 5 | [Elements](/docs/ui/components/element) |
+| [`element:text`](/docs/ui/components/element#element-text) | `element` | 3 | [Elements](/docs/ui/components/element) |
+| [`em`](/docs/ui/components/html#em) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`embeddable-form`](/docs/ui/components/plugins#embeddable-form) | `plugin-form` | 7 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`figcaption`](/docs/ui/components/html#figcaption) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`figure`](/docs/ui/components/html#figure) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`flex`](/docs/ui/components/ui#flex) | `ui` | 7 | [Layout & Basic](/docs/ui/components/ui) |
+| [`footer`](/docs/ui/components/html#footer) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`grid`](/docs/ui/components/ui#grid) | `ui` | 4 | [Layout & Basic](/docs/ui/components/ui) |
+| [`h1`](/docs/ui/components/html#h1) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`h2`](/docs/ui/components/html#h2) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`h3`](/docs/ui/components/html#h3) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`h4`](/docs/ui/components/html#h4) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`h5`](/docs/ui/components/html#h5) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`h6`](/docs/ui/components/html#h6) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`header`](/docs/ui/components/html#header) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`hr`](/docs/ui/components/html#hr) | `ui` | 1 | [HTML Elements](/docs/ui/components/html) |
+| [`i`](/docs/ui/components/html#i) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`icon`](/docs/ui/components/ui#icon) | `ui` | 4 | [Layout & Basic](/docs/ui/components/ui) |
+| [`image`](/docs/ui/components/ui#image) | `ui` | 3 | [Layout & Basic](/docs/ui/components/ui) |
+| [`img`](/docs/ui/components/html#img) | `ui` | 6 | [HTML Elements](/docs/ui/components/html) |
+| [`ins`](/docs/ui/components/html#ins) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`label`](/docs/ui/components/html#label) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`li`](/docs/ui/components/html#li) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`list-view`](/docs/ui/components/plugins#list-view) | `plugin-list` | 41 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`main`](/docs/ui/components/html#main) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`mark`](/docs/ui/components/html#mark) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`markdown`](/docs/ui/components/plugins#markdown) | `plugin-markdown` | 2 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`nav`](/docs/ui/components/html#nav) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`object-calendar`](/docs/ui/components/plugins#object-calendar) | `plugin-calendar` | 11 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-chart`](/docs/ui/components/plugins#object-chart) | `plugin-charts` | 6 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-form`](/docs/ui/components/plugins#object-form) | `plugin-form` | 40 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-gantt`](/docs/ui/components/plugins#object-gantt) | `plugin-gantt` | 18 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-grid`](/docs/ui/components/plugins#object-grid) | `plugin-grid` | 31 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-kanban`](/docs/ui/components/plugins#object-kanban) | `plugin-kanban` | 15 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-map`](/docs/ui/components/plugins#object-map) | `plugin-map` | 10 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-master-detail-form`](/docs/ui/components/plugins#object-master-detail-form) | `plugin-form` | 15 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-metric`](/docs/ui/components/plugins#object-metric) | `plugin-dashboard` | 19 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-pivot`](/docs/ui/components/plugins#object-pivot) | `plugin-dashboard` | 12 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-timeline`](/docs/ui/components/plugins#object-timeline) | `plugin-timeline` | 16 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`object-tree`](/docs/ui/components/plugins#object-tree) | `plugin-tree` | 6 | [Plugin Blocks](/docs/ui/components/plugins) |
+| [`ol`](/docs/ui/components/html#ol) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`p`](/docs/ui/components/html#p) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`page:accordion`](/docs/ui/components/page#page-accordion) | `page` | 3 | [Page Structure](/docs/ui/components/page) |
+| [`page:card`](/docs/ui/components/page#page-card) | `page` | 4 | [Page Structure](/docs/ui/components/page) |
+| [`page:footer`](/docs/ui/components/page#page-footer) | `page` | 1 | [Page Structure](/docs/ui/components/page) |
+| [`page:header`](/docs/ui/components/page#page-header) | `page` | 7 | [Page Structure](/docs/ui/components/page) |
+| [`page:section`](/docs/ui/components/page#page-section) | `page` | 1 | [Page Structure](/docs/ui/components/page) |
+| [`page:sidebar`](/docs/ui/components/page#page-sidebar) | `page` | 1 | [Page Structure](/docs/ui/components/page) |
+| [`page:tabs`](/docs/ui/components/page#page-tabs) | `page` | 4 | [Page Structure](/docs/ui/components/page) |
+| [`pre`](/docs/ui/components/html#pre) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`q`](/docs/ui/components/html#q) | `ui` | 3 | [HTML Elements](/docs/ui/components/html) |
+| [`record:activity`](/docs/ui/components/record#record-activity) | `record` | 11 | [Record](/docs/ui/components/record) |
+| [`record:alert`](/docs/ui/components/record#record-alert) | `record` | 8 | [Record](/docs/ui/components/record) |
+| [`record:details`](/docs/ui/components/record#record-details) | `record` | 11 | [Record](/docs/ui/components/record) |
+| [`record:discussion`](/docs/ui/components/record#record-discussion) | `record` | 5 | [Record](/docs/ui/components/record) |
+| [`record:highlights`](/docs/ui/components/record#record-highlights) | `record` | 7 | [Record](/docs/ui/components/record) |
+| [`record:history`](/docs/ui/components/record#record-history) | `record` | 3 | [Record](/docs/ui/components/record) |
+| [`record:line_items`](/docs/ui/components/record#record-line_items) | `record` | 16 | [Record](/docs/ui/components/record) |
+| [`record:path`](/docs/ui/components/record#record-path) | `record` | 2 | [Record](/docs/ui/components/record) |
+| [`record:quick_actions`](/docs/ui/components/record#record-quick_actions) | `record` | 9 | [Record](/docs/ui/components/record) |
+| [`record:reference_rail`](/docs/ui/components/record#record-reference_rail) | `record` | 1 | [Record](/docs/ui/components/record) |
+| [`record:related_list`](/docs/ui/components/record#record-related_list) | `record` | 16 | [Record](/docs/ui/components/record) |
+| [`section`](/docs/ui/components/html#section) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`small`](/docs/ui/components/html#small) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`span`](/docs/ui/components/html#span) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`stack`](/docs/ui/components/ui#stack) | `ui` | 6 | [Layout & Basic](/docs/ui/components/ui) |
+| [`strong`](/docs/ui/components/html#strong) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`sub`](/docs/ui/components/html#sub) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`sup`](/docs/ui/components/html#sup) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`table`](/docs/ui/components/html#table) | `ui` | 5 | [HTML Elements](/docs/ui/components/html) |
+| [`tabs`](/docs/ui/components/ui#tabs) | `ui` | 3 | [Layout & Basic](/docs/ui/components/ui) |
+| [`text`](/docs/ui/components/ui#text) | `ui` | 3 | [Layout & Basic](/docs/ui/components/ui) |
+| [`time`](/docs/ui/components/html#time) | `ui` | 3 | [HTML Elements](/docs/ui/components/html) |
+| [`u`](/docs/ui/components/html#u) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |
+| [`ul`](/docs/ui/components/html#ul) | `ui` | 2 | [HTML Elements](/docs/ui/components/html) |

@@ -1,0 +1,85 @@
+---
+title: "Page structure components — component reference"
+navTitle: "Page Structure"
+description: "The page:* components that give a page its structure: header, footer, sidebar, sections, cards, tabs and accordions."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Generated from sdui.manifest.json by node scripts/gen-sdui-reference.mjs; change the manifest or the generator, never this page. */}
+
+The `page:*` components give a page its structure. All of them except the header are containers for other components.
+
+<Callout type="info">
+This page is generated from the repo-root `sdui.manifest.json`, the component manifest CI
+regenerates from the renderer registry. Regenerate it with
+`node scripts/gen-sdui-reference.mjs`; `node scripts/gen-sdui-reference.mjs --check` fails when it is stale.
+</Callout>
+
+## `page:accordion` [#page-accordion]
+
+Namespace `page` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `items` | `array` of `object` | yes | Panel definitions [\{ label, icon?, collapsed?, children \}] — collapsed: false opens a panel by default |
+| `allowMultiple` | `boolean` |  | — |
+| `variant` | `enum`: `flush`, `card` |  | — |
+
+## `page:card` [#page-card]
+
+Namespace `page` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `title` | `string` \| `object` |  | Accepts an inline translation map (\{ en, "zh-CN", … \}) |
+| `bordered` | `boolean` |  | — |
+| `children` | `slot` |  | Card content components, in order (the card body slot) |
+| `footer` | `slot` |  | — |
+
+## `page:footer` [#page-footer]
+
+Namespace `page` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `children` | `slot` |  | Child components rendered inside this container, in order |
+
+## `page:header` [#page-header]
+
+Namespace `page`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `title` | `string` \| `object` |  | Supports \{field\} interpolation and inline translation maps; falls back to the record title |
+| `subtitle` | `string` \| `object` |  | Same interpolation as Title |
+| `actions` | `array` of `string` |  | Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record_header nor record_more in its locations renders nowhere. |
+| `recordChrome` | `boolean` |  | Set false for the bare h1 header on non-record pages |
+| `showCopyId` | `boolean` |  | — |
+| `maxVisible` | `number` |  | How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host's own buttons (the record page's Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator. |
+| `mobileMaxVisible` | `number` |  | The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged. |
+
+## `page:section` [#page-section]
+
+Namespace `page` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `children` | `slot` |  | Child components rendered inside this container, in order |
+
+## `page:sidebar` [#page-sidebar]
+
+Namespace `page` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `children` | `slot` |  | Child components rendered inside this container, in order |
+
+## `page:tabs` [#page-tabs]
+
+Namespace `page` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `items` | `array` of `object` | yes | Tab definitions [\{ label, value?, icon?, count?, visibleWhen?, children \}] — value is the stable ?tab= URL token, count auto-derives from record:related_list descendants when omitted |
+| `tabStyle` | `enum`: `line`, `card`, `pill` |  | — |
+| `position` | `enum`: `top`, `left` |  | — |
+| `alwaysShowStrip` | `boolean` |  | Keep the tab strip visible when only one tab survives. Default false: a lone pill is clutter rather than an affordance, so a one-tab strip is hidden and its panel renders bare. Count the tabs AFTER each item visibleWhen predicate has been evaluated — a page authored with four tabs of which three are conditional reaches this rule whenever the other three are false. |

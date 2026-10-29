@@ -227,6 +227,21 @@ function pickFlatMapConfig(
   );
 }
 
+/** The eight per-kind blocks a list view carries at its top level. */
+const LIST_VIEW_KIND_BLOCKS = ['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'chart', 'tree'] as const;
+
+/**
+ * [#25923] The per-kind blocks a host `views` entry declares, by reference,
+ * for the `renderListView` relay. An absent block stays absent.
+ */
+function hostViewKindBlocks(view: unknown): Record<string, unknown> {
+  if (!view || typeof view !== 'object') return {};
+  const source = view as Record<string, unknown>;
+  return Object.fromEntries(
+    LIST_VIEW_KIND_BLOCKS.filter((kind) => source[kind] !== undefined).map((kind) => [kind, source[kind]]),
+  );
+}
+
 /**
  * `table.columns` as a FIELD-NAME list — the shape the non-grid field slot
  * declares (objectui#5269).
@@ -864,11 +879,11 @@ type FormMode = 'create' | 'edit' | 'view';
  * ## The verdict
  *
  * The delegation branch in `renderContent` below reads 30 distinct keys off
- * the object-view node through `(schema as any).K` and forwards them to the
- * host's list renderer. Three of them — `data`, `navigation`,
- * `searchableFields`, listed in
+ * the object-view node and forwards them to the host's list renderer. Three
+ * of them — `data`, `navigation`, `searchableFields`, listed in
  * {@link OBJECT_VIEW_DECLARED_FORWARDED_KEYS} — are declared members of
- * `ObjectViewSchema`. The other 27, listed here, are not, and stay that way:
+ * `ObjectViewSchema` and are read without a cast. The other 27, listed here,
+ * are read through `(schema as any).K`, are not declared, and stay that way:
  * they are HOST-COMPOSITION surface, not authored surface. This constant is
  * their single home; the branch is fenced by `#region` markers so the pin in
  * `src/__tests__/objectViewHostSurface.test.tsx` fails BY NAME when a read is
@@ -986,9 +1001,10 @@ export const OBJECT_VIEW_HOST_COMPOSITION_KEYS = [
 ] as const;
 
 /**
- * The other three keys the same branch reads through `(schema as any)`: these
- * ARE declared members of `ObjectViewSchema` (`data` via `BaseSchema`), so
- * they are authored surface and are NOT part of the objectui#5097 exemption.
+ * The other three keys the same branch reads off the node: these ARE declared
+ * members of `ObjectViewSchema` (`data` via `BaseSchema`), so they are
+ * authored surface, are read as `schema.K` with no cast, and are NOT part of
+ * the objectui#5097 exemption.
  * They are listed so the pin can assert the split, not just the exempt half —
  * a read that moves from this list into the one above is a key losing its
  * declaration, and must fail loudly.
@@ -2058,10 +2074,11 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     // on a named view (`ObjectViewSchema.listViews` is its strict
     // `ObjectListViewSchema` by reference), so the canonical top-level blocks
     // below are the named view's only source. A stored body that still carries
-    // `options.KIND` is folded onto `KIND` at the door that relays it into
-    // `listViews` — `@object-ui/app-shell`'s `ViewPreview` — so it arrives here
-    // already canonical. ⛔ Do not restore the read: that would re-open a
-    // dialect the contract refuses. The host `views` entry keeps this rung.
+    // `options.KIND` is folded onto `KIND` by the server before it is served
+    // (the spec's D2 conversion `list-view-options-bag-folded`, #25923; app-shell's
+    // `ViewPreview` folded it until then), so it arrives here already
+    // canonical. ⛔ Do not restore the read: that would re-open a dialect the
+    // contract refuses. The host `views` entry keeps this rung.
     const legacyViewOptions: Record<string, any> = activeView || {};
 
     // ⭐ objectui#8980 — THE CANONICAL, PROTOCOL-DECLARED PLACE FOR THE EIGHT
@@ -2083,7 +2100,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     // block wins key-by-key over the legacy one for the same kind. A partially
     // declared canonical block therefore does not blank its legacy neighbour.
     // ⚠️ Since objectui#7928 the legacy side is the host `views` entry only; a
-    // named view's own `options` bag is folded at `ViewPreview` instead (see
+    // named view's own `options` bag is folded before it is served (see
     // `legacyViewOptions` above).
     //
     // ⚠️ IDENTITY IS PRESERVED WHEN NOTHING CANONICAL IS DECLARED — the `else`
@@ -2954,9 +2971,11 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     // If a custom renderListView is provided, use it
     // #region object-view HOST-COMPOSITION SURFACE (objectui#5097)
     //
-    // 30 of the values assembled below are read off the object-view node with
-    // `(schema as any).K`. Three are declared members of `ObjectViewSchema`;
-    // the other 27 are NOT, deliberately: the maintainer ruling of 2026-08-18
+    // 30 of the values assembled below are read off the object-view node. Three
+    // are declared members of `ObjectViewSchema`
+    // (`OBJECT_VIEW_DECLARED_FORWARDED_KEYS`) and are read as `schema.K`, with
+    // no cast; the other 27 are read with `(schema as any).K` because they are
+    // NOT declared, deliberately: the maintainer ruling of 2026-08-18
     // on objectui#5097 (verbatim 「同意」) ruled them HOST-COMPOSITION surface,
     // not authored surface, because this branch is entered only when a HOST
     // passes `renderListView` and the registered renderer never does.
@@ -3031,9 +3050,12 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           // no rung here at all. Canonical source first, host `views` entry
           // second — the precedence every other pair on this branch uses.
           grouping: currentNamedViewConfig?.grouping ?? activeView?.grouping,
-          // objectui#7928 — the host `views` entry only; a named view's legacy
-          // `options` bag is no longer read (see `legacyViewOptions` above).
-          options: activeView,
+          // [#25923] The host `views` entry's per-kind blocks, at the TOP
+          // level, each by reference (so `ListView`'s fetch effect, which
+          // names each block by identity, sees no new object per render).
+          // They rode `options: activeView` (objectui#7928) until the spec
+          // retired the bag, and `ListView` reads no bag now.
+          ...hostViewKindBlocks(activeView),
           // Toolbar policy — one vocabulary (#2890). The host node and the
           // active view may still carry the legacy bare `show*` flags, so both
           // go through `normalizeListViewSchema` (the single fold) and merge,
@@ -3106,16 +3128,16 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           // never reaches the renderer.
           // objectui#8980 / objectui#7928's open half: the cast on the
           // named-view config is GONE — `data` is a declared `NamedListView`
-          // member now, so the read and the declaration are one fact. The
-          // `activeView` and node rungs keep their casts: the host `views` entry
-          // is an untyped host shape and `data` on the node is one of the 27
-          // objectui#5097 host-composition keys.
-          data: currentNamedViewConfig?.data ?? (activeView as any)?.data ?? (schema as any).data,
+          // member now, so the read and the declaration are one fact. The node
+          // rung is uncast for the same reason: `data` is declared on the node
+          // (via `BaseSchema`). The `activeView` rung keeps its cast: the host
+          // `views` entry is an untyped host shape.
+          data: currentNamedViewConfig?.data ?? (activeView as any)?.data ?? schema.data,
           // Propagate new spec properties (P0/P1/P2)
-          navigation: currentNamedViewConfig?.navigation ?? activeView?.navigation ?? (schema as any).navigation,
+          navigation: currentNamedViewConfig?.navigation ?? activeView?.navigation ?? schema.navigation,
           selection: currentNamedViewConfig?.selection ?? activeView?.selection ?? (schema as any).selection,
           pagination: currentNamedViewConfig?.pagination ?? activeView?.pagination ?? (schema as any).pagination,
-          searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? (schema as any).searchableFields,
+          searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? schema.searchableFields,
           resizable: currentNamedViewConfig?.resizable ?? activeView?.resizable ?? (schema as any).resizable,
           hiddenFields: currentNamedViewConfig?.hiddenFields ?? activeView?.hiddenFields ?? (schema as any).hiddenFields,
           // objectui#8980 — TWO SLOTS THAT HAD NO RUNG ON THIS BRANCH AT ALL.

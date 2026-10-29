@@ -116,8 +116,9 @@ const VIEW = {
   ],
   pagination: { pageSize: 25 },
   // What the console's object page hands the list for a view with no kanban
-  // block of its own (`kanbanViewOptions` in `ObjectView.tsx`).
-  options: { kanban: { groupByField: 'stage', titleField: 'name' } },
+  // block of its own (`kanbanViewOptions` in `ObjectView.tsx`), at the top
+  // level since objectstack#25923 retired the `options` bag.
+  kanban: { groupByField: 'stage', titleField: 'name' },
 };
 
 function mountBoard(ds: any, view: Record<string, unknown> = VIEW) {

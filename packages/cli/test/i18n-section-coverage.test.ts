@@ -191,53 +191,57 @@ describe('authored form-view sections', () => {
 
 describe('authored record-page sections', () => {
   /**
-   * The showcase `showcase_project_detail` shape: a slotted record page whose
-   * `record:details` lives two levels down inside `page:tabs`
+   * The showcase `showcase_project_detail` shape: a full record page whose
+   * `record:details` lives two levels down inside its own `page:tabs`
    * (`properties.items[].children[]`). This is the nesting the issue calls
    * out — a walk that only looked at `regions[].components[].properties`
    * would report nothing here.
    */
-  const slottedPage = {
+  const tabbedPage = {
     name: 'crm_opportunity_detail',
     type: 'record',
     object: 'crm_opportunity',
-    kind: 'slotted',
-    regions: [],
-    slots: {
-      tabs: {
-        type: 'page:tabs',
-        properties: {
-          items: [
-            {
-              key: 'details',
-              label: 'Details',
-              children: [
+    kind: 'full',
+    regions: [
+      {
+        name: 'main',
+        components: [
+          {
+            type: 'page:tabs',
+            properties: {
+              items: [
                 {
-                  type: 'record:details',
-                  properties: {
-                    sections: [
-                      { name: 'overview', label: 'Overview', fields: ['name'] },
-                      { name: 'timeline', label: 'Timeline', fields: ['close_date'] },
-                    ],
-                  },
+                  key: 'details',
+                  label: 'Details',
+                  children: [
+                    {
+                      type: 'record:details',
+                      properties: {
+                        sections: [
+                          { name: 'overview', label: 'Overview', fields: ['name'] },
+                          { name: 'timeline', label: 'Timeline', fields: ['close_date'] },
+                        ],
+                      },
+                    },
+                  ],
                 },
               ],
             },
-          ],
-        },
+          },
+        ],
       },
-    },
+    ],
   };
 
   it('reaches sections nested under `page:tabs → children → record:details`', () => {
-    expect(sectionKeys({ pages: [slottedPage] }).sort()).toEqual([
+    expect(sectionKeys({ pages: [tabbedPage] }).sort()).toEqual([
       'objects.crm_opportunity._sections.overview.label',
       'objects.crm_opportunity._sections.timeline.label',
     ]);
   });
 
   it('reads `label` as the source text', () => {
-    const timeline = sectionEntries({ pages: [slottedPage] }).find((e) => e.path[3] === 'timeline');
+    const timeline = sectionEntries({ pages: [tabbedPage] }).find((e) => e.path[3] === 'timeline');
     expect(timeline?.inline).toBe('Timeline');
   });
 
@@ -249,8 +253,8 @@ describe('authored record-page sections', () => {
     // off-spec key is how the second spelling would become self-documenting.
     // Asserting the key survives is what keeps this non-vacuous: the entry is
     // present and its `inline` is empty, not absent because nothing was walked.
-    const titled = JSON.parse(JSON.stringify(slottedPage));
-    const sections = titled.slots.tabs.properties.items[0].children[0].properties.sections;
+    const titled = JSON.parse(JSON.stringify(tabbedPage));
+    const sections = titled.regions[0].components[0].properties.items[0].children[0].properties.sections;
     sections[1] = { name: 'timeline', title: 'Timeline', fields: ['close_date'] };
 
     const entries = sectionEntries({ pages: [titled] });

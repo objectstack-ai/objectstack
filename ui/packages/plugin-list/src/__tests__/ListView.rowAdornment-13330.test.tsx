@@ -27,7 +27,7 @@ const BOARD = {
   objectName: 'sys_user',
   viewType: 'kanban',
   fields: ['name'],
-  options: { kanban: { groupBy: 'status' } },
+  kanban: { groupBy: 'status' },
 } as unknown as ListViewSchema;
 
 let gridProps: Record<string, unknown> | undefined;

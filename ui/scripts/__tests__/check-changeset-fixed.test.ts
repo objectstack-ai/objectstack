@@ -18,11 +18,12 @@ import { changesetConfigPath } from '../workspace-root.mjs';
  * an omitted `privatePackages` defaulted to `{ version: true, tag: false }`
  * under v2 and defaults to `{ version: false, tag: false }` under v3, and
  * `version: false` marks private packages IGNORED rather than merely unbumped.
- * This repo keeps one private package inside the 40-name `fixed` group —
- * `object-ui` at `packages/vscode-extension`, which ships to the VS Code
- * marketplace instead of npm — so under the new default a changeset naming it
- * next to a published package becomes a "mixed changeset" and both
- * `changeset status` and `changeset version` exit 1.
+ * This repo then kept one private package inside the `fixed` group — the VS
+ * Code extension, which shipped to the VS Code marketplace instead of npm — so
+ * under the new default a changeset naming it next to a published package
+ * became a "mixed changeset" and both `changeset status` and
+ * `changeset version` exited 1. The extension has since left the workspace
+ * (objectstack#25910); the rules stay for the next private package in `fixed`.
  *
  * The stock pending during the v3 migration contained exactly one such file,
  * `.changeset/no-console-lint-rule.md` (`object-ui` plus four published
@@ -160,7 +161,7 @@ describe('the repository itself', () => {
     expect(
       normalizePrivatePackages(config.privatePackages),
       'An omitted key means `{ version: true, tag: false }` under @changesets/cli@2 and ' +
-        '`{ version: false, tag: false }` under v3 — opposite answers to "does object-ui ' +
+        '`{ version: false, tag: false }` under v3 — opposite answers to "does a private package ' +
         'release?". Write it down.'
     ).not.toBeNull();
   });
@@ -176,13 +177,13 @@ describe('the repository itself', () => {
     ).toEqual([]);
   });
 
-  it('still keeps the private VS Code extension inside the fixed group', () => {
-    // The shape the two rules above exist for. If this ever stops being true the
-    // guard is not wrong, but it is no longer guarding anything real — and the
-    // rationale in both files should be re-read before it is trimmed.
-    const vscode = manifests.find((m) => m.path === 'packages/vscode-extension/package.json');
-    expect(vscode?.name).toBe('object-ui');
-    expect(vscode?.private).toBe(true);
-    expect((config.fixed ?? []).flat()).toContain('object-ui');
+  it('puts no private package inside the fixed group', () => {
+    // The VS Code extension was the one private member, and it left the
+    // workspace (objectstack#25910). A private package that re-enters the group
+    // must arrive with a ruling and a row in the root gate's
+    // PRIVATE_FIXED_MEMBERS (`scripts/check-changeset-fixed.mjs`); this pin
+    // makes that arrival a deliberate edit here too.
+    const fixed = new Set((config.fixed ?? []).flat());
+    expect(manifests.filter((m) => m.private && fixed.has(m.name)).map((m) => `${m.name} (${m.path})`)).toEqual([]);
   });
 });

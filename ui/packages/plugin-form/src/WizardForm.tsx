@@ -298,6 +298,16 @@ export interface WizardFormSchema {
    * that step fills the grid. Omitted = the step's own `columns`, else 1.
    */
   columns?: number;
+
+  /**
+   * Label placement for every field on every step — `vertical` (the default)
+   * or `horizontal` (label beside its field). Declared as
+   * `ObjectFormSchema['layout']` rather than restated: `ObjectForm` hands the
+   * authored key over in its `{...schema}` spread, and this layout used to drop
+   * it on the form node it builds (objectstack-ai/objectstack#27224), as
+   * `TabbedForm` did before it.
+   */
+  layout?: ObjectFormSchema['layout'];
   
   /**
    * Show step indicators
@@ -1263,7 +1273,9 @@ export const WizardForm: React.FC<WizardFormProps> = ({
     fields: stepGrid.layOut(currentSectionFields, currentSection?.columns),
     columns: stepGridColumns,
     ...(stepFieldContainerClass ? { fieldContainerClass: stepFieldContainerClass } : {}),
-    layout: 'vertical',
+    // The authored label placement, not a hard-coded `vertical`
+    // (objectstack-ai/objectstack#27224): the form renderer draws it on every step.
+    layout: schema.layout ?? 'vertical',
     defaultValues: formData,
     // Persisted record → `previous` binding + read-only submit
     // strip (#3484). Never `formData`: that already carries the

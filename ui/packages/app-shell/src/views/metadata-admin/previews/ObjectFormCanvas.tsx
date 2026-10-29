@@ -72,6 +72,12 @@ import {
   type FieldTypeCategory,
 } from './field-types.js';
 import { FieldStub } from './FieldStub.js';
+import {
+  ExternalFieldBadge,
+  ExternalObjectNotice,
+  readExternalBinding,
+  useExternalWriteState,
+} from './external-object.js';
 import { t, tFormat } from '../i18n.js';
 
 /* ─── locale helpers ─── */
@@ -104,6 +110,12 @@ export function ObjectFormCanvas({
   locale,
 }: ObjectFormCanvasProps) {
   const readOnly = !onPatch;
+  // ADR-0015 — an external object's fields mirror a remote table, so the
+  // controls that would reshape it (add a field, delete fields) are not
+  // offered; each field says where it comes from instead.
+  const external = readExternalBinding(draft);
+  const writeState = useExternalWriteState(external);
+  const canAddFields = !readOnly && !external;
   // The "Ask AI" affordances arm the global chat FAB (requestAssistantOpen).
   // Hide them when the runtime serves no AI — otherwise they'd dead-end with no
   // FAB to open. Same server-pushed signal the FAB itself gates on.
@@ -448,12 +460,13 @@ export function ObjectFormCanvas({
           count={multiSel.size}
           groups={declaredGroups}
           onMoveToGroup={bulkSetGroup}
-          onDelete={bulkDelete}
+          onDelete={external ? undefined : bulkDelete}
           onClear={clearMulti}
           locale={locale}
         />
       )}
       <div className="mx-auto max-w-3xl px-6 py-6 space-y-4" onClick={handleBgClick}>
+        {external && <ExternalObjectNotice binding={external} state={writeState} locale={locale} />}
         {!emptyState && (
           <CanvasToolbar
             fieldCount={view.entries.length}
@@ -470,7 +483,7 @@ export function ObjectFormCanvas({
         )}
 
         {emptyState ? (
-          <EmptyCanvas onAdd={readOnly ? undefined : addField} locale={locale} aiEnabled={aiEnabled} />
+          <EmptyCanvas onAdd={canAddFields ? addField : undefined} locale={locale} aiEnabled={aiEnabled} />
         ) : (
           <div className="space-y-5">
             {groups.map((g) => {
@@ -493,7 +506,7 @@ export function ObjectFormCanvas({
                   onRename={g.key ? (label) => renameSection(g.key!, label) : undefined}
                   onRemove={g.key ? () => removeSection(g.key!) : undefined}
                   onMove={g.key ? (dir) => moveSection(g.key!, dir) : undefined}
-                  onAddField={readOnly ? undefined : (type) => addField(type, g.key)}
+                  onAddField={canAddFields ? (type) => addField(type, g.key) : undefined}
                   onDropField={readOnly ? undefined : moveToGroup}
                 >
                   {g.entries.map((entry) => (
@@ -504,6 +517,11 @@ export function ObjectFormCanvas({
                       multiSelected={multiSel.has(entry.name)}
                       diffStatus={statusOf(entry.name)}
                       changedKeys={changedKeysOf(entry.name)}
+                      sourceBadge={
+                        external ? (
+                          <ExternalFieldBadge binding={external} state={writeState} locale={locale} />
+                        ) : undefined
+                      }
                       readOnly={readOnly}
                       locale={locale}
                       onClick={(e) => handleRowClick(entry, e)}
@@ -538,7 +556,7 @@ export function ObjectFormCanvas({
 
         {!emptyState && !readOnly && (
           <div className="flex items-center gap-2 pt-1">
-            <AddFieldButton onPick={(type) => addField(type)} locale={locale} />
+            {canAddFields && <AddFieldButton onPick={(type) => addField(type)} locale={locale} />}
             <Button
               variant="ghost"
               size="sm"
@@ -681,7 +699,8 @@ function BulkActionBar({
   count: number;
   groups: ObjectFieldGroup[];
   onMoveToGroup: (groupKey: string | null) => void;
-  onDelete: () => void;
+  /** Absent on an external object: deleting a field would drop a remote column. */
+  onDelete?: () => void;
   onClear: () => void;
   locale?: string;
 }) {
@@ -725,15 +744,17 @@ function BulkActionBar({
             </PopoverContent>
           </Popover>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 gap-1.5 bg-background/70 text-destructive hover:text-destructive"
-          onClick={onDelete}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {t('designer.canvas.bulkDelete', locale)}
-        </Button>
+        {onDelete && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 bg-background/70 text-destructive hover:text-destructive"
+            onClick={onDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t('designer.canvas.bulkDelete', locale)}
+          </Button>
+        )}
         <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={onClear}>
           <X className="h-3.5 w-3.5" />
           {t('designer.canvas.bulkClear', locale)}
@@ -1001,6 +1022,7 @@ function FieldRow({
   multiSelected,
   diffStatus,
   changedKeys,
+  sourceBadge,
   readOnly,
   locale,
   onClick,
@@ -1014,6 +1036,8 @@ function FieldRow({
   /** Review mode: how this field differs from the published baseline. */
   diffStatus?: FieldDiffStatus;
   changedKeys?: string[];
+  /** ADR-0015 — where an external object's field comes from, and its write state. */
+  sourceBadge?: React.ReactNode;
   readOnly: boolean;
   locale?: string;
   /** Receives the mouse event so the host can branch on Ctrl/⌘/Shift. */
@@ -1200,6 +1224,7 @@ function FieldRow({
                 {t('designer.canvas.diffChanged', locale)}
               </Badge>
             )}
+            {sourceBadge}
             <Badge variant="outline" className={cn('text-[10px] font-medium', tone.badge)}>
               {typeLabel(meta, locale) ?? typeStr}
             </Badge>

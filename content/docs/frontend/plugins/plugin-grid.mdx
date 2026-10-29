@@ -1,0 +1,467 @@
+---
+title: "Plugin Grid"
+---
+
+Advanced data grid with sorting, filtering, pagination, and row selection capabilities.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-grid
+```
+
+This package publishes a stylesheet. Import it after the base sheets, or the grid renders unstyled — the themed utilities it uses have no other source in a published app ([#4929](https://github.com/objectstack-ai/objectui/issues/4929)):
+
+```css
+/* src/index.css */
+@import "tailwindcss";
+@import "@object-ui/components/style.css";
+@import "@object-ui/fields/style.css";
+@import "@object-ui/plugin-grid/style.css";
+```
+
+The props an [`object-grid`](/docs/ui/components/plugins#object-grid) node reads on a page are generated from the spec into the component reference; this page covers using the plugin from React.
+
+## Features
+
+- **Sorting** - Multi-column sorting support
+- **Filtering** - Column-level filtering
+- **Pagination** - Built-in pagination controls
+- **Row Selection** - Single and multi-row selection
+- **Custom Cells** - Custom cell renderers
+- **Responsive** - Mobile-friendly layouts
+
+## Usage
+
+### Registration is a side effect of the import
+
+```ts
+import '@object-ui/plugin-grid';
+```
+
+That single import is the whole of registration — there is no components map to
+iterate over. Importing the entry runs the two `ComponentRegistry.register(...)`
+calls in `packages/plugin-grid/src/index.tsx`, which claim exactly these schema
+types:
+
+| Namespaced key | Bare-name fallback | Renderer behind it |
+| --- | --- | --- |
+| `plugin-grid:object-grid` | `object-grid` | `ObjectGridRenderer` — the data grid, queried from an object |
+| `view:grid` | none — `skipFallback: true` | the same renderer, under the view protocol |
+
+`ComponentRegistry.register` publishes `namespace:type`, and — unless the call
+passes `skipFallback: true` — the bare `type` as a back-compat fallback
+(`packages/core/src/registry/Registry.ts:194`, fallback at `:226`).
+
+The `import-wizard` node key is RETIRED (objectui#10859 batch 8): no schema
+produced it, and `objectui validate` refused it at `type`. `ImportWizard` is still
+exported, and `@object-ui/app-shell` mounts it directly (the object view's import
+flow).
+
+**Bare `grid` is deliberately not this plugin's.** `skipFallback: true` on the
+`view:grid` call keeps the data grid from claiming it, because `grid` belongs to
+the CSS Grid *layout* container in `@object-ui/components`
+(`packages/components/src/renderers/layout/grid.tsx:50`). Reach the data grid as
+`object-grid`, or as `view:grid` when you want the namespaced spelling.
+
+### Registering the renderer under your own key
+
+To serve the data grid under a key of your own, register the exported renderer —
+that is what a manual registration is here:
+
+```ts
+import { ComponentRegistry } from '@object-ui/core';
+import { ObjectGridRenderer } from '@object-ui/plugin-grid';
+
+ComponentRegistry.register('my-grid', ObjectGridRenderer, {
+  namespace: 'my-app',
+  label: 'My Grid',
+  category: 'plugin',
+});
+```
+
+`ObjectGrid`, `ObjectGridRenderer`, `VirtualGrid`, `SplitPaneGrid`,
+`ImportWizard`, `InlineEditing` and `FormulaBar` are on the package's export
+surface, alongside the hooks (`useGroupedData`, `useColumnSummary`,
+`useCellClipboard`, …) and the component prop types
+(`ObjectGridComponentProps`, `VirtualGridProps`, …). There is no aggregate map
+among them, and the *schema* types are not here either — they live in
+`@object-ui/types`, because the schema is the shared authoring contract rather
+than this package's component API.
+
+## Features
+
+### Sorting
+
+Columns sort by default. `sortable` is a **per-column** key, used to turn a
+column off; the grid-level `sort` declares the order the grid opens with. There
+is no top-level `sortable` switch.
+
+```json
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "users",
+    "sort": [{ "field": "created", "order": "desc" }],
+    "columns": [
+      { "field": "name", "label": "Name" },
+      { "field": "email", "label": "Email", "sortable": false }
+    ]
+  }
+}
+```
+
+### Filtering and search
+
+There is no per-column filter key and no top-level `filterable` switch. A grid
+narrows its query two ways: a `filter` baked into the metadata, and a toolbar
+search over the fields named in `searchableFields`.
+
+```json
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "users",
+    "filter": [
+      { "field": "status", "operator": "equals", "value": "active" },
+      { "field": "created", "operator": "after", "value": "2026-01-01" }
+    ],
+    "searchableFields": ["name", "email"],
+    "columns": ["name", "email", "status"]
+  }
+}
+```
+
+### Row Actions
+
+`rowActions` and `bulkActions` are lists of **action names** — the actions
+themselves live in the object's action set, so the same action behaves
+identically wherever it is offered. They are `string[]`, not inline definitions
+carrying callbacks.
+
+```json
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "users",
+    "columns": ["name", "email"],
+    "rowActions": ["view", "edit", "delete"],
+    "selection": { "type": "multiple" },
+    "bulkActions": ["delete", "export"]
+  }
+}
+```
+
+A name in `bulkActions` runs that action once per selected record. If the
+action declares `params`, the selection bar's dialog collects them once, before
+the run, and resolves them as the record page's action dialog does. A
+field-backed param (`{ "field": "crm_campaign", "objectOverride":
+"crm_campaign_member" }`) takes its type, label, options, default and picker
+target from that field, so a lookup param renders the record picker and the
+confirm step shows the picked record's label. A param whose field is not in
+the object metadata is refused, and the run is blocked.
+
+The confirm step lists the affected records by their display title — the
+object's `nameField`, resolved as the record header resolves it — for every
+bulk action, whether it runs once per record or once over the selection. A
+record with no title to show is listed as `Record #` followed by its id.
+
+The selection bar offers a write only to a caller who may make it. A bulk Delete
+is the `rowDelete` row of the affordance-to-grant map (`@object-ui/core`), and a
+`bulkActionDefs` entry with `operation: 'update'` — a patch written to every
+selected record — is the `rowEdit` row, the same rows the row menu's Delete and
+Edit read: the object's policy, the effective API operation set and the
+caller's **delete** or **update** grant. A closed row removes the button, and
+with it the dialog, its undo and its retry. `custom` entries are unchanged.
+With no permission provider mounted both read open.
+
+### Row callbacks are component props
+
+`onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`, `onBatchSave`,
+`onEdit`, `onDelete`, `onBulkDelete` and `onAddRecord` are React props on
+`ObjectGridComponentProps`. They are functions, so no metadata document can hold
+them, and writing one of them into a schema does nothing at all: the grid builds
+the inner table's handlers itself and never reads any of these nine off the
+schema.
+
+The one callback the grid does read off the schema is `onNavigate`, declared on
+`ObjectGridSchema` for programmatic callers only. It is a function value too, so
+it is no more authorable than the nine — it is deliberately absent from the
+manifest and the designer panel, and prefer passing it as a prop
+(objectui#5234, maintainer ruling of 2026-08-19).
+
+```tsx
+import { ObjectGrid } from '@object-ui/plugin-grid';
+import type { ObjectGridComponentProps } from '@object-ui/plugin-grid';
+
+export const Grid = (props: ObjectGridComponentProps) => (
+  <ObjectGrid
+    {...props}
+    onRowClick={(record) => console.log('Row clicked:', record)}
+    onRowSelect={(rows) => console.log('Selection changed:', rows)}
+  />
+);
+```
+
+Note `onRowSelect` — the prop that reports a selection change is spelled that
+way; there is no `onSelectionChange` on this component.
+
+The declarative alternative, which *is* metadata and survives a round trip
+through storage, is `navigation`: its `mode` decides what a row click does
+without any host code.
+
+### Withholding a row's Edit or Delete
+
+`operations` and the `onEdit` / `onDelete` wiring are GRID-level: they decide
+whether the generic Edit / Delete entries exist at all, identically for every
+row. When the refusal belongs to one RECORD — a system field a designer may not
+drop — use `rowOperations`, a component prop called with a row record that
+answers for that row alone. Mounting `<ObjectGrid>` directly hands it the node as
+it reads it, so its `schema` prop is the flat `ObjectGridSchema`, with no bag:
+
+```tsx
+import { ObjectGrid } from '@object-ui/plugin-grid';
+import type { ObjectGridSchema } from '@object-ui/types';
+
+const schema: ObjectGridSchema = {
+  type: 'object-grid',
+  objectName: 'field_definition',
+  columns: ['name', 'label', 'type'],
+};
+
+export const FieldList = ({ isSystem }: { isSystem: (name: string) => boolean }) => (
+  <ObjectGrid
+    schema={schema}
+    onEdit={(record) => console.log('edit', record)}
+    onDelete={(record) => console.log('delete', record)}
+    rowOperations={(record) => ({ delete: !isSystem(String(record.name)) })}
+  />
+);
+```
+
+It speaks the same `update` / `delete` vocabulary as the authored `operations`
+block, and it is an **intersection**, never a union: `false` withholds the
+entry, while `true`, an omitted member, and a `null` / `undefined` return all
+leave the grid's own verdict alone. Nothing it returns can re-open what the
+object's lifecycle bucket, its `userActions`, the server's effective operations,
+the principal's grant or the record-level verdict already closed — and a grid
+that passes no `rowOperations` renders exactly as it did before the prop
+existed.
+
+Prefer this over refusing inside the callback. A refusal that runs after the
+click ships a button that is drawn as available and then does nothing, which is
+indistinguishable from a broken build (objectui#8674).
+
+### A node beside a row's title
+
+A host that has something to say about one record, next to its name, passes
+`rowAdornment`: a component prop called with a row record that returns a React
+node, or `null` for none. The grid draws it in the cell of the object's
+declared `nameField` when a column shows that field, else in the first shown
+column (never in the row actions), and beside the card's title in the card
+view. It is drawn after the cell's own content and never in place of it, so
+the value, its link and its mask stay as they were. A grid that passes no
+`rowAdornment` renders exactly as it did before the prop existed. It is a host
+prop, not a schema key: list metadata cannot set it.
+
+```tsx
+import { ObjectGrid } from '@object-ui/plugin-grid';
+import type { ObjectGridSchema } from '@object-ui/types';
+
+const schema: ObjectGridSchema = {
+  type: 'object-grid',
+  objectName: 'sys_user',
+  columns: ['name', 'email'],
+};
+
+export const UserList = ({ needsAccess }: { needsAccess: (id: string) => boolean }) => (
+  <ObjectGrid
+    schema={schema}
+    rowAdornment={(record) => (needsAccess(String(record.id)) ? <span>Not authorized</span> : null)}
+  />
+);
+```
+
+The console's Setup → Users list on a cloud-managed environment uses it to mark
+a user who holds no permission set beyond the baseline (objectui#13330).
+
+### Inline Editing
+
+Enable inline cell editing for quick data updates:
+
+```json
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "users",
+    "columns": [
+      { "field": "id", "label": "ID" },
+      { "field": "name", "label": "Name" },
+      { "field": "email", "label": "Email" },
+      { "field": "status", "label": "Status", "type": "select" }
+    ],
+    "editable": true,
+    "singleClickEdit": false
+  }
+}
+```
+
+`editable` is the only switch: it is a grid-level flag, and edits persist
+through the host's data source (`dataSource.update`) with no callback to wire.
+
+**Features:**
+- **Double-click to edit**: double-click any editable cell to enter edit mode
+  (`singleClickEdit: true` opens it on the first click instead)
+- **Keyboard shortcuts**: press Enter on a focused cell to start editing, Enter
+  again to save, Escape to cancel
+- **Per-field read-only**: which cells open is decided by the **field
+  definition**, not by a column key — a field marked `readonly`, and
+  computed/binary field types (formula, autonumber, file, …), never open an
+  editor. There is no `editable` key on `ListColumn`.
+- **Visual feedback**: editable cells show a hover state, and the input is
+  focused and selected when editing begins
+
+To own persistence in a React host, supply `onCellChange` as a **component
+prop** — it is not a schema key.
+
+### Keyboard navigation
+
+`keyboardNavigation` turns the grid's data cells into one roving Tab stop, on the
+WAI-ARIA grid pattern (objectui#11068):
+
+```json
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "users",
+    "columns": ["name", "email", "status"],
+    "keyboardNavigation": true
+  }
+}
+```
+
+- **One Tab stop.** Tab reaches the cells once — on the cell that last held
+  focus, or the first cell of the first row — and the next Tab moves past them.
+  A widget a cell renders (the record link, a row's action menu, a selection
+  checkbox) keeps its own Tab stop.
+- **Arrow keys** move focus one cell; **Home** / **End** go to the first / last
+  cell of the row, and **Ctrl+Home** / **Ctrl+End** to the first / last cell of
+  the page. At an edge, focus stays put.
+- **Editing.** On an editable grid, Enter still opens the focused cell, and an
+  open cell's editor keeps every key. An edit ended with Enter or Escape hands
+  focus back to its cell, so the arrows carry on from there.
+- **Default.** On when the grid renders editable — the authored `editable` *and*
+  the viewer's permission to update the object, the same value inline editing
+  obeys. A read-only grid keeps every cell its own Tab stop unless you write
+  `true`, and `false` turns it off on an editable grid.
+- While it is on, the table is exposed to assistive technology as a `grid`. A
+  grouped grid navigates within each group's table; the mobile card layout has
+  no cells and is unaffected.
+
+### Batch Editing & Multi-Row Save
+
+Edit multiple cells across multiple rows and save them individually or all at
+once. The schema half is just `editable` — the save/cancel affordances appear on
+their own once a row has pending changes:
+
+```json
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "products",
+    "columns": [
+      { "field": "sku", "label": "SKU" },
+      { "field": "name", "label": "Name" },
+      { "field": "price", "label": "Price", "type": "currency", "align": "right" },
+      { "field": "stock", "label": "Stock", "type": "number", "align": "right" }
+    ],
+    "editable": true
+  }
+}
+```
+
+Left alone, saving goes through the host's data source. A React host that needs
+to own persistence supplies `onRowSave` / `onBatchSave` as **component props** —
+and because they are props, they take the adapter from the host's own scope
+rather than from anything in the schema:
+
+```tsx
+import type { ObjectGridComponentProps } from '@object-ui/plugin-grid';
+
+type Persistence = Pick<ObjectGridComponentProps, 'onRowSave' | 'onBatchSave'>;
+
+const persistence = (
+  dataSource: NonNullable<ObjectGridComponentProps['dataSource']>,
+): Persistence => ({
+  onRowSave: async (rowIndex, changes, row) => {
+    await dataSource.update('products', row.id, changes);
+  },
+  onBatchSave: async (allChanges) => {
+    await Promise.all(
+      allChanges.map(({ row, changes }) => dataSource.update('products', row.id, changes)),
+    );
+  },
+});
+```
+
+**Features:**
+- **Pending changes tracking**: edit multiple cells across rows before saving; a
+  cell edited back to the value it loaded with is not a pending change, and its
+  row is no longer counted as modified
+- **Visual indicators**: modified rows highlighted in amber, modified cells in bold
+- **Row-level save/cancel**: individual row save and cancel buttons
+- **Batch operations**: Save All and Cancel All buttons for bulk actions
+- **Flexible callbacks** — all three are `ObjectGridComponentProps`, never schema
+  keys: `onRowSave` for a single row, `onBatchSave` for many, `onCellChange` for
+  each committed cell edit, including one that leaves the value as loaded (only a
+  real change is staged)
+- **A concurrent write is refused, not overwritten**: the default saves send each
+  row's `updated_at` as `If-Match`, and an editable grid asks for that column even
+  when no column shows it. A row someone else saved after it was read answers
+  `409`, which opens the record page's conflict dialog (Reload latest, Overwrite
+  anyway, Cancel). "Save All" reports each row on its own: a refused row stays
+  pending and flagged, and the rows that saved are cleared.
+
+## TypeScript Support
+
+The schema and column types come from `@object-ui/types`; this package exports
+the *component* types. Neither `GridSchema` nor `GridColumn` is on this
+package's export surface, and both names are taken elsewhere by different
+things — `GridSchema` in `@object-ui/types` is the CSS Grid **layout**
+container, and `GridColumn` in `@object-ui/fields` is a column of the
+line-items form widget (keyed `name`). The data-grid pair is
+`ObjectGridSchema` + `ListColumn`. `ObjectGridSchema` types the component's
+`schema` prop — the node as the grid reads it, after `SchemaRenderer` hoists an
+authored node's `properties` bag onto it — so its keys sit flat here.
+
+```typescript
+import type { ObjectGridSchema, ListColumn } from '@object-ui/types';
+import type { ObjectGridComponentProps } from '@object-ui/plugin-grid';
+
+const nameColumn: ListColumn = {
+  field: 'name',
+  label: 'Full Name',
+  sortable: true
+};
+
+const grid: ObjectGridSchema = {
+  type: 'object-grid',
+  objectName: 'users',
+  columns: [nameColumn],
+  pagination: { pageSize: 20 }
+};
+
+// Row callbacks are COMPONENT props, not schema keys.
+const gridProps: ObjectGridComponentProps = {
+  schema: grid,
+  onRowClick: (record) => console.log('Row clicked:', record)
+};
+```
+
+Annotating the literal is the point: an un-annotated `const schema = { … }`
+type-checks no matter what is written in it, so a snippet that carries no
+annotation cannot tell you whether its keys are real.
+
+## License
+
+MIT

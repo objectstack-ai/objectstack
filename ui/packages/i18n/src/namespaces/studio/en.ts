@@ -293,6 +293,15 @@ const STUDIO_EN: Record<string, string> = {
   'designer.canvas.removeSectionHint': 'Remove section (fields move to Ungrouped)',
   'designer.canvas.renameHint': 'Double-click to rename',
   'designer.canvas.sectionN': 'Section {n}',
+  // External (ADR-0015) objects: field source and write state
+  'designer.external.from': 'From {datasource}',
+  'designer.external.readOnly': 'Read-only',
+  'designer.external.writable': 'Writable',
+  'designer.external.unconfirmed': 'Writes unconfirmed',
+  'designer.external.unconfirmedHint':
+    'Writes need allowWrites on datasource {datasource} as well as writable on this object, and the datasource could not be read.',
+  'designer.external.notice':
+    'External object: its fields mirror a table in datasource {datasource}, so fields cannot be added, removed, renamed or retyped here.',
   // Field stubs (disabled runtime-preview placeholders)
   'designer.stub.pickDate': 'Pick a date…',
   'designer.stub.off': 'Off',
@@ -330,7 +339,6 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.description': 'Description',
   'designer.field.readonly': 'Read-only',
   'designer.field.hidden': 'Hidden',
-  'designer.field.externalId': 'External ID',
   'designer.field.trackHistory': 'Track history',
   'designer.field.placeholder': 'Placeholder',
   'designer.field.group': 'Group',
@@ -1471,6 +1479,7 @@ const STUDIO_EN: Record<string, string> = {
   // Flow reference picker — ReferenceCombobox / FlowReferenceField (objectui#10586)
   'engine.inspector.reference.pickFromRecords': 'Pick from records',
   'engine.inspector.reference.pickFromRegistry': 'Pick from declared items',
+  'engine.inspector.reference.pickFromQueues': 'Pick from the queues',
   'engine.inspector.reference.enterManually': 'Enter value manually',
   'engine.inspector.reference.managerPlaceholder': 'Resolved automatically',
   'engine.inspector.reference.managerHint': "Resolved at runtime from the submitter's manager — no value needed.",
@@ -2146,6 +2155,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.undeclared': '(not declared — surfaces pick heuristically)',
   'engine.studio.settings.highlightMax': 'Up to {max} highlight fields — remove one to add another.',
   'engine.studio.settings.highlightPreview': 'Highlight strip preview',
+  'engine.studio.settings.relatedLists': 'Related list order (relatedLists) — the order of the lists of child records on this object\'s record page, most important first; it orders only, and showing or hiding a list stays on its relationship field',
+  'engine.studio.settings.relatedListsAdd': '+ Add relationship…',
+  'engine.studio.settings.relatedListsTail': 'Not listed — shown after these, in the default order',
+  'engine.studio.settings.relatedListsUndeclared': 'Not declared — every list shows in the default order: owned children first, then lookups',
+  'engine.studio.settings.relatedListsNone': 'No object points at this one through a lookup or master-detail field yet.',
+  'engine.studio.settings.relatedListsLoading': 'Loading the objects that point at this one…',
+  'engine.studio.settings.relatedListsUnmatched': '“{entry}” names no relationship that points at this object, so the next change to this list leaves it out.',
+  'engine.studio.settings.relatedListsHidden': 'hidden',
+  'engine.studio.settings.relatedListsPrimary': 'in body',
+  'engine.studio.settings.relatedListsPreview': 'Record page order',
+  'engine.studio.settings.relatedListsPreviewBody': 'In the body',
+  'engine.studio.settings.relatedListsPreviewSide': 'Side cards',
   'engine.studio.settings.sharing': 'Record sharing (OWD)',
   'engine.studio.settings.sharingHint': 'Baseline record visibility applied before positions and sharing rules (ADR-0056/0090)',
   'engine.studio.settings.sharingModel': 'Sharing model (sharingModel) — who can see and edit records another user owns',
@@ -3099,6 +3120,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.groupDelete': 'Delete group',
   'engine.studio.designer.groupDeleteTitle': 'Delete group (its fields move to Ungrouped)',
   'engine.studio.designer.dropHere': 'Drag fields here',
+  'engine.studio.designer.relatedTable': 'Related table: {name} — this group places a related list, so it holds no fields',
   'engine.studio.designer.ungrouped': 'Ungrouped',
   'engine.studio.designer.newGroup': 'New group',
   // objectui#12453 — a read-only field card's title: what a click still does.
@@ -3301,6 +3323,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.group.collapseExpanded': 'Collapsible · expanded by default',
   'engine.studio.designer.group.collapseCollapsed': 'Collapsible · collapsed by default',
   'engine.studio.designer.group.collapseHint': 'Controls how this group appears in the actual form (see Preview).',
+  'engine.studio.designer.group.relatedListLabel': 'Place a related table here (relatedList)',
+  'engine.studio.designer.group.relatedListNone': 'None — a section of fields',
+  'engine.studio.designer.group.relatedListHint': 'The group then stands for that related list\'s table, drawn at this position in the record\'s details column. A group that places a table holds no fields.',
+  'engine.studio.designer.group.relatedListHasFields': 'Move this group\'s fields to another group first: a group that places a related table holds no fields.',
+  'engine.studio.designer.group.relatedListLoading': 'Loading the objects that point at this one…',
   // objectui#11788 — the New automation dialog's trigger choice, left unset.
   'engine.studio.newAutoTrigger.later': 'Choose later on the Start node',
   // ── Record Sharing Baseline (OWD) overview (objectui#2505) ──────────────

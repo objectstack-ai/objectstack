@@ -115,8 +115,7 @@ export interface ObjectFormComponentProps {
  * Fold the structured, spec-aligned `buttons`/`defaults` surface
  * (`@objectstack/spec` FormViewSchema; framework#1894 / objectstack-ai/objectstack#2998) down onto the
  * flat renderer props ObjectForm and its variants read
- * (`showSubmit`/`submitText`/`showCancel`/`cancelText`/`showReset`/
- * `initialValues`). This is the objectui-side consumer of those spec keys — it
+ * (`showSubmit`/`submitText`/`showCancel`/`cancelText`/`initialValues`). This is the objectui-side consumer of those spec keys — it
  * is what lets them flip `experimental → live` in the spec liveness ledger.
  *
  * Spec is the authored surface, but an explicitly-set flat key still wins so
@@ -134,7 +133,6 @@ function foldFormButtons(schema: ObjectFormComponentProps['schema']): ObjectForm
   if (buttons?.submit?.label != null && s.submitText === undefined) out.submitText = buttons.submit.label;
   if (buttons?.cancel?.show !== undefined && s.showCancel === undefined) out.showCancel = buttons.cancel.show;
   if (buttons?.cancel?.label != null && s.cancelText === undefined) out.cancelText = buttons.cancel.label;
-  if (buttons?.reset?.show !== undefined && s.showReset === undefined) out.showReset = buttons.reset.show;
   if (defaults && s.initialValues === undefined) out.initialValues = defaults;
   return out as ObjectFormComponentProps['schema'];
 }
@@ -278,8 +276,8 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
   // Fail-open when no provider mounted (perms.isLoaded false).
   const schema = useMemo<LocalizedObjectFormSchema>(() => {
     // framework#1894 / objectstack-ai/objectstack#2998 (ADR-0078): the authored @objectstack/spec
-    // FormViewSchema carries the structured `buttons.{submit,cancel,reset}.
-    // {show,label}` + `defaults` surface, but this renderer historically read
+    // FormViewSchema carries the structured `buttons.{submit,cancel}.
+    // {show,label}` + `defaults` surface (`buttons.reset` retired, #27153), but this renderer historically read
     // only the flat `showSubmit`/`submitText`/…/`initialValues`. Fold the
     // structured shape down onto those flat props FIRST so every downstream
     // read (and every variant we dispatch `schema` into) sees it. An
