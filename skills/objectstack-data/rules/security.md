@@ -16,7 +16,7 @@ export const salesUser = definePermissionSet({
   },
 });
 
-// Register it on the stack root under `permissions` — NOT `permissionSets`:
+// Register it on the stack root under `permissions`:
 // defineStack({ permissions: [salesUser], ... })
 ```
 
@@ -162,8 +162,7 @@ rowLevelSecurity: [
   position → `positions` on the policy; a named record → a membership key;
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
-  reaches an ownership queue's members (it shares the rule's rows, it parks
-  none — only the record's `queue` column does that; SKILL.md § Ownership queues).
+  reaches an ownership queue's members (SKILL.md § Ownership queues).
 
 ## Positions grant only what they name; portal users are `external`
 
@@ -177,9 +176,7 @@ rowLevelSecurity: [
   https://objectstack.ai/docs/permissions/authentication#membership-tiers-are-a-closed-list).
   The `everyone` baseline (`isDefault` sets) does not reach it, it sees no
   member directory and holds no business unit, and every org-wide default is
-  owner-only for it: rows reach it **only** through explicit grants — a
-  position or permission set whose row policies bound them (the key above),
-  a sharing rule or a manual share.
+  owner-only for it: rows reach it **only** through the explicit grants above.
 
 ## Field permissions — a row-conditioned edit lock (`when`)
 
@@ -214,16 +211,21 @@ fields: {
 
 `maskingRule` is **live** (FieldMasker). Two more channels:
 
-**Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** For reversible
-machine credentials (DB passwords, API keys, tokens): encrypted on write via the
-registered `ICryptoProvider`, the ciphertext handle in `sys_secret` and only an
-opaque ref on the row, masked on read. **Fail-closed:** with no crypto provider,
-writes throw rather than persist cleartext.
+**Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** Ciphertext lives in
+`sys_secret`, only an opaque ref on the row. **Fail-closed:** with no crypto
+provider, writes throw rather than persist cleartext.
+
+**Query a credential only for presence.** A `secret` / `password` column is
+never a filter, sort, group-by or import `matchFields` key (`400 INVALID_FIELD`;
+an import row naming it fails). Search never scans it: keep it out of
+`searchableFields`.
 
 ```typescript
 fields: {
   api_key: { type: 'secret', label: 'API Key' },
 }
+filter: { api_key: { $null: false } }   // set? also `null`, `$exists`, `$empty`
+// filter: { api_key: 'sk_live_…' }     // 400 INVALID_FIELD
 ```
 
 **Per-field access gating — `requiredPermissions` (ADR-0066 D3).** A field
