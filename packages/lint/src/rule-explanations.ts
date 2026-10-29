@@ -114,6 +114,15 @@ const SECURITY_OWD_UNSET_EXPLANATION: RuleExplanation = {
       'default); \'public_read\' — everyone reads, the owner writes; \'public_read_write\' — everyone ' +
       'reads and writes; \'controlled_by_parent\' — access derives from the master record (a ' +
       'master-detail child).',
+    'A writable external object (`external.writable: true`) is the exception to that recommendation. ' +
+      'The remote row carries no `owner_id` or `created_by` the platform can read, so on \'private\' every ' +
+      'member edit is refused, and where the object carries `owner_id` a member reads no row at all ' +
+      '(`os explain security-external-owner-unmapped`). There the fix line names that rule\'s two ways out ' +
+      'instead: \'public_read_write\' with a `beforeUpdate` hook that decides who may edit, or the ownership ' +
+      'column (`owner_id`, or `created_by` on an object without one) declared in `fields` and returned by ' +
+      'the driver, after which \'private\' or \'public_read\' admits edits by the user that column names. ' +
+      'An external object that already declares that column, or whose datasource lets no write through, ' +
+      'keeps the usual fix line.',
     'System objects (`isSystem: true`, or a name starting with `sys_`) are not judged: the platform ' +
       'owns their posture.',
   ],

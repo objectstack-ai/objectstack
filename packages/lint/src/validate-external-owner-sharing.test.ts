@@ -4,9 +4,12 @@ import { describe, expect, it } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import {
+  PUBLIC_READ_WRITE_WAY_OUT,
   SECURITY_EXTERNAL_OWNER_UNMAPPED,
+  declareOwnershipColumnWayOut,
   validateExternalOwnerSharing,
 } from './validate-external-owner-sharing.js';
+import { SECURITY_OWD_UNSET, validateSecurityPosture } from './validate-security-posture.js';
 
 /**
  * The two external objects of `packages/runtime/src/plugin-driver-external-object.spike.test.ts`,
@@ -217,6 +220,69 @@ describe('security-external-owner-unmapped — the fix line', () => {
   it('the verdict leaves room for an app-authored row-level policy', () => {
     for (const f of findingsFor(ext({ sharingModel: 'private' }), ext({ sharingModel: 'private', ownership: 'none' }))) {
       expect(f.message).toContain('unless an app-authored row-level policy admits the row');
+    }
+  });
+});
+
+// [#27472] `security-owd-unset` refuses a custom object with no sharingModel, and its fix line used
+// to recommend 'private' everywhere: on a writable external object that is the shape this rule warns
+// refuses every member edit. Its fix line for the objects this rule judges is built from this
+// rule's own two ways out; every other object keeps the 'private' recommendation.
+describe("security-owd-unset's fix line on a writable external object", () => {
+  const owdUnsetHint = (stack: Record<string, unknown>, where: string) => {
+    const findings = validateSecurityPosture(stack).filter((f) => f.rule === SECURITY_OWD_UNSET && f.where === where);
+    expect(findings, where).toHaveLength(1);
+    return findings[0]!.hint ?? '';
+  };
+  const OLD_HINT =
+    "declare sharingModel: 'private' (owner + shares; recommended), 'public_read', " +
+    "'public_read_write', or 'controlled_by_parent' (master-detail children)";
+
+  it("spike_owned gets this rule's ways out and no 'private' recommendation", () => {
+    const hint = owdUnsetHint(SPIKE_STACK, 'object "spike_owned"');
+    expect(hint).toContain(PUBLIC_READ_WRITE_WAY_OUT);
+    expect(hint).toContain(declareOwnershipColumnWayOut('owner_id'));
+    expect(hint).not.toContain('recommended');
+    expect(hint).not.toContain('\n');
+    // Severity and verdict are the rule's own and do not move.
+    const [finding] = validateSecurityPosture(SPIKE_STACK).filter((f) => f.where === 'object "spike_owned"');
+    expect(finding).toMatchObject({ severity: 'error', path: 'objects[1].sharingModel' });
+    expect(finding!.message).toBe(
+      "custom object declares no sharingModel (OWD); the runtime falls back to 'private', " +
+        'but the baseline must be an authored decision',
+    );
+  });
+
+  it('a managed custom object keeps the private recommendation', () => {
+    expect(owdUnsetHint({ objects: [{ name: 'leave_request', label: 'Leave Request' }] }, 'object "leave_request"')).toBe(
+      OLD_HINT,
+    );
+  });
+
+  it('names created_by on an external object without owner_id', () => {
+    const hint = owdUnsetHint({ objects: [ext({ ownership: 'none' })] }, 'object "remote_row"');
+    expect(hint).toContain(declareOwnershipColumnWayOut('created_by'));
+    expect(hint).not.toContain('recommended');
+  });
+
+  it('keeps the private recommendation where this rule judges nothing', () => {
+    const ownerField = { ...NAME_FIELD, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner' } };
+    const readOnlyDatasource = { name: 'remote', schemaMode: 'external', external: { allowWrites: false } };
+    for (const [label, stack] of [
+      ['read-only binding', { objects: [ext({}, { writable: false })] }],
+      ['declared owner_id', { objects: [ext({ fields: ownerField })] }],
+      ['allowWrites: false', { datasources: [readOnlyDatasource], objects: [ext()] }],
+    ] as const) {
+      expect(owdUnsetHint(stack, 'object "remote_row"'), label).toBe(OLD_HINT);
+    }
+  });
+
+  it('either way out it names, once taken, clears this rule too', () => {
+    const ownerField = { ...NAME_FIELD, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner' } };
+    for (const obj of [ext({ sharingModel: 'public_read_write' }), ext({ sharingModel: 'private', fields: ownerField })]) {
+      const stack = { objects: [obj] };
+      expect(validateSecurityPosture(stack).map((f) => f.rule)).toEqual([]);
+      expect(validateExternalOwnerSharing(stack)).toEqual([]);
     }
   });
 });
