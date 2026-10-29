@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Cube } from '@objectstack/spec/data';
+import { ANALYTICS_CUBE_NAME_REQUIRED } from '@objectstack/spec/api';
 import type { AnalyticsQuery, AnalyticsResult, AnalyticsStrategy, IAnalyticsService } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 import { CubeRegistry } from '../cube-registry.js';
@@ -478,9 +479,57 @@ describe('AnalyticsService', () => {
     await expect(service.query(baseQuery)).rejects.toThrow('No strategy can handle');
   });
 
-  it('should throw when cube name is missing', async () => {
-    const service = new AnalyticsService({ logger: silentLogger });
-    await expect(service.query({ measures: ['count'] })).rejects.toThrow('Cube name is required');
+  // A query that names no cube is refused with the typed `VALIDATION_FAILED` /
+  // 400 the HTTP doors answer for the same body — not a plain Error, which
+  // every boundary maps to a 500 (`cube-name-refusal.ts`). The sentence is the
+  // schema's own (`ANALYTICS_CUBE_NAME_REQUIRED`); the pins below read the
+  // envelope (`code` + `status`), the field entry and the sentence's head.
+  describe('a query that names no cube is the typed VALIDATION_FAILED refusal, in-process', () => {
+    const refused = { code: 'VALIDATION_FAILED', status: 400, name: 'ValidationError' };
+
+    it('query(): a missing cube', async () => {
+      const service = new AnalyticsService({ logger: silentLogger });
+      await expect(service.query({ measures: ['count'] })).rejects.toMatchObject({
+        ...refused,
+        fields: [{ field: 'cube', code: 'required', message: ANALYTICS_CUBE_NAME_REQUIRED }],
+      });
+    });
+
+    it('query(): an empty cube name', async () => {
+      const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
+      await expect(service.query({ cube: '', measures: ['count'] })).rejects.toMatchObject({
+        ...refused,
+        fields: [{ field: 'cube', code: 'min_length', message: ANALYTICS_CUBE_NAME_REQUIRED }],
+      });
+    });
+
+    it('generateSql(): a missing cube and an empty cube name', async () => {
+      const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
+      await expect(service.generateSql({ measures: ['count'] })).rejects.toMatchObject({
+        ...refused,
+        fields: [{ field: 'cube', code: 'required', message: ANALYTICS_CUBE_NAME_REQUIRED }],
+      });
+      await expect(service.generateSql({ cube: '', measures: ['count'] })).rejects.toMatchObject({
+        ...refused,
+        fields: [{ field: 'cube', code: 'min_length', message: ANALYTICS_CUBE_NAME_REQUIRED }],
+      });
+    });
+
+    it('the refusal reads the prescription first, and is the schema\'s sentence', async () => {
+      const service = new AnalyticsService({ logger: silentLogger });
+      const err = await service.query({ cube: '', measures: ['count'] }).catch((e: unknown) => e as Error);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(/^Name the cube to query/);
+      expect((err as Error).message).toBe(ANALYTICS_CUBE_NAME_REQUIRED);
+    });
+
+    it('a whitespace-only name is a NAME no cube carries: CUBE_NOT_FOUND / 404, unchanged', async () => {
+      const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
+      await expect(service.query({ cube: '   ', measures: ['count'] })).rejects.toMatchObject({
+        code: 'CUBE_NOT_FOUND',
+        status: 404,
+      });
+    });
   });
 
   it('should return cube metadata via getMeta()', async () => {
