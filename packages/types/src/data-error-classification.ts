@@ -36,6 +36,7 @@ import {
 } from './thrown-http-error.js';
 import { isNativeErrorName } from './native-error-name.js';
 import { unevaluableHookConditionRefusal } from './hook-condition-refusal.js';
+import type { ErrorCode } from '@objectstack/spec/api';
 
 /**
  * How many characters of a domain error's OWN message reach the client.
@@ -471,6 +472,41 @@ function thrownCodeFields(error: any, status: number): { code?: string; declared
     if (thrown.declaredCode === undefined) return {};
     const demoted = demotedDeclaredCode(thrown);
     return { code: thrown.code, ...(demoted !== undefined ? { declaredCode: demoted } : {}) };
+}
+
+/**
+ * [#27597] The wire `code` a sandboxed hook body's business refusal answers
+ * with when the body declared none: the hook aborted the operation (its
+ * `onError: 'abort'`, the default) with free text, so the caller learns that
+ * fact from `code` instead of from the absence of one.
+ *
+ * Registered under `@objectstack/types` in the ADR-0112 ledger, and typed
+ * `ErrorCode` so a ledger without the row stops this file compiling.
+ */
+export const UNDECLARED_HOOK_REFUSAL_CODE: ErrorCode = 'HOOK_ABORTED';
+
+/**
+ * [#27597] {@link thrownCodeFields} for a sandboxed body's business refusal
+ * ({@link sandboxBusinessMessage} answered): the producer's own code when it
+ * declared one — a registered code, a demoted `declaredCode` beside the
+ * status-derived member, or a hook's `refusals` catalogue entry, each exactly
+ * as before — else {@link UNDECLARED_HOOK_REFUSAL_CODE}.
+ *
+ * Before this, an undeclared abort answered with no `code` at all, the one
+ * refusal on the `/data` door a client could not branch on. Ruling
+ * `6431311681` (#26170, letter A) stands: a hook that declares `refusals`
+ * refuses by code only, and a throw its catalogue cannot answer is refused as
+ * a fault before it reaches here. This names only what a hook WITHOUT a
+ * catalogue answers when it throws free text.
+ *
+ * Read by every door that answers a sandbox refusal — the unwrap door and its
+ * wrapper fallback in {@link classifyDataError}, and `@objectstack/rest`'s
+ * declared-status passthrough — so one abort carries one code whichever route
+ * caught it.
+ */
+function sandboxRefusalCodeFields(error: any, status: number): { code?: string; declaredCode?: string } {
+    const declared = thrownCodeFields(error, status);
+    return declared.code !== undefined ? declared : { code: UNDECLARED_HOOK_REFUSAL_CODE };
 }
 
 /**
@@ -1522,7 +1558,9 @@ function classifyDataError(error: any, object?: string): { status: number; body:
                 status,
                 body: {
                     error: error.innerMessage,
-                    ...thrownCodeFields(error, status),
+                    // [#27597] …and a body that declared no code answers
+                    // {@link UNDECLARED_HOOK_REFUSAL_CODE} instead of none.
+                    ...sandboxRefusalCodeFields(error, status),
                     ...(object ? { object } : {}),
                 },
             };
@@ -1826,6 +1864,10 @@ function classifyDataError(error: any, object?: string): { status: number; body:
             status: 400,
             body: {
                 error: msg,
+                // [#27597] Byte-identical to the `innerMessage` door above, the
+                // code included. A rethrow that kept the wrapper but lost the
+                // instance lost any declared code with it.
+                ...sandboxRefusalCodeFields(error, 400),
                 ...(object ? { object } : {}),
             },
         };
@@ -2272,6 +2314,7 @@ export function driverNotNullRefusalAnswer(
 export {
     truncateClientMessage,
     thrownCodeFields,
+    sandboxRefusalCodeFields,
     withoutDeclaredCodePrefix,
     withDeclaredUserMessage,
     isSandboxOrigin,

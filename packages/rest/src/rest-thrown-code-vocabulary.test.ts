@@ -164,6 +164,9 @@ const ARMS = [
             return { status: r.status, body: r.body };
         },
         status: 409,
+        // [#27597] The one arm that names a code for a producer that declared
+        // none: a sandboxed hook's undeclared abort.
+        undeclaredCode: 'HOOK_ABORTED',
     },
 ] as const;
 
@@ -256,7 +259,9 @@ describe('#9232 §3 — the halves that must not move', () => {
             const { status, body } = arm.answer(undefined);
 
             expect(status).toBe(arm.status);
-            expect(body.code).toBeUndefined();
+            // [#27597] …except the sandbox unwrap, whose undeclared abort
+            // answers the ledgered `HOOK_ABORTED`. Nothing is DECLARED for it.
+            expect(body.code).toBe('undeclaredCode' in arm ? arm.undeclaredCode : undefined);
             expect(body.declaredCode).toBeUndefined();
             // ADR-0112 D4 governs the semantic-CODE channel — the producer
             // names the condition on the CODE axis, and the ADR rules no HTTP
