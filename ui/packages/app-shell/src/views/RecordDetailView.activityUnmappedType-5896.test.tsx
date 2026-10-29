@@ -204,7 +204,7 @@ function makeMetadata() {
 /** Render the console record page over the seeded `sys_activity` rows. */
 const renderWith = (rows: Array<Record<string, any>>) =>
   render(
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
       <MetadataCtx.Provider value={makeMetadata()}>
         <RecordDetailView
           dataSource={makeDataSource(rows)}

@@ -277,7 +277,6 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.description': '描述',
   'designer.field.readonly': '只读',
   'designer.field.hidden': '隐藏',
-  'designer.field.externalId': '外部 ID',
   'designer.field.trackHistory': '记录历史',
   'designer.field.placeholder': '占位符',
   'designer.field.group': '分组',

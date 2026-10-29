@@ -1238,7 +1238,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 695 since #27069: the object form's `relatedLists` row and the
       // `fieldGroups` repeater's `relatedList` sub-row — two row labels,
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(695);
+      // 694 since #26674: the field form no longer offers `externalId` (graded
+      // `dead`) — one row label fewer, in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(694);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

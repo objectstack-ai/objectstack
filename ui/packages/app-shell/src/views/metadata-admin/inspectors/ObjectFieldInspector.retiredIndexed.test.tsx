@@ -72,7 +72,6 @@ describe('ObjectFieldInspector · the Indexed toggle is retired (objectui#4644)'
     // targeted retirement, not a section that failed to render.
     expect(screen.getByText('Read-only')).toBeInTheDocument();
     expect(screen.getByText('Hidden')).toBeInTheDocument();
-    expect(screen.getByText('External ID')).toBeInTheDocument();
     expect(screen.getByText('Track history')).toBeInTheDocument();
   });
 

@@ -36,9 +36,9 @@ export {
 
 // Per-file artifact integrity verification (ADR-0025 §3.2) — pure and
 // portable like the signature contract above; consumed by the
-// `os plugin publish` preflight. Unpack-time re-verification is owned by
-// the future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
-// control plane (that leg is unbuilt).
+// `os plugin publish` preflight and by `os plugin install`, which
+// re-verifies at unpack (ADR-0025 §3.5 M1). The cloud control plane stores
+// the artifact blob opaquely.
 export {
   verifyIntegrity,
   formatIntegrityViolation,

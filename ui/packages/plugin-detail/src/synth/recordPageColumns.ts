@@ -28,10 +28,11 @@
  * seed carrying it would be refused at save. The layout is therefore read off
  * the synthesized page itself, by the stable semantic `value` every tab item
  * carries (`buildDefaultTabs`, objectui#2257): `details` is the details
- * column, `activity` / `history` join the discussion footer in the timeline
- * column, and every related tab, `approvals` and `attachments` go to the
- * related column. The page's opt-in `aside` (the reference rail and the
- * `rightRail` slot) folds into that same related column — one rail, not two.
+ * column, `timeline` (the one stream, objectstack#27055) is the timeline
+ * column, and `related`, `approvals` and `attachments` go to the related
+ * column. The synthesized page has one region (`main`); a page with
+ * any other region is not the synthesized page (objectstack#27055 removed the
+ * opt-in rail and the `rightRail` slot that used to add an `aside`).
  *
  * A page this module cannot read — no synthesized tab strip, or a tab whose
  * value it does not know (an authored strip) — answers `null`,
@@ -193,7 +194,9 @@ export function recordPageColumnDefaults(object: RecordPageObjectLike | null | u
 export function recordPageColumnOfTab(value: unknown): RecordPageColumn | null {
   if (typeof value !== 'string') return null;
   if (value === 'details') return 'details';
-  if (value === 'activity' || value === 'history') return 'timeline';
+  // `timeline` is the one stream (objectstack#27055); `activity` / `history`
+  // are the values a pre-v3 strip carried, kept so such a page still lays out.
+  if (value === 'timeline' || value === 'activity' || value === 'history') return 'timeline';
   if (value === 'related' || value.startsWith('related:')) return 'related';
   if (value === 'approvals' || value === 'attachments') return 'related';
   return null;
@@ -209,16 +212,13 @@ export interface DefaultPageColumns {
   header: any[];
   /** The Details tab's body. */
   details: any[];
-  /** The discussion footer first (the composer on top), then Activity and History. */
+  /** The Timeline tab's stream (objectstack#27055), after any node the page places below its strip. */
   timeline: any[];
-  /**
-   * Related lists in the strip's order, then the folded `aside` (reference
-   * rail, `rightRail` slot), then Approvals and Attachments.
-   */
+  /** Related lists in the strip's order, then Approvals and Attachments. */
   related: any[];
   /**
    * How many related collections the related column shows: one per
-   * `record:related_list`, one per reference-rail entry. Labels the
+   * `record:related_list`. Labels the
    * two-column tier's rail toggle.
    */
   relatedCount: number;
@@ -238,7 +238,6 @@ function relatedCollectionsIn(nodes: any[]): number {
     const node = asNode(raw);
     if (!node) continue;
     if (node.type === 'record:related_list') count += 1;
-    else if (node.type === 'record:reference_rail') count += nodeList(asNode(node.properties)?.entries).length;
   }
   return count;
 }
@@ -247,17 +246,18 @@ function relatedCollectionsIn(nodes: any[]): number {
  * Partition a synthesized default record page (`buildDefaultPageSchema`'s
  * output, after any host pruning) into the column tiers' header and columns.
  *
- * Reads the page exactly as the synthesizer writes it: a `main` region whose
- * one `page:tabs` node carries its items in the node's `properties` bag
- * (`componentNode`, ADR-0089 D3a), and an optional `aside` region. Answers
- * `null` — draw the tabs — for anything else: no `main` region, no tab strip
- * or more than one, a strip carrying its items elsewhere, an item gated by
+ * Reads the page exactly as the synthesizer writes it: one `main` region
+ * whose one `page:tabs` node carries its items in the node's `properties`
+ * bag (`componentNode`, ADR-0089 D3a). Answers `null` — draw the tabs — for
+ * anything else: no `main` region or a second region, no tab strip or more
+ * than one, a strip carrying its items elsewhere, an item gated by
  * `visibleWhen`, or an item whose value has no column.
  */
 export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | null {
   const regions = nodeList(asNode(page)?.regions);
-  const main = regions.map(asNode).find((r) => r?.name === 'main');
-  if (!main) return null;
+  if (regions.length !== 1) return null;
+  const main = asNode(regions[0]);
+  if (!main || main.name !== 'main') return null;
   const components = nodeList(main.components);
   const tabIndexes = components
     .map((node, index) => (asNode(node)?.type === 'page:tabs' ? index : -1))
@@ -284,9 +284,7 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     else relatedLists.push(...children);
   }
 
-  const aside = regions.map(asNode).find((r) => r?.name === 'aside');
-  const folded = nodeList(aside?.components);
-  const related = [...relatedLists, ...folded, ...relatedPanels];
+  const related = [...relatedLists, ...relatedPanels];
   return {
     header: components.slice(0, tabIndex),
     details,
@@ -294,4 +292,40 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     related,
     relatedCount: relatedCollectionsIn(related),
   };
+}
+
+/**
+ * The relationship ids (`object.field`) of the body tables a synthesized
+ * record page draws (objectstack#27055, Target 8): every `record:related_list`
+ * among the Details tab's children. Read off the page itself, so the host and
+ * the column tiers agree with what `buildDefaultTabs` placed.
+ */
+export function bodyTableIdsOf(page: unknown): Set<string> {
+  const ids = new Set<string>();
+  const regions = nodeList(asNode(page)?.regions);
+  for (const region of regions) {
+    for (const component of nodeList(asNode(region)?.components)) {
+      const tabs = asNode(component);
+      if (tabs?.type !== 'page:tabs') continue;
+      for (const item of nodeList(asNode(tabs.properties)?.items)) {
+        if (asNode(item)?.value !== 'details') continue;
+        for (const id of relatedListIdsIn(nodeList(asNode(item)?.children))) ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/** The relationship ids of the `record:related_list` nodes among `nodes`. */
+export function relatedListIdsIn(nodes: any[]): string[] {
+  const out: string[] = [];
+  for (const raw of nodes) {
+    const node = asNode(raw);
+    if (node?.type !== 'record:related_list') continue;
+    const props = { ...node, ...(asNode(node.properties) ?? {}) };
+    if (typeof props.objectName === 'string' && typeof props.relationshipField === 'string') {
+      out.push(`${props.objectName}.${props.relationshipField}`);
+    }
+  }
+  return out;
 }

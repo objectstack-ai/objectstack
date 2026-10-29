@@ -813,10 +813,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Filter",
         helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
       },
-      externalId: {
-        label: "External Id",
-        helpText: "Mark as external ID for upsert operations"
-      },
       storage: {
         label: "Storage",
         helpText: "Physical storage constraints (ADR-0113): the DDL the write contract deliberately does not imply. Unset: none requested."

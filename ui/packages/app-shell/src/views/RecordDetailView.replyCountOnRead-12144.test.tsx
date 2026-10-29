@@ -172,7 +172,7 @@ interface MountOptions {
 async function mount(comments: Record<string, unknown>[], options: MountOptions = {}) {
   const dataSource = makeDataSource(comments, options.activities);
   const page = (
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
       <MetadataCtx.Provider value={metadataFor(options.pages ?? [])}>
         <RecordDetailView
           dataSource={dataSource}
