@@ -4834,7 +4834,13 @@ export function InterfacesPillar({
   });
   // Only the open leaf's own buffer is held (objectui#11272).
   const leafHeld = draftLoaded ? leafIncomplete : null;
-  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? null);
+  // objectstack#27464 — a nav rename typed but not committed (blur / Enter)
+  // lives only in the canvas input, so it is held as the leaf's edit is: the
+  // same report, so the surface's one guard (beforeunload included) asks.
+  const [navRenamePending, setNavRenamePending] = React.useState<string | null>(null);
+  const navRenameClause =
+    navRenamePending === null ? null : tFormat('engine.studio.held.navRename', locale, { item: navRenamePending });
+  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? navRenameClause);
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const leafDraftStatus = useStudioItemDraftStatus(
     current ? { type: current.type, name: current.name } : null,
@@ -6103,6 +6109,7 @@ export function InterfacesPillar({
                 onPatch={onNavPatch}
                 selection={navSel}
                 onSelectionChange={(s) => setNavSel(s ? { kind: s.kind, id: s.id } : null)}
+                onRenamePendingChange={setNavRenamePending}
               />
             ) : navTree.length === 0 ? (
               <p className="px-2 py-3 text-[11px] text-muted-foreground">

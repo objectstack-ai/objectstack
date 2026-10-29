@@ -291,6 +291,14 @@ export interface AppNavCanvasProps {
   onPatch?: (patch: Record<string, unknown>) => void;
   selection: { kind: string; id: string } | null;
   onSelectionChange?: (sel: { kind: string; id: string; label?: string } | null) => void;
+  /**
+   * objectstack#27464 — the label of the entry whose rename is typed but not
+   * yet committed (the input differs from the authored label), or `null`. A
+   * rename commits on blur or Enter, so a reload or a tab close before either
+   * drops it; a host reports it as an edit held unsent. Optional: a host with
+   * no departure guard leaves it out.
+   */
+  onRenamePendingChange?: (label: string | null) => void;
 }
 
 export function AppNavCanvas({
@@ -299,6 +307,7 @@ export function AppNavCanvas({
   onPatch,
   selection,
   onSelectionChange,
+  onRenamePendingChange,
 }: AppNavCanvasProps) {
   const locale = useMetadataLocale();
   const targetLabel = useNavTargetLabel();
@@ -477,6 +486,7 @@ export function AppNavCanvas({
               canEdit={!!onPatch}
               onClick={(p, lbl) => onSelectionChange?.({ kind: 'nav', id: p, label: lbl })}
               onRename={(lbl) => renameItem(i, lbl)}
+              onRenamePendingChange={onRenamePendingChange}
               onRemove={() => removeItem(i)}
               onDragStart={() => setDragIndex(i)}
               onDragEnd={() => setDragIndex(null)}
@@ -504,6 +514,7 @@ function NavCardTree({
   canEdit,
   onClick,
   onRename,
+  onRenamePendingChange,
   onRemove,
   onDragStart,
   onDragEnd,
@@ -519,6 +530,7 @@ function NavCardTree({
   canEdit: boolean;
   onClick: (path: string, label: string) => void;
   onRename: (label: string) => void;
+  onRenamePendingChange?: (label: string | null) => void;
   onRemove: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -537,6 +549,7 @@ function NavCardTree({
         canEdit={canEdit && depth === 0}
         onClick={() => onClick(path, navLabel(item, index, locale, targetLabel))}
         onRename={onRename}
+        onRenamePendingChange={onRenamePendingChange}
         onRemove={onRemove}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
@@ -580,6 +593,7 @@ function NavCard({
   canEdit,
   onClick,
   onRename,
+  onRenamePendingChange,
   onRemove,
   onDragStart,
   onDragEnd,
@@ -595,6 +609,7 @@ function NavCard({
   canEdit: boolean;
   onClick: () => void;
   onRename: (label: string) => void;
+  onRenamePendingChange?: (label: string | null) => void;
   onRemove: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -614,6 +629,27 @@ function NavCard({
   React.useEffect(() => {
     if (!editing) setDraft(authored);
   }, [authored, editing]);
+
+  // objectstack#27464 — a typed rename that blur or Enter has not committed
+  // yet is reported, keyed on the label string (AGENTS.md #10). Only a card
+  // that has reported takes it back, so the other cards' mounts never clear it.
+  const pendingRename = editing && draft.trim() !== '' && draft.trim() !== authored ? label : null;
+  const reportRef = React.useRef(onRenamePendingChange);
+  React.useLayoutEffect(() => {
+    reportRef.current = onRenamePendingChange;
+  });
+  const reportedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (pendingRename === null && !reportedRef.current) return;
+    reportedRef.current = pendingRename !== null;
+    reportRef.current?.(pendingRename);
+  }, [pendingRename]);
+  React.useEffect(
+    () => () => {
+      if (reportedRef.current) reportRef.current?.(null);
+    },
+    [],
+  );
 
   return (
     <div className={cn('relative', DEPTH_INDENT[Math.min(depth, DEPTH_INDENT.length - 1)])}>
