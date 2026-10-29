@@ -427,6 +427,8 @@ import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './proto
 import { foldObjectExtendersFromRegistry } from './protocol-object-extender-fold.js';
 // [#25467 cut 31] The disabled-package face of the by-name item read.
 import { readMetaItemFace } from './protocol-meta-item-face.js';
+// [#25467 cut 32] A stored commit row's `items` column read back as its revert plan.
+import { parseCommitItems } from './protocol-commit-items.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2748,7 +2750,7 @@ function mutationEventMember(type: string, member: string | null | undefined): {
  * timeline serves it on every item of a bundled type, the canonical member
  * spelled out ({@link ObjectStackProtocolImplementation.listCommits}).
  */
-type CommitPlanItem = { type: string; name: string; existedBefore: boolean; prevVersion: number | null; member?: string };
+export type CommitPlanItem = { type: string; name: string; existedBefore: boolean; prevVersion: number | null; member?: string };
 
 /** [#22877] The identity of a plan item or a draft within one batch: two members of one name are two. */
 function commitPlanKey(item: { type: string; name: string; member?: string }): string {
@@ -26479,16 +26481,8 @@ export class ObjectStackProtocolImplementation implements
     private parseCommitItems(
         raw: unknown,
     ): CommitPlanItem[] {
-        if (Array.isArray(raw)) return raw as CommitPlanItem[];
-        if (typeof raw === 'string') {
-            try {
-                const p = JSON.parse(raw);
-                return Array.isArray(p) ? p : [];
-            } catch {
-                return [];
-            }
-        }
-        return [];
+        // [#25467 cut 32] The body moved to `protocol-commit-items.ts`; it reads no member.
+        return parseCommitItems(raw);
     }
 
     /**
