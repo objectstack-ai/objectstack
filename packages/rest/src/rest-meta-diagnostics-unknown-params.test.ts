@@ -28,6 +28,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
@@ -55,7 +56,16 @@ function boot(seed: (registry: SchemaRegistry) => void = () => {}) {
     registry.registerItem('view', { name: 'pkg_view', label: 'View', object: 'account', type: 'grid' }, 'name', PACKAGE_ID);
     seed(registry);
     const protocol = new ObjectStackProtocolImplementation(
-        { registry, find: async () => [], findOne: async () => null } as never, () => new Map(), undefined,
+        {
+            registry,
+            find: async () => [],
+            findOne: async (object: string, query?: unknown) => {
+                assertEngineFindOnePredicate(object, query as never);
+                return null;
+            },
+        } as never,
+        () => new Map(),
+        undefined,
     );
     const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'u_admin', systemPermissions: ['manage_metadata'] });
