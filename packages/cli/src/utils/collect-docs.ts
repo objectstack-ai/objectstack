@@ -1109,7 +1109,8 @@ export function lintMetadataEmbeds(
  * judged here so one nav item is judged in one place.
  *
  * Walked: every app's `navigation` and `areas[].navigation` (children
- * included), and the items of `manifest.navigationContributions`.
+ * included) — the top level's apps, or each package body's when the top level
+ * carries none — and the items of `manifest.navigationContributions`.
  *
  * ## What resolves
  *
@@ -1175,7 +1176,13 @@ export function lintDocNavTargets(stack: Record<string, unknown>, docNames: Read
     }
   };
 
-  const apps = Array.isArray(stack.apps) ? (stack.apps as AnyRec[]) : [];
+  // A multi-package `preserve` artifact carries its apps in the package bodies
+  // and none at its top level. The top level's apps when it carries the key,
+  // otherwise each body's: `resolveStackCollection`'s rule, over the same
+  // `artifactPackages` walk as the books above, which refuses no entry shape.
+  const apps = (Array.isArray(stack.apps)
+    ? stack.apps
+    : artifactPackages(stack).flatMap(({ body }) => (Array.isArray(body.apps) ? body.apps : []))) as AnyRec[];
   for (const app of apps) {
     if (!app || typeof app !== 'object') continue;
     const appName = typeof app.name === 'string' ? app.name : '(unnamed)';
