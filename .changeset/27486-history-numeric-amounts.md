@@ -5,7 +5,7 @@
 
 fix(app-shell): the record history "Changes" entry formats a currency, number or percent value the way the record page formats that field, instead of printing the raw stored number
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 - **Before.** Editing a currency field to `4321000` showed `$4,321,000.00` on the record but `— → 4321000` in Activity › Timeline. Number and percent fields printed their raw stored value the same way (`1234.5`, `0.25`).
