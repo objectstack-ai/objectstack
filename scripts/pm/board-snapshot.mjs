@@ -231,6 +231,58 @@
  * (comments, reviews) are not re-asked: an empty page is their ordinary
  * answer, and they were not seen to blank.
  *
+ * ## A listing that lags, and a card that moved — measured 2026-10-29 (#27726)
+ *
+ * Every scheduled run from 2026-10-26T15:11Z on failed its count check with a
+ * SURPLUS of 1 to 3 (11 of 11 since 10-27). Read against the API on 2026-10-29,
+ * the archive held exactly three open issues the board does not:
+ *
+ *   #25896  transferred to objectstack-ai/hotcrm#2307 (`GET` answers 301). The
+ *           listing never returns a transferred number, so nothing re-read it.
+ *   #26084  closed 2026-10-27T02:32:52Z, inside the 02:33Z run. That run's
+ *           listing served the PRE-close row (updated 01:52) while it served
+ *           rows updated at 02:33:14 and 02:33:18 fresh, and 02:33:18 became
+ *           the cursor — so the close, 26 seconds older, was outside every
+ *           later `since` window and the record stayed open for good.
+ *   #26638  closed 2026-10-28T02:25:16Z and last touched 02:26:13, missed the
+ *           same way by the 02:26Z run, whose cursor was 02:26:16.
+ *
+ * The same lag had left four closed pull requests archived open (#20052,
+ * #20072, #20074, #22635) — outside the count check, which counts issues, so
+ * nothing had said so. The listing is not consistent within one read: a row
+ * can be served stale while a row updated AFTER it is served fresh, and a
+ * cursor taken from the newest row then skips the stale one permanently. Two
+ * fixes, one per consequence:
+ *
+ *   the cursor settles   a live walk's cursor (the delta's, or the incremental
+ *                        walk's) is stored no later than `LISTING_SETTLE_MS`
+ *                        before the instant its last listing page was read
+ *                        (`settledCursor`), so the next run re-reads the
+ *                        trailing window the listing may not have caught up
+ *                        on. `since` is inclusive, so this is an over-read —
+ *                        the safe direction — and on a quiet board the cursor
+ *                        is already older than that and does not move.
+ *   a disagreement is    a census that disagrees with the board is not
+ *   reconciled first     reported until the open listing has been compared
+ *                        with the archive's open records number by number
+ *                        (`reconcileCandidates`) and every number the two
+ *                        disagree on has been read ON ITS OWN
+ *                        (`numberReadVerdict`): a live record is archived
+ *                        again; a 301 to a named issue in ANOTHER repository
+ *                        is written onto the archived record as
+ *                        `transferred_to`, and the census counts it apart from
+ *                        the open set; a 404 or 410 is left exactly as
+ *                        archived. Then the board's arithmetic is read again,
+ *                        so both sides of the check reported name one instant
+ *                        after the repair.
+ *
+ * ⛔ Neither is a tolerance. Nothing is subtracted on the strength of a
+ * timestamp or a margin: every number that moves the verdict was READ in this
+ * run and its answer is on disk. A destroyed record is still a SURPLUS, still
+ * red, and the summary names it with its `--restore`. A transfer is recognised
+ * only from GitHub's own redirect to an issue in another repository, and the
+ * record stays in the archive with where it went.
+ *
  * ## The count check, and why a mismatch is red rather than a warning
  *
  * `rest-channel.md`: an enumeration without a count check is not a reading. So
@@ -244,9 +296,14 @@
  *                                        this archive does — the destruction
  *                                        signature this tool was built for.
  *                                        `--restore` prints them back; a number
- *                                        deliberately left destroyed (or moved
- *                                        to another repo) goes in `gone.json`,
- *                                        which is the ONLY way to quiet it.
+ *                                        deliberately left destroyed goes in
+ *                                        `gone.json`, which is the ONLY way to
+ *                                        quiet it. A transfer is recorded by
+ *                                        the reconcile above and never reaches
+ *                                        this line.
+ *
+ * A disagreeing census is reconciled before either verdict is reported
+ * (§ A listing that lags); the verdict is the census AFTER that repair.
  *
  * Both are non-zero exits. `pending` is the third answer and not a pass — what
  * keeps "could not check" apart from "checked and clean" (#4690) — and the
@@ -431,6 +488,29 @@ export const DELTA_REQUEST_SLICE = 300;
  * identical bytes and is the safe direction.
  */
 export const DELTA_SKEW_MS = 30 * 60 * 1000;
+
+/**
+ * How far behind the instant of its last listing page a live walk's stored
+ * cursor sits (§ A listing that lags).
+ *
+ * The measured lag is a lower bound, not a size: #26084's close was 26 s older
+ * than a row the same listing served fresh. Fifteen minutes is that bound many
+ * times over and still a job's own timeout. The cost is re-reading whatever
+ * moved in the last fifteen minutes before each run — on this board a few
+ * dozen numbers at the busiest, against runs that spend ~500 of their 800 —
+ * and the re-read writes identical bytes unless the row really did change.
+ * ⛔ Not a tolerance: it changes what the NEXT run reads, never what this run's
+ * count check counts.
+ */
+export const LISTING_SETTLE_MS = 15 * 60 * 1000;
+
+/**
+ * The most numbers one reconcile reads on their own. A partial open listing
+ * (a page that blanked past the first) would name every archived open record
+ * after it; each costs one read plus its comments, so the reconcile is bounded
+ * and names what it left for the next run instead of spending the budget.
+ */
+export const RECONCILE_MAX_NUMBERS = 50;
 
 /** Where a run writes when `--out` is not given. */
 export const DEFAULT_OUT_DIR = 'board';
@@ -771,6 +851,65 @@ export function sliceCeiling({ spent, max, slice }) {
   return Math.min(max, spent + slice);
 }
 
+/** The walks that read the LIVE board, whose cursor becomes the next run's `since`. */
+export const LIVE_WALKS = Object.freeze(['delta', 'incremental']);
+
+/**
+ * The cursor a live walk stores: its high-water mark, or `settleMs` before the
+ * instant its last listing page was read when that is earlier (§ A listing
+ * that lags). A cursor already older than that is returned unchanged, which is
+ * what keeps a quiet board's manifest byte-identical run over run.
+ *
+ * ⛔ An unparseable stamp on either side returns the cursor unchanged rather
+ * than a cursor built from `NaN` — the same rule as `skewedSince`.
+ */
+export function settledCursor(cursor, readAt, settleMs = LISTING_SETTLE_MS) {
+  const at = Date.parse(cursor ?? '');
+  const read = Date.parse(readAt ?? '');
+  if (!Number.isFinite(at) || !Number.isFinite(read)) return cursor ?? null;
+  const settled = read - settleMs;
+  return at > settled ? new Date(settled).toISOString() : cursor;
+}
+
+/**
+ * The numbers a reconcile reads on its own: every open record of the archive
+ * the open listing does not carry, and every number the listing carries that
+ * the archive does not hold open. Numbers in the gone ledger are neither — the
+ * maintainer has already answered for them. Ascending, so the oldest stuck
+ * record is read first, and bounded by `max` with the remainder counted.
+ */
+export function reconcileCandidates({ archivedOpen, listedOpen, gone = [], max = RECONCILE_MAX_NUMBERS }) {
+  const ledger = new Set(gone ?? []);
+  const listed = new Set(listedOpen ?? []);
+  const archived = new Set(archivedOpen ?? []);
+  const all = [
+    ...[...archived].filter((n) => !listed.has(n)),
+    ...[...listed].filter((n) => !archived.has(n)),
+  ].filter((n) => !ledger.has(n)).sort((a, b) => a - b);
+  return { numbers: all.slice(0, max), left: Math.max(0, all.length - max) };
+}
+
+/**
+ * What one number's own read says, from the status and `Location` of a read
+ * that does not follow redirects.
+ *
+ *   live         200: the record as the board holds it now — archive it again.
+ *   transferred  a redirect to `/repos/{other}/issues/{n}` in ANOTHER repository.
+ *   destroyed    404 or 410: the destruction signature; nothing is written.
+ *   unreadable   anything else — including a redirect within this repository
+ *                (a rename), which is not a transfer and is not acted on.
+ */
+export function numberReadVerdict({ repo, status, location = null, body = null }) {
+  if (status === 200 && body) return { verdict: 'live', raw: body };
+  if ([301, 302, 307, 308].includes(status)) {
+    const moved = /\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)\/?$/.exec(String(location ?? ''));
+    if (moved && moved[1].toLowerCase() !== String(repo).toLowerCase()) return { verdict: 'transferred', to: `${moved[1]}#${moved[2]}` };
+    return { verdict: 'unreadable', status };
+  }
+  if (status === 404 || status === 410) return { verdict: 'destroyed', status };
+  return { verdict: 'unreadable', status };
+}
+
 /**
  * Why this run's census is not a reading about the board, or `null` when it is.
  *
@@ -977,10 +1116,11 @@ export function readGoneLedger(outDir) {
  *
  * Read from the FILES, never accumulated across runs: an accumulated counter
  * drifts from what is actually stored, and the count check would then be
- * comparing the board with a number this tool made up.
+ * comparing the board with a number this tool made up. `openNumbers`, when
+ * given a Set, is filled with the open records' numbers for the reconcile.
  */
-export function censusArchive(outDir) {
-  const counts = { issues_open: 0, issues_closed: 0, pulls_open: 0, pulls_closed: 0, records: 0 };
+export function censusArchive(outDir, { openNumbers = null } = {}) {
+  const counts = { issues_open: 0, issues_closed: 0, issues_transferred: 0, pulls_open: 0, pulls_closed: 0, records: 0 };
   let names = [];
   try {
     names = readdirSync(join(outDir, 'issues'));
@@ -994,6 +1134,13 @@ export function censusArchive(outDir) {
     counts.records += 1;
     const pull = record.kind === 'pull_request';
     const open = record.state === 'open';
+    // A transferred record is kept — it is what the card said — but it is no
+    // longer this board's to count (§ A listing that lags).
+    if (record.transferred_to) {
+      counts.issues_transferred += 1;
+      continue;
+    }
+    if (open) openNumbers?.add(record.number);
     if (pull && open) counts.pulls_open += 1;
     else if (pull) counts.pulls_closed += 1;
     else if (open) counts.issues_open += 1;
@@ -1143,14 +1290,25 @@ export function rateLimitStop({ status, remaining, retryAfter, reset }) {
 /** The request counter every fetch in this run passes through. */
 const requestCount = { value: 0 };
 
-async function rest(path) {
+/**
+ * The one read helper. `reply: true` is the reconcile's per-number read: the
+ * redirect is NOT followed — a transfer is read off its own `Location`, never
+ * off whatever the destination answers to this token — and a redirect, 404 or
+ * 410 comes back as `{ status, location, body: null }` instead of a throw.
+ * A rate-limit refusal throws in both modes.
+ */
+async function rest(path, { reply = false } = {}) {
   requestCount.value += 1;
   const res = await fetch(`${API}${path}`, {
     headers: {
       accept: 'application/vnd.github+json',
       ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}),
     },
+    ...(reply ? { redirect: 'manual' } : {}),
   });
+  if (reply && [301, 302, 307, 308, 404, 410].includes(res.status)) {
+    return { status: res.status, location: res.headers.get('location'), body: null };
+  }
   if (!res.ok) {
     const stop = rateLimitStop({
       status: res.status,
@@ -1163,7 +1321,8 @@ async function rest(path) {
     err.status = res.status;
     throw err;
   }
-  return res.json();
+  const body = await res.json();
+  return reply ? { status: res.status, location: null, body } : body;
 }
 
 /** Every page of one paginated read, walked to a short page. Never a `Link` header. */
@@ -1258,6 +1417,73 @@ async function readBoardArithmetic(repo, budget) {
   return { open_issues_count: meta?.open_issues_count ?? null, open_pull_requests: openPulls.length, read_at: new Date().toISOString() };
 }
 
+/** One page of the open board for the reconcile: creation order, which an update mid-walk does not reshuffle. */
+export function openSetPath(repo, { page = 1, perPage = PER_PAGE } = {}) {
+  return `/repos/${repo}/issues?state=open&sort=created&direction=asc&per_page=${perPage}&page=${page}`;
+}
+
+/**
+ * A disagreeing census, reconciled before it is reported (§ A listing that
+ * lags). Returns the files the repair writes and what each number answered;
+ * a spent budget ends it early with the reason, and a rate-limit refusal
+ * propagates to the run like every other read.
+ *
+ * ⛔ A blank FIRST page of the open listing ends it with nothing read: an
+ * empty listing of a board with open items is not a reading (§ A blank page),
+ * and believing it would name every archived open record as a candidate.
+ */
+async function reconcileOpenSet(repo, outDir, { budget, gone }) {
+  const files = new Map();
+  const outcome = { listed: null, candidates: 0, left: 0, reread: [], transferred: [], destroyed: [], unreadable: [], blank_pages_reasked: 0, reason: null };
+  try {
+    const listed = new Set();
+    for (let page = 1, asks = 0; ;) {
+      budget.spend();
+      const batch = await rest(openSetPath(repo, { page }));
+      const rows = Array.isArray(batch) ? batch : [];
+      if (rows.length === 0 && ++asks < BLANK_PAGE_ASKS) {
+        outcome.blank_pages_reasked += 1;
+        continue;
+      }
+      if (rows.length === 0 && page === 1) {
+        outcome.reason = `the open listing answered EMPTY ${asks} times from the beginning, so it named nothing to compare`;
+        return { files, outcome };
+      }
+      for (const raw of rows) listed.add(raw.number);
+      if (rows.length < PER_PAGE) break;
+      page += 1;
+      asks = 0;
+    }
+    outcome.listed = listed.size;
+    const archivedOpen = new Set();
+    censusArchive(outDir, { openNumbers: archivedOpen });
+    const { numbers, left } = reconcileCandidates({ archivedOpen, listedOpen: listed, gone });
+    outcome.candidates = numbers.length + left;
+    outcome.left = left;
+    for (const number of numbers) {
+      budget.spend();
+      const read = numberReadVerdict({ repo, ...(await rest(`/repos/${repo}/issues/${number}`, { reply: true })) });
+      if (read.verdict === 'live') {
+        const collected = await collectNumber(repo, read.raw, outDir, { budget });
+        for (const [path, text] of collected.files) files.set(path, text);
+        outcome.reread.push({ number, state: collected.record.state });
+      } else if (read.verdict === 'transferred') {
+        const archived = readJsonFile(issuePath(outDir, number));
+        if (archived) files.set(issuePath(outDir, number), stableJson({ ...archived, transferred_to: read.to }));
+        outcome.transferred.push({ number, to: read.to });
+      } else if (read.verdict === 'destroyed') {
+        outcome.destroyed.push(number);
+      } else {
+        outcome.unreadable.push({ number, status: read.status });
+      }
+    }
+  } catch (err) {
+    if (!(err instanceof BudgetExhausted)) throw err;
+    outcome.reason = `${err.message} — the rest is left for the next run`;
+  }
+  return { files, outcome };
+}
+
 /**
  * The snapshot run.
  *
@@ -1311,6 +1537,9 @@ async function snapshot(repo, options) {
   let walkComplete = false;
   let blankPagesReasked = 0;
   let board = { open_issues_count: null, open_pull_requests: null, read_at: null };
+  // The instant each walk's last listing page came back — what a live walk's
+  // stored cursor settles against (§ A listing that lags).
+  const listingReadAt = {};
 
   /**
    * One phase's page walk. Returns whether the phase FINISHED (a short page, and
@@ -1325,6 +1554,7 @@ async function snapshot(repo, options) {
     for (;;) {
       walkBudget.spend();
       const batch = await rest(listingPath(repo, { since, page, state }));
+      listingReadAt[key] = new Date().toISOString();
       const rows = Array.isArray(batch) ? batch : [];
       if (rows.length === 0) {
         // § A blank page is not a reading. The witness — the board's own open
@@ -1424,6 +1654,14 @@ async function snapshot(repo, options) {
     else throw err;
   }
 
+  // A live walk's cursor settles behind the listing it was read from, so the
+  // next run re-reads the window this listing may not have caught up on —
+  // stopped or finished alike, since a stopped walk's cursor is also the next
+  // run's start.
+  for (const key of LIVE_WALKS) {
+    if (listingReadAt[key]) cursors[key] = settledCursor(cursors[key], listingReadAt[key]);
+  }
+
   // The board's own arithmetic, read in THIS run so the two sides of the count
   // check describe one instant. Skipped when the run stopped without having
   // enumerated the open set: spending the last requests on a census of an
@@ -1443,22 +1681,50 @@ async function snapshot(repo, options) {
   // repairs. The other order loses records and reports success.
   const written = applyWrites(files, { dryRun: options.dryRun });
 
-  const counts = censusArchive(outDir);
   const gone = readGoneLedger(outDir);
-  const check = countCheck({
-    openIssuesCount: board.open_issues_count,
-    openPullRequests: board.open_pull_requests,
-    archivedOpenIssues: counts.issues_open,
-    gone,
-    pending: countCheckPendingReason({
-      phase,
-      openSetComplete,
-      openSetCompletedHere,
-      deltaCompletedHere,
-      walkCompletedHere: walkComplete,
-      boardCountRead: board.open_issues_count !== null,
-    }),
-  });
+  const takeCensus = () => {
+    const census = censusArchive(outDir);
+    return {
+      counts: census,
+      check: countCheck({
+        openIssuesCount: board.open_issues_count,
+        openPullRequests: board.open_pull_requests,
+        archivedOpenIssues: census.issues_open,
+        gone,
+        pending: countCheckPendingReason({
+          phase,
+          openSetComplete,
+          openSetCompletedHere,
+          deltaCompletedHere,
+          walkCompletedHere: walkComplete,
+          boardCountRead: board.open_issues_count !== null,
+        }),
+      }),
+    };
+  };
+  let { counts, check } = takeCensus();
+
+  // A census that disagrees is reconciled before it is reported (§ A listing
+  // that lags): the numbers the open listing and the archive disagree on are
+  // read on their own, the answers written, the board's arithmetic read AGAIN
+  // so both sides name one instant after the repair, and the census retaken.
+  // The verdict reported is that second one; the first is kept beside it.
+  let reconcile = null;
+  if (!stopped && (check.verdict === 'shortfall' || check.verdict === 'surplus')) {
+    const first = { verdict: check.verdict, expected: check.expected, archived: check.archived, shortfall: check.shortfall, surplus: check.surplus };
+    try {
+      const repaired = await reconcileOpenSet(repo, outDir, { budget, gone });
+      for (const path of applyWrites(repaired.files, { dryRun: options.dryRun })) if (!written.includes(path)) written.push(path);
+      written.sort();
+      if (!repaired.outcome.reason) board = await readBoardArithmetic(repo, budget);
+      reconcile = { first, ...repaired.outcome };
+    } catch (err) {
+      if (err instanceof BudgetExhausted) reconcile = { first, reason: err.message };
+      else if (err instanceof RateLimited) stopped = { kind: 'rate-limit', reason: err.message, resetAt: err.resetAt };
+      else throw err;
+    }
+    ({ counts, check } = takeCensus());
+  }
 
   /**
    * The delta's own cursor and completeness, beside the history cursor and
@@ -1534,6 +1800,7 @@ async function snapshot(repo, options) {
       delta_completed_here: deltaCompletedHere,
       delta_requests: deltaRequests,
       blank_pages_reasked: blankPagesReasked,
+      reconcile,
     },
   });
 
@@ -1541,7 +1808,7 @@ async function snapshot(repo, options) {
   const manifestMoved = manifestChanged(previous, manifest) || written.length > 0;
   if (manifestMoved) writeIfChanged(manifestPath, stableJson(manifest), { dryRun: options.dryRun });
 
-  return { manifest, written, manifestMoved, stopped, plan, deltaPlan, walkComplete };
+  return { manifest, written, manifestMoved, stopped, plan, deltaPlan, walkComplete, reconcile };
 }
 
 /** What each phase is doing, in the words a reader of the run summary needs. */
@@ -1579,11 +1846,32 @@ export function renderRun(result, options) {
     `  since        ${m.since ?? '(from the beginning)'} — ${m.since_reason}`,
     `  read         ${m.run.numbers_read} number(s) in ${m.requests} request(s); walk ${m.run.walk_complete ? 'complete' : 'INCOMPLETE'}${m.run.blank_pages_reasked ? `; ${m.run.blank_pages_reasked} blank page(s) asked again` : ''}`,
     `  written      ${result.written.length} file(s)${result.manifestMoved ? ' + manifest' : ''}`,
-    `  archive      ${m.counts.records} record(s): ${m.counts.issues_open} open / ${m.counts.issues_closed} closed issue(s), ${m.counts.pulls_open} open / ${m.counts.pulls_closed} closed pull request(s)`,
+    `  archive      ${m.counts.records} record(s): ${m.counts.issues_open} open / ${m.counts.issues_closed} closed issue(s)${m.counts.issues_transferred ? ` / ${m.counts.issues_transferred} transferred` : ''}, ${m.counts.pulls_open} open / ${m.counts.pulls_closed} closed pull request(s)`,
   ];
 
   if (!result.written.length && !result.manifestMoved) {
     lines.push('  idempotent   nothing changed on the board since the last run, so nothing was written.');
+  }
+
+  const rec = m.run.reconcile ?? null;
+  if (rec) {
+    const first = rec.first.verdict === 'surplus' ? `SURPLUS of ${rec.first.surplus}` : `SHORTFALL of ${rec.first.shortfall}`;
+    const numbers = (rows, show) => (rows.length ? rows.map(show).join(', ') : 'none');
+    lines.push(
+      `  reconcile    the first census disagreed (${first}: archived ${rec.first.archived}, board ${rec.first.expected}), so it was reconciled before the verdict below:`,
+      rec.listed === null || rec.listed === undefined
+        ? `               nothing was compared — ${rec.reason}.`
+        : `               the open listing carried ${rec.listed} number(s); ${rec.candidates} disagreed with the archive and were read on their own${rec.left ? ` (${rec.left} left for the next run)` : ''}.`,
+    );
+    if (rec.listed !== null && rec.listed !== undefined) {
+      lines.push(
+        `               archived again: ${numbers(rec.reread, (r) => `#${r.number} ${r.state}`)}`,
+        `               transferred:    ${numbers(rec.transferred, (r) => `#${r.number} → ${r.to}`)}`,
+        `               destroyed:      ${numbers(rec.destroyed, (n) => `#${n} (404/410 — --restore=${n})`)}`,
+        ...(rec.unreadable.length ? [`               unreadable:     ${numbers(rec.unreadable, (r) => `#${r.number} (HTTP ${r.status})`)}`] : []),
+        ...(rec.reason ? [`               stopped early:  ${rec.reason}`] : ['               The board\'s arithmetic was then read again; the count check below is that second reading.']),
+      );
+    }
   }
 
   const check = m.count_check;
@@ -1604,8 +1892,8 @@ export function renderRun(result, options) {
   } else {
     lines.push(
       `  count check  SURPLUS of ${check.surplus} — the archive holds ${check.archived} open issue(s) where the board reports only ${check.expected}.`,
-      '               Records this archive carries are no longer on the board: destroyed with an account, deleted, or transferred.',
-      `               Print one back with --restore=N. A number deliberately left gone belongs in ${GONE_LEDGER_NAME}, which is the only way to quiet this.`,
+      '               Records this archive carries are no longer on the board: destroyed with an account, or deleted. A transfer is recorded by the reconcile and is not one of them.',
+      `               Print one back with --restore=N. A number deliberately left destroyed belongs in ${GONE_LEDGER_NAME}, which is the only way to quiet this.`,
     );
   }
 
@@ -1917,11 +2205,27 @@ function rearmThroughProxy(args) {
  * because those are what the walk is steering by — a stub that ignored them
  * would agree with any walk order at all.
  */
-function fakeBoard({ rows, openPulls = [], blankListings = 0 }) {
+/** A non-200 answer from the fake board: the status and, for a redirect, its `Location`. */
+class FakeReply {
+  constructor(status, location = null) {
+    this.status = status;
+    this.location = location;
+  }
+}
+
+/**
+ * The lag measured 2026-10-29 (#26084) is `lagging`: number → the row as it
+ * stood BEFORE its last update, served by the first `lagListings` listing GETs
+ * in place of the current row while every other row is served current. `moved`
+ * is number → `owner/name#n` (the per-number read answers 301 there);
+ * `destroyed` numbers answer 404. A per-number read serves the current row.
+ */
+function fakeBoard({ rows, openPulls = [], blankListings = 0, lagging = new Map(), lagListings = 0, moved = new Map(), destroyed = new Set() }) {
   const calls = [];
   // The blank reply measured 2026-10-22, reproduced: the first N listing GETs
   // answer `[]` whatever the board holds. The witness and the pulls do not.
   let blanksLeft = blankListings;
+  let lagLeft = lagListings;
   const serve = (path) => {
     if (path === '/repos/o/r') return { open_issues_count: rows.filter((r) => r.state === 'open').length };
     const url = new URL(`https://board${path}`);
@@ -1932,13 +2236,25 @@ function fakeBoard({ rows, openPulls = [], blankListings = 0 }) {
     const thread = /^\/repos\/o\/r\/issues\/(\d+)\/comments$/.exec(url.pathname);
     if (thread) return page === 1 ? (rows.find((r) => r.number === Number(thread[1]))?.thread ?? []) : [];
     if (/^\/repos\/o\/r\/pulls\/\d+\/(reviews|comments)$/.test(url.pathname)) return [];
+    const one = /^\/repos\/o\/r\/issues\/(\d+)$/.exec(url.pathname);
+    if (one) {
+      const number = Number(one[1]);
+      if (moved.has(number)) {
+        const [to, n] = moved.get(number).split('#');
+        return new FakeReply(301, `${API}/repos/${to}/issues/${n}`);
+      }
+      return destroyed.has(number) ? new FakeReply(404) : (rows.find((r) => r.number === number) ?? new FakeReply(404));
+    }
     if (url.pathname !== '/repos/o/r/issues') return [];
     if (blanksLeft > 0) {
       blanksLeft -= 1;
       return [];
     }
+    const lagged = lagLeft > 0;
+    if (lagged) lagLeft -= 1;
     const sinceAt = q.get('since') ? Date.parse(q.get('since')) : null;
     const matching = rows
+      .map((r) => (lagged && lagging.has(r.number) ? lagging.get(r.number) : r))
       .filter((r) => (q.get('state') === 'open' ? r.state === 'open' : true))
       .filter((r) => sinceAt === null || Date.parse(r.updated_at) >= sinceAt)
       .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || a.number - b.number);
@@ -1968,6 +2284,9 @@ async function driveSnapshot({ dir, board, options = {} }) {
     const path = String(url).slice(API.length);
     board.calls.push(path);
     const body = board.serve(path);
+    if (body instanceof FakeReply) {
+      return Promise.resolve({ ok: false, status: body.status, headers: { get: (name) => (name === 'location' ? body.location : null) }, json: () => Promise.resolve({}) });
+    }
     return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve(body) });
   };
   try {
@@ -2016,8 +2335,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the delta walk, driven: the archive catches up with the live board': 19,
   'the freshness row: a stale archive is never a green run': 18,
   'the blank page: asked again, then believed or stopped by where the walk is': 13,
+  'the lagging listing and the moved card: a disagreement is reconciled before it is reported': 22,
 });
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -2356,6 +2676,9 @@ export async function selfTest() {
   const blankDir = mkdtempSync(join(tmpdir(), 'board-snapshot-blank-'));
   const blankStopDir = mkdtempSync(join(tmpdir(), 'board-snapshot-blank-stop-'));
   const plainDir = mkdtempSync(join(tmpdir(), 'board-snapshot-plain-'));
+  const lagDir = mkdtempSync(join(tmpdir(), 'board-snapshot-lag-'));
+  const settleDir = mkdtempSync(join(tmpdir(), 'board-snapshot-settle-'));
+  const destroyedDir = mkdtempSync(join(tmpdir(), 'board-snapshot-destroyed-'));
   try {
     // THE REGRESSION, driven from the manifest board-archive actually carried.
     //
@@ -2628,8 +2951,126 @@ export async function selfTest() {
       unpaid.manifest.run.blank_pages_reasked === 0 && !/asked again/.test(renderRun(unpaid, { out: plainDir, dryRun: true }).text)
       && believed.stopped === null && believed.manifest.walk_phase === 'incremental' && believed.manifest.run.walk_complete === true
       && believed.manifest.run.blank_pages_reasked === B - 1 && believed.manifest.next_since === unpaid.manifest.next_since);
+
+    // -- the lagging listing and the moved card (#27726) ----------------------
+    battery('the lagging listing and the moved card: a disagreement is reconciled before it is reported');
+    const NOW = Date.now();
+    const ago = (ms) => new Date(NOW - ms).toISOString();
+    const MIN = 60_000;
+    t('a cursor inside the settle window is held back to the listing read minus the window',
+      settledCursor(ago(MIN), ago(0)) === new Date(NOW - LISTING_SETTLE_MS).toISOString());
+    t('…while a cursor already older than that is returned unchanged — a quiet board\'s manifest does not move',
+      settledCursor('2026-09-13T14:50:00Z', ago(0)) === '2026-09-13T14:50:00Z');
+    t('…and no cursor, or an unreadable stamp, is never turned into one built from NaN',
+      settledCursor(null, ago(0)) === null && settledCursor('not a stamp', ago(0)) === 'not a stamp' && settledCursor(ago(MIN), 'nope') === ago(MIN));
+    const cands = reconcileCandidates({ archivedOpen: [26084, 25896, 103, 11286], listedOpen: [103, 27741], gone: [11286] });
+    t('the candidates are both directions of the disagreement, ascending, and never a gone-ledger number',
+      stableJson(cands) === stableJson({ numbers: [25896, 26084, 27741], left: 0 }));
+    t('…bounded, with the remainder counted rather than spent',
+      stableJson(reconcileCandidates({ archivedOpen: [1, 2, 3, 4], listedOpen: [], max: 3 })) === stableJson({ numbers: [1, 2, 3], left: 1 }));
+    t('a per-number read of 200 is the live record',
+      numberReadVerdict({ repo: 'o/r', status: 200, body: { number: 7 } }).verdict === 'live');
+    t('a 301 to an issue in ANOTHER repository is a transfer, named by where it went (the #25896 reply)',
+      stableJson(numberReadVerdict({ repo: 'objectstack-ai/objectstack', status: 301, location: 'https://api.github.com/repos/objectstack-ai/hotcrm/issues/2307' }))
+        === stableJson({ verdict: 'transferred', to: 'objectstack-ai/hotcrm#2307' }));
+    t('…a redirect within THIS repository (a rename) is not a transfer and is not acted on',
+      numberReadVerdict({ repo: 'O/R', status: 301, location: 'https://api.github.com/repos/o/r/issues/7' }).verdict === 'unreadable'
+      && numberReadVerdict({ repo: 'o/r', status: 301, location: null }).verdict === 'unreadable');
+    t('…404 and 410 are the destruction signature, and anything else is unreadable',
+      numberReadVerdict({ repo: 'o/r', status: 404 }).verdict === 'destroyed' && numberReadVerdict({ repo: 'o/r', status: 410 }).verdict === 'destroyed'
+      && numberReadVerdict({ repo: 'o/r', status: 502 }).verdict === 'unreadable');
+    t('the reconcile reads the open board in creation order, which an update mid-read does not reshuffle',
+      openSetPath('o/r', { page: 2 }) === '/repos/o/r/issues?state=open&sort=created&direction=asc&per_page=100&page=2');
+
+    const SEEDED = ago(6 * 60 * MIN);
+    const seedArchive = (dir, records, gone = null) => {
+      writeIfChanged(join(dir, MANIFEST_NAME), stableJson({
+        schema: ARCHIVE_SCHEMA,
+        repo: 'o/r',
+        generated_at: SEEDED,
+        walk_phase: 'incremental',
+        walk: {
+          open_set: { complete: true, completed_at: '2026-09-10T15:39:49.484Z', cursor: null },
+          delta: { complete: true, cursor: SEEDED, since: SEEDED, slice: DELTA_REQUEST_SLICE },
+          history: { complete: true, cursor: '2026-09-23T20:24:00Z' },
+        },
+        since: SEEDED,
+        since_reason: 'seeded',
+        next_since: SEEDED,
+        resume: null,
+      }));
+      for (const raw of records) writeIfChanged(issuePath(dir, raw.number), stableJson(issueRecord(raw)));
+      if (gone) writeIfChanged(join(dir, GONE_LEDGER_NAME), stableJson(gone.map((number) => ({ number, note: 'accepted as gone' }))));
+    };
+    const card = (number, over = {}) => RAW({ number, comments: 0, html_url: `https://github.com/o/r/issues/${number}`, created_at: ago(3 * 24 * 60 * MIN), updated_at: ago(2 * 24 * 60 * MIN), ...over });
+
+    // TODAY'S RED, reproduced: a close the listing served stale (#26084) and a
+    // card transferred out (#25896), on an archive that was level before them.
+    seedArchive(lagDir, [card(101), card(103)]);
+    const closedLate = card(104, { state: 'closed', state_reason: 'completed', updated_at: ago(2 * MIN), closed_at: ago(2 * MIN) });
+    const lagBoard = () => fakeBoard({
+      rows: [card(103), closedLate, card(105, { updated_at: ago(MIN) })],
+      lagging: new Map([[104, card(104, { updated_at: ago(3 * 60 * MIN) })]]),
+      lagListings: 1,
+      moved: new Map([[101, 'o/hotcrm#2307']]),
+    });
+    const lagRun = lagBoard();
+    const repaired = await driveSnapshot({ dir: lagDir, board: lagRun });
+    t('TODAY\'S RED, REPRODUCED: the walk archives the stale open row and the census first disagrees with the board by a SURPLUS of 2',
+      repaired.reconcile?.first.verdict === 'surplus' && repaired.reconcile.first.surplus === 2 && repaired.reconcile.first.archived === 4 && repaired.reconcile.first.expected === 2);
+    t('…and is RECONCILED, not reported: the close is archived again from its own read, the transfer is recorded, and the check reads OK',
+      repaired.manifest.count_check.verdict === 'ok' && readArchivedCard(lagDir, 104).issue.state === 'closed'
+      && stableJson(repaired.reconcile?.reread) === stableJson([{ number: 104, state: 'closed' }])
+      && stableJson(repaired.reconcile?.transferred) === stableJson([{ number: 101, to: 'o/hotcrm#2307' }]));
+    t('…the transferred record STAYS in the archive, whole, with where it went — counted apart from the open set',
+      readArchivedCard(lagDir, 101).issue.transferred_to === 'o/hotcrm#2307' && readArchivedCard(lagDir, 101).issue.body === 'the body that a suspension destroys'
+      && repaired.manifest.counts.issues_transferred === 1 && repaired.manifest.counts.issues_open === 2);
+    t('…the board\'s arithmetic is read AGAIN after the repair, so the two sides of the reported check name one instant',
+      lagRun.calls.filter((c) => c === '/repos/o/r').length === 2
+      && lagRun.calls.lastIndexOf('/repos/o/r') > lagRun.calls.indexOf('/repos/o/r/issues/104'));
+    const repairedText = renderRun(repaired, { out: lagDir, dryRun: false });
+    t('…and the run is GREEN and says what it reconciled, with the first census beside the verdict',
+      repairedText.exitCode === EXIT_OK && /reconcile    the first census disagreed \(SURPLUS of 2/.test(repairedText.text)
+      && /#101 → o\/hotcrm#2307/.test(repairedText.text) && /#104 closed/.test(repairedText.text) && /count check  ok/.test(repairedText.text));
+    t('…while the cursor it stores is SETTLED: no later than the window before its last listing read, though the newest row is a minute old',
+      Date.parse(repaired.manifest.next_since) <= Date.now() - LISTING_SETTLE_MS && Date.parse(repaired.manifest.next_since) < Date.parse(ago(MIN)));
+    const after = lagBoard();
+    const steady = await driveSnapshot({ dir: lagDir, board: after });
+    t('the next run is green with nothing to reconcile, and the transferred number is never read again',
+      steady.manifest.count_check.verdict === 'ok' && steady.reconcile === null && steady.manifest.run.reconcile === null
+      && !after.calls.some((c) => /^\/repos\/o\/r\/issues\/\d+$/.test(c)) && steady.manifest.counts.issues_transferred === 1);
+
+    // THE SETTLE WINDOW, alone: a lagged update that moves no count, so no
+    // reconcile runs — only the next run's window can catch it.
+    seedArchive(settleDir, [card(201, { labels: [{ name: 'a' }] })]);
+    const relabelled = card(201, { labels: [{ name: 'b' }], updated_at: ago(2 * MIN) });
+    const settleRows = [relabelled, card(202, { updated_at: ago(MIN) })];
+    const settleLag = new Map([[201, card(201, { labels: [{ name: 'a' }] })]]);
+    const lagged = await driveSnapshot({ dir: settleDir, board: fakeBoard({ rows: settleRows, lagging: settleLag, lagListings: 99 }) });
+    t('a lagged relabel is missed by the run whose listing served it stale, which agrees with the board and reconciles nothing',
+      lagged.manifest.count_check.verdict === 'ok' && lagged.reconcile === null && stableJson(readArchivedCard(settleDir, 201).issue.labels) === stableJson(['a']));
+    await driveSnapshot({ dir: settleDir, board: fakeBoard({ rows: settleRows }) });
+    t('…and CAUGHT by the next run, whose settled window starts before it — a cursor taken from the newest row (a minute old) would have skipped it for good',
+      stableJson(readArchivedCard(settleDir, 201).issue.labels) === stableJson(['b']));
+
+    // THE REAL ALARM SURVIVES: a destroyed number is read, named and left red.
+    seedArchive(destroyedDir, [card(301), card(302), card(303)], [302]);
+    const goneBoard = fakeBoard({ rows: [card(303)], destroyed: new Set([301, 302]) });
+    const destroyedRun = await driveSnapshot({ dir: destroyedDir, board: goneBoard });
+    const destroyedText = renderRun(destroyedRun, { out: destroyedDir, dryRun: false });
+    t('⛔ NOT A TOLERANCE: a number the board answers 404 for stays archived as it was, the check stays a SURPLUS and the run exits 2, naming its --restore',
+      destroyedRun.manifest.count_check.verdict === 'surplus' && destroyedRun.manifest.count_check.surplus === 1 && destroyedText.exitCode === EXIT_COUNT_MISMATCH
+      && stableJson(destroyedRun.reconcile?.destroyed) === stableJson([301]) && /#301 \(404\/410 — --restore=301\)/.test(destroyedText.text)
+      && readArchivedCard(destroyedDir, 301).issue.state === 'open' && readArchivedCard(destroyedDir, 301).issue.transferred_to === undefined);
+    t('…and a number the maintainer already answered for in the gone ledger is never read',
+      !goneBoard.calls.includes('/repos/o/r/issues/302') && goneBoard.calls.includes('/repos/o/r/issues/301'));
+    const blankBoard = fakeBoard({ rows: [card(303)], destroyed: new Set([301, 302]), blankListings: 99 });
+    const blankRun = await driveSnapshot({ dir: destroyedDir, board: blankBoard });
+    t('a reconcile whose open listing stays blank from the beginning compares nothing, reads no number, and the disagreement is reported as it stands',
+      blankRun.manifest.count_check.verdict === 'surplus' && blankRun.reconcile?.listed === null && /answered EMPTY/.test(blankRun.reconcile?.reason)
+      && !blankBoard.calls.some((c) => /^\/repos\/o\/r\/issues\/\d+$/.test(c)) && /nothing was compared/.test(renderRun(blankRun, { out: destroyedDir, dryRun: false }).text));
   } finally {
-    for (const d of [liveDir, busyDir, stopDir, idemDir, quietDir, staleDir, blankDir, blankStopDir, plainDir]) rmSync(d, { recursive: true, force: true });
+    for (const d of [liveDir, busyDir, stopDir, idemDir, quietDir, staleDir, blankDir, blankStopDir, plainDir, lagDir, settleDir, destroyedDir]) rmSync(d, { recursive: true, force: true });
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
