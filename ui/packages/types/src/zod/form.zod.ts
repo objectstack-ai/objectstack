@@ -1314,6 +1314,8 @@ export const FormSchema = BaseSchema.extend({
   submitLabel: z.string().optional().describe('Submit button label'),
   cancelLabel: z.string().optional().describe('Cancel button label'),
   showCancel: z.boolean().optional().describe('Show cancel button'),
+  showReset: z.boolean().optional().describe('Show a Reset button that restores the opening values without saving'),
+  resetLabel: z.string().optional().describe('Reset button label'),
   // objectui#11070 — read by the `form` renderer (destructured off the node,
   // default `true`; the submit button renders only while it holds) and
   // refused by the strict authoring face until declared here.

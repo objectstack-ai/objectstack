@@ -12,7 +12,7 @@ import { ActionRunner } from '@object-ui/core';
 import { builtInLocales, registerBuiltInLocales } from '@object-ui/i18n/locales';
 import { ApiErrorSchema, FlowFailureDetailsSchema } from '@objectstack/spec/api';
 import type { AutomationResult } from '@objectstack/spec/contracts';
-import { flowSuccessCopy, interpretFlowResponse, judgeFlowLaunch } from '../flowResponse';
+import { apiActionFailureMessage, flowSuccessCopy, interpretFlowResponse, judgeFlowLaunch } from '../flowResponse';
 
 const ok = { ok: true, status: 200 };
 
@@ -741,5 +741,65 @@ describe('interpretFlowResponse — a refusal met inside the run, by the record-
         expect(on200(run({ innerRefusal: UNIQUE, userMessage: USER_TEXT, errorMessage: 'Conversion failed.' })))
             .toMatchObject({ error: 'Conversion failed.' });
         expect(on200(run({}))).toMatchObject({ error: RAW_ERROR });
+    });
+});
+
+describe('apiActionFailureMessage — a flow-backed api action reads the run refusal, not the node chain (objectstack#27487)', () => {
+    registerBuiltInLocales();
+
+    // The card's toast: a map item's subflow met the refusal on its update.
+    const REFUSAL = 'You do not have permission to perform this action. Contact your administrator if you need access.';
+    const ONE_LEVEL = `Node 'write_estimate' failed: update_record(showcase_task) failed: ${REFUSAL}`;
+    const NESTED = "Node 'recalc_each' failed: map 'recalc_each': item 0 (subflow 'showcase_recalc_task_estimate') failed: "
+        + ONE_LEVEL;
+    const DENIED = { code: 'PERMISSION_DENIED', message: REFUSAL } as const;
+    const RULE = { code: 'VALIDATION_FAILED', message: 'Estimate must be a positive number.' } as const;
+
+    /** A declared `type: 'flow'` endpoint's `400 FLOW_FAILED`, proven real by the spec's own schemas. */
+    function endpointFailed(message: string, details: Record<string, unknown>, userMessage?: string) {
+        const error = {
+            code: 'FLOW_FAILED',
+            message,
+            httpStatus: 400,
+            ...(userMessage ? { userMessage } : {}),
+            details,
+        };
+        expect(ApiErrorSchema.safeParse(error).error?.issues).toBeUndefined();
+        expect(FlowFailureDetailsSchema.safeParse(details).error?.issues).toBeUndefined();
+        return { success: false, error };
+    }
+    const on400 = (json: unknown, locale?: string) => apiActionFailureMessage({ status: 400 }, json, 'HTTP 400', locale);
+
+    it("a one-level permission refusal reads the record form's line, in the host's language", () => {
+        expect(on400(endpointFailed(ONE_LEVEL, { innerRefusal: DENIED }))).toBe(builtInLocales.en.form.noPermissionToSave);
+        expect(on400(endpointFailed(ONE_LEVEL, { innerRefusal: DENIED }), 'zh-CN')).toBe(builtInLocales.zh.form.noPermissionToSave);
+    });
+
+    it('the nested map → subflow chain reads the same line once the inner refusal is carried', () => {
+        const shown = on400(endpointFailed(NESTED, { innerRefusal: DENIED }));
+        expect(shown).toBe(builtInLocales.en.form.noPermissionToSave);
+        expect(shown).not.toContain("Node '");
+        expect(shown).not.toContain('subflow');
+    });
+
+    it("a non-permission refusal reads its own sentence; a userMessage and the flow's errorMessage outrank it", () => {
+        expect(on400(endpointFailed(NESTED, { innerRefusal: RULE }))).toBe(RULE.message);
+        expect(on400(endpointFailed(NESTED, { innerRefusal: DENIED }, 'Ask your lead to recalculate.')))
+            .toBe('Ask your lead to recalculate.');
+        expect(on400(endpointFailed(NESTED, { errorMessage: 'Recalculation failed.', innerRefusal: DENIED })))
+            .toBe('Recalculation failed.');
+    });
+
+    it('an envelope without the members falls back to its message, never to silence', () => {
+        expect(on400(endpointFailed(NESTED, {}))).toBe(NESTED);
+    });
+
+    it('every other answer reads the envelope as the door always has', () => {
+        const denied = { success: false, error: { code: 'PERMISSION_DENIED', message: 'Forbidden', details: { innerRefusal: RULE } } };
+        expect(apiActionFailureMessage({ status: 403 }, denied, 'HTTP 403', 'en')).toBe('Forbidden');
+        // A 400 that is not FLOW_FAILED does not read flow carriers either.
+        const invalid = { success: false, error: { code: 'VALIDATION_FAILED', message: 'Bad body', details: { innerRefusal: RULE } } };
+        expect(apiActionFailureMessage({ status: 400 }, invalid, 'HTTP 400', 'en')).toBe('Bad body');
+        expect(apiActionFailureMessage({ status: 502 }, null, 'HTTP 502', 'en')).toBe('HTTP 502');
     });
 });

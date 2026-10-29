@@ -6,6 +6,7 @@
     "fields",
     "field-types",
     "field-type-decision-tree",
+    "currency",
     "relationships",
     "object-extensions",
     "validation",

@@ -3754,6 +3754,13 @@ const ko = {
       countSeedData: "샘플 데이터",
       extendTarget: "기존 앱에 추가: {{app}}",
       awaitingConfirm: "확인 대기 중",
+      iterateOrNew: {
+        question: "이 계획은 이미 있는 앱 “{{app}}”과(와) 겹칩니다. 이 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
+        questionUnnamed: "이 계획은 이미 있는 앱과 겹칩니다. 그 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
+        extend: "“{{app}}” 계속 개선",
+        buildNew: "별도의 앱 만들기",
+        replyHint: "어느 쪽인지 회신해 주세요.",
+      },
       objectsAndFields: "개체 및 필드",
       views: "뷰",
       suggestedField: "추가 제안",

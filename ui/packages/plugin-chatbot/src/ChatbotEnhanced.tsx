@@ -857,6 +857,19 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   planAnswerMessage?: (question: string, option: string) => string;
   /**
+   * objectstack#27480 — builds the message the extend-or-new question's "keep
+   * improving" choice sends (a plan whose `proposedPlan.iterateOrNew` is set),
+   * given the existing app's display name. OUTBOUND text like
+   * `planApproveMessage`, so the console picks it by the language of the
+   * conversation. Default: `Keep improving "<app>" instead of building a new app.`
+   */
+  planExtendExistingMessage?: (app: string) => string;
+  /**
+   * objectstack#27480 — the message the extend-or-new question's "build a
+   * separate app" choice sends; outbound, as above (default "Build a separate, new app.").
+   */
+  planBuildNewAppMessage?: string;
+  /**
    * Labels for the granular confirm-before-change card (`changes_proposed`).
    * Separate from the plan card's: that one approves a whole build, this one
    * approves a specific set of metadata edits. They were hard-coded Chinese
@@ -1907,6 +1920,91 @@ function useExtendChip(
   );
 }
 
+/**
+ * objectstack#27480 — the extend-or-new question a `decision: 'iterate_or_new'`
+ * plan asks, drawn in place of the plan card's "Build it" gate. The plan
+ * overlaps an app the user already has, so one click on "Build it" could build
+ * a duplicate of it; the card asks instead, and each choice sends its answer
+ * as a chat message (`onChoose`), the same channel the user would type into.
+ *
+ * The app is named by the envelope's `label`, else by the host's
+ * `resolveAppLabel`, else by its machine name. An overlap that names no app
+ * gets the question without a name and a reply hint, not a one-click
+ * "keep improving" that could not say which app it means.
+ *
+ * `mode`: `choose` draws the two choices; `reply` (the host wired no message
+ * sending) draws the reply hint; `settled` (a build already ran after this
+ * question) draws the question alone.
+ */
+function IterateOrNewQuestion({
+  iterateOrNew,
+  resolveAppLabel,
+  mode,
+  onChoose,
+  disabled,
+  extendMessage,
+  buildNewMessage,
+}: {
+  iterateOrNew: NonNullable<ProposedPlan['iterateOrNew']>;
+  resolveAppLabel: ((appName: string) => string | undefined) | undefined;
+  mode: 'choose' | 'reply' | 'settled';
+  onChoose: (message: string) => void;
+  disabled: boolean;
+  extendMessage: (app: string) => string;
+  buildNewMessage: string;
+}) {
+  const { t } = useObjectTranslation();
+  const { app } = iterateOrNew;
+  const appName = app ? app.label || resolveAppLabel?.(app.name) || app.name : undefined;
+  const question = appName
+    ? t('chatbot.plan.iterateOrNew.question', {
+        app: appName,
+        defaultValue: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
+      })
+    : t('chatbot.plan.iterateOrNew.questionUnnamed', {
+        defaultValue: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
+      });
+  const choiceClass =
+    'inline-flex h-7 items-center rounded-md border bg-background px-3 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
+  return (
+    <div
+      className="flex flex-col gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 dark:border-amber-900/50 dark:bg-amber-950/30"
+      data-testid="proposed-plan-iterate-or-new"
+    >
+      <span className="inline-flex items-start gap-1.5 text-[11px] font-medium text-amber-900 dark:text-amber-200">
+        <HelpCircle className="mt-px size-3.5 shrink-0" />
+        <span data-testid="proposed-plan-iterate-or-new-question">{question}</span>
+      </span>
+      {mode === 'choose' && appName ? (
+        <div className="flex flex-wrap items-center gap-1.5 pl-5" data-testid="proposed-plan-iterate-or-new-choices">
+          <button
+            type="button"
+            onClick={() => onChoose(extendMessage(appName))}
+            disabled={disabled}
+            className={choiceClass}
+            data-testid="proposed-plan-extend-existing"
+          >
+            {t('chatbot.plan.iterateOrNew.extend', { app: appName, defaultValue: 'Keep improving "{{app}}"' })}
+          </button>
+          <button
+            type="button"
+            onClick={() => onChoose(buildNewMessage)}
+            disabled={disabled}
+            className={choiceClass}
+            data-testid="proposed-plan-build-new"
+          >
+            {t('chatbot.plan.iterateOrNew.buildNew', { defaultValue: 'Build a separate app' })}
+          </button>
+        </div>
+      ) : mode === 'settled' ? null : (
+        <span className="pl-5 text-[11px] italic text-muted-foreground/80" data-testid="proposed-plan-iterate-or-new-hint">
+          {t('chatbot.plan.iterateOrNew.replyHint', { defaultValue: 'Reply to say which.' })}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function summarizeTools(
   tools: ChatbotEnhancedToolInvocation[],
   /**
@@ -2087,6 +2185,8 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       planApproveMessage = 'Looks good — build it as proposed.',
       planApproveDefaultsMessage = 'Build it with your best assumptions; use sensible defaults for the open questions.',
       planAnswerMessage = (question: string, option: string) => `For "${question}", go with: ${option}.`,
+      planExtendExistingMessage = (app: string) => `Keep improving "${app}" instead of building a new app.`,
+      planBuildNewAppMessage = 'Build a separate, new app.',
       changesTitleLabel = 'Confirm changes',
       changesConfirmedLabel = 'Confirmed',
       changesConfirmLabel = 'Confirm',
@@ -3640,8 +3740,24 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     the input so the user types changes. Falls back to a text hint
                     when the host hasn't wired message sending. Once this plan's
                     build has run (issue #432) the actions collapse to a static
-                    "Built" badge so it can't be re-triggered. */}
-                {onSendMessage ? (
+                    "Built" badge so it can't be re-triggered.
+                    objectstack#27480 — an `iterate_or_new` plan has no such
+                    gate: it overlaps an app that already exists, so in place
+                    of the actions it asks whether to keep improving that app
+                    or build a separate one. */}
+                {tool.proposedPlan.iterateOrNew ? (
+                  <IterateOrNewQuestion
+                    iterateOrNew={tool.proposedPlan.iterateOrNew}
+                    resolveAppLabel={resolveAppLabel}
+                    mode={
+                      !onSendMessage ? 'reply' : builtPlanIds.has(tool.toolCallId) ? 'settled' : 'choose'
+                    }
+                    onChoose={handleSuggestionClick}
+                    disabled={planActionsLocked}
+                    extendMessage={planExtendExistingMessage}
+                    buildNewMessage={planBuildNewAppMessage}
+                  />
+                ) : onSendMessage ? (
                   builtPlanIds.has(tool.toolCallId) ? (
                     <div className="flex flex-wrap items-center gap-1.5 pt-0.5" data-testid="proposed-plan-actions">
                       <span

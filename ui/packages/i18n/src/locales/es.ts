@@ -3831,6 +3831,13 @@ const es = {
       countSeedData: "datos de ejemplo",
       extendTarget: "Se añade a la app existente: {{app}}",
       awaitingConfirm: "Pendiente de confirmación",
+      iterateOrNew: {
+        question: "Esto se solapa con «{{app}}», una app que ya tiene. ¿Seguir mejorándola o crear una app independiente?",
+        questionUnnamed: "Esto se solapa con una app que ya tiene. ¿Seguir mejorando esa app o crear una independiente?",
+        extend: "Seguir mejorando «{{app}}»",
+        buildNew: "Crear una app independiente",
+        replyHint: "Responda para indicar cuál prefiere.",
+      },
       objectsAndFields: "Objetos y campos",
       views: "Vistas",
       suggestedField: "sugerido",

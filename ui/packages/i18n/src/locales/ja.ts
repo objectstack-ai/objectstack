@@ -3757,6 +3757,13 @@ const ja = {
       countSeedData: "サンプルデータ",
       extendTarget: "既存のアプリに追加：{{app}}",
       awaitingConfirm: "確認待ち",
+      iterateOrNew: {
+        question: "このプランは既存のアプリ「{{app}}」と重なっています。このアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
+        questionUnnamed: "このプランは既存のアプリと重なっています。そのアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
+        extend: "「{{app}}」を引き続き改善",
+        buildNew: "別のアプリを作成",
+        replyHint: "どちらにするか返信してください。",
+      },
       objectsAndFields: "オブジェクトとフィールド",
       views: "ビュー",
       suggestedField: "追加提案",
