@@ -251,12 +251,16 @@ export interface NoOperatorObjectRefusal {
   readonly aggregated: boolean;
 }
 
-/** How the object is named in the words: its keys, never its values. */
+/**
+ * How the object is named in the words: its keys, never its values — the
+ * first, and a count of the rest. [#27351] Every position and kind prints this
+ * head before its route, and the path already places the object, so listing
+ * more keys would cost the route its room inside the client cap.
+ */
 function describeObject(keys: readonly string[]): string {
   if (keys.length === 0) return 'an empty object {}';
-  const shown = keys.slice(0, 3).map((key) => JSON.stringify(key)).join(', ');
-  const more = keys.length > 3 ? `, and ${keys.length - 3} more` : '';
-  return `an object with no operator key (keys ${shown}${more})`;
+  const more = keys.length > 1 ? `, and ${keys.length - 1} more` : '';
+  return `an object with no operator key (keys ${JSON.stringify(keys[0])}${more})`;
 }
 
 /**

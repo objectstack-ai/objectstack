@@ -69,10 +69,10 @@ const STRESS_MULTI: Fixture = { ...STRESS, multiple: true };
 
 /** The opening and the closing words of each reason's route. */
 function routes(f: Fixture): Record<string, readonly [string, string]> {
-  const ids = f.multiple ? 'an $or of those for several.' : '"$in": [ID, …] } }.';
+  const ids = f.multiple ? '"$contains": ID } }, one per id.' : '"$in": [ID, …] } }.';
   return {
-    secondLevel: [`Read '${f.target}' with { "parent_account": { … } } yourself`, ids],
-    dottedKey: [`Read '${f.target}' with that condition yourself`, ids],
+    secondLevel: [`Read '${f.target}' with { "parent_account": { … } }`, ids],
+    dottedKey: [`Read '${f.target}' with that condition`, ids],
     empty: ['Name one (', '"$null": false } }.'],
     undeclaredKey: ['Name a field it declares', '"FIELD": VALUE } }.'],
     unregistered: ['Match ', ids],
