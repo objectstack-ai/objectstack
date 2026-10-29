@@ -30,6 +30,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ObjectQL } from '@objectstack/objectql';
 import { Runtime } from './runtime.js';
 import { createStandaloneStack } from './standalone-stack.js';
 
@@ -148,7 +149,7 @@ describe('an artifact hot reload refreshes every read of every item the boot reg
 
   it('the reload keeps the package record the boot installed: same source, still enabled', async () => {
     const { kernel, reload } = await bootOverArtifact();
-    const registry = (kernel.getService('objectql') as any).registry;
+    const registry = kernel.getService<ObjectQL>('objectql').registry;
     const before = registry.getPackage(PACKAGE_ID);
     expect(before).toMatchObject({ source: 'code', enabled: true, status: 'installed' });
 

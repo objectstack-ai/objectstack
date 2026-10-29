@@ -19,7 +19,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import type { IEmailTransport, TransportSendResult } from '@objectstack/spec/contracts';
 import { EmailService } from './email-service.js';
 import { createRegistryEmailTemplateLoader } from './template-loader.js';
@@ -92,7 +92,7 @@ describe('a hot reloaded declared email template is what the next send renders',
     await kernel.use(app);
     await kernel.bootstrap();
     const ctx = app.ctx!;
-    const engine: any = kernel.getService('objectql');
+    const engine = kernel.getService<ObjectQL>('objectql');
     const protocol: any = kernel.getService('protocol');
     const transport = new CaptureTransport();
     const mail = new EmailService({
