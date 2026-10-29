@@ -59,7 +59,7 @@ type Injected = { url: string; init: RequestInit };
 function boot(opts: {
     disabled?: string[];
     /** What the target answers: status, JSON body, extra response headers. */
-    answer?: { status?: number; body?: unknown; headers?: Array<[string, string]> };
+    answer?: { status?: number; body?: unknown; text?: string; headers?: Array<[string, string]> };
     noServer?: boolean;
 } = {}) {
     const disabled = new Set(opts.disabled ?? []);
@@ -67,9 +67,12 @@ function boot(opts: {
     const answer = opts.answer ?? {};
     const request = vi.fn(async (url: string, init: RequestInit) => {
         injected.push({ url, init });
-        return new Response(JSON.stringify(answer.body ?? { success: true, data: { ok: true } }), {
+        // `text` is a raw (non-JSON) body with the caller's own content-type;
+        // otherwise the JSON `body` under `application/json`.
+        const raw = typeof answer.text === 'string';
+        return new Response(raw ? answer.text : JSON.stringify(answer.body ?? { success: true, data: { ok: true } }), {
             status: answer.status ?? 200,
-            headers: [['content-type', 'application/json'], ...(answer.headers ?? [])],
+            headers: [...(raw ? [] : [['content-type', 'application/json'] as [string, string]]), ...(answer.headers ?? [])],
         });
     });
     const server = { getRawApp: () => ({ request }) };
@@ -181,8 +184,9 @@ describe('door 1 — REST `POST /actions/:object/:action` forwards a same-origin
         expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
         expect(injected).toHaveLength(1);
         const [{ url, init }] = injected;
-        // The caller's origin, so a target that reads `request.url` sees the deployment, not localhost.
-        expect(url).toBe('https://app.example.test/api/v1/auth/admin/ban-user');
+        // `http://<Host>` — the URL the direct request has at this process. The
+        // caller's `x-forwarded-proto: https` is NOT consulted (see the next case).
+        expect(url).toBe('http://app.example.test/api/v1/auth/admin/ban-user');
         expect(init.method).toBe('POST');
         const headers = headersOf(init);
         expect(headers.authorization).toBe('Bearer tok_member');
@@ -226,6 +230,41 @@ describe('door 1 — REST `POST /actions/:object/:action` forwards a same-origin
         expect(relayed['x-unrelated']).toBeUndefined();
         // A stock better-auth body is not enveloped: it comes back as-is.
         expect(res?.response?.body?.data).toEqual({ session: { userId: 'u_target' } });
+    });
+
+    it('builds the forwarded URL from `Host` alone — a caller-sent `X-Forwarded-Host` / `-Proto` cannot choose it (they cross as headers only)', async () => {
+        // `server.trustProxy` is the platform's one rule for believing forwarded
+        // headers (`security/inbound-rate-limit.ts`), and this seam cannot see
+        // it; so the URL never follows them. The headers still reach the target
+        // as the caller sent them, where its own trust rule judges them.
+        const { dispatcher, injected } = boot();
+
+        const res = await dispatcher.handleActions(
+            `/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' },
+            CTX({ 'x-forwarded-host': 'attacker.example', 'x-forwarded-proto': 'https' }),
+        );
+
+        expect(statusOf(res)).toBe(200);
+        expect(injected[0].url).toBe('http://app.example.test/api/v1/auth/admin/ban-user');
+        const headers = headersOf(injected[0].init);
+        expect(headers['x-forwarded-host']).toBe('attacker.example');
+        expect(headers['x-forwarded-proto']).toBe('https');
+    });
+
+    it('refuses (502) a target that answered 2xx with a non-JSON body instead of relaying it as a result', async () => {
+        // The console's direct fetch read such an answer as `{}` — a silent
+        // loss. The door names the content-type so the declaration can be fixed.
+        const { dispatcher, injected } = boot({
+            answer: { status: 200, text: 'id,name\n1,ada\n', headers: [['content-type', 'text/csv; charset=utf-8']] },
+        });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' }, CTX());
+
+        expect(injected).toHaveLength(1);
+        expect(statusOf(res)).toBe(502);
+        expect(messageOf(res)).toContain('text/csv');
+        expect(messageOf(res)).toContain('not JSON');
+        expect(res?.response?.body?.data).toBeUndefined();
     });
 
     it('relays the target\'s OWN refusal — its status and its code, never a 200', async () => {
@@ -278,7 +317,7 @@ describe('door 1 — REST `POST /actions/:object/:action` forwards a same-origin
         const res = await dispatcher.handleActions(`/${OBJECT}/${DELETE_LEAD.name}`, 'POST', { recordId: 'lead 7' }, CTX());
 
         expect(statusOf(res)).toBe(200);
-        expect(injected[0].url).toBe('https://app.example.test/api/v1/data/crm_lead/lead%207');
+        expect(injected[0].url).toBe('http://app.example.test/api/v1/data/crm_lead/lead%207');
         expect(injected[0].init.method).toBe('DELETE');
         expect(injected[0].init.body).toBeUndefined();
     });
@@ -322,9 +361,38 @@ describe('door 2 — the MCP `run_action` bridge forwards a same-origin api acti
         expect(result.action).toBe(BAN_LEAD.name);
         expect(result.result).toEqual({ banned: true });
         expect(result.headers).toEqual({ 'set-auth-token': 'rotated' });
-        expect(h.injected[0].url).toBe('https://app.example.test/api/v1/auth/admin/ban-user');
+        expect(h.injected[0].url).toBe('http://app.example.test/api/v1/auth/admin/ban-user');
         expect(JSON.parse(String(h.injected[0].init.body))).toEqual({ banReason: 'spam', userId: 'u_target', organizationId: 'org_1' });
         expect(h.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('relays ONLY the bearer-lane pair into the tool result — no Set-Cookie line, ever (the MCP door admits cookie sessions)', async () => {
+        // A tool result is JSON text that whatever script receives it can read;
+        // an `HttpOnly` session cookie's value must not travel in it. The REST
+        // door relays cookies on the response, where only the browser sees them.
+        const h = boot({
+            answer: {
+                body: { session: { userId: 'u_target' } },
+                headers: [
+                    ['set-cookie', 'better-auth.session_token=new; Path=/; HttpOnly'],
+                    ['set-cookie', 'better-auth.admin_session=adm; Path=/; HttpOnly'],
+                    ['set-auth-token', 'tok_impersonated'],
+                    ['set-admin-session-token', 'tok_admin_recovery'],
+                ],
+            },
+        });
+
+        const result: any = await runViaMcp(h, BAN_LEAD.name, { recordId: 'u_target' });
+
+        expect(result.headers).toEqual({ 'set-auth-token': 'tok_impersonated', 'set-admin-session-token': 'tok_admin_recovery' });
+        expect(JSON.stringify(result)).not.toContain('session_token=');
+        expect(JSON.stringify(result)).not.toContain('HttpOnly');
+    });
+
+    it('a bearer-only rotation with no cookie line reaches the tool result as before', async () => {
+        const h = boot({ answer: { body: { ok: true }, headers: [['set-auth-token', 'rotated']] } });
+        const result: any = await runViaMcp(h, BAN_LEAD.name, { recordId: 'u_target' });
+        expect(result.headers).toEqual({ 'set-auth-token': 'rotated' });
     });
 
     it('the target\'s refusal rides the throw with its own status and code', async () => {
@@ -386,6 +454,22 @@ describe('buildApiActionRequest — the declaration\'s request, by the console\'
         );
         expect((page as any).status).toBe(400);
         expect((page as any).message).toContain('{{page.<var>}}');
+        // Whitespace inside the braces is the same console syntax.
+        const spaced = buildApiActionRequest(
+            { name: 'submit', type: 'api', target: '/api/v1/forms/x', bodyExtra: { name: '{{ page.inquiryName }}' } }, { params: {}, ec },
+        );
+        expect((spaced as any).status).toBe(400);
+    });
+
+    it('passes a literal `{{…}}` that is NOT the console\'s `{{page.*}}` syntax through as the author\'s text', () => {
+        // Only the page-variable spelling is browser-only; a Handlebars-looking
+        // literal in a param or `bodyExtra` is content, not a token.
+        const req = buildApiActionRequest(
+            { name: 'submit', type: 'api', target: '/api/v1/forms/x', bodyExtra: { template: '{{greeting}} {{ user.name }}' } },
+            { params: { note: 'see {{docs}}' }, ec },
+        );
+        expect((req as any).status).toBeUndefined();
+        expect((req as any).body).toEqual({ note: 'see {{docs}}', template: '{{greeting}} {{ user.name }}' });
     });
 
     it('does not inject `organizationId` outside `/api/v1/auth/`, and respects an explicit one inside it', () => {

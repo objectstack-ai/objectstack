@@ -1071,11 +1071,6 @@ export function isSameOriginApiTarget(target: unknown): target is string {
     return second !== '/' && second !== '\\';
 }
 
-/** Is this declaration a `type: 'api'` action the server forwards? */
-export function isSameOriginApiAction(action: any): boolean {
-    return action?.type === 'api' && isSameOriginApiTarget(action?.target);
-}
-
 /**
  * Why the activation ledger cannot switch THIS api action — `null` when it
  * can (every non-api action, and every same-origin api action).
@@ -1108,7 +1103,14 @@ const API_FORWARD_HEADER_ALLOWLIST: ReadonlySet<string> = new Set([
     // What a browser's own fetch would carry, so a target's origin / CSRF
     // check sees the caller's browser, not the server talking to itself.
     'origin', 'referer', 'user-agent', 'accept-language',
-    // Proxy provenance, for a target that rate-limits or logs by it.
+    // Proxy provenance, carried AS THE CALLER SENT IT for a target that
+    // rate-limits or logs by it — the target applies its own `server.trustProxy`
+    // to these, exactly as it does to a direct request. ⛔ This door never
+    // reads them itself: the forwarded URL's host is the `Host` header (see
+    // {@link forwardApiAction}), because a caller-controlled
+    // `X-Forwarded-Host` / `X-Forwarded-Proto` is attacker input unless the
+    // deployment declared `server.trustProxy` (`security/inbound-rate-limit.ts`),
+    // and this seam has no view of that declaration.
     'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'x-real-ip', 'x-request-id',
 ]);
 
@@ -1150,9 +1152,16 @@ function substituteApiTargetTokens(template: string, scopes: Record<string, unkn
     });
 }
 
+/**
+ * The console's page-variable syntax (`ui/packages/.../resolvePageVarTokens.ts`):
+ * `{{page.<path>}}`, whitespace tolerated inside the braces. Only this spelling
+ * is a browser-only token; any other `{{…}}` is the author's literal text.
+ */
+const PAGE_VAR_TOKEN_RE = /\{\{\s*page\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\}\}/;
+
 /** Does any string in this value still carry a `{{page.x}}` token? */
 function carriesPageToken(value: unknown): boolean {
-    if (typeof value === 'string') return value.includes('{{');
+    if (typeof value === 'string') return PAGE_VAR_TOKEN_RE.test(value);
     if (Array.isArray(value)) return value.some(carriesPageToken);
     if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(carriesPageToken);
     return false;
@@ -1303,7 +1312,12 @@ export function buildApiActionRequest(
 /** What the in-process forward answered — status, parsed JSON body, relayed headers. */
 export type ApiActionForwardAnswer = {
     status: number;
-    /** The target's JSON body; a non-JSON answer is carried as `{ raw }`. */
+    /**
+     * The target's JSON body (`null` for an empty one). A 2xx answer that is
+     * not JSON is turned into the door's own 502 refusal before it gets here
+     * (see {@link forwardApiAction}); a non-2xx non-JSON answer carries its
+     * text as `{ raw }` so the refusal can quote it.
+     */
     body: any;
     /**
      * Response headers relayed to the caller (credential rotations).
@@ -1342,10 +1356,41 @@ export async function resolveInProcessRequest(
 /** The 503 for a kernel that cannot forward (no raw app to inject into). */
 export function apiActionForwardUnavailableError(action: any): string {
     return (
-        `Action '${action?.name ?? 'unknown'}' is a same-origin \`type: 'api'\` action, but this deployment's HTTP ` +
-        `server exposes no in-process request path to forward it through (IHttpServer.getRawApp). Call its ` +
-        `\`target\` (${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) directly.`
+        `Action '${action?.name ?? 'unknown'}' is a same-origin \`type: 'api'\` action whose \`target\` ` +
+        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, ` +
+        `but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). ` +
+        `Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.`
     );
+}
+
+/**
+ * The 502 for a target that answered 2xx with something other than JSON (a
+ * file, HTML, a stream): the door's answer is a JSON envelope and the console's
+ * direct fetch read such a body as `{}` — a silent loss this door refuses by name.
+ */
+export function apiActionNonJsonAnswerError(actionName: string, status: number, contentType: string | null): string {
+    return (
+        `Action '${actionName}' — its target answered HTTP ${status} with ` +
+        `${contentType ? `content-type '${contentType}'` : 'no content-type'}, not JSON. The action doors relay JSON ` +
+        `answers only; a target that serves a file or a page is not a \`type: 'api'\` action this door can carry.`
+    );
+}
+
+/**
+ * The subset of a forward's relayed headers an MCP tool result may carry: the
+ * bearer lane's pair ({@link API_FORWARD_RELAYED_RESPONSE_HEADERS}), which are
+ * JS-visible by design. ⛔ Never `Set-Cookie`: the MCP door admits cookie
+ * sessions too, and a tool result is JSON text that whatever script receives
+ * it can read — an `HttpOnly` session cookie's value must not travel in it.
+ * The REST door relays cookies on the response, where only the browser sees them.
+ */
+export function mcpRelayableForwardHeaders(headers: Record<string, string | string[]>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const name of API_FORWARD_RELAYED_RESPONSE_HEADERS) {
+        const v = headers[name];
+        if (typeof v === 'string' && v) out[name] = v;
+    }
+    return out;
 }
 
 /** The refusal for a forwarded request arriving back at an action door (a loop). */
@@ -1361,19 +1406,26 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * Forward the assembled request to the declared target, in-process, with the
  * caller's own credentials, and bring the answer back.
  *
- * The URL's origin is the CALLER's (`Host` + `X-Forwarded-Proto`), so a target
- * that reads `new URL(request.url).origin` — better-auth's trusted-origins
- * check does — sees the deployment's own origin, exactly as a direct browser
- * fetch would. Only the allow-listed caller headers cross
+ * The URL is `http://<Host header><path>` — the URL the direct request has at
+ * this process (the in-process server builds its own requests from `Host`;
+ * TLS terminates upstream), so a target that reads `request.url` sees what
+ * it would have seen had the browser called it. ⛔ `X-Forwarded-Host` /
+ * `X-Forwarded-Proto` are NOT consulted for it: they are caller input unless
+ * `server.trustProxy` says otherwise, and this seam cannot see that
+ * declaration — they cross to the target as headers, where its own trust
+ * rule judges them. Only the allow-listed caller headers cross
  * ({@link API_FORWARD_HEADER_ALLOWLIST}); `Content-Length` / `Host` are the
  * injector's to set. The forward is marked ({@link API_FORWARD_MARK_HEADER})
  * so a door reached by it refuses instead of looping.
  *
- * Relayed back: the status, the JSON body (or `{ raw }` for a non-JSON
- * answer), and the credential-rotation headers a target like
- * `/admin/impersonate-user` emits — `set-auth-token` /
+ * Relayed back: the status, the JSON body, and the credential-rotation
+ * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
  * `set-admin-session-token` (the bearer lane) and `Set-Cookie` (the cookie
- * lane). Everything else about the answer stays the target's business.
+ * lane). Everything else about the answer stays the target's business. A 2xx
+ * answer that is not JSON is refused as 502 here: this door answers JSON
+ * envelopes (the console's direct fetch read such an answer as `{}`, which
+ * is a silent loss, not a result), and a declaration whose target streams a
+ * file is not an action this door can carry.
  */
 export async function forwardApiAction(
     inject: (url: string, init: RequestInit) => Promise<Response>,
@@ -1398,24 +1450,34 @@ export async function forwardApiAction(
         headers['content-type'] = 'application/json';
         init.body = JSON.stringify(req.body);
     }
-    const host = typeof headers['x-forwarded-host'] === 'string' && headers['x-forwarded-host']
-        ? headers['x-forwarded-host']
-        : typeof incoming.host === 'string' && incoming.host ? incoming.host : 'localhost';
-    const proto = typeof headers['x-forwarded-proto'] === 'string' && /^https?$/i.test(headers['x-forwarded-proto'])
-        ? headers['x-forwarded-proto'].toLowerCase()
-        : 'http';
-    const res = await inject(`${proto}://${host}${req.path}`, init);
+    const host = typeof incoming.host === 'string' && incoming.host ? incoming.host : 'localhost';
+    const res = await inject(`http://${host}${req.path}`, init);
 
     const text = await res.text();
     let body: any;
+    let isJson = true;
     if (text.length === 0) {
         body = null;
     } else {
         try {
             body = JSON.parse(text);
         } catch {
+            isJson = false;
             body = { raw: text };
         }
+    }
+    if (!isJson && res.status >= 200 && res.status < 300) {
+        return {
+            status: 502,
+            body: {
+                success: false,
+                error: {
+                    code: standardErrorCodeForHttpStatus(502),
+                    message: apiActionNonJsonAnswerError(mark.actionName, res.status, res.headers.get('content-type')),
+                },
+            },
+            headers: {},
+        };
     }
     const relayed: Record<string, string | string[]> = {};
     for (const name of API_FORWARD_RELAYED_RESPONSE_HEADERS) {
@@ -3277,7 +3339,9 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             // A credential rotation the target emitted (impersonation) — the
             // bearer caller's own new tokens, which only a header could carry
             // over HTTP; over MCP the tool result is the one channel there is.
-            ...(Object.keys(answer.headers).length > 0 ? { headers: answer.headers } : {}),
+            // Bearer pair ONLY — see {@link mcpRelayableForwardHeaders} for why
+            // no `Set-Cookie` line may enter a tool result.
+            ...(() => { const h = mcpRelayableForwardHeaders(answer.headers); return Object.keys(h).length > 0 ? { headers: h } : {}; })(),
         };
     }
 
