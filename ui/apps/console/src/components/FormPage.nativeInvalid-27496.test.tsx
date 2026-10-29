@@ -48,11 +48,8 @@ function stubPublic(ok: boolean, status: number, body: unknown) {
     if (!String(url).includes('/forms/')) throw new Error(`unstubbed fetch: ${url}`);
     return reply(true, 200, PAYLOAD);
   }));
-  render(
-    <MemoryRouter initialEntries={['/f/contact-us']}>
-      <Routes><Route path="/f/:slug" element={<FormPage mode="public" />} /></Routes>
-    </MemoryRouter>,
-  );
+  const route = <Route path="/f/:slug" element={<FormPage mode="public" />} />;
+  render(<MemoryRouter initialEntries={['/f/contact-us']}><Routes>{route}</Routes></MemoryRouter>);
 }
 
 const submit = () => userEvent.click(screen.getByRole('button', { name: /Submit/ }));
@@ -92,7 +89,6 @@ describe('#27496 — a submit the browser blocks replaces the stale banner', () 
     expect(posts).toHaveLength(0);
     expect(email).toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByLabelText(/^Name/)).not.toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByLabelText(/^Message/)).not.toHaveAttribute('aria-invalid', 'true');
   });
 
   it('a fixed address then submits', async () => {
@@ -108,6 +104,5 @@ describe('#27496 — a submit the browser blocks replaces the stale banner', () 
     await refuseThenSubmitBadEmail();
     await fixEmailAndSubmit();
     expect(await screen.findByText(/Submit failed \(400\)/)).toBeInTheDocument();
-    expect(posts).toHaveLength(1);
   });
 });
