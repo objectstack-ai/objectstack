@@ -211,6 +211,13 @@ export function seedRecordPageReaders(args: {
   approvals: boolean;
 }): void {
   const { payload, objectName, recordId, principal } = args;
+  // A seeded part nobody asks for (a reader already reading, or none mounted)
+  // must not surface its refusal as an unhandled rejection; a reader that
+  // joins it still sees the refusal.
+  const quiet = <T,>(part: Promise<T>): Promise<T> => {
+    part.catch(() => undefined);
+    return part;
+  };
   args.related.forEach((list, index) => {
     const read = payload.then((page) => {
       const answer = page?.related?.[index];
@@ -228,15 +235,15 @@ export function seedRecordPageReaders(args: {
     );
   });
   for (const operation of args.explain) {
-    const decision = payload.then((page) => {
+    const decision = quiet(payload.then((page) => {
       const answer = page?.explain?.[operation];
       return isRefused(answer) ? undefined : answer;
-    });
+    }));
     if (operation === 'transfer') seedQueueClaimDecision(principal, objectName, recordId, decision);
     else seedRecordVerdict(principal, objectName, recordId, operation, decision);
   }
   if (args.fieldAccess) {
-    seedRecordFieldAccess(objectName, recordId, payload.then((page): RecordFieldAccess | null => {
+    seedRecordFieldAccess(objectName, recordId, quiet(payload.then((page): RecordFieldAccess | null => {
       const answer = page?.fieldAccess;
       if (!page || !answer) return null;
       if (isRefused(answer)) {
@@ -245,14 +252,14 @@ export function seedRecordPageReaders(args: {
         throw refusal(answer.error, 'Field access refused');
       }
       return answer;
-    }));
+    })));
   }
   if (args.approvals) {
-    seedRecordApprovals(objectName, recordId, payload.then((page) => {
+    seedRecordApprovals(objectName, recordId, quiet(payload.then((page) => {
       const answer = page?.approvals;
       if (!page || !answer) throw refusal(undefined, 'No approvals answer');
       if (isRefused(answer)) throw refusal(answer.error, 'Approvals refused');
       return { requests: answer.requests as ApprovalRequestLite[], lock: answer.lock };
-    }));
+    })));
   }
 }
