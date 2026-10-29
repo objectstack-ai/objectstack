@@ -848,3 +848,112 @@ describe('datasource `password` guidance — following it parses', () => {
     expect(result.success).toBe(true);
   });
 });
+
+// ── ADR-0015 amendment D7 — `external.connector` ──────────────────────────────
+//
+// An API-backed datasource names a declared connector instance and borrows its
+// credential (ruling 6486136301). The datasource-level half refuses the three
+// pairings the key can never serve; whether the instance is declared is the
+// stack's half (`stack-datasource-connector.test.ts`).
+describe('external.connector — an API-backed datasource borrows a connector instance credential', () => {
+  const odata = {
+    name: 'sap_orders',
+    driver: 'odata',
+    config: { serviceUrl: 'https://sap.example.com/odata/v4/orders' },
+    schemaMode: 'external',
+  } as const;
+
+  const issuesAt = (raw: unknown, path: string) => {
+    const result = DatasourceSchema.safeParse(raw);
+    return result.success ? [] : result.error.issues.filter((i) => i.path.join('.') === path);
+  };
+
+  it('accepts the key on a plugin driver in external and validate-only modes', () => {
+    for (const schemaMode of ['external', 'validate-only'] as const) {
+      const result = DatasourceSchema.safeParse({ ...odata, schemaMode, external: { connector: 'sap_s4' } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      if (result.success) expect(result.data.external?.connector).toBe('sap_s4');
+    }
+  });
+
+  it('is a declared key, not an unrecognized one', () => {
+    const result = ExternalDatasourceSettingsSchema.safeParse({ connector: 'sap_s4' });
+    expect(result.success).toBe(true);
+  });
+
+  it('folds the near-miss spellings onto `connector`', () => {
+    for (const spelling of ['connectorName', 'connectorId', 'connectorRef', 'connectorInstance']) {
+      const result = DatasourceSchema.safeParse({ ...odata, external: { [spelling]: 'sap_s4' } });
+      const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+      expect(messages.join('\n'), spelling).toContain('connector');
+    }
+  });
+
+  it('takes a connector name, so it refuses a name that is not snake_case', () => {
+    expect(issuesAt({ ...odata, external: { connector: 'SAP-S4' } }, 'external.connector')).toHaveLength(1);
+  });
+
+  it('refuses `connector` beside a bound `credentialsRef` — the two channels are exclusive', () => {
+    const hits = issuesAt(
+      { ...odata, external: { connector: 'sap_s4', credentialsRef: 'sys_secret:9f2c' } },
+      'external.connector',
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.code).toBe('custom');
+    expect(hits[0]!.message).toContain('two credential channels');
+  });
+
+  it('an empty-string `credentialsRef` is not a binding, so it is not the second channel', () => {
+    const result = DatasourceSchema.safeParse({ ...odata, external: { connector: 'sap_s4', credentialsRef: '' } });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('refuses `connector` on every built-in database driver, naming the driver', () => {
+    const builtins = [
+      { driver: 'postgres', config: { host: 'db.internal', database: 'analytics', username: 'ro' } },
+      { driver: 'mysql', config: { host: 'db.internal', database: 'analytics', username: 'ro' } },
+      { driver: 'sqlite', config: { filename: 'warehouse.db' } },
+    ];
+    for (const { driver, config } of builtins) {
+      const hits = issuesAt(
+        { name: 'warehouse', driver, config, schemaMode: 'external', external: { connector: 'sap_s4' } },
+        'external.connector',
+      );
+      expect(hits, driver).toHaveLength(1);
+      expect(hits[0]!.message).toContain(`'${driver}' driver connects to a database`);
+      expect(hits[0]!.message).toContain('external.credentialsRef');
+    }
+  });
+
+  it('refuses `connector` on a managed datasource, prescribing the schema mode — not the generic managed-block deletion', () => {
+    const result = DatasourceSchema.safeParse({ ...odata, schemaMode: 'managed', external: { connector: 'sap_s4' } });
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    const hits = issues.filter((i) => i.path.join('.') === 'external.connector');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.message).toContain("set `schemaMode: 'external'`");
+    // The generic managed-block refusal does not also list it for deletion.
+    expect(issues.some((i) => i.path.join('.') === 'external')).toBe(false);
+  });
+
+  it('a managed built-in datasource gets the driver refusal alone — the mode advice would not fix it', () => {
+    const hits = issuesAt(
+      { name: 'analytics', driver: 'postgres', config: { host: 'db.internal', database: 'a', username: 'ro' }, external: { connector: 'sap_s4' } },
+      'external.connector',
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.message).toContain("'postgres' driver connects to a database");
+  });
+
+  it('a `connector` written at the datasource level is pointed into the `external` block', () => {
+    const result = DatasourceSchema.safeParse({ ...odata, external: {}, connector: 'sap_s4' });
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+    expect(messages.join('\n')).toContain('it belongs in the `external` block');
+  });
+
+  it('CONTROL: `credentialsRef` alone on a plugin driver still parses, unchanged', () => {
+    const result = DatasourceSchema.safeParse({ ...odata, external: { credentialsRef: 'sys_secret:9f2c' } });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+});

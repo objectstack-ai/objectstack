@@ -4372,6 +4372,77 @@ function collectExternalBindingDatasourceErrors(config: ObjectStackDefinition): 
 }
 
 /**
+ * [ADR-0015 amendment D7] A datasource's `external.connector` must name a
+ * connector instance this stack declares: a `connectors` entry with a
+ * `provider` and an `auth` that is not `none`.
+ *
+ * The datasource borrows that instance's credential, so a name this stack
+ * cannot resolve would leave an API-backed datasource with no credential at
+ * all, found by its first read as an upstream 401. Refused here instead (the
+ * ruling: "refused at build when the named instance is not declared"), with
+ * three findings, because the fixes differ:
+ *
+ *  - no `connectors` entry of that name — declare the instance or correct the
+ *    name;
+ *  - an entry with no `provider` — a catalog descriptor (ADR-0097), which is
+ *    never materialized and holds no credential;
+ *  - an instance with no `auth`, or `auth: { type: 'none' }` — nothing to
+ *    lend; an unauthenticated upstream needs no `connector` on the datasource.
+ *
+ * Resolved against the stack's own `connectors`, like a job's mapping
+ * reference: a datasource is package-authored, and a reference its own stack
+ * cannot resolve is an authoring defect the package would otherwise ship. A
+ * connector a plugin registers at runtime is not a declared instance and has
+ * no connection record to share. A disabled instance (`enabled: false`) is
+ * accepted: the switch turns the vendor off for its actions and its records
+ * alike, which is the one-grant behaviour D7 asks for, not a dangling name.
+ * Runs before the object-count early return: it needs no object.
+ */
+function collectDatasourceConnectorErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const datasources = Array.isArray(config.datasources) ? config.datasources : [];
+  const borrowing = datasources.filter(
+    (ds) => isRecord(ds) && isRecord(ds.external) && typeof ds.external.connector === 'string',
+  );
+  if (borrowing.length === 0) return errors;
+  const connectors = new Map<string, Record<string, unknown>>();
+  for (const entry of Array.isArray(config.connectors) ? config.connectors : []) {
+    if (isRecord(entry) && typeof entry.name === 'string') connectors.set(entry.name, entry);
+  }
+  for (const ds of borrowing) {
+    const name = String((ds.external as Record<string, unknown>).connector);
+    const entry = connectors.get(name);
+    const subject = `Datasource '${String(ds.name)}' borrows the credential of connector '${name}' (external.connector)`;
+    if (entry === undefined) {
+      errors.push(
+        `${subject}, which is not defined in connectors. Declare the connector instance it borrows ` +
+          `from (a connectors entry named '${name}' with a provider and an auth credential, e.g. ` +
+          `auth: { type: 'bearer', credentialRef }) or correct the name.`,
+      );
+      continue;
+    }
+    if (typeof entry.provider !== 'string' || entry.provider.length === 0) {
+      errors.push(
+        `${subject}, which declares no provider — a connector entry with no provider is a catalog ` +
+          `descriptor, never materialized, and holds no credential to lend (ADR-0097). Give it the ` +
+          `provider that serves this vendor and an auth credential, or name a connector instance ` +
+          `that has one.`,
+      );
+      continue;
+    }
+    const auth = entry.auth;
+    if (!isRecord(auth) || auth.type === 'none') {
+      errors.push(
+        `${subject}, which declares no auth credential — there is nothing to borrow. Declare the ` +
+          `instance's auth (e.g. auth: { type: 'bearer', credentialRef }), or, if the upstream ` +
+          `needs no credential, remove external.connector from the datasource.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
  * [ADR-0015 §4.2 · #25211] {@link collectExternalBindingDatasourceErrors} over
  * a COMPOSITION: an `external` object of one input bound to a datasource
  * another input declares managed (or with no `schemaMode`).
@@ -4449,6 +4520,9 @@ function validateCrossReferences(
   // Same placement: the development boot's demo accounts resolve against the
   // stack's positions and permission sets, and need no object either.
   errors.push(...collectDemoStaffErrors(config));
+  // Same placement: a datasource's `external.connector` resolves against the
+  // stack's connectors and needs no object either (ADR-0015 amendment D7).
+  errors.push(...collectDatasourceConnectorErrors(config));
   // Same placement: the names an object gives its related lists (`relatedLists`,
   // a field group's `relatedList`) resolve against the objects of the stack AND
   // its package bodies, so an artifact whose objects live only in package
