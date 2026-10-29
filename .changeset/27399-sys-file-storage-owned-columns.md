@@ -7,6 +7,8 @@ fix(service-storage): `sys_file`'s storage-owned columns (`key`, `mime_type`, `s
 Clause-②: no (narrowing)
 Metadata-protocol: none
 
+<!-- adr-0087: not-required (no-migration-prescription) A data-door write to five storage-owned sys_file columns is no longer applied: no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and no write is refused (an update keeps the stored values, a create starts pending). There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+
 A file field refuses a file whose upload never completed by reading `sys_file.status`, and judges its `accept` / `maxSize` by `mime_type` / `size`. Those columns were plain writable fields, so a caller allowed to write `sys_file` rows (an administrator, on a stock boot) could `PATCH /api/v1/data/sys_file/ID` a presigned upload that never received its bytes to `committed`, and a record's file field then claimed it; or rewrite `size` / `mime_type` after commit so the field's constraints judged values that do not describe the stored bytes.
 
 - **Update.** The five columns are now `readonly` on `sys_file`. A non-system update, by id or by predicate, keeps the values the storage service wrote and lands the rest of the payload; the write answers as before and the engine logs the dropped column at `warn`, as it does for every read-only column. A caller that passes `strictReadonlyWrites` is refused with `ERR_READONLY_FIELD_REJECTED`, as for every read-only column.
