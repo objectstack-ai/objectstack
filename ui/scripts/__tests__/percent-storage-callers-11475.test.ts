@@ -46,6 +46,9 @@ interface Call {
 
 /** Every caller, by file, in source order within each file. */
 const CALLERS: Record<string, Call[]> = {
+  'packages/app-shell/src/utils/auditHistoryDisplay.ts': [
+    { fn: 'formatPercent', storage: 'percentCellScale(def)', source: 'field in hand', why: 'record History tab: a percent change formatted as the percent cell formats it' },
+  ],
   'packages/core/src/utils/dataset-format.ts': [
     { fn: 'percentDisplayValue', storage: "percentScale ?? 'fraction'", source: 'stated: no field', why: 'formatMeasure: the server annotation, else the `%` pattern (numeral: a fraction)' },
   ],

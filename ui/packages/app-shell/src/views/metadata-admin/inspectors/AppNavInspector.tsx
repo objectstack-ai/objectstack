@@ -452,7 +452,15 @@ export function AppNavInspector({ selection, draft, name, onPatch, onClearSelect
             value={String((node as Record<string, unknown>)[target.targetKey] ?? '')}
             options={targetOptions.options}
             loading={targetOptions.loading}
-            onCommit={(v) => patch({ [target.targetKey as string]: v })}
+            // objectstack#27525 — a `report` item's empty pick is the report
+            // index: the `reportName` key is REMOVED, as the Studio inspector
+            // does, never written as `''`.
+            emptyLabel={navType === 'report' ? t('engine.inspector.appNav.reportIndex', locale) : undefined}
+            onCommit={(v) =>
+              v === '' && navType === 'report'
+                ? patch({}, [target.targetKey as string])
+                : patch({ [target.targetKey as string]: v })
+            }
             disabled={readOnly}
             mono
           />
@@ -477,6 +485,16 @@ export function AppNavInspector({ selection, draft, name, onPatch, onClearSelect
             />
           </>
         )
+      )}
+
+      {/* objectstack#27525 — a `report` item with no `reportName` is the
+          app's report index, not an unbound item. */}
+      {navType === 'report' && !node.reportName && (
+        <p className="text-[11px] text-muted-foreground" data-testid="nav-report-index-hint">
+          <span className="font-medium">{t('engine.inspector.appNav.reportIndex', locale)}</span>
+          {' · '}
+          {t('engine.inspector.appNav.reportIndexHint', locale)}
+        </p>
       )}
 
       {previewHref && (

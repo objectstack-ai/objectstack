@@ -36,6 +36,7 @@
 import type { ObjectStackProtocolImplementation, ShippingPackages } from './protocol.js';
 import { resolveItemLock } from './item-lock.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import type { MetadataDiagnostics } from './metadata-diagnostics.js';
 
@@ -77,8 +78,15 @@ export async function getMetaDiagnostics(
     stats: Record<string, { count: number; locked: number; packages: string[] }>;
 }> {
     const includeWarnings = request.severity === 'warning';
+    // [#27514] A named type is swept, and keyed in `stats` and `entries`, under
+    // its CANONICAL spelling: the fold `canonicalMetaType` applies at every
+    // `/meta` entry point. `getMetaItems` already listed `views` as `view`, but
+    // the answer was keyed by the raw alias, so a consumer reading `stats.view`
+    // missed an alias request's counts. A spelling the fold does not map
+    // (`viewes`, `fieldz`) comes back unchanged, so the [#8924] refusal below
+    // still sees what the caller wrote.
     const targetTypes = request.type
-        ? [request.type]
+        ? [canonicalMetaUrlType(request.type)]
         : DEFAULT_METADATA_TYPE_REGISTRY
             .filter((e) => getMetadataTypeSchema(e.type))
             .map((e) => e.type);
@@ -240,6 +248,29 @@ export async function getMetaDiagnostics(
         stats[t] = { count: items.length, locked: lockedCount, packages: [...pkgSet].sort() };
     }
 
+    // [#27514] A package that is not installed, and that no swept item is bound
+    // to, scoped the sweep to nothing: every type answered `count: 0` and the
+    // whole answer read as a clean package. Refused instead, with the [#8924]
+    // refusal's status and code. Both halves are read, in this order: an item
+    // bound to the package is proof enough (rows of an uninstalled package are
+    // real, and this sweep is how an author finds them), and only an empty
+    // sweep asks the installed-package listing (`getMetaItems` of type
+    // `package`, the registry's records). An installed package with no items
+    // still answers its honest zeros. Fails OPEN: a listing that cannot be read
+    // keeps the answer, because "no such package" is an existence claim and an
+    // unreadable authority cannot make it.
+    if (request.packageId !== undefined && scannedItems === 0
+        && !(await packageIsInstalled(this, request.packageId))) {
+        const err = new Error(
+            `'${request.packageId}' is not an installed package, and no metadata item is bound to it, so a sweep `
+            + `scoped to it would report a clean package that does not exist. GET /api/v1/packages lists the `
+            + `installed packages; omit package (or pass package=all) to sweep every package.`,
+        );
+        (err as any).code = 'INVALID_REQUEST';
+        (err as any).status = 400;
+        throw err;
+    }
+
     return {
         entries,
         total: entries.length,
@@ -247,4 +278,23 @@ export async function getMetaDiagnostics(
         scannedItems,
         stats,
     };
+}
+
+/**
+ * [#27514] Does the installed-package listing carry this id? `true` ("cannot
+ * disprove, so do not refuse") when the listing cannot be read at all.
+ */
+async function packageIsInstalled(host: Pick<MetaDiagnosticsHost, 'getMetaItems'>, packageId: string): Promise<boolean> {
+    let listed: unknown;
+    try {
+        listed = await host.getMetaItems({ type: 'package' });
+    } catch {
+        return true;
+    }
+    const items = (listed as { items?: unknown } | null | undefined)?.items;
+    if (!Array.isArray(items)) return true;
+    return items.some((record) => {
+        const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
+        return (r?.manifest?.id ?? r?.id) === packageId;
+    });
 }

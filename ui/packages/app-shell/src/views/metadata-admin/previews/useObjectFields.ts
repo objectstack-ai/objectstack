@@ -57,6 +57,34 @@ export interface ObjectFieldInfo {
    * no such refusal.
    */
   required?: boolean;
+  /**
+   * The field's declared choices (`FieldSchema.options`, the spec's
+   * `SelectOption` — `{ value, label }`), in declared order. Absent when the
+   * field declares none.
+   *
+   * Carried for the list-view inspector's filter (objectstack#27515): the
+   * runtime `FilterBuilder` it mounts draws an option picker for a picklist
+   * column and stores the option's `value`, but only when the column it is
+   * handed carries `options`. Without them the builder fell back to a plain
+   * text box, an author typed the label they see (`New Request`), and the view
+   * saved a filter no record matches (`new` is what is stored).
+   */
+  options?: Array<{ value: string; label: string }>;
+}
+
+/**
+ * The declared choices of a served field definition, in the spec's own
+ * `SelectOption` shape and only in it — an entry that is not `{ value, label }`
+ * with string members is not a choice the builder can offer.
+ */
+function declaredFieldOptions(def: Record<string, unknown>): Array<{ value: string; label: string }> | undefined {
+  if (!Array.isArray(def.options)) return undefined;
+  const options = (def.options as unknown[]).flatMap((o) => {
+    if (!o || typeof o !== 'object') return [];
+    const { value, label } = o as { value?: unknown; label?: unknown };
+    return typeof value === 'string' && typeof label === 'string' ? [{ value, label }] : [];
+  });
+  return options.length > 0 ? options : undefined;
 }
 
 export interface UseObjectFieldsResult {
@@ -135,17 +163,21 @@ export function useObjectFields(
           return;
         }
         const view = readFields((obj as any).fields);
-        const fields: ObjectFieldInfo[] = view.entries.map((e) => ({
-          name: e.name,
-          label:
-            typeof e.def.label === 'string' && e.def.label
-              ? (e.def.label as string)
-              : e.name,
-          type: typeof e.def.type === 'string' ? (e.def.type as string) : 'text',
-          hidden: e.def.hidden === true,
-          ...(e.def.system === true ? { system: true } : {}),
-          ...(e.def.required === true ? { required: true } : {}),
-        }));
+        const fields: ObjectFieldInfo[] = view.entries.map((e) => {
+          const options = declaredFieldOptions(e.def);
+          return {
+            name: e.name,
+            label:
+              typeof e.def.label === 'string' && e.def.label
+                ? (e.def.label as string)
+                : e.name,
+            type: typeof e.def.type === 'string' ? (e.def.type as string) : 'text',
+            hidden: e.def.hidden === true,
+            ...(e.def.system === true ? { system: true } : {}),
+            ...(e.def.required === true ? { required: true } : {}),
+            ...(options ? { options } : {}),
+          };
+        });
         setState({ result: { fields, loading: false, error: null }, notFound: false });
       })
       .catch((err) => {
