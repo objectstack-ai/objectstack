@@ -419,7 +419,7 @@ const result = ApiMethod.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **trackHistory** | `boolean` | optional (default: `false`) | Show the record's field changes (audit-trail UI): on the default record page they join the record's one timeline stream, under its Changes filter. An authored page shows a field-change history only where it places a record:history block. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
+| **trackHistory** | `boolean` | optional (default: `false`) | Show the record's field changes (audit-trail UI): on the default record page they join the record's one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record's field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
 | **searchable** | `boolean` | optional (default: `true`) | Index records for global search |
 | **apiEnabled** | `boolean` | optional (default: `true`) | Expose object via automatic APIs |
 | **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]` | optional | Whitelist of allowed API operations (six primitives; undefined = all, [] = none) |
@@ -550,7 +550,7 @@ const result = ApiMethod.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **trackHistory** | `boolean` | optional (default: `false`) | Show the record's field changes (audit-trail UI): on the default record page they join the record's one timeline stream, under its Changes filter. An authored page shows a field-change history only where it places a record:history block. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
+| **trackHistory** | `boolean` | optional (default: `false`) | Show the record's field changes (audit-trail UI): on the default record page they join the record's one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record's field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
 | **searchable** | `boolean` | optional (default: `true`) | Index records for global search |
 | **apiEnabled** | `boolean` | optional (default: `true`) | Expose object via automatic APIs |
 | **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]` | optional | Whitelist of allowed API operations (six primitives; undefined = all, [] = none) |
