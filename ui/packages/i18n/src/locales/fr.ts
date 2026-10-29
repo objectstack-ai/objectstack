@@ -4730,6 +4730,7 @@ const fr = {
     on: "Activé",
     off: "Désactivé",
     notRunning: "Ne s'exécute pas ici",
+    notRunningDeploymentPolicy: "Activé, mais ce déploiement n'exécute pas les tâches planifiées",
     clone: "Cloner",
     cloneTitle: "Cloner le flux du package",
     cloneBody: "La copie reprend toute la définition et exige un nouveau nom machine et un nouveau libellé. Modifiez la copie dans Studio.",

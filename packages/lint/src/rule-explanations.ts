@@ -730,6 +730,49 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
+  rule: 'security-external-owner-unmapped',
+  covers: 'why members cannot write an external object',
+  paragraphs: [
+    'Before a member updates or deletes one record, the platform runs two row-level checks. Record ' +
+      'sharing, on a `private` or `public_read` object that carries an `owner_id` column, asks for the ' +
+      'row\'s `owner_id` and admits the owner (widened by write depth, an `edit` share or Modify All ' +
+      'Data). The platform ownership floor, `created_by` equal to the caller, stays in force unless record ' +
+      'sharing admits the write or the object declares `sharingModel: \'public_read_write\'`.',
+    'The registry adds `owner_id` and `created_by` to an external object as it does to every object, but ' +
+      'the remote database owns the table and the platform creates no column for either. So the remote row ' +
+      'answers no `owner_id` (record sharing refuses) and no `created_by` equal to the caller (the floor ' +
+      'refuses). A member whose permission set grants `allowEdit` is refused every edit and every delete ' +
+      'with 403 `PERMISSION_DENIED`, unless an app-authored row-level policy admits the row; otherwise only ' +
+      'an administrator can write. An object with no `sharingModel` is ' +
+      'judged as \'private\', the value the runtime falls back to.',
+    '`ownership: \'none\'` (or `\'org\'`, `\'business_unit\'`) is not a way out: without `owner_id` record ' +
+      'sharing stops judging the row, and the floor\'s `created_by` check refuses the same write. Turning ' +
+      'the audit columns off (`systemFields.audit: false`) does not help either: the floor then has no ' +
+      'column to compare and refuses every row.',
+    'There are two ways out. Declare `sharingModel: \'public_read_write\'`: every member who holds ' +
+      '`allowEdit` may then edit, and a `beforeUpdate` hook decides who really may. Or serve the column ' +
+      'the check reads: declare `owner_id` in `fields` and have the driver return the remote owner under ' +
+      'that name, so the owner edits and deletes the row and other members are refused. A built-in SQL ' +
+      'driver does that through `external.columnMap` (remote column to `owner_id`); `columnMap` is applied ' +
+      'by those drivers, not by the engine, so a plugin driver must return the field itself. Declaring ' +
+      'the field matters for reads too: the platform\'s own `owner_id` is treated as unstored, and reads ' +
+      'are not scoped by owner. On an object without `owner_id`, declare `created_by` the same way instead, ' +
+      'so the creator writes the row.',
+    'A `columnMap` entry for the column without a declared field is reported too, with its own wording: ' +
+      'it serves the check on a built-in SQL driver and does nothing on a plugin driver, and the ' +
+      'declaration is what holds on both.',
+    'Deletes are not opened by `public_read_write`: that model opens edits, and the floor keeps deletes ' +
+      'to the row\'s `created_by`. On an external object that column has no storage either, so member ' +
+      'deletes stay refused unless the driver returns `created_by` or an authored policy or share grants them.',
+    'The rule judges only a writable binding (`external.writable: true`, on a datasource this stack does ' +
+      'not declare with `external.allowWrites: false`) on a model that keys writes to ' +
+      'an owner (`private`, `public_read`, or none on a custom object). `controlled_by_parent` is not judged: ' +
+      'the master record\'s gate decides its writes. It is a warning, not an error: the stack is valid and ' +
+      'an administrator can still write.',
+  ],
+};
+
 const SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
   rule: 'security-fls-unknown-field',
   covers: 'how the runtime resolves a field-permission key',
@@ -5150,6 +5193,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
+  [SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION.rule]: SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION,
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,

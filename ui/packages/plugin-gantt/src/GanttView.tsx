@@ -187,6 +187,50 @@ function rowHeightForContainer(width: number) {
   return width < 640 ? 32 : 40;
 }
 
+/** The horizontal padding a bar spends before its in-bar title (`px-2`). */
+const BAR_LABEL_PADDING_W = 16;
+
+/**
+ * The least in-bar room worth a truncated title: below it the title is moved
+ * beside the bar instead. 96px holds about as much of a title as the phone
+ * task list's title cell does, so a bar never shows less of its title than
+ * the list beside it.
+ */
+const BAR_LABEL_MIN_INSIDE_W = 96;
+
+/**
+ * A title's width in the bar's 10px label font, estimated per character: a
+ * wide (CJK) character at 10px, any other at 5.5px, which is what Chromium
+ * measured for latin titles at that size. An estimate, not a measurement, so
+ * it may only decide where the title goes, never cut the title itself.
+ */
+function estimateBarLabelWidth(title: string) {
+  let width = 0;
+  for (const ch of title) width += (ch.codePointAt(0) ?? 0) > 0x2e7f ? 10 : 5.5;
+  return width;
+}
+
+/**
+ * Where a bar draws its title (#27418). Inside when the whole title fits, or
+ * when the bar has room for a readable part of it (truncated with an ellipsis,
+ * as before). Otherwise BESIDE the bar, after its end: at phone width a week
+ * or month bar is 18 to 63px wide, and a title squeezed into that showed an
+ * ellipsis or nothing at all — and with the task list collapsed, as it opens
+ * on a phone, the bar is the only place the title appears.
+ */
+function barLabelPlacement(barWidth: number, title: string): 'inside' | 'beside' {
+  const room = barWidth - BAR_LABEL_PADDING_W;
+  return room >= BAR_LABEL_MIN_INSIDE_W || estimateBarLabelWidth(title) <= room ? 'inside' : 'beside';
+}
+
+/**
+ * The title drawn beside a bar too narrow to hold it: after the bar's end, on
+ * the row's own background, never truncated (the row has the whole timeline
+ * to its right). Shared by the leaf and summary bars.
+ */
+const BESIDE_BAR_LABEL_CLASS =
+  "absolute left-full top-1/2 -translate-y-1/2 ml-1.5 whitespace-nowrap text-[10px] font-medium text-foreground pointer-events-none";
+
 /**
  * Dependency link types, MS-Project style:
  * - `fs` finish-to-start (default): predecessor must finish before this task starts
@@ -4469,9 +4513,19 @@ export function GanttView({
                               />
                             </>
                           )}
-                          <span className="relative text-[10px] text-white font-medium truncate pointer-events-none">
-                            {task.title}
-                          </span>
+                          {barLabelPlacement(liveStyle.width, task.title) === 'inside' ? (
+                            <span
+                              className="relative text-[10px] text-white font-medium truncate pointer-events-none"
+                              data-testid={`gantt-bar-label-${task.id}`}
+                              data-placement="inside"
+                            >
+                              {task.title}
+                            </span>
+                          ) : (
+                            <span className={BESIDE_BAR_LABEL_CLASS} data-testid={`gantt-bar-label-${task.id}`} data-placement="beside">
+                              {task.title}
+                            </span>
+                          )}
                           {/* Connector dots — same drag-to-link affordance as leaf
                               bars, so dependencies (3.4.5) can be drawn between
                               summary plans, not only via the right-click menu. */}
@@ -4843,10 +4897,22 @@ export function GanttView({
 
                         {/* Bar label — the task title, shown like summary bars so
                             leaf bars aren't blank. Fades out on hover to reveal the
-                            progress / drag overlay below. */}
-                        <span className="relative text-[10px] text-white font-medium truncate pointer-events-none group-hover:opacity-0 transition-opacity">
-                          {task.title}
-                        </span>
+                            progress / drag overlay below. A bar too narrow for it
+                            draws it beside its end instead (#27418), where the
+                            overlay does not reach, so that one stays put. */}
+                        {barLabelPlacement(liveStyle.width, task.title) === 'inside' ? (
+                          <span
+                            className="relative text-[10px] text-white font-medium truncate pointer-events-none group-hover:opacity-0 transition-opacity"
+                            data-testid={`gantt-bar-label-${task.id}`}
+                            data-placement="inside"
+                          >
+                            {task.title}
+                          </span>
+                        ) : (
+                          <span className={BESIDE_BAR_LABEL_CLASS} data-testid={`gantt-bar-label-${task.id}`} data-placement="beside">
+                            {task.title}
+                          </span>
+                        )}
                         {/* Hover Details / drag tooltip — overlays the title so the
                             bar's text width never shifts on hover. */}
                         <span className="absolute inset-0 flex items-center px-2 text-[10px] text-white font-medium truncate opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">

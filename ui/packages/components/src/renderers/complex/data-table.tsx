@@ -1206,6 +1206,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     borderless = false,
     disableInnerScroll = false,
     rowGroups,
+    isRowEditable,
     // Read ONLY to diagnose it. `data-table` does not resolve `bind` and the
     // objectui#6575 ruling is explicit that it must not start — see
     // `dataTableBindDiagnostic.ts`.
@@ -2262,9 +2263,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setDragOverColumn(null);
   };
 
+  // objectstack#27365 — the host's per-row verdict narrows `editable` for one
+  // row. Absent, or answering anything but `false`, the row follows
+  // `editable`; a refused row reads exactly like a row of a read-only table.
+  const rowMayEdit = (row: any): boolean => isRowEditable?.(row) !== false;
+
   // Cell editing handlers
   const startEdit = (row: any, columnKey: string) => {
-    if (!editable) return;
+    if (!editable || !rowMayEdit(row)) return;
     const rowKey = pendingRowKeyOf(row);
 
     // Already editing THIS cell — do nothing. Re-entering would reset `editValue`
@@ -2798,7 +2804,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       return;
     }
 
-    if (!editable) return;
+    if (!editable || !rowMayEdit(paginatedData[rowIndex])) return;
     
     const column = columns.find(col => col.accessorKey === columnKey);
     if (column?.editable === false) return;
@@ -3654,8 +3660,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // A masked column reads as NOT editable here too
                         // (objectui#10583), so its cell neither shows the
                         // edit cursor nor swallows the row's click —
-                        // `startEdit` would refuse it anyway.
-                        const isEditable = editable && col.editable !== false && !col.masked;
+                        // `startEdit` would refuse it anyway. Nor is a row
+                        // the host's per-row verdict refuses (objectstack#27365).
+                        const isEditable = editable && col.editable !== false && !col.masked && rowMayEdit(row);
                         const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;
                         const frozenOffset = isFrozen
                           ? measuredStickyLefts?.[leadingCellCount + colIndex]

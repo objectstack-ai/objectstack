@@ -2,14 +2,28 @@
  * Repro: inline-edit a LOOKUP cell, pick a value, then click ANOTHER row.
  * Reported bug: the just-picked value is lost when moving to another row.
  */
-import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
+import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
+import { installExplainDouble } from './explainDouble';
+
+// objectstack#27365 — an editable grid asks the record-grained `update`
+// verdict for the rows on screen even with no kebab Edit wired. Answer it from
+// the double (every row permitted), never the network.
+beforeEach(() => {
+  __clearRecordCrudVerdictCache();
+  installExplainDouble();
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 registerAllFields();
 

@@ -202,6 +202,7 @@ interface ScanRoot {
   readonly rule: string;
   readonly exclude?: string[];
   readonly collect?: string[];
+  readonly diskRoot?: string;
 }
 
 /** Every file the real scan opens, tagged with the row that opened it. */
@@ -522,6 +523,7 @@ describe('the repo it guards', () => {
       'CHANGELOG.md',
       'CLAUDE.md',
       'LICENSE-THIRD-PARTY.md',
+      '../skills/objectui',
     ]);
     // `README.md`, `CONTRIBUTING.md`, `ROADMAP.md` and `QUICK_REFERENCE.md` left
     // the table with the files themselves (objectstack#26080): folded into the
@@ -568,6 +570,9 @@ describe('the repo it guards', () => {
     // requires every one of them to be opened, so an `apps/*` row that stopped
     // expanding would fail there the day it started mattering.
     expect(scanned['packages/*/*']).toBeGreaterThanOrEqual(4);
+    // objectstack#27369. The skill bundle: 16 markdown files when the row
+    // landed (`SKILL.md` plus its guides and rules); a floor, not a census.
+    expect(scanned['../skills/objectui']).toBeGreaterThanOrEqual(10);
     for (const rootFile of ['AGENTS.md', 'CHANGELOG.md', 'CLAUDE.md', 'LICENSE-THIRD-PARTY.md']) {
       expect(scanned[rootFile], `${rootFile} is a SCAN_ROOTS row that opened no file`).toBe(1);
     }
@@ -610,6 +615,11 @@ describe('the repo it guards', () => {
     // the SECOND wildcard segment in each path, which is the whole reason the
     // top-level README cannot be reached from these rows. A row quietly losing
     // that segment would start double-parsing every package README.
+    //
+    // objectstack#27369 added the objectui skill bundle, `disk` — it is read on
+    // GitHub and by agents, never served by the site — with `diskRoot` set to
+    // the bundle itself, because the bundle ships to customer projects as one
+    // directory: a relative href that leaves it resolves nowhere there.
     expect(SCAN_ROOTS).toEqual([
       { path: '../content/docs/frontend', rule: 'docs' },
       { path: 'examples', rule: 'disk' },
@@ -624,6 +634,30 @@ describe('the repo it guards', () => {
       { path: 'CHANGELOG.md', rule: 'disk' },
       { path: 'CLAUDE.md', rule: 'disk' },
       { path: 'LICENSE-THIRD-PARTY.md', rule: 'disk' },
+      { path: '../skills/objectui', rule: 'disk', diskRoot: '../skills/objectui' },
+    ]);
+  });
+
+  it('judges the skill bundle inside the bundle — objectstack#27369', () => {
+    // The bundle sits outside this tree, so the default `disk` boundary (this
+    // tree's root) would reject every intra-bundle link; `diskRoot` moves the
+    // boundary to the bundle. A link that leaves it is still rejected, and a
+    // site URL is judged against the route table as it is everywhere else.
+    // One accepted and one rejected case per branch, so neither half can pass
+    // by the row never being scanned.
+    const repo = repoWith({
+      ...SITE_FIXTURE,
+      '../skills/objectui/SKILL.md': '[setup](./guides/setup.md) and [gone](./guides/NOWHERE.md)',
+      '../skills/objectui/guides/setup.md':
+        '[back](../SKILL.md), [out](../../../ui/packages/core/README.md), '
+        + '[site](https://objectstack.ai/docs/frontend/theming) and [dead](https://objectstack.ai/nowhere/at/all)',
+      '../content/docs/frontend/theming.mdx': '# Theming',
+      'packages/core/README.md': '# Core',
+    });
+    expect(scan(repo).map((item) => [path.relative(repo, item.file), item.href, item.reason])).toEqual([
+      [path.join('..', 'skills', 'objectui', 'SKILL.md'), './guides/NOWHERE.md', 'example-relative'],
+      [path.join('..', 'skills', 'objectui', 'guides', 'setup.md'), '../../../ui/packages/core/README.md', 'example-relative'],
+      [path.join('..', 'skills', 'objectui', 'guides', 'setup.md'), 'https://objectstack.ai/nowhere/at/all', 'site-absolute-url'],
     ]);
   });
 
@@ -2245,6 +2279,14 @@ describe('the anchor rule is the renderers’ own, not this gate’s — objectu
     expect(diskFiles).toBeGreaterThan(50);
   });
 
+  it('reads a heading inside a blockquote, as both renderers do — objectstack#27369', () => {
+    // The skill bundle writes `> ### …` callouts; GitHub and fumadocs anchor
+    // them, so the gate must too, or a link to one reads as dead.
+    expect([...headingAnchors('> ### Quoted title\n>\n> body\n', { customId: false })]).toEqual(['quoted-title']);
+    expect([...headingAnchors('>> ## Twice quoted\n', { customId: false })]).toEqual(['twice-quoted']);
+    expect([...headingAnchors('> not a heading\n', { customId: false })]).toEqual([]);
+  });
+
   it('has no setext headings, which the ATX-only scan would not see', () => {
     // `Title` over `---` is a heading too, and `headingAnchors()` does not read
     // one. Nothing in this tree writes them; this is what says so out loud, so
@@ -2256,7 +2298,9 @@ describe('the anchor rule is the renderers’ own, not this gate’s — objectu
       const lines = body.split('\n');
       // Every heading fumadocs found must have been written in ATX form; the
       // TOC carries no position, so compare counts against the ATX scan.
-      const atx = lines.filter((line, index) => /^#{1,6}\s+\S/.test(line) && !inFence(lines, index)).length;
+      // A blockquoted ATX heading (`> ### Title`) counts: the gate strips the
+      // markers before its own ATX test (objectstack#27369).
+      const atx = lines.filter((line, index) => /^(?: {0,3}>\s?)*#{1,6}\s+\S/.test(line) && !inFence(lines, index)).length;
       if (toc.length > atx) setext.push(`${path.relative(repoRoot, file)}: ${toc.length} headings, ${atx} ATX`);
     }
     expect(setext).toEqual([]);

@@ -482,6 +482,36 @@ function estimateLabelWidthPx(label: string): number {
 /** recharts' default chart margin, left plus right (5px each side). */
 const CHART_MARGIN_X_PX = 10;
 
+/** The font size `showDataLabels` prints each point's value in, in px. */
+const DATA_LABEL_FONT_PX = 11;
+/** recharts' `LabelList` default `offset`: the gap between a mark and its label. */
+const DATA_LABEL_OFFSET_PX = 5;
+
+/**
+ * The chart margin a vertical cartesian chart (bar, line, area, combo) takes
+ * while `showDataLabels` is on (objectstack#27372).
+ *
+ * A data label sits ABOVE its mark: its baseline is `DATA_LABEL_OFFSET_PX`
+ * over the mark's top. recharts' default margin leaves 5px between the plot's
+ * top edge and the end of the chart surface, and the value axis's nice domain
+ * routinely puts the tallest mark exactly on that edge (a 400,000 bar under a
+ * 400K top tick). Its label was then drawn wholly outside the surface: the
+ * tallest bar, the one a reader looks at first, was the one with no value.
+ *
+ * The top margin is that 5px plus the label's own height (offset and font),
+ * so a mark ON the top edge still has its label inside the surface. A margin
+ * rather than a padded domain: an author's `yAxis.max` pins the domain and
+ * must keep doing so, and the margin holds whatever the domain is. The other
+ * three sides stay recharts' default 5px, which `CHART_MARGIN_X_PX` counts on.
+ * Horizontal bars are left alone: their value runs across the plot.
+ */
+const DATA_LABEL_CHART_MARGIN = {
+  top: 5 + DATA_LABEL_OFFSET_PX + DATA_LABEL_FONT_PX,
+  right: 5,
+  bottom: 5,
+  left: 5,
+} as const;
+
 /**
  * The inset, in px, a line or area chart's categorical x axis keeps at BOTH
  * ends of the plot (objectui#13390).
@@ -2128,10 +2158,6 @@ function AdvancedChartImplInner({
     yAxisPositionNotes(yPlacement, categoriesRunDown),
     yAxisUndrawnNotes(yPlacement, yAxes, categoriesRunDown),
   );
-  /** The entry a series' marks are measured against — for its value labels. */
-  const axisOfSeries = (s: { yAxis?: string }): NormalizedAxis | undefined =>
-    hasDualAxis ? (s.yAxis === 'right' ? rightY : leftY) : primaryY;
-
   const xTickFormatter = React.useMemo(
     () => formatterFor(xAxisSpec?.format, displayLocale) ?? formatTick,
     [xAxisSpec?.format, displayLocale, formatTick],
@@ -2196,6 +2222,12 @@ function AdvancedChartImplInner({
     () => formatterFor(rightY?.format, displayLocale) ?? formatYTick,
     [rightY?.format, displayLocale, formatYTick],
   );
+  /**
+   * The tick formatter of the value axis a series' marks are measured
+   * against — the one its value labels print with (objectstack#27372).
+   */
+  const valueTickFormatterOf = (s: { yAxis?: string }): typeof yTickFormatter =>
+    hasDualAxis ? (s.yAxis === 'right' ? rightYTickFormatter : leftYTickFormatter) : yTickFormatter;
 
   /**
    * Every number plotted in one slot of a dual axis (or on the only axis,
@@ -2317,10 +2349,16 @@ function AdvancedChartImplInner({
     ? <Brush dataKey={xAxisKey} height={24} travellerWidth={8} stroke="hsl(var(--muted-foreground))" />
     : null;
 
-  /** `showDataLabels` prints each point's value on the mark itself. */
-  const dataLabel = (formatter?: (v: any) => string) =>
+  /**
+   * `showDataLabels` prints each point's value on the mark itself, in the
+   * units of the value axis the mark is measured against (objectstack#27372):
+   * the caller passes that axis's own tick formatter, so an authored
+   * `yAxis.format` wins and an axis without one gives its label the compact
+   * default (`174K` beside a `400K` tick, never a raw `174000`).
+   */
+  const dataLabel = (formatter: (v: any) => string) =>
     showDataLabels
-      ? <LabelList position="top" className="fill-foreground" fontSize={11} {...(formatter ? { formatter } : {})} />
+      ? <LabelList position="top" className="fill-foreground" fontSize={DATA_LABEL_FONT_PX} offset={DATA_LABEL_OFFSET_PX} formatter={formatter} />
       : null;
 
   // Shared X-axis props for time/categorical axes, in two branches.
@@ -3034,7 +3072,7 @@ function AdvancedChartImplInner({
             happens at chart level because that is the only place the CATEGORY
             is known — a line/area item handler is handed the curve's props and
             no datum. */}
-        <ComposedChart ref={setChartSurface} data={data} {...comboClickProps}>
+        <ComposedChart ref={setChartSurface} data={data} {...(showDataLabels ? { margin: DATA_LABEL_CHART_MARGIN } : {})} {...comboClickProps}>
           <CartesianGrid {...gridProps} {...valueAxisIdFor(valueAxesHaveIds, categoriesRunDown)} />
           <XAxis dataKey={xAxisKey} {...xAxisCommonProps} />
           {/* A combo always draws both value axes (an authored combo binds an
@@ -3072,7 +3110,7 @@ function AdvancedChartImplInner({
                 : (seriesType === 'bar' ? 'left' : 'right');
             const pres = seriesStyle(s, seriesType as any);
             const stackProps = s.stack ? { stackId: String(s.stack) } : {};
-            const valueFormatter = formatterFor((yAxisId === 'right' ? rightY : leftY)?.format, displayLocale);
+            const valueFormatter = yAxisId === 'right' ? rightYTickFormatter : leftYTickFormatter;
 
             if (seriesType === 'line') {
               return (
@@ -3122,7 +3160,7 @@ function AdvancedChartImplInner({
     <ChartFrame title={title} subtitle={subtitle}>
     <ChartFootnote note={joinNotes(xPositionNote, yPositionNote)}>
     <ChartContainer config={config} className={className} {...containerProps}>
-      <ChartComponent ref={setChartSurface} data={data} layout={isHorizontal ? 'vertical' : 'horizontal'} {...cartesianClickProps}>
+      <ChartComponent ref={setChartSurface} data={data} layout={isHorizontal ? 'vertical' : 'horizontal'} {...(showDataLabels && !isHorizontal ? { margin: DATA_LABEL_CHART_MARGIN } : {})} {...cartesianClickProps}>
         <defs>
           {gradColors.map((c) => (
             <React.Fragment key={gslug(c)}>
@@ -3263,7 +3301,7 @@ function AdvancedChartImplInner({
           // Recharts keys stacking off `stackId`, so the author's group name
           // passes through unchanged.
           const stackProps = s.stack ? { stackId: String(s.stack) } : {};
-          const valueFormatter = formatterFor(axisOfSeries(s)?.format, displayLocale);
+          const valueFormatter = valueTickFormatterOf(s);
 
           if (chartType === 'bar' || chartType === 'horizontal-bar') {
             // One series, one colour: a bar's colour names its SERIES, so a

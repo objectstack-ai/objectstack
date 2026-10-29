@@ -9,14 +9,28 @@
  * in-memory fake server, so a passing test means the grid code persists
  * correctly and a failing one pinpoints where the value is dropped.
  */
-import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
+import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
+import { installExplainDouble } from './explainDouble';
+
+// objectstack#27365 — an editable grid asks the record-grained `update`
+// verdict for the rows on screen even with no kebab Edit wired. Answer it from
+// the double (every row permitted), never the network.
+beforeEach(() => {
+  __clearRecordCrudVerdictCache();
+  installExplainDouble();
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 registerAllFields();
 
