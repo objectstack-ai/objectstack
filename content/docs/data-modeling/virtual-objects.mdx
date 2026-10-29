@@ -90,8 +90,9 @@ const RESOURCES: Record<string, { resource: string; columns: ReadonlySet<string>
 
 const OPERATORS: Record<string, RemoteCondition['op']> = { $eq: 'eq', $ne: 'ne', $in: 'in' };
 
+/** A refusal of this request, by name. `status: 400` is what the engine reads to tell it from an outage. */
 function refuse(what: string): never {
-  throw new Error(`port_schedule driver: the remote cannot run ${what}`);
+  throw Object.assign(new Error(`port_schedule driver: the remote cannot run ${what}`), { status: 400 });
 }
 
 function resourceOf(object: string) {
@@ -191,15 +192,25 @@ trust a plugin driver to have applied the query: it re-applies it
   of an `$or` narrows the result. The skeleton above takes the stricter road and refuses
   instead, which is also safe.
 - **Fail when the remote fails.** Throw; ⛔ never return an empty array, which reads
-  exactly like "no rows match". A read that throws (a refusal by name included) answers
-  the caller `503 ERR_DATASOURCE_UNAVAILABLE` with `reason: 'remote'`. Its message says
-  the remote could not answer and to retry; your error's own text goes to the server log
-  at `warn` and never to the caller. A write the remote refuses for the request's own
-  sake (400, 404, 409, 412 or 422) is answered `422 EXTERNAL_WRITE_REFUSED` carrying your
-  error's message, so set `status` (or `statusCode`) on the error you throw. A write
-  that fails any other way is `503`, as a read is. That includes 401, 403, 407 and 429:
-  an expired credential or a rate limit is the operator's to fix, and its text may name
-  the credential.
+  exactly like "no rows match". What the caller sees depends on the `status` (or
+  `statusCode`) on the error you throw:
+  - A read refused for the request's own sake (400, 404 or 422), which is what
+    `refuse()` above throws, answers `400`. The code is `INVALID_QUERY`, or the code you
+    set on the error when it is a registered one (`INVALID_FILTER`, say). A retry of the
+    same read never clears it. The caller reads your error's message, so they know which
+    operator or column to drop. Write it for them: ⛔ no remote URL, host or credential
+    in it. The message is withheld, and goes to the server log, when the read carries a
+    predicate the caller did not write, such as a sharing or row-level security scope,
+    because it may name that predicate's column or value. A remote `404` on a list
+    endpoint often means a wrong base path or resource mapping in your driver, not a bad
+    query.
+  - A write refused for the request's own sake (400, 404, 409, 412 or 422) answers
+    `422 EXTERNAL_WRITE_REFUSED` carrying your error's message.
+  - Anything else answers `503 ERR_DATASOURCE_UNAVAILABLE` with `reason: 'remote'`: a
+    5xx, an unreachable remote, a throw with no `status`, and also 401, 403, 407 and 429,
+    because an expired credential or a rate limit is the operator's to fix and its text
+    may name the credential. The message says the remote could not answer and to retry;
+    your error's own text goes to the server log at `warn` and never to the caller.
 - **Send the remote only the columns it owns.** `update` receives the patch plus any
   field a hook stamped, plus `id`, `updated_at` and `updated_by`, which the engine adds on
   its own and no remote column declares.
@@ -561,6 +572,8 @@ describe('port_schedule driver — the shapes the engine sends, and what the rem
     const remote = recordingTransport();
     const driver = createPortScheduleDriver(remote);
     await expect(driver.find('berth_slot', { where: { $or: [{ archived: false }, { planner: 'u1' }] } } as never)).rejects.toThrow(/\$or/);
+    // The status the engine reads: a refusal of this request answers 400, not "retry later".
+    await expect(driver.find('berth_slot', { where: { $or: [{ archived: false }] } } as never)).rejects.toMatchObject({ status: 400 });
     await expect(driver.find('berth_slot', { where: { start_date: { $gte: '2026-11-01' } } } as never)).rejects.toThrow(/\$gte/);
     // The default sharing model asks for ownership columns no remote row carries.
     await expect(driver.findOne('berth_slot', { where: { $and: [{ id: 's_1' }, { created_by: 'u1' }] } } as never)).rejects.toThrow(/created_by/);
