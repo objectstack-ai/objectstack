@@ -47,6 +47,7 @@ import { render } from '@testing-library/react';
 import { createHash } from 'node:crypto';
 import '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
+import { FILTER_FIELD_TYPES } from '@object-ui/types';
 import { getExample } from '../src/index.js';
 
 const IDS = [
@@ -403,13 +404,30 @@ describe('objectui#6939 — the vocabulary the mirror now names is live', () => 
     expect(oneRow('string').inputs).not.toEqual(oneRow('number').inputs);
   });
 
-  it.each(['status', 'currency', 'percent', 'rating', 'lookup', 'master_detail', 'user'])(
-    '`%s` is live too, and the mirror refuses it — a pre-existing gap, reported not repaired',
-    (type) => {
-      // These draw a REAL control (a number input, or the option-driven Select),
-      // so they are not phantoms like `string`; the mirror refused them before
-      // this change and still does. Recorded here so the gap is a decision.
-      expect(oneRow(type).inputs).not.toEqual(oneRow('zzz-not-a-field-type').inputs);
-    },
-  );
+  /**
+   * objectstack#27369 — the ruling's precondition, held for EVERY member of the
+   * shared list rather than a hand-kept seven: a member that `FilterFieldSchema`
+   * accepts must draw something a nonsense spelling does not. A fifteenth
+   * member added to `FILTER_FIELD_TYPES` without a bucket reddens here.
+   *
+   * `text` is the one member left out, and only because it IS the fallthrough
+   * target: it draws what a nonsense spelling draws by construction, and its
+   * branch is by NAME (`fieldType || "text"`), pinned in the validator half.
+   */
+  const BRANCHED = FILTER_FIELD_TYPES.filter((type) => type !== 'text');
+
+  it('the branched population is the whole list but `text`', () => {
+    expect(BRANCHED).toHaveLength(FILTER_FIELD_TYPES.length - 1);
+    expect(BRANCHED.length).toBeGreaterThan(0);
+  });
+
+  it.each(BRANCHED)('`%s` draws a branch of its own, not the fallthrough', (type) => {
+    const nonsense = oneRow('zzz-not-a-field-type');
+    const row = oneRow(type);
+    expect(
+      `${row.inputs.join(',')}|${row.triggers.length}`,
+      `FILTER_FIELD_TYPES carries \`${type}\`, but the renderer draws it exactly as an unrecognised `
+        + 'spelling — give it a bucket in custom/filter-builder.tsx or take it out of the list',
+    ).not.toBe(`${nonsense.inputs.join(',')}|${nonsense.triggers.length}`);
+  });
 });

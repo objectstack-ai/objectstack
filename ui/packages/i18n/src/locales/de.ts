@@ -4617,6 +4617,7 @@ const de = {
     on: "An",
     off: "Aus",
     notRunning: "Läuft hier nicht",
+    notRunningDeploymentPolicy: "An, aber diese Installation führt keine geplanten Aufgaben aus",
     clone: "Klonen",
     cloneTitle: "Paket-Flow klonen",
     cloneBody: "Die Kopie übernimmt die gesamte Definition und benötigt einen neuen Maschinennamen und ein neues Label. Bearbeiten Sie die Kopie im Studio.",

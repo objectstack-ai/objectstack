@@ -4618,6 +4618,7 @@ const ja = {
     on: "オン",
     off: "オフ",
     notRunning: "ここでは実行されていません",
+    notRunningDeploymentPolicy: "オンですが、このデプロイではスケジュールされた処理を実行しません",
     clone: "クローン",
     cloneTitle: "パッケージフローをクローン",
     cloneBody: "コピーは定義全体を引き継ぎ、新しいマシン名とラベルが必要です。コピーの編集は Studio で行ってください。",

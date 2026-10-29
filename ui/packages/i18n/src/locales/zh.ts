@@ -4673,6 +4673,7 @@ const zh = {
     on: '已启用',
     off: '已关闭',
     notRunning: '未在此运行',
+    notRunningDeploymentPolicy: '已启用，但此部署不运行计划任务',
     clone: '克隆',
     cloneTitle: '克隆打包流程',
     cloneBody: '副本会带上完整定义,并需要新的机器名和标签。请在 Studio 中编辑副本。',

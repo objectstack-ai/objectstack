@@ -4615,6 +4615,7 @@ const ko = {
     on: "켜짐",
     off: "꺼짐",
     notRunning: "여기서 실행되지 않음",
+    notRunningDeploymentPolicy: "켜져 있으나 이 배포에서는 예약 작업을 실행하지 않음",
     clone: "복제",
     cloneTitle: "패키지 플로우 복제",
     cloneBody: "사본은 정의 전체를 그대로 가져가며 새 머신 이름과 레이블이 필요합니다. 사본은 Studio에서 편집하세요.",

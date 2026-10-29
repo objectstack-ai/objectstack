@@ -553,6 +553,12 @@ export const DataTableSchema = BaseSchema.extend({
   // is `ObjectGrid` (`@object-ui/plugin-grid`) for a grouped view. A React node
   // is no more JSON than a function is, so authored data is refused by name.
   rowGroups: handlerKeyRefusal('rowGroups', 'runtime-slot', 'Host-built group bands of a grouped grid'),
+  // RUNTIME SLOT (objectstack#27365): `data-table` reads `schema.isRowEditable`
+  // and calls it per row before opening a cell editor; its supplier is
+  // `ObjectGrid` (`@object-ui/plugin-grid`), answering from the server's
+  // record-grained write verdict. A function is not JSON, so authored data is
+  // refused by name.
+  isRowEditable: handlerKeyRefusal('isRowEditable', 'runtime-slot', 'Host-supplied per-row inline-edit verdict'),
   frozenColumns: z.number().optional().describe('Number of frozen columns'),
   showRowNumbers: z.boolean().optional().describe('Show row numbers'),
   emptyAction: SchemaNodeSchema.optional().describe('Optional schema node rendered inside the empty-state, e.g. an "Add record" button. Lets the empty state become an actionable invitation rather than a dead end.'),
@@ -561,7 +567,7 @@ export const DataTableSchema = BaseSchema.extend({
     + 'TypeScript type checker across all 24 registering packages, no renderer read consumes `body` or '
     + '`children` for this node, and `SchemaRenderer` strips both out of the props bag it spreads. An '
     + 'authored value therefore rendered NOTHING — no render-time error or warning and no element; only the parser tier\'s `not-a-container` warning (objectui#9910) noticed it. '
-    + 'What it renders instead: `emptyAction`, `onAddRecord`, `onBatchSave`, `onCellChange`, '
+    + 'What it renders instead: `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`, '
     + '`onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`, `onRowDelete`, '
     + '`onRowEdit`, `onRowSave`, `onSelectionChange`, `renderCellEditor`, `rowActionDefs`, '
     + '`rowDeletePredicates`, `rowEditPredicates`.',
@@ -571,7 +577,7 @@ export const DataTableSchema = BaseSchema.extend({
     + 'TypeScript type checker across all 24 registering packages, no renderer read consumes `body` or '
     + '`children` for this node, and `SchemaRenderer` strips both out of the props bag it spreads. An '
     + 'authored value therefore rendered NOTHING — no render-time error or warning and no element; only the parser tier\'s `not-a-container` warning (objectui#9910) noticed it. '
-    + 'What it renders instead: `emptyAction`, `onAddRecord`, `onBatchSave`, `onCellChange`, '
+    + 'What it renders instead: `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`, '
     + '`onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`, `onRowDelete`, '
     + '`onRowEdit`, `onRowSave`, `onSelectionChange`, `renderCellEditor`, `rowActionDefs`, '
     + '`rowDeletePredicates`, `rowEditPredicates`.',

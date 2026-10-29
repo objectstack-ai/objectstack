@@ -1389,6 +1389,16 @@
           "description": "Period-over-period comparison, `{ kind: \"previousPeriod\" }` or `{ kind: \"previousYear\" }` — the computed alternative to a static `trend`."
         },
         {
+          "name": "polarity",
+          "type": "enum",
+          "enum": [
+            "higher",
+            "lower",
+            "neutral"
+          ],
+          "description": "Which direction of change is good news. Colours the trend badge, computed (`compareTo`) or static (`trend`): `lower` draws a rise red and a fall green (turnaround, overdue counts, cost), `neutral` draws it muted. Omit it for rise green, fall red. The arrow always shows which way the number moved."
+        },
+        {
           "name": "drillDown",
           "type": "object",
           "description": "Click-through config that opens the records behind the number. `drillDown.filter` and `drillDown.mode` do not apply to a metric, which has no clicked point to filter by and no row to open, so the list is always scoped by this block’s own `filter`; a drill `filter` belongs on `object-chart` or `object-pivot`, and `mode` on `object-data-table`."
