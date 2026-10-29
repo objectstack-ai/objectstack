@@ -28,8 +28,15 @@ import { ApprovalService } from './approval-service.js';
 
 interface Row { [k: string]: any }
 
+/**
+ * The accounts this suite routes `user` approver slots to: a `user` approver
+ * holds a slot only when an account carries it (#27397), so the double's
+ * directory starts with them.
+ */
+const ROUTED_USERS = ['alice', 'carol'];
+
 function makeEngine(seed: Record<string, Row[]> = {}) {
-  const tables: Record<string, Row[]> = { ...seed };
+  const tables: Record<string, Row[]> = { sys_user: ROUTED_USERS.map((id) => ({ id })), ...seed };
   const ensure = (n: string) => (tables[n] ??= []);
   const matches = (row: Row, filter: any): boolean => {
     if (!filter || typeof filter !== 'object') return true;
