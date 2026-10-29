@@ -335,7 +335,7 @@ been removed from the spec.
 **Features:**
 - `currencyMode: dynamic | fixed | record`; a `defaultCurrency` code on the
   field under `fixed`, a `currencyField` pointer under `record`
-- A `defaultCurrency` code is validated by **length only** (3 characters), so
+- A `fixed` field's `defaultCurrency` code is validated by **length only** (3 characters), so
   ISO 4217 (`USD`, `EUR`, `CNY`) and non-ISO codes (`BTC`, `ETH`) both pass. A
   record's code is judged by its field's `valueDomain: iso_4217_currency`, so
   only ISO 4217 codes pass there
