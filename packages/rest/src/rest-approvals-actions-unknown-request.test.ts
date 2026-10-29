@@ -126,11 +126,14 @@ describe('GET /approvals/requests/:id/actions answers an unreadable parent as th
         expect(svc.listActions).not.toHaveBeenCalled();
     });
 
-    it('a visible request with actions is still 200 with its rows unchanged', async () => {
+    it('a visible request with actions is still 200 with its rows unchanged, and the parent door still answers its row', async () => {
         const svc = approvalsStub();
         const rest = boot(svc, 'u1');
+        const parent = await get(rest, REQ, REQUEST.id);
         const actions = await get(rest, `${REQ}/actions`, REQUEST.id);
 
+        expect(parent.status).toBe(200);
+        expect(parent.body).toEqual(REQUEST);
         expect(actions.status).toBe(200);
         expect(actions.body).toEqual({ data: ACTIONS });
         expect(svc.listActions).toHaveBeenCalledTimes(1);
