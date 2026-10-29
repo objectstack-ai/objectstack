@@ -10,7 +10,9 @@
  * render through plugin-report's `ReportRenderer` (→ DatasetReportRenderer),
  * keeping the studio preview pixel-equal with the runtime — including the
  * matrix cross-tab and the joined block stack — and the numbers consistent
- * with every other surface on the same dataset (`adapter.queryDataset`).
+ * with every other surface on the same dataset (`adapter.queryDataset`). In
+ * the Studio the query reads the draft world, so a draft dataset runs before
+ * the package publishes (`useCanvasDataSource`, objectstack#27585).
  * Drill-down stays inert here: the preview passes no `onDrill` sink.
  *
  * A draft with neither a dataset nor any dataset-bound block gets an
@@ -20,7 +22,7 @@
 
 import * as React from 'react';
 import { Database, Loader2 } from 'lucide-react';
-import { useAdapter } from '../../../providers/AdapterProvider.js';
+import { useCanvasDataSource } from './canvasDataSource.js';
 import type { MetadataPreviewProps } from '../preview-registry.js';
 import { PreviewShell, PreviewErrorBoundary, PreviewEmptyState } from './PreviewShell.js';
 import { t as tr } from '../i18n.js';
@@ -30,7 +32,7 @@ const ReportRenderer = React.lazy(() =>
 );
 
 export function ReportPreview({ draft, locale }: MetadataPreviewProps) {
-  const adapter = useAdapter();
+  const dataSource = useCanvasDataSource();
   const d = draft as any;
 
   // ADR-0021 single-form: a report binds a semantic-layer dataset; a `joined`
@@ -61,7 +63,7 @@ export function ReportPreview({ draft, locale }: MetadataPreviewProps) {
             }
           >
             <div className="p-3 min-h-[200px] max-h-[70vh] overflow-auto">
-              <ReportRenderer schema={draft as any} dataSource={adapter as any} />
+              <ReportRenderer schema={draft as any} dataSource={dataSource as any} />
             </div>
           </React.Suspense>
         </PreviewErrorBoundary>
