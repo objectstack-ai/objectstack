@@ -551,20 +551,24 @@ describe('#6445 group 3 — nothing else became loud', () => {
     });
   });
 
-  it('SUPERSEDED by objectui#6504: an adapter-only `data.*` `disabled` predicate now reports, on the enablement leg — not this fault one', async () => {
-    // Was pinned SILENT until the 2026-08-27 ruling (option A) extended
-    // objectui#5687's diagnostic to this gate. This predicate never FAULTS —
-    // it evaluates perfectly, against the wrong object — so it must never
-    // appear on THIS file's `reports()` (the #6445 fault leg); see group 6
-    // below for the positive coverage of the new leg.
+  it('objectstack#27457: a BARE adapter-only `data.*` `disabled` predicate is CEL — it FAULTS, disables, and reports on THIS fault leg', async () => {
+    // Was pinned to objectui#6504's adapter-only leg while a bare string read
+    // on the legacy grammar, where `undefined == 'locked'` is a clean `false`.
+    // A bare string is CEL shorthand now, and CEL refuses a key the bound
+    // `data` does not hold, so the predicate FAULTS: the gate's fail-soft
+    // answer disables the control, and this file's fault line names the
+    // engine's reason. The adapter-only leg (group 6, written as the `${…}`
+    // template that still evaluates cleanly) does not fire for it.
     await inDevelopment((mount) => {
       const warn = spyWarn();
       mount([{ id: 'n1', disabled: "data.status == 'locked'" }]);
-      expect(disabledProp()).toBe('absent');
-      expect(reports(warn)).toHaveLength(0);
+      expect(disabledProp()).toBe('true');
+      const lines = reports(warn);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("data.status == 'locked'");
+      expect(lines[0]).toContain('No such key: status');
       expect(visibilityReports(warn)).toHaveLength(0);
-      // It DOES now report — on its own leg and its own prefix.
-      expect(adapterOnlyReports(warn)).toHaveLength(1);
+      expect(adapterOnlyReports(warn)).toHaveLength(0);
     });
   });
 });
@@ -574,13 +578,18 @@ describe('#6445 group 3 — nothing else became loud', () => {
  * constant-predicate diagnostic. A DIFFERENT fault class than groups 0-5
  * above: nothing here FAULTS (the predicate evaluates perfectly, against the
  * wrong object), so none of it belongs on `reports()` / `UNRESOLVABLE_ENABLEMENT_PREFIX`.
+ *
+ * Every `data.*` predicate here is written as the `${…}` template: since
+ * objectstack#27457 a BARE string is CEL, which refuses an unanswered key
+ * instead of reading `undefined`, so the bare spelling faults and never reaches
+ * this leg (group 3's last case pins where it goes instead).
  * -------------------------------------------------------------------------- */
 
 describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`', () => {
   it('THE acceptance criterion: the card\'s repro shape reports, dev-only, and the verdict is untouched (constant-FALSE direction)', async () => {
     await inDevelopment((mount) => {
       const warn = spyWarn();
-      mount([{ id: 'n1', disabled: "data.status == 'locked'" }]);
+      mount([{ id: 'n1', disabled: "${data.status == 'locked'}" }]);
       // Verdict UNCHANGED — `undefined == 'locked'` is `false`, so the control
       // is NOT disabled here. This diagnostic never moves a verdict.
       expect(disabledProp()).toBe('absent');
@@ -605,7 +614,7 @@ describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`'
     // EVERY build, with nothing on the console.
     await inDevelopment((mount) => {
       const warn = spyWarn();
-      mount([{ id: 'n1', disabled: 'data.locked == null' }]);
+      mount([{ id: 'n1', disabled: '${data.locked == null}' }]);
       expect(disabledProp()).toBe('true');
       expect(adapterOnlyReports(warn)).toHaveLength(1);
     });
@@ -617,7 +626,7 @@ describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`'
     // sentence for THIS gate is about a constant `true` greying it out.
     await inDevelopment((mount) => {
       const warn = spyWarn();
-      mount([{ id: 'n1', disabled: 'data.locked == null' }]);
+      mount([{ id: 'n1', disabled: '${data.locked == null}' }]);
       const line = adapterOnlyReports(warn)[0];
       expect(line).toContain('constant `true`');
       expect(line).toContain('DISABLED');
@@ -639,8 +648,8 @@ describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`'
     await inDevelopment((mount) => {
       const warn = spyWarn();
       mount([
-        { id: 'nA', visibleWhen: "data.status == 'locked'" },
-        { id: 'nB', disabled: "data.status == 'locked'" },
+        { id: 'nA', visibleWhen: "${data.status == 'locked'}" },
+        { id: 'nB', disabled: "${data.status == 'locked'}" },
       ]);
       const visLine = adapterOnlyVisibilityReports(warn);
       const enLine = adapterOnlyReports(warn);
@@ -682,7 +691,7 @@ describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`'
   it('⛔ C excluded: a PRODUCTION build reaches the SAME verdict and stays silent — this leg is dev-only, exactly as its sibling is', async () => {
     await inProduction((mount) => {
       const warn = spyWarn();
-      mount([{ id: 'n1', disabled: 'data.locked == null' }]);
+      mount([{ id: 'n1', disabled: '${data.locked == null}' }]);
       // Same verdict as the dev case above — this diagnostic never moves one.
       expect(disabledProp()).toBe('true');
       expect(adapterOnlyReports(warn)).toHaveLength(0);
@@ -696,8 +705,8 @@ describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`'
     await inDevelopment((mount) => {
       const warn = spyWarn();
       mount([
-        { id: 'n1', disabled: "data.status == 'locked'" },
-        { id: 'n2', disabled: "data.status == 'locked'" },
+        { id: 'n1', disabled: "${data.status == 'locked'}" },
+        { id: 'n2', disabled: "${data.status == 'locked'}" },
       ]);
       expect(adapterOnlyReports(warn)).toHaveLength(1);
     });
@@ -711,8 +720,8 @@ describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`'
     await inDevelopment((mount) => {
       const warn = spyWarn();
       mount([
-        { id: 'n1', disabled: "data.status == 'locked'" },
-        { id: 'n2', visibleWhen: "data.status == 'locked'" },
+        { id: 'n1', disabled: "${data.status == 'locked'}" },
+        { id: 'n2', visibleWhen: "${data.status == 'locked'}" },
       ]);
       expect(adapterOnlyReports(warn)).toHaveLength(1);
       expect(adapterOnlyVisibilityReports(warn)).toHaveLength(1);

@@ -21,7 +21,9 @@
  * policy, nothing new: the bag binds `record` and nothing else, so a bare field
  * or `data.*` — and a legacy `${data.x}` / `${x}` string, one bag for both
  * dialects — is an unknown variable. The throwing leg (`throwOnError`) hides and
- * reports once; the non-throwing leg fails soft to `true`. Both legs are pinned
+ * reports once; the non-throwing leg fails soft to `true`. A bare string is CEL
+ * (objectstack#27457), so its report names the CEL fault and the source rather
+ * than the legacy engine's `X is not defined`. Both legs are pinned
  * on BOTH a matching and a non-matching row, because "the same verdict on both"
  * is what "no longer bound" looks like from outside.
  */
@@ -69,12 +71,14 @@ describe('[#5741] useCondition tier — the row is bound as `record.*` only', ()
   });
 
   describe.each([
-    ['bare shorthand', "status == 'in_review'", 'status'],
-    ['`data.*`', "data.status == 'in_review'", 'data'],
-    ['legacy `${data.x}`', '${data.status === "in_review"}', 'data'],
-    ['legacy `${x}`', '${status === "in_review"}', 'status'],
-  ])('a %s predicate no longer discriminates', (_what, pred, variable) => {
-    it('throwing leg (`throwOnError`): hidden on BOTH rows, reported once, naming the variable', () => {
+    // A bare string is CEL (objectstack#27457): the throw names the CEL fault and the source.
+    ['bare shorthand', "status == 'in_review'", "CEL predicate failed to evaluate: status == 'in_review'"],
+    ['`data.*`', "data.status == 'in_review'", "CEL predicate failed to evaluate: data.status == 'in_review'"],
+    // A `${…}` template is still the legacy engine, which names the variable.
+    ['legacy `${data.x}`', '${data.status === "in_review"}', 'data is not defined'],
+    ['legacy `${x}`', '${status === "in_review"}', 'status is not defined'],
+  ])('a %s predicate no longer discriminates', (_what, pred, reason) => {
+    it('throwing leg (`throwOnError`): hidden on BOTH rows, reported once, naming the fault', () => {
       // The label carries the predicate so the hook's warn-once key (label,
       // source) is unique per case — the registry is module-global.
       const label = `action "approve" (visible) [${pred}]`;
@@ -82,7 +86,7 @@ describe('[#5741] useCondition tier — the row is bound as `record.*` only', ()
       expect(evaluate(pred, other, { throwOnError: true, label })).toBe(false);
       const reports = messages().filter((m) => m.includes('was hidden/disabled: its predicate threw'));
       expect(reports).toHaveLength(1);
-      expect(reports[0]).toContain(`${variable} is not defined`);
+      expect(reports[0]).toContain(reason);
       expect(reports[0]).toContain(label);
     });
 
@@ -98,23 +102,29 @@ describe('[#5741] useCondition tier — the row is bound as `record.*` only', ()
     });
   });
 
-  it("a host's own ambient `data` is left standing: `data.*` reads the HOST object — constant, and silent", () => {
+  it("a host's own ambient `data` is left standing: `data.*` reads the HOST object — constant on both rows", () => {
     // app-shell's `ExpressionProvider` mounts `data: {}`; a record page under it
-    // hands this tier exactly this bag. Not a fault — `data.status` is an
-    // undefined VALUE on the host's object — so no leg reports it, and the row
-    // never enters the verdict. Pinned so the constant-false is a measured
-    // consequence of the ruling, not a surprise.
+    // hands this tier exactly this bag, and the row never enters the verdict.
+    // A bare string is CEL (objectstack#27457), and CEL refuses a key the host's
+    // `data` does not hold rather than reading `undefined`: so this is a FAULT
+    // now, taking each leg's existing policy — fail-soft `true` on the
+    // non-throwing leg, hidden and reported once on the throwing leg. Still
+    // constant across rows, which is what the ruling measured.
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(PredicateScopeProvider, { scope: { data: {} }, children });
     const under = (pred: string, record: unknown, options?: Options) =>
       renderHook(() => useCondition(pred as never, usePredicateRecordContext(record), options), { wrapper })
         .result.current;
-    expect(under("data.status == 'in_review'", row)).toBe(false);
-    expect(under("data.status == 'in_review'", other)).toBe(false);
+    expect(under("data.status == 'in_review'", row)).toBe(true);
+    expect(under("data.status == 'in_review'", other)).toBe(true);
     expect(under("data.status == 'in_review'", row, { throwOnError: true })).toBe(false);
+    expect(under("data.status == 'in_review'", other, { throwOnError: true })).toBe(false);
     // …while the row still reaches `record`, which this bag pins over the host.
     expect(under("record.status == 'in_review'", row)).toBe(true);
-    expect(messages()).toHaveLength(0);
+    expect(under("record.status == 'in_review'", other)).toBe(false);
+    const reports = messages().filter((m) => m.includes('its predicate threw'));
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain("CEL predicate failed to evaluate: data.status == 'in_review'");
   });
 
   it('binds NOTHING when there is no row (a non-row `useCondition` call)', () => {
