@@ -266,16 +266,15 @@ export const ObjectCapabilities = strictObject({
    * the console. On the synthesized record page they join the record's one
    * timeline stream, beside its discussion and activity, under the stream's
    * Changes filter; that page has no separate History tab. A page an author
-   * assigns is drawn as authored: it shows a field-change history only where
-   * it places a `record:history` block, which reads the record's own activity,
-   * not this flag (a `record:activity` block there lists field edits only as
-   * activity lines). Pair with per-field `trackHistory: true` to select which field
-   * diffs render as human-readable timeline summaries (ADR-0052 §5b). Audit
-   * *capture* into `sys_audit_log` is a compliance ledger and stays on
-   * regardless of this flag; retention is governed by data lifecycle
-   * (ADR-0057), not by hiding the UI.
+   * assigns is drawn as authored: a `record:history` or `record:activity`
+   * block placed there shows the record's field changes from its own activity
+   * (`sys_activity`), and neither reads this flag. Pair with per-field
+   * `trackHistory: true` to select which field diffs render as human-readable
+   * timeline summaries (ADR-0052 §5b). Audit *capture* into `sys_audit_log` is
+   * a compliance ledger and stays on regardless of this flag; retention is
+   * governed by data lifecycle (ADR-0057), not by hiding the UI.
    */
-  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. An authored page shows a field-change history only where it places a record:history block. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
+  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),

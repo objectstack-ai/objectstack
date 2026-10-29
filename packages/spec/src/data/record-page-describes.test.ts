@@ -114,7 +114,10 @@ describe('[#27312] enable.trackHistory describes the one timeline stream', () =>
 
   it('sends field changes into the record\'s timeline stream', () => {
     expect(text).toContain('join the record\'s one timeline stream, under its Changes filter');
-    expect(text).toContain('An authored page shows a field-change history only where it places a record:history block');
+    expect(text).toContain('On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag');
+    // Neither block is the only place an authored page shows changes.
+    expect(text).not.toMatch(/only where it places/);
+    expect(text).not.toMatch(/activity lines/);
   });
 
   it('carries no v2 tab phrase', () => {
