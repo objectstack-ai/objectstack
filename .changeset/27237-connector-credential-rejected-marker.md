@@ -14,3 +14,5 @@ Three additions for the connector credential store (#27237):
 - `IAutomationService` gains three optional members, `listConnectorCredentialRefs`, `setConnectorCredential` and `clearConnectorCredential`, with their types `ConnectorCredentialRef`, `ConnectorCredentialSetRequest` and `ConnectorCredentialClearRequest`. A listing entry never carries a value.
 
 `PLATFORM_OBJECT_NAMES['service-automation']` lists the new `sys_connector_credential` object.
+
+The descriptions now match the new behaviour. The stack's `connectors` field says a `credentialRef` nothing resolves, or one the upstream refuses, degrades that instance until the credential is set, where it said such a reference failed the boot. The auth and connector schemas say a credential is resolved when the instance materializes, not at boot.

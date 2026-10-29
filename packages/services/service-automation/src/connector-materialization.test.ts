@@ -6,8 +6,8 @@
 // resolves `auth.credentialRef`, and registers the resulting `{ def, handlers }`
 // on the connector registry — so `connector_action` dispatches it and
 // `GET /connectors` lists it, indistinguishable from a hand-written connector.
-// Boot fails loudly for unknown provider / unresolvable credentialRef / name
-// conflict / factory failure.
+// Boot fails loudly for unknown provider / name conflict / factory failure; a
+// credentialRef nothing resolves degrades the instance naming it (#27237).
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
