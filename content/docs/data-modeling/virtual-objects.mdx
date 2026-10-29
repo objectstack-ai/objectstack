@@ -195,9 +195,15 @@ trust a plugin driver to have applied the query: it re-applies it
   exactly like "no rows match". What the caller sees depends on the `status` (or
   `statusCode`) on the error you throw:
   - A read refused for the request's own sake (400, 404 or 422), which is what
-    `refuse()` above throws, answers `400 INVALID_QUERY` carrying your error's message,
-    so the caller reads which operator or column to drop. A retry of the same read never
-    clears it.
+    `refuse()` above throws, answers `400`. The code is `INVALID_QUERY`, or the code you
+    set on the error when it is a registered one (`INVALID_FILTER`, say). A retry of the
+    same read never clears it. The caller reads your error's message, so they know which
+    operator or column to drop. Write it for them: ⛔ no remote URL, host or credential
+    in it. The message is withheld, and goes to the server log, when the read carries a
+    predicate the caller did not write, such as a sharing or row-level security scope,
+    because it may name that predicate's column or value. A remote `404` on a list
+    endpoint often means a wrong base path or resource mapping in your driver, not a bad
+    query.
   - A write refused for the request's own sake (400, 404, 409, 412 or 422) answers
     `422 EXTERNAL_WRITE_REFUSED` carrying your error's message.
   - Anything else answers `503 ERR_DATASOURCE_UNAVAILABLE` with `reason: 'remote'`: a

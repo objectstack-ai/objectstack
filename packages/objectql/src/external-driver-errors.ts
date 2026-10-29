@@ -17,10 +17,11 @@
  * the platform's own write switch being off, fixed by turning it on; these are
  * fixed by changing the payload or the filter. They are registered under this
  * package in `ERROR_CODE_LEDGER`, beside the gate codes' own owner; the read
- * refusal carries the standard `INVALID_QUERY` and needs no row.
+ * refusal carries the driver's registered code or the standard `INVALID_QUERY`
+ * and needs no row.
  */
 
-import { StandardErrorCode } from '@objectstack/spec/api';
+import { ErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 
 /** The `code` {@link ExternalWriteRefusedError} carries. */
 export const EXTERNAL_WRITE_REFUSED_CODE = 'EXTERNAL_WRITE_REFUSED' as const;
@@ -57,8 +58,8 @@ export const EXTERNAL_WRITE_REFUSED_STATUSES: ReadonlySet<number> = new Set([400
  * [#27471] The statuses a plugin driver's `find` throw is read as a refusal of
  * THIS read with: the remote (or the driver, before it asked — the guide's
  * `refuse()`) judged the filter, the column or the resource, and a changed
- * request may pass. Answered {@link ExternalReadRefusedError} with the driver's
- * message. Every other status, and a throw that declares none, is a remote
+ * request may pass. Answered {@link ExternalReadRefusedError}, with the driver's
+ * message when the read's `where` is the caller's own. Every other status, and a throw that declares none, is a remote
  * failure (`ERR_DATASOURCE_UNAVAILABLE`, 503, text withheld), for the reasons
  * {@link EXTERNAL_WRITE_REFUSED_STATUSES} gives.
  */
@@ -67,14 +68,24 @@ export const EXTERNAL_READ_REFUSED_STATUSES: ReadonlySet<number> = new Set([400,
 /**
  * [#27471] A plugin driver refused a read with a request-shaped 4xx
  * ({@link EXTERNAL_READ_REFUSED_STATUSES}): an operator, a combinator or a
- * column the remote cannot run, a resource it does not map. 400 with the
- * standard `INVALID_QUERY`: the caller's query is what has to change, so the
- * message is the driver's own and a retry of the same read never clears it.
+ * column the remote cannot run, a resource it does not map. 400: the caller's
+ * query is what has to change, and a retry of the same read never clears it.
  * `find`, `findOne` and `count` all read through `find`, so `operation` is
  * always `find`.
+ *
+ * - **Code.** A driver that declared a registered ADR-0112 code (`ErrorCode`,
+ *   the membership test the HTTP door applies to a thrown `code`) keeps it, as
+ *   it would on a datasource the engine does not floor; any other spelling, or
+ *   none, answers the standard `INVALID_QUERY`. `details.remoteCode` carries
+ *   what the driver declared either way.
+ * - **Message.** The driver's own sentence, when the floor passes it
+ *   (`remoteMessage` a string). `null` withholds it: the read's `where` was not
+ *   attested as the caller's own (`filter-subtree-provenance.ts`), so the
+ *   sentence may name a policy subtree's column or comparand. The answer is
+ *   then the same refusal with a fixed sentence pointing at the server log.
  */
 export class ExternalReadRefusedError extends Error {
-  readonly code = StandardErrorCode.enum.INVALID_QUERY;
+  readonly code: ErrorCode;
   readonly status = 400;
   readonly httpStatus = 400;
   readonly details: {
@@ -83,20 +94,30 @@ export class ExternalReadRefusedError extends Error {
     operation: 'find';
     /** The status the driver declared on its throw. */
     remoteStatus: number;
+    /** The `code` the driver declared on its throw, kept or not; absent when it declared none. */
+    remoteCode?: string;
   };
 
   constructor(
     datasource: string,
     object: string,
     remoteStatus: number,
-    remoteMessage: string,
-    options?: { cause?: unknown },
+    remoteMessage: string | null,
+    options?: { cause?: unknown; remoteCode?: string },
   ) {
-    const said = remoteMessage.trim() || `it answered ${remoteStatus} with no message`;
-    super(`The plugin driver of datasource '${datasource}' refused this read on '${object}': ${said}`);
+    const head = `The plugin driver of datasource '${datasource}' refused this read on '${object}'`;
+    const said = remoteMessage?.trim() || `it answered ${remoteStatus} with no message`;
+    super(remoteMessage === null ? `${head}; its reason is in the server log.` : `${head}: ${said}`);
     this.name = 'ExternalReadRefusedError';
     if (options && 'cause' in options) (this as Error & { cause?: unknown }).cause = options.cause;
-    this.details = { datasource, object, operation: 'find', remoteStatus };
+    const remoteCode = options?.remoteCode;
+    this.code = remoteCode !== undefined && ErrorCode.safeParse(remoteCode).success
+      ? remoteCode as ErrorCode
+      : StandardErrorCode.enum.INVALID_QUERY;
+    this.details = {
+      datasource, object, operation: 'find', remoteStatus,
+      ...(remoteCode !== undefined ? { remoteCode } : {}),
+    };
   }
 }
 
