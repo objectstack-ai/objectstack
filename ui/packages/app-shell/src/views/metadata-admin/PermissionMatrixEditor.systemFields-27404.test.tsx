@@ -129,16 +129,16 @@ describe('the field rows leave out the platform bookkeeping columns (objectstack
     expect(screen.queryByTestId('perm-field-name-a_project-organization_id')).toBeNull();
   });
 
-  it('CONTROL: a stored row the draft clears keeps its row, so the admin sees what the save drops', async () => {
+  it('CONTROL: a stored row the draft clears keeps its row until the save lands, then nothing is stored', async () => {
     await renderExpanded({ 'a_project.__search': { readable: false, editable: false } });
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-    const body = await (async () => {
-      await waitFor(() => expect(saved.length).toBeGreaterThan(0), AUTOSAVE);
-      return saved[saved.length - 1];
-    })();
-    expect(body.fields?.['a_project.__search']).toBeUndefined();
+    // Unsaved: the loaded set still carries the entry, so the row shows what the save drops.
     expect(screen.getByTestId('perm-field-name-a_project-__search')).toBeInTheDocument();
     expect(screen.getByLabelText('a_project.__search readable')).toHaveAttribute('data-field-rule', 'inherited');
+    await waitFor(() => expect(saved.length).toBeGreaterThan(0), AUTOSAVE);
+    expect(saved[saved.length - 1].fields?.['a_project.__search']).toBeUndefined();
+    // Saved: no entry is stored any more, so the column is not offered.
+    await waitFor(() => expect(screen.queryByTestId('perm-field-name-a_project-__search')).toBeNull());
   });
 
   it('a bulk shortcut writes only the offered rows, never a bookkeeping column', async () => {
