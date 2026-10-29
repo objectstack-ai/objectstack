@@ -4734,6 +4734,7 @@ const es = {
     on: "Activado",
     off: "Desactivado",
     notRunning: "No se ejecuta aquí",
+    notRunningDeploymentPolicy: "Activado, pero esta implementación no ejecuta tareas programadas",
     clone: "Clonar",
     cloneTitle: "Clonar flujo del paquete",
     cloneBody: "La copia conserva toda la definición y necesita un nombre de máquina y una etiqueta nuevos. Edita la copia en Studio.",
