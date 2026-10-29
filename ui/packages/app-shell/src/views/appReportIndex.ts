@@ -404,7 +404,7 @@ export const DEFAULT_REPORT_INDEX_VIEW: ReportIndexView = 'all';
 
 /**
  * The reader's index view, in the console's preference store
- * (`workspacePreference.ts`), scope `user`: one choice across apps, stored as
+ * (`defineWorkspacePreference`), scope `user`: one choice across apps, stored as
  * `{"value":"all"|"recent","v":1}`. Any other stored value is no choice.
  */
 export const REPORT_INDEX_VIEW_PREFERENCE = defineWorkspacePreference<ReportIndexView>({
