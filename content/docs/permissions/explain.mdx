@@ -71,6 +71,8 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 
 `operation` is one of `read | create | update | delete | transfer | restore |
 purge | export` (defaults to `read`); omit `userId` to explain **yourself**.
+An empty `userId` (`"userId": ""`, or `?userId=` with no value) names nobody, so
+it is refused `400 VALIDATION_FAILED` rather than read as "yourself".
 
 `export` is the one operation whose answer you cannot infer from `read`. Since
 the [export axis](/docs/permissions/permission-sets#allowexport--the-export-axis)
