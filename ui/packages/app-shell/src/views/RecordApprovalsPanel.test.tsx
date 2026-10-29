@@ -26,6 +26,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import type { ApprovalRequestLite } from '../hooks/useRecordApprovals';
+import { builtInLocales } from '@object-ui/i18n/locales';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -160,9 +161,14 @@ describe('RecordApprovalsPanel — read-gated approval visibility (objectui#3461
     expect(screen.getByText('Qian Hua')).toBeTruthy();
     expect(screen.getByText('Li Lei')).toBeTruthy();
     expect(screen.queryByText('u_qa_head')).toBeNull();
-    // Group label + the collapsed ×2 count for the double-slot approver.
+    // Group label + the collapsed count for the double-slot approver, in the
+    // words of the slot family's count-invariant row (this render runs with no
+    // i18next instance, so the inline default, which is that row, is drawn).
     expect(screen.getByText('· production')).toBeTruthy();
-    expect(screen.getByText('×2')).toBeTruthy();
+    expect(
+      screen.getByText(`· ${builtInLocales.en.approvalsInbox.approverSlots.replace('{{count}}', '2')}`),
+    ).toBeTruthy();
+    expect(screen.queryByText('×2')).toBeNull();
     // The per-group branch of the tally copy. (The literal counts are
     // interpolated by i18next, which this render intentionally runs without —
     // the group badges below carry the numbers.)

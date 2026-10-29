@@ -863,6 +863,8 @@ export function ObjectValidationsPanel({
   onPatch,
   disabled,
   onBlockingIssuesChange,
+  onCelVerdictsChange,
+  focus,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
@@ -874,6 +876,18 @@ export function ObjectValidationsPanel({
    * and refuses to write.
    */
   onBlockingIssuesChange?: (count: number) => void;
+  /**
+   * objectstack#27629 — the same verdicts per rule NAME (only rules in the
+   * draft, `0` included), so the Data pillar can keep each one with the draft
+   * once this panel unmounts and name the rule it holds.
+   */
+  onCelVerdictsChange?: (verdicts: Readonly<Record<string, number>>) => void;
+  /**
+   * objectstack#27629 — the rule the Data pillar's "Show me" asks for, on a
+   * held edit. Each new object selects it once; the author's own picks are
+   * free after that.
+   */
+  focus?: { name: string } | null;
 }) {
   const locale = useMetadataLocale();
   const rules = React.useMemo(() => readRules(draft.validations), [draft.validations]);
@@ -882,7 +896,12 @@ export function ObjectValidationsPanel({
   // in the header). The first edit that gives one its guard writes it.
   const [unsaved, setUnsaved] = React.useState<ValidationRuleDraft[]>([]);
   const listed = React.useMemo(() => [...rules, ...unsaved], [rules, unsaved]);
-  const [selected, setSelected] = React.useState<string | null>(null);
+  const [selected, setSelected] = React.useState<string | null>(() => focus?.name ?? null);
+  const [focusSeen, setFocusSeen] = React.useState(focus);
+  if (focus !== focusSeen) {
+    setFocusSeen(focus);
+    if (focus) setSelected(focus.name);
+  }
   const [addOpen, setAddOpen] = React.useState(false);
   // Default to the first rule so the detail pane isn't a dead "pick one" empty
   // state whenever rules already exist. Falls back automatically when `selected`
@@ -952,22 +971,29 @@ export function ObjectValidationsPanel({
     () => new Set(rules.map((r) => r.name ?? '')),
     [rules],
   );
-  const blockingIssues = React.useMemo(() => {
-    let total = 0;
+  const liveCelErrors = React.useMemo(() => {
+    const live: Record<string, number> = {};
     for (const [name, count] of Object.entries(celErrors)) {
-      if (!liveRuleNames.has(name)) continue; // pruned: the rule is gone
-      total += count;
+      if (liveRuleNames.has(name)) live[name] = count; // else pruned: the rule is gone
     }
-    return total;
+    return live;
   }, [celErrors, liveRuleNames]);
-  // Held in a ref so an unmemoized host callback cannot re-fire the effect.
+  const blockingIssues = Object.values(liveCelErrors).reduce((total, count) => total + count, 0);
+  // Held in refs so an unmemoized host callback cannot re-fire the effects.
   const onBlockingIssuesChangeRef = React.useRef(onBlockingIssuesChange);
+  const onCelVerdictsChangeRef = React.useRef(onCelVerdictsChange);
   React.useEffect(() => {
     onBlockingIssuesChangeRef.current = onBlockingIssuesChange;
+    onCelVerdictsChangeRef.current = onCelVerdictsChange;
   });
   React.useEffect(() => {
     onBlockingIssuesChangeRef.current?.(blockingIssues);
   }, [blockingIssues]);
+  // Keyed on the verdicts' text, not on the memo's identity (ui/AGENTS.md #10).
+  const celVerdictsKey = JSON.stringify(liveCelErrors);
+  React.useEffect(() => {
+    onCelVerdictsChangeRef.current?.(JSON.parse(celVerdictsKey) as Record<string, number>);
+  }, [celVerdictsKey]);
 
   const commit = (next: ValidationRuleDraft[]) => onPatch({ validations: next });
 

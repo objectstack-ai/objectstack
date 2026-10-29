@@ -118,7 +118,8 @@ Your own keys are listed (prefix only) and revoked under **Account → Developer
 → API Keys**. Platform admins get the tenant-wide list at **Setup → Access
 Control → API Keys**, which requires `manage_platform_settings`.
 
-Or mint one over REST:
+Or mint one over REST, from a signed-in session (the `-b cookies.txt` below). A
+request authenticated with an API key is refused `403 PERMISSION_DENIED`:
 
 ```bash
 curl -b cookies.txt -X POST https://your-deployment.example.com/api/v1/keys

@@ -328,13 +328,14 @@ describe('why the gate cannot delegate "is there a condition?" to the verdict (o
   it('toPredicateInput collapses the EMPTY shapes and passes the BLANK ones through', () => {
     // Why the gate is not simply `toPredicateInput(x) !== undefined`: blank
     // predicate text survives normalization as an evaluable-looking value in both
-    // its spellings — a wrapped template for the bare string, an intact envelope
-    // for a blank `source` — so the shared definition names blankness explicitly
+    // its spellings — a `cel` envelope for the bare string (objectstack#27457:
+    // it is CEL shorthand), an intact envelope for a blank `source` — so the
+    // shared definition names blankness explicitly
     // (objectui#3960; the same blank rule `evalRowPredicate` applies in
     // `evaluator/listConditional.ts`).
     expect(toPredicateInput('')).toBeUndefined();
     expect(toPredicateInput({ dialect: 'cel', source: '' })).toBeUndefined();
-    expect(toPredicateInput('   ')).toBe('${   }');
+    expect(toPredicateInput('   ')).toEqual({ dialect: 'cel', source: '   ' });
     expect(toPredicateInput({ dialect: 'cel', source: '   ' })).toEqual({ dialect: 'cel', source: '   ' });
   });
 

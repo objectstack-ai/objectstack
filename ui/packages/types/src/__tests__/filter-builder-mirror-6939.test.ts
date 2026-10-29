@@ -158,6 +158,14 @@
  *   - **every member is a spec `FieldType`**, except the members named in
  *     `SPEC_FIELD_TYPE_EXEMPTIONS` below, each with its reason. A member that
  *     is neither reddens here.
+ *
+ * ## objectstack#27497 (ruling C) — the number bucket IS the spec's numeric family
+ *
+ * `FILTER_NUMBER_LIKE_TYPES` is taken from `NUMERIC_VALUE_TYPES`
+ * (`@objectstack/spec/data`), the set the server's filter doors read a field as
+ * numeric by, so `progress`, `slider` and `summary` joined the accepted set and
+ * the number bucket. The pins below hold the bucket equal to that family member
+ * for member, and the type face's literal union equal to it too.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -167,7 +175,7 @@ import { dirname, join } from 'node:path';
 import { FilterBuilderSchema, FilterFieldSchema, FilterGroupSchema } from '../zod/complex.zod';
 import { safeValidateSchema } from '../zod/index.zod';
 import type { FilterField as TsFilterField, FilterGroup as TsFilterGroup } from '../complex';
-import { FieldType as SpecFieldTypeEnum } from '@objectstack/spec/data';
+import { FieldType as SpecFieldTypeEnum, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 import {
   FILTER_FIELD_TYPES,
   FILTER_LOOKUP_LIKE_TYPES,
@@ -446,6 +454,31 @@ describe('objectui#6939 — the type vocabulary', () => {
     }
   });
 
+});
+
+/**
+ * The type face of the number bucket, as an exhaustive record: a member the
+ * literal union lacks or carries extra fails to compile here, and the runtime
+ * test below compares these keys with the spec set.
+ */
+const NUMBER_BUCKET_TYPE_FACE: Record<(typeof FILTER_NUMBER_LIKE_TYPES)[number], true> = {
+  number: true, currency: true, percent: true, rating: true, slider: true, progress: true, summary: true,
+};
+
+describe('objectstack#27497 — the number bucket is the spec numeric value family', () => {
+  it('`FILTER_NUMBER_LIKE_TYPES` equals `NUMERIC_VALUE_TYPES`, member for member', () => {
+    expect(NUMERIC_VALUE_TYPES.size).toBeGreaterThan(0);
+    expect([...FILTER_NUMBER_LIKE_TYPES].sort()).toEqual([...NUMERIC_VALUE_TYPES].sort());
+  });
+
+  it('the literal union the type face names is the same family', () => {
+    expect(Object.keys(NUMBER_BUCKET_TYPE_FACE).sort()).toEqual([...NUMERIC_VALUE_TYPES].sort());
+  });
+
+  it.each([...NUMERIC_VALUE_TYPES])('accepts the spec numeric type `%s` on a filter-builder field', (type) => {
+    expect(FilterFieldSchema.safeParse({ value: 'a', label: 'A', type }).success).toBe(true);
+    expect((FILTER_FIELD_TYPES as readonly string[]).includes(type)).toBe(true);
+  });
 });
 
 describe('objectui#6939 — the group shape is `{ id, logic, conditions }`', () => {

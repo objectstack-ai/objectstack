@@ -2188,9 +2188,9 @@ const STUDIO_EN: Record<string, string> = {
     'Record visibility is inherited from the parent (master) record through its master-detail relationship.',
   'engine.studio.settings.capabilities': 'Capabilities (enable.*)',
   'engine.studio.settings.capabilitiesHint': 'Record-page features — every switch here is enforced by the runtime',
-  'engine.studio.settings.capTrackHistory': 'History tab (trackHistory)',
+  'engine.studio.settings.capTrackHistory': 'Field change history (trackHistory)',
   'engine.studio.settings.capTrackHistoryDesc':
-    'Shows the read-only History tab (audit trail) on record pages. Pair with per-field history tracking for human-readable diffs; audit capture itself is always on for compliance.',
+    "Shows the record's field changes: on the default record page they join the record's one timeline stream, under its Changes filter. Pair with per-field history tracking to pick which field diffs are summarized; audit capture itself is always on for compliance.",
   'engine.studio.settings.capFiles': 'Attachments (files)',
   'engine.studio.settings.capFilesDesc':
     'Generic Attachments panel on record pages (upload/download/delete). Off = the server also rejects new attachments targeting this object.',
@@ -3012,8 +3012,14 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11910 — a dashboard widget held until it is bound; `input` is the
   // widget inspector's own label for it (Dataset, Values (measures)).
   'engine.studio.held.widgetNeedsInput': '{input} on the widget “{widget}” needs a value',
+  // objectstack#27464 — a navigation rename typed but not committed yet.
+  'engine.studio.held.navRename': 'the rename of the navigation item “{item}” is not finished',
   // objectstack#27485 — a field CEL expression the inspector judged broken, held after it closes.
   'engine.studio.held.celInvalid': 'an expression on the field “{field}” has an error to fix',
+  // objectstack#27629 — the same hold for a validation rule, an action, and an item in the metadata editor.
+  'engine.studio.held.celInvalidRule': 'an expression on the rule “{rule}” has an error to fix',
+  'engine.studio.held.celInvalidAction': 'an expression on the action “{action}” has an error to fix',
+  'engine.studio.held.inspectorInvalid': '“{item}” has an error to fix in its inspector',
   'engine.studio.held.line': 'Not saved yet: {clause}. Your changes are kept here and saved once it is filled in.',
   'engine.studio.held.publish': 'Not published: {clause}, so that change is not saved yet. Finish it, then publish.',
   'engine.studio.held.inputHint': 'Required. Changes are saved once this has a value.',
@@ -3261,11 +3267,30 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.interfaces.create.measurePlaceholder': 'Choose a measure…',
   'engine.studio.interfaces.create.reportHint':
     'A report shows measures of one dataset. Add more measures and groupings in the Properties panel once it is created.',
-  'engine.studio.interfaces.create.noDatasets':
-    'There is no dataset to report on yet. A report shows the measures of a dataset, so create a dataset first.',
   'engine.studio.interfaces.create.datasetsFailed': 'The datasets could not be loaded: {error}',
   'engine.studio.interfaces.create.noMeasures': 'This dataset declares no measures, so a report cannot show it.',
   'engine.studio.interfaces.create.needsBinding': 'Choose the dataset this report reads, and one of its measures.',
+  // objectstack#27518 — New dataset, beside the report dialog's and the widget inspector's dataset pickers.
+  'engine.studio.interfaces.newDataset.open': 'New dataset',
+  'engine.studio.interfaces.newDataset.title': 'New dataset',
+  'engine.studio.interfaces.newDataset.description':
+    'Saved as a draft in this package. It counts the records of the object it reads; reports and charts show its measures, grouped by the fields you pick.',
+  'engine.studio.interfaces.newDataset.nameLabel': 'Dataset name',
+  'engine.studio.interfaces.newDataset.namePlaceholder': 'Dataset name (e.g. Work orders)',
+  'engine.studio.interfaces.newDataset.idPlaceholder': 'Identifier (e.g. work_orders)',
+  'engine.studio.interfaces.newDataset.object': 'Object',
+  'engine.studio.interfaces.newDataset.needsObject': 'Choose the object this dataset reads.',
+  'engine.studio.interfaces.newDataset.groupBy': 'Group by',
+  'engine.studio.interfaces.newDataset.groupByHint': 'A chart draws one bar or slice for each value of these fields.',
+  'engine.studio.interfaces.newDataset.totals': 'Totals',
+  'engine.studio.interfaces.newDataset.totalsHint':
+    'Each number field picked here is summed. Every dataset also counts its records.',
+  'engine.studio.interfaces.newDataset.noFields':
+    'This object has no field to group by or total yet. The dataset will count its records.',
+  'engine.studio.interfaces.newDataset.taken':
+    'A dataset with the identifier “{name}” already exists. Choose another identifier.',
+  'engine.studio.interfaces.newDataset.noPackageDatasets':
+    'No dataset reads this package’s objects yet. Reports and charts show the measures of a dataset: create one with New dataset.',
   'engine.studio.interfaces.create.page': 'New page',
   'engine.studio.interfaces.create.pageNameLabel': 'Page name',
   'engine.studio.interfaces.create.pageNamePlaceholder': 'Page name (e.g. Team handbook)',
@@ -3349,6 +3374,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.saved': 'Saved {count} object draft(s).',
   'engine.studio.owd.unsaved': 'Unsaved',
   'engine.studio.owd.byParent': 'By parent → {master}',
+  'engine.studio.owd.cbpPrereqTitle': 'Make the relationship required?',
+  'engine.studio.owd.cbpPrereqDesc':
+    'Controlled by parent needs exactly one required master-detail field. Saving {object} this way makes this relationship required, which the server flags as a change to confirm:',
+  'engine.studio.owd.cbpPrereqConfirm': 'Make required and save',
   'engine.studio.owd.byParentNoMaster': 'By parent — no master: the object needs exactly one required master-detail field',
   'engine.studio.owd.masterTip':
     'Controlled by parent — record visibility is inherited from the master record.',

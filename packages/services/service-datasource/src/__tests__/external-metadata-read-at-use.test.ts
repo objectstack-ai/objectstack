@@ -288,7 +288,9 @@ describe('with no metadata service at all, every reader keeps its fallback', () 
   // same reading validate already made of an unreadable definition ("not
   // federated", the empty report below), so an import can no longer bind an
   // object the sweep would never check. The refusal comes before any
-  // introspection.
+  // introspection. [#27618] A name with no definition is refused as every
+  // by-name door refuses it: `404 RESOURCE_NOT_FOUND`, not the `400` a
+  // definition that is not a federation source gets.
   it('validate and the sweep answer an empty report, and the Sync doors refuse an undeclared datasource', async () => {
     // [#21842] No engine registry either: that is where validate's objects
     // come from, so with neither service the report has nothing to list.
@@ -296,11 +298,11 @@ describe('with no metadata service at all, every reader keeps its fallback', () 
     const service = await federation(h);
 
     expect(await service.validateAll()).toEqual({ ok: true, results: [] });
-    const refusal = { status: 400, message: expect.stringContaining("Datasource 'warehouse' has no datasource definition") };
-    await expect(service.generateObjectDraft('warehouse', 'customers')).rejects.toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', ...refusal });
-    await expect(service.refreshCatalog('warehouse')).rejects.toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', ...refusal });
-    await expect(service.listRemoteTables('warehouse')).rejects.toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', ...refusal });
-    await expect(service.importObject('warehouse', 'customers')).rejects.toMatchObject({ code: 'EXTERNAL_IMPORT_ERROR', ...refusal });
+    const refusal = { status: 404, code: 'RESOURCE_NOT_FOUND', message: 'Datasource "warehouse" does not exist.' };
+    await expect(service.generateObjectDraft('warehouse', 'customers')).rejects.toMatchObject(refusal);
+    await expect(service.refreshCatalog('warehouse')).rejects.toMatchObject(refusal);
+    await expect(service.listRemoteTables('warehouse')).rejects.toMatchObject(refusal);
+    await expect(service.importObject('warehouse', 'customers')).rejects.toMatchObject(refusal);
     const data = h.services.get('data') as { introspectDatasource: Mock };
     expect(data.introspectDatasource).not.toHaveBeenCalled();
   });

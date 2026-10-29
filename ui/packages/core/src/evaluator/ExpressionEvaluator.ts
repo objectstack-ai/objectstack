@@ -360,9 +360,9 @@ export class ExpressionEvaluator {
     // engine (the one `fieldRules` / list conditionals already use), NOT the legacy
     // JS evaluator below. This makes a component / action `visible` / `disabled`
     // predicate reach the SAME verdict as server enforcement — including CEL-only
-    // behavior like `record.due_date == today()` (framework#3205). Bare strings and
-    // `${…}` templates stay on the legacy path (back-compat deprecation window);
-    // only an explicit `{ dialect: 'cel' }` envelope is rerouted.
+    // behavior like `record.due_date == today()` (framework#3205). A BARE string
+    // takes the same route further down (objectstack#27457); only a `${…}`
+    // template, and an envelope of another dialect, stay on the legacy path.
     if (
       condition && typeof condition === 'object'
       && (condition as { dialect?: string }).dialect === 'cel'
@@ -371,9 +371,14 @@ export class ExpressionEvaluator {
       return this.evaluateCelCondition((condition as { source: string }).source, options);
     }
 
-    // Unwrap Expression envelope (see `evaluate` for rationale).
+    // Unwrap Expression envelope (see `evaluate` for rationale). Only an
+    // envelope of a dialect other than `cel` gets here (a `cel` one with a
+    // string `source` was routed above); its `source` keeps the legacy reading
+    // below, which is why the unwrap is remembered.
+    let unwrappedEnvelope = false;
     if (condition && typeof condition === 'object' && typeof (condition as any).source === 'string') {
       condition = (condition as any).source as string;
+      unwrappedEnvelope = true;
     }
 
     // A BLANK gate — `''`, whitespace-only text, or an envelope whose `source`
@@ -413,6 +418,26 @@ export class ExpressionEvaluator {
     if (trimmed.includes('${')) {
       return Boolean(this.evaluate(trimmed, options));
     }
+
+    // objectstack#27457 — a BARE string is CEL. `@objectstack/spec` defines it
+    // as shorthand for `{ dialect: 'cel', source }` (the string arm of
+    // `ExpressionInputSchema` / `EvaluatedExpressionInputSchema`), and the
+    // server reads it that way, so the console reads it on the same engine
+    // (ADR-0032, one CEL language) instead of keeping a second grammar for the
+    // shorthand. Raw authored values reach this method unnormalized — a page
+    // node's `visibleWhen` from `SchemaRenderer`, a nav entry's `visible` from
+    // app-shell's `ExpressionProvider` — so the shorthand is resolved HERE, at
+    // the one evaluator every predicate reaches, and `toPredicateInput` emits
+    // the envelope for the callers that normalize first. Before, a CEL-only
+    // predicate (`'org_owner' in current_user.positions`, `size(page.items) > 0`)
+    // faulted on the legacy grammar and its gate failed closed for everyone.
+    if (!unwrappedEnvelope) {
+      return this.evaluateCelCondition(trimmed, options);
+    }
+
+    // What is left is the `source` of an envelope whose dialect is not `cel`
+    // (a `template` one, or one naming no dialect at all): neither is a CEL
+    // predicate by the spec, so neither is moved by the line above.
     try {
       return Boolean(this.evaluateExpression(trimmed, { sanitize: options.sanitize !== false }));
     } catch (error) {

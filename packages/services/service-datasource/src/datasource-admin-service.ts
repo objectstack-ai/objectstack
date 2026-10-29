@@ -333,17 +333,23 @@ function withRemaining(remaining: string[]): { remaining?: string[] } {
  * internal datasources and tables, and the message is served to an API caller.
  */
 /**
- * The refusal every by-name lifecycle door answers when `name` resolves no
- * stored datasource — `updateDatasource`, `removeDatasource` and
- * `migrateCredential`.
+ * The refusal every by-name door answers when `name` resolves no stored
+ * datasource: here `updateDatasource`, `removeDatasource` and
+ * `migrateCredential`; in `ExternalDatasourceService`, `testConnection` and
+ * the federation guard every Sync door runs first; and `GET /datasources/:name`
+ * answers in its words.
  *
  * It carries the ADR-0112 envelope (`404` / `RESOURCE_NOT_FOUND`) so the admin
  * routes answer it exactly as `GET /datasources/:name` answers the same name.
  * A plain `Error` here was rendered `400 DATASOURCE_ADMIN_ERROR`, which tells an
  * SDK or AI caller its request was malformed rather than that the datasource
  * does not exist — and the read sibling already said the latter.
+ *
+ * [#27618] ONE helper for the package, so every by-name door names a missing
+ * datasource in one spelling. Exported from this module for its siblings only:
+ * ⛔ not from the package index, which would widen the public surface.
  */
-function datasourceNotFoundError(name: string): Error {
+export function datasourceNotFoundError(name: string): Error {
   // GET's own words, so every by-name door names the missing datasource alike.
   const err = new Error(`Datasource "${name}" does not exist.`) as Error & { code?: string; status?: number };
   err.code = 'RESOURCE_NOT_FOUND';

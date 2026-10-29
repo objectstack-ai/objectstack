@@ -47,7 +47,12 @@ import { CAP_REACT_PAGES, isCapabilityEnabled } from '@object-ui/core';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { useDatasetCatalog, useDatasetSemantics } from '../metadata-admin/previews/useDatasetCatalog.js';
-import { datasetSelectOptions, labelBesideName } from '../metadata-admin/inspectors/dataset-picker-options.js';
+import {
+  datasetSelectOptions,
+  labelBesideName,
+  packageDatasetsFirst,
+} from '../metadata-admin/inspectors/dataset-picker-options.js';
+import { DatasetCreateEntry, type StudioDatasetAuthoring } from './datasetCreate.js';
 import type { NavNode } from './navSurface.js';
 
 /** The kinds the Interfaces pillar creates. */
@@ -298,21 +303,28 @@ export function PageCreateFields({
  * that dataset's measures, offered from the same catalog the report's
  * Properties panel binds from (`useDatasetCatalog`). Nothing is chosen for
  * the author: both start empty, and a dataset change clears the measure.
+ *
+ * objectstack#27518 — the catalog is the draft-overlaid one, with this
+ * package's datasets first, and the New dataset entry sits under the picker
+ * (`DatasetCreateEntry`): it says when no dataset reads this package's objects
+ * yet, and a dataset it creates is the one the picker then holds.
  */
 export function ReportCreateFields({
   value,
   onChange,
+  authoring,
   locale,
 }: {
   value: ReportBinding;
   onChange: (next: ReportBinding) => void;
+  authoring: StudioDatasetAuthoring;
   locale: SupportedLocale;
 }): React.ReactElement {
-  const catalog = useDatasetCatalog();
+  const catalog = useDatasetCatalog(undefined, { previewDrafts: true });
   const semantics = useDatasetSemantics(value.dataset || undefined, catalog);
   const datasetOptions = [
     { value: '', label: t('engine.studio.interfaces.create.datasetPlaceholder', locale) },
-    ...datasetSelectOptions(catalog.datasets),
+    ...datasetSelectOptions(packageDatasetsFirst(catalog.datasets, authoring.packageId)),
   ];
   const measureOptions = [
     { value: '', label: t('engine.studio.interfaces.create.measurePlaceholder', locale) },
@@ -329,13 +341,16 @@ export function ReportCreateFields({
       </p>
     );
   }
-  if (catalog.datasets.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground" data-testid="create-report-no-datasets">
-        {t('engine.studio.interfaces.create.noDatasets', locale)}
-      </p>
-    );
-  }
+  const newDataset = (
+    <DatasetCreateEntry
+      authoring={authoring}
+      catalog={catalog}
+      onCreated={(name) => onChange({ dataset: name, measure: '' })}
+      locale={locale}
+      testId="create-report-new-dataset"
+    />
+  );
+  if (catalog.datasets.length === 0) return newDataset;
   return (
     <div className="space-y-3">
       <label className="block">
@@ -347,6 +362,7 @@ export function ReportCreateFields({
           testId="create-report-dataset"
         />
       </label>
+      {newDataset}
       {value.dataset !== '' && (
         <label className="block">
           <span className="mb-1 block text-sm font-medium">{t('engine.studio.interfaces.create.measure', locale)}</span>

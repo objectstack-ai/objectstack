@@ -1877,7 +1877,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "必要な権限",
-        helpText: "このアクションを実行するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です（ADR-0066 D4）。それ以外の呼び出し元はプラットフォームのアクションルートで 403 として拒否され（script、flow、modal アクションと MCP/AI 経路）、ボタンも表示されません。type が api のアクションはエンドポイントを直接呼び出すため、そのエンドポイントで改めてチェックする必要があります。"
+        helpText: "このアクションを実行するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です（ADR-0066 D4）。プラットフォームのアクションドアは、自らがディスパッチするすべての呼び出しで、それ以外の呼び出し元を 403 として拒否し（MCP/AI 経路を含む）、ボタンも表示されません。type が api のアクションのエンドポイントは引き続き直接呼び出せるため、そのエンドポイント自身でもこれらの機能をチェックする必要があります。target が別オリジンの api アクションについては、プラットフォームはサーバー側で何もチェックしません。"
       },
       ai: {
         label: "AI 公開",

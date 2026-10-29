@@ -111,6 +111,15 @@ const buildFindings = (body: unknown) => {
 
 const dump = (r: unknown) => JSON.stringify(r, null, 2);
 
+/**
+ * [#27643] The build's findings as the door spells them: a validation rule's
+ * finding carries the judged slot's key path, and the door re-spells its
+ * top-level index by name (`objects[0]` → `objects.fx_rule`); every other key
+ * is the build's own.
+ */
+const asAtDoor = <T extends { path: string }>(fs: readonly T[]): T[] =>
+  fs.map((f) => ({ ...f, path: f.path.replace(/^objects\[0\]/, 'objects.fx_rule') }));
+
 describe('#22032 pass 1 — the object door gives the build\'s validation-rule verdict', () => {
   it('needs no registry change: `validateStackExpressions` is already on the object door', () => {
     expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toContain('validateStackExpressions');
@@ -123,7 +132,7 @@ describe('#22032 pass 1 — the object door gives the build\'s validation-rule v
     const errs = expressionFindings(result.errors);
     const where = "object 'fx_rule' · validation 'amount_root'";
     expect(errs, dump(result)).toHaveLength(1);
-    expect(errs[0]).toMatchObject({ severity: 'error', where, path: where });
+    expect(errs[0]).toMatchObject({ severity: 'error', where, path: 'objects.fx_rule.validations[0].condition' });
     expect(errs[0]!.message).toContain('`sqrt` is not a callable name here');
   });
 
@@ -171,7 +180,7 @@ describe('#22032 pass 1 — the object door gives the build\'s validation-rule v
 
       // Non-vacuous: the build refuses each of them.
       expect(atBuild.length, dump(rule)).toBeGreaterThan(0);
-      expect(atDoor, dump(rule)).toEqual(atBuild);
+      expect(atDoor, dump(rule)).toEqual(asAtDoor(atBuild));
     }
   });
 
@@ -265,7 +274,11 @@ describe('#22042 — a `conditional` rule\'s nested predicates meet the same ver
     const atBuild = buildFindings(fxRule([NESTED_REFUSED]));
 
     expect(atBuild.map((f) => f.where), dump(atBuild)).toEqual([THEN_WHERE, OTHERWISE_WHERE]);
-    for (const f of atBuild) expect(f).toMatchObject({ severity: 'error', path: f.where });
+    expect(atBuild.map((f) => f.path), dump(atBuild)).toEqual([
+      'objects[0].validations[0].then.condition',
+      'objects[0].validations[0].otherwise.condition',
+    ]);
+    for (const f of atBuild) expect(f).toMatchObject({ severity: 'error' });
     expect(atBuild[0]!.message).toContain('`sqrt` is not a callable name here');
     expect(atBuild[1]!.message).toContain('bare reference `amont`');
   });
@@ -276,7 +289,7 @@ describe('#22042 — a `conditional` rule\'s nested predicates meet the same ver
     expect(result.rulesRun).toContain('validateStackExpressions');
     const atDoor = expressionFindings(result.errors);
     expect(atDoor.map((f) => f.where), dump(result)).toEqual([THEN_WHERE, OTHERWISE_WHERE]);
-    expect(atDoor).toEqual(buildFindings(fxRule([NESTED_REFUSED])));
+    expect(atDoor).toEqual(asAtDoor(buildFindings(fxRule([NESTED_REFUSED]))));
   });
 
   it('⭐ LIT — two levels down: a nested `conditional`\'s `when` and the rule below it are judged', () => {
@@ -288,7 +301,11 @@ describe('#22042 — a `conditional` rule\'s nested predicates meet the same ver
     ]);
     expect(atBuild[0]!.message).toContain('bare reference `amount`');
     expect(atBuild[1]!.message).toContain('`sqrt` is not a callable name here');
-    expect(expressionFindings(gateObject(fxRule([TWO_LEVEL])).errors)).toEqual(atBuild);
+    expect(atBuild.map((f) => f.path), dump(atBuild)).toEqual([
+      'objects[0].validations[0].then.when',
+      'objects[0].validations[0].then.then.condition',
+    ]);
+    expect(expressionFindings(gateObject(fxRule([TWO_LEVEL])).errors)).toEqual(asAtDoor(atBuild));
   });
 
   it('⭐ CONTROL — valid nested predicates publish clean, two levels down and in `otherwise`', () => {
@@ -326,7 +343,7 @@ describe('#22042 — a `conditional` rule\'s nested predicates meet the same ver
     const topWhen = buildFindings(fxRef([{ ...HYDRATION, when: MULTI_HOP, then: NESTED_VALID.otherwise, otherwise: undefined }]));
     expect(topWhen.map((f) => f.where), dump(topWhen)).toEqual(["object 'fx_rule' · validation 'outer' when"]);
     expect(topWhen[0]!.message).toContain('ONE hop');
-    expect(expressionFindings(gateObject(fxRef([HYDRATION])).errors)).toEqual(atBuild);
+    expect(expressionFindings(gateObject(fxRef([HYDRATION])).errors)).toEqual(asAtDoor(atBuild));
   });
 
   it('a stored sibling\'s nested fault is not this write\'s to answer for (the differential)', () => {
@@ -364,7 +381,8 @@ describe('#24468 — the object door refuses a rule hop to a field the target do
     const errs = expressionFindings(result.errors);
     expect(errs, dump(result)).toHaveLength(1);
     const where = "object 'fx_order' · validation 'north_only'";
-    expect(errs[0]).toMatchObject({ severity: 'error', where, path: where });
+    // [#27643] The second rule's `condition`, by key path; `where` stays the prose.
+    expect(errs[0]).toMatchObject({ severity: 'error', where, path: 'objects.fx_order.validations[1].condition' });
     expect(errs[0]!.message).toContain('unknown field `region` on `fx_account`');
     expect(errs[0]!.message).toContain('the rule has no verdict');
   });
@@ -428,7 +446,7 @@ describe('#24512 — the object door judges a `conditional` rule\'s `when` hop a
     const errs = expressionFindings(result.errors);
     expect(errs, dump(result)).toHaveLength(1);
     const where = "object 'fx_order' · validation 'gate' when";
-    expect(errs[0]).toMatchObject({ rule: EXPRESSION_INVALID, severity: 'error', where, path: where });
+    expect(errs[0]).toMatchObject({ rule: EXPRESSION_INVALID, severity: 'error', where, path: 'objects.fx_order.validations[0].when' });
     expect(errs[0]!.message).toContain('unknown field `region` on `fx_account`');
     expect(errs[0]!.message).toContain('the rule has no verdict');
   });

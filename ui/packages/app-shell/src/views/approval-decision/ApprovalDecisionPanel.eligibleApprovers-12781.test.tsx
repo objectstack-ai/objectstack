@@ -33,6 +33,7 @@ vi.mock('../DeclaredActionsBar.js', () => ({
 
 import { RecordContextProvider } from '@object-ui/react';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { ApprovalDecisionRenderer } from './ApprovalDecisionPanel';
 import { resetApproverDirectoryCache } from '../../hooks/useApproverDirectory';
 
@@ -107,5 +108,66 @@ describe('ApprovalDecisionPanel — eligible approvers count distinct users (obj
     expect(bar.getAttribute('aria-valuemax')).toBe('2');
     expect(bar.getAttribute('aria-valuenow')).toBe('1');
     expect(bar.children).toHaveLength(2);
+  });
+});
+
+/**
+ * The chip and the count read as one story when one principal holds several
+ * of a step's slots (objectstack#27615). Both numbers stay as they were: the
+ * chip still stands for every slot its person fills, and the eligible count
+ * still counts that person once. What changed is that the chip says, in the
+ * pack's words, what its number counts, instead of a bare "×3" beside
+ * "1 eligible approver".
+ */
+describe('ApprovalDecisionPanel — a principal holding several slots: the chip and the count read as one story (objectstack#27615)', () => {
+  const chips = (panel: HTMLElement) => within(panel).getAllByTestId('approver-chip');
+
+  it('the stock committee quorum: one chip that says its person holds three slots, beside one eligible approver', () => {
+    const { panel } = mount(requestRow(['u_dev_admin', 'u_dev_admin', 'u_dev_admin']));
+    const words = row('approverSlots', { count: 3 });
+
+    // The row resolved from the pack's count family, not from the key itself.
+    expect(words).not.toBe('approvalsInbox.approverSlots');
+    expect(words).toContain('3');
+    expect(chips(panel).map((chip) => chip.textContent)).toEqual([`Dev Admin· ${words}`]);
+    expect(panel.textContent).not.toContain('×');
+    expect(within(panel).getByText(row('progressEligible', { count: 1 }))).toBeTruthy();
+  });
+
+  it('one person in two slots among others: only that chip carries the slot words', () => {
+    const { panel } = mount(requestRow(['u_nina', 'u_dev_admin', 'u_dev_admin', 'u_lee']));
+
+    expect(chips(panel).map((chip) => chip.textContent)).toEqual([
+      'Nina Novak',
+      `Dev Admin· ${row('approverSlots', { count: 2 })}`,
+      'Lee Lin',
+    ]);
+    expect(within(panel).getByText(row('progressEligible', { count: 3 }))).toBeTruthy();
+  });
+
+  it('the zh pack draws its own words for the chip, beside its own eligible count', async () => {
+    const zh = builtInLocales.zh.approvalsInbox as Record<string, string>;
+    const en = builtInLocales.en.approvalsInbox as Record<string, string>;
+    // zh selects `other` at every count.
+    const zhWords = zh.approverSlots_other.replace('{{count}}', '3');
+    expect(zhWords).not.toBe(en.approverSlots_other.replace('{{count}}', '3'));
+
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
+        <RecordContextProvider
+          objectName="sys_approval_request"
+          recordId="areq_12781"
+          data={requestRow(['u_dev_admin', 'u_dev_admin', 'u_dev_admin'])}
+        >
+          <ApprovalDecisionRenderer />
+        </RecordContextProvider>
+      </I18nProvider>,
+    );
+    const panel = screen.getByTestId('approval-decision-panel');
+
+    expect(
+      (await within(panel).findAllByTestId('approver-chip')).map((chip) => chip.textContent),
+    ).toEqual([`Dev Admin· ${zhWords}`]);
+    expect(within(panel).getByText(zh.progressEligible_other.replace('{{count}}', '1'))).toBeTruthy();
   });
 });

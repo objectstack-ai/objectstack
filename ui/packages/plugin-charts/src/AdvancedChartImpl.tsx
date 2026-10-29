@@ -1154,6 +1154,93 @@ function SankeyOmittedRowsNote({ shown, total, dataKey }: { shown: number; total
 }
 
 /**
+ * The series a sankey draws as FLOWS (objectstack#27460): every series except a
+ * comparison overlay, which is the same measure one period back and no group of
+ * it, so it never becomes a flow.
+ */
+const sankeyFlowSeries = (series: readonly NormalizedSeries[]): NormalizedSeries[] =>
+  series.filter((s) => s.variant !== 'comparison');
+
+/** One drawn flow of a two-level sankey, and the cell it was drawn from. */
+interface SankeyCellLink {
+  source: number;
+  target: number;
+  value: number;
+  /** The `data` row the flow leaves — what a click drills to, with `seriesKey`. */
+  rowIndex: number;
+  /** The series (the second dimension's group) the flow enters. */
+  seriesKey: string;
+}
+
+/** A target column whose carried cells were not all drawn: the omitted-rows note's inputs. */
+interface SankeyOmittedColumn {
+  label: string;
+  shown: number;
+  total: number;
+}
+
+/**
+ * A TWO-LEVEL sankey: each row's category flows into each series it carries
+ * (objectstack#27460).
+ *
+ * A sankey declares ONE measure (the spec's `SINGLE_SERIES_CHART_TYPES` refuses
+ * a second), so two or more flow series reaching the arm are the groups of that
+ * one measure: `buildChartSeries` pivots a SECOND dimension into series exactly
+ * when the chart carries one measure, one row per first-dimension value and one
+ * column per second-dimension value. The arm used to read `series[0]` alone and
+ * drew the first group's flows as if they were the whole chart, with nothing
+ * saying the rest were dropped. Here every cell is a flow: source = the row's
+ * category (`xAxisKey`), target = the series, width = the cell.
+ *
+ * A cell the row does not CARRY is not a flow and not an omission: the pivot
+ * writes a column only for a combination the dataset answered, so an absent key
+ * is a combination with no records. A cell it carries that is not above zero is
+ * dropped, as the one-level arm drops a row, and counted per target column, so
+ * the chart says which flows it left out. Nodes with no drawn flow are left out
+ * too: Recharts would draw them as zero-height bars with a label and no link.
+ */
+function buildSankeyCellFlows(
+  data: ReadonlyArray<Record<string, any>>,
+  xAxisKey: string,
+  flowSeries: readonly NormalizedSeries[],
+  palette: readonly string[],
+): { nodes: Array<{ name: string; fill: string }>; links: SankeyCellLink[]; omitted: SankeyOmittedColumn[] } {
+  const cells = data.map((row) =>
+    flowSeries.map((s) => {
+      const carried = row != null && Object.prototype.hasOwnProperty.call(row, s.dataKey);
+      return { carried, value: carried ? Number(row[s.dataKey]) || 0 : 0 };
+    }),
+  );
+  const sourceRows = data.flatMap((_, i) => (cells[i].some((c) => c.value > 0) ? [i] : []));
+  const targetColumns = flowSeries.flatMap((_, j) => (cells.some((r) => r[j].value > 0) ? [j] : []));
+  const nodes = [
+    ...sourceRows.map((i, n) => ({
+      name: String(data[i]?.[xAxisKey] ?? ''),
+      fill: resolveColor(palette[n % palette.length]),
+    })),
+    ...targetColumns.map((j, n) => ({
+      name: String(flowSeries[j].label ?? flowSeries[j].dataKey),
+      fill: resolveColor(palette[(sourceRows.length + n) % palette.length]),
+    })),
+  ];
+  const links: SankeyCellLink[] = [];
+  sourceRows.forEach((i, sourceNode) => {
+    targetColumns.forEach((j, n) => {
+      const { value } = cells[i][j];
+      if (value > 0) {
+        links.push({ source: sourceNode, target: sourceRows.length + n, value, rowIndex: i, seriesKey: flowSeries[j].dataKey });
+      }
+    });
+  });
+  const omitted = flowSeries.flatMap((s, j) => {
+    const total = cells.filter((r) => r[j].carried).length;
+    const shown = cells.filter((r) => r[j].value > 0).length;
+    return shown < total ? [{ label: String(s.label ?? s.dataKey), shown, total }] : [];
+  });
+  return { nodes, links, omitted };
+}
+
+/**
  * Renders the spec's `ChartConfig.title` / `.subtitle` above the plot.
  *
  * Both were previously accepted by the contract and drawn by nothing — `title`
@@ -2028,7 +2115,30 @@ function AdvancedChartImplInner({
 
   const scatterClickProps = onChartClick ? { onClick: handleScatterClick, cursor: 'pointer' } : {};
   const treemapClickProps = onChartClick ? { onClick: handleTreemapClick, style: { cursor: 'pointer' as const } } : {};
+  // A two-level sankey (objectstack#27460) drills on a FLOW: a link is exactly
+  // one cell, the row it leaves and the series it enters, which is the
+  // `{ category, series }` pair the drill lookup resolves to one dataset row. A
+  // node is no single cell — a category node spans every series and a series
+  // node every category — so a node click does not drill, as the one-level
+  // root does not.
+  const handleSankeyFlowClick = React.useCallback((item: any, type?: string) => {
+    if (!onChartClick || type !== 'link') return;
+    const link = item?.payload as Partial<SankeyCellLink> | undefined;
+    const row = typeof link?.rowIndex === 'number' ? data[link.rowIndex] : undefined;
+    const key = link?.seriesKey;
+    if (!row || typeof key !== 'string') return;
+    const cat = row[xAxisKey];
+    onChartClick({
+      category: cat != null ? String(cat) : undefined,
+      categoryId: chartRowBucketId(row),
+      series: key,
+      seriesLabel: seriesLabelForKey(key, series),
+      value: typeof row[key] === 'number' ? row[key] : undefined,
+    });
+  }, [onChartClick, data, xAxisKey, series]);
+
   const sankeyClickProps = onChartClick ? { onClick: handleSankeyClick, style: { cursor: 'pointer' as const } } : {};
+  const sankeyFlowClickProps = onChartClick ? { onClick: handleSankeyFlowClick, style: { cursor: 'pointer' as const } } : {};
 
   React.useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -2707,6 +2817,59 @@ function AdvancedChartImplInner({
   // (The dashboard aggregate yields one value per category; a real multi-stage
   // flow needs richer data, but this honestly renders the sankey family.)
   if (chartType === 'sankey') {
+    // Two or more flow series are the groups of a pivoted second dimension,
+    // drawn as a second column of nodes (objectstack#27460,
+    // `buildSankeyCellFlows`). One series keeps the one-level flow below.
+    const flowSeries = sankeyFlowSeries(series);
+    if (flowSeries.length >= 2) {
+      const flows = buildSankeyCellFlows(data, xAxisKey, flowSeries, getPalette());
+      if (flows.links.length === 0) {
+        // Rows arrived and none carries a cell above zero: the one-level
+        // refusal below (objectui#7140), naming every column it tested.
+        if (data.length === 0) {
+          return <div className={className} />;
+        }
+        return (
+          <ChartRefusal code="no-positive-flow" className={className}>
+            This chart has no flow to draw: no row&apos;s{' '}
+            {flowSeries.map((s, i) => (
+              <React.Fragment key={s.dataKey}>
+                {i > 0 ? ' / ' : null}
+                <code className="font-mono">{s.label ?? s.dataKey}</code>
+              </React.Fragment>
+            ))}{' '}
+            is above zero.
+          </ChartRefusal>
+        );
+      }
+      // A partial flow says it is partial (objectui#7148), once per target
+      // column that left a carried cell out.
+      return (
+        <ChartFootnote
+          note={
+            flows.omitted.length > 0 ? (
+              <>
+                {flows.omitted.map((c) => (
+                  <SankeyOmittedRowsNote key={c.label} shown={c.shown} total={c.total} dataKey={c.label} />
+                ))}
+              </>
+            ) : null
+          }
+        >
+          <ChartContainer config={config} className={className} {...containerProps}>
+            <Sankey
+              data={{ nodes: flows.nodes, links: flows.links }}
+              nodePadding={24}
+              link={SankeyLinkShape}
+              node={SankeyNodeShape}
+              {...sankeyFlowClickProps}
+            >
+              <Tooltip />
+            </Sankey>
+          </ChartContainer>
+        </ChartFootnote>
+      );
+    }
     const dataKey = series[0]?.dataKey || 'value';
     const rootName = series[0]?.label || dataKey;
     const rows = data.filter((r) => (Number(r?.[dataKey]) || 0) > 0);

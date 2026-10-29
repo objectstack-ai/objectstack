@@ -101,6 +101,8 @@ const ROW = { id: 'r1', status: 'open' };
 const FAULT_BARE = 'nosuchroot.x > 1';
 const FAULT_BARE_2 = 'anotherbadroot.y == 3';
 const FAULT_TEMPLATE = '${nosuchroot.x > 1}';
+/** Group 4's own template source, so no earlier cell's dedupe can reach it. */
+const FAULT_TEMPLATE_PARITY = '${parityroot27457.x > 1}';
 const FAULT_CEL = { dialect: 'cel', source: 'record.bad(' };
 /** A predicate that resolves cleanly — the silence that makes the noise mean something. */
 const HEALTHY = "record.status == 'open'";
@@ -370,13 +372,30 @@ describe('#6038 group 3 — nothing else became loud', () => {
     // evaluated perfectly against the wrong object — not a fault — and its own
     // ruling (2026-08-22, option A) scoped it to development. Pinned here so
     // "production is louder" cannot quietly become "production reports
-    // everything the dev build reports".
+    // everything the dev build reports". Written as the `${…}` template: that
+    // is the spelling that still evaluates cleanly against the wrong object (a
+    // bare string is CEL since objectstack#27457 — see the next case).
     await inProduction((mount) => {
       const warn = spyWarn();
-      mount([{ id: 'n1', visibleWhen: "data.status == 'draft'" }]);
+      mount([{ id: 'n1', visibleWhen: "${data.status == 'draft'}" }]);
       // Verdict: the constant-false still hides, exactly as documented.
       expect(shownCount()).toBe(0);
       expect(allWarnings(warn)).toHaveLength(0);
+    });
+  });
+
+  it('the BARE spelling of that predicate is CEL: the unanswered read is a fault, reported in production (objectstack#27457)', async () => {
+    // CEL refuses a key the bound `data` does not hold, so this is no longer the
+    // dev-only adapter leg's case but a fault — the production line this card
+    // made loud, naming the engine's reason — and the node is withheld.
+    await inProduction((mount) => {
+      const warn = spyWarn();
+      mount([{ id: 'n1', visibleWhen: "data.status == 'draft'" }]);
+      expect(shownCount()).toBe(0);
+      const lines = reports(warn);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("data.status == 'draft'");
+      expect(lines[0]).toContain('No such key: status');
     });
   });
 });
@@ -391,6 +410,14 @@ describe('#6038 group 4 — dev and production print the IDENTICAL line', () => 
     // decides HOW the fault is detected, not WHETHER it is reported" a fact
     // rather than a comment: a production-only message would be a second
     // diagnostic to keep in sync, and they would drift.
+    //
+    // Measured on the `${…}` template, the dialect whose dev (`throwOnError`)
+    // and production (`onFault`) channels carry the same reason. A bare string
+    // used to be measured here; it is CEL shorthand since objectstack#27457,
+    // and the CEL route's fail-closed probe throws a generic sentence naming
+    // the predicate where production names the engine's reason — the
+    // `{ dialect: 'cel' }` envelope's long-standing split, recorded in the
+    // PR's acceptance notes rather than changed by it.
     const { __resetVisibilityPredicateWarnings } = await import('../utils/visibilityDiagnostic');
     const { SchemaRenderer } = await import('../SchemaRenderer');
     const { SchemaRendererContext } = await import('../context/SchemaRendererContext');
@@ -408,7 +435,7 @@ describe('#6038 group 4 — dev and production print the IDENTICAL line', () => 
       <PredicateScopeProvider scope={APP_SCOPE}>
         <SchemaRendererContext.Provider value={{ dataSource: ADAPTER } as never}>
           <RecordContextProvider objectName="showcase_task" recordId={ROW.id} data={ROW}>
-            <SchemaRenderer schema={{ type: TYPE, id: 'n1', visibleWhen: FAULT_BARE } as never} />
+            <SchemaRenderer schema={{ type: TYPE, id: 'n1', visibleWhen: FAULT_TEMPLATE_PARITY } as never} />
           </RecordContextProvider>
         </SchemaRendererContext.Provider>
       </PredicateScopeProvider>,
@@ -416,7 +443,7 @@ describe('#6038 group 4 — dev and production print the IDENTICAL line', () => 
     const devLines = reports(warn);
     expect(devLines).toHaveLength(1);
     expect(devLines[0]).toContain(TYPE);
-    expect(devLines[0]).toContain(FAULT_BARE);
+    expect(devLines[0]).toContain(FAULT_TEMPLATE_PARITY);
     // Dev fails closed too (objectui#13299) — the verdict is one behaviour,
     // not two.
     expect(shownCount()).toBe(0);
@@ -433,7 +460,7 @@ describe('#6038 group 4 — dev and production print the IDENTICAL line', () => 
     let prodLine = '';
     await inProduction((mount) => {
       const prodWarn = spyWarn();
-      mount([{ id: 'n1', visibleWhen: FAULT_BARE }]);
+      mount([{ id: 'n1', visibleWhen: FAULT_TEMPLATE_PARITY }]);
       const lines = reports(prodWarn);
       expect(lines).toHaveLength(1);
       prodLine = lines[0];
