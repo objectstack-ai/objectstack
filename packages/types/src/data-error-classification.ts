@@ -481,9 +481,9 @@ function thrownCodeFields(error: any, status: number): { code?: string; declared
  * fact from `code` instead of from the absence of one.
  *
  * Registered under `@objectstack/types` in the ADR-0112 ledger, and typed
- * against `ErrorCode` so a ledger without the row stops this file compiling.
+ * `ErrorCode` so a ledger without the row stops this file compiling.
  */
-export const UNDECLARED_HOOK_REFUSAL_CODE = 'HOOK_ABORTED' as const satisfies ErrorCode;
+export const UNDECLARED_HOOK_REFUSAL_CODE: ErrorCode = 'HOOK_ABORTED';
 
 /**
  * [#27597] {@link thrownCodeFields} for a sandboxed body's business refusal
