@@ -48,7 +48,7 @@ examples/app-todo/
 ## 📋 Features Demonstrated
 
 ### Object Definition
-- **Task Object** (`task`) with 20+ fields covering all common patterns
+- **Task Object** (`task`) with fields covering all common patterns
 
 ### Field Types Covered
 - ✅ **Text** (`subject`) — Task title (required, searchable)
@@ -63,25 +63,25 @@ examples/app-todo/
 - ✅ **Color** (`category_color`) — Color picker with presets
 - ✅ **Rich Text** (`notes`) — Formatted notes
 
-### Actions (8)
+### Actions
 - **Complete Task** / **Start Task** — Status transitions
 - **Defer Task** — Reschedule with reason
 - **Set Reminder** / **Clone Task** — Utility actions
 - **Mass Complete** / **Delete Completed** / **Export CSV** — Bulk operations
 
 ### Dashboard
-- 4 Key Metrics (total, completed today, overdue, completion rate)
+- Key Metrics (total, completed today, overdue, completion rate)
 - Charts (status pie, priority bar, weekly trend line, category donut)
 - Task tables (overdue, due today)
 
-### Reports (5)
+### Reports
 - Tasks by Status / Priority / Owner
 - Completed Tasks
 - Time Tracking (estimated vs actual hours matrix)
 - (Overdue Tasks is deliberately **not** a report — a flat record list is a
   ListView lens, ADR-0021; see `src/views/task.view.ts`)
 
-### Automation Flows (4)
+### Automation Flows
 - **Task Reminder** — Daily scheduled reminder for tasks due tomorrow
 - **Overdue Escalation** — Auto-escalate tasks overdue by 3+ days
 - **Task Completion** — Auto-create next occurrence for recurring tasks

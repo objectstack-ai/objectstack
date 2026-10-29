@@ -149,6 +149,7 @@ export interface FieldDefaultsSchemaLike {
 type SeedFieldLike = NonNullable<NonNullable<FieldDefaultsSchemaLike['fields']>[string]> & {
   options?: unknown;
   multiple?: unknown;
+  currencyConfig?: unknown;
 };
 
 /**
@@ -185,6 +186,31 @@ export interface SeedContext {
    * engine's own `current_user` resolution handles at insert.
    */
   currentUserId?: string | null;
+  /**
+   * The organization's currency (`localization.currency`, via
+   * `useLocalization().currency`), or null/undefined when the setting is
+   * unset. A record-currency code field — the field a `record`-mode amount's
+   * `currencyConfig.currencyField` names (ADR-0144 D2) — opens pre-filled with
+   * it on a create form (ADR-0144 D8 rule 4): the user submits the code as an
+   * explicit value, and the server never fills one in. Unset seeds nothing.
+   */
+  homeCurrency?: string | null;
+}
+
+/**
+ * The fields of `fields` that some `record`-mode amount names as its
+ * `currencyConfig.currencyField` (ADR-0144 D2) — the record-currency code
+ * fields a create form pre-fills with the organization's currency.
+ */
+function recordCurrencyCodeFields(fields: Record<string, SeedFieldLike | undefined>): Set<string> {
+  const out = new Set<string>();
+  for (const f of Object.values(fields)) {
+    const config = f?.currencyConfig as { currencyMode?: unknown; currencyField?: unknown } | undefined;
+    if (config?.currencyMode === 'record' && typeof config.currencyField === 'string' && config.currencyField !== '') {
+      out.add(config.currencyField);
+    }
+  }
+  return out;
 }
 
 /**
@@ -286,6 +312,7 @@ export function schemaDefaultValues(
   const fields = objectSchema?.fields;
   if (!fields || typeof fields !== 'object') return {};
   const defaults: Record<string, unknown> = {};
+  const codeFields = ctx?.homeCurrency ? recordCurrencyCodeFields(fields) : undefined;
   for (const name of Object.keys(fields)) {
     const f = fields[name];
     const dv = f?.defaultValue;
@@ -313,6 +340,11 @@ export function schemaDefaultValues(
       // server never applies to that field.
       const fromOptions = optionListDefault(f);
       if (fromOptions !== undefined) defaults[name] = fromOptions;
+      // ADR-0144 D8 rule 4 — a record-currency code field with no declared
+      // default opens on the organization's currency. It is a pre-filled
+      // VALUE the user submits (or changes), so the stored code is always
+      // explicit; a declared `defaultValue` is the author's and wins.
+      else if (codeFields?.has(name) && ctx?.homeCurrency) defaults[name] = ctx.homeCurrency;
     }
   }
   return defaults;

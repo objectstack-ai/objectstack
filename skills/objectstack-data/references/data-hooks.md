@@ -7,7 +7,7 @@
 - [Best Practices](#best-practices) · [Error Handling](#error-handling) · [References](#references)
 
 Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
-data hooks. Covers the 8 lifecycle events, the inline `handler` and sandboxed
+data hooks. Covers the lifecycle events, the inline `handler` and sandboxed
 `body` forms, the `HookContext` API, registration, and the canonical patterns
 (delete guards, audit trails, cross-object writes, read masking).
 
@@ -28,7 +28,7 @@ They intercept operations at specific points (before/after) and can:
 
 ### Hook Lifecycle Events
 
-ObjectStack provides **8 lifecycle events** organized by operation type:
+ObjectStack provides lifecycle events organized by operation type:
 
 | Event | When It Fires | Use Cases |
 |:------|:--------------|:----------|
@@ -43,7 +43,7 @@ ObjectStack provides **8 lifecycle events** organized by operation type:
 | `beforeDelete` | Before deleting a record (single **or** bulk `multi:true`) | Check dependencies, prevent deletion |
 | `afterDelete` | After deleting a record (single **or** bulk) | Clean up related data, notify users |
 
-> **Why only 8?** The read events fire for `findOne` as well as `find` (the event
+> **Why so few?** The read events fire for `findOne` as well as `find` (the event
 > attaches to record materialization, not the engine method), so one subscription
 > covers every read shape — there is no `beforeFindOne`/`afterFindOne`. Likewise the
 > write events fire on bulk `multi:true` operations, so there is no `*Many` event. A

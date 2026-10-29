@@ -3,6 +3,7 @@ import { Input, Textarea, EmptyValue } from '@object-ui/components';
 import type { TextFieldMetadata, TextareaFieldMetadata } from '@object-ui/types';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { CurrencyCodeField, isCurrencyCodeField } from './CurrencyCodeField.js';
 
 /**
  * TextField - Standard single-line or multi-line text input
@@ -10,6 +11,14 @@ import { toDomProps } from './toDomProps.js';
  */
 export function TextField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<string>) {
   const fieldData = field;
+
+  // A record-currency code field (ADR-0144 D2) — `valueDomain:
+  // 'iso_4217_currency'` declared on the field — is chosen from the ISO 4217
+  // list, never typed: keyed off the DECLARATION, so every host that renders a
+  // text field (form, inline edit, action dialog) gets the select.
+  if (isCurrencyCodeField(fieldData)) {
+    return <CurrencyCodeField value={value} onChange={onChange} field={field} readonly={readonly} error={error} {...props} />;
+  }
 
   if (readonly) {
     return <span className="text-sm">{value || <EmptyValue />}</span>;

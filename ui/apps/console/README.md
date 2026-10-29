@@ -8,7 +8,7 @@ The standard runtime UI for ObjectStack applications. This package provides the 
 
 - **Server-Driven UI**: Renders objects, views, dashboards, reports, and pages from JSON schemas
 - **Multi-App Support**: Switch between apps defined in your stack, each with its own branding
-- **Plugin Architecture**: 15+ view plugins (grid, kanban, calendar, timeline, chart, map, gantt, gallery, etc.)
+- **Plugin Architecture**: view plugins (grid, kanban, calendar, timeline, chart, map, gantt, gallery, etc.)
 - **Expression Engine**: Dynamic visibility, disabled, and hidden expressions evaluated at runtime
 - **CRUD Operations**: Create, edit, delete records via schema-driven forms and dialogs
 - **Command Palette**: `⌘+K` for quick navigation across apps and objects

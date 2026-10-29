@@ -406,7 +406,7 @@ Full TypeScript support with discriminated unions:
 ```typescript
 import type { AnySchema, ButtonSchema, FormSchema, InputSchema } from '@object-ui/types';
 
-// The shipped `AnySchema` carries 50+ members. These three are a slice of it,
+// The shipped `AnySchema` carries many members. These three are a slice of it,
 // and the assignment below is what proves the slice really is part of the union.
 type SchemaSlice = InputSchema | ButtonSchema | FormSchema;
 declare const slice: SchemaSlice;

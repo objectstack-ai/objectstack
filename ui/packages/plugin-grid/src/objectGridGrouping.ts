@@ -16,6 +16,7 @@ import { resolveGridCellRendering, type GridCellFieldLike } from './cellRenderer
 import { useGroupedDataInOptionOrder, usableGroupingFields, type GroupOptionRanks, type ServerGroupSource } from './useGroupedData';
 import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
 import { normalizeColumns } from './objectGridColumns';
+import { honestGroupAggregations } from './recordCurrencyAggregates';
 import type { useGridTranslation } from './objectGridTranslations';
 import type { useObjectGridQueryInputs } from './objectGridQueryInputs';
 import type { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
@@ -276,6 +277,22 @@ export function useObjectGridGrouping({
     }
   }, [groupRowQueryKey]);
   const groupReloadKey = `${refreshKey}:${invalidationNonce}`;
+  // [ADR-0144 D6] A money aggregate over a `record`-mode amount stands only in
+  // groups bucketed by that amount's code field; elsewhere it would add
+  // amounts in different currencies, so it is dropped before either the
+  // server or the client bucketing computes it. Keyed on what it reads, so a
+  // host that rebuilds `schema` every render does not re-key the header query.
+  const groupAggregationKey = JSON.stringify({
+    aggregations: schema.aggregations ?? null,
+    grouping: usableGroupingFields(schema.grouping?.fields).map((gf) => gf.field),
+  });
+  const groupAggregations = React.useMemo(() => {
+    const { aggregations, grouping } = JSON.parse(groupAggregationKey) as {
+      aggregations: ObjectGridSchema['aggregations'] | null;
+      grouping: string[];
+    };
+    return honestGroupAggregations(aggregations ?? undefined, objectFields, grouping);
+  }, [groupAggregationKey, objectFields]);
   const groupHeaders = useServerGroupHeaders({
     enabled: serverGroupedFetch && !objectTypesPending && groupRowQuery !== null && !groupWhere.error,
     dataSource,
@@ -285,7 +302,7 @@ export function useObjectGridGrouping({
     // [objectui#11021] The search term, off the same resolved query every
     // group's row page is asked with: one pair on both queries.
     ...groupSearchOf(groupRowQuery),
-    aggregations: schema.aggregations,
+    aggregations: groupAggregations,
     objectFields,
     reloadKey: groupReloadKey,
   });
@@ -326,7 +343,7 @@ export function useObjectGridGrouping({
       ? (schema.grouping ? { ...schema.grouping, fields: serverGroupingFields } : undefined)
       : groupingForRender,
     data,
-    schema.aggregations,
+    groupAggregations,
     groupValueFormatter,
     serverGroupSource,
     groupOptionRanks,

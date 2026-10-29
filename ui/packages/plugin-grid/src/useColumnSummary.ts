@@ -12,7 +12,7 @@ import type { ColumnSummary, ListViewGroupHeaderRow } from '@objectstack/spec/ui
 import { deriveColumnSummary } from '@objectstack/spec/ui';
 import type { CurrencyConfig } from '@objectstack/spec/data';
 import { resolveFieldScale } from '@objectstack/spec/data';
-import { useLocalization, useDisplayLocale, resolveFieldCurrency, createSafeTranslation } from '@object-ui/i18n';
+import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyField, createSafeTranslation } from '@object-ui/i18n';
 import { formatCurrency, formatPercent, percentCellScale } from '@object-ui/fields';
 
 /**
@@ -621,6 +621,13 @@ export function useScopedColumnSummary(
       if (config.type === 'none' || !SUPPORTED_SUMMARY_TYPES.has(config.type)) continue;
 
       const targetField = config.field || col.field;
+
+      // [ADR-0144 D6] The footer spans every row, so it is never inside one
+      // currency: a sum / avg / min / max over a `record`-mode amount would add
+      // amounts in different currencies. It draws nothing for that column (the
+      // counts stand); the consolidated figure is the home field's, and a
+      // per-currency figure is the header of a group bucketed by the code.
+      if (!NON_NUMERIC_TYPES.has(config.type) && recordCurrencyField(fieldMetadata?.[targetField])) continue;
 
       // objectui#12081 item 3 — the whole matched set's figure, read off the
       // server's answer through the spec's own read-back (the four derived

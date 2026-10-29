@@ -371,7 +371,7 @@ disappeared is flagged too (the entry outlived the capability). This is the
 `examples/app-showcase/src/coverage.ts` demonstrated-or-waived ratchet, applied to
 testing instead of demonstration.
 
-Enumerable surfaces *inside* a capability (49 field types, 20 chart types, flow node
+Enumerable surfaces *inside* a capability (field types, chart types, flow node
 types, query operators, decision actions, …) are covered by `variants` matrices on the
 items themselves, each derived from the spec's own Zod enums with the source cited.
 

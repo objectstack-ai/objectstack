@@ -108,6 +108,13 @@ import {
 } from '../previews/field-types.js';
 import { FieldTypePicker } from './FieldTypePicker.js';
 import {
+  CurrencyConfigField,
+  currencyCodeFieldCandidates,
+  nextCurrencyCodeFieldName,
+  newCurrencyCodeFieldDef,
+  type CurrencyConfigDraft,
+} from './CurrencyConfigField.js';
+import {
   ExternalFieldBadge,
   readExternalBinding,
   useExternalWriteState,
@@ -841,6 +848,26 @@ export function ObjectFieldInspector({
   };
 
   /**
+   * ADR-0144 D2 — "Create currency field": append a record-currency code field
+   * (explicit metadata: `text`, the ISO 4217 domain, required) right after this
+   * amount and point the amount at it, as ONE write, so the draft never holds
+   * a `record` config pointing at a field that does not exist yet.
+   */
+  const createCurrencyCodeField = () => {
+    const codeName = nextCurrencyCodeFieldName(view.entries);
+    const nextEntries = [...view.entries];
+    nextEntries[idx] = {
+      ...entry,
+      def: { ...def, currencyConfig: { currencyMode: 'record', currencyField: codeName } },
+    };
+    nextEntries.splice(idx + 1, 0, {
+      name: codeName,
+      def: newCurrencyCodeFieldDef(tr('designer.field.currency.codeFieldLabel')),
+    });
+    writeView({ shape: view.shape, entries: nextEntries });
+  };
+
+  /**
    * objectui#12326 — on a `controlled_by_parent` object a `master_detail` field
    * is `required: true` and its Required box is locked on: the object derives
    * its master from exactly one required `master_detail` (ADR-0055 §1), and the
@@ -1345,6 +1372,16 @@ export function ObjectFieldInspector({
                 disabled={readOnly}
               />
             </div>
+          )}
+          {(type === 'currency' || (type === 'formula' && def.returnType === 'currency')) && (
+            <CurrencyConfigField
+              config={def.currencyConfig as CurrencyConfigDraft | undefined}
+              candidates={currencyCodeFieldCandidates(view.entries, name)}
+              onCommit={(next) => patchDef({ currencyConfig: next })}
+              onCreateCodeField={createCurrencyCodeField}
+              disabled={readOnly}
+              tr={tr}
+            />
           )}
           {isTexty(type) && (
             <div className="grid grid-cols-2 gap-2">
