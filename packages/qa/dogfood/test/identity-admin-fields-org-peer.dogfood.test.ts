@@ -232,7 +232,7 @@ describe('[#21237] the identity object Admin group at the HTTP door: org peers a
   });
 
   it('a member directory read projecting the sign-in phone is served the colleague name and email without it', async () => {
-    const res = await stack.apiAs(token.member, 'GET', '/data/sys_user?fields=name,email,phone_number,phone_number_verified&$top=100');
+    const res = await stack.apiAs(token.member, 'GET', '/data/sys_user?fields=id,name,email,phone_number,phone_number_verified&$top=100');
     expect(res.status).toBe(200);
     const row = rowsOf(await res.json()).find((r) => String(r.id) === uid.colleague);
     expect(row, 'colleague listed').toBeTruthy();
