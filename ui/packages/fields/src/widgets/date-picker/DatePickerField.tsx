@@ -79,6 +79,7 @@ function TemporalPicker({
   field,
   readonly,
   error,
+  onInvalidInputChange,
   withTime,
   ...props
 }: FieldWidgetComponentProps<string> & { withTime: boolean }) {
@@ -105,6 +106,27 @@ function TemporalPicker({
     setText(shown);
     setBadText(null);
   }
+
+  // Text that names no date is never written, so the host has to be told, or
+  // the form saves the old value as if nothing had been typed
+  // (objectstack#27483). Reported on change only, and withdrawn on unmount.
+  const pattern = localeDatePattern(locale, withTime);
+  const invalidMessage = !readonly && badText !== null
+    ? t('fields.datePicker.invalid', { value: badText, format: pattern })
+    : null;
+  const reportInvalid = React.useRef(onInvalidInputChange);
+  reportInvalid.current = onInvalidInputChange;
+  const reported = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (reported.current === invalidMessage) return;
+    reported.current = invalidMessage;
+    reportInvalid.current?.(invalidMessage);
+  }, [invalidMessage]);
+  React.useEffect(() => () => {
+    if (reported.current === null) return;
+    reported.current = null;
+    reportInvalid.current?.(null);
+  }, []);
 
   if (readonly) {
     const ReadonlyFace = withTime ? DateTimeField : DateField;
@@ -147,9 +169,9 @@ function TemporalPicker({
   };
 
   const selected = nativeValue ? fromLocalDay(nativeValue) : undefined;
-  const pattern = localeDatePattern(locale, withTime);
-  const notice = badText !== null
-    ? t('fields.datePicker.invalid', { value: badText, format: pattern })
+  // A host that takes the report shows its text as the field's error.
+  const notice = invalidMessage !== null && !onInvalidInputChange
+    ? invalidMessage
     : impossible
       ? t(withTime ? 'fields.dateTime.impossibleDay' : 'fields.date.impossibleDay', { value: String(value) })
       : null;

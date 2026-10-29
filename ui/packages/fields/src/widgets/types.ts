@@ -159,6 +159,21 @@ export type FieldWidgetComponentProps<T = any> = {
    * widgets ignore it.
    */
   onUploadingChange?: (uploading: boolean) => void;
+  /**
+   * The free-text widgets that parse what was typed (`date` / `datetime`'s
+   * picker) fire this when the text the user committed names no value, with
+   * the message to show, and with `null` once the text is valid, cleared, or
+   * the widget unmounts. Such text is never written through `onChange`, so
+   * without this channel the value stays what it was and the form saves it as
+   * if nothing had been typed (objectstack#27483).
+   *
+   * **Producer**: `DatePickerField` / `DateTimePickerField`.
+   * **Consumer**: the form renderer, which turns the message into a field
+   * validation error that blocks submit, the way a missing required value is.
+   * A widget given this callback leaves the message TEXT to the host's
+   * `<FormMessage/>`, as for `error`; one that is not keeps its own notice.
+   */
+  onInvalidInputChange?: (message: string | null) => void;
 
   /* ── Host plumbing: what a rendering host actually forwards ─────────────── */
 
