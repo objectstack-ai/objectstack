@@ -3246,11 +3246,30 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.interfaces.create.measurePlaceholder': 'Choose a measure…',
   'engine.studio.interfaces.create.reportHint':
     'A report shows measures of one dataset. Add more measures and groupings in the Properties panel once it is created.',
-  'engine.studio.interfaces.create.noDatasets':
-    'There is no dataset to report on yet. A report shows the measures of a dataset, so create a dataset first.',
   'engine.studio.interfaces.create.datasetsFailed': 'The datasets could not be loaded: {error}',
   'engine.studio.interfaces.create.noMeasures': 'This dataset declares no measures, so a report cannot show it.',
   'engine.studio.interfaces.create.needsBinding': 'Choose the dataset this report reads, and one of its measures.',
+  // objectstack#27518 — New dataset, beside the report dialog's and the widget inspector's dataset pickers.
+  'engine.studio.interfaces.newDataset.open': 'New dataset',
+  'engine.studio.interfaces.newDataset.title': 'New dataset',
+  'engine.studio.interfaces.newDataset.description':
+    'Saved as a draft in this package. It counts the records of the object it reads; reports and charts show its measures, grouped by the fields you pick.',
+  'engine.studio.interfaces.newDataset.nameLabel': 'Dataset name',
+  'engine.studio.interfaces.newDataset.namePlaceholder': 'Dataset name (e.g. Work orders)',
+  'engine.studio.interfaces.newDataset.idPlaceholder': 'Identifier (e.g. work_orders)',
+  'engine.studio.interfaces.newDataset.object': 'Object',
+  'engine.studio.interfaces.newDataset.needsObject': 'Choose the object this dataset reads.',
+  'engine.studio.interfaces.newDataset.groupBy': 'Group by',
+  'engine.studio.interfaces.newDataset.groupByHint': 'A chart draws one bar or slice for each value of these fields.',
+  'engine.studio.interfaces.newDataset.totals': 'Totals',
+  'engine.studio.interfaces.newDataset.totalsHint':
+    'Each number field picked here is summed. Every dataset also counts its records.',
+  'engine.studio.interfaces.newDataset.noFields':
+    'This object has no field to group by or total yet. The dataset will count its records.',
+  'engine.studio.interfaces.newDataset.taken':
+    'A dataset with the identifier “{name}” already exists. Choose another identifier.',
+  'engine.studio.interfaces.newDataset.noPackageDatasets':
+    'No dataset reads this package’s objects yet. Reports and charts show the measures of a dataset: create one with New dataset.',
   'engine.studio.interfaces.create.page': 'New page',
   'engine.studio.interfaces.create.pageNameLabel': 'Page name',
   'engine.studio.interfaces.create.pageNamePlaceholder': 'Page name (e.g. Team handbook)',
