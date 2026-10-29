@@ -220,7 +220,9 @@ describe('[#23932] controls that stay LOUD — the verdict is not "any 4xx"', ()
         });
         for (const res of await expectLoudAtBothDoors(hookRefusal)) {
             expect(res.statusCode).toBe(400);
-            expect(res.body.code).toBeUndefined();
+            // [#27597] It carries `HOOK_ABORTED` now; the log verdict is not
+            // that card's, so it still logs.
+            expect(res.body.code).toBe('HOOK_ABORTED');
         }
     });
 
