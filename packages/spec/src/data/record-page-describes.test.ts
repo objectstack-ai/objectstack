@@ -10,8 +10,9 @@
  *    with no inbound FK is refused everywhere; a child that exists nowhere is
  *    refused by `defineStack` and by a metadata write that names no package; a
  *    write into a package stores it (the `validate-related-list-refs` header in
- *    `@objectstack/lint` holds the reasoning). The old text promised a refusal
- *    with no boundary.
+ *    `@objectstack/lint` holds the reasoning). `defineStack` leaves a
+ *    platform-prefixed name (`sys_` / `cloud_` / `ai_`) to the runtime, and the
+ *    text says so. The old text promised a refusal with no boundary.
  *  - [#27312] `relatedList: 'primary'` and `enable.trackHistory` describe the
  *    v3 synthesized record page: a primary list is a body table in the details
  *    column (inside the Details tab when tabbed), and field changes join the
@@ -67,7 +68,7 @@ describe('[#27311] relatedLists describes the refusal that is enforced', () => {
   });
 
   it('refuses a child that exists nowhere on os validate / os build and on a write that names no package', () => {
-    expect(text).toContain('exists nowhere is refused by os validate / os build and by a metadata write that names no package');
+    expect(text).toContain('exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package');
   });
 
   it('says a write into a package stores the entry and the page places nothing', () => {
@@ -86,6 +87,7 @@ describe('[#27311] fieldGroups[i].relatedList is judged as a relatedLists entry 
   it('names the same two refusals and the package-write boundary', () => {
     expect(text).toContain('The name is judged as a relatedLists entry is');
     expect(text).toContain('in the stack with no inbound lookup / master_detail field, or exists nowhere');
+    expect(text).toContain('which leave a sys_ / cloud_ / ai_ name to the runtime');
     expect(text).toContain('a write into a package stores it');
   });
 
@@ -112,7 +114,7 @@ describe('[#27312] enable.trackHistory describes the one timeline stream', () =>
 
   it('sends field changes into the record\'s timeline stream', () => {
     expect(text).toContain('join the record\'s one timeline stream, under its Changes filter');
-    expect(text).toContain('An authored page shows changes only where it places a record:history block');
+    expect(text).toContain('An authored page shows a field-change history only where it places a record:history block');
   });
 
   it('carries no v2 tab phrase', () => {

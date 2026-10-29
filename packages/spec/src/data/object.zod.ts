@@ -266,15 +266,16 @@ export const ObjectCapabilities = strictObject({
    * the console. On the synthesized record page they join the record's one
    * timeline stream, beside its discussion and activity, under the stream's
    * Changes filter; that page has no separate History tab. A page an author
-   * assigns is drawn as authored: it shows changes where it places a
-   * `record:history` block, which reads the record's own activity, not this
-   * flag. Pair with per-field `trackHistory: true` to select which field
+   * assigns is drawn as authored: it shows a field-change history only where
+   * it places a `record:history` block, which reads the record's own activity,
+   * not this flag (a `record:activity` block there lists field edits only as
+   * activity lines). Pair with per-field `trackHistory: true` to select which field
    * diffs render as human-readable timeline summaries (ADR-0052 §5b). Audit
    * *capture* into `sys_audit_log` is a compliance ledger and stays on
    * regardless of this flag; retention is governed by data lifecycle
    * (ADR-0057), not by hiding the UI.
    */
-  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. An authored page shows changes only where it places a record:history block. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
+  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. An authored page shows a field-change history only where it places a record:history block. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),
@@ -1247,15 +1248,15 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * Such a group carries no fields: a field whose `group` names it is refused
    * at parse. Its name is judged exactly as a `relatedLists` entry's is (see
    * there): a child in the stack with no inbound relationship is refused
-   * everywhere; a child that exists nowhere is refused at `defineStack` and by
-   * a metadata write that names no package, and a write into a package stores
-   * it, placing nothing. Body tables no group places
-   * keep the record page's default position. `relatedList: false` on the FK
+   * everywhere; a child that exists nowhere is refused at `defineStack` (save a
+   * platform-prefixed name, left to the runtime) and by a metadata write that
+   * names no package, and a write into a package stores it, placing nothing.
+   * Body tables no group places keep the record page's default position. `relatedList: false` on the FK
    * still hides the table.
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. relatedList: false on the relationship still hides the table.').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. relatedList: false on the relationship still hides the table.').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -3060,7 +3061,10 @@ const ObjectSchemaBase = strictObject(
    *    write door;
    *  - a child that exists nowhere is refused at `defineStack` and by a
    *    metadata write that names no package (judged against the whole
-   *    collection the host serves). A write into a package judges only that
+   *    collection the host serves). `defineStack` leaves a name carrying a
+   *    platform prefix (`sys_`, `cloud_`, `ai_`; `hasPlatformObjectPrefix`)
+   *    unjudged, since a platform or third-party package may provide it; the
+   *    runtime door, which sees the registry, judges it. A write into a package judges only that
    *    package's closure, and a child outside it may be a downstream
    *    package's object that points in, so the entry is stored, and the
    *    record page places nothing for it. The boundary is deliberate: the
@@ -3079,7 +3083,7 @@ const ObjectSchemaBase = strictObject(
     z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
       message: 'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
     }),
-  ).optional().describe('Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere. An entry whose child exists nowhere is refused by os validate / os build and by a metadata write that names no package; a write into a package stores it, since a child outside the package may be a downstream package\'s object that points here, and the record page places nothing for it. It orders only: relatedList: false on the relationship still hides a list, and relatedList: \'primary\' still places a list in the record\'s body, so the order applies among the body tables and among the side cards.'),
+  ).optional().describe('Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere. An entry whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it, since a child outside the package may be a downstream package\'s object that points here, and the record page places nothing for it. It orders only: relatedList: false on the relationship still hides a list, and relatedList: \'primary\' still places a list in the record\'s body, so the order applies among the body tables and among the side cards.'),
   /**
    * [ADR-0085] Semantic role: the field that represents the record's LINEAR
    * lifecycle (an ordered pipeline / stage progression). A string names the
