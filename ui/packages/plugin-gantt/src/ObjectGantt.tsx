@@ -1954,9 +1954,17 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
   // unification ever becomes a product direction that is a fresh ruling, with
   // visual-regression evidence across all four surfaces in one stroke.
   const navConfig = schema.navigation ?? { mode: 'drawer' };
-  // `drawer` is the one overlay mode the spec keeps (objectstack#26677), and
-  // the hook's own default for a block written without `mode`.
-  const navIsOverlay = (navConfig.mode ?? 'drawer') === 'drawer';
+  // A host's `onRowClick` takes the click, as on the kanban, the grid and
+  // every other view (objectstack#27057). The console hands one down through
+  // `ListView` and opens the record there, in the one record page
+  // (`RecordDetailView`, embedded in the drawer stack), honouring the view's
+  // or the object's authored `navigation` as it does for a grid row. This
+  // chart's own drawer and its `page` sink below are the fallback for a host
+  // that routes no click: a standalone block, or a `ListView` with no host
+  // handler. Until then a host click never got here from the console:
+  // `ObjectGanttRenderer` dropped it, and this call dropped a direct caller's
+  // whenever the mode was the drawer, so a gantt bar opened a second, smaller
+  // rendering of the record than a grid row of the same object.
 
   // objectui#7334 — the NON-OVERLAY half of an authored `navigation`, and the
   // reason this component needed one at all.
@@ -1965,9 +1973,11 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
   // it owns the four overlay modes itself; `new_window` calls `onNavigate` and
   // otherwise falls through to a `window.open`; and `page` calls `onNavigate`
   // and then **returns with no fallback**. This component supplied no
-  // `onNavigate`, and its own registration hands it no host `onRowClick`
-  // either (`ObjectGanttRenderer` forwards `schema` and `dataSource` only —
-  // objectui#7210 / objectui#7222). So `page` had BOTH carriers empty at once.
+  // `onNavigate`, and its own registration handed it no host `onRowClick`
+  // either (`ObjectGanttRenderer` forwarded `schema` and `dataSource` only —
+  // objectui#7210 / objectui#7222; since objectstack#27057 it forwards a host
+  // `onRowClick` as well, and nothing else). So `page` had BOTH carriers empty
+  // at once.
   //
   // That was invisible until the sibling half of objectui#7334 started
   // forwarding the authored `navigation` down the gantt view-schema path: the
@@ -1976,8 +1986,8 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
   // click does nothing at all". A silent dead click is worse than a loud wrong
   // one, so the sink lands on the same card rather than as a follow-up.
   //
-  // ⛔ NOT a host prop forwarded to the chart. Nothing is taken from
-  // `ObjectGanttRenderer`, no `{...props}` is spread anywhere, and
+  // ⛔ NOT a host prop forwarded to the chart. The sink is taken from nothing
+  // `ObjectGanttRenderer` hands down, no `{...props}` is spread anywhere, and
   // objectui#7210 half 2 stays untouched and unruled. The destination is the
   // one this component ALREADY computes for the drawer's full-page link, so a
   // `page` click and the drawer's "open full page" affordance cannot diverge.
@@ -2024,7 +2034,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
     navigation: navConfig,
     objectName: schema.objectName,
     onNavigate: navigateToRecord,
-    onRowClick: navIsOverlay ? undefined : onRowClick,
+    onRowClick,
   });
 
   // #2473: a foreign-object row (its `objectField` names another object than
