@@ -16,7 +16,7 @@
 import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog, ExecutionStatus, FlowRunSummary } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
-import type { ConnectorDescriptor } from '../integration/connector-descriptor';
+import type { ConnectorDescriptor, ConnectorState } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import type { FlowRegistration } from '../api/protocol.zod';
@@ -970,6 +970,77 @@ export interface ConnectorSourcePullResult {
     summary: ConnectorSourcePullSummary;
 }
 
+/**
+ * One declarative connector `credentialRef` (ADR-0097 §3) as the credential
+ * door reports it (#27237, ruling A on #27230): where it resolves from and
+ * whether it is set — ⛔ never its value, which no read of this door returns.
+ *
+ * The chain is env → the `sys_connector_credential` row an administrator set →
+ * the host's injected resolver. An environment variable of the same name wins,
+ * so such a reference reports `source: 'env'` and `writable: false`. Under a
+ * walled tenancy posture (`group` / `isolated`) the stored arm is not read, and
+ * nothing is `writable`.
+ */
+export interface ConnectorCredentialRef {
+    /** The reference, exactly as an instance's `auth.credentialRef` names it. */
+    ref: string;
+    /**
+     * `set` — a source answers for it; `missing` — none does, and every
+     * instance naming it is registered degraded; `rejected` — an upstream
+     * refused the value `source` answers with, and no provider has proved it
+     * since. A stored value stays `rejected` across a restart until a provider
+     * proves it while materializing or it is set again; a call answered `2xx`
+     * does not clear it, since the endpoint may not check the credential.
+     */
+    status: 'set' | 'missing' | 'rejected';
+    /** Which arm of the chain answers: `env`, `object` (the stored row) or `vault` (the host's resolver); `null` when missing. */
+    source: 'env' | 'object' | 'vault' | null;
+    /**
+     * Whether the credential door may write it — `false` while an environment
+     * variable of the same name supplies it, and under a walled tenancy posture.
+     */
+    writable: boolean;
+    /** Whether an installed package still declares it. A stored row nothing declares is listed so it can be cleared. */
+    declared: boolean;
+    /** The declarative connector instances naming it, with their registry state when registered. */
+    connectors: Array<{
+        name: string;
+        packageId?: string;
+        state?: ConnectorState;
+        degradedReason?: string;
+    }>;
+    /** The upstream's message when `status` is `rejected`. Never the value. */
+    statusReason?: string;
+    /**
+     * When the stored value was last set through the credential door, and by
+     * whom. A status change (`rejected`, verified) moves neither.
+     */
+    updatedAt?: string;
+    updatedBy?: string;
+    /**
+     * When the stored value was last seen working: a provider proved it while
+     * materializing, or, while `status` is `set`, a call with it was answered
+     * `2xx`. Cleared when the value is set again.
+     */
+    lastVerifiedAt?: string;
+}
+
+/** What {@link IAutomationService.setConnectorCredential} is asked to store. */
+export interface ConnectorCredentialSetRequest {
+    /** A reference an installed package declares. */
+    ref: string;
+    /** The credential. Encrypted on write; never returned. */
+    value: string;
+    /** The caller — its user id stamps the row's audit columns. */
+    context?: ExecutionContext;
+}
+
+/** What {@link IAutomationService.clearConnectorCredential} is asked to remove. */
+export interface ConnectorCredentialClearRequest {
+    ref: string;
+    context?: ExecutionContext;
+}
+
 export interface IAutomationService {
     /**
      * Execute a named flow or script
@@ -1226,6 +1297,45 @@ export interface IAutomationService {
      * pull, rather than calling.
      */
     pullConnectorSource?(request: ConnectorSourcePullRequest): Promise<ConnectorSourcePullResult>;
+
+    /**
+     * Every `credentialRef` an installed package's declarative connector
+     * instances name, with where it resolves from and whether it is set —
+     * plus any stored credential no package declares any more (#27237). ⛔ No
+     * value: the listing is built from the references, the stored rows'
+     * bookkeeping and the registry's connector states.
+     *
+     * Optional for the reason {@link getConnectorDescriptors} is: a connector
+     * registry is a capability of the flow-engine implementation, not of every
+     * automation slot.
+     */
+    listConnectorCredentialRefs?(): Promise<ConnectorCredentialRef[]>;
+
+    /**
+     * Store the value for one declared reference in the encrypted credential
+     * store and re-materialize every instance naming it, without a restart;
+     * resolves to the reference's listing entry after that reconcile. Rejects
+     * with an ADR-0112 `code` + `status`, before anything is written: a
+     * walled tenancy posture, `group` or `isolated`, where the store is not
+     * used (`403 PERMISSION_DENIED`, naming the posture); a reference no
+     * installed package declares (`404 RESOURCE_NOT_FOUND`); one an environment
+     * variable supplies (`409 RESOURCE_CONFLICT` — env wins, so a stored value
+     * would never be read), or a first write another replica made at the same
+     * moment (`409`); an empty or oversized reference or value, or a value
+     * starting with `secret:` (`400 VALIDATION_ERROR`); a deployment that
+     * cannot encrypt it, or whose tenancy posture cannot be read
+     * (`503 SERVICE_UNAVAILABLE`).
+     */
+    setConnectorCredential?(request: ConnectorCredentialSetRequest): Promise<ConnectorCredentialRef>;
+
+    /**
+     * Remove the stored value for one reference; every instance naming it is
+     * torn down and registered degraded, naming the reference. Resolves to the
+     * reference's listing entry after that reconcile. Rejects `404
+     * RESOURCE_NOT_FOUND` when nothing is stored for it, and `403
+     * PERMISSION_DENIED` under a walled tenancy posture, as a set does.
+     */
+    clearConnectorCredential?(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef>;
 
     /**
      * Per-flow deployment + binding state, for operator surfaces.

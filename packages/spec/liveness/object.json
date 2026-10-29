@@ -386,7 +386,7 @@
         },
         "trackHistory": {
           "status": "live",
-          "evidence": "objectui app-shell RecordDetailView gates the record History tab on enable.trackHistory === true (historyEnabled memo); pairs with per-field trackHistory (plugin-audit renderTrackedChangeSummary, packages/plugins/plugin-audit/src/audit-writers.ts) which selects the field diffs. Audit CAPTURE into sys_audit_log is deliberately unconditional (compliance ledger) — the flag gates the UI surface, not the ledger (#2707)."
+          "evidence": "objectui app-shell RecordDetailView gates the record's field changes on enable.trackHistory === true (historyEnabled memo): on the synthesized record page they join the one timeline stream (RecordFieldChangesContext, its Changes filter), with no History tab; pairs with per-field trackHistory (plugin-audit renderTrackedChangeSummary, packages/plugins/plugin-audit/src/audit-writers.ts) which selects the field diffs. Audit CAPTURE into sys_audit_log is deliberately unconditional (compliance ledger) — the flag gates the UI surface, not the ledger (#2707)."
         },
         "searchable": {
           "status": "live",

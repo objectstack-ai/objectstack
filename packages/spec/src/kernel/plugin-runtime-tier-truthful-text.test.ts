@@ -42,11 +42,24 @@ import { ManifestSchema, PluginRuntimeSchema } from './manifest.zod';
 // amendment, D2 = A). `loading` is a strict unknown key now, pinned in
 // `plugin-loading-retirement.test.ts`; the describes below are the carriers
 // that remain, and the ones the reference docs render.
+//
+// [#27123, ADR-0025 §3.5 M1] The second half MOVED, so it is pinned as it now
+// reads. The boot-time loader for plugins `os plugin install` installed
+// dispatches on the tier (`dispatchPluginRuntime` in
+// `packages/runtime/src/installed-plugin-loader.ts`, pinned there): only `node`
+// is loaded, in process and NOT isolated, and `sandbox` / `worker` are refused
+// until M3 routes them. Still a split, and still both halves: the text must
+// not claim isolation (`node` is not isolation, and nothing confines
+// `sandbox` yet: it is refused). The old sentence, "load-side enforcement is
+// NOT implemented", is now false and is pinned absent.
 
 /** Both halves of the truthful split, as separate probes. */
 const SAYS_PUBLISH_GATE_ENFORCED = /publish gate/i;
 const SAYS_422 = /422/;
-const SAYS_LOAD_SIDE_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;
+const SAYS_BOOT_LOADS_ONLY_NODE = /at boot for a plugin `os plugin install` installed: only `node` is loaded/i;
+const SAYS_NODE_NOT_ISOLATED = /not isolated/i;
+const SAYS_SANDBOX_WORKER_REFUSED = /`sandbox` and `worker` are refused until/i;
+const RETRACTED_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;
 describe('manifest.runtime trust-tier text is truthful', () => {
   const baseManifest = {
     id: 'com.example.plugin',
@@ -62,7 +75,10 @@ describe('manifest.runtime trust-tier text is truthful', () => {
     expect(text, 'the enum must carry a describe at all').not.toBe('');
     expect(text).toMatch(SAYS_PUBLISH_GATE_ENFORCED);
     expect(text).toMatch(SAYS_422);
-    expect(text).toMatch(SAYS_LOAD_SIDE_NOT_ENFORCED);
+    expect(text).toMatch(SAYS_BOOT_LOADS_ONLY_NODE);
+    expect(text).toMatch(SAYS_NODE_NOT_ISOLATED);
+    expect(text).toMatch(SAYS_SANDBOX_WORKER_REFUSED);
+    expect(text).not.toMatch(RETRACTED_NOT_ENFORCED);
   });
 
   it('states BOTH halves on the `manifest.runtime` field describe', () => {
@@ -74,7 +90,10 @@ describe('manifest.runtime trust-tier text is truthful', () => {
     expect(text, 'the field must carry its own describe').not.toBe('');
     expect(text).toMatch(SAYS_PUBLISH_GATE_ENFORCED);
     expect(text).toMatch(SAYS_422);
-    expect(text).toMatch(SAYS_LOAD_SIDE_NOT_ENFORCED);
+    expect(text).toMatch(SAYS_BOOT_LOADS_ONLY_NODE);
+    expect(text).toMatch(SAYS_NODE_NOT_ISOLATED);
+    expect(text).toMatch(SAYS_SANDBOX_WORKER_REFUSED);
+    expect(text).not.toMatch(RETRACTED_NOT_ENFORCED);
   });
 
   it('`loading` no longer carries the sentence at all — it is a strict unknown key (#25767)', () => {
