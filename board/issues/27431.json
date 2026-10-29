@@ -1,0 +1,31 @@
+{
+  "number": 27431,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): withhold the sign-in phone fields from org peers in the user directory",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T06:30:12Z",
+  "updated_at": "2026-10-29T06:31:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27431",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`sys_user.phone_number` / `phone_number_verified` 从 `Account` 字段组移入 `Admin` 字段组；普通成员读用户目录时不再拿到其他用户的登录手机号。\n- 为什么改：手机号是 better-auth 的登录标识，不是通讯录数据；`Admin` 组已由内置权限集做字段级只读屏蔽（成员屏蔽、管理员保留），沿用同一机制，不新增规则。\n- 风险与回滚：字段级读权限不区分行，成员通过通用数据 API 读自己那行也看不到手机号（本人手机号从登录会话读取）；回滚 = 把两个字段的 group 改回 `Account`。\n- 先看：`packages/platform-objects/src/identity/sys-user.object.ts`（两个字段的 `group`）；`packages/plugins/plugin-security/src/identity-admin-field-group.test.ts`（新增的成员屏蔽/管理员保留断言）。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-security exec vitest run src/identity-admin-field-group.test.ts`，预期 19 passed。\n- 需要你做的：确认「成员通过数据 API 读自己那行也不返回手机号」可接受；若必须按行放行，需要新的裁决（字段读权限目前按 ADR-0066 规定不区分行）。\n\n## What changes\n\nThe user directory no longer returns another user's sign-in phone number to non-admin readers.\n\n- `sys_user.phone_number` and `sys_user.phone_number_verified` (the better-auth phone sign-in identifier and its verified flag) move from the `Account` field group to the `Admin` field group.\n- The `Admin` group is already the declaration the shipped permission sets read (`identityAdminFieldSecurity` in `plugin-security`'s `default-permission-sets.ts`): `member_default`, `viewer_readonly` and `external_default` mark every group field `readable: false, editable: false`; `admin_full_access`, `organization_admin` and its no-bypass variant keep it. No new rule, list or field attribute: the server's existing field-level security (field masker, predicate guard, activity redaction, metadata-plane masking) does the work, so the Console needs no change.\n- A user picker's `$search` stops scanning the phone column for a member through the existing queryable-field narrowing, so picker search keeps working.\n- `banned` / `ban_reason` / `ban_expires`: reviewed, no change. `banned` stays served to org peers by an earlier ruling (directory status every user picker filters on); `ban_reason` and `ban_expires` are already in the `Admin` group and already withheld.\n\n## Acceptance notes\n\n- **Own row.** Field-level read security is row-blind (ADR-0066, 2026-10-26 note: `readable` stays row-blind; `when` beside `readable: false` is refused at parse). So a member's OWN row on the generic data API is withheld the phone fields too, exactly as for every other `Admin`-group field. The member's own number stays reachable through auth context: better-auth's phone-number plugin declares `phoneNumber` / `phoneNumberVerified` with `returned: true`, so the session user carries them when the plugin is enabled. Serving the own row through the data API would need a row-conditioned read vote, which is a new decision, not this change.\n- System-context readers (sign-in, SMS delivery, admin import, the auth adapter) are unaffected.\n- A deployment that wants members to read colleagues' phone numbers grants a set naming the two fields `readable: true` (field grants merge most-permissively).\n\n## Tests\n\n- `packages/plugins/plugin-security/src/identity-admin-field-group.test.ts`: the two phone fields are declared inside the group; a member (`member_default`) is withheld both and the field masker strips them from a colleague row; each admin set keeps both and the masker serves them.\n- `packages/qa/dogfood/test/identity-admin-fields-org-peer.dogfood.test.ts` (real showcase boot, HTTP door): the colleague fixture now carries a synthetic phone; a member's directory read projecting the phone fields is served the colleague's id, name and email without them; the org owner and the platform admin read the stored values. The existing generic group pins (member reads colleague, list door, activity door, member own row, filter refusal) now cover the phone fields too.\n\n## Verification\n\nGate and test readings below were taken on head `a195fe983` (package sources unchanged since `592b434d`, where the package suites ran).\n\n<details><summary>Package tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/platform-objects --filter @objectstack/plugin-security run test`: platform-objects Test Files 97 passed, Tests 1369 passed; plugin-security Test Files 236 passed, Tests 5116 passed / 45 skipped. Lock VERDICT command-exit 0.\n- `... run typecheck` on both packages: VERDICT command-exit 0.\n- Dogfood file `identity-admin-fields-org-peer.dogfood.test.ts`: Test Files 1 passed, Tests 15 passed.\n\n</details>\n\n<details><summary>Ablation (one-shot, not kept)</summary>\n\nMutation via `scripts/ablation-replace.mjs`: `phone_number_verified`'s `group: 'Admin'` replaced with a marker group, `platform-objects` rebuilt, marker proved present in `dist/` by `ablation-dist-preflight.mjs`.\n\n- Unit file: 5 failed / 14 passed (the inside-the-group pin, the member composition pin, the three admin composition pins).\n- Dogfood file: 1 failed / 14 passed (the member projection read).\n- Restore leg: blob equal to HEAD, `git diff HEAD` empty, rebuilt, marker absent from all 66 built files, working tree clean; both files green again (19/19, 15/15).\n\n</details>\n\n<details><summary>Derived gate families</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` on `a195fe983`: 65 commands, all exit 0. `--ran` reconciliation: 65 derived, 65 run, 0 NOT-MEASURED (derived zero, every line carries its exit code), 0 UNRUN. `node scripts/check-nul-bytes.mjs` exit 0. Repo-wide scans (`pnpm lint`, `test:repo`) are left to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcUoS2G4jgqRskpExS7)_\n"
+}

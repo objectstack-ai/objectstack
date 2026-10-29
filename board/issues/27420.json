@@ -1,0 +1,37 @@
+{
+  "number": 27420,
+  "kind": "issue",
+  "title": "In-app assistant at 1024px: the auto-opened draft preview is clipped to 136 of 380px — the chat/preview split (360 + 420 min) has no fallback when the dock is narrower",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T05:59:32Z",
+  "updated_at": "2026-10-29T07:49:02Z",
+  "closed_at": "2026-10-29T07:47:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27420",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: the in-app assistant). `reach:` headless Chrome at 1024×768, local stack on cloud `main` `90e673e8` (framework pin `eef83734`), zh-CN, 2026-10-29. Setup: an app's list page with the 助手 dock open, then an iterate turn (「再加一张跟进记录表…」 → 开始搭建 → saved as a draft). The 「草稿预览」 pane opens automatically beside the chat inside the dock. Measured: the preview `<iframe>` spans x 888–1268 in a 1024-wide window, so **only 136 of its 380 px are visible**. The rest is clipped (`document.scrollWidth` = 1024, no horizontal scroll). The page reads list ≈ 264 px | chat ≈ 365 px | preview mostly off-screen. Still present on objectstack `main` `45c9be5f`.\n\nBatch-of: 2 · 2026-10-29 re-verification of the 2026-10-25 desktop E2E after the pin bump. Filed at the maintainer's request: 「立卡」. Reviewed in-session; the usual second-model review could not run (usage limit), so the location below was read directly in the pinned tree and on `origin/main`.\n\n**Business reason.** \"Ask the assistant to change my app\" is the second thing every customer does, and the draft preview is how they see the change before publishing. objectstack#26470 removed the second assistant that used to fill this pane. At a common laptop width the preview is now simply cut off, so the customer sees a sliver of it and can't review the change.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/app-shell/src/console/ai`.\n\n## Where (pin `eef83734`; unchanged on `main` `45c9be5f`)\n- `ui/packages/app-shell/src/console/ai/AiChatPage.tsx:553-555` (main :562-564): `CHAT_PANE_MIN_WIDTH = 360`, `CHAT_PREVIEW_MIN_WIDTH = 420`.\n- `:564` `clampChatPaneWidth`: `upper = max(min, containerWidth − previewMin)`. When the container is narrower than `min + previewMin` (780 px), the chat stays at 360 and nothing gives way, so the preview overflows its container.\n- The chat column is `shrink-0` with `style={{ width: split.width }}` (`:2525-2533`). The dock hosts this same page, but its container is far below 780 px at a 1024 px window.\n- `LiveCanvas.tsx:128` (`flex h-full min-h-0 flex-1 … border-l`).\n\n## Expected\nBelow `min + previewMin` the split degrades instead of overflowing. For example:\n- the preview replaces the chat (a 聊天 / 预览 toggle), or\n- the preview opens as an overlay over the list rather than a third column, or\n- the dock widens / the page list collapses while a preview is open.\n\nThe seat picks. Whatever is chosen, no part of the preview is clipped. Add a layout test at a 1024 px window with the dock open.\n\n## Dedupe\n`gh api search/issues`, incl. closed:\n- objectstack `clampChatPaneWidth`: 0.\n- cloud `clampChatPaneWidth`: 0.\n- objectstack `draft preview dock narrow clipped`: 2 (#25943, #6015).\n- cloud `draft preview dock narrow clipped`: 0.\n- objectstack `Live Canvas preview min width dock 1024`: 2 (same).\n- cloud `Live Canvas preview min width dock 1024`: 0.\n\nobjectstack#25943 (open) is Studio's copilot / properties right slot (`StudioAiCopilot.tsx`), a different surface. objectstack#26470 (closed) fixed the nested dock inside this preview, not its width."
+}

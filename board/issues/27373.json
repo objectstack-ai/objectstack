@@ -1,0 +1,37 @@
+{
+  "number": 27373,
+  "kind": "issue",
+  "title": "connectors: an offline OpenAPI normalization script for connector-openapi — Swagger 2.0 → 3.x, YAML → JSON, `$ref` bundled and dereferenced, absolute `servers[0].url`, sha256, and a generated `include` list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T04:02:58Z",
+  "updated_at": "2026-10-29T07:32:57Z",
+  "closed_at": "2026-10-29T07:31:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27373",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\ncarries item 4 of #26709; #26709 keeps items 1 and 3(c). Split by the triage seat's ruling on #26709 (comment 6487372008, 2026-10-29T03:48Z): \"Item 4 is split into its own card, filed by the epic PM as a child of #27293. It brings a new third-party dependency (Swagger 2.0 → 3.x conversion and `$ref` bundling), so the PR is reviewed on that alone. Home: a script under `packages/connectors/connector-openapi/`, not a new `os` subcommand, unless the maintainer wants it published to authors. p2.\" Child of #27293 (E1). ⛔ Not a claim.\n\n## What the runtime does today (why an offline tool)\n\nRead at `origin/main` `c4c515ad`, 2026-10-29T04:05Z:\n- `loadOpenApiDocument` refuses a non-3.x document at load and never converts (`packages/connectors/connector-openapi/src/openapi-provider.ts`, the `assertOpenApi3Document` path landed by PR #26798); its message tells the author to \"convert the document to OpenAPI 3.x offline\".\n- No converter exists in this repository: `connector-openapi`'s dependencies are `@objectstack/core` and `@objectstack/spec` only; no YAML parser, `$ref` resolver or converter (re-check: `git show origin/main:packages/connectors/connector-openapi/package.json`).\n- The loader also skips an in-document `$ref` parameter, request body or response (`openapi-connector.ts:295`, `:336`, `:342`), so the derived action schema silently loses those parts; the skill now tells authors to dereference every `$ref` offline (PR #27322).\n\n## Work (the card's item 4, verbatim scope)\n\n\"input an OpenAPI/Swagger URL or file; output a normalized 3.x JSON document (YAML→JSON, 2.0→3.0 conversion, bundle + dereference of `$ref`, `servers[0].url` made absolute), its sha256, and a generated `include` list from an allow-pattern. The shelf pipeline and app authors run it; the runtime never converts.\"\n\n- Home per triage: a script under `packages/connectors/connector-openapi/` (not an `os` subcommand).\n- The generated `include` list targets the declarative `include` key that #26709 items 1 lands; until that key ships, the script emits the trimmed document itself (the allowlist the skill teaches today).\n- The new third-party dependency (conversion and bundling) is the PR's main review subject: name the package, its licence and its maintenance state in the PR body.\n\n## Acceptance\n\n- The Stripe (`stripe/openapi`, 3.0.0, MIT) and DocuSign (`docusign/OpenAPI-Specifications`, Swagger 2.0, MIT) documents normalize to 3.x JSON that the `openapi` provider loads with no `$ref` left.\n- The sha256 printed matches the bytes written.\n- A changeset for `@objectstack/connector-openapi` if the script ships in its package.\n\n## Business reason\n\n#27293's E4 shelf (#27302, ruled A) packages vendor documents as connector apps; most vendor documents are Swagger 2.0, YAML or `$ref`-heavy, and the runtime refuses or mis-reads them by design. Without this script every author converts by hand and gets it wrong silently.\n\n## Reader\n\nThe epic PM of #27293 dispatches it to the `domain:server` lane's dev.\n\n## Dedupe\n\nSplit card by triage direction; parent #26709 holds the original item. The 500 most recent issues and PRs (all states, read 2026-10-29T04:10Z), titles grepped for `normaliz|swagger|dereference`: 2 hits, this card and #27210 (closed, a CLI census call-site defect, unrelated). #26709 itself is older than that window.\n"
+}

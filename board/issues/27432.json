@@ -1,0 +1,36 @@
+{
+  "number": 27432,
+  "kind": "pull_request",
+  "title": "fix(studio): the publish review names the flow steps that changed instead of \"~ nodes\"",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T06:36:18Z",
+  "updated_at": "2026-10-29T06:57:44Z",
+  "closed_at": "2026-10-29T06:57:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T06:57:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27432",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ836VkJMbRirYcP4FDCFmjrE)_\nPart of #27356\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:发布前的变更审阅里,流程草稿不再只写「其他变更：~ nodes」,而是逐个列出新增/修改/删除的步骤(先写步骤名,旁边是 id),修改的步骤写出改了哪个属性(如 `config.fields`)。\n- 为什么改:HotCRM 18.2.0 走查(hotcrm#2320 Studio S6)发现发布对话框只说「Also changed: ~ nodes」,看不出改了哪一步。\n- 风险与回滚:只在类型为 flow 且两侧步骤都有 id 时逐步对比;仅调整顺序或步骤无 id 时仍显示 `nodes` 行,不会把有变化的草稿说成「无变化」;回滚即 revert 本 PR。\n- 先看:`ui/packages/app-shell/src/preview/DraftChangesPanel.tsx`(`diffFlowNodes`、`computeChangeDetail` 的 `type` 参数、`EntryDetail` 的节点行)。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/preview/__tests__/DraftChangesPanel.flowNodeRows-27356.test.tsx`,预期 7 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nRow 17 of #27356 (hotcrm#2320, Studio report finding S6): \"The publish dialog says \"Also changed: ~ nodes\".\"\n\nPremise measured first, as the order asked: the drill-in (`EntryDetail`) already reads BOTH full bodies, the published item and the draft, and every flow node carries its `id` and `label`. So the names are on the client; no server door is needed. `computeChangeDetail` compared every top-level key other than `fields` whole, and a flow keeps all its steps in `nodes`, so any step edit read `~ nodes`.\n\nIn `ui/packages/app-shell/src/preview/DraftChangesPanel.tsx`:\n\n- `computeChangeDetail(published, draft, type?)` takes the entry's type (the drill-in passes `entry.type`). For a `flow`, `diffFlowNodes` matches the two `nodes` lists by `id` and returns `nodes: { added, changed, removed }` on `EntryChangeDetail`. Each row is `{ id, label? }`; a changed node lists the properties that differ, `config` one level down (`config.fields`), since nearly every inspector edit lands there. Rows sort by id, as field rows sort by name.\n- When that yields at least one node row, `nodes` leaves the \"Also changed:\" key list. `edges` and every other key stay there.\n- The drill-in renders the node rows after the field rows in `FieldRow`'s own shape: mark, label, the id in monospace beside it, and `· config.fields` for a changed node. `FieldRow` takes a `testId` (default `draft-field-row`, unchanged); node rows are `draft-node-row`.\n- `isEmptyChangeDetail` counts node rows.\n\nGuards, each pinned:\n\n- A reorder alone changes no node, so `nodes` stays a key row and the draft never reads \"No differences detected\".\n- A `nodes` list that is not keyed by a unique string `id` keeps the old whole-key comparison (`nodes: null`).\n- Any type other than `flow` is compared exactly as before.\n\n## Why\n\n\"~ nodes\" tells the author that something in the flow changed, which they knew. The summary is the last look before publishing, and it should say which step and what about it, the way the same panel already names an object's fields.\n\n## Tests\n\n`ui/packages/app-shell/src/preview/__tests__/DraftChangesPanel.flowNodeRows-27356.test.tsx` (7 tests):\n\n- `computeChangeDetail` on a flow: the added node (no label, id only), the changed node with `config.fields`, the removed node by label; `nodes` is not a key row and `edges` is.\n- A changed top-level node property (`label`) is named as itself.\n- A NEW flow adds every node.\n- CONTROL: a reorder alone keeps `nodes` as a key row.\n- CONTROL: a list not keyed by `id` gives `nodes: null` and keeps the key row.\n- CONTROL: the same bodies typed `page` compare `nodes` whole.\n- The panel: expanding a flow draft shows `+ wait_a_day`, `~ Create follow-up task create_task · config.fields`, `− Notify owner notify_owner`, the id in monospace, no \"~ nodes\", and \"Also changed:\" with `~ edges`.\n\n<details><summary>Ablation (one: the flow branch never taken)</summary>\n\n`node scripts/ablation-replace.mjs --anchor \"  if (type === 'flow') {\" --replacement \"  if (type === 'not-a-flow') {\"` on `DraftChangesPanel.tsx` (anchor 1 → 0, blob `0583bc280d81` → `9f20adc71adb`): 5 failed / 2 passed. The two that stay green are the not-keyed and not-a-flow controls, which assert the old behaviour. Restored: blob after restore = blob at HEAD = `0583bc280d81`, `git diff HEAD` empty.\n</details>\n\n## Acceptance notes\n\n- A changed node lists property paths (`config.fields`), not the field names inside the map (`subject`, `due_date`). One level down covers the inspector's edits without restating each node type's config shape here.\n- Node rows sort by id, not by canvas position: the drill-in has no layout order to read, and field rows sort by name the same way.\n- `edges` still reads `~ edges`. Edge ids are machine ids with no label, so per-edge rows would not read better; the node rows already say which steps were added or removed.\n- `computeChangeDetail` stays one function for every type; the flow branch is opt-in by `type`, so no caller that passes two arguments changes.\n\n## Verification\n\nAll on head `751c7d1b` (merge base `b10fd655`), after `pnpm install --frozen-lockfile` and a fresh `@object-ui/app-shell^...` closure build, under the shared verification lock.\n\n- New file: 7 / 7 passed. Every test file under `ui/` that names `DraftChangesPanel` (72 files, the new one included): 436 / 436 passed.\n- `pnpm --filter @object-ui/app-shell run type-check` (both `tsc` programs): exit 0.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: the same 34 families as rows 21 and 16, all 34 exit 0 (the `ui scripts/` family: 169 files passed, 2 skipped); `--ran`: 34 run, 0 NOT-MEASURED, 0 UNRUN. Tier: no path-derived mandate; 290 changed lines.\n\nRepo-wide lint, the full ui test battery and the e2e jobs are CI's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWuU6sVfBYiy4dY4PA)_\n"
+}

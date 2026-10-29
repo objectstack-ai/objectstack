@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T13:43:29Z",
-  "updated_at": "2026-10-29T02:18:36Z",
+  "updated_at": "2026-10-29T05:48:14Z",
   "closed_at": "2026-10-29T02:18:36Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -29,7 +29,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25802",
   "body": "Filing gate **① a reproduced defect** (class a, public door: an organization invitation sent from the cloud console). `reach:` local stack, cloud `main` `36b07fdf` on framework pin `888d686` (which contains #24193, the fix for #24154), 2026-10-25. The zh-CN invitation mail reads 「陈静（chenjing…）邀请您以 **Member** 的身份加入 ObjectOS Cloud 上的 静安家居设计。」: the role is the English label inside a Chinese sentence. The control-plane log carries no `[AuthManager] invitation mail` warning.\n\nBatch-of: 10 · 2026-10-25 desktop E2E (signup · magic flow · invite), filed at the maintainer's request in session: 「必要的合理的建议都可以立卡」.\n\n**Business reason.** The invitation mail is a colleague's first contact with the product. #24154 already ruled that the role must read 「成员」 in a Chinese mail. Today it reads `Member` instead of `member`, still English. Every hosted invitation in a non-English locale is affected, because they are all sent by the cloud control plane.\n\n**Reader who acts.** The `domain:server` seat (plugin-auth). If the cause is the cloud control plane's i18n bundle registration, the seat hands the half to objectstack-ai/cloud.\n\n## Measured / where\n- `plugin-auth/src/auth-manager-organization-plugin.ts:607` calls `invitationRoleLabel(role, mailLocale.locale, { getI18n })`. The template rendered in zh-CN, so `mailLocale.locale` was zh.\n- `plugin-auth/src/invitation-role-label.ts`: `translateMetaList` over `getI18n()` translates the `sys_member.role` options. When the service answers without a zh entry for those options, `collect()` keeps the authored English labels **silently**: only a thrown read warns. That matches the observation (`Member`, no warning).\n- The control plane registers `I18nServicePlugin: registered file-based i18n adapter (default: en)`. Whether its bundles include `platform-objects`' zh labels for `sys_member` is the first thing to read.\n\n## Expected\nThe zh-CN invitation names the role 「成员」. And when no translated label is found for the mail's locale, the function warns once, as it does for a thrown read, so this never ships silent again.\n\n## Dedupe\n`gh api search/issues`, repos cloud / objectui / objectstack, incl. closed, `invitation email Member role`: 23 / 4 / 84. objectstack#24154 (closed completed 2026-10-17, PR #24193 `8a88901b`) is the same symptom with the stored value. Its fix is in this pin (`compare 8a88901b...888d686` = ahead), and the mail still is not Chinese. That is a residual on a different path (the label read), not a regression of the value read. cloud#2435 (closed) listed the English remnants in the invitation mail as of 09-28."

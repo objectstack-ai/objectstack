@@ -1,0 +1,36 @@
+{
+  "number": 27369,
+  "kind": "issue",
+  "title": "refactor(ui-types): one source for the filter-builder field-type list, read by the schema, the interface and the renderer; close the three K4 review should-fixes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T03:54:19Z",
+  "updated_at": "2026-10-29T05:39:44Z",
+  "closed_at": "2026-10-29T05:39:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27369",
+  "body": "Filing gate ③ (maintainer-directed). This is the follow-up to K4 (#27145, PR #27329, merged 2026-10-29 03:51Z) of the objectui.org docs fold. In the \"Restore objectui.org docs deploy\" project thread on 2026-10-29, Tesla asked 「k4 从长远考虑应该怎么处理」. The dispatching seat answered: merge K4 as it is, then file one card that gives the filter-builder field-type list a single source and also takes the K4 review's three should-fixes. Tesla confirmed with 「K4 先合并，然后再单独派卡是吗」.\n\n## 维护者速读\n\nfilter-builder 能接受的 14 种字段类型，现在由三处手写列表共同决定：校验 schema、TS 接口、K4 测试里冻结的那份列表。另外，渲染器里还有一份按行为划分的分组表。objectui#6939、#7562、#8774 修的都是这几份列表对不上的问题。本卡把渲染器的分组表搬到 `@object-ui/types`，作为唯一来源。schema、接口和渲染器都从这里引用，测试只校验两点：每个类型都有渲染分支，除 `status`（spec 里没有这个类型，单独列出豁免）外，每个类型都是 spec 的 `FieldType`。K4 合约评审的三条建议改项也一并处理。\n\n## Wanted\n\n1. **One source.** Move the renderer's behaviour buckets out of `ui/packages/components/src/custom/filter-builder.tsx`: `numberLikeTypes` (`number`, `currency`, `percent`, `rating`), `dateLikeTypes` (`date`, `datetime`, `time`), `selectLikeTypes` (`select`, `status`) and `lookupLikeTypes` (`lookup`, `master_detail`, `user`). Put them in a module of `@object-ui/types`, which `@object-ui/components` already depends on. Export from there the full accepted list, which is those buckets plus `text` and `boolean`, 14 members today.\n   - `FilterFieldSchema.type` in `ui/packages/types/src/zod/complex.zod.ts` builds its `z.enum` from that list, and its `.describe()` stops citing \"the published doc\".\n   - `FilterField.type` in `ui/packages/types/src/complex.ts` is typed from the same `as const` list, not restated as a union.\n   - `filter-builder.tsx` imports the buckets and declares none of its own.\n2. **The pin moves.** `ui/packages/types/src/__tests__/filter-builder-mirror-6939.test.ts` drops the frozen `LAST_PUBLISHED_TYPES` list, which K4 added because its doc authority had gone. In its place it asserts that:\n   - every member of the list has a branch in the renderer, using the existing per-member render measurement in `examples/schema-catalog/test/filter-builder-mirror-6939.test.tsx`;\n   - every member is a member of `FieldType` in `packages/spec/src/data/field.zod.ts`, except an explicitly named exemption list. On main `c4c515ad` exactly one member needs an exemption: `status` is not a spec `FieldType`. Exempt it with a one-line reason, and do not drop it, because the accepted set must not narrow.\n   Rewrite the header's `objectstack#27145` section to say where the authority now lives. The accepted set must not change: still 14 members, `type` still optional, `text` still the default.\n3. **K4 should-fix (1).** The skill pointers in `skills/objectui/guides/app-composition.md:62` and `skills/objectui/rules/styling.md:318` are prose URLs, and no gate checks them. Either turn them into a form that `check-skills-paths.mjs` or `check-doc-links.mjs` already judges, or add `skills` to a gate's scan roots. State which in the PR.\n4. **K4 should-fix (2).** At `.github/workflows/ci.yml:454` the comment says \"four roots outside ui/\", but the list under it has five globs. Correct the comment.\n5. **K4 should-fix (3).** `ui/AGENTS.md:106` still tells contributors to update `content/docs/guide/*.md`, which no longer exists. Point it at `content/docs/frontend/`.\n\nThese should-fixes are recorded in triage's PASS records on #27329 (6485237613 on `6a7c7794`, 6486708135 on `df07a80e`).\n\n## Who acts\n\nA `domain:devx` card thread. The file surface is:\n- `ui/packages/types/src/**`, the new module plus the zod and interface lines;\n- `ui/packages/components/src/custom/filter-builder.tsx`;\n- the two `filter-builder-mirror-6939` tests;\n- `skills/objectui/{guides/app-composition.md,rules/styling.md}`;\n- `ui/scripts/check-doc-links.mjs` or `ui/scripts/check-skills-paths.mjs` and their tests, only if item 3 needs them;\n- `.github/workflows/ci.yml`, one comment line;\n- `ui/AGENTS.md`;\n- a changeset.\n\nItem 4 makes the PR Tier H by path: it stays a draft until green, the triage seat writes the contract review, and the maintainer merges.\n\n**Business reason.** A metadata author who puts a filter-builder in a page relies on two things agreeing: the types that validation accepts and the types the renderer draws. Today a third hand-kept list sits between them. Three past cards (objectui#6939, #7562, #8774) each fixed a case where these lists had drifted apart, and validation either refused a column the renderer could draw or accepted a spelling it drew as plain text. A single source removes that class of bug. The three should-fixes leave a stale pointer for contributors and two links that no gate checks.\n\n## Acceptance\n\n- `git grep -n \"LAST_PUBLISHED_TYPES\\|published doc's fourteen\"` prints nothing.\n- Adding a fifteenth member to the shared list, without a renderer branch, makes the mirror test red. Removing one member from a bucket narrows the schema, the interface and the renderer together. Record both as one-time ablations in the PR.\n- `pnpm --dir ui exec vitest run packages/types examples/schema-catalog` is green, and the Lint UI steps are green.\n- The four `components-complex-filter-builder/*` catalog entries and the nested `search-interface` entry still validate.\n\n**Duplicate search.** I ran a semantic issue search for \"filter-builder FilterField type vocabulary single source list\" on objectstack-ai/objectstack. Its one hit, #24640 (closed, about `filterableFields`), is a different surface. **New.**\n\n**Size:** S–M. **Clause-②:** no. **Metadata-protocol:** none."
+}

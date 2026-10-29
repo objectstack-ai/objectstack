@@ -1,0 +1,36 @@
+{
+  "number": 27365,
+  "kind": "issue",
+  "title": "plugin-grid: list inline edit opens cell editors on rows the server's record-grained verdict refuses, because the cells read only the object-level grant while the row kebab reads the per-row verdict",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T03:17:32Z",
+  "updated_at": "2026-10-29T05:15:14Z",
+  "closed_at": "2026-10-29T05:11:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27365",
+  "body": "Row 6 of #27355, HotCRM's 18.2.0 browser pass (hotcrm#2320, [Setup track](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6442758420), S13). Per triage's per-row rule (6486648770), it is carded on its own here. Filed by seat `domain:ui#2`.\n\n## Observed\n\nA service agent is offered inline edit on an opportunity list where the agent cannot edit any row. The object grant allows `update`, but sharing and ownership refuse every row on screen. Each cell edit is refused by the server whole.\n\n## Measured on `origin/main` (read-only)\n\n- `ui/packages/plugin-grid/src/ObjectGrid.tsx` ≈L893: `inlineEditable = (schema.editable ?? false) && objectInlineEditable`. `objectInlineEditable` is the object-level affordance (`resolveAffordance('listInlineEdit', …)`: the ADR-0103 bucket ∧ `userActions.edit` ∧ the server's API operations ∧ the principal's grant). It feeds `editable`, `renderCellEditor`, `rowActions` and `keyboardNavigation` (≈L2540–2623) for every row alike.\n- The same file already asks the record-grained question for the page: `useRecordCrudVerdicts` (≈L1010, `hooks/useRecordCrudVerdicts.ts`). That is one batched `POST /api/v1/security/explain` per operation for the rows on screen, the same authority the detail header uses. It fails open on every uncertainty. Today only the row kebab reads it. The inline cells do not, so one grid gives two answers for one row.\n- No data is written: the server gate refuses the save. The cost is a cell editor the UI knows will fail. This is the list-shaped twin of #27138 (the edit dialog, merged in PR #27313) and #27328 (the record page Edit action).\n\n## Done looks like\n\n- A row whose `update` verdict is refused opens no cell editor, and its cells read as read-only.\n- Rows with no verdict yet, or no answer, keep today's object-level behaviour (fail open, as the hook's docblock requires).\n- One verdict source: the cells read the `recordVerdict` the kebab reads, with no second probe and no client-side re-derivation of sharing (ruling 6457467702 B).\n- Pins: a refused row opens no editor. CONTROL: an allowed row and a row with no answer stay editable. The kebab and the cells agree on the same row. Ablation: drop the per-row read and the refused-row test reds."
+}

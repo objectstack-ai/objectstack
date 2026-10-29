@@ -1,0 +1,37 @@
+{
+  "number": 27410,
+  "kind": "issue",
+  "title": "Setup › Position › Add holder: the user picker lists names only, so two people with the same name can't be told apart",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T05:32:08Z",
+  "updated_at": "2026-10-29T06:56:07Z",
+  "closed_at": "2026-10-29T06:55:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27410",
+  "body": "domain:ui#2 · os-warren · session_01JQwxbXpF772qWJjojJvRXw\n\nRow 2 of #27356, from HotCRM's 18.2.0 browser pass (hotcrm#2320, [Setup track](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6442758420), S2). Triage's per-row rule (6486657637) applies. Filed by seat `domain:ui#2`.\n\n## Observed\n\nPosition › Add holder opens a user picker that shows each user's name and nothing else. An admin can't tell two people with the same name apart, and can't confirm the account before granting the position.\n\n## Measured on `origin/main` 9f760377 (read-only)\n\n- `ui/packages/app-shell/src/views/metadata-admin/PositionHoldersSection.tsx` ≈L389 opens `RecordPickerDialog` on `sys_user` with no `columns` and no `displayField`.\n- `RecordPickerDialog` (`ui/packages/fields/src/widgets/RecordPickerDialog.tsx` ≈L358) defaults `columns` to the display field alone, so the dialog draws one column.\n- The holder list on the same section already shows the email under the name (≈L363–366), so the section's own rows and its picker disagree.\n- The dialog draws only the columns the user may read (`readableColumns`, ≈L643). An `email` column is dropped for a viewer who can't read it.\n\n## Suggested remedy\n\n1. Pass `columns` naming the user's display field and `email`. Measure `sys_user`'s field names and how the list rows build their label (≈L87). The picker's own read rule keeps an unreadable email out.\n2. Tests:\n   - the picker draws an email column;\n   - CONTROL: selecting still adds the holder as before;\n   - CONTROL: a viewer without read on `email` gets the name column only, if the existing test harness can express it; otherwise say so;\n   - ablation.\n\nNot a broken capability, so it stays p3 per triage."
+}

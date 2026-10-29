@@ -1,0 +1,36 @@
+{
+  "number": 27388,
+  "kind": "pull_request",
+  "title": "refactor(components)!: retire the unused ViewSkeleton dispatcher and ShimmerSkeleton",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T04:53:55Z",
+  "updated_at": "2026-10-29T06:23:15Z",
+  "closed_at": "2026-10-29T06:23:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T06:23:13Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27388",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8MCjwDfBRBbh1qJBm2tbXAr)_\n\nFixes #25915\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:从 `@object-ui/components` 的发布入口删掉两个没人用的组件:`ViewSkeleton`(按 variant 分发的骨架屏包装,连同它的两个类型)和 `ShimmerSkeleton`(连同其 props 类型)。\n- 为什么改:裁决 B 收尾本卡;两者在整个工作区零导入,只是挂在公开面上的死导出。\n- 风险与回滚:对外是破坏性变更(外部宿主若导入会编译失败),changeset 带 BREAKING 说明与逐个 FROM → TO 迁移;仓内零调用方。回滚即恢复两处导出。`GridSkeleton` 等其余骨架屏照常导出。\n- 先看:`ui/packages/components/src/custom/view-skeleton.tsx`(只删分发器);`.changeset/25915-retire-view-and-shimmer-skeleton.md`(迁移说明与 ADR-0087 标记)。\n- 两分钟验证:`git grep -nwE \"ViewSkeleton|ShimmerSkeleton\" -- ui ':!*CHANGELOG.md'`,预期零命中。\n- 需要你做的:无,席位落地(合并前需 `CONTRACT_REVIEW_TIER` 契约复核,席位转交分诊)。\n\n## What changes\n\n- `ui/packages/components/src/custom/view-skeleton.tsx`: the `ViewSkeleton` variant dispatcher leaves, with `ViewSkeletonVariant` and `ViewSkeletonDispatchProps`. The file stays and keeps exporting `GridSkeleton`, `KanbanSkeleton`, `FormSkeleton`, `ListSkeleton`, `ChartSkeleton` and the `ViewSkeletonProps` / `GridSkeletonProps` / `KanbanSkeletonProps` types. `GridSkeleton` and `ChartSkeleton` have live importers (`plugin-dashboard`, `plugin-charts`).\n- `ui/packages/components/src/custom/shimmer-skeleton.tsx` is deleted (`ShimmerSkeleton`, `ShimmerSkeletonProps`), and so is its `custom/index.ts` line.\n- `ui/packages/app-shell/src/styles.css`: the `animate-shimmer` usage comment no longer points at `ShimmerSkeleton`. The keyframe and utility stay.\n- Changeset `@object-ui/components` `patch`: a BREAKING note, a FROM → TO line for each of the five retired exports, and an `adr-0087: not-required (runtime-export-retired …)` marker naming all five. `patch` because `Metadata-protocol: none` (AGENTS.md Post-Task Checklist step 3: a non-protocol change, breaking included, ships `patch` and keeps its BREAKING banner).\n\nNot touched, per ruling B (6486367718): `KanbanSkeleton`, `FormSkeleton` and `ListSkeleton` lose their only caller (the dispatcher) but stay exported. The Studio empty states and `DataEmptyState` are not touched either.\n\n## Tests\n\nNo new test. The removal is proven once on the built package (below), not pinned by a permanent file. The claim's file surface names no test file.\n\n## Acceptance notes\n\n- Owes one `CONTRACT_REVIEW_TIER` contract review of the whole non-prose diff before the queue: `pm-dispatch` `references/contract-review.md` puts a `Clause-②: no (narrowing)` declaration at that tier. The seat hands it to triage. It is not Tier H, because no governed path is touched.\n- ADR-0145 does not govern this: it covers `?: never` tombstones on the ui authoring face, not React runtime exports.\n\n## Verification\n\nAll readings at head `8e055464` (base `c4c515ad`, #27366's merge).\n\n<details><summary>Build, type-check, tests and the removal proof</summary>\n\n- `pnpm --filter @object-ui/components build` under `os-verify-lock`: VERDICT command-exit 0. `pnpm --filter @object-ui/components type-check`: VERDICT command-exit 0, 0 `error TS`.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/components/` under the lock: VERDICT command-exit 0, Test Files 447 passed | 1 skipped (448), Tests 4327 passed | 24 skipped. This includes `chart-primitives-removed-7397.test.ts`, which reads the package barrel and requires `ChartSkeleton` to stay exported.\n- Removal proof on the built `dist/`: `grep -cw` reads 0 for each of `ViewSkeleton`, `ViewSkeletonVariant`, `ViewSkeletonDispatchProps`, `ShimmerSkeleton` and `ShimmerSkeletonProps`, in `index.js` and in `custom/view-skeleton.d.ts`. `custom/shimmer-skeleton.d.ts` is not emitted, and `custom/index.d.ts` has no shimmer line. Control: `GridSkeleton` reads 2 in `custom/view-skeleton.d.ts` and 1 in `index.js`.\n- Importers before the change, `git grep -w` over `ui`, `packages`, `apps` and `examples` (CHANGELOGs and the two files themselves excluded): 0 for all five. The only other hit was the `styles.css` comment this PR rewords.\n- `node scripts/check-platform-checklist.mjs --changed-from origin/main`: exit 0, with no anchored file in the change set.\n\n</details>\n\n<details><summary>Gates and dogfood</summary>\n\n- `dispatch-gates --commands --repo objectstack-ai/objectstack` derived 28 families. All 28 ran, each with its exit code captured before any pipe, and all exited 0. `check-adr-0087-registration --base origin/main` verified the `runtime-export-retired` marker for all five operands. `--ran` reconciliation: 28 derived, 28 run, 0 NOT-MEASURED.\n- `pnpm --dir ui exec vitest run scripts/` first read 1 failed. The failure was `quick-reference-commands-4149` naming `apps/site`: a leftover `ui/apps/site` directory holding only ignored files from this worktree's install, before #27329 retired the site on `main`. With the directory removed, the rerun gave VERDICT command-exit 0, Test Files 169 passed | 2 skipped.\n- `dispatch-gates --tier`: no path-derived mandate. Changed lines: 111 (+21 / -90).\n- Full dogfood, required because the title carries `!` and Clause-② has the `(narrowing)` arm. The closure was built with `pnpm --filter '@objectstack/dogfood^...' build` (VERDICT 0), then `pnpm --filter @objectstack/dogfood test` ran under the lock with no shard and no path: VERDICT command-exit 0, Test Files 348 passed | 3 skipped (351), Tests 2806 passed | 20 skipped (2826).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZK9w6fe2Y6mGQjj6L)_\n"
+}

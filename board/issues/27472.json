@@ -1,0 +1,34 @@
+{
+  "number": 27472,
+  "kind": "issue",
+  "title": "lint: security-owd-unset's hint recommends sharingModel 'private' on a writable external object, the shape that refuses every member edit and that security-external-owner-unmapped warns against (epic #27261)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:spec",
+    "finding",
+    "pm:epic",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T07:44:15Z",
+  "updated_at": "2026-10-29T08:16:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27472",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① product defect (author-time advice steering to a refused shape), a follow-up owed by landed work (#27332, PR #27422).\nReader: the epic PM (#27261) dispatches it in the epic subtree after triage; the fix is in `packages/lint/src/validate-security-posture.ts` (the `security-owd-unset` hint).\nDedupe (open AND closed): \"security-owd-unset hint recommends private sharingModel external object writable\" → 29 hits, none this defect (#27332 is the warning that now contradicts this hint).\nreach: public entry `os validate`, measured by #27332's dev (report 6489300223, out-of-scope finding 4). The spike's `spike_owned` shape (a writable external object with no `sharingModel`) gets `security-owd-unset` (error). Its hint reads \"declare sharingModel: 'private' (owner + shares; recommended), …\" (`validate-security-posture.ts:819`). Following it yields the shape that `security-external-owner-unmapped` (PR #27422, `92297384`) warns refuses every member edit with 403.\ntype: Bug\n\n## 维护者速读\n\n- **现象：** 可写外部对象没写 `sharingModel` 时，`os validate` 的报错提示「推荐 `private`」；照做后，新警告又说成员每次改都会 403。两条提示互相打架。\n- **原因：** `security-owd-unset` 的提示对所有自定义对象一刀切推荐 `private`，没区分外部对象。\n- **影响：** 作者（尤其是 AI）照推荐写出必然 403 的元数据。\n- **最小修法：** 对带 `external` 绑定且 `writable: true` 的对象，提示改为推荐 `public_read_write` 加 `beforeUpdate` 判权，或声明远端会返回的 owner 字段；其它对象不变。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `security-owd-unset`'s hint on an object with `external.writable: true` names the ways out `security-external-owner-unmapped` names, and does not recommend `private`. Severity and message are unchanged; managed objects keep today's hint.\n- [ ] Pin: `spike_owned` gets the external hint, and a managed custom object keeps the old one.\n- [ ] `os explain security-owd-unset` mentions the external case.\n\n`Clause-②: no` (hint text only) · `Metadata-protocol: none`."
+}

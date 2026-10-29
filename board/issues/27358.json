@@ -1,0 +1,36 @@
+{
+  "number": 27358,
+  "kind": "pull_request",
+  "title": "pm-dispatch(lanes): the skills, spec and ui charters point at the lane self-triage exception instead of restating the old absolute",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T02:30:20Z",
+  "updated_at": "2026-10-29T03:06:24Z",
+  "closed_at": "2026-10-29T03:06:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T03:06:22Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27358",
+  "body": "Fixes #27326\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:skills、spec、ui 三份车道岗位说明各改一行,不再重述「车道席绝不自分诊」的旧绝对句,改为指向 `triage-duties.md` 车道席自分诊例外。\n- 为什么改:例外已写进 `triage-duties.md`,只读自己岗位说明的席位仍会读到旧规则,与技能本体自相矛盾;规则文字仍只写一处。\n- 风险与回滚:仅内部指令文本(`.claude/**`,Tier S),不发布任何包;回滚即 revert 本 PR,三行恢复原文。\n- 先看:`references/lanes/ui.md` L8(为挤进 120 字节删了「同笔」二字与指针两侧空格,见下);其次 `lanes/skills.md` L22、`lanes/spec.md` L29。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,预期三文件行数 32/42/23 不变、全绿。\n- 需要你做的:无,席位落地(Tier S 契约复核)。\n\n## What changes\n\nThree in-place line edits, net 0 lines per file, each line within the 120-byte budget. Each line keeps its lane content and names the exception's home (`triage-duties.md`, 自分诊) instead of restating the absolute; no new rule text.\n\n| file:line | before (bytes) | after (bytes) |\n|---|---|---|\n| `lanes/skills.md` L22 | 「- 本车道 finding 同走分诊席首触,⛔ 不自分诊;席位可附证据与「仪器为车队服务」的答案。」 (119) | 「- 本车道 finding 归分诊首触,自分诊见 `triage-duties.md`;可附证据与「仪器为车队服务」答案。」 (119) |\n| `lanes/spec.md` L29 | 「- findings 首触定级归分诊席,本席只供证据。」 (57) | 「- findings 首触定级归分诊席,本席只供证据;例外见 `triage-duties.md` 车道席自分诊。」 (105) |\n| `lanes/ui.md` L8 | 「- ⛔ 不产 `domain:*`、type 与定级,分诊唯一生产;误标 `pm:retriage`+异议同笔,整树归本席除外。」 (118) | 「- ⛔ 不产 `domain:*`、type,定级仅`triage-duties.md`自分诊;误标 `pm:retriage`+异议,整树归本席除外。」 (120) |\n\nLine counts: `skills.md` 32 to 32 (ceiling 33), `spec.md` 42 to 42 (ceiling 43), `ui.md` 23 to 23 (ceiling 23). Headroom not spent.\n\n## Tests\n\nNo code, no published surface (`.claude/**` only), so no unit tests and no changeset (`skip-changeset`). The gate union derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (17 families) ran green on head `f65fff31`; see Verification.\n\n## Acceptance notes\n\n- `ui.md` L8 byte budget: the dispatch hypothesis gave this line 2 B of room once 「分诊唯一生产」 is displaced. Measured, every wording that keeps 「定级」, 「自分诊」 and the full file name plus the untouched remainder lands at 128 B or more (the remainder alone is 89 B; the grade clause with the pointer is 39 B). To fit 120 B without spending the 0-line headroom, two things went: the spaces around the pointer's code span, and 「同笔」 in the mislabel clause (the same-stroke rule keeps its general home in `references/cross-repo-coordination.md` L32, 「误标挂 `pm:retriage`+异议同笔」). `domain:*` and `type` stay absolute and the pointer attaches to 定级 alone, so it does not read as a `domain:*` exception (triage-duties L32: 不改 `domain:*`). 「整树归本席除外」 is unchanged. If the seat prefers keeping 「同笔」, the alternative is dropping `.md` and 「归」 from 「整树归本席除外」, which the dispatch said stays.\n- `skills.md` L22 keeps 「仪器为车队服务」; to fit, 「同走分诊席」 became 「归分诊」 and 「席位…的答案」 became 「…答案」.\n- Out of scope, not edited (single-file-surface claim): `references/cross-repo-coordination.md` L31 still says 「执行席永不定级或路由裸卡」, the same absolute this card retires, in the multi-lane-repo section. Same family as this card; reported to the seat, not filed.\n- `skills.md` L23 (「…⛔ 不自入队;定级归分诊。」) covers findings that cannot answer the instrument question (p3 or drop), outside the exception's p1/p2 own-in-flight scope, so no contradiction; left as is.\n\n## Verification\n\n<details><summary>Gate union on head f65fff31 (exit captured before any pipe)</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0   (18850 files, 0 disagree)\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0   (first run exit 3 PREREQUISITE NOT MET; built formula + lint under the verify lock, VERDICT command-exit 0, then green)\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-skill-id-lint :: exit 0   (105 file(s) clean)\npnpm check:pm-skill-ratchet :: exit 0   (skills.md 32/33, spec.md 42/43, ui.md 23/23)\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\nextra, outside the derivation: pnpm check:pm-settings-deny-roster :: exit 0, pnpm check:pm-governed-prose :: exit 0\ndispatch-gates --ran: 17 derived, 17 run, 0 NOT-MEASURED (a DERIVED zero, all 17 recorded an exit code)\n```\n\n</details>\n\nFamilies the dispatch expected but the derivation does not name for these paths (`check:pm-half-states`, `check:pm-dispatch-gates`, `check:pm-record-recognisers`) are left to CI's `Lint & Repo Gates`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmhU5KEj1nukYhp1Tg)_\n"
+}

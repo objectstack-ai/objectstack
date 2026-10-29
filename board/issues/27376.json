@@ -1,0 +1,36 @@
+{
+  "number": 27376,
+  "kind": "pull_request",
+  "title": "fix(studio): a read-only package's flow Enabled switch is drawn muted with a lock",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T04:13:30Z",
+  "updated_at": "2026-10-29T04:35:32Z",
+  "closed_at": "2026-10-29T04:35:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T04:35:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27376",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ836VkJMbRirYcP4FDCFmjrE)_\nPart of #27356\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 自动化页里,只读(代码)包的流程「启用」开关不再画成绿色的可操作开关,改为灰色轨道加一把锁;开/关的位置与文字照旧如实显示。\n- 为什么改:HotCRM 18.2.0 浏览器走查(hotcrm#2320 Studio S10)发现只读包的开关绿着,看起来能点,其实点不动。\n- 风险与回滚:只改这一个开关的样式类与一个图标;可写包外观和行为不变;回滚即 revert 本 PR。\n- 先看:`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`(`flowSwitchEl` 里的 `track` 与 `Lock`)。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface.readOnlyFlowSwitch-27356.test.tsx`,预期 4 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nRow 21 of #27356 (hotcrm#2320, Studio report finding S10): \"A read-only package's flow Enabled switch is drawn on and green, like a live control.\"\n\nIn the Automations pillar's flow header (`flowSwitchEl` in `StudioDesignSurface.tsx`), on a read-only package:\n\n- The track is muted: `bg-muted-foreground/60` when the flow is on, `bg-muted-foreground/25` when it is off, instead of `bg-emerald-500` / `bg-muted-foreground/40`.\n- A lock icon (`Lock`, `aria-hidden`) sits between the track and the word.\n- The button drops its hover fill and the `disabled:opacity-50` fade, and reads in `text-muted-foreground`, so the lock and the word stay legible.\n- Unchanged: the thumb position, the word (Enabled / Disabled), `aria-checked`, `disabled`, and the read-only reason on the wrapper (objectui#12303).\n\nA writable package's switch is unchanged: green track when on, hover fill, operable.\n\n## Why\n\nThe switch was already disabled on a read-only package (objectui#11124), but a disabled switch drawn green at half opacity still reads as a live control that is on. The muted track plus the lock says \"on, and locked\" in the same place the read-only chip already says why.\n\n## Tests\n\n`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.readOnlyFlowSwitch-27356.test.tsx` (4 tests, the real `AutomationsPillar` and the registered `FlowPreview`, harness copied from the objectui#11124 file):\n\n- Read-only, enabled flow: disabled, `aria-checked=\"true\"`, the track has no `bg-emerald-500` and carries the muted on-class, the thumb is at on, a hidden lock is present, no hover fill, and a click saves nothing.\n- Read-only, disabled flow: `aria-checked=\"false\"`, the fainter track, the thumb at off, the lock.\n- CONTROL writable, enabled flow: green track, no lock, a click saves `status: 'obsolete'`.\n- CONTROL writable, disabled flow: the grey track it always had, no lock.\n\n<details><summary>Ablation (one, on the read-only on-track)</summary>\n\n`node scripts/ablation-replace.mjs --anchor \"? 'bg-muted-foreground/60'\" --replacement \"? 'bg-emerald-500'\"` on `StudioDesignSurface.tsx` (anchor 1 → 0, blob `112c2439faa1` → `30f9154353a7`): the new file goes 1 failed / 3 passed, `expected 'relative inline-flex h-5 w-9 shrink-0…' not to contain 'bg-emerald-500'`. Restored: blob after restore = blob at HEAD = `112c2439faa1`, `git diff HEAD` empty.\n</details>\n\n## Acceptance notes\n\n- Setup's Packaged Automation toggle (row 3 of #27356) has the same look problem; it is seat 2's row and is not touched here.\n- The first commit on this branch carries no `Claude-Session` / `Co-authored-by` trailer pair (a WIP commit pushed before the closure build); later commits carry it. History is not rewritten.\n\n## Verification\n\nAll on head `a24979d2` (merge base `28872e68`), under the shared verification lock.\n\n- New file: 4 / 4 passed. The eight existing files that drive the same switch (`automationsReadOnly-11124`, `automationsReadOnlySelect-11546`, `autosaveInFlight-11204`, `autosaveSwitch-11232`, `flowRegistration-12349`, `interfacesReadOnly-11136`, `packageLessFlows-11553`, `AutomationsPillar.narrowRow-11795`) plus the new one: 9 files, 76 / 76 passed.\n- `pnpm --filter @object-ui/app-shell run type-check` (both `tsc` programs): exit 0.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 34 families derived, all 34 run, all exit 0; `--ran` reconciliation: 34 run, 0 NOT-MEASURED, 0 UNRUN. Tier: no path-derived mandate; 224 changed lines.\n\n<details><summary>Derived gate exits</summary>\n\nEvery family below exited 0: `check-adr-0087-registration` (and `--self-test`), `check-changeset-no-major`, `check-closing-keyword-parity` (and `--self-test`), `check-comment-mask-corpus`, `check-empty-changeset` (and `--self-test`), `check-sdui-manifest` (and `--self-test`), `release-rehearsal-clone --self-test`, `release-pending-publish --self-test`, `pnpm --dir ui exec vitest run scripts/` (174 files passed, 2 skipped; 4987 tests passed), `spec check:duration-unit-keys`, and `check:` changeset-gate-self-tests, closed-ceremony-text, cross-package-test-inputs, dispatcher-error-vocabulary, driver-memory-census, engine-double-contract, gitlink-declared, nul-bytes, pm-changeset-deadline-census, published-files, query-options-erasure, refd-timer-probe, skill-identifier-liveness, test-source-alias, tier-file-adoption, type-check-coverage, type-check-debt, undeclared-dep-imports, watch-hint-literal, where-matcher.\n</details>\n\nRepo-wide lint, the full ui test battery and the e2e jobs are CI's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWuU6sVfBYiy4dY4PA)_\n"
+}

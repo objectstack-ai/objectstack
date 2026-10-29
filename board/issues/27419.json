@@ -1,0 +1,37 @@
+{
+  "number": 27419,
+  "kind": "issue",
+  "title": "AI build progress panel: two group names print raw English type names (「dataset 项目」「permission …」) — useBuildGroupLabel has no case for them and falls back to the type id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T05:58:46Z",
+  "updated_at": "2026-10-29T07:53:44Z",
+  "closed_at": "2026-10-29T07:52:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27419",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: the AI build chat). `reach:` headless Chrome, local stack on cloud `main` `90e673e8` (cloud#3362, framework pin `eef83734`), zh-CN, 2026-10-29. During a whole-app build the live progress panel reads 「对象 客户, 项目 | 视图 客户列表, 项目列表 | 仪表板 首页仪表盘 | 应用 家装项目管理 | 示例数据 客户 | **dataset** 项目 | **permission** 家装项目管理·组织成员」. Two of the seven group names are raw English type names; every other group is translated. Still present on objectstack `main` `45c9be5f`.\n\nBatch-of: 2 · 2026-10-29 re-verification of the 2026-10-25 desktop E2E after the pin bump. Filed at the maintainer's request: 「立卡」. Reviewed in-session; the usual second-model review could not run (usage limit), so the location below was read directly in the pinned tree and on `origin/main`.\n\n**Business reason.** This panel is the whole screen for the 15–30 s of every first build, the magic moment. objectstack#26469 and cloud#3310 just made it readable (labels instead of `u9ba_project.project_list`). Two leftover English type words in a Chinese sentence undo part of that, and 「permission」 in particular reads like an error or a warning to a customer who never asked for permissions.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/plugin-chatbot` and `ui/packages/i18n`.\n\n## Where (pin `eef83734`; unchanged on `main` `45c9be5f`)\n- `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx:5065-5085` `useBuildGroupLabel`: a static switch with cases `object`, `view`, `dashboard`, `app`, `seed`, and `default: return type`. So `dataset` and `permission` fall through and print their raw type names.\n- `ui/packages/i18n/src/locales/zh.ts:3946-3952` `chatbot.build.group` has keys only for `object / view / dashboard / app / seed` (en likewise).\n- The frames carrying these types come from cloud's `apply_blueprint` progress (cloud#3310 added `label`). The artifacts themselves are correct; only their group name is untranslated.\n\n## Expected\nEither name the two groups (zh 「数据集」/「权限」 or wording the seat prefers, with en/ja/es), or, if a customer should not see dataset/permission plumbing at all during a build, hide those groups the way an unknown type should be hidden. In both cases `default:` should never print a raw type identifier: fall back to a neutral 「其他」 or omit the group. Add a unit test that renders a frame with every artifact type `apply_blueprint` stages.\n\n## Dedupe\n`gh api search/issues`, incl. closed:\n- objectstack `useBuildGroupLabel`: 0.\n- cloud `useBuildGroupLabel`: 1 (#2439, member permissions, unrelated).\n- objectstack `构建进度 dataset`: 1 (#12708 director seat post).\n- cloud `构建进度 dataset`: 0.\n- objectstack `build progress dataset permission label`: 164 (QA runs and sweeps; none on this).\n- cloud `build progress dataset permission label`: 17 (#2914, #1979, #2474; unrelated).\n\nNearest closed work: objectstack#26469 and cloud#3310 (labels for item names), which did not cover the group names."
+}

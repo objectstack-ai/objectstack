@@ -1,0 +1,32 @@
+{
+  "number": 27380,
+  "kind": "issue",
+  "title": "console: what a save or bulk action tells the user: a bulk action reports Succeeded N / N whatever each row did, a warning save shows two toasts, a hook cannot add a sentence to the save toast, and Delete has no per-object confirm text",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T04:25:44Z",
+  "updated_at": "2026-10-29T04:55:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27380",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.2.0** while implementing hotcrm#2371 (UX card \"show users the result of what they did\", from the #2320 browser pass). The implementer's report is [hotcrm#2371 comment 6487801082](https://github.com/objectstack-ai/hotcrm/issues/2371#issuecomment-6487801082), and the HotCRM side landed as hotcrm#2376. HotCRM worked around each item below where it could. What remains needs the console or the spec.\n\n| # | Observed on 18.2.0 | Suggestion |\n|---|---|---|\n| 1 | A list bulk action that fans out per row (HotCRM's Add to Campaign, two leads selected) ends on \"Succeeded 2 / 2\", whatever each row's action did. When one row is refused, the dialog shows only the last refusal and drops the count. | Report succeeded / refused counts from each row's actual answer, and list every refusal, each with its record. |\n| 2 | A save that passes with a warning-severity rule shows two toasts: \"Saved — with warnings <msg>\" and \"<Object> \"<name>\" updated\". | One toast: the save, carrying the warning. |\n| 3 | No hook or flow can add a sentence to a save's toast. A save that sends a deal for approval cannot say so, so HotCRM shows a `record:alert` banner on the page instead. | A way for a `beforeUpdate` / `afterUpdate` hook, or a record-triggered flow, to attach one user-facing notice to the save's answer, which the console shows with or in place of the save toast. |\n| 4 | Deleting a lead cascades its campaign memberships without saying so. `RowCrudActionOverrideSchema` (`packages/spec/src/data/object.zod.ts:1426` at 18.2.0) takes only `enabled` / `visibleWhen` / `disabledWhen`, so an object cannot word its Delete confirmation. | A `confirmText` on the delete override (with `{{count}}` / record holes as #25942 gave bulk actions), or a generated line naming the cascade-delete children. |\n\n**Already carded, not asked again:** the per-step \"Saved — next step\" toast in a screen flow is #26578 (closed after 18.2.0).\n\n## Acceptance\n\nEach row is either taken, as a card of its own where it needs one, or answered \"will not do\" with the reason.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2371's report. Dedupe: searched objectstack issues for bulk action result counts, warning-save double toasts, hook save notices and delete confirm text. Related, closed: #26172 (save toasts name the record), #25942 (bulk confirmText holes), #7428. No open card.</sub>"
+}

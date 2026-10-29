@@ -1,0 +1,30 @@
+{
+  "number": 27433,
+  "kind": "issue",
+  "title": "Setup › Permission set › Add user: the user picker lists names only, so two people of one name cannot be told apart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T06:38:32Z",
+  "updated_at": "2026-10-29T06:38:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27433",
+  "body": "domain:ui#2 · os-warren · session_01JQwxbXpF772qWJjojJvRXw\n\nFollow-up from #27410 (PR #27427, seat ACCEPT 6489766088). The os-dev reported it in that PR's acceptance notes.\n\n## What happens\n\nOn a Setup permission-set page, **Assigned users › Add** opens `RecordPickerDialog` on `sys_user` with no `columns` (`ui/packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx`, the picker near L612). The picker draws only its default display column, the name. An administrator cannot tell two people of the same name apart, or confirm the account before granting the set. Yet the assigned-user rows on the same section already show each person's email under the name (≈L579).\n\nThis is the same gap #27410 closed for Setup › Position › Add holder.\n\n## Fix shape (reuse #27427)\n\n- Pass `columns` for `name` and `email`, with en/zh headers from the section's own copy, and `objectSchema` set to `sys_user` from the `useMetadata()` objects the section already holds. Add no new fetch.\n- Add no permission check of its own: the picker's `readableColumns` rule decides what is drawn.\n\n## Acceptance\n\n- The picker draws a Name column and an Email column.\n- CONTROL: choosing people still writes the `sys_user_permission_set` grant by name (`{ user_id, permission_set }`). It still offers the active organization's members only, and the AI-seat cap refusal still shows inline.\n- CONTROL: under a real `PermissionProvider` that denies `sys_user.email`, only the name column is drawn and no email text appears.\n- Test against the real `RecordPickerDialog`, with a `columns` ablation that goes red."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 27427,
+  "kind": "pull_request",
+  "title": "fix(setup): position holder picker shows email beside the name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T06:23:31Z",
+  "updated_at": "2026-10-29T06:55:30Z",
+  "closed_at": "2026-10-29T06:55:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T06:55:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27427",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8MmawCuxSaq1JmBYvdfaADn)_\nFixes #27410\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Setup › 岗位 › 添加持有人 的用户选择框,在姓名列旁边多画一列邮箱。\n- 为什么改:原来只列姓名,两个同名的人分不清,授予岗位前也无法确认是哪个账号;同页的持有人列表本来就在姓名下显示邮箱。\n- 风险与回滚:只给选择框传了列和对象 schema;看不到 `sys_user.email` 的人仍只看到姓名列(选择框自身的字段读权限规则);回滚即还原本 PR。\n- 先看:`ui/packages/app-shell/src/views/metadata-admin/PositionHoldersSection.tsx`(`RecordPickerDialog` 的 `columns` 与 `objectSchema`)、同目录新测试 `PositionHoldersSection.pickerColumns-27410.test.tsx`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/PositionHoldersSection`,预期 4 个文件 17 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`PositionHoldersSection` now opens its `RecordPickerDialog` on `sys_user` with:\n\n- `columns`: a Name column (`name`, the field `sys_user` declares as its `nameField`) and an Email column (`email`, its login identity), with headers from the section's own en/zh copy.\n- `objectSchema`: `sys_user` as the registry serves it, read from the `useMetadata()` objects the section already holds (no new fetch). The name column resolves each person's title through it, as a lookup's dropdown does.\n\nNothing else moves. Per the card's ruling, the picker's own read rule (`readableColumns`) decides what it draws: the section adds no permission check of its own and reads the email no other way.\n\n## Why\n\nThe picker drew only its default display column, so two people of one name could not be told apart, while the holder rows on the same section already show each holder's email under the name. Row 2 of #27356.\n\n## Tests\n\nNew file `PositionHoldersSection.pickerColumns-27410.test.tsx`, against the real `RecordPickerDialog` (the existing suites stub it):\n\n- the picker draws a name column and an email column (cells read by `data-lookup-cell`);\n- CONTROL: choosing a person still creates the `sys_user_position` row by name;\n- CONTROL: under a real `PermissionProvider` policy that denies `sys_user.email` to the viewer, the picker draws the name column only and no email text.\n\nAblation (one-shot, `node scripts/ablation-replace.mjs --delete` on the `columns` prop, under the lock): the email-column test goes red (1 failed, 2 passed), and the restore leg reports blob `7283c48e2e90` equal to HEAD with `git diff HEAD` empty.\n\n## Acceptance notes\n\n- `AssignedUsersSection` (a permission set's holders) opens the same `RecordPickerDialog` on `sys_user` with no `columns`, so its picker lists names only too. Read from the source, not filed here; reported to the seat.\n\n## Verification\n\nAll readings on head `d2e47a1a` (origin/main merged).\n\n<details><summary>Local runs</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/app-shell/src/views/metadata-admin/PositionHoldersSection` (lock): Test Files 4 passed (4), Tests 17 passed (17).\n- `pnpm --filter @object-ui/app-shell type-check` (lock): VERDICT command-exit 0.\n- `pnpm --dir ui run type-check:scripts`: exit 0.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n- `node scripts/check-sdui-manifest.mjs`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 34 derived families, each run, all exit 0; `--ran` reconciliation: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\nChangeset: `.changeset/27410-position-holder-picker-email.md`, `@object-ui/app-shell` and `@object-ui/console` patch (app-shell is private and versioned; console ships it).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI runs it)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZN5JqZpSuejtNPz6p)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 27383,
+  "kind": "issue",
+  "title": "qa(checklist): standing regression between releases — a retest-owed reader over QA-source cards, a touched:SHA selector in checklist-select, and checklist-test §5 cadence for a weekly P0 + api run and a post-publish npm smoke (maintainer, 2026-10-29)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T04:27:52Z",
+  "updated_at": "2026-10-29T04:55:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27383",
+  "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiling gate: **③ a maintainer-directed task.** The maintainer, in session `session_017xRBcVy4VXmkQjn2MGeaWk` on 2026-10-29, asked how to improve periodic testing so platform problems are found in time (verbatim: 「你也可以和我沟通如何完善定期测试，及时发现平台的问题」). Asked which items to land first, they selected all four of the proposed options (option labels as shown to them): 「欠测清单脚本 + 周检」, 「增量选择器 touched:sha」, 「每周 P0 + api 例行」, 「发版后 npm 冒烟例行」. Then: 「这些都应该写到 checklist skills 中」.\n\nBusiness reason: between releases nothing re-runs the checklist. The measured cost of that gap:\n- **Retest debt goes unseen.** SKILL §5 trigger 2 says the seat accepting a QA-extracted fix appends the affected items to the wave anchor's retest list. On the 18.2.0 anchor #25807, 20 such fix cards closed after wave 2's subject (#25934, #26452, #26453, #26459, #26461, #26462, #26463, #26465, #26474, #26477, #26478, #26479, #26480, #26630, #26631, #26632, #26640, #26641, #26642, #26644, #26646, #26707), and its §4 retest list still read \"None yet\". This session had to derive the list by hand for #27377 §4. A discipline step nobody performs needs a reader that computes it instead.\n- **Delta selection is done by hand.** \"Which items cite a file changed since the last run\" was computed ad hoc for wave 2 and again for wave 3. It found 254 of 352 items touched in 514 commits, and #24840/#24841 used a hand-made `tier1:24681-touched` set. `checklist-select` has no selector for it.\n- **The post-publish npm smoke finds the most.** It found 3 FAILs on 18.2.0 (#26629) and 5 on 18.0.0 (#24908) with about 25 cells each: the highest yield per item of any run shape. It only happens when someone remembers to start it.\n\nReader: the runner and PM sessions that run `checklist-test`, plus the scheduled tasks the dispatching PM session will create once this lands. Those tasks are a weekly regression and a release watch, created by that session as scheduled tasks; they are not repository code.\nDedupe (open AND closed): \"checklist-select selector items touched since sha retest owed QA-source fixed cards scheduled weekly checklist run\" returns 162 hits, and none of them is a selector, a reader or a cadence. `scripts/qa/qa-rollup.mjs` answers \"latest verdict per selector and its staleness\". It does not answer \"which fixes landed after the verdict that found them\". Extend it if that is the cleaner home.\n\n## Deliverables\n\n1. **Retest-owed reader.** A read-only script, `scripts/qa/retest-owed.mjs` or a `qa-rollup` mode.\n   - It lists every closed issue whose body carries a `QA-source: #RECORD · area.item · clause` line and whose close time is after the subject commit time of the newest `qa-run` record that judged `area.item`.\n   - Output per row: item id, fix card(s), the record that last judged the item, and whether a later record already re-judged it.\n   - It has a `--json` mode and an offline `--self-test` in the repository's existing self-test battery style.\n   - ⛔ It writes nothing to GitHub.\n2. **`touched:SHA` selector in `scripts/checklist-select.mjs`.**\n   - It selects the runnable items whose `source[]` paths, or `automated.ref` files, changed in `SHA..HEAD`, comparing paths with the anchor suffix (`#symbol`) stripped.\n   - Directory sources match by prefix.\n   - It is deterministic and listed in the selector table. Self-test cases go in the existing battery, and its pinned floor rises.\n3. **checklist-test SKILL.md cadence text**, in §5 or a new short section.\n   - **Weekly regression:** the retest-owed list, plus `touched:` the previous weekly record's subject, plus `priority:P0`, plus `surface:api`, on `main` HEAD. One `qa-run` record per selector. The supersede protocol keeps at most one open weekly record per selector.\n   - **Post-publish npm smoke:** after each published release, the `smoke:npm-VERSION` run in the shape of #26629. Its fix cards are re-judged there.\n   - This adds a fourth retest trigger to §5's \"three and only three\". Write it with the ruling cited above. ⛔ Keep the rule that hand-feel reruns are not a trigger.\n4. RUNNER.md only if a definition there needs the new selector named.\n\n## Gates to expect\n\n- `node scripts/checklist-select.mjs --self-test` must pass, with its floor raised.\n- `node scripts/check-platform-checklist.mjs` stays green.\n- The pm-skill line ratchet applies if it covers `checklist-test`, as #26567 had to handle. A net increase needs the ruling id, and the seat posts the ruling on #27377 before ACCEPT.\n- `skip-changeset`: no package publishes.\n\n## Out of scope\n\n- Creating the scheduled tasks. The dispatching PM session does that after this lands.\n- Any change to verdict rules.\n- Any CI workflow.\n\nClause-②: no. Metadata-protocol: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

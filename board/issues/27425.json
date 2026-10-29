@@ -1,0 +1,36 @@
+{
+  "number": 27425,
+  "kind": "issue",
+  "title": "sharing: a `private` external object whose driver serves `owner_id` without declaring it in `fields` gives every member every row — `hasPhantomOwnerAnchor` reads `fields` only, so the read filter goes unscoped (epic #27261, found by #27332's dev)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T06:18:04Z",
+  "updated_at": "2026-10-29T07:56:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27425",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① product defect, exception: possible data exposure (reach measured first).\nReader: the epic PM (#27261) dispatches the fix inside the epic subtree after triage sets the lane; the fix lands in `packages/plugins/plugin-sharing` (read-filter provenance check).\nDedupe (open AND closed): \"federated phantom owner_id read filter unscoped private external object columnMap hasPhantomOwnerAnchor\" → 3 hits, all closed and the origin of the design, not this defect (#7858 read-scope lowering, #8119 single-record write gates, #21918 cascade anchors); \"external object private sharing read scope member sees every row owner column served by driver not declared\" → 37 hits, none this defect.\nreach: public HTTP entry, measured once: in a booted composition of the P0 spike (plugin driver), on a `sharingModel: 'private'` external object whose driver returns `owner_id` but whose `fields` do not declare it, a member's `GET /api/v1/data/<object>` answered 2 of 2 rows, the admin-owned one included. With `owner_id` declared in `fields`, the same GET answered 1 (own only). Measured by #27332's dev (report 6489300223 on #27332, out-of-scope finding 1); the mechanism was confirmed by code reading in the independent review of PR #27422.\ntype: Bug\n\nPart of #27261 (Tier A). Found while building #27332's lint warning (PR #27422).\n\n## 维护者速读\n\n- **现象：** 外部对象设成 `private`（仅所有者可见），若 driver 实际返回了 `owner_id` 列、但对象 `fields` 里没声明它，普通成员读列表能看到所有人的行；写仍按所有者拦。\n- **原因：** 共享服务判断「`owner_id` 是不是虚列」只看 `fields` 声明（`hasPhantomOwnerAnchor`），没声明就当远端没有这列、读过滤整个不加；但 SQL driver 经 `columnMap`、或插件 driver 自己，都可能真的把这列返回来。\n- **影响：** 数据越权读；作者按「private」以为已隔离。\n- **最小修法：** 方向待定：要么读过滤在虚列时改为拒读（fail-closed，与写一致），要么把「served 但未声明」视同声明。#27422 的 lint 警告已提示作者声明该字段，可先止血。\n- **需要您做的：** 无（真正的取舍若出现，走 Fable 分析线程）。\n\n## Evidence\n\n- `packages/plugins/plugin-sharing/src/sharing-service.ts:683`: `buildReadFilter` returns `null` (unscoped) whenever `hasPhantomOwnerAnchor` is true.\n- `federated-phantom-anchors.ts:150-153`: `hasPhantomOwnerAnchor` is true iff the registered `owner_id` def equals the injected `OWNER_FIELD_DEF`. It never reads `external.columnMap` or what the driver returns.\n- Writes stay owner-scoped: `matchesOwnerScope` (`sharing-service.ts:936-940`) reads the row's served `owner_id`. So the same object refuses another owner's PATCH but lists their rows.\n- `external.columnMap` is applied by the SQL driver (`packages/drivers/driver-sql/src/sql-driver.ts:4479-4481`), not by the engine. A plugin driver may return `owner_id` on its own.\n- The #7858 design assumed \"undeclared ⇒ not served\". `columnMap` and plugin drivers break that assumption.\n\n## Task\n\n- [ ] Reads on a `private` / `public_read` external object never go unscoped because an owner column is undeclared. Pick the fail-closed shape (deny the scoped read, or scope on the served column) and pin the 2-of-2 case to own-only (or refused).\n- [ ] Pin both drivers: SQL with `columnMap: { <col>: 'owner_id' }`, and a plugin driver returning `owner_id`.\n- [ ] Check the unit read scope (`owning_business_unit_id`) for the same hole.\n\n`Clause-②: no` · `Metadata-protocol: none`."
+}

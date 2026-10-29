@@ -1,0 +1,37 @@
+{
+  "number": 27378,
+  "kind": "issue",
+  "title": "Setup › Packaged automation: a flow the deployment does not run shows a live green switch beside \"Not running here\", and the reason names an environment variable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T04:17:42Z",
+  "updated_at": "2026-10-29T05:30:16Z",
+  "closed_at": "2026-10-29T05:29:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27378",
+  "body": "domain:ui#2 · os-warren · session_01JQwxbXpF772qWJjojJvRXw\n\nRow 3 of #27356, from HotCRM's 18.2.0 browser pass (hotcrm#2320, [Setup track](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6442758420), S3). Triage's per-row rule (6486657637) applies, so this row is carded on its own here. Filed by seat `domain:ui#2`.\n\n## Observed\n\nSetup › Packaged automation lists five scheduled flows. Each one shows a green **On** switch beside an outlined \"Not running here\" badge. The Details chip holds the platform's reason, which names `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`. An administrator reads the green track as \"running\" and cannot act on the variable from the browser.\n\n## Measured on `origin/main` c4c515ad (read-only)\n\n`ui/packages/app-shell/src/views/setup/PackagedAutomationPage.tsx`:\n\n- The `Switch` (≈L661) shows `checked={row.enabled}` with its default track whatever the engine reads. The badge beside it (≈L675–686) reads `on` / `not-running` / `off`.\n- objectui#13159 (CHANGELOG 673a71c) chose on purpose to keep the switch showing and writing the activation flag. **That switch does act:** it writes the flag. So this is not the read-only case. Seat 1's Studio fix for the same look (PR #27376, `StudioDesignSurface.tsx` AutomationsPillar, read-only switch) is a pattern to borrow for the visual, not for disabling.\n- The reason chip renders the server's sentence verbatim (`ReasonDetails`, ≈L648). The row also carries the closed `unboundCause` (`deployment_policy` | `disabled_subflow` | `missing_trigger` | `binding_failure`, objectstack#23842). Today the page reads it for presence only (≈L250).\n\n## Suggested remedy (the dev measures; the seat's order binds)\n\n1. When the reading is `not-running`, draw the switch's on-track muted rather than primary. Its thumb, `aria-checked` and toggling stay as they are: the flag is still on, and turning it off still works.\n2. For `unboundCause: 'deployment_policy'`, the visible line says it in plain words, e.g. \"On, but this deployment does not run scheduled work\". It is keyed on the cause and localized. The server's sentence, with the variable name, stays behind Details for the operator. The other causes keep today's wording.\n3. Tests:\n   - muted track plus the plain line on a `deployment_policy` row;\n   - CONTROL: a bound row keeps the primary track and \"On\";\n   - CONTROL: the switch still toggles on a not-running row;\n   - ablation.\n\nNot a broken capability (nothing misfires), so it stays p3 per triage."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 27404,
+  "kind": "issue",
+  "title": "Setup › Permission set: the field-level rows list platform bookkeeping columns, so \"Search Index (`__search`)\" sorts first",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T05:17:06Z",
+  "updated_at": "2026-10-29T07:17:32Z",
+  "closed_at": "2026-10-29T07:16:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27404",
+  "body": "domain:ui#2 · os-warren · session_01JQwxbXpF772qWJjojJvRXw\n\nRow 9 of #27356, from HotCRM's 18.2.0 browser pass (hotcrm#2320, [Setup track](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6442758420), S10). Triage's per-row rule (6486657637) applies. Filed by seat `domain:ui#2`.\n\n## Observed\n\nA permission set's field overrides for an object list the platform's internal \"Search Index (`__search`)\" first. They also list the other columns the platform injects, ahead of or among the object's own fields.\n\n## Measured on `origin/main` ad2c2869 (read-only)\n\n- `ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx`, `ensureFields` (≈L1016–1045): it lists every field of the merged object definition, keeps only `name` and `label`, and sorts by name. The `system` and `hidden` flags are dropped there, so `__search` sorts first.\n- The house rule for the platform's bookkeeping columns already exists. It is `isStudioHiddenSystemField` (`views/studio-design/studioHiddenSystemField.ts`): `system` AND `hidden` together, as on `__search`, `owning_business_unit_id` and `organization_id`. The Data rail (objectui#11780), the flow reference picker and the list-view inspector pickers (objectui#13152), the form designer and the draft-changes panel all drop such fields. This editor is the one field list that doesn't.\n\n## Suggested remedy\n\n1. Keep `system` and `hidden` on each `FieldSummary`. Drop a field from the offered rows when `isStudioHiddenSystemField` holds.\n2. CONTROL: a field with a stored override in the permission set still draws its row, as written, even when the predicate holds (the objectui#13152 CONTROL shape). An author's own `hidden` field without `system` still draws. Nothing about how a save writes changes.\n3. Tests: `__search` is not offered; a stored `__search` override still draws; a hidden non-system field still draws; ablation.\n\nNot a broken capability, so it stays p3 per triage."
+}

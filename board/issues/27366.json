@@ -1,0 +1,36 @@
+{
+  "number": 27366,
+  "kind": "pull_request",
+  "title": "fix(app-shell): announce the route object-read and page record-load failures",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T03:21:24Z",
+  "updated_at": "2026-10-29T03:51:23Z",
+  "closed_at": "2026-10-29T03:51:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T03:51:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27366",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8MCjwDfBRBbh1qJBm2tbXAr)_\n\nPart of #25915 (slice 3 of ruling B; slice 4, the retirement of `ViewSkeleton` / `ShimmerSkeleton`, is the PR that closes the card).\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:控制台里两处\"加载失败\"画面(路由对象读取失败、自定义页面记录读取失败)改用共享的 `DataErrorState` 组件绘制。\n- 为什么改:原来这两处用无 `role` 的 `Empty` 手绘,读屏软件在读取失败时什么都听不到;共享组件天生 `role=\"alert\"`,失败会被播报,也与\"空\"区分开。\n- 风险与回滚:只换呈现组件,文案、i18n 键、测试 id、重试按钮都不变;视觉上多一个红色小图标方块。回滚即还原这两个文件。\n- 先看:`ui/packages/app-shell/src/views/PageView.tsx` 的失败分支;`ui/packages/app-shell/src/console/AppContent.tsx` 的 `RouteObjectReadFailed`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/__tests__/PageView.appPageRecord-12931.test.tsx`,预期全部通过,含新增的 `#25915` 用例。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `RouteObjectReadFailed` (`ui/packages/app-shell/src/console/AppContent.tsx`) and the page record-scope load failure (`ui/packages/app-shell/src/views/PageView.tsx`) render `DataErrorState` from `@object-ui/components` instead of a hand-drawn `Empty`. The failure node is now `role=\"alert\"` by construction.\n- Kept unchanged: the i18n keys and defaults (`list.loadErrorTitle` / `list.loadErrorMessage`, `empty.recordLoadFailed` / `empty.recordLoadFailedDescription`, `common.retry`), the test ids (`route-object-read-failed`, `page-record-load-failed` and their `-retry` buttons) and both Retry handlers.\n- No new prop on the shared component: the test id spreads onto the root through `...props`, and Retry is passed as `children` (the component's documented slot for a call site's own control) rather than `onRetry`, so it keeps its own test id and, on the page, its icon. The shared default icon (destructive `AlertCircle` square) replaces the page block's muted `AlertTriangle`; `AlertTriangle` drops from the page's imports.\n- Changeset: `@object-ui/app-shell` is `private: true`, but its code ships inside the published `@object-ui/console` SPA, so the changeset bumps both as `patch` (the same pair recent app-shell fixes carry).\n\n## Tests\n\n- New pin in `AppContent.disabledPackageDeepLink-13052.test.tsx`: on a 5xx read the `route-object-read-failed` node has `role=\"alert\"` and contains its Retry; Retry asks once more and the served object renders with no alert. The existing served-object CONTROL also asserts no alert.\n- New pin in `PageView.appPageRecord-12931.test.tsx`: the failed read's node has `role=\"alert\"` and contains Retry; Retry re-reads, the loaded row renders, and no alert remains.\n\n## Acceptance notes\n\nOther app-shell blocks that draw a load failure by hand (listed for the card; not moved here, per the order): `views/metadata-admin/AuditPanel.tsx` (`audit-error-state`, an `Empty`), `views/metadata-admin/ResourceEditPage.tsx` (`refs-error`, an `Empty`), `views/metadata-admin/DirectoryPage.tsx` (the `engine.directory.loadFailed` line, a bare `text-destructive` div), and `chrome/ErrorBoundary.tsx` (the boundary fallback, an `Empty`). `objectViewHeaderChrome.tsx` also has one but is under the `ObjectView*` exclusion.\n\n## Verification\n\nAll readings at head `72976b7a` (base `eef83734`).\n\n<details><summary>Tests and ablation</summary>\n\n- The two touched files, under `os-verify-lock`: `pnpm --dir ui exec vitest run --maxWorkers=2` on both. VERDICT command-exit 0, Test Files 2 passed (2), Tests 23 passed (23).\n- Ablation, with the fix committed: both source files reverted to `origin/main` (the `Empty` blocks: a `grep -c` for the `DataErrorState` JSX opener reads 0 in each file, and for the old `Empty` opener carrying the test id reads 1 in each). VERDICT command-exit 1, Tests 2 failed | 21 passed (23). The two `#25915` pins went red on `toHaveAttribute('role', 'alert')`, and every other test stayed green. Restored with `git checkout HEAD --`: both blob hashes equal `HEAD`, `git diff HEAD` empty.\n- Every app-shell test file that imports `AppContent` or `PageView` (56 files), under the lock: VERDICT command-exit 0, Test Files 56 passed (56), Tests 358 passed (358).\n- `pnpm --filter @object-ui/app-shell type-check` (`tsc --noEmit` + `tsc -p tsconfig.test.json`), after building `@object-ui/app-shell^...`: VERDICT command-exit 0, 0 `error TS`.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `dispatch-gates --commands --repo objectstack-ai/objectstack` derived 34 families. All 34 ran, each with its exit code captured before any pipe, and all 34 exited 0 (`pnpm --dir ui exec vitest run scripts/` ran under the lock: 174 files passed, 2 skipped). `--ran` reconciliation: 34 derived, 34 run, 0 NOT-MEASURED.\n- `dispatch-gates --tier`: no path-derived mandate.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n- Changed lines: 129 (+89 / -40), under the 3000 human-merge threshold.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZK9w6fe2Y6mGQjj6L)_\n"
+}

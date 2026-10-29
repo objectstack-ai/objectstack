@@ -1,0 +1,32 @@
+{
+  "number": 27398,
+  "kind": "issue",
+  "title": "public forms: a form row's options subset is ignored by the renderer and the submit door, an empty currency field shows 0.00, and the thank-you page cannot name the record it created",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T04:59:54Z",
+  "updated_at": "2026-10-29T06:04:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27398",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.2.0** while implementing hotcrm#2368, its public web forms card. The maintainer had ruled that a guest may pick at most High priority on the web-to-case form. The implementer's report is [hotcrm#2368 comment 6488327868](https://github.com/objectstack-ai/hotcrm/issues/2368#issuecomment-6488327868), and the HotCRM side is hotcrm#2378. Because of row 1, HotCRM dropped the priority field from its public form and caps a posted Critical in its own hook.\n\n| # | Observed on 18.2.0 | Evidence | Suggestion |\n|---|---|---|---|\n| 1 | A public form row that declares an `options` subset (`[low, medium, high]` of four) still renders all four options at `/_console/f/support`. `POST /api/v1/forms/support/submit` also accepts a value outside the subset. | `GET /forms/support` serves the subset; `registerFormEndpoints` checks keys and required fields only; screenshot `probe-form-option-subset-ignored-en.png` (HotCRM project files, issue-2368). | The renderer offers only the row's subset, and the submit door refuses a value outside it. |\n| 2 | An empty optional currency field on a public form shows the placeholder `0.00`, which reads as filled in (HotCRM's Contact Us, Annual Revenue). | The `CurrencyField` placeholder falls back to `0.00`. | No numeric placeholder on an empty currency field, or the field's own `placeholder`. |\n| 3 | After submit, the page says \"Thank you!\" and cannot name what was created (a case number for web-to-case). `submitBehavior` text is not translated. | The submit answer carries the id only; the thank-you title and message take no holes. | Let the thank-you text interpolate the created record's display fields (for example `{{record.case_number}}`), and translate `submitBehavior`. |\n\n## Acceptance\n\nEach row is either taken, as a card of its own where it needs one, or answered \"will not do\" with the reason.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2368's report. Dedupe: searched objectstack issues for public form option subset, thank-you record number and currency placeholder. Related: #26452 (closed, standalone form option labels), objectstack#27355 rows 9–10 (form branding, field highlighting). No open card.</sub>"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 27405,
+  "kind": "pull_request",
+  "title": "fix(studio): a flow node's key / value map stacks each field over its value, so field names are readable",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T05:19:18Z",
+  "updated_at": "2026-10-29T05:44:56Z",
+  "closed_at": "2026-10-29T05:44:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T05:44:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27405",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ836VkJMbRirYcP4FDCFmjrE)_\nPart of #27356\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 流程检查器里,键/值映射(新建记录节点的字段值、HTTP 头等)的每一行改为上下两行:字段名单独一行(旁边是删除按钮),值在下面一行(旁边是表达式切换)。\n- 为什么改:HotCRM 18.2.0 走查(hotcrm#2320 Studio S5)发现新建记录节点把字段名截成 4–5 个字符(「subj」「dueD」);300px 的检查器里一行要塞字段、值和两个按钮。\n- 风险与回滚:只改这个编辑器的行布局,存储的值不变;回滚即 revert 本 PR。\n- 先看:`ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowKeyValueField.tsx`(行渲染的 `flow-kv-key-line` / `flow-kv-value-line`)。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/inspectors/FlowKeyValueField.stackedRows-27356.test.tsx`,预期 2 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nRow 16 of #27356 (hotcrm#2320, Studio report finding S5): \"The Create Record node cuts field names to 4–5 characters (\"subj\", \"dueD\").\"\n\n`FlowKeyValueField`, the key / value map editor in the flow node inspector, draws each row on two lines instead of one:\n\n- **Key line:** the key box (`min-w-0 flex-1`) and the remove button.\n- **Value line:** the value box and, where the map has one, the text / expression toggle.\n\nRows are spaced `space-y-3` (was `space-y-1.5`) so one pair reads apart from the next. Nothing about what the map commits changes: the same rows, the same flush on blur, the same refusal and expression-issue lines under the value.\n\n`FlowNodeConfigField` is the editor's only caller, so every key / value map in the flow inspector stacks: Create Record and Update Record field values, the Update Record filter, HTTP headers, Assignment assignments, subflow input mapping, script inputs, screen form defaults, action parameters. That is one component's layout, not a sweep; each of those maps had the same cut-off key.\n\n## Why\n\nIn the 300 px Studio inspector (`STUDIO_ASIDE_WIDTH`, less the inspector shell's `p-4`), the key box got the width left after the value box and two 32 px buttons.\n\n<details><summary>Geometry reading (Chromium, Tailwind 4.3.3 compiled from the same class strings, 267 px content width)</summary>\n\nKey box holding `customer_satisfaction_score`, computed font 14 px monospace (the `Input` primitive's `md:text-sm` outranks the row's `text-xs` at desktop width; unchanged here):\n\n| | key box width | characters visible |\n|---|---|---|\n| before (one line: key, value, toggle, remove) | 104 px | 9 |\n| after (key + remove over value + toggle) | 227 px | 24 |\n\nOne-off probe, not committed: a static page with both row shapes built from `compile()` of `tailwindcss/dist/lib.mjs`, measured with Playwright.\n</details>\n\n## Tests\n\n`ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowKeyValueField.stackedRows-27356.test.tsx` (2 tests, through `FlowNodeConfigField`; jsdom draws no layout, so the pin is the row's structure):\n\n- Create Record field values with `customer_satisfaction_score`: the key's line holds no value box, exactly one input and one button (remove); the value's line is a different line, after it, and holds the expression toggle.\n- HTTP headers (a map with no toggle): the key's line holds no value box.\n\n<details><summary>Ablation (one: rejoin the two lines)</summary>\n\n`node scripts/ablation-replace.mjs --delete` of the anchor that closes the key line and opens the value line (anchor 1 → 0, blob `9f71951b7644` → `d9d573fada30`): both tests fail, `expected true to be false`. Restored: blob after restore = blob at HEAD = `9f71951b7644`, `git diff HEAD` empty.\n</details>\n\n## Acceptance notes\n\n- The key box still shows the API name (`subject`), as before; the datalist suggestions keep showing `Label (name)`. Showing the label in the box would change what the box edits, which this row does not ask for.\n- A 27-character name still needs 251 px at desktop width and shows 24 characters in the 300 px aside; the box scrolls as any input does.\n- The `Input` primitive's `md:text-sm` outranks this editor's `text-xs` at desktop width, so the key box reads at 14 px rather than 12 px. Pre-existing and unchanged; noted only.\n\n## Verification\n\nCode on head `d30f8380` (fix + test + changeset); head `5ebc5576` adds a one-line changeset wording fix, after which the changeset families were re-run. Merge base `7e200b4a`. Under the shared verification lock.\n\n- New file: 2 / 2 passed. Every app-shell test file that imports `FlowNodeInspector`, `FlowNodeConfigField` or `FlowKeyValueField` (65 files, the new one included): 971 / 971 passed.\n- `pnpm --filter @object-ui/app-shell run type-check` (both `tsc` programs): exit 0.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: the same 34 families as row 21, all 34 exit 0; `--ran`: 34 run, 0 NOT-MEASURED, 0 UNRUN. Tier: no path-derived mandate; 132 changed lines.\n- The `ui scripts/` family first exited 1 on `quick-reference-commands-4149` (\"no row for apps/site\"): an ignored `ui/apps/site/node_modules` left in this worktree from before the site retired (#27329). Deleted it and re-ran: 169 files passed, 2 skipped, exit 0. Not a tree defect.\n- Re-run on `5ebc5576`: `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check:changeset-gate-self-tests`, `check:pm-changeset-deadline-census`, `check:nul-bytes`, all exit 0.\n\nRepo-wide lint, the full ui test battery and the e2e jobs are CI's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWuU6sVfBYiy4dY4PA)_\n"
+}

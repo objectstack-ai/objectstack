@@ -2,8 +2,8 @@
   "number": 27145,
   "kind": "issue",
   "title": "docs(ui-merge): fold objectui.org into objectstack docs, K4 — retire ui/apps/site and ui/content/docs, 301 every objectui.org path to objectstack.ai/docs, drop the deploy-ui-site job",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T08:08:40Z",
-  "updated_at": "2026-10-28T17:14:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T03:51:22Z",
+  "closed_at": "2026-10-29T03:51:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

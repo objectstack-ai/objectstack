@@ -1,0 +1,32 @@
+{
+  "number": 27434,
+  "kind": "issue",
+  "title": "console: an action dialog opened from a record gets no row and always says Confirm, a lookup pick cannot fill another field, highlights colour booleans by value, and the import matcher never tries an object's unique fields",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T06:42:44Z",
+  "updated_at": "2026-10-29T06:58:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27434",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.2.0** while implementing hotcrm#2369, its forms and record pages card. The implementer's report is [hotcrm#2369 comment 6489824787](https://github.com/objectstack-ai/hotcrm/issues/2369#issuecomment-6489824787), and the HotCRM side is hotcrm#2380. HotCRM shipped what it could inside 18.2.0; each row is the half it could not.\n\n| # | Observed on 18.2.0 | Evidence | Suggestion |\n|---|---|---|---|\n| 1 | An action's param dialog opened from the record header or a list row's ⋮ menu gets no row. A `{{ record.x }}` hole in the action `description` or a param `helpText` prints raw, and a `defaultFromRow` param stays empty. | HotCRM `send_email` (contact) and `log_call` / `log_meeting` (contact, case, opportunity). | Pass the row to the dialog, so `description`, `helpText` and `defaultFromRow` can read it. |\n| 2 | The dialog's submit button always reads \"Confirm\" (`actionDialog.confirm`). No metadata key gives the action's own verb (\"Send\", \"Log Call\"). | Same actions. | An action key for the dialog's submit label, falling back to \"Confirm\". |\n| 3 | In a form, picking a lookup cannot fill another field: a quote line's Sales Price arrives only after save, from the server hook. | HotCRM quote line item, product → `unit_price`. | A declared lookup-pick autofill (`field ← lookup.field`) on the form. |\n| 4 | `record:highlights` draws a boolean `false` as a red \"× No\" and `true` as a green \"✓ Yes\", whatever the field means, so \"SLA Violated: No\" wears red. `record:details` draws a neutral circle for the same value. | HotCRM case `is_sla_violated`. hotcrm#2380 moved it out of the strip into an alert. | Neutral by default in highlights, as in details, or a field-level key saying which value is the bad one. |\n| 5 | A `record_header` action button cannot show per-reader state, such as \"you voted Helpful\" on a knowledge article. | HotCRM `mark_article_helpful` / `mark_article_not_helpful`. | A per-reader `active` (or `pressed`) predicate on a header action. |\n| 6 | The import lookup matcher (`resolveRef` in `@objectstack/core`) tries the id, the lookup's `displayField`, the target's `nameField`, then name/title/label/full_name/email/username. It never tries the target's unique fields, so \"ACC-000012\" names nothing, and any change to a record title breaks every old export file. | HotCRM's row 10 measurement (titles \"ACC-000012 - Name\"). Related: #24981 (closed, added `nameField`). | Also try the target's `unique` fields (an autonumber included) before reporting `reference_not_found`. |\n| 7 | `outcomeMessages` interpolate `${result.x}`, while `successMessage` takes `{{ result.x }}`. A `{{ }}` hole in `outcomeMessages` prints raw, and no lint rule says so. | HotCRM knowledge article feedback actions. | One hole syntax for both, or a lint rule on the other one. |\n\n## Acceptance\n\nEach row is either taken, as a card of its own where it needs one, or answered \"will not do\" with the reason.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2369's report. Dedupe: searched objectstack issues for action dialog record context / defaultFromRow, dialog confirm label, lookup pick autofill, highlights boolean colour, import resolve by unique field. Related: #24981, #26951, #5150 (all closed, different gaps). No open card.</sub>"
+}

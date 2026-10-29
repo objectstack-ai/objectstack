@@ -1,0 +1,37 @@
+{
+  "number": 27363,
+  "kind": "issue",
+  "title": "skills(os-dev, pm-dispatch): a seat-driven PR is not assigned to the seat's account at the draft open; it reaches a human only after ACCEPT + contract PASS, as a review request to os-zhuang/hotlong when Tier H",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T02:46:40Z",
+  "updated_at": "2026-10-29T06:08:52Z",
+  "closed_at": "2026-10-29T06:05:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27363",
+  "body": "coordinator#1 · os-bill · session_01Utp6CXZyT2n7UiyKFUQ3yT\n\n**Filing gate ③** (maintainer-directed task). The maintainer, in this project's thread, 2026-10-29, verbatim:\n- 「我看到你有一大堆pr」 (02:42Z, looking at his GitHub PR list)\n- 「这个是技能的bug，应该是开发完了你审核通过才会推送给我审核。立skills卡」 (02:42Z)\n- 「审核人是 os-zhuang 和 hotlong」 (02:43Z)\n\n⛔ Not a claim, ⛔ not a dispatch: the maintainer asked for the card. Lane `domain:skills`; the filing project (engine/spec lanes) does not implement it.\n\n**Business reason:** the maintainer's assigned-PR list fills with seat-driven drafts that are not his to look at yet, so the PRs that do need a human are buried, and a request to look reads as \"ready\" before the seat has reviewed anything (the failure #26617 measured five times).\n**Reader:** the `domain:skills` seat that dispatches this; the dev edits the files named below.\n**Dedupe:** MCP semantic search on objectstack issues, open + closed, query \"draft PR assigned to maintainer and review requested before seat review pr_create assignees governed review request\" (178 hits, top 10 read). Same family, not the same ask: #26617 (open, `pm:on-hold`) moves the **governed approver request** off `pr_create`; #27345 (open, p1) gates the seat record's approval ask on a same-head PASS; #26155 / #26671 closed. None touches the **PR assignee** set at the draft open, or the project harness step.\n\n## What happens now (measured on `origin/main` `eef83734`, 2026-10-29T02:50Z)\n\n| PR | draft | assignees | requested_reviewers | author |\n|:--|:--|:--|:--|:--|\n| #27344 | yes | `os-bill` | `hotlong`, `os-zhuang` | `objectstack-fleet[bot]` |\n| #27268 | yes | `os-bill` | `hotlong` | `objectstack-fleet[bot]` |\n| #27246 | yes | `os-bill` | — | `objectstack-fleet[bot]` |\n| #27353 | no | `os-bill` | — | `objectstack-fleet[bot]` |\n\nThree sources put a PR in front of a human the moment it opens:\n\n1. **PR assignee at the draft open.** `.claude/agents/os-dev.md:37` 「PR assignee = 卡的:`pr_create` 带 `assignees: [LOGIN]`」 and L60 (write budget 「`pr_create`(draft,含 assignee 与 labels)」); `.claude/skills/pm-dispatch/references/execution-duties.md:63` 「PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`」. The card's assignee is the seat's account; for this maintainer's own seats that is `os-bill`, his login, so every draft lands in his assigned list. The relay carries it out in `scripts/pm/fleet-write/ops.mjs:861–873` (`pr_create`, the assignees leg).\n2. **Governed approver request at the draft open.** `ops.mjs:867` `governedReview: true` on `pr_create`; `.claude/skills/pm-dispatch/SKILL.md:198–199` ③. Already carded as #26617; not re-filed here. The maintainer's rule above covers it too, so the two can ride one PR.\n3. **The claude.ai project harness, outside this repo.** A project thread's session context tells it, after creating any PR on github.com, to add the requesting user as assignee and request a review from them (`issue_write` update with `assignees: [\"os-bill\"]`, then `update_pull_request` with `reviewers: [\"os-bill\"]`), best-effort. No repo file sets this and no repo PR can remove it; the repo can only tell project threads not to perform it for a seat-driven PR, on the maintainer's words above.\n\n## Wanted — the maintainer's rule\n\nA PR reaches a human only when development is done **and** the seat's review (ACCEPT, `## 席位核对`) **and**, where clause ② applies, the contract-review PASS on the current head are on the PR. Only then, and only when the PR needs a human approval (Tier H), the seat requests review from `GOVERNED_APPROVERS` (`os-zhuang`, `hotlong`; `scripts/pm/check-governed-queue-guard.mjs:698`). ⛔ The seat's own account (`os-bill` here) is never assigned to or requested on a PR. A PR that lands on the seat's review (Tier S, ungoverned) goes to no human.\n\n1. `os-dev.md` L37 / L60: `pr_create` stops carrying `assignees`; the dev opens the draft with labels only.\n2. `execution-duties.md:63`: drop 「PR assignee = 卡的」 and the takeover swap; the seat's in-flight-PR reader stops depending on a PR assignee (e.g. open PRs on `head:claude/` whose body `Fixes #N` / `Part of #N` names a card the seat holds; the card's assignee and `Claim:` `Branch:` still own it). Check `project-forms.md:31–32` and every patrol that reads PR assignees as ownership.\n3. `SKILL.md:198–201` and `references/lanes/director.md:57`: the approver request is the seat's hand-off step after PASS + ACCEPT on the current head (shape 1 of #26617). The author-is-approver fallback (L199: assign the approver who cannot be requested) stays; it assigns an approver, never the seat's account.\n4. One line where project threads read the PR rules (`references/dispatch-runbook.md` card-thread section or `references/coordinator.md`): a project thread does not perform the harness's post-create assign / request-review step on a seat-driven PR; the approver request is the seat's hand-off. Cite the maintainer's words above.\n5. H43 (`scripts/pm/check-half-states.mjs:9886`; drafts neither fire nor silence it, L9940) reads the new timing, as #26617 asks: a Tier H PR before PASS + ACCEPT is not a half state; after both with no approver request it is.\n6. Not this card: unassigning `os-bill` from PRs already in flight; their owning seats do it once this lands, or earlier on the maintainer's word.\n\n## Acceptance\n\n- A relay `pr_create` for an os-dev draft sends no assignee leg (one live run quoted); `execute.mjs --self-test` / `validate.mjs --self-test` pin it.\n- The seat finds its in-flight PRs without a PR assignee (self-test or a quoted read).\n- After landing, new seat-driven PRs do not appear under `is:pr is:open assignee:os-bill`; a Tier H PR shows `requested_reviewers` only after PASS + ACCEPT on its head.\n- `pnpm check:pm-skill-ratchet` green (SKILL.md, os-dev.md, execution-duties.md sit at headroom 0: reword inside lines, pay each added line with a deleted one).\n\n**Tier:** `.claude/**` + `scripts/pm/**`; SKILL.md is a `MANDATORY_TIER_GLOB` row (CONTRACT_REVIEW_TIER). **Size:** S–M. **Clause-②:** no. **Metadata-protocol:** none. **Suggested grade:** p2, same family as #26617; the grade is triage's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

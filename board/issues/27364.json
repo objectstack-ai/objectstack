@@ -1,0 +1,32 @@
+{
+  "number": 27364,
+  "kind": "issue",
+  "title": "os package publish sends the manifest's listing tags (cloud now stores them), and drops or maps the top-level tagline",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T03:12:16Z",
+  "updated_at": "2026-10-29T04:00:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27364",
+  "body": "Filing gate ①: the objectstack half that #27348 asks for (\"Then the objectstack half (a new card in that repository, filed by whoever answers 1 and 2)\"). Questions 1 and 2 were answered on #27348 (comment 6485953428). The cloud half landed as objectstack-ai/cloud#3361 (merged 2026-10-29 02:41Z as a32781f, Fixes cloud#3360). Filed by `repo:cloud` seat 2. ⛔ Not a claim.\n\nPart of #27348 · follows #27325\n\n## 维护者速读\n\ncloud 的发布接口现在会校验并保存作者声明的 `tags`，市场可以按标签搜索了。但 `os package publish` 还没把清单里的 `tags` 发出去。这张卡让 CLI 发送 `tags`，同时把 #27325 临时警告的措辞改对：\n\n- `publisher` 和 `isStarter` 由平台决定，作者写了也不生效。警告应该这么说，而不是说「暂未携带」。\n- 顶层 `tagline` 云端不存。CLI 在没有 description 时把它当 description 发，有 description 时不再发送。\n\n## Facts\n\n- **Cloud, main a32781f.** `POST /api/v1/cloud/packages` reads `body.tags` on create and on re-publish.\n  - The shape check is `CreatePackageRequestSchema.shape.tags`.\n  - Each tag is trimmed, empty tags are dropped, and repeats are removed. The bounds are at most 20 tags of at most 64 characters each.\n  - A malformed value gets a 400 `INVALID_FIELD` or `VALUE_TOO_LONG`, with `details.field: 'tags'`, and nothing is written.\n  - When the body has no `tags`, the column is left alone. `[]` clears it.\n- **Cloud: `publisher`.** The control plane decides it alone (`package-publish.ts`, around :843-844). It never reads the body.\n- **Cloud: `isStarter`.** It is honoured only for a first-party service-mode seed. An author's value is ignored.\n- **Cloud: top-level `tagline`.** It is not read and has no column. The seat ruled on cloud#3360 that it gets none, because `description` is the short listing text (512 characters).\n- **CLI, objectstack main 28872e68d3.** `packages/cli/src/commands/package/publish.ts` sends `pkgBody.tagline` from `m.tagline` (around :547) and sends no `tags`.\n\n## Work\n\n1. Send the manifest's `tags` as `pkgBody.tags`, an array of strings, when the manifest declares them. Pre-check the cloud bounds locally only if the check uses the same numbers; otherwise let the 400 speak. Print the server's refusal message as is.\n2. In #27325's warning, drop `tags` from the \"not carried\" list. Reword `publisher` and `isStarter` as \"decided by the platform; an author's value has no effect\". `preview` is unchanged.\n3. Top-level `tagline`: when no `--description` flag and no manifest `description` are given, send it as `description`. Otherwise stop sending it. The per-locale `translations.*.tagline` path is unchanged.\n4. Tests: tags are sent; the reworded warning; the tagline-to-description mapping in both cases. Include an ablation.\n\n## Done when\n\n`os package publish` of a manifest that declares `tags` leaves them in the hosted `sys_package.tags`, and the warning no longer names `tags`.\n\n## Reader\n\nTriage routes this card. It is objectstack-only (CLI), so no cloud work remains."
+}

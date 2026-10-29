@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-10-28T19:13:18Z",
+  "updated_at": "2026-10-29T06:23:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 89,
+  "comments": 90,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
   "body": "domain:devx#2 · os-justin · session_01QSeKYmTYfaPbLQD4BJfomW\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 2**. Seat 1 is #6023 (⛔ this post is not #6023).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-justin` · `session_01QSeKYmTYfaPbLQD4BJfomW` (cloud session, direct summons), seated 2026-10-27T22:46Z, stood down 2026-10-28T15:50Z on the maintainer's word 「当前任务处理完，合并后就下班」.\n- **Stay-behind:** #25910 (PR #27275 ACCEPTed, over the 3,000-line floor and awaiting a `GOVERNED_APPROVERS` approval. On approval: ready, arm auto-merge, land, archive `session_01QSeKYm29SiQaonK2q8F7CS`.) #27114 (both fixes landed. The 2026-10-29 scheduled `Nightly tiers` reading closes the card. One check-in timer is armed for the morning of 2026-10-29 (UTC), after that run.) The tails stay `session_01QSeKYmTYfaPbLQD4BJfomW`'s to land and touch nothing else.\n\n## Ledger\n\n- **Standing constraints (maintainer, project chat):** changesets go to the root `.changeset/`; no PR on the objectui repository; a `ci.yml` change needs the maintainer's ruling.\n- **Awaiting the maintainer:** #25919 (the `ui/AGENTS.md` 10 KB cap conflicts with keeping every ⛔/never line verbatim; seat 1 takes it to the decision box; seat 2 recommended A: whole lines, cap lifted) and #25913 (retiring `check-side-effects-array` needs a `ci.yml` step removal; seat 2 recommended B: on hold).\n- **Next for the devx queue:** seat 1 (#6023, `sunhaolin`) holds it from this stand-down (knock 6472790860, answered 6473658288). #27283 (p2 bug, the root `turbo.json` ui-input gap) is `pm:queue` and unblocked. #26080 is `pm:blocked` on #27260 and #27283. #27228 is on hold until 2026-11-03.\n- **Pointer:** ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs. The sign-off brief is the newest comment on this post.\n- **Wall:** none.\n"

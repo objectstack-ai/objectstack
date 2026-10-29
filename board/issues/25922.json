@@ -2,8 +2,8 @@
   "number": 25922,
   "kind": "issue",
   "title": "app-shell: a published library that is 66% Console product surface — retire the 67 zero-reference exports now, decide the split, and fold the second i18n table into @object-ui/i18n",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-zhuang",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T12:57:47Z",
-  "updated_at": "2026-10-28T12:50:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T02:37:59Z",
+  "closed_at": "2026-10-29T02:37:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 46,
+  "comments": 47,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25922",
   "body": "Ruled: 6431234244 · Q1 B (re-ruled from A, 6431032267) · Q2 A (staged) · Q3 yes · 2026-10-27T01:12Z\n\n\n## 维护者速读\n\n`@object-ui/app-shell` 209,861 行非测试源码，其中 `views/metadata-admin` + `views/studio-design` + `console/` = **139,373 行（66 %）是 Studio / 元数据管理 / Console 页面**；barrel 262 个导出里 **76 个只被 `apps/console` 用、181 个没有任何非测试 import、67 个在包外任何文件都不出现**。代价已经可测：`tsc` 冷编译峰值 2.73 GB，本机默认 2 GB 堆下 `pnpm build` 直接 OOM（CI 没设 `NODE_OPTIONS`，只是 runner 堆更大）。包内还有第二套 i18n（`views/metadata-admin/i18n.ts` 7,973 行，只有 en/zh）。第一步 S，方向是维护者的决定。\n\n## Measured (2026-10-24, HEAD 7981384, 4 vCPU / 15 GB container)\n\n- Size: 209,861 non-test lines in 599 files, 1,715 test files. By directory: `views/metadata-admin` 96,087, `views/studio-design` 21,673, `console/` 21,613 (ai 4,763, marketplace 4,665, organizations 3,303, home 2,816, auth 827). `docs/ARCHITECTURE.md` still calls the package a \"Minimal application rendering engine\" with five exports and \"~50KB\".\n- Barrel `packages/app-shell/src/index.ts`: 561 lines, 92 export statements, 262 names. 76 imported only by `apps/console`; 181 never named by any non-test `import {…} from '@object-ui/app-shell'`; 67 absent from every file of every kind outside the package (positive control: `SchemaRenderer` in 951 of 1,071 corpus files). Sample of the 67: `useExpressionContext`, `UrlOverlayControls`, `SettleSignalState`, `toastWithUndo`, `getCloudBase`, `getBrandColor`, `isRuntimeConfigInitialised`, `RuntimeFeatures`, `RuntimeBranding`. Even `ObjectView` and `ConsoleLayout` have 0 external importers — the console consumes `DefaultAppContent`.\n- Build cost: `pnpm build` exit 134 — `@object-ui/app-shell:build` (`tsc && node ../../scripts/check-dist-completeness.mjs`) died with \"FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory\" at about 2,044 MB; this box's default heap is 2,096 MB. Cold emit with an 8 GB heap: 64 s wall, peak RSS 2.73 GB. `grep -rn \"max-old-space-size\\|NODE_OPTIONS\" .github/workflows package.json packages/*/package.json turbo.json` finds nothing.\n- Second i18n: `packages/app-shell/src/views/metadata-admin/i18n.ts` is 7,973 lines, `SupportedLocale = 'en-US' | 'zh-CN'`, its own `t()` / `tFormat()`; 140 non-test files import it, 351 call sites; its own header says the other eight shipped locales render English on these screens and that the i18n gates skip it by declaration (`check-i18n-designer-table-parity.mjs` is its private parity gate, objectui#8834). Touched in 178 of the last 3,000 commits.\n- Giant files in the package: `views/studio-design/StudioDesignSurface.tsx` 8,865 lines (71 `useState`, 45 `useEffect` in one component; 122 commits of 3,000), `views/ObjectView.tsx` 4,411, `views/RecordDetailView.tsx` 3,957.\n\n## Recommendation\n\n- [ ] (S) Retire the 67 zero-reference exports in one batch, following objectui#12504 (\"no caller → retire\"); rewrite `docs/ARCHITECTURE.md` to describe the package that exists.\n- [ ] (decision) The 76 console-only names are the Console's private API. Either move metadata-admin / Studio / marketplace / organizations / ai pages into `apps/console` or into a non-published `@object-ui/studio` workspace package, leaving in `app-shell` what a BYO-backend host uses; or stop publishing `app-shell` as a library at all. This is the direction ADR-0060 and `product-neutral-renderer.ratchet.test.ts` already push. (M–L)\n- [ ] (M) Migrate the designer strings into an `@object-ui/i18n` namespace so Studio is translatable in all ten locales; retire `check-i18n-designer-table-parity.mjs`. Until then, no new keys in the private table.\n- [ ] (policy, no sweep) `StudioDesignSurface.tsx`, `ObjectView.tsx`, `RecordDetailView.tsx` split on the next touch.\n\nBenefit: published API from 262 to about 120 names; `tsc` memory and time back to normal; one i18n mechanism; a smaller surface for the objectui#13410 class of \"the shell pulls a whole plugin\". Bundle effect of the split is 未实测 (rebuild and read `eager-closure.json`). External npm consumers of retired names are 未实测.\n\nRefs: objectui#13410, objectui#2763, objectui#12504, objectui#8834.\n\nFiled by the read-only whole-repo review session `https://claude.ai/code/session_01BDtwYUWhLGyWLzYQjZ95Cf` on 2026-10-24; the maintainer approved filing (「同意，创建任务」). Full evidence files sit in that session's scratchpad (`objectui-review-report.md`, `findings-*.md`). ⛔ Not a claim; for triage to grade and route.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n\n"
