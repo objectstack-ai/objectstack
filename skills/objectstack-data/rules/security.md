@@ -20,9 +20,7 @@ export const salesUser = definePermissionSet({
 // defineStack({ permissions: [salesUser], ... })
 ```
 
-- `permissionSets:` is **refused at load** with an `Unrecognized key(s) on this
-  stack definition` error naming the key; `ObjectStackDefinitionSchema` enumerates
-  the keys.
+- `permissionSets:` is **refused at load** (`Unrecognized key(s) on this stack definition`, naming the key).
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
@@ -109,6 +107,7 @@ bridge (warns). The compiler resolves these
 | `current_user.organization_id` | the caller's tenant |
 | `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
 | `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
+| `current_user.queues` | the ownership queues the caller sits in (for `IN`; ADR-0142 D3) |
 | `current_user.KEY` | the set an object's `membershipKeys.KEY` declares (for `IN`) |
 
 - Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts`.
@@ -161,7 +160,10 @@ rowLevelSecurity: [
   rows grants the key.
 - **Choose by what the rows are keyed on:** the person → owner scoping; a
   position → `positions` on the policy; a named record → a membership key;
-  one record, once → a sharing rule or a manual share.
+  one record, once → a sharing rule or a manual share; a team's records → a
+  sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
+  reaches an ownership queue's members (it shares the rule's rows, it parks
+  none — only the record's `queue` column does that; SKILL.md § Ownership queues).
 
 ## Positions grant only what they name; portal users are `external`
 
@@ -213,11 +215,10 @@ fields: {
 `maskingRule` is **live** (FieldMasker). Two more channels:
 
 **Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** For reversible
-machine credentials (DB passwords, API keys, tokens): the engine encrypts the
-value on write via the registered `ICryptoProvider`, stores the ciphertext
-handle in `sys_secret`, persists only an opaque ref on the row, and masks the
-value on read. **Fail-closed:** with no crypto provider registered, writes
-throw rather than persist cleartext.
+machine credentials (DB passwords, API keys, tokens): encrypted on write via the
+registered `ICryptoProvider`, the ciphertext handle in `sys_secret` and only an
+opaque ref on the row, masked on read. **Fail-closed:** with no crypto provider,
+writes throw rather than persist cleartext.
 
 ```typescript
 fields: {
@@ -272,12 +273,12 @@ none — e.g. identity tables a plugin writes via its own adapter
   (adapter-written rows often lack it) is **denied** — the list renders empty.
   Under `single` the wall is inert.
 - The `viewAllRecords` superuser bit is **posture-gated and wall-blind**: it
-  short-circuits **business RLS only**, and only on objects whose posture allows
-  it (`access.default: 'private'`, `tenancy: { enabled: false }`, or a
-  better-auth-managed identity table). It never crosses the Layer 0 wall —
-  crossing takes a *true platform admin* (the superuser bit **and** a
-  platform-exclusive capability: `manage_metadata`, `manage_platform_settings`,
-  `studio.access`, `manage_users`) on one of those same postures.
+  short-circuits **business RLS only**, on objects whose posture allows it
+  (`access.default: 'private'`, `tenancy: { enabled: false }`, or a
+  better-auth-managed identity table), and never crosses the Layer 0 wall —
+  that takes a *true platform admin*: the superuser bit **and** a
+  platform-exclusive capability (`manage_metadata`, `manage_platform_settings`,
+  `studio.access`, `manage_users`) on one of those postures.
 
 **Recipe — env-global, admin-only object that admins can fully see:**
 
@@ -286,27 +287,21 @@ tenancy: { enabled: false }, // not a tenant object → Layer 0 contributes noth
 requiredPermissions: ['manage_platform_settings'], // capability AND-gate → members get 403
 ```
 
-> ⚠️ **Both keys are load-bearing — neither works alone.**
-> `tenancy: { enabled: false }` *by itself* switches the wall off for **every**
-> caller, and any permission set carrying a wildcard (`'*'`) read grant then
-> reads every row env-wide — the shipped `viewer_readonly` still carries one, as
-> may an app-declared default profile or a customer-authored set. (The
-> `member_default` baseline is **not** one of them: it is explicit-allow and
-> grants only the objects it names.) `requiredPermissions` *by itself* leaves a
-> tenant object, whose untagged rows the wall denies to everyone (above); it is
-> the half that holds however permissive the caller's grants are. Posture model:
-> ADR-0066.
+> ⚠️ **Both keys are load-bearing — neither works alone.** `tenancy: { enabled:
+> false }` alone switches the wall off for **every** caller, so any set with a
+> wildcard (`'*'`) read grant — the shipped `viewer_readonly`, an app-declared
+> default profile, a customer-authored set; not `member_default`, which is
+> explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
+> tenant object whose untagged rows the wall denies to everyone (above); it is
+> the half that holds however permissive the grants. Posture model: ADR-0066.
 
 ## Renaming or removing a shipped access item
 
-Administrators act on a package's access items by **name**: they switch a
-permission set, position or sharing rule off, clone a set, and name its objects,
-fields and capabilities in their own sets. A later version can quietly undo them
-on upgrade:
-
-- **Rename** → the old switch-off stops matching; the renamed item arrives switched **on**.
-- **Remove** an object, field or capability → a customer's clone or own set names something that no longer exists.
-- **Add a field deny** to a shipped set → a customer's clone does not carry it.
-
-Keep shipped names stable. When such a change is genuinely needed, say so in the
-release notes: what changed, and what an administrator should re-check after upgrading.
+Administrators act on a package's access items by **name** — switching a
+permission set, position or sharing rule off, cloning a set, naming its objects,
+fields and capabilities in their own sets — and an upgrade can quietly undo them:
+a **rename** stops the old switch-off matching and the item arrives switched
+**on**; a **removed** object, field or capability leaves a clone or own set
+naming nothing; a **field deny added** to a shipped set is missing from every
+clone. Keep shipped names stable; when a change is needed, the release notes say
+what changed and what an administrator re-checks after upgrading.
