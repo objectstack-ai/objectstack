@@ -76,7 +76,7 @@ const result = DashboardSchema.parse(data);
 | **values** | `string[]` | ✅ | Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family and on the single-series pie/donut/funnel/treemap/sankey; with no dimensions, two or more only on table/pivot/bar/column/horizontal-bar/line/area/combo) |
 | **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
 | **options** | `{ dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; sortBy?: string; sortOrder?: Enum<'asc' \| 'desc'>; limit?: integer; … } & Record<string, any>` | optional | Widget specific configuration |
-| **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
+| **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out. Each key must name a filter the dashboard declares (dateRange only when declared); lint rule dashboard-filter-binding-unknown refuses any other |
 | **suppressWarnings** | `string[]` | optional | Build diagnostic rule ids suppressed on this widget |
 
 ### Nested Shape: `Dashboard.dateRange`
@@ -176,7 +176,7 @@ Dashboard header action
 | **values** | `string[]` | ✅ | Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family and on the single-series pie/donut/funnel/treemap/sankey; with no dimensions, two or more only on table/pivot/bar/column/horizontal-bar/line/area/combo) |
 | **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
 | **options** | `{ dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; sortBy?: string; sortOrder?: Enum<'asc' \| 'desc'>; limit?: integer; … } & Record<string, any>` | optional | Widget specific configuration |
-| **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
+| **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out. Each key must name a filter the dashboard declares (dateRange only when declared); lint rule dashboard-filter-binding-unknown refuses any other |
 | **suppressWarnings** | `string[]` | optional | Build diagnostic rule ids suppressed on this widget |
 
 ### Allowed Values: `DashboardWidget.type`
