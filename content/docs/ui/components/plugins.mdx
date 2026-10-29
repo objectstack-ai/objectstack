@@ -310,7 +310,6 @@ Namespace `plugin-list`.
 | `rowActions` | `array` of `string` |  | Names of the actions offered on each row's menu. |
 | `bulkActions` | `array` of `string` |  | Names of the actions offered once rows are selected. Needs a multi-row `selection`. |
 | `bulkActionDefs` | `array` of `object` |  | Full bulk-action definitions, the spec's `BulkActionDef`: a mass update (`operation: "update"` with a `patch`) or delete, or a named action run once for the whole selection. |
-| `options` | `object` |  | Per-kind settings, `{ kanban, calendar, gantt, gallery, timeline, map, tree, chart }`, each judged by that kind's own block. The top-level block of the same name is the canonical spelling. |
 | `kanban` | `object` |  | The board, the spec's kanban block: `{ groupByField, columns, titleField, summarizeField }`. `groupByField` is the lane field and `columns` the fields on each card. |
 | `calendar` | `object` |  | The calendar, `{ startDateField, endDateField, titleField, colorField, allDayField }`. |
 | `gantt` | `object` |  | The gantt chart, `{ startDateField, endDateField, titleField, progressField, dependenciesField }`. Both date fields are needed to draw it. |
