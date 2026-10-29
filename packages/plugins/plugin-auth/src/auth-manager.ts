@@ -5443,20 +5443,37 @@ export class AuthManager {
    * native `password.verify` (passed in) rather than re-hashing. Returns the
    * current hash (for the after-hook to append) when the candidate is fresh, or
    * undefined when the feature is off / nothing to compare.
+   *
+   * While an administrator's forced change (`sys_user.must_change_password`)
+   * is outstanding, a candidate matching the CURRENT password is refused with
+   * `PASSWORD_REUSE` whatever `passwordHistoryCount` is, the default 0
+   * included: completing the change clears the flag, and it must not clear
+   * while the user keeps the password the administrator issued.
+   * `currentPassword` is the caller's claim of the current password on
+   * `/change-password` (`''` when the body carries none). The claim gate sits
+   * above BOTH reuse refusals, not only the forced change's: the history
+   * ring's `PASSWORD_REUSE` is also given only once the claim verifies against
+   * the current hash, so a wrong current password gets the endpoint's own
+   * `INVALID_PASSWORD` whatever the new password is. Omitted on a door that
+   * carries no claim (`/reset-password`, whose token is the authority). A
+   * failed read of the forced-change flag fails open (treated as not set) and
+   * is reported through `logDurabilityDegradation`.
    */
   private assertPasswordNotReused(
     userId: string,
     candidate: string,
     verify?: (data: { password: string; hash: string }) => Promise<boolean>,
+    currentPassword?: string,
   ): Promise<string | undefined> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'parseHashes'> = {
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation' | 'parseHashes'> = {
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
       parseHashes: (...a) => this.parseHashes(...a),
     };
-    return assertPasswordNotReused.call(host, userId, candidate, verify);
+    return assertPasswordNotReused.call(host, userId, candidate, verify, currentPassword);
   }
 
   /**
