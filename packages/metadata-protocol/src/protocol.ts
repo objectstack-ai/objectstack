@@ -23043,7 +23043,10 @@ export class ObjectStackProtocolImplementation implements
         // binding the active row is written under), before `repo.promoteDraft`
         // writes — so a batch publish aborts on it as it aborts on the owner
         // refusal above. See {@link permissionSetNameCollisionRefusal}.
-        {
+        // Asked only when a draft was read, like its siblings: with none at
+        // the address the caller is told `repo.promoteDraft`'s `NO_DRAFT`
+        // first, the fact about its own state, rather than another owner's.
+        if (draftForGate) {
             const nameCollision = await this.permissionSetNameCollisionRefusal(
                 singularType, request.name, promoteInto, 'publish',
             );
