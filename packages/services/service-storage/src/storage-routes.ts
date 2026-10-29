@@ -160,6 +160,28 @@ function uploadScopeRefusalMessage(scope: unknown): string {
 }
 
 /**
+ * [#27412] The chunk door's `chunkIndex` path segment, read strictly: decimal
+ * digits only, so `-1`, `0.5`, `1e2` and `0x1` are not indexes. `null` ⇒ not
+ * a whole number. The range half — below the upload's declared
+ * `total_chunks` — is judged against the session row by the caller, because
+ * a chunk stored outside that range is counted in the progress and then
+ * blocks the completion door for good (no door removes a chunk).
+ */
+function parseChunkIndex(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+function chunkIndexRefusalMessage(totalChunks: number): string {
+  const range = totalChunks === 1 ? 'must be 0' : `must be a whole number from 0 to ${totalChunks - 1}`;
+  return (
+    `chunkIndex ${range}: this upload declared ${totalChunks} chunk${totalChunks === 1 ? '' : 's'}, ` +
+    'indexed from zero.'
+  );
+}
+
+/**
  * [#22332] How many times the chunk door tries to record a stored chunk in the
  * upload's progress before it refuses.
  *
@@ -1160,8 +1182,7 @@ export function registerStorageFamily(
       if (authSession === false) return;
       const writeContext: StorageWriteContext = { organizationId: authSession?.organizationId };
       const { uploadId, chunkIndex: chunkIndexStr } = req.params;
-      const chunkIndex = parseInt(chunkIndexStr, 10);
-      if (!uploadId || isNaN(chunkIndex)) {
+      if (!uploadId || !chunkIndexStr) {
         sendError(res, 400, 'INVALID_REQUEST', 'uploadId and chunkIndex are required');
         return;
       }
@@ -1196,6 +1217,22 @@ export function registerStorageFamily(
           'UPLOAD_SESSION_EXPIRED',
           `Upload session expired at ${live.expires_at}; start a new chunked upload`,
         );
+        return;
+      }
+
+      // [#27412] The index must name a chunk this upload declared: a whole
+      // number in [0, total_chunks). Judged here — after the resume token
+      // (a caller who cannot prove it owns the session learns nothing of its
+      // chunk count) and before a byte is read, stored or counted. An index
+      // outside the range used to be stored and counted in the progress, then
+      // refused for good by the completion door; `-1` reached the backend as
+      // part number 0 and answered 500.
+      const totalChunks = Number(session.total_chunks);
+      const chunkIndex = parseChunkIndex(chunkIndexStr);
+      if (chunkIndex === null || !(chunkIndex < totalChunks)) {
+        sendError(res, 400, 'INVALID_REQUEST', chunkIndexRefusalMessage(totalChunks), {
+          details: { chunkIndex: chunkIndexStr, totalChunks },
+        });
         return;
       }
 
