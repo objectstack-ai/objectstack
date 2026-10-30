@@ -153,42 +153,42 @@ export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * What the clone response tells the admin, in the admin's own words.
+ * What the clone response tells the admin, in one line of the admin's own
+ * words.
  *
  * Two facts, both required to be stated rather than discovered:
  *
- *  1. References are not re-pointed (ADR-0126 §9). A cloned flow's subflow
- *     nodes, action calls and object references point exactly where the
- *     original's did.
- *  2. The clone is armed. `status: 'draft'` is a lifecycle label, not an
+ *  1. The clone is armed. `status: 'draft'` is a lifecycle label, not an
  *     off-switch — see {@link FLOW_CLONE_STATUS}. An admin who clones a
- *     record-change flow and walks away has two flows running on one trigger,
- *     and the only thing standing between them and that surprise is this
- *     sentence.
+ *     record-change or schedule flow and walks away has two flows running on
+ *     one trigger, and the only thing standing between them and that surprise
+ *     is this line.
+ *  2. References are not re-pointed (ADR-0126 §9 — "the surface tells the
+ *     admin so"). A cloned flow's subflow nodes, action calls and object
+ *     references point exactly where the original's did.
  *
- * [#20726, ADR-0126 §7.2] The clone's own off-switch is its `status`
- * (`obsolete`), published through `PUT /:name`. A clone carries no package
- * envelope (see {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in
- * this deployment, and the activation toggle — which switches packaged flows
- * only — refuses it. That holds whatever the clone was copied from: the clone
- * door takes any registered flow as its source, packaged or not.
+ * [#27886] The notice is ONE line in business words, because the console
+ * shows it verbatim beside a "Switch the original off" button: a paragraph
+ * that named `status`, lifecycle labels and both switches repeated what the
+ * screen already offers. Engine words (`draft`, `status`, off-switch) and
+ * the switch locations live here, not in the notice:
  *
- * The notice is admin copy — the console shows it verbatim on the clone
- * result — so it names the controls the admin uses, never an endpoint or a
- * request body: the Packaged automation page's `Switch "…" off` action for a
- * packaged original, and Studio's Enabled switch (publish to apply) for the
- * clone. The REST recipe is developer copy and lives in the client SDK's
- * `automation.toggle` TSDoc.
+ *  - [#20726, ADR-0126 §7.2] The clone's own off-switch is its `status`
+ *    (`obsolete`). In the console that is Studio's Enabled switch set to
+ *    Disabled, then a publish. A clone carries no package envelope (see
+ *    {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in this
+ *    deployment, and the activation toggle — which switches packaged flows
+ *    only — refuses it. That holds whatever the clone was copied from: the
+ *    clone door takes any registered flow as its source, packaged or not.
+ *  - A packaged original is switched off on the Packaged automation page,
+ *    with its `Switch "…" off` action; that switch does not reach the clone.
+ *
+ * The notice names no endpoint or request body. The REST recipe is developer
+ * copy and lives in the client SDK's `automation.toggle` TSDoc.
  */
 export const FLOW_CLONE_NOTICE =
-    'References are not re-pointed: this clone calls exactly what the original called '
-    + '(subflows, actions and objects are unchanged). It is created with status `draft`, '
-    + 'which is a lifecycle label and NOT an off-switch — a cloned record-change or schedule '
-    + 'flow is bound to its trigger and will run alongside the flow it was copied from. '
-    + 'If that is not what you want, switch one of them off. A packaged original is switched '
-    + 'off on the Packaged automation page, with its Switch "…" off action; that switch covers '
-    + 'packaged flows only and does not reach the clone. To switch the clone itself off, open it '
-    + 'in Studio, set its Enabled switch to Disabled, and publish.';
+    'The copy runs alongside the original until you switch one of them off, '
+    + 'and it still uses the same subflows, actions and objects as the original.';
 
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */
 export const FLOW_CLONE_NAME_TAKEN_STATUS = 409;
