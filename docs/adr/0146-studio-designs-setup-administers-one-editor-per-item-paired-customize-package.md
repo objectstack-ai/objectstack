@@ -174,7 +174,8 @@ word is a typing slip for 界面, "one interface" — editorial note, not part o
 
 Doors this needs (server cards, Phase 2): the package create door accepts the pairing convention (name
 `<base>.customize`, dependency on the base, **`namespace` set to the base's explicitly** — the install primitive
-otherwise derives one from the id, which for `hotcrm.customize` would be `customize` — idempotent "create if absent"); the flow clone door takes a target
+otherwise derives one from the id (`packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId`), which
+for `hotcrm.customize` would be `customize` — idempotent "create if absent"); the flow clone door takes a target
 `packageId` and refuses a package-less target once the convention exists (fixing the Context §6 mismatch with ADR-0070
 D5 on the way).
 
@@ -187,12 +188,13 @@ ADR-0126 §7.4 chose Setup as the first surface for the packaged-flow toggle and
   (`GET /api/v1/automation/_status`, `POST /api/v1/automation/<name>/toggle`) and reads "off for this deployment"; on a
   **writable package's flow** it stays the definition switch ("disabled; publish to apply"). Two switches, two words —
   never one control that means different things by package.
-- **Authority is the ledger door's, not Studio's.** The toggle's gate (`packages/runtime/src/domains/activation-gate.ts`)
+- **Authority is the ledger door's, not Studio's.** The toggle's gate (`packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite`)
   admits `manage_metadata` in the `single` posture and, under the walled `group` / `isolated` postures, only the
   PLATFORM_ADMIN posture rung (ADR-0126 §5); a tenant administrator there is refused with a sentence naming the
   platform operator. Studio pre-judges that verdict from the two served facts the console already reads for the walled
-  catalog doors (`features.tenancyPosture` through `useTenancyPosture`, and `user.isPlatformAdmin` on the session —
-  `views/metadata-admin/catalog-scope.ts`, `walledCatalogReadOnly`): the switch draws **disabled, in the console's own
+  catalog doors (`features.tenancyPosture` through `ui/packages/app-shell/src/hooks/useTenancyPosture.ts#useTenancyPosture`,
+  and `user.isPlatformAdmin` on the session —
+  `ui/packages/app-shell/src/views/metadata-admin/catalog-scope.ts#walledCatalogReadOnly`): the switch draws **disabled, in the console's own
   words**, for a principal those facts refuse, and the server's refusal is shown verbatim after any attempt, as Setup's
   page shows it today — never a live control that always answers 403, and never a client copy of the gate's sentence.
 - The item's ⋯ menu offers **Clone** (`POST /api/v1/automation/<name>/clone`, a new machine name required, the server's
@@ -257,9 +259,9 @@ Setup → Metadata route whose administrative action has no Setup home yet.
 
 ## Rollout
 
-Tracked by epic [#28130](https://github.com/objectstack-ai/objectstack/issues/28130) (`pm:epic`, `pm:blocked` on
-PR #28045), which carries the phase 2 and phase 3 child-card plan. Cut as cards after this record merges; nothing
-below binds a seat before that. Each card cites this record and the epic.
+Tracked by epic [#28130](https://github.com/objectstack-ai/objectstack/issues/28130), blocked on this record's merge,
+which carries the phase 2 and phase 3 child-card plan. Cut as cards after this record merges; nothing below binds a
+seat before that. Each card cites this record and the epic.
 
 1. **Now** (#27356 row 19, letter **A1**, independent of this record): Studio deletes a writable package's flow from
    the Automations item menu (confirm; the same `DELETE /meta/:type/:name` door; a pending draft of the item is
@@ -271,8 +273,8 @@ below binds a seat before that. Each card cites this record and the epic.
    (f) the browse entry ([D5](#d5)) — #27356 row 12, PR #28076, merged 2026-10-30; it reversed no wall and landed ahead of
    this record.
 3. **Phase 3 — the catalog moves** ([D1](#d1), [D7](#d7)): `views/metadata-admin` directory, lists, item page,
-   history and diagnostics re-homed under Studio's All-metadata area (per package and across packages); the three Setup
-   administration pages; Setup → Metadata routes redirect; QA checklist and e2e door rewrites.
+   history and diagnostics re-homed under Studio's All-metadata area (per package and across packages); the two Setup
+   administration pages [D7](#d7) names (queue membership arrives with ADR-0142 D2); Setup → Metadata routes redirect; QA checklist and e2e door rewrites.
 4. **Phase 4 — as pulled**: app, action, dataset (today a create dialog, no designer), translation, email template,
    documentation and the AI types gain pillar-grade designers in Studio one card at a time; until then the All-metadata
    area's generic page is their editor.
