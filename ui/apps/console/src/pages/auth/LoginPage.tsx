@@ -65,6 +65,7 @@ import {
   needsBootstrapProbe,
   useBootstrapStatus,
   InvitationGoneNotice,
+  InvitationLinkHint,
   InvitationSignUpPrompt,
   invitationArrivalCopy,
   useInvitationArrival,
@@ -366,6 +367,7 @@ export function LoginPage() {
                 registerUrl={offerSignUp && !invitationRedirect ? registerUrl : undefined}
                 redirect={redirect}
               />
+              <InvitationLinkHint offer={signUpOffer} />
               {devSeedAdmin ? <DevAdminRow seed={devSeedAdmin} /> : null}
             </>
           )}

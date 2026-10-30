@@ -146,6 +146,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -585,6 +586,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -676,6 +678,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -688,13 +691,24 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       add_member: {
         label: "Add Member",
-        successMessage: "Member added"
+        successMessage: "Member added",
+        params: {
+          role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them."
+          }
+        }
       },
       update_member_role: {
         label: "Change Role",
+        description: "Choose the new organization role for ${record.user_id?.name ?? 'this member'}.",
         successMessage: "Member role updated",
         outcomeMessages: {
           permission_set_granted: "Member role updated. The new role also granted the permission set ${result.grantedPermissionSet.label}."
+        },
+        params: {
+          role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them."
+          }
         }
       },
       remove_member: {
@@ -748,11 +762,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       status: {
         label: "Status",
         options: {
-          pending: "pending",
-          accepted: "accepted",
-          rejected: "rejected",
-          expired: "expired",
-          canceled: "canceled"
+          pending: "Pending",
+          accepted: "Accepted",
+          rejected: "Declined",
+          expired: "Expired",
+          canceled: "Canceled"
         }
       },
       inviter_id: {
@@ -816,6 +830,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -833,6 +848,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Resend Invitation",
+        description: "Resend the invitation to ${record.email}? Its expiry date starts over.",
         successMessage: "Invitation resent",
         outcomeMessages: {
           sent: "Invitation resent to ${result.email}",

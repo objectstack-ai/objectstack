@@ -36,7 +36,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
@@ -218,6 +218,33 @@ describe('LoginPage — the "Sign up" link follows the audience posture (objectu
       screen.getByRole('heading', { name: builtInLocales.en.auth.login.invitationTitle }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('link', INVITE_SIGN_UP)).toBeNull();
+  });
+});
+
+describe('LoginPage — an invitee without the link is told to open it (objectstack#27521 row 11)', () => {
+  const HINT = builtInLocales.en.auth.login.invitationLinkHint;
+
+  it('under invite_only on a deployment with an owner, says so in the card', async () => {
+    renderAt('/login', configFor('invite_only'));
+    await loginConfigApplied();
+    expect(await screen.findByTestId('invitation-link-hint')).toHaveTextContent(HINT);
+    expect(screen.getByTestId('login-card')).toContainElement(screen.getByTestId('invitation-link-hint'));
+  });
+
+  it('is not drawn where a sign-up is offered or for an invitation redirect', async () => {
+    for (const [path, config, hasOwner] of [
+      ['/login', configFor('open'), true],
+      ['/login', configFor('invite_only'), false],
+      [`/login${INVITE_QUERY}`, configFor('invite_only'), true],
+    ] as const) {
+      renderAt(path, config, { hasOwner });
+      await loginConfigApplied();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(screen.queryByTestId('invitation-link-hint'), `${path} owner=${hasOwner}`).toBeNull();
+      cleanup();
+    }
   });
 });
 

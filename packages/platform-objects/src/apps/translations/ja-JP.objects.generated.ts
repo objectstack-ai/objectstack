@@ -146,6 +146,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -585,6 +586,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -676,6 +678,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -688,13 +691,24 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       add_member: {
         label: "メンバーを追加",
-        successMessage: "メンバーを追加しました"
+        successMessage: "メンバーを追加しました",
+        params: {
+          role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。"
+          }
+        }
       },
       update_member_role: {
         label: "ロールを変更",
+        description: "${record.user_id?.name ?? 'このメンバー'} の新しい組織ロールを選択してください。",
         successMessage: "メンバーロールを更新しました",
         outcomeMessages: {
           permission_set_granted: "メンバーのロールを更新しました。新しいロールにより権限セット ${result.grantedPermissionSet.label} も付与されました。"
+        },
+        params: {
+          role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。"
+          }
         }
       },
       remove_member: {
@@ -816,6 +830,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -833,6 +848,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "招待を再送",
+        description: "${record.email} に招待を再送しますか？有効期限は改めて始まります。",
         successMessage: "招待を再送しました",
         outcomeMessages: {
           sent: "${result.email} に招待を再送しました",
