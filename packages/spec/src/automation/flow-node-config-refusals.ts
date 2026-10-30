@@ -247,7 +247,9 @@ function insideRegion(nodeType: string, path: ReadonlyArray<PropertyKey>): boole
  */
 function insideValueSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
   return FLOW_NODE_EXPRESSION_PATHS.some((entry) => {
-    if (entry.nodeType !== nodeType || entry.role !== 'value') return false;
+    // [#27968] A path here is inside `config`: an entry rooted in a sibling
+    // block (`connectorConfig`) names no position in it.
+    if (entry.nodeType !== nodeType || entry.role !== 'value' || entry.block !== undefined) return false;
     const segments = ledgerSlotSegments(entry.path);
     return path.length > segments.length && startsWithLedgerSlot(segments, path);
   });
@@ -341,7 +343,8 @@ function atOrInsideJudgedLedgerSlot(
   path: ReadonlyArray<PropertyKey>,
 ): boolean {
   return FLOW_NODE_EXPRESSION_PATHS.some((entry) => {
-    if (entry.nodeType !== nodeType || !LEDGER_JUDGED_ROLES.has(entry.role)) return false;
+    // [#27968] `config`-rooted entries only, as in `insideValueSlot`.
+    if (entry.nodeType !== nodeType || !LEDGER_JUDGED_ROLES.has(entry.role) || entry.block !== undefined) return false;
     const segments = ledgerSlotSegments(entry.path);
     if (!startsWithLedgerSlot(segments, path)) return false;
     if (entry.role !== 'value') return true;

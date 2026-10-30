@@ -5481,7 +5481,8 @@ function collectCompositeKeyHeadHits(
 /**
  * Phase 3a-destructive: detect changes between an existing object schema
  * and an incoming overlay that would break runtime data — removed fields,
- * field type narrowing, required toggled on without a default. Returned
+ * field type narrowing, required toggled on without a default, a stored
+ * amount switched to `currencyMode: 'record'` (rows left codeless). Returned
  * issues are surfaced as HTTP 409 `destructive_change` unless the caller
  * sets `force: true`, letting the admin UI render a warning dialog before
  * proceeding.
@@ -5601,6 +5602,36 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
                 code: 'field_required_no_default',
                 field: fname,
                 message: `Field '${fname}' is now required but has no default value — existing rows with null values may fail validation.`,
+            });
+        }
+        // [ADR-0144, ruling 6492000994] An existing amount switched to
+        // `currencyMode: 'record'` — the sibling of `field_required_no_default`:
+        // a one-word config edit that leaves every stored row owing a value.
+        // The rows already stored hold an amount and no code; the switch is
+        // allowed (the write guard refuses such a row only when a write
+        // touches the pair), so this finding acknowledges it and names the
+        // explicit backfill. Like its siblings it reads no row: whether the
+        // table holds any is not this gate's to judge, and a finding over an
+        // empty table costs one `force`. Judged by what the STORED side holds,
+        // so a previously unstored field (a formula) raises nothing.
+        if (
+            nextField?.type === 'currency'
+            && nextField.currencyConfig?.currencyMode === 'record'
+            && prevField.currencyConfig?.currencyMode !== 'record'
+            && isStored(prevField)
+        ) {
+            const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
+            const codeField = typeof nextField.currencyConfig.currencyField === 'string'
+                ? `'${nextField.currencyConfig.currencyField}'`
+                : 'its currency code field';
+            issues.push({
+                code: 'currency_mode_to_record',
+                field: fname,
+                message: `Field '${fname}' switched to currencyMode 'record' — rows already stored with an amount and a blank ${codeField} `
+                    + 'display as a plain number, fall into the null group of a grouped aggregate, and sit outside every '
+                    + 'currency-paired filter until they hold a code; once saved, write it with '
+                    + `\`os migrate record-currency-codes --object ${objectName} --field ${fname} --code <ISO 4217 code>\``
+                    + ' (a dry run; add --apply to write).',
             });
         }
     }
