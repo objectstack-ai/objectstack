@@ -65,7 +65,8 @@ HotCRM's module split.
 **Evidence**: every anchor into this repository was read at `origin/main` `47af3dde42`, the base of this record's branch
 (the tree outside `docs/adr/` is identical at the record's head). `objectstack-ai/hotcrm` and `objectstack-ai/cloud` are
 not readable from the drafting session; their facts are cited as the rulings and the HotCRM seat cite them and marked
-**not re-verified**.
+**not re-verified**. The build-time sentences of D1, the Consequences and Execution plan item 4 were re-read at
+`f5dd057587` and corrected on 2026-10-30 (#27616).
 
 ---
 
@@ -200,8 +201,11 @@ cross-app reference is legal.
 ⛔ No owner-side "published object" flag, no export list, no second reference mechanism (the ruling's own words: the
 closure "already honours the declared packages' objects"). An undeclared cross-app reference is refused where it is
 refused today — at the save door, `422` — and the fix it prints is the declaration. `os validate`, `os build` and
-`os lint` keep judging neither side of a cross-package binding: a stack there is one app and cannot see its dependencies'
-objects.
+`os lint` cannot see the objects of a dependency the artifact does not carry: a stack there resolves against its own
+objects, its artifact's `packages[]` and the platform's names, so a lookup to such an object is refused
+(`object-reference-unknown`) and a flow triggered on one warns (`flow-trigger-unknown-object`). Only the save door
+honours the declaration, for a flow's trigger, a dataset's base and a list view's object; it does not judge a lookup.
+Closing that gap at build is deferred by the ruling on #25805.
 
 ### D2 — The pre-install check: installed and in range, or a clear refusal — and only that gate
 
@@ -561,7 +565,7 @@ one way to declare a dependency.
 **Unchanged** — the consumer model (ADR-0019 D1–D4: one app installs, opens, uninstalls — a standalone module is itself
 an App), the artifact as a control-plane noun that installs whole (ADR-0130 D2), the one sorter (ADR-0130 D5), one
 version per artifact (ADR-0130 D6), permission sets (ADR-0086 D4), the save door's closure rules, the snapshot shape
-(D8, until its own card), and the compile-time boundary (`os validate` judges neither side of a cross-artifact binding).
+(D8, until its own card), and the compile-time boundary (`os validate` refuses a lookup into another artifact, D1).
 
 ---
 
@@ -727,8 +731,8 @@ sizing decision; 10 is a reading of an earlier ruling.
    control-plane reader of `sys_package_version.manifest_json`, then the one record-to-array conversion. Independent of
    (1); snapshots keep the record shape until it lands.
 4. **Docs**: the package-authoring guide states how to declare a dependency, the range grammar, what the install refusal
-   means, that two modules of one app need not declare each other, and that `os validate` cannot see a dependency's
-   objects.
+   means, that two modules of one app need not declare each other, and that `os validate` cannot see the objects of a
+   dependency the artifact does not carry, so it refuses a lookup to one and warns on a flow triggered on one (D1).
 5. **HotCRM** (its own lane): the D4 readings on the revenue module; D7's preconditions — service and marketing declare
    sales (Open items 7), hooks follow ownership, revenue's permission sets travel with it — and the carved-out module's
    `type: 'app'`; hotcrm#2271 ships revenue as its own artifact once (1) is released.
