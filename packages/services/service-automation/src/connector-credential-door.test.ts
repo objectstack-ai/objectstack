@@ -682,4 +682,43 @@ describe('[#27237] contract review: an encoded spelling of the value is withheld
             }
         }
     });
+
+    // [ADR-0015 D7] The connector path takes its spellings from the shared
+    // `borrowedCredentialForms`, so the form encoding `URLSearchParams` writes
+    // (a space as `+`, which `encodeURIComponent` spells `%20`) is withheld here
+    // as it is for a datasource borrowing the same credential.
+    it('an api-key instance whose upstream echoes the form-encoded query string: no spelling reaches the reason, the row or a log', async () => {
+        const formEncoded = new URLSearchParams({ v: ENCODABLE }).toString().slice(2);
+        expect(formEncoded).not.toBe(encodeURIComponent(ENCODABLE));
+        expect(credentialForms(ENCODABLE)).toContain(formEncoded);
+
+        const out = captureOutput();
+        const provider = fakeProvider();
+        const factory: ConnectorProviderFactory = (ctx) => {
+            provider.state.materialized.push(ctx);
+            const key = ctx.auth?.type === 'api-key' ? ctx.auth.key : '';
+            const echo = `GET https://erp.example/orders?${new URLSearchParams({ api_key: key })} was refused`;
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', actions: [{ key: 'request', label: 'Request' }] } as unknown as Connector,
+                handlers: { request: async () => ({ status: 401, ok: false, body: { message: echo } }) },
+            };
+        };
+        const erp = { ...billing('erp'), auth: { type: 'api-key', paramName: 'api_key', credentialRef: REF } };
+        const { engine, call } = await boot([erp], { provider: { ...provider, factory } });
+
+        await engine.setConnectorCredential({ ref: REF, value: ENCODABLE, context: ADMIN });
+        expect(await call('erp')).toMatchObject({ status: 401 });
+        const reason = engine.getConnectorDegradedReason('erp') ?? '';
+        expect(reason).toContain('[credential withheld]');
+
+        for (const [where, text] of [
+            ['reason on a call', reason],
+            ['listing after the call', JSON.stringify(await engine.listConnectorCredentialRefs())],
+            ['logs', out.text()],
+        ] as const) {
+            for (const form of [formEncoded, encodeURIComponent(ENCODABLE), ENCODABLE]) {
+                expect(text.includes(form), `${where}: a spelling of the value`).toBe(false);
+            }
+        }
+    });
 });

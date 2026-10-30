@@ -29,6 +29,11 @@
  * path runs, or on a `refresh()`. The grant-bearing kinds ADR-0143 adds answer
  * through the same handle, per dispatch, when they land.
  *
+ * Each granted borrow is announced to the source's `onLent` subscribers by
+ * the instance's name alone, so a datasource the boot recorded as unable to
+ * borrow is re-judged the moment its instance lends again (the datasource
+ * connection service subscribes).
+ *
  * ⛔ A value leaves this module only as the return of a handle's `get` /
  * `refresh`. Every refusal names the instance and the reference, never a
  * value, and a host resolver's own message is not interpolated.
@@ -195,10 +200,27 @@ export function createConnectorCredentialSource(deps: ConnectorCredentialSourceD
         return item as Lendable;
     };
 
+    const lentListeners = new Set<(connector: string) => void>();
+    /** Tell every `onLent` subscriber; a listener's throw stays its own. */
+    const announceLent = (connector: string): void => {
+        for (const listener of [...lentListeners]) {
+            try {
+                listener(connector);
+            } catch {
+                /* the borrow was granted either way */
+            }
+        }
+    };
+
     return {
+        onLent(listener: (connector: string) => void): () => void {
+            lentListeners.add(listener);
+            return () => void lentListeners.delete(listener);
+        },
         async borrow(connector: string): Promise<ConnectorCredentialHandle> {
             const refusal = lendRefusal(connector, findDeclared(await readDeclared(connector), connector));
             if (refusal) throw connectorCredentialRefusal(refusal, 'VALIDATION_ERROR', 422);
+            announceLent(connector);
 
             let held: { generation: number; credential: BorrowedConnectorCredential } | undefined;
             let inflight: Promise<BorrowedConnectorCredential> | undefined;

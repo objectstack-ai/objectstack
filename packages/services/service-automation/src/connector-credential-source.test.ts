@@ -259,3 +259,42 @@ describe('[ADR-0015 D7] createConnectorCredentialSource — the refusals of a ha
         expect(reads).toBe(1);
     });
 });
+
+describe('[ADR-0015 D7] createConnectorCredentialSource — onLent announces each granted borrow', () => {
+    const entry = sap();
+    const source = (readDeclared: () => Promise<unknown[]>) => createConnectorCredentialSource({
+        readDeclared,
+        chain: async () => ({ env: () => DUMMY_VALUE }),
+        vaultWired: () => false,
+        generation: () => 0,
+    });
+
+    it('names the instance on a lend, never on a refusal, and stops after the unsubscribe', async () => {
+        let declared: unknown[] = [{ ...entry, enabled: false }];
+        const lender = source(async () => declared);
+        const lent: string[] = [];
+        const unsubscribe = lender.onLent!((connector) => lent.push(connector));
+
+        await expect(lender.borrow('sap_s4')).rejects.toMatchObject({ status: 422 });
+        await expect(lender.borrow('not_declared')).rejects.toMatchObject({ status: 422 });
+        expect(lent).toEqual([]);
+
+        declared = [entry];
+        await lender.borrow('sap_s4');
+        expect(lent).toEqual(['sap_s4']);
+
+        unsubscribe();
+        await lender.borrow('sap_s4');
+        expect(lent).toEqual(['sap_s4']);
+    });
+
+    it('grants the borrow when a listener throws', async () => {
+        const lender = source(async () => [entry]);
+        const later: string[] = [];
+        lender.onLent!(() => { throw new Error('listener fault'); });
+        lender.onLent!((connector) => later.push(connector));
+        const handle = await lender.borrow('sap_s4');
+        expect(handle.connector).toBe('sap_s4');
+        expect(later).toEqual(['sap_s4']);
+    });
+});

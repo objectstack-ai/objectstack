@@ -123,6 +123,20 @@ export interface IConnectorCredentialSource {
      * `503 SERVICE_UNAVAILABLE` when the declaration cannot be read now.
      */
     borrow(connector: string): Promise<ConnectorCredentialHandle>;
+    /**
+     * Subscribe to the borrows this source grants: `listener` is called with
+     * the connector instance's name each time {@link borrow} lends a handle,
+     * whoever asked — a driver's request, a connect, a probe. Returns the
+     * unsubscribe. A listener's throw is the listener's own and never fails
+     * the borrow.
+     *
+     * A borrow judges the declaration, so a lend proves that the instance can
+     * lend NOW. A consumer that recorded "this instance cannot lend" uses it
+     * to retract that record once the instance is repaired, rather than
+     * carrying it until a restart. Optional: a source without it leaves such
+     * a record standing.
+     */
+    onLent?(listener: (connector: string) => void): () => void;
 }
 
 /** A refusal of this seam: a standard-catalog `code` and its `status` on the error, the message naming the instance. */
@@ -147,8 +161,9 @@ function base64Unpadded(text: string): string {
  * base64(`username:password`), the `Authorization: Basic` header. A base64
  * form is kept without its `=` padding, so an echo that drops it is caught
  * too. Longest first, so a longer form is replaced before a shorter one
- * inside it. The same spellings `@objectstack/service-automation`'s
- * connector call path withholds.
+ * inside it. `@objectstack/service-automation`'s connector call path takes
+ * its list from here too, so the connector and a datasource borrowing its
+ * credential withhold the same spellings.
  */
 export function borrowedCredentialForms(auth: BorrowedConnectorAuth): string[] {
     const value = auth.type === 'bearer' ? auth.token : auth.type === 'api-key' ? auth.key : auth.password;

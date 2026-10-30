@@ -53,6 +53,8 @@ export interface OpenApiDocument {
 }
 
 export interface OpenApiPathItem {
+    /** Parameters shared by every operation under this path (OpenAPI 3.x Path Item Object). */
+    parameters?: OpenApiParameter[];
     [method: string]: OpenApiOperation | unknown;
 }
 
@@ -253,19 +255,44 @@ interface Op extends OpenApiOperation {
     path: string;
 }
 
-/** Flatten paths × methods into a deterministic list of operations. */
+/**
+ * Flatten paths × methods into a deterministic list of operations, each
+ * carrying its path item's shared `parameters` (see {@link mergeParameters}).
+ */
 function collectOperations(doc: OpenApiDocument): Op[] {
     const ops: Op[] = [];
     for (const [path, item] of Object.entries(doc.paths ?? {})) {
         if (!item || typeof item !== 'object') continue;
         const record = item as Record<string, unknown>;
+        const shared = Array.isArray(record.parameters) ? (record.parameters as OpenApiParameter[]) : [];
         for (const method of HTTP_METHODS) {
             const operation = record[method] as OpenApiOperation | undefined;
             if (!operation || typeof operation !== 'object') continue;
-            ops.push({ ...operation, method, path });
+            ops.push({ ...operation, parameters: mergeParameters(shared, operation.parameters), method, path });
         }
     }
     return ops;
+}
+
+/**
+ * The OpenAPI 3.x rule for a Path Item's `parameters`: they apply to every
+ * operation under the path, and an operation entry with the same `name` + `in`
+ * overrides the path-level one whole. A `$ref` entry has no `name` / `in` to
+ * match on, so it is kept as is — the caller de-references the document, and
+ * {@link buildInputSchema} skips an unresolved one exactly as it does an
+ * operation-level `$ref`.
+ */
+function mergeParameters(
+    shared: readonly OpenApiParameter[],
+    own: OpenApiParameter[] | undefined,
+): OpenApiParameter[] | undefined {
+    if (shared.length === 0) return own;
+    const ownList = Array.isArray(own) ? own : [];
+    // `in` is a closed vocabulary with no ':' in it, so `in:name` is unambiguous.
+    const key = (p: OpenApiParameter): string | undefined =>
+        p && typeof p === 'object' && !('$ref' in p) ? `${p.in}:${p.name}` : undefined;
+    const overridden = new Set(ownList.map(key));
+    return [...shared.filter((p) => key(p) === undefined || !overridden.has(key(p))), ...ownList];
 }
 
 /**

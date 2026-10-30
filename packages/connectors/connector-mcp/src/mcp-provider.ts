@@ -208,6 +208,13 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * a configuration fault the materializer degrades the instance for (see
  * {@link credentialRejectionStatus}, #27237). A handshake that carried the
  * instance's credential answers `credentialVerified`.
+ *
+ * `providerConfig.include` (optional) narrows the actions to an allowlist of
+ * tool names, with the `openapi` provider's meaning. An `include` that is not
+ * an array of non-empty strings is refused before connecting, and an entry
+ * naming a tool the server's `tools/list` does not carry is refused after
+ * listing (the connection is closed first); both are configuration faults,
+ * thrown plain. The instance never falls back to exposing every tool.
  */
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
@@ -222,10 +229,33 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         transport = { ...transport, cwd: await ctx.resolvePackagePath('.') };
       }
     }
-    const includeList = Array.isArray(cfg.include)
-      ? cfg.include.filter((x): x is string => typeof x === 'string')
+    // `include` keeps the `openapi` provider's meaning (one allowlist, two
+    // providers): absent ⇒ every tool; otherwise an array of non-empty tool
+    // names. Any other shape is a configuration fault, thrown plain before
+    // connecting — fatal at boot, a skipped entry on reload. An allowlist that
+    // dropped a shape it could not read would expose every tool the server
+    // has, the very ones the author meant to keep out of flows and agents.
+    if (
+      cfg.include !== undefined &&
+      (!Array.isArray(cfg.include) ||
+        cfg.include.some((entry) => typeof entry !== 'string' || entry.length === 0))
+    ) {
+      throw new Error(
+        `connector-mcp provider: connector '${ctx.name}' providerConfig.include must be an array of ` +
+          `tool names (strings): each the name of a tool the MCP server lists in tools/list.`,
+      );
+    }
+    const includeList = cfg.include as readonly string[] | undefined;
+    // The allowlist rides the connector's own `include` predicate; every tool
+    // name the server lists is recorded on the way, so an entry nothing
+    // matched can be named in the refusal below.
+    const listedTools: string[] = [];
+    const include = includeList
+      ? (toolName: string) => {
+          listedTools.push(toolName);
+          return includeList.includes(toolName);
+        }
       : undefined;
-    const include = includeList ? (toolName: string) => includeList.includes(toolName) : undefined;
 
     let bundle;
     try {
@@ -269,6 +299,29 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         `connector-mcp provider: connector '${ctx.name}' could not reach its MCP server: ${(err as Error).message}`,
         { cause: err },
       );
+    }
+    if (includeList) {
+      // An entry naming a tool the server does not list is a configuration
+      // fault, thrown plain — fatal at boot, a skipped entry on reload — after
+      // the connection is released. Ignoring it would bring the instance up
+      // without the tool the author listed (a typo, or a tool the server
+      // renamed or dropped), and the first sign would be a flow failing at
+      // run time.
+      const offered = new Set(listedTools);
+      const unknown = [...new Set(includeList)].filter((entry) => !offered.has(entry));
+      if (unknown.length > 0) {
+        await bundle.close().catch(() => {});
+        // At most 20 of the server's tool names, as the openapi refusal lists.
+        const sample = [...offered].slice(0, 20);
+        const more = offered.size > sample.length ? `, … ${offered.size - sample.length} more` : '';
+        throw new Error(
+          `connector-mcp provider: connector '${ctx.name}' providerConfig.include names ` +
+            `${unknown.map((entry) => `'${entry}'`).join(', ')}, which the MCP server does not list. ` +
+            `Each entry must be the name of a tool from the server's tools/list; ` +
+            `the server lists ${offered.size} tool(s): ` +
+            `${sample.map((name) => `'${name}'`).join(', ')}${more}.`,
+        );
+      }
     }
     // [#27237] The handshake carried the instance's credential only over
     // http, and only as a header (an api-key `paramName` is not sent): then

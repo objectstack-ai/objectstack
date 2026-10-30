@@ -404,7 +404,10 @@
  *
  * ## H19 — the question that ENDS a block
  *
- *   H19 an open `pm:blocked` card whose `Blocked-by:` target has CLOSED — the
+ *   H19 an open `pm:blocked` card whose `Blocked-by:` target has CLOSED — for a
+ *       PR target, MERGED: the issues API answers an abandoned PR `closed` too,
+ *       and a PR that never merged landed nothing, so it founds no row and
+ *       withholds a full discharge (#27925) — the
  *       block has outlived its blocker. Two items already read that line and
  *       NEITHER expires a block: H4 asks whether the line EXISTS, H14 asks the
  *       REVERSE index (does anything target THIS card). Nothing asked whether
@@ -5094,6 +5097,44 @@ export function needsBlockerLivenessComments(issue) {
 }
 
 /**
+ * One `GET /repos/<o>/<n>/issues/<N>` answer as the resolution H19 judges —
+ * exported so the reading is driven offline in the self-test rather than only
+ * inside the sweep's resolver, which needs the network.
+ *
+ * ## A PR target is released by its MERGE, never by its close (#27925)
+ *
+ * A card may park on a PR number (`state-machine.md`, `pm:blocked`), and the
+ * issues API answers a PR number in its PR shape: `state` reads `closed`
+ * whether the PR merged or was abandoned, and only `pull_request.merged_at`
+ * tells the two apart (measured on this board: a merged PR and a closed-
+ * unmerged one both answer `closed`, `merged_at` set on the first and `null` on
+ * the second; an issue carries no `pull_request` key). Reading `state` alone
+ * published a block on an ABANDONED PR as outlived — an unlock candidate whose
+ * fix never landed anywhere. So a closed PR with no `merged_at` keeps
+ * `state: 'closed'` (every other reader of these rows asks what the API said)
+ * and carries `unmerged: true`, the same field `scheduled-full-run.mjs`'s
+ * refresh judges, and `h19BlockOutlivedBlocker` lets it found nothing. A
+ * missing `merged_at` on a PR reads as unmerged: the one direction that cannot
+ * release a card.
+ *
+ * @param {{ key: string, repo: string, number: number, local: boolean }} target
+ * @param {{ state?: string, closed_at?: string|null, labels?: any[],
+ *   pull_request?: { merged_at?: string|null } }} row
+ */
+export function blockerResolutionFromRow(target, row) {
+  const state = row?.state === 'closed' ? 'closed' : 'open';
+  const unmerged = state === 'closed' && row?.pull_request != null && !row.pull_request.merged_at;
+  return {
+    ...target,
+    state,
+    closedAt: row?.closed_at ?? null,
+    detail: null,
+    labels: labelNames(row ?? {}),
+    ...(unmerged ? { unmerged: true } : {}),
+  };
+}
+
+/**
  * How many targets a row names before it counts the rest — the same render
  * budget `BLOCKING_DEPENDENT_LIST_CAP` keeps, for the same reason (the
  * markdown renderer writes into a body with a hard cap and a fold). Every
@@ -5117,7 +5158,10 @@ function namedTargets(rows) {
   const named = shown
     .map((r) => {
       const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
-      if (r.state === 'closed') return `${ref}${r.closedAt ? ` (closed ${r.closedAt})` : ' (closed)'}`;
+      if (r.state === 'closed') {
+        const word = r.unmerged === true ? 'closed UNMERGED' : 'closed';
+        return `${ref}${r.closedAt ? ` (${word} ${r.closedAt})` : ` (${word})`}`;
+      }
       if (r.state === 'unresolved') {
         const why =
           r.repoReadable === false
@@ -5354,13 +5398,19 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
   // and that evidence is never discarded by carrier (#11747's re-park parks the
   // LIVE blocker in a comment while the body still names the spent one): it is
   // counted whichever channel carries it and can only ever WITHHOLD a row.
-  const closed = rows.filter((r) => r.state === 'closed' && carries(r));
+  //
+  // A PR target that closed UNMERGED (#27925) never landed its fix, so its close
+  // is not the event the line waits for: it founds nothing and, carried by the
+  // judged set, withholds a full discharge. Outside the judged set it is the
+  // same spent archive line as any other superseded close.
+  const closed = rows.filter((r) => r.state === 'closed' && r.unmerged !== true && carries(r));
+  const unmerged = rows.filter((r) => r.state === 'closed' && r.unmerged === true && carries(r));
   const superseded = rows.filter((r) => r.state === 'closed' && !carries(r));
   const unresolved = rows.filter((r) => r.state === 'unresolved' && carries(r));
   const supersededUnreadable = rows.filter((r) => r.state === 'unresolved' && !carries(r));
   const open = rows.filter((r) => r.state === 'open');
   if (closed.length === 0 && unresolved.length === 0) return null;
-  const judgedCount = closed.length + open.length + unresolved.length;
+  const judgedCount = closed.length + open.length + unresolved.length + unmerged.length;
   const carrier =
     judgedFrom === 'body'
       ? 'judged against the BODY\'s `Blocked-by:` set, the authoritative carrier whenever the body ' +
@@ -5409,6 +5459,14 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
     '`pm:queue` still carrying the assignee of the seat that parked it is dispatchable to the queue ' +
     'view and taken to the claim rule at the same time (H24), which is the state the unlock scan was ' +
     'measured leaving behind — ⚠️ agent identity only, a HUMAN assignment is ⛔ never cleared by an agent.';
+  // Named on whichever row fires; it never founds one (#27925).
+  const unmergedNote =
+    unmerged.length === 0
+      ? ''
+      : ` ${unmerged.length} judged target(s) are PRs that closed UNMERGED (${namedTargets(unmerged)}): the ` +
+        'issues API answers a PR `closed` whether it merged or was abandoned, and only `merged_at` tells ' +
+        'them apart. A PR that never merged landed nothing, so its close is ⛔ never an unlock — counted in ' +
+        'the denominator, never as closed.';
 
   if (closed.length > 0) {
     const rest =
@@ -5416,6 +5474,10 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
         ? ` ${open.length} target(s) are still open (${namedTargets(open)}), so this is a PARTIAL ` +
           'discharge and the card may still be legitimately blocked — the row reports it, it does not ' +
           'decide it.'
+        : unmerged.length > 0
+          ? ' No target this row JUDGED is still open, but a PR that closed unmerged withholds, so this is ' +
+            'a PARTIAL discharge and the card may still be legitimately blocked — the row reports it, it ' +
+            'does not decide it.'
         : supersededUnreadable.length > 0
           ? ` No target this row JUDGED is still open, but ${supersededUnreadable.length} target(s) ` +
             `the comment archive names (${namedTargets(supersededUnreadable)}) could not be read at ` +
@@ -5436,6 +5498,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
       'row anywhere: one measured card sat ~4.5h past its blocker\'s close and was found only by a human ' +
       'walking the graph, another was released only by a manual triage pass.' +
       rest +
+      unmergedNote +
       alsoUnresolved +
       supersededNote +
       supersededUnreadableNote +
@@ -5466,6 +5529,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
     (open.length > 0
       ? ` The card's other ${open.length} target(s) did resolve, and are still open.`
       : '') +
+    unmergedNote +
     supersededNote +
     supersededUnreadableNote +
     release
@@ -23900,14 +23964,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       resolved = { ...target, state: 'open', closedAt: null, detail: null, labels: labelNames(localOpen) };
     } else {
       try {
-        const row = await rest(`/repos/${target.repo}/issues/${target.number}`);
-        resolved = {
-          ...target,
-          state: row.state === 'closed' ? 'closed' : 'open',
-          closedAt: row.closed_at ?? null,
-          detail: null,
-          labels: labelNames(row),
-        };
+        // A PR number answers `closed` merged or not; the projection carries `merged_at`.
+        resolved = blockerResolutionFromRow(target, await rest(`/repos/${target.repo}/issues/${target.number}`));
       } catch (err) {
         // Per-target, never fatal — and deliberately NOT the rethrow H16/H17
         // and the comment fallback make on a total shortfall. Those passes
@@ -24480,6 +24538,8 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // discharge). A negative with no live control beside it is how a repair
   // becomes a silencer, so the controls are inside the same floored battery.
   'H19 judged-set founding': 34,
+  // Registered with the PR-target merge reading (#27925), 18 cases, pin just under the count: a WITHHOLD with its controls inside.
+  'H19 PR target merge reading': 16,
   // Registered with the second-spelling repair (#18547): 45 cases, the pin just
   // under the count on the same grounds as its two neighbours. What this
   // battery floors is a WIDENING — the row stopped reporting a Chinese
@@ -27057,6 +27117,46 @@ async function selfTest() {
   t('summary: absent H19 counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('resolved on 0 of 0 distinct'), true);
   t('summary: …and the H19 clause never prints the string undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('undefined'), false);
   t('summary: the report-only contract still ends the sentence', summaryLine(btCounts(12, 12), 1).endsWith('not a gate verdict.'), true);
+
+  // -- H19: a PR target is released by its MERGE, never by its close (#27925) --
+  //
+  // A card may park on a PR number, and the issues API answers one `closed`
+  // whether it merged or was abandoned. The rows below are the shapes measured
+  // on this board 2026-10-30 (`GET /issues/N`): #27888 merged, #27296 closed
+  // unmerged, #27846 an issue (no `pull_request` key). They go through the
+  // sweep's own projection, so the reading AND the judgement are pinned: merged
+  // -> outlived, closed unmerged -> held, open -> held.
+  const BATTERY_PR_MERGE = 'H19 PR target merge reading';
+  const merged27888 = { state: 'closed', closed_at: '2026-10-30T03:29:36Z', labels: [], pull_request: { merged_at: '2026-10-30T03:29:36Z' } };
+  const abandoned27296 = { state: 'closed', closed_at: '2026-10-28T18:30:39Z', labels: [], pull_request: { merged_at: null } };
+  const issue27846 = { state: 'closed', closed_at: '2026-10-30T05:23:54Z', labels: [] };
+  const openPr19 = { state: 'open', closed_at: null, labels: [], pull_request: { merged_at: null } };
+  const resolvedFrom = (number, row) => blockerResolutionFromRow(target(number, 'unread'), row);
+  b(BATTERY_PR_MERGE, 'H19 PR: a merged PR reads closed, and carries no unmerged mark', [resolvedFrom(27888, merged27888).state, resolvedFrom(27888, merged27888).unmerged].join(), 'closed,');
+  b(BATTERY_PR_MERGE, 'H19 PR: a PR closed unmerged reads closed AND unmerged', [resolvedFrom(27296, abandoned27296).state, resolvedFrom(27296, abandoned27296).unmerged].join(), 'closed,true');
+  b(BATTERY_PR_MERGE, 'H19 PR: a closed PR whose merged_at is absent reads unmerged (the side that cannot release)', resolvedFrom(1, { state: 'closed', labels: [], pull_request: {} }).unmerged, true);
+  b(BATTERY_PR_MERGE, 'H19 PR: an open PR reads open, unmarked', [resolvedFrom(1, openPr19).state, resolvedFrom(1, openPr19).unmerged].join(), 'open,');
+  b(BATTERY_PR_MERGE, 'H19 PR: an ISSUE (no pull_request key) is judged by state alone, as before', [resolvedFrom(27846, issue27846).state, resolvedFrom(27846, issue27846).unmerged].join(), 'closed,');
+  b(BATTERY_PR_MERGE, 'H19 PR: …and the projection keeps the close time and the labels the other rows read', [resolvedFrom(27846, issue27846).closedAt, resolvedFrom(1, { ...openPr19, labels: [{ name: 'pm:on-hold' }] }).labels.join()].join(' '), '2026-10-30T05:23:54Z pm:on-hold');
+  const prCard = blockedCard(27925, 'Blocked-by: #27888');
+  const mergedRow = h19row(prCard, [resolvedFrom(27888, merged27888)], REPO_OS);
+  b(BATTERY_PR_MERGE, 'H19 PR: MERGED -> outlived: the row fires', mergedRow.includes('outlived its blocker'), true);
+  b(BATTERY_PR_MERGE, 'H19 PR: …as a full discharge', mergedRow.includes('Every target it names is closed'), true);
+  b(BATTERY_PR_MERGE, 'H19 PR: CLOSED UNMERGED -> held: no row', h19BlockOutlivedBlocker(blockedCard(27925, 'Blocked-by: #27296'), [resolvedFrom(27296, abandoned27296)], REPO_OS), null);
+  b(BATTERY_PR_MERGE, 'H19 PR: OPEN -> held: no row', h19BlockOutlivedBlocker(blockedCard(27925, 'Blocked-by: #2'), [resolvedFrom(2, openPr19)], REPO_OS), null);
+  // An abandoned PR beside a closed issue withholds the discharge and is named.
+  const mixedPr19 = h19row(blockedCard(27925, 'Blocked-by: #27846, #27296'), [resolvedFrom(27846, issue27846), resolvedFrom(27296, abandoned27296)], REPO_OS);
+  b(BATTERY_PR_MERGE, 'H19 PR: a closed issue beside an abandoned PR still fires on the issue', mixedPr19.includes('1 of 2 `Blocked-by:` target(s)'), true);
+  b(BATTERY_PR_MERGE, 'H19 PR: …as a PARTIAL discharge', mixedPr19.includes('PARTIAL'), true);
+  b(BATTERY_PR_MERGE, 'H19 PR: …⛔ never claiming every target is closed', mixedPr19.includes('Every target it names is closed'), false);
+  b(BATTERY_PR_MERGE, 'H19 PR: …and names the abandoned PR as closed UNMERGED', mixedPr19.includes('`#27296` (closed UNMERGED 2026-10-28T18:30:39Z)'), true);
+  b(BATTERY_PR_MERGE, 'H19 PR: …and never as the closed target the row is founded on', mixedPr19.includes('CLOSED (`#27846` (closed 2026-10-30T05:23:54Z))'), true);
+  // The UNJUDGED row names it too, and the archive keeps its old power only.
+  const unjudgedPr = h19row(blockedCard(1, 'Blocked-by: #2, #27296'), [target(2, 'unresolved', { detail: 'HTTP 404' }), resolvedFrom(27296, abandoned27296)], REPO_OS);
+  b(BATTERY_PR_MERGE, 'H19 PR: an UNJUDGED row names a judged abandoned PR', [unjudgedPr.includes('UNJUDGED, not confirmed'), unjudgedPr.includes('closed UNMERGED')].join(), 'true,true');
+  const archivePr = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), resolvedFrom(27296, abandoned27296)], REPO_OS);
+  b(BATTERY_PR_MERGE, 'H19 PR control: an archive-only abandoned PR is the superseded clause, not a withhold', [archivePr.includes('Every target it names is closed'), archivePr.includes('reach this card ONLY through the comment archive')].join(), 'true,true');
+  b(BATTERY_PR_MERGE, 'H19 PR control: an ordinary closed target renders byte-identically', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed', { closedAt: '2026-08-20T07:58:08Z' })], REPO_OS).includes('`#2` (closed 2026-08-20T07:58:08Z)'), true);
 
   // -- H20: a `pm:dispatched` card nobody is working (#10312) ----------------
   //
