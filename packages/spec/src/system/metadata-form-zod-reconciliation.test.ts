@@ -365,6 +365,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // #27973 — the same declared-not-enforced shape: `percentDisplay` is the spec
+  // half of a percent field's read-only face, `planned` in `liveness/field.json`
+  // until the console's percent face reads it.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'percentDisplay',
+    why: "planned, not yet rendered — a percent field's read-only face (`bar` or `plain`) parses, but the console's percent face draws the progress bar for every value until it reads the key, after the spec publishes. A form control offered today would let an author pick `plain` and still see the bar; the field form gains the row with the renderer half, as `useGrouping` did once it was enforced",
+  },
   // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
   // in the liveness ledger, read by no form or grid until the ui card's lookup
   // widget writes the declared targets on pick.

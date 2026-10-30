@@ -2326,6 +2326,7 @@ const en = {
       title: 'Reports',
       emptyTitle: 'No reports',
       emptyDescription: 'This app has no reports you can open.',
+      otherApps: 'Reports in your other apps:',
       viewsLabel: 'Report views',
       viewAll: 'All reports',
       viewRecent: 'Recent',

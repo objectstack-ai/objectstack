@@ -36,7 +36,10 @@ import { useId, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { BarChart3, ChevronDown, ChevronRight, Loader2, Search } from 'lucide-react';
 import { Empty, EmptyTitle, EmptyDescription, Input, cn } from '@object-ui/components';
-import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { useLauncherApps } from '../hooks/useLauncherApps.js';
+import { appRouteSegment, resolveKeyedI18nLabel } from '../utils/index.js';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { useRecentItems } from '../context/RecentItemsProvider.js';
@@ -50,6 +53,7 @@ import {
   navigationObjectOrder,
   reportMatchesQuery,
   useAppReportEntries,
+  useOtherAppsWithReports,
   useReportObjectLabels,
   type AppReportEntry,
   type ReportIndexView,
@@ -78,9 +82,16 @@ export function AppReportIndexView() {
   const [view, setView] = useWorkspacePreference(REPORT_INDEX_VIEW_PREFERENCE, 'user', DEFAULT_REPORT_INDEX_VIEW);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const otherAppsHeadingId = useId();
   const objects = [...new Set(entries.flatMap((entry) => (entry.object ? [entry.object] : [])))];
   const labels = useReportObjectLabels(app, objects);
   const title = t('console.reportIndex.title', { defaultValue: 'Reports' });
+  // objectstack#27356 — an index with nothing to list points at the apps
+  // whose index has something for this reader.
+  const { apps: metadataApps } = useMetadata();
+  const { apps: launcherApps } = useLauncherApps(metadataApps);
+  const otherApps = useOtherAppsWithReports(launcherApps, app);
+  const { appLabel } = useObjectLabel();
 
   if (loading) {
     return (
@@ -172,6 +183,31 @@ export function AppReportIndexView() {
                 defaultValue: 'This app has no reports you can open.',
               })}
             </EmptyDescription>
+            {otherApps.length > 0 && (
+              <nav
+                aria-labelledby={otherAppsHeadingId}
+                className="mt-4 flex flex-col items-center gap-2"
+                data-testid="report-index-other-apps"
+              >
+                <p id={otherAppsHeadingId} className="text-sm text-muted-foreground">
+                  {t('console.reportIndex.otherApps', { defaultValue: 'Reports in your other apps:' })}
+                </p>
+                <ul className="flex flex-wrap justify-center gap-2">
+                  {otherApps.map((other) => (
+                    <li key={String(other.name)}>
+                      <Link
+                        to={`/apps/${appRouteSegment(other) ?? String(other.name)}/reports`}
+                        className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        data-testid={`report-index-other-app-${String(other.name)}`}
+                      >
+                        <BarChart3 className="h-4 w-4 text-muted-foreground" aria-hidden />
+                        {appLabel({ name: String(other.name), label: resolveKeyedI18nLabel(other.label, t) })}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            )}
           </Empty>
         </div>
       ) : (

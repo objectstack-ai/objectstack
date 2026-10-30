@@ -103,6 +103,7 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   step: 'presentation',       // input granularity
   rows: 'presentation',       // inline multiline-editor height (objectui#6140) — read by objectui's TextAreaField/RichTextField, never by the DDL (a rows-sized editor surface, not a column shape)
   useGrouping: 'presentation',
+  percentDisplay: 'presentation', // a percent field's read-only face (bar or plain), never read by the DDL
   options: 'presentation',    // select values: validation + UI, no DDL
   picklist: 'presentation',   // names the shared option list the server resolves into `options` — validation + UI, no DDL
   accept: 'presentation',     // upload validation

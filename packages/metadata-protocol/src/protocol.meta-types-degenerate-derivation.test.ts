@@ -348,10 +348,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // [#26170] `hook` 22 → 23: the declared refusal catalogue, `refusals`.
     // [#27069] `object` 48 → 49: `relatedLists`, the business order of the
     // record page's related lists.
-    // [#27945] `field` 79 → 80: `lookupAutofill`, the fields a pick in a
+    // [#27973] `field` 79 → 80: `percentDisplay`, a percent field's read-only
+    // face (the progress bar or the plain percentage).
+    // [#27945] `field` 80 → 81: `lookupAutofill`, the fields a pick in a
     // lookup fills.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 22, dashboard: 20, dataset: 16, field: 80, flow: 22,
+        agent: 24, app: 22, dashboard: 20, dataset: 16, field: 81, flow: 22,
         hook: 23, object: 49, page: 26, position: 13, report: 23, skill: 16, tool: 14,
     };
 

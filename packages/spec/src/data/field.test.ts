@@ -808,6 +808,61 @@ describe('FieldSchema', () => {
     });
   });
 
+  describe('percentDisplay — percent-field read-only face', () => {
+    it('accepts `plain` (a rate or probability: the percentage alone, no bar)', () => {
+      const probability: Field = {
+        name: 'probability',
+        label: 'Probability',
+        type: 'percent',
+        percentDisplay: 'plain',
+      };
+      expect(FieldSchema.parse(probability).percentDisplay).toBe('plain');
+    });
+
+    it('accepts `bar` (the author pins the progress bar)', () => {
+      expect(FieldSchema.parse({ type: 'percent', percentDisplay: 'bar' }).percentDisplay).toBe('bar');
+    });
+
+    it('is optional — absent stays absent, no default materializes', () => {
+      const result = FieldSchema.parse({ type: 'percent' }) as Record<string, unknown>;
+      expect('percentDisplay' in result).toBe(false);
+    });
+
+    it('refuses a value outside the closed set, on the key itself', () => {
+      for (const value of ['number', 'progress', true, null]) {
+        const result = FieldSchema.safeParse({ type: 'percent', percentDisplay: value });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues.some((i) => i.path.join('.') === 'percentDisplay')).toBe(true);
+        }
+      }
+    });
+
+    it('is a declared key, not stripped or refused as unknown', () => {
+      const result = FieldSchema.safeParse({ type: 'percent', percentDisplay: 'plain' });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data).toHaveProperty('percentDisplay', 'plain');
+    });
+
+    it('Field.percent(...) threads percentDisplay through', () => {
+      const f = Field.percent({ label: 'Probability', percentDisplay: 'plain' });
+      expect(f).toEqual({ type: 'percent', label: 'Probability', percentDisplay: 'plain' });
+      expect(() => FieldSchema.parse(f)).not.toThrow();
+    });
+
+    it('declares a closed enum JSON-Schema slot with NO default — absence defers to the renderer', () => {
+      const js = z.toJSONSchema(FieldSchema as unknown as z.ZodType, {
+        unrepresentable: 'any',
+        io: 'input',
+      }) as any;
+      const prop = js.properties?.percentDisplay;
+      expect(prop).toBeDefined();
+      expect(prop.enum).toEqual(['bar', 'plain']);
+      expect(prop.default).toBeUndefined();
+      expect(js.required ?? []).not.toContain('percentDisplay');
+    });
+  });
+
   describe('Select Field', () => {
     it('should accept select field with options', () => {
       const selectField: Field = {
