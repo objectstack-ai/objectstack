@@ -76,7 +76,8 @@ describe('objectstack#27594 — the title switcher dropdown', () => {
       />,
     );
     expect(screen.getByTestId('list-view-switcher')).toHaveTextContent('All Leads');
-    expect(screen.getByTestId('list-view-switcher-count')).toHaveTextContent(`· ${(1234).toLocaleString()}`);
+    // Formatted in the display locale (en here), never the machine's.
+    expect(screen.getByTestId('list-view-switcher-count')).toHaveTextContent('· 1,234');
   });
 
   it('CONTROL: no count is drawn until the list reports one', () => {

@@ -113,6 +113,8 @@ export function ObjectViewTitleSwitcher({
 }: ObjectViewTitleSwitcherProps) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
+    // The count is formatted in the display locale, never the machine's (objectui#9909).
+    const displayLocale = useDisplayLocale();
 
     const byId = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
     const all = useMemo(() => authoredFirst(views), [views]);
@@ -311,7 +313,7 @@ export function ObjectViewTitleSwitcher({
             </Popover>
             {typeof count === 'number' && (
                 <span className="shrink-0 font-normal text-muted-foreground" data-testid="list-view-switcher-count">
-                    · {count.toLocaleString()}
+                    · {count.toLocaleString(displayLocale)}
                 </span>
             )}
         </span>
