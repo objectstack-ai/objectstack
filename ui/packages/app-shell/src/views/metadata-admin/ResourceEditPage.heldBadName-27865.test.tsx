@@ -11,7 +11,10 @@
  *   (c) a Name derived from the Label, never touched, is held the same way,
  *       and the Save attempt shows its error inline (the create form's
  *       show-on-touch deferral ends there);
- *   (d) a good Name saves (control).
+ *   (d) a good Name saves (control);
+ *   (e) the hold's BOUND: a good Name beside a client-refused key that is not
+ *       the identity (the server-gained-a-key skew shape the advisory ruling
+ *       is about) still sends — only the Name holds a create.
  *
  * The REAL page over a REAL `MetadataClient` whose transport is an in-memory
  * server that records every `PUT` and answers the way the save door does: an
@@ -72,6 +75,8 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
 }
 
 const client = vi.hoisted(() => ({ current: null as unknown }));
+/** Extra keys the served create seed carries — set by (e) only. */
+const seedExtra = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
 vi.mock('./useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./useMetadata')>();
@@ -88,7 +93,7 @@ vi.mock('./useMetadata', async (importOriginal) => {
           allowEnvironmentOverlay: true,
           allowRuntimeCreate: true,
           schema: PERMISSION_JSON_SCHEMA,
-          createSeed: getMetadataCreateSeed('permission'),
+          createSeed: { ...getMetadataCreateSeed('permission'), ...seedExtra.current },
         },
       ],
     }),
@@ -112,6 +117,7 @@ registerBuiltinAnchors();
 
 beforeEach(() => {
   server.puts = [];
+  seedExtra.current = {};
 });
 afterEach(() => {
   cleanup();
@@ -190,6 +196,23 @@ describe('New Permission Set: one mistake, one message (objectstack#27865)', () 
     fireEvent.click(saveButton());
     await waitFor(() => expect(server.puts).toHaveLength(1), { timeout: 8000 });
     expect(server.puts[0]!.name).toBe('sales_ops');
+    await screen.findByTestId('landed', {}, { timeout: 8000 });
+  });
+
+  it('(e) a good Name beside a client-refused non-identity key still sends — the hold is the Name only', async () => {
+    // A key the bundled spec does not declare, served in the create seed: the
+    // client's strict pass refuses it at the root, the (newer) server takes it.
+    seedExtra.current = { zzServerOnlyKey: true };
+    const nameBox = await openNewPermissionSet();
+    fireEvent.change(nameBox, { target: { value: 'sales_ops' } });
+    // The client does refuse the draft — surfaced, advisory — and not at Name.
+    const banner = await screen.findByTestId('metadata-validation-banner', {}, { timeout: 8000 });
+    expect(banner.textContent).toContain('(root)');
+    expect(screen.queryAllByTestId('schema-form-issue')).toHaveLength(0);
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(server.puts).toHaveLength(1), { timeout: 8000 });
+    expect(server.puts[0]!.name).toBe('sales_ops');
+    expect(server.puts[0]!.body.zzServerOnlyKey).toBe(true);
     await screen.findByTestId('landed', {}, { timeout: 8000 });
   });
 });
