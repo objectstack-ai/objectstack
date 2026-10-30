@@ -19,7 +19,8 @@
  *  - opening a view writes nothing: no edit, no save;
  *  - a read-only package draws the settings disabled;
  *  - CONTROLS: a grid has no such section, a kanban keeps its card section
- *    and gets none, and a chart, whose block binds a dataset, gets none.
+ *    and gets none, and a chart, whose block binds a dataset, gets none
+ *    (its binding has its own section, objectstack#27933).
  */
 
 import '@testing-library/jest-dom/vitest';
