@@ -1168,6 +1168,19 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * retirement prescription, and a provider-bound refusal could only ever repeat
  * that verdict with a wrong reason (see "REMOVED: `triggers`" above).
  */
+/**
+ * True for a `provider: 'mcp'` instance whose `providerConfig.transport` is an
+ * http transport — the one place an `oauth2` instance may leave its endpoints
+ * and client id to the MCP authorization flow (ADR-0143 D2.1). Read
+ * structurally: the provider owns `providerConfig`'s vocabulary and validates
+ * it at materialization, so anything else answers false here.
+ */
+function isMcpHttpInstance(entry: { provider?: string; providerConfig?: Record<string, unknown> }): boolean {
+  if (entry.provider !== 'mcp') return false;
+  const transport = entry.providerConfig?.transport;
+  return typeof transport === 'object' && transport !== null && (transport as { kind?: unknown }).kind === 'http';
+}
+
 export const DeclarativeConnectorEntrySchema = lazySchema(() =>
   // [#12840 precedent] The ADR-0097 refusals ride on the BASE, INSIDE the
   // residue stage, for the reason `ObjectPermissionSchema` records: in zod 4
@@ -1217,6 +1230,27 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         message: `Provider-bound connector instance '${entry.name}' must not author \`actions\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0097 §5).`,
       });
     }
+    // ADR-0143 D2.1 — an `oauth2` instance names its endpoints and its client,
+    // except on `provider: 'mcp'` over an http transport, where the provider
+    // runs the MCP authorization flow (protected-resource and
+    // authorization-server metadata, dynamic client registration) and keeps
+    // the registered client in the connection record, never in metadata. The
+    // rule needs the provider, so it lives here rather than on the auth shape.
+    if (entry.auth?.type === 'oauth2' && !isMcpHttpInstance(entry)) {
+      const missing: Array<[key: 'tokenUrl' | 'clientId' | 'authorizationUrl', why: string]> = [];
+      if (entry.auth.tokenUrl === undefined) missing.push(['tokenUrl', 'its token endpoint']);
+      if (entry.auth.clientId === undefined) missing.push(['clientId', 'its pre-registered client id']);
+      if (entry.auth.grant === 'authorization_code' && entry.auth.authorizationUrl === undefined) {
+        missing.push(['authorizationUrl', "its authorization endpoint (`grant: 'authorization_code'`)"]);
+      }
+      for (const [key, why] of missing) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['auth', key],
+          message: `Connector instance '${entry.name}' declares \`auth: { type: 'oauth2' }\` without \`${key}\`: name ${why}. Only \`provider: 'mcp'\` over an http transport may omit the endpoints and the client id, because that provider discovers them and registers a client itself (ADR-0143 D2.1).`,
+        });
+      }
+    }
   }), CONNECTOR_RETIRED_KEY_RESIDUE),
 );
 
@@ -1232,6 +1266,10 @@ export {
   ConnectorInstanceBearerAuthSchema,
   ConnectorInstanceAPIKeyAuthSchema,
   ConnectorInstanceBasicAuthSchema,
+  ConnectorInstanceOAuth2AuthSchema,
+  ConnectorInstanceAppCredentialAuthSchema,
+  ConnectorOAuth2GrantSchema,
+  ConnectorAppCredentialVendorSchema,
 } from '../shared/connector-auth.zod';
 export type {
   ConnectorInstanceAuth,
@@ -1244,4 +1282,8 @@ export type {
   ConnectorInstanceBearerAuth,
   ConnectorInstanceAPIKeyAuth,
   ConnectorInstanceBasicAuth,
+  ConnectorInstanceOAuth2Auth,
+  ConnectorInstanceAppCredentialAuth,
+  ConnectorOAuth2Grant,
+  ConnectorAppCredentialVendor,
 } from '../shared/connector-auth.zod';
