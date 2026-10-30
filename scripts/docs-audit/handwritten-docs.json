@@ -87,6 +87,7 @@
     "content/docs/data-modeling/indexing.mdx",
     "content/docs/data-modeling/object-extensions.mdx",
     "content/docs/data-modeling/objects.mdx",
+    "content/docs/data-modeling/odata-datasources.mdx",
     "content/docs/data-modeling/queries.mdx",
     "content/docs/data-modeling/relationships.mdx",
     "content/docs/data-modeling/schema-design.mdx",

@@ -40,6 +40,18 @@
  * reference of their own. The server-stated rewrites of a row this store
  * already holds (`source` set: the stored-metadata migration) keep their
  * pass-through, as the system principal does under the #27582 rule.
+ *
+ * [#27818] The doors that make a STORED body the active row ask the same
+ * judge, as `door: 'restore'` and `door: 'publish'`: the restore doors
+ * (`rollbackMetaItem` and `revertCommit`'s restore limb, through the restore
+ * path's save-door refusal family) on the history body they write back, and
+ * the draft publish (the per-item publish and the package publish) on the
+ * draft it promotes. Each is judged as an active write into the row it lands
+ * in, so the one reference the body may name is the one that row holds NOW:
+ * a version or draft stored before the save door judged the key, or before
+ * the row's own reference moved, is refused rather than brought back live. A
+ * body naming no reference is written as it stands, as a save omitting the
+ * key is. No server-stated restore or publish exists, so none passes through.
  */
 
 import { itemDiscriminator } from '@objectstack/metadata-core';
@@ -69,6 +81,12 @@ export async function datasourceCredentialsRefSaveRefusal(args: {
     packageId: string | null | undefined;
     /** The server-stated `source` of a rewrite; `undefined` for every authoring save. */
     source: string | undefined;
+    /**
+     * [#27818] The door asking: the save (omitted), a restore writing a stored
+     * version back, or a publish promoting a stored draft. It changes only the
+     * refusal's words, never what is judged.
+     */
+    door?: 'restore' | 'publish';
 }): Promise<(Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined> {
     if (args.type !== 'datasource' || args.source !== undefined) return undefined;
     const named = namedCredentialsRef(args.item);
@@ -83,13 +101,23 @@ export async function datasourceCredentialsRefSaveRefusal(args: {
     }
     const own = namedCredentialsRef(head?.body);
     if (typeof own === 'string' && own === named) return undefined;
-    const err = new Error(
-        `Datasource '${args.name}' was not saved: \`external.credentialsRef\` may only name the credentials `
-        + `reference this datasource's own stored definition already holds, because a reference is minted by the `
-        + `platform when a secret is bound. Send back the reference a read of this datasource serves, or omit the `
-        + `key to save it with no credential bound. To bind a credential, send the secret to the datasource admin `
-        + `door instead (Setup → Datasources, \`POST /api/v1/datasources\` or \`PATCH /api/v1/datasources/${args.name}\`).`,
-    ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
+    const adminDoor = `To bind a credential, send the secret to the datasource admin door instead (Setup → Datasources, `
+        + `\`POST /api/v1/datasources\` or \`PATCH /api/v1/datasources/${args.name}\`).`;
+    const why = 'because a reference is minted by the platform when a secret is bound.';
+    const message = args.door === 'restore'
+        ? `Datasource '${args.name}' was not restored: the version restored names an \`external.credentialsRef\` `
+            + `this datasource's stored definition does not hold now, and a restore may only bring back the credentials `
+            + `reference that definition holds, ${why} Restore a version that names the reference a read of this `
+            + `datasource serves, or one that names none to restore it with no credential bound. ${adminDoor}`
+        : args.door === 'publish'
+            ? `Datasource '${args.name}' was not published: its draft names an \`external.credentialsRef\` this `
+                + `datasource's active definition does not hold now, and a publish may only make live the credentials `
+                + `reference that definition holds, ${why} Save the draft again with the key omitted, or discard it, `
+                + `to publish it with no credential bound. ${adminDoor}`
+            : `Datasource '${args.name}' was not saved: \`external.credentialsRef\` may only name the credentials `
+                + `reference this datasource's own stored definition already holds, ${why} Send back the reference a `
+                + `read of this datasource serves, or omit the key to save it with no credential bound. ${adminDoor}`;
+    const err = new Error(message) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
     err.code = 'VALIDATION_ERROR';
     err.status = 400;
     return err;

@@ -7017,6 +7017,9 @@ export class ObjectStackProtocolImplementation implements
      *  - [#26724] an object restored with a `datasource` that names no
      *    datasource here, when that is not the binding it holds now
      *    ({@link unknownDatasourceSaveRefusal});
+     *  - [#27818] a datasource restored with an `external.credentialsRef` the
+     *    active row it is restored into does not hold now
+     *    ({@link datasourceCredentialsRefSaveRefusal}, in its restore words);
      *  - a `runAs: 'system'` flow an anonymous endpoint names
      *    ({@link anonymousElevatedFlowRefusal}): a restore writes an ACTIVE
      *    row, the case the save door asks it of;
@@ -7070,6 +7073,7 @@ export class ObjectStackProtocolImplementation implements
             credentialChannelFor: (...a) => this.credentialChannelFor(...a),
             defaultRecordPageSaveRefusal: (...a) => this.defaultRecordPageSaveRefusal(...a),
             externalBindingSaveRefusal: (...a) => this.externalBindingSaveRefusal(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             permissionSetNameCollisionRefusal: (...a) => this.permissionSetNameCollisionRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
@@ -23104,6 +23108,15 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, request.batchDatasources,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+        // [#27818] …and a datasource draft whose `external.credentialsRef` the active row it is promoted into
+        // (`promoteInto`) does not hold now: refused before `repo.promoteDraft` writes. See {@link datasourceCredentialsRefSaveRefusal}.
+        if (draftForGate) {
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: draftForGate.body,
+                mode: 'publish', packageId: promoteInto, source: undefined, door: 'publish',
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
         }
         // [ADR-0138 D2b] …and a flow draft that would go `active` with
         // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
