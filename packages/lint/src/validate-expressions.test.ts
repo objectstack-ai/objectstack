@@ -3409,7 +3409,7 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // `object` is absent — the action schema's canonical key is `objectName`.
     // `disabledReason` is absent by contract (#26619): display copy beside
     // `disabled`, never read as a condition.
-    expected: ['disabled', 'name', 'objectName', 'visible'],
+    expected: ['disabled', 'name', 'objectName', 'pressed', 'visible'],
     declaredBy: 'ObjectStackSchema.actions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.actions),
   },
