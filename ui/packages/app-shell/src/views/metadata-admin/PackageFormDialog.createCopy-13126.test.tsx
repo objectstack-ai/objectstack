@@ -21,6 +21,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { PackageFormDialog } from './PackageFormDialog';
 import { t } from './i18n';
+// The zh rows live in `@object-ui/i18n`'s `studio` namespace, fetched on
+// demand (objectstack#25922). Resident before any case, so the dialog and the
+// positive control below read the same catalogue: rendering zh otherwise
+// starts the fetch, and the control could read zh while the dialog had
+// rendered the en fallback.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 let localeFixture: 'en-US' | 'zh-CN' = 'en-US';
 vi.mock('./i18n', async (importOriginal) => ({
