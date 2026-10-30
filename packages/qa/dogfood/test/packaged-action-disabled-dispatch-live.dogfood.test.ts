@@ -14,7 +14,7 @@
 //   - absence means active: on a stock boot with no ledger row the param
 //     gallery's garbage bag answers its param contract's 400 (negative[1]);
 //   - acceptance[0]: a disabled `showcase_mark_done` answers 409
-//     ACTION_DISABLED with the engine's sentence naming the ledger, for a
+//     ACTION_DISABLED with the engine's plain sentence (#27842), for a
 //     bogus id and for a real task, and the real task is not written;
 //   - acceptance[1] / negative[0]: the disabled gallery answers 409 to the bag
 //     its enabled twin answers 400 to, so the consult precedes the param
@@ -56,10 +56,20 @@ const BOGUS_ID = 'no-such-record-26572';
 
 const activation = (object: string, action: string) => `/actions/_activation/${object}/${action}`;
 
-/** The engine's `describeDisabledAction` sentence, as the wire carries it. */
-function expectDisabledSentence(message: unknown, action: string) {
-  expect(String(message)).toMatch(new RegExp(`^Action '${action}' is disabled — `));
-  expect(String(message)).toContain('(sys_metadata_activation, ADR-0126 §8)');
+/**
+ * The engine's `describeDisabledAction` sentence, as the wire carries it.
+ *
+ * [#27842] It is the end user's sentence — what the red toast reads — so it
+ * says what happened and who can undo it where, and names no system table and
+ * no ADR (the engine's log line carries those; the envelope carries the code).
+ * The action is the one the caller named, so the sentence does not repeat it;
+ * `action` stays so each call site still says which refusal it reads.
+ */
+function expectDisabledSentence(message: unknown, _action: string) {
+  expect(String(message)).toMatch(/^This action is turned off for this deployment\. /);
+  expect(String(message)).toContain('An administrator can turn it on again under Setup › Packaged automation');
+  expect(String(message)).not.toContain(LEDGER);
+  expect(String(message)).not.toMatch(/ADR-\d+/);
 }
 
 interface Answer { status: number; text: string; json: any }
