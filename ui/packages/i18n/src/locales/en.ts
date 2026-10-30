@@ -4514,6 +4514,7 @@ const en = {
       delete_field: 'Delete a field',
       describe_metadata: 'Look at the metadata',
       describe_object: 'Look at the object structure',
+      draft_record: 'Draft the new record',
       get_active_package: 'Check the active package',
       get_authoring_rules: 'Read the authoring rules',
       get_metadata_schema: 'Read the metadata format',

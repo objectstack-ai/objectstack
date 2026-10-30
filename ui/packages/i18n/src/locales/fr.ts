@@ -3813,6 +3813,7 @@ const fr = {
       delete_field: "Supprimer le champ",
       describe_metadata: "Examiner les métadonnées",
       describe_object: "Examiner la structure de l’objet",
+      draft_record: "Préparer la nouvelle fiche",
       get_active_package: "Vérifier le paquet actif",
       get_authoring_rules: "Consulter les règles d’écriture",
       get_metadata_schema: "Consulter le format des métadonnées",

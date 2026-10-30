@@ -3812,6 +3812,7 @@ const pt = {
       delete_field: "Excluir um campo",
       describe_metadata: "Revisar os metadados",
       describe_object: "Revisar a estrutura do objeto",
+      draft_record: "Rascunhar o novo registro",
       get_active_package: "Verificar o pacote ativo",
       get_authoring_rules: "Consultar as regras de autoria",
       get_metadata_schema: "Consultar o formato dos metadados",

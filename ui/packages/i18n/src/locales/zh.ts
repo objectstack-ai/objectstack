@@ -3932,6 +3932,7 @@ const zh = {
       delete_field: '删除一个字段',
       describe_metadata: '查看元数据的内容',
       describe_object: '查看对象的结构',
+      draft_record: '起草新记录',
       get_active_package: '确认当前应用包',
       get_authoring_rules: '查阅编写规范',
       get_metadata_schema: '查阅元数据的格式',

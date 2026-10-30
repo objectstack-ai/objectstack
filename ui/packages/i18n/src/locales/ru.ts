@@ -3900,6 +3900,7 @@ const ru = {
       delete_field: "Удалить одно поле",
       describe_metadata: "Изучить метаданные",
       describe_object: "Изучить структуру объекта",
+      draft_record: "Подготовить черновик новой записи",
       get_active_package: "Проверить активный пакет",
       get_authoring_rules: "Прочитать правила разработки",
       get_metadata_schema: "Изучить формат метаданных",

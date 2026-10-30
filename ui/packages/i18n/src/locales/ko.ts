@@ -3742,6 +3742,7 @@ const ko = {
       delete_field: "필드 삭제하기",
       describe_metadata: "메타데이터 내용 확인하기",
       describe_object: "오브젝트 구조 살펴보기",
+      draft_record: "새 레코드 초안 작성하기",
       get_active_package: "현재 패키지 확인하기",
       get_authoring_rules: "작성 규칙 읽기",
       get_metadata_schema: "메타데이터 형식 살펴보기",

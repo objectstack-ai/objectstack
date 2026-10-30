@@ -3745,6 +3745,7 @@ const ja = {
       delete_field: "項目を削除する",
       describe_metadata: "メタデータの内容を確認する",
       describe_object: "オブジェクトの構造を確認する",
+      draft_record: "新しいレコードの下書きを作る",
       get_active_package: "現在のパッケージを確認する",
       get_authoring_rules: "作成ルールを読む",
       get_metadata_schema: "メタデータの形式を調べる",
