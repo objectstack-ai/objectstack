@@ -71,8 +71,12 @@ function secretStore() {
     async insert(_object: string, data: Record<string, unknown>) { rows.set(String(data.id), data); return data; },
     async delete(_object: string, options: { where: Record<string, unknown> }) { rows.delete(String(options.where.id)); },
     async find(_object: string, query: Record<string, unknown>) {
-      const row = rows.get(String((query.where as { id?: unknown })?.id));
-      return row ? [row] : [];
+      const where = (query.where ?? {}) as Record<string, unknown>;
+      if (Object.entries(where).some(([k, v]) => k.startsWith('$') || (v !== null && typeof v === 'object'))) {
+        throw new Error('only plain equality filters are implemented by this double');
+      }
+      const hits = [...rows.values()].filter((row) => Object.entries(where).every(([k, v]) => row[k] === v));
+      return typeof query.limit === 'number' ? hits.slice(0, query.limit) : hits;
     },
   };
 }
