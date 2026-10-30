@@ -370,6 +370,48 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
       );
     });
 
+    for (const op of ['sum', 'difference'] as const) {
+      it(`a derived ${op} declaring a currency other than its operands' one fixed code is refused, naming the fix`, () => {
+        const measures = [
+          ...base,
+          { name: 'eur_restated', aggregate: 'sum', field: 'amt_eur', currency: 'EUR' },
+          { name: 'eur_as_usd', derived: { op, of: ['eur', 'eur_restated'] }, currency: 'USD' },
+        ];
+        expectRefused(measures, 'eur_as_usd');
+        expect(compileRefusal(measures)?.message).toContain(
+          `[dataset-compiler] dataset "os27187_guard" derived measure "eur_as_usd" declares currency "USD" over `
+          + 'measures "eur", "eur_restated", whose amounts are fixed to EUR.',
+        );
+        expect(compileRefusal(measures)?.message)
+          .toContain("delete the measure's `currency` (the column takes the operands' EUR)");
+      });
+    }
+
+    it('a derived measure declaring a currency over a fixed-code derived sum is judged too', () => {
+      expectRefused(
+        [...base, { name: 'eur_twice', derived: { op: 'sum', of: ['eur', 'eur'] } }, { name: 'eur_as_jpy', derived: { op: 'sum', of: ['eur_twice', 'eur'] }, currency: 'JPY' }],
+        'eur_as_jpy',
+      );
+    });
+
+    it("CONTROL: a derived measure restating its operands' one fixed code is accepted", () => {
+      expect(
+        compileRefusal([...base, { name: 'eur_twice', derived: { op: 'sum', of: ['eur', 'eur'] }, currency: 'EUR' }]),
+      ).toBeUndefined();
+    });
+
+    it('CONTROL: a derived measure currency is not judged where its operands resolve to no one fixed code', () => {
+      expect(
+        compileRefusal([
+          ...base,
+          // a fixed amount with the tenant currency: one currency, but not a `fixed` one
+          { name: 'usd_and_tenant_as_jpy', derived: { op: 'sum', of: ['usd', 'tenant'] }, currency: 'JPY' },
+          // a ratio resolves to no currency
+          { name: 'eur_per_invoice_as_usd', derived: { op: 'ratio', of: ['eur', 'invoices'] }, currency: 'USD' },
+        ]),
+      ).toBeUndefined();
+    });
+
     it('CONTROL: a fixed operand restated by its measure currency compares by that one code', () => {
       expect(
         compileRefusal([...base, { name: 'usd_restated', aggregate: 'sum', field: 'amt_usd', currency: 'USD' }, { name: 'both', derived: { op: 'sum', of: ['usd', 'usd_restated'] } }]),
@@ -400,6 +442,7 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
     const fixedShapes = [
       ['a measure currency contradicting a fixed field', [{ name: 'eur_as_jpy', aggregate: 'sum', field: 'amt_eur', currency: 'JPY' }], 'eur_as_jpy'],
       ['a derived measure across two different fixed codes', [...base, { name: 'mixed', derived: { op: 'difference', of: ['usd', 'eur'] } }], 'mixed'],
+      ["a derived measure currency contradicting its operands' fixed code", [...base, { name: 'eur_as_usd', derived: { op: 'sum', of: ['eur', 'eur'] }, currency: 'USD' }], 'eur_as_usd'],
     ] as const;
     for (const [label, measures, named] of fixedShapes) {
       for (const [door, options] of [['queryDataset', undefined], ['the draft preview', { previewDrafts: true }]] as const) {

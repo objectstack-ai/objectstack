@@ -17,7 +17,10 @@
  *      field): its column carries no per-row pointer, so the one code would
  *      label every row.
  *    - Over a `fixed` field, a code other than the field's. The same code is
- *      redundant, not wrong, and is accepted.
+ *      redundant, not wrong, and is accepted. That holds for a derived measure
+ *      whose resolved currency is one `fixed` code (a sum of `fixed` amounts in
+ *      one code): `computeDerived` keeps the operands' amounts, so the measure's
+ *      code would label them as another currency.
  * 2. **A derived measure across currencies.** `computeDerived` adds,
  *    subtracts, multiplies and divides bare numbers, so such a value is not a
  *    number in any currency (probe A, `m_mixed_sum`: `200` with no currency).
@@ -147,7 +150,8 @@ export function assertMeasureCurrenciesCoherent(
     });
 
   // Guard 1 — a measure `currency` over a record-mode amount (aggregated or
-  // derived), or contradicting a `fixed` field's code.
+  // derived), or contradicting a `fixed` code (a field's, or the one its
+  // derived operands resolve to).
   for (const m of dataset.measures) {
     if (m.duration || !m.currency) continue;
     const field = m.derived ? undefined : fieldOf(m);
@@ -174,6 +178,15 @@ export function assertMeasureCurrenciesCoherent(
         `[dataset-compiler] dataset "${dataset.name}" derived measure "${m.name}" declares currency `
         + `"${m.currency}" over amounts in ${currencyWords(resolved)}. One code cannot label amounts in several `
         + "currencies: delete the measure's `currency`.",
+      );
+    }
+    if (resolved?.kind === 'code' && resolved.fixed && resolved.code !== m.currency) {
+      const operands = [...new Set(monetaryOperands(m).map((o) => `"${o.name}"`))].join(', ');
+      throw datasetInvalidError(
+        `[dataset-compiler] dataset "${dataset.name}" derived measure "${m.name}" declares currency `
+        + `"${m.currency}" over measures ${operands}, whose amounts are fixed to ${resolved.code}. The amounts are `
+        + `${resolved.code}, so the column would print them as ${m.currency}: delete the measure's \`currency\` `
+        + `(the column takes the operands' ${resolved.code}).`,
       );
     }
   }
