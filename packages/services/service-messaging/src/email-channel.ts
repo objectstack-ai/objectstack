@@ -117,8 +117,56 @@ export interface EmailChannelOptions {
      * hole with no argument formats in. `undefined` (no default set, or not
      * wired) leaves the render without one, so such a hole refuses the delivery
      * with `TEMPLATE_INVALID` instead of formatting in a guessed currency.
+     * REJECTS when the read itself failed: the render then runs without one,
+     * and a `TEMPLATE_INVALID` that a default would cure is graded retryable
+     * ({@link templateRefusalAfterCurrencyReadFault}).
      */
     getTenantCurrency?(organizationId: string | undefined): Promise<string | undefined>;
+}
+
+/**
+ * The ISO 4217 code for "no currency" (`XXX`, formatted `¤1,234.50`): the
+ * stand-in default {@link templateRefusalAfterCurrencyReadFault} renders with
+ * to ask whether a default would cure a refusal. Never sent: the probe only
+ * renders.
+ */
+const NO_CURRENCY_PROBE = 'XXX';
+
+/**
+ * [#27257] The row error of a templated delivery whose render failed. A read
+ * that FAILED is not a read that found no default: when `getTenantCurrency`
+ * rejected and the render then answered `TEMPLATE_INVALID`, the template is
+ * rendered once more WITHOUT sending (`renderWithDefault`), with
+ * {@link NO_CURRENCY_PROBE} as the default.
+ *
+ * - The probe renders: the only refusal was the missing default, which the
+ *   read would have supplied. The error is rewritten WITHOUT a `TEMPLATE_*`
+ *   code, so `classifyError` grades it retryable.
+ * - The probe still answers `TEMPLATE_INVALID`: a default cannot cure the
+ *   template (a hole the grammar refuses, an `@path` value that is not a
+ *   code). That refusal is returned as it stands, graded permanent.
+ * - No probe (an email service without `renderTemplate`) or a probe failing
+ *   any other way: the cause cannot be told apart, and the read fault is
+ *   transient, so it is rewritten and retried.
+ *
+ * Any other failure, and every refusal after a read that succeeded, is
+ * returned unchanged. Shared by the email and inbox channels.
+ */
+export async function templateRefusalAfterCurrencyReadFault(
+    message: string,
+    currencyReadFault: string | undefined,
+    renderWithDefault: ((currency: string) => Promise<unknown>) | undefined,
+): Promise<string> {
+    if (currencyReadFault === undefined || !/\bTEMPLATE_INVALID\b/.test(message)) return message;
+    if (renderWithDefault) {
+        try {
+            await renderWithDefault(NO_CURRENCY_PROBE);
+        } catch (err) {
+            const standing = (err as Error)?.message ?? String(err);
+            if (/\bTEMPLATE_INVALID\b/.test(standing)) return standing;
+        }
+    }
+    return `the template was not rendered: the organization's default currency could not be read (${currencyReadFault}); the delivery is retried until that read succeeds`;
 }
 
 /**
@@ -351,8 +399,16 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                 }
                 const templateLocale = recipientLocale;
                 const data = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
+                let currency: string | undefined;
+                let currencyReadFault: string | undefined;
                 try {
-                    const currency = await opts.getTenantCurrency?.(n.organizationId);
+                    currency = await opts.getTenantCurrency?.(n.organizationId);
+                } catch (err) {
+                    // The read failed and learned nothing: render without a
+                    // currency, and grade a refusal below (#27257).
+                    currencyReadFault = (err as Error)?.message ?? String(err);
+                }
+                try {
                     const result = (await email.sendTemplate({
                         template: templateName,
                         to: address,
@@ -377,8 +433,21 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                     // TEMPLATE_INACTIVE / MISSING_VARIABLES / TEMPLATE_INVALID)
                     // arrives as a thrown Error — keep the code at the front of
                     // the row's error so classifyError() below can grade it
-                    // permanent.
-                    return { ok: false, error: (err as Error)?.message ?? String(err) };
+                    // permanent — unless the currency read failed first.
+                    const renderTemplate = email.renderTemplate?.bind(email);
+                    return {
+                        ok: false,
+                        error: await templateRefusalAfterCurrencyReadFault(
+                            (err as Error)?.message ?? String(err),
+                            currencyReadFault,
+                            renderTemplate && ((probe) => renderTemplate({
+                                template: templateName,
+                                ...(data !== undefined ? { data } : {}),
+                                ...(templateLocale ? { locale: templateLocale } : {}),
+                                ...{ currency: probe },
+                            })),
+                        ),
+                    };
                 }
             }
 
