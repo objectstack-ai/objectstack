@@ -1,0 +1,9 @@
+[
+  "overlay open -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact",
+  "clicked ⋯ for Leads -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact menu=[\"Add to favorites | Open in new tab | Copy link\"]",
+  "Esc (closes menu?) -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact",
+  "Esc again -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact",
+  "opened record Grace -> collapsed/rail sb=48 main=48+1232 path=/apps/com.example.crm/crm_contact url=http://localhost:45293/apps/com.example.crm/crm_contact?recordId=FXuNJOyxe00HD5-x dialogs=[\"Record Detail  Record detail o\"]",
+  "Ctrl+B with record open -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact dialogs=[\"Record Detail  Record detail o\"]",
+  "Esc -> collapsed/rail sb=48 main=48+1232 path=/apps/com.example.crm/crm_contact url=http://localhost:45293/apps/com.example.crm/crm_contact dialogs=[]"
+]

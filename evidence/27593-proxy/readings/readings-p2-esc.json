@@ -1,0 +1,28 @@
+{
+  "E1 app bar button then Esc": [
+    "open via button -> expanded/overlay sb=256 focus=BUTTON[trigger] \"Toggle sidebar\" inSidebar=false menus=0",
+    "Esc -> collapsed/rail sb=48 focus=BUTTON[trigger] \"Toggle sidebar\" inSidebar=false menus=0"
+  ],
+  "E2 rail bg click then Tab then Esc": [
+    "open -> expanded/overlay sb=256 focus=body menus=0",
+    "Tab -> expanded/overlay sb=256 focus=BUTTON[group-label] \"Sales\" inSidebar=true menus=0",
+    "Esc -> collapsed/rail sb=48 focus=body menus=0"
+  ],
+  "E3 rail bg click, click Sales group label, Esc": [
+    "clicked group label -> expanded/overlay sb=256 focus=BUTTON[group-label] \"Sales\n5\" inSidebar=true menus=0",
+    "Esc -> collapsed/rail sb=48 focus=body menus=0"
+  ],
+  "E4 Ctrl+B, focus nav link programmatically, Esc": [
+    "focused Accounts link -> expanded/overlay sb=256 focus=A[menu-button] \"Accounts\" inSidebar=true menus=0",
+    "Esc -> expanded/overlay sb=256 focus=A[menu-button] \"Accounts\" inSidebar=true menus=0"
+  ],
+  "E5 ⋯ menu, Esc closes menu, Esc again": [
+    "menu open -> expanded/overlay sb=256 focus=DIV \"Add to favorites\nOpen in \" inSidebar=false menus=1",
+    "Esc #1 -> expanded/overlay sb=256 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true menus=0",
+    "Esc -> expanded/overlay sb=256 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true menus=0"
+  ],
+  "E6 Ctrl+B then hover overlay and Esc": [
+    "hover overlay -> expanded/overlay sb=256 focus=body menus=0",
+    "Esc -> collapsed/rail sb=48 focus=body menus=0"
+  ]
+}

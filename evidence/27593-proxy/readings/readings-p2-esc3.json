@@ -1,0 +1,20 @@
+{
+  "rail bg click": [
+    "rail bg click -> expanded/overlay sb=256",
+    "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+    "Esc #1 -> expanded/overlay sb=256",
+    "Esc #2 -> collapsed/rail sb=48"
+  ],
+  "app bar button": [
+    "app bar button -> expanded/overlay sb=256",
+    "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+    "Esc #1 -> expanded/overlay sb=256",
+    "Esc #2 -> collapsed/rail sb=48"
+  ],
+  "Ctrl+B": [
+    "Ctrl+B -> expanded/overlay sb=256",
+    "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+    "Esc #1 -> expanded/overlay sb=256",
+    "Esc #2 -> collapsed/rail sb=48"
+  ]
+}

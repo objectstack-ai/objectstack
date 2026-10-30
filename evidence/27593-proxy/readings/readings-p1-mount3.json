@@ -1,0 +1,32 @@
+{
+  "cookieBeforeReload": "sidebar_state=true",
+  "mountFrames": [
+    {
+      "t": 4715,
+      "w": 256,
+      "mode": "rail"
+    },
+    {
+      "t": 4850,
+      "w": 169,
+      "mode": "rail"
+    },
+    {
+      "t": 4928,
+      "w": 135,
+      "mode": "rail"
+    },
+    {
+      "t": 4983,
+      "w": 48,
+      "mode": "rail"
+    }
+  ],
+  "after": {
+    "st": "collapsed",
+    "rail": "rail",
+    "sbW": 48,
+    "mainX": 48,
+    "mainW": 1232
+  }
+}

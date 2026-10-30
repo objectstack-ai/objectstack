@@ -1,0 +1,184 @@
+{
+  "point": 1,
+  "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+  "state": {
+    "path": "/apps/com.example.crm/crm_contact",
+    "dataState": "collapsed",
+    "rail": "rail",
+    "containerZ": "10",
+    "containerPos": "fixed",
+    "sidebar": {
+      "x": 0,
+      "w": 48,
+      "y": 48,
+      "h": 852
+    },
+    "main": {
+      "x": 48,
+      "w": 1232,
+      "y": 48,
+      "h": 852
+    },
+    "footerText": "",
+    "mobileSheet": false
+  },
+  "mountFrames": {
+    "frames": 132,
+    "distinctSidebarWidths": [
+      256,
+      152,
+      100,
+      48
+    ],
+    "distinctMainLefts": [
+      48
+    ],
+    "distinctMainWidths": [
+      1232
+    ],
+    "first": [
+      [
+        5185,
+        256,
+        "rail",
+        48,
+        1232
+      ],
+      [
+        5294,
+        256,
+        "rail",
+        48,
+        1232
+      ],
+      [
+        5330,
+        152,
+        "rail",
+        48,
+        1232
+      ]
+    ],
+    "modes": [
+      "rail"
+    ]
+  },
+  "expectMainWidth": 1232,
+  "pass": true,
+  "otherSurfaces": [
+    {
+      "path": "/apps/com.example.crm/crm_account",
+      "dataState": "collapsed",
+      "rail": "rail",
+      "containerZ": "10",
+      "containerPos": "fixed",
+      "sidebar": {
+        "x": 0,
+        "w": 48,
+        "y": 48,
+        "h": 852
+      },
+      "main": {
+        "x": 48,
+        "w": 1232,
+        "y": 48,
+        "h": 852
+      },
+      "footerText": "",
+      "mobileSheet": false
+    },
+    {
+      "path": "/apps/com.example.crm/dashboard/pipeline_dashboard",
+      "dataState": "collapsed",
+      "rail": "rail",
+      "containerZ": "10",
+      "containerPos": "fixed",
+      "sidebar": {
+        "x": 0,
+        "w": 48,
+        "y": 48,
+        "h": 852
+      },
+      "main": {
+        "x": 48,
+        "w": 1232,
+        "y": 48,
+        "h": 852
+      },
+      "footerText": "",
+      "mobileSheet": false
+    },
+    {
+      "path": "/apps/com.example.crm/crm_lead",
+      "dataState": "collapsed",
+      "rail": "rail",
+      "containerZ": "10",
+      "containerPos": "fixed",
+      "sidebar": {
+        "x": 0,
+        "w": 48,
+        "y": 48,
+        "h": 852
+      },
+      "main": {
+        "x": 48,
+        "w": 1232,
+        "y": 48,
+        "h": 852
+      },
+      "footerText": "",
+      "mobileSheet": false
+    }
+  ],
+  "consoleErrors": [],
+  "thresholdProbe": [
+    {
+      "W": 1024,
+      "rail": "rail",
+      "dataState": "collapsed",
+      "sidebarW": 48,
+      "mainX": 48,
+      "mainW": 976
+    },
+    {
+      "W": 1366,
+      "rail": "rail",
+      "dataState": "collapsed",
+      "sidebarW": 48,
+      "mainX": 48,
+      "mainW": 1318
+    },
+    {
+      "W": 1415,
+      "rail": "rail",
+      "dataState": "collapsed",
+      "sidebarW": 48,
+      "mainX": 48,
+      "mainW": 1367
+    },
+    {
+      "W": 1416,
+      "rail": null,
+      "dataState": "expanded",
+      "sidebarW": 256,
+      "mainX": 256,
+      "mainW": 1160
+    },
+    {
+      "W": 1417,
+      "rail": null,
+      "dataState": "expanded",
+      "sidebarW": 256,
+      "mainX": 256,
+      "mainW": 1161
+    },
+    {
+      "W": 1440,
+      "rail": null,
+      "dataState": "expanded",
+      "sidebarW": 256,
+      "mainX": 256,
+      "mainW": 1184
+    }
+  ]
+}

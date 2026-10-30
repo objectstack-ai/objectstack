@@ -1,0 +1,57 @@
+[
+  {
+    "x": 24,
+    "y": 880,
+    "target": "DIV[content] Leads\nAccounts\nConta",
+    "st": "expanded",
+    "rail": "overlay",
+    "sbW": 256,
+    "mainX": 48,
+    "mainW": 1232,
+    "path": "/apps/com.example.crm/crm_contact"
+  },
+  {
+    "x": 4,
+    "y": 300,
+    "target": "DIV[group] ",
+    "st": "expanded",
+    "rail": "overlay",
+    "sbW": 256,
+    "mainX": 48,
+    "mainW": 1232,
+    "path": "/apps/com.example.crm/crm_contact"
+  },
+  {
+    "x": 44,
+    "y": 500,
+    "target": "DIV[content] Leads\nAccounts\nConta",
+    "st": "expanded",
+    "rail": "overlay",
+    "sbW": 256,
+    "mainX": 48,
+    "mainW": 1232,
+    "path": "/apps/com.example.crm/crm_contact"
+  },
+  {
+    "x": 24,
+    "y": 98,
+    "target": "UL[menu] Leads\nAccounts\nConta",
+    "st": "expanded",
+    "rail": "overlay",
+    "sbW": 256,
+    "mainX": 48,
+    "mainW": 1232,
+    "path": "/apps/com.example.crm/crm_contact"
+  },
+  {
+    "x": 24,
+    "y": 246,
+    "target": "DIV[group] Leads\nAccounts\nConta",
+    "st": "expanded",
+    "rail": "overlay",
+    "sbW": 256,
+    "mainX": 48,
+    "mainW": 1232,
+    "path": "/apps/com.example.crm/crm_contact"
+  }
+]

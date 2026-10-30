@@ -1,0 +1,3623 @@
+{
+  "generated": "2026-10-30T11:40:43.476Z",
+  "console": "http://localhost:45293",
+  "surface": "http://localhost:45293/apps/crm_app/crm_contact (redirects to /apps/com.example.crm/crm_contact); also crm_account, crm_lead, crm_opportunity, dashboard/pipeline_dashboard",
+  "summary": {
+    "p1": {
+      "steady_1280": {
+        "sidebarW": 48,
+        "mainX": 48,
+        "mainW": 1232,
+        "mode": "rail",
+        "state": "collapsed"
+      },
+      "mountFlash": "first paint at 1280 has sidebar container 256px wide (mode rail, labels hidden) animating to 48 over ~150-450ms when stored state is open (fresh visit, after a wide-window session, reload with overlay open); straight 48 only when last narrow state was folded",
+      "thresholdProbe": [
+        {
+          "W": 1024,
+          "rail": "rail",
+          "dataState": "collapsed",
+          "sidebarW": 48,
+          "mainX": 48,
+          "mainW": 976
+        },
+        {
+          "W": 1366,
+          "rail": "rail",
+          "dataState": "collapsed",
+          "sidebarW": 48,
+          "mainX": 48,
+          "mainW": 1318
+        },
+        {
+          "W": 1415,
+          "rail": "rail",
+          "dataState": "collapsed",
+          "sidebarW": 48,
+          "mainX": 48,
+          "mainW": 1367
+        },
+        {
+          "W": 1416,
+          "rail": null,
+          "dataState": "expanded",
+          "sidebarW": 256,
+          "mainX": 256,
+          "mainW": 1160
+        },
+        {
+          "W": 1417,
+          "rail": null,
+          "dataState": "expanded",
+          "sidebarW": 256,
+          "mainX": 256,
+          "mainW": 1161
+        },
+        {
+          "W": 1440,
+          "rail": null,
+          "dataState": "expanded",
+          "sidebarW": 256,
+          "mainX": 256,
+          "mainW": 1184
+        }
+      ]
+    },
+    "p2": {
+      "overlay": {
+        "sidebarW": 256,
+        "z": 40,
+        "mainX": 48,
+        "mainW": 1232,
+        "mainXRangeDuringTransition": [
+          48,
+          48
+        ],
+        "mainWRangeDuringTransition": [
+          1232,
+          1232
+        ]
+      },
+      "escFailsFirstPressWhenPointerOrFocusOnItem": {
+        "rail bg click": [
+          "rail bg click -> expanded/overlay sb=256",
+          "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+          "Esc #1 -> expanded/overlay sb=256",
+          "Esc #2 -> collapsed/rail sb=48"
+        ],
+        "app bar button": [
+          "app bar button -> expanded/overlay sb=256",
+          "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+          "Esc #1 -> expanded/overlay sb=256",
+          "Esc #2 -> collapsed/rail sb=48"
+        ],
+        "Ctrl+B": [
+          "Ctrl+B -> expanded/overlay sb=256",
+          "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+          "Esc #1 -> expanded/overlay sb=256",
+          "Esc #2 -> collapsed/rail sb=48"
+        ]
+      },
+      "escWithTabFocus": {
+        "tabs1": [
+          "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+          "Tab x1 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[group-label] \"Sales\" inSidebar=true tooltips=[]",
+          "Esc -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]",
+          "Esc again -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]"
+        ],
+        "tabs2": [
+          "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+          "Tab x2 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[\"\",\"Leads\"]",
+          "Esc -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[]",
+          "Esc again -> collapsed/rail sb=48 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[]"
+        ],
+        "tabs3": [
+          "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+          "Tab x3 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true tooltips=[]",
+          "Esc -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]",
+          "Esc again -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]"
+        ],
+        "tabs4": [
+          "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+          "Tab x4 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[\"\",\"Accounts\"]",
+          "Esc -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[]",
+          "Esc again -> collapsed/rail sb=48 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[]"
+        ],
+        "keyboardOnly": [
+          "Ctrl+B -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+          "Tab 1 -> expanded/overlay sb=256 main=48+1232 focus=A[] \"Skip to content\" inSidebar=false tooltips=[]",
+          "Tab 2 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[trigger] \"Toggle sidebar\" inSidebar=false tooltips=[\"Toggle sidebar\\n⌘B\",\"Toggle sidebar\\n⌘B\"]",
+          "Tab 3 -> expanded/overlay sb=256 main=48+1232 focus=A[] \"ObjectOS home\" inSidebar=false tooltips=[]",
+          "Tab 4 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"CRM\" inSidebar=false tooltips=[]",
+          "Tab 5 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Search…\" inSidebar=false tooltips=[]",
+          "Tab 6 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Open inbox\" inSidebar=false tooltips=[]",
+          "Tab 7 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Help & Documentation\" inSidebar=false tooltips=[]",
+          "Tab 8 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"DA\" inSidebar=false tooltips=[]",
+          "Tab 9 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[group-label] \"Sales\" inSidebar=true tooltips=[]",
+          "Tab 10 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[\"\",\"Leads\"]",
+          "Tab 11 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true tooltips=[]",
+          "Tab 12 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[\"\",\"Accounts\"]"
+        ],
+        "keepOpenFocus": [
+          "focus Keep open -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-button] \"Keep sidebar open\" inSidebar=true tooltips=[\"\",\"Keep sidebar open\"]",
+          "Esc -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-button] \"Keep sidebar open\" inSidebar=true tooltips=[]"
+        ]
+      }
+    },
+    "p3": {
+      "keptOpen": {
+        "sidebarW": 256,
+        "mainX": 256,
+        "mainW": 1024,
+        "afterReload": "same",
+        "storage": "os:pref:console.sidebar.keepOpen={value:on}"
+      },
+      "unpinned": {
+        "sidebarW": 48,
+        "mainX": 48,
+        "mainW": 1232,
+        "afterReload": "same"
+      }
+    },
+    "p4": {
+      "w1440": {
+        "sidebarW": 256,
+        "mainX": 256,
+        "mainW": 1184,
+        "footer": "none",
+        "ctrlB": {
+          "sidebarW": 48,
+          "mainX": 48,
+          "mainW": 1392
+        }
+      },
+      "w700": {
+        "sheet": {
+          "role": "dialog",
+          "data-mobile": "true",
+          "w": 288,
+          "z": 50,
+          "backdrop": "rgba(0,0,0,0.35)"
+        },
+        "main": {
+          "x": 0,
+          "w": 700
+        }
+      },
+      "boundaries": [
+        {
+          "W": 767,
+          "st": null,
+          "rail": null,
+          "z": null,
+          "sbX": null,
+          "sbW": null,
+          "mainX": 0,
+          "mainW": 767,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false
+        },
+        {
+          "W": 768,
+          "st": "collapsed",
+          "rail": "rail",
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 720,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false
+        },
+        {
+          "W": 800,
+          "st": "collapsed",
+          "rail": "rail",
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 752,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false
+        }
+      ]
+    },
+    "p5": {
+      "baseSequence": "1440 collapsed 48/1392 -> 1280 rail 48/1232 -> 1440 collapsed 48/1392 (pass)",
+      "keepOpenRoundTripLeak": [
+        [
+          "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+          "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+          "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+          "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+          "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+          "widen -> 1440: expanded/null sb=256 main=256+1184",
+          "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+        ],
+        [
+          "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+          "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+          "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+          "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+          "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+          "widen -> 1440: expanded/null sb=256 main=256+1184",
+          "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+        ],
+        [
+          "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+          "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+          "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+          "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+          "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+          "widen -> 1440: expanded/null sb=256 main=256+1184",
+          "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+        ]
+      ]
+    }
+  },
+  "raw": {
+    "boards": {
+      "RecordDrawerV4Enlarged.dc.html": {
+        "title": "记录 v4 · 子表放大态（分栏 720 内）= 「任务」页签激活 · 头部原样 · 表格占满",
+        "docW": 1600,
+        "docH": 1000,
+        "asides": [
+          {
+            "box": {
+              "x": 0,
+              "y": 48,
+              "w": 200,
+              "h": 852
+            },
+            "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+          },
+          {
+            "box": {
+              "x": 880,
+              "y": 48,
+              "w": 720,
+              "h": 852
+            },
+            "style": "min-width:0;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)",
+            "text": "联系人 | › | John Smith | 3 / 21 | ↓ | ↑ | ⤢ | ✕ | John Smith | 联系人 | VP Sales · Acme Corp | 记录通话 | 安排会议 | ⋯ | 邮箱 | john.smith@acme.com | 客户 | Acme Corp | 电话 | +1 555 0100 | 要点 = crm_contact.highlightFields [full_name, email, crm_account, phon"
+          }
+        ]
+      },
+      "RecordDrawerV4Max.dc.html": {
+        "title": "记录 v4 · ⤢ 铺满态 · 记录占满内容区（留侧栏）· URL 不变 · 三栏 · 顶行「联系人 › John Smith … 3 / 21 ↓ ↑ ⊟ ⤡ ✕」",
+        "docW": 1600,
+        "docH": 1000,
+        "asides": [
+          {
+            "box": {
+              "x": 0,
+              "y": 48,
+              "w": 200,
+              "h": 852
+            },
+            "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+          },
+          {
+            "box": {
+              "x": 200,
+              "y": 48,
+              "w": 1400,
+              "h": 852
+            },
+            "style": "position:absolute;inset:0 0 0 200px;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)",
+            "text": "联系人 | › | John Smith | 3 / 21 | ↓ | ↑ | ⊟ | ⤡ | ✕ | John Smith | 联系人 | VP Sales · Acme Corp | 记录通话 | 记录会议 | 安排会议 | ⋯ | 邮箱 | john.smith@acme.com | 客户 | Acme Corp | 电话 | +1 555 0100 | 要点 = crm_contact.highlightFields [full_name, email, crm_accoun"
+          }
+        ]
+      },
+      "RecordDrawerV4Peek.dc.html": {
+        "title": "记录 v4 · 默认分栏 · 列表 464 三列 + 记录 720 单列堆叠 · 顶行「联系人 › John Smith … 3 / 21 ↓ ↑ ⤢ ✕」",
+        "docW": 1600,
+        "docH": 1367,
+        "asides": [
+          {
+            "box": {
+              "x": 0,
+              "y": 48,
+              "w": 200,
+              "h": 1319
+            },
+            "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+          },
+          {
+            "box": {
+              "x": 880,
+              "y": 48,
+              "w": 720,
+              "h": 1319
+            },
+            "style": "min-width:0;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)",
+            "text": "联系人 | › | John Smith | 3 / 21 | ↓ | ↑ | ⤢ | ✕ | John Smith | 联系人 | VP Sales · Acme Corp | 记录通话 | 安排会议 | ⋯ | 邮箱 | john.smith@acme.com | 客户 | Acme Corp | 电话 | +1 555 0100 | 要点 = crm_contact.highlightFields [full_name, email, crm_account, phon"
+          }
+        ]
+      },
+      "RecordMobile.dc.html": {
+        "title": "记录页 v4 · 手机端（列表 → 记录页单列堆叠 → 一层下）· 无页签",
+        "docW": 1600,
+        "docH": 1000,
+        "asides": []
+      },
+      "RecordPageV4Enlarged.dc.html": {
+        "title": "记录页 v4 · 子表放大态 = 「任务」页签激活 · 头部原样 · 表格占满 · 不做 modal",
+        "docW": 1600,
+        "docH": 1000,
+        "asides": [
+          {
+            "box": {
+              "x": 0,
+              "y": 48,
+              "w": 200,
+              "h": 852
+            },
+            "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+          }
+        ]
+      },
+      "RecordPageV4Panels.dc.html": {
+        "title": "记录页 v4 · 关联列改为「面板」模型 · 三栏（工作型对象，动态独立成列）",
+        "docW": 1664,
+        "docH": 1006,
+        "asides": [
+          {
+            "box": {
+              "x": 0,
+              "y": 48,
+              "w": 200,
+              "h": 958
+            },
+            "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+          }
+        ]
+      },
+      "RecordPageV4Product.dc.html": {
+        "title": "记录页 v4 · 主数据对象（产品）· 子表行首列跳过回指 FK · 轻量折叠动态",
+        "docW": 1600,
+        "docH": 1000,
+        "asides": [
+          {
+            "box": {
+              "x": 0,
+              "y": 48,
+              "w": 200,
+              "h": 852
+            },
+            "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 产品 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+          }
+        ]
+      },
+      "RecordPageV4TwoCol.dc.html": {
+        "title": "记录页 v4 · 两栏（带侧栏 1200 宽）· 动态作为右栏顶部面板 · 无栏开关",
+        "docW": 1600,
+        "docH": 1000,
+        "asides": [
+          {
+            "box": {
+              "x": 0,
+              "y": 48,
+              "w": 200,
+              "h": 921
+            },
+            "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+          }
+        ]
+      },
+      "SidebarReports.dc.html": {
+        "title": "侧栏「全部报表」· 现状与方案（条件显示，并入应用自己的报表组）",
+        "docW": 1600,
+        "docH": 1000,
+        "asides": [
+          {
+            "box": {
+              "x": 32,
+              "y": 53,
+              "w": 220,
+              "h": 560
+            },
+            "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 商机 | 报价 | 报表 10 | 销售业绩 | 销售活动 | CRM 总览 | … | 📊 全部报表"
+          },
+          {
+            "box": {
+              "x": 292,
+              "y": 53,
+              "w": 220,
+              "h": 560
+            },
+            "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 商机 | 报价 | 报表 10 | 销售业绩 | 销售活动 | CRM 总览 | … | 全部报表 →"
+          },
+          {
+            "box": {
+              "x": 552,
+              "y": 53,
+              "w": 220,
+              "h": 560
+            },
+            "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 服务 | 工单 | 知识库 | 服务概览 | 📊 全部报表"
+          },
+          {
+            "box": {
+              "x": 812,
+              "y": 53,
+              "w": 220,
+              "h": 560
+            },
+            "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+            "text": "首页 | 销售主页 | 待办 | 我的待办 | 已完成"
+          }
+        ]
+      }
+    },
+    "p1": {
+      "point": 1,
+      "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+      "state": {
+        "path": "/apps/com.example.crm/crm_contact",
+        "dataState": "collapsed",
+        "rail": "rail",
+        "containerZ": "10",
+        "containerPos": "fixed",
+        "sidebar": {
+          "x": 0,
+          "w": 48,
+          "y": 48,
+          "h": 852
+        },
+        "main": {
+          "x": 48,
+          "w": 1232,
+          "y": 48,
+          "h": 852
+        },
+        "footerText": "",
+        "mobileSheet": false
+      },
+      "mountFrames": {
+        "frames": 132,
+        "distinctSidebarWidths": [
+          256,
+          152,
+          100,
+          48
+        ],
+        "distinctMainLefts": [
+          48
+        ],
+        "distinctMainWidths": [
+          1232
+        ],
+        "first": [
+          [
+            5185,
+            256,
+            "rail",
+            48,
+            1232
+          ],
+          [
+            5294,
+            256,
+            "rail",
+            48,
+            1232
+          ],
+          [
+            5330,
+            152,
+            "rail",
+            48,
+            1232
+          ]
+        ],
+        "modes": [
+          "rail"
+        ]
+      },
+      "expectMainWidth": 1232,
+      "pass": true,
+      "otherSurfaces": [
+        {
+          "path": "/apps/com.example.crm/crm_account",
+          "dataState": "collapsed",
+          "rail": "rail",
+          "containerZ": "10",
+          "containerPos": "fixed",
+          "sidebar": {
+            "x": 0,
+            "w": 48,
+            "y": 48,
+            "h": 852
+          },
+          "main": {
+            "x": 48,
+            "w": 1232,
+            "y": 48,
+            "h": 852
+          },
+          "footerText": "",
+          "mobileSheet": false
+        },
+        {
+          "path": "/apps/com.example.crm/dashboard/pipeline_dashboard",
+          "dataState": "collapsed",
+          "rail": "rail",
+          "containerZ": "10",
+          "containerPos": "fixed",
+          "sidebar": {
+            "x": 0,
+            "w": 48,
+            "y": 48,
+            "h": 852
+          },
+          "main": {
+            "x": 48,
+            "w": 1232,
+            "y": 48,
+            "h": 852
+          },
+          "footerText": "",
+          "mobileSheet": false
+        },
+        {
+          "path": "/apps/com.example.crm/crm_lead",
+          "dataState": "collapsed",
+          "rail": "rail",
+          "containerZ": "10",
+          "containerPos": "fixed",
+          "sidebar": {
+            "x": 0,
+            "w": 48,
+            "y": 48,
+            "h": 852
+          },
+          "main": {
+            "x": 48,
+            "w": 1232,
+            "y": 48,
+            "h": 852
+          },
+          "footerText": "",
+          "mobileSheet": false
+        }
+      ],
+      "consoleErrors": [],
+      "thresholdProbe": [
+        {
+          "W": 1024,
+          "rail": "rail",
+          "dataState": "collapsed",
+          "sidebarW": 48,
+          "mainX": 48,
+          "mainW": 976
+        },
+        {
+          "W": 1366,
+          "rail": "rail",
+          "dataState": "collapsed",
+          "sidebarW": 48,
+          "mainX": 48,
+          "mainW": 1318
+        },
+        {
+          "W": 1415,
+          "rail": "rail",
+          "dataState": "collapsed",
+          "sidebarW": 48,
+          "mainX": 48,
+          "mainW": 1367
+        },
+        {
+          "W": 1416,
+          "rail": null,
+          "dataState": "expanded",
+          "sidebarW": 256,
+          "mainX": 256,
+          "mainW": 1160
+        },
+        {
+          "W": 1417,
+          "rail": null,
+          "dataState": "expanded",
+          "sidebarW": 256,
+          "mainX": 256,
+          "mainW": 1161
+        },
+        {
+          "W": 1440,
+          "rail": null,
+          "dataState": "expanded",
+          "sidebarW": 256,
+          "mainX": 256,
+          "mainW": 1184
+        }
+      ]
+    },
+    "p1_mount": [
+      [
+        {
+          "t": 9646,
+          "cw": 256,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 10100,
+          "cw": 83,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 10227,
+          "cw": 48,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        }
+      ],
+      {
+        "reload": [
+          {
+            "t": 6537,
+            "cw": 48,
+            "mode": "rail",
+            "st": "collapsed",
+            "labelW": 0,
+            "trans": "left, right, width 0.2s",
+            "z": "10",
+            "mainX": 48
+          }
+        ]
+      },
+      [
+        {
+          "t": 5777,
+          "cw": 256,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 5937,
+          "cw": 135,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 5947,
+          "cw": 117,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 6044,
+          "cw": 100,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 6087,
+          "cw": 48,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        }
+      ],
+      {
+        "reload": [
+          {
+            "t": 5371,
+            "cw": 48,
+            "mode": "rail",
+            "st": "collapsed",
+            "labelW": 0,
+            "trans": "left, right, width 0.2s",
+            "z": "10",
+            "mainX": 48
+          }
+        ]
+      },
+      [
+        {
+          "t": 5610,
+          "cw": 256,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 5763,
+          "cw": 152,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 5856,
+          "cw": 117,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        },
+        {
+          "t": 5990,
+          "cw": 48,
+          "mode": "rail",
+          "st": "collapsed",
+          "labelW": 0,
+          "trans": "left, right, width 0.2s",
+          "z": "10",
+          "mainX": 48
+        }
+      ],
+      {
+        "reload": [
+          {
+            "t": 5543,
+            "cw": 48,
+            "mode": "rail",
+            "st": "collapsed",
+            "labelW": 0,
+            "trans": "left, right, width 0.2s",
+            "z": "10",
+            "mainX": 48
+          }
+        ]
+      }
+    ],
+    "p1_mount2": {
+      "fresh context, no prior state": [
+        {
+          "t": 5277,
+          "w": 256,
+          "mode": "rail",
+          "mainX": 48
+        },
+        {
+          "t": 5421,
+          "w": 135,
+          "mode": "rail",
+          "mainX": 48
+        },
+        {
+          "t": 5470,
+          "w": 100,
+          "mode": "rail",
+          "mainX": 48
+        },
+        {
+          "t": 5541,
+          "w": 65,
+          "mode": "rail",
+          "mainX": 48
+        },
+        {
+          "t": 5547,
+          "w": 48,
+          "mode": "rail",
+          "mainX": 48
+        }
+      ],
+      "cookieBefore": "sidebar_state=true",
+      "prior wide-window session with sidebar expanded (cookie true)": [
+        {
+          "t": 5134,
+          "w": 256,
+          "mode": "rail",
+          "mainX": 48
+        },
+        {
+          "t": 5309,
+          "w": 169,
+          "mode": "rail",
+          "mainX": 48
+        },
+        {
+          "t": 5348,
+          "w": 100,
+          "mode": "rail",
+          "mainX": 48
+        },
+        {
+          "t": 5409,
+          "w": 48,
+          "mode": "rail",
+          "mainX": 48
+        }
+      ],
+      "prior narrow session (already visited at 1280)": [
+        {
+          "t": 5220,
+          "w": 48,
+          "mode": "rail",
+          "mainX": 48
+        }
+      ]
+    },
+    "p1_mount3": {
+      "cookieBeforeReload": "sidebar_state=true",
+      "mountFrames": [
+        {
+          "t": 4715,
+          "w": 256,
+          "mode": "rail"
+        },
+        {
+          "t": 4850,
+          "w": 169,
+          "mode": "rail"
+        },
+        {
+          "t": 4928,
+          "w": 135,
+          "mode": "rail"
+        },
+        {
+          "t": 4983,
+          "w": 48,
+          "mode": "rail"
+        }
+      ],
+      "after": {
+        "st": "collapsed",
+        "rail": "rail",
+        "sbW": 48,
+        "mainX": 48,
+        "mainW": 1232
+      }
+    },
+    "p2": {
+      "point": 2,
+      "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+      "tests": [
+        {
+          "label": "A1 click rail background (24,700)",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 52,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "A2 press Escape",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 51,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B1 click app bar Toggle sidebar button",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 54,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B2 click outside on empty content (700,650)",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 51,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B3 click app bar button again (open)",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 53,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B4 click app bar button while open (toggle close?)",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 106,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B5 open via button",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 159,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B6 click outside on app bar empty area (400,24)",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 200,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B7 open via button",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 52,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "B8 click outside on a list cell (Email column, 780,260)",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 102,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "C1 Control+b",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 52,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "C2 Control+b again",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 51,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "C3 Meta+b",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 50,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "C4 Meta+b again",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 100,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "C5 Control+b after clicking content",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 50,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "C6 Escape",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 100,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "D1 click rail background (24,700)",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 51,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "D2 click \"Accounts\" in overlay",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 79,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "D3 open via ctrl+b",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 51,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "D4 click \"Sales\" group label (not a navigation)",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account"
+          },
+          "after": {
+            "st": "expanded",
+            "rail": "overlay",
+            "z": "40",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account",
+            "footer": "Keep sidebar open"
+          },
+          "duringFrames": {
+            "frames": 106,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              255,
+              255
+            ]
+          }
+        },
+        {
+          "label": "D5 click \"Pipeline\" in overlay",
+          "before": {
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/dashboard/pipeline_dashboard",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 61,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "E1 hover rail icon (24,116) 800ms",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 49,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              47
+            ]
+          }
+        },
+        {
+          "label": "E2 hover rail background (24,600) 800ms",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 50,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              47
+            ]
+          }
+        },
+        {
+          "label": "E3 click rail icon for Accounts",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 83,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              47
+            ]
+          }
+        },
+        {
+          "label": "E4 click rail icon for Opportunities",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_opportunity",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 64,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              47
+            ]
+          }
+        },
+        {
+          "label": "E5 click rail icon for Pipeline",
+          "before": {
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_opportunity"
+          },
+          "after": {
+            "st": "collapsed",
+            "rail": "rail",
+            "z": "10",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/dashboard/pipeline_dashboard",
+            "footer": ""
+          },
+          "duringFrames": {
+            "frames": 61,
+            "mainX": [
+              48,
+              48
+            ],
+            "mainW": [
+              1232,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              47
+            ]
+          }
+        }
+      ],
+      "topAt": "sidebar overlay"
+    },
+    "p2_extra": [
+      "overlay open -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact",
+      "clicked ⋯ for Leads -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact menu=[\"Add to favorites | Open in new tab | Copy link\"]",
+      "Esc (closes menu?) -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact",
+      "Esc again -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact",
+      "opened record Grace -> collapsed/rail sb=48 main=48+1232 path=/apps/com.example.crm/crm_contact url=http://localhost:45293/apps/com.example.crm/crm_contact?recordId=FXuNJOyxe00HD5-x dialogs=[\"Record Detail  Record detail o\"]",
+      "Ctrl+B with record open -> expanded/overlay sb=256 main=48+1232 path=/apps/com.example.crm/crm_contact dialogs=[\"Record Detail  Record detail o\"]",
+      "Esc -> collapsed/rail sb=48 main=48+1232 path=/apps/com.example.crm/crm_contact url=http://localhost:45293/apps/com.example.crm/crm_contact dialogs=[]"
+    ],
+    "p2_esc": {
+      "E1 app bar button then Esc": [
+        "open via button -> expanded/overlay sb=256 focus=BUTTON[trigger] \"Toggle sidebar\" inSidebar=false menus=0",
+        "Esc -> collapsed/rail sb=48 focus=BUTTON[trigger] \"Toggle sidebar\" inSidebar=false menus=0"
+      ],
+      "E2 rail bg click then Tab then Esc": [
+        "open -> expanded/overlay sb=256 focus=body menus=0",
+        "Tab -> expanded/overlay sb=256 focus=BUTTON[group-label] \"Sales\" inSidebar=true menus=0",
+        "Esc -> collapsed/rail sb=48 focus=body menus=0"
+      ],
+      "E3 rail bg click, click Sales group label, Esc": [
+        "clicked group label -> expanded/overlay sb=256 focus=BUTTON[group-label] \"Sales\n5\" inSidebar=true menus=0",
+        "Esc -> collapsed/rail sb=48 focus=body menus=0"
+      ],
+      "E4 Ctrl+B, focus nav link programmatically, Esc": [
+        "focused Accounts link -> expanded/overlay sb=256 focus=A[menu-button] \"Accounts\" inSidebar=true menus=0",
+        "Esc -> expanded/overlay sb=256 focus=A[menu-button] \"Accounts\" inSidebar=true menus=0"
+      ],
+      "E5 ⋯ menu, Esc closes menu, Esc again": [
+        "menu open -> expanded/overlay sb=256 focus=DIV \"Add to favorites\nOpen in \" inSidebar=false menus=1",
+        "Esc #1 -> expanded/overlay sb=256 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true menus=0",
+        "Esc -> expanded/overlay sb=256 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true menus=0"
+      ],
+      "E6 Ctrl+B then hover overlay and Esc": [
+        "hover overlay -> expanded/overlay sb=256 focus=body menus=0",
+        "Esc -> collapsed/rail sb=48 focus=body menus=0"
+      ]
+    },
+    "p2_esc2": {
+      "tabs1": [
+        "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+        "Tab x1 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[group-label] \"Sales\" inSidebar=true tooltips=[]",
+        "Esc -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]",
+        "Esc again -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]"
+      ],
+      "tabs2": [
+        "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+        "Tab x2 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[\"\",\"Leads\"]",
+        "Esc -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[]",
+        "Esc again -> collapsed/rail sb=48 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[]"
+      ],
+      "tabs3": [
+        "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+        "Tab x3 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true tooltips=[]",
+        "Esc -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]",
+        "Esc again -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]"
+      ],
+      "tabs4": [
+        "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+        "Tab x4 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[\"\",\"Accounts\"]",
+        "Esc -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[]",
+        "Esc again -> collapsed/rail sb=48 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[]"
+      ],
+      "keyboardOnly": [
+        "Ctrl+B -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+        "Tab 1 -> expanded/overlay sb=256 main=48+1232 focus=A[] \"Skip to content\" inSidebar=false tooltips=[]",
+        "Tab 2 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[trigger] \"Toggle sidebar\" inSidebar=false tooltips=[\"Toggle sidebar\\n⌘B\",\"Toggle sidebar\\n⌘B\"]",
+        "Tab 3 -> expanded/overlay sb=256 main=48+1232 focus=A[] \"ObjectOS home\" inSidebar=false tooltips=[]",
+        "Tab 4 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"CRM\" inSidebar=false tooltips=[]",
+        "Tab 5 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Search…\" inSidebar=false tooltips=[]",
+        "Tab 6 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Open inbox\" inSidebar=false tooltips=[]",
+        "Tab 7 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Help & Documentation\" inSidebar=false tooltips=[]",
+        "Tab 8 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"DA\" inSidebar=false tooltips=[]",
+        "Tab 9 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[group-label] \"Sales\" inSidebar=true tooltips=[]",
+        "Tab 10 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[\"\",\"Leads\"]",
+        "Tab 11 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true tooltips=[]",
+        "Tab 12 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[\"\",\"Accounts\"]"
+      ],
+      "keepOpenFocus": [
+        "focus Keep open -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-button] \"Keep sidebar open\" inSidebar=true tooltips=[\"\",\"Keep sidebar open\"]",
+        "Esc -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-button] \"Keep sidebar open\" inSidebar=true tooltips=[]"
+      ]
+    },
+    "p2_esc3": {
+      "rail bg click": [
+        "rail bg click -> expanded/overlay sb=256",
+        "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+        "Esc #1 -> expanded/overlay sb=256",
+        "Esc #2 -> collapsed/rail sb=48"
+      ],
+      "app bar button": [
+        "app bar button -> expanded/overlay sb=256",
+        "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+        "Esc #1 -> expanded/overlay sb=256",
+        "Esc #2 -> collapsed/rail sb=48"
+      ],
+      "Ctrl+B": [
+        "Ctrl+B -> expanded/overlay sb=256",
+        "hover \"Accounts\" item 900ms -> expanded/overlay sb=256 tooltips=[{\"text\":\"Accounts\",\"visibleBox\":[251,154,0,0]},{\"wrapper\":\"\",\"box\":[251,154,0,0],\"opacity\":\"1\",\"display\":\"none\",\"visibility\":\"visible\"}]",
+        "Esc #1 -> expanded/overlay sb=256",
+        "Esc #2 -> collapsed/rail sb=48"
+      ]
+    },
+    "p2_railbg": [
+      {
+        "x": 24,
+        "y": 880,
+        "target": "DIV[content] Leads\nAccounts\nConta",
+        "st": "expanded",
+        "rail": "overlay",
+        "sbW": 256,
+        "mainX": 48,
+        "mainW": 1232,
+        "path": "/apps/com.example.crm/crm_contact"
+      },
+      {
+        "x": 4,
+        "y": 300,
+        "target": "DIV[group] ",
+        "st": "expanded",
+        "rail": "overlay",
+        "sbW": 256,
+        "mainX": 48,
+        "mainW": 1232,
+        "path": "/apps/com.example.crm/crm_contact"
+      },
+      {
+        "x": 44,
+        "y": 500,
+        "target": "DIV[content] Leads\nAccounts\nConta",
+        "st": "expanded",
+        "rail": "overlay",
+        "sbW": 256,
+        "mainX": 48,
+        "mainW": 1232,
+        "path": "/apps/com.example.crm/crm_contact"
+      },
+      {
+        "x": 24,
+        "y": 98,
+        "target": "UL[menu] Leads\nAccounts\nConta",
+        "st": "expanded",
+        "rail": "overlay",
+        "sbW": 256,
+        "mainX": 48,
+        "mainW": 1232,
+        "path": "/apps/com.example.crm/crm_contact"
+      },
+      {
+        "x": 24,
+        "y": 246,
+        "target": "DIV[group] Leads\nAccounts\nConta",
+        "st": "expanded",
+        "rail": "overlay",
+        "sbW": 256,
+        "mainX": 48,
+        "mainW": 1232,
+        "path": "/apps/com.example.crm/crm_contact"
+      }
+    ],
+    "p3": {
+      "point": 3,
+      "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+      "steps": [
+        {
+          "label": "0 initial at 1280",
+          "st": "collapsed",
+          "rail": "rail",
+          "z": "10",
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "foot": [],
+          "storage": {
+            "ls": {
+              "os:console-sidebar:wide-open": "true"
+            },
+            "cookie": [
+              "sidebar_state=false"
+            ]
+          }
+        },
+        {
+          "label": "1 expanded via rail background",
+          "st": "expanded",
+          "rail": "overlay",
+          "z": "40",
+          "sbW": 256,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "false",
+              "title": null,
+              "box": [
+                8,
+                856,
+                239,
+                36
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:console-sidebar:wide-open": "true"
+            },
+            "cookie": [
+              "sidebar_state=true"
+            ]
+          }
+        },
+        {
+          "label": "2 after pressing foot item (keep open)",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1024,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "true",
+              "title": null,
+              "box": [
+                8,
+                856,
+                239,
+                36
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=true"
+            ]
+          },
+          "frames": {
+            "frames": 56,
+            "mainX": [
+              48,
+              256
+            ],
+            "mainW": [
+              1024,
+              1232
+            ],
+            "sidebarW": [
+              255,
+              255
+            ]
+          }
+        },
+        {
+          "label": "3 Esc while kept open",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1024,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "true",
+              "title": null,
+              "box": [
+                8,
+                856,
+                239,
+                36
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=true"
+            ]
+          }
+        },
+        {
+          "label": "4 outside click while kept open",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1024,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "true",
+              "title": null,
+              "box": [
+                8,
+                856,
+                239,
+                36
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=true"
+            ]
+          }
+        },
+        {
+          "label": "5 nav choice while kept open",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1024,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "true",
+              "title": null,
+              "box": [
+                8,
+                856,
+                239,
+                36
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=true"
+            ]
+          }
+        },
+        {
+          "label": "6 after reload",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1024,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "true",
+              "title": null,
+              "box": [
+                8,
+                856,
+                239,
+                36
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=true"
+            ]
+          }
+        },
+        {
+          "label": "7 Control+b while kept open",
+          "st": "collapsed",
+          "rail": null,
+          "z": "10",
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "true",
+              "title": null,
+              "box": [
+                8,
+                860,
+                32,
+                32
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=false"
+            ]
+          }
+        },
+        {
+          "label": "8 Control+b again",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1024,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "Keep sidebar open",
+          "foot": [
+            {
+              "text": "Keep sidebar open",
+              "aria": null,
+              "pressed": "true",
+              "title": null,
+              "box": [
+                8,
+                856,
+                239,
+                36
+              ]
+            }
+          ],
+          "storage": {
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=true"
+            ]
+          }
+        },
+        {
+          "label": "9 after pressing foot item again",
+          "st": "collapsed",
+          "rail": "rail",
+          "z": "10",
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "foot": [],
+          "storage": {
+            "ls": {
+              "os:console-sidebar:wide-open": "true",
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=false"
+            ]
+          },
+          "frames": {
+            "frames": 53,
+            "mainX": [
+              48,
+              256
+            ],
+            "mainW": [
+              1024,
+              1232
+            ],
+            "sidebarW": [
+              47,
+              255
+            ]
+          }
+        },
+        {
+          "label": "10 after reload (unpinned)",
+          "st": "collapsed",
+          "rail": "rail",
+          "z": "10",
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "foot": [],
+          "storage": {
+            "ls": {
+              "os:console-sidebar:wide-open": "true",
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+            },
+            "cookie": [
+              "sidebar_state=false"
+            ]
+          }
+        }
+      ],
+      "newTabSameContext": {
+        "st": "expanded",
+        "rail": null,
+        "z": "10",
+        "sbW": 256,
+        "mainX": 256,
+        "mainW": 1024,
+        "path": "/apps/com.example.crm/crm_contact",
+        "footer": "Keep sidebar open"
+      }
+    },
+    "p3_edge": {
+      "steps": [
+        {
+          "label": "pinned",
+          "st": "expanded",
+          "rail": null,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1024,
+          "path": "/apps/com.example.crm/crm_contact",
+          "ls": {
+            "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+          },
+          "ck": "sidebar_state=true"
+        },
+        {
+          "label": "pinned + Ctrl+B (collapsed docked)",
+          "st": "collapsed",
+          "rail": null,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "ls": {
+            "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+          },
+          "ck": "sidebar_state=false"
+        },
+        {
+          "label": "  reload",
+          "st": "collapsed",
+          "rail": null,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "ls": {
+            "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+          },
+          "ck": "sidebar_state=false"
+        },
+        {
+          "label": "  click rail background",
+          "st": "collapsed",
+          "rail": null,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "ls": {
+            "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+          },
+          "ck": "sidebar_state=false"
+        },
+        {
+          "label": "  Esc",
+          "st": "collapsed",
+          "rail": null,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "ls": {
+            "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+          },
+          "ck": "sidebar_state=false"
+        },
+        {
+          "label": "  press foot pin icon while collapsed",
+          "st": "collapsed",
+          "rail": "rail",
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "ls": {
+            "os:console-sidebar:wide-open": "false",
+            "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+          },
+          "ck": "sidebar_state=false"
+        },
+        {
+          "label": "  reload",
+          "st": "collapsed",
+          "rail": "rail",
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1232,
+          "path": "/apps/com.example.crm/crm_contact",
+          "ls": {
+            "os:console-sidebar:wide-open": "false",
+            "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+          },
+          "ck": "sidebar_state=false"
+        }
+      ]
+    },
+    "p4": {
+      "point": 4,
+      "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+      "w1440": [
+        {
+          "label": "initial",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1184,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "Esc",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1184,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "outside click",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1184,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "hover sidebar",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1184,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "nav choice Accounts",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1184,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "Ctrl+B",
+          "st": "collapsed",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1392,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "hover collapsed rail bg",
+          "st": "collapsed",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1392,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "click collapsed rail background",
+          "st": "collapsed",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1392,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "Esc",
+          "st": "collapsed",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1392,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "collapsed icon click Contacts",
+          "st": "collapsed",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 1392,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "app bar button",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1184,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        },
+        {
+          "label": "reload",
+          "st": "expanded",
+          "rail": null,
+          "z": "10",
+          "sbX": 0,
+          "sbW": 256,
+          "mainX": 256,
+          "mainW": 1184,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "ls": {}
+        }
+      ],
+      "w700": [
+        {
+          "label": "initial",
+          "st": null,
+          "rail": null,
+          "z": null,
+          "sbX": null,
+          "sbW": null,
+          "mainX": 0,
+          "mainW": 700,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "sheet": {
+            "dialogs": [],
+            "overlays": [],
+            "main": {
+              "x": 0,
+              "y": 48,
+              "w": 700,
+              "h": 852
+            },
+            "sidebarInDom": false
+          }
+        },
+        {
+          "label": "app bar button",
+          "st": null,
+          "rail": null,
+          "z": "auto",
+          "sbX": 0,
+          "sbW": 700,
+          "mainX": 0,
+          "mainW": 700,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": true,
+          "sheet": {
+            "dialogs": [
+              {
+                "attrs": {
+                  "role": "dialog",
+                  "data-state": "open",
+                  "data-sidebar": "sidebar",
+                  "data-mobile": "true"
+                },
+                "box": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 288,
+                  "h": 900
+                },
+                "z": "50",
+                "footer": [],
+                "text": "Sidebar | Displays the mobile sidebar. | CRM | Sales | Leads | Accounts | Contacts | Opportunities | Activities | Analytics | Pipeline | Recent"
+              }
+            ],
+            "overlays": [
+              {
+                "box": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 700,
+                  "h": 900
+                },
+                "z": "50",
+                "bg": "rgba(0, 0, 0, 0.35)"
+              }
+            ],
+            "main": {
+              "x": 0,
+              "y": 48,
+              "w": 700,
+              "h": 852
+            },
+            "sidebarInDom": false
+          }
+        },
+        {
+          "label": "Esc",
+          "st": null,
+          "rail": null,
+          "z": null,
+          "sbX": null,
+          "sbW": null,
+          "mainX": 0,
+          "mainW": 700,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false,
+          "sheet": {
+            "dialogs": [],
+            "overlays": [],
+            "main": {
+              "x": 0,
+              "y": 48,
+              "w": 700,
+              "h": 852
+            },
+            "sidebarInDom": false
+          }
+        },
+        {
+          "label": "Ctrl+B",
+          "st": null,
+          "rail": null,
+          "z": "auto",
+          "sbX": 0,
+          "sbW": 700,
+          "mainX": 0,
+          "mainW": 700,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": true,
+          "sheet": {
+            "dialogs": [
+              {
+                "attrs": {
+                  "role": "dialog",
+                  "data-state": "open",
+                  "data-sidebar": "sidebar",
+                  "data-mobile": "true"
+                },
+                "box": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 288,
+                  "h": 900
+                },
+                "z": "50",
+                "footer": [],
+                "text": "Sidebar | Displays the mobile sidebar. | CRM | Sales | Leads | Accounts | Contacts | Opportunities | Activities | Analytics | Pipeline | Recent"
+              }
+            ],
+            "overlays": [
+              {
+                "box": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 700,
+                  "h": 900
+                },
+                "z": "50",
+                "bg": "rgba(0, 0, 0, 0.35)"
+              }
+            ],
+            "main": {
+              "x": 0,
+              "y": 48,
+              "w": 700,
+              "h": 852
+            },
+            "sidebarInDom": false
+          }
+        },
+        {
+          "label": "nav choice in drawer",
+          "st": null,
+          "rail": null,
+          "z": "auto",
+          "sbX": 0,
+          "sbW": 700,
+          "mainX": 0,
+          "mainW": 700,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "mobileSheet": true,
+          "sheet": {
+            "dialogs": [
+              {
+                "attrs": {
+                  "role": "dialog",
+                  "data-state": "open",
+                  "data-sidebar": "sidebar",
+                  "data-mobile": "true"
+                },
+                "box": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 288,
+                  "h": 900
+                },
+                "z": "50",
+                "footer": [],
+                "text": "Sidebar | Displays the mobile sidebar. | CRM | Sales | Leads | Accounts | Contacts | Opportunities | Activities | Analytics | Pipeline | Recent"
+              }
+            ],
+            "overlays": [
+              {
+                "box": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 700,
+                  "h": 900
+                },
+                "z": "50",
+                "bg": "rgba(0, 0, 0, 0.35)"
+              }
+            ],
+            "main": {
+              "x": 0,
+              "y": 48,
+              "w": 700,
+              "h": 852
+            },
+            "sidebarInDom": false
+          }
+        },
+        {
+          "label": "click outside (backdrop)",
+          "st": null,
+          "rail": null,
+          "z": null,
+          "sbX": null,
+          "sbW": null,
+          "mainX": 0,
+          "mainW": 700,
+          "path": "/apps/com.example.crm/crm_account",
+          "footer": "",
+          "mobileSheet": false,
+          "sheet": {
+            "dialogs": [],
+            "overlays": [],
+            "main": {
+              "x": 0,
+              "y": 48,
+              "w": 700,
+              "h": 852
+            },
+            "sidebarInDom": false
+          }
+        }
+      ],
+      "boundaries": [
+        {
+          "W": 767,
+          "st": null,
+          "rail": null,
+          "z": null,
+          "sbX": null,
+          "sbW": null,
+          "mainX": 0,
+          "mainW": 767,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false
+        },
+        {
+          "W": 768,
+          "st": "collapsed",
+          "rail": "rail",
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 720,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false
+        },
+        {
+          "W": 800,
+          "st": "collapsed",
+          "rail": "rail",
+          "z": "10",
+          "sbX": 0,
+          "sbW": 48,
+          "mainX": 48,
+          "mainW": 752,
+          "path": "/apps/com.example.crm/crm_contact",
+          "footer": "",
+          "mobileSheet": false
+        }
+      ]
+    },
+    "p5": {
+      "point": 5,
+      "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+      "scenarios": {
+        "S1 collapse on wide, narrow, widen": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "Ctrl+B at 1440 (collapse)",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized back to 1440",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          }
+        ],
+        "S2 collapse on wide, narrow, use overlay (rail click + Esc, then nav), widen": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "Ctrl+B at 1440 (collapse)",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "rail bg click",
+            "W": 1280,
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "Esc",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "Ctrl+B",
+            "W": 1280,
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "nav choice",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_account",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized back to 1440",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_account",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          }
+        ],
+        "S3 expanded on wide, narrow, open overlay and leave it open, widen": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "initial 1440 expanded",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "true"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "Ctrl+B overlay open",
+            "W": 1280,
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "true"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "Ctrl+B overlay closed",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "true"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized back to 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=true"
+          }
+        ],
+        "S4 collapse on wide, narrow, reload at narrow, widen": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "Ctrl+B at 1440 (collapse)",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "reload at 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized back to 1440",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "reload at 1440",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          }
+        ],
+        "S5 collapse on wide, narrow, overlay open, widen while overlay open": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "Ctrl+B at 1440 (collapse)",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "rail bg click (overlay open)",
+            "W": 1280,
+            "st": "expanded",
+            "rail": "overlay",
+            "sbW": 256,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "resized back to 1440 with overlay open",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          }
+        ],
+        "S6 expanded on wide, narrow, pin on, Ctrl+B, unpin, widen": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "initial 1440 expanded",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "true"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "pin on",
+            "W": 1280,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1024,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "Ctrl+B (collapse while pinned)",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "press pin icon (unpin)",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false",
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized back to 1440",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+            },
+            "ck": "sidebar_state=false"
+          }
+        ],
+        "S7 collapse on wide, narrow, pin on then off, widen": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "Ctrl+B at 1440 (collapse)",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "pin on",
+            "W": 1280,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1024,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "pin off",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "true",
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized back to 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+            },
+            "ck": "sidebar_state=true"
+          }
+        ],
+        "S8 collapse on wide, narrow, pin on, widen, narrow": [
+          {
+            "label": "start 1440",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": ""
+          },
+          {
+            "label": "Ctrl+B at 1440 (collapse)",
+            "W": 1440,
+            "st": "collapsed",
+            "rail": null,
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1392,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {},
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "resized to 1280",
+            "W": 1280,
+            "st": "collapsed",
+            "rail": "rail",
+            "sbW": 48,
+            "mainX": 48,
+            "mainW": 1232,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:console-sidebar:wide-open": "false"
+            },
+            "ck": "sidebar_state=false"
+          },
+          {
+            "label": "pin on",
+            "W": 1280,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1024,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "resized to 1440 (pinned)",
+            "W": 1440,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1184,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "ck": "sidebar_state=true"
+          },
+          {
+            "label": "resized to 1280 again",
+            "W": 1280,
+            "st": "expanded",
+            "rail": null,
+            "sbW": 256,
+            "mainX": 256,
+            "mainW": 1024,
+            "path": "/apps/com.example.crm/crm_contact",
+            "ls": {
+              "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+            },
+            "ck": "sidebar_state=true"
+          }
+        ]
+      }
+    },
+    "p5_repeat": [
+      [
+        "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+        "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+        "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+        "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+        "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+        "widen -> 1440: expanded/null sb=256 main=256+1184",
+        "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+      ],
+      [
+        "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+        "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+        "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+        "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+        "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+        "widen -> 1440: expanded/null sb=256 main=256+1184",
+        "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+      ],
+      [
+        "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+        "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+        "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+        "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+        "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+        "widen -> 1440: expanded/null sb=256 main=256+1184",
+        "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+      ]
+    ]
+  }
+}

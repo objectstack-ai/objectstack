@@ -1,0 +1,448 @@
+{
+  "point": 4,
+  "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+  "w1440": [
+    {
+      "label": "initial",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1184,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "Esc",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1184,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "outside click",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1184,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "hover sidebar",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1184,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "nav choice Accounts",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1184,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "Ctrl+B",
+      "st": "collapsed",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1392,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "hover collapsed rail bg",
+      "st": "collapsed",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1392,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "click collapsed rail background",
+      "st": "collapsed",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1392,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "Esc",
+      "st": "collapsed",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1392,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "collapsed icon click Contacts",
+      "st": "collapsed",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1392,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "app bar button",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1184,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    },
+    {
+      "label": "reload",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbX": 0,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1184,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "ls": {}
+    }
+  ],
+  "w700": [
+    {
+      "label": "initial",
+      "st": null,
+      "rail": null,
+      "z": null,
+      "sbX": null,
+      "sbW": null,
+      "mainX": 0,
+      "mainW": 700,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "sheet": {
+        "dialogs": [],
+        "overlays": [],
+        "main": {
+          "x": 0,
+          "y": 48,
+          "w": 700,
+          "h": 852
+        },
+        "sidebarInDom": false
+      }
+    },
+    {
+      "label": "app bar button",
+      "st": null,
+      "rail": null,
+      "z": "auto",
+      "sbX": 0,
+      "sbW": 700,
+      "mainX": 0,
+      "mainW": 700,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": true,
+      "sheet": {
+        "dialogs": [
+          {
+            "attrs": {
+              "role": "dialog",
+              "data-state": "open",
+              "data-sidebar": "sidebar",
+              "data-mobile": "true"
+            },
+            "box": {
+              "x": 0,
+              "y": 0,
+              "w": 288,
+              "h": 900
+            },
+            "z": "50",
+            "footer": [],
+            "text": "Sidebar | Displays the mobile sidebar. | CRM | Sales | Leads | Accounts | Contacts | Opportunities | Activities | Analytics | Pipeline | Recent"
+          }
+        ],
+        "overlays": [
+          {
+            "box": {
+              "x": 0,
+              "y": 0,
+              "w": 700,
+              "h": 900
+            },
+            "z": "50",
+            "bg": "rgba(0, 0, 0, 0.35)"
+          }
+        ],
+        "main": {
+          "x": 0,
+          "y": 48,
+          "w": 700,
+          "h": 852
+        },
+        "sidebarInDom": false
+      }
+    },
+    {
+      "label": "Esc",
+      "st": null,
+      "rail": null,
+      "z": null,
+      "sbX": null,
+      "sbW": null,
+      "mainX": 0,
+      "mainW": 700,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false,
+      "sheet": {
+        "dialogs": [],
+        "overlays": [],
+        "main": {
+          "x": 0,
+          "y": 48,
+          "w": 700,
+          "h": 852
+        },
+        "sidebarInDom": false
+      }
+    },
+    {
+      "label": "Ctrl+B",
+      "st": null,
+      "rail": null,
+      "z": "auto",
+      "sbX": 0,
+      "sbW": 700,
+      "mainX": 0,
+      "mainW": 700,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": true,
+      "sheet": {
+        "dialogs": [
+          {
+            "attrs": {
+              "role": "dialog",
+              "data-state": "open",
+              "data-sidebar": "sidebar",
+              "data-mobile": "true"
+            },
+            "box": {
+              "x": 0,
+              "y": 0,
+              "w": 288,
+              "h": 900
+            },
+            "z": "50",
+            "footer": [],
+            "text": "Sidebar | Displays the mobile sidebar. | CRM | Sales | Leads | Accounts | Contacts | Opportunities | Activities | Analytics | Pipeline | Recent"
+          }
+        ],
+        "overlays": [
+          {
+            "box": {
+              "x": 0,
+              "y": 0,
+              "w": 700,
+              "h": 900
+            },
+            "z": "50",
+            "bg": "rgba(0, 0, 0, 0.35)"
+          }
+        ],
+        "main": {
+          "x": 0,
+          "y": 48,
+          "w": 700,
+          "h": 852
+        },
+        "sidebarInDom": false
+      }
+    },
+    {
+      "label": "nav choice in drawer",
+      "st": null,
+      "rail": null,
+      "z": "auto",
+      "sbX": 0,
+      "sbW": 700,
+      "mainX": 0,
+      "mainW": 700,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "mobileSheet": true,
+      "sheet": {
+        "dialogs": [
+          {
+            "attrs": {
+              "role": "dialog",
+              "data-state": "open",
+              "data-sidebar": "sidebar",
+              "data-mobile": "true"
+            },
+            "box": {
+              "x": 0,
+              "y": 0,
+              "w": 288,
+              "h": 900
+            },
+            "z": "50",
+            "footer": [],
+            "text": "Sidebar | Displays the mobile sidebar. | CRM | Sales | Leads | Accounts | Contacts | Opportunities | Activities | Analytics | Pipeline | Recent"
+          }
+        ],
+        "overlays": [
+          {
+            "box": {
+              "x": 0,
+              "y": 0,
+              "w": 700,
+              "h": 900
+            },
+            "z": "50",
+            "bg": "rgba(0, 0, 0, 0.35)"
+          }
+        ],
+        "main": {
+          "x": 0,
+          "y": 48,
+          "w": 700,
+          "h": 852
+        },
+        "sidebarInDom": false
+      }
+    },
+    {
+      "label": "click outside (backdrop)",
+      "st": null,
+      "rail": null,
+      "z": null,
+      "sbX": null,
+      "sbW": null,
+      "mainX": 0,
+      "mainW": 700,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "mobileSheet": false,
+      "sheet": {
+        "dialogs": [],
+        "overlays": [],
+        "main": {
+          "x": 0,
+          "y": 48,
+          "w": 700,
+          "h": 852
+        },
+        "sidebarInDom": false
+      }
+    }
+  ],
+  "boundaries": [
+    {
+      "W": 767,
+      "st": null,
+      "rail": null,
+      "z": null,
+      "sbX": null,
+      "sbW": null,
+      "mainX": 0,
+      "mainW": 767,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false
+    },
+    {
+      "W": 768,
+      "st": "collapsed",
+      "rail": "rail",
+      "z": "10",
+      "sbX": 0,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 720,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false
+    },
+    {
+      "W": 800,
+      "st": "collapsed",
+      "rail": "rail",
+      "z": "10",
+      "sbX": 0,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 752,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "mobileSheet": false
+    }
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "RecordDrawerV4Enlarged.dc.html": {
+    "title": "记录 v4 · 子表放大态（分栏 720 内）= 「任务」页签激活 · 头部原样 · 表格占满",
+    "docW": 1600,
+    "docH": 1000,
+    "asides": [
+      {
+        "box": {
+          "x": 0,
+          "y": 48,
+          "w": 200,
+          "h": 852
+        },
+        "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+      },
+      {
+        "box": {
+          "x": 880,
+          "y": 48,
+          "w": 720,
+          "h": 852
+        },
+        "style": "min-width:0;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)",
+        "text": "联系人 | › | John Smith | 3 / 21 | ↓ | ↑ | ⤢ | ✕ | John Smith | 联系人 | VP Sales · Acme Corp | 记录通话 | 安排会议 | ⋯ | 邮箱 | john.smith@acme.com | 客户 | Acme Corp | 电话 | +1 555 0100 | 要点 = crm_contact.highlightFields [full_name, email, crm_account, phon"
+      }
+    ]
+  },
+  "RecordDrawerV4Max.dc.html": {
+    "title": "记录 v4 · ⤢ 铺满态 · 记录占满内容区（留侧栏）· URL 不变 · 三栏 · 顶行「联系人 › John Smith … 3 / 21 ↓ ↑ ⊟ ⤡ ✕」",
+    "docW": 1600,
+    "docH": 1000,
+    "asides": [
+      {
+        "box": {
+          "x": 0,
+          "y": 48,
+          "w": 200,
+          "h": 852
+        },
+        "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+      },
+      {
+        "box": {
+          "x": 200,
+          "y": 48,
+          "w": 1400,
+          "h": 852
+        },
+        "style": "position:absolute;inset:0 0 0 200px;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)",
+        "text": "联系人 | › | John Smith | 3 / 21 | ↓ | ↑ | ⊟ | ⤡ | ✕ | John Smith | 联系人 | VP Sales · Acme Corp | 记录通话 | 记录会议 | 安排会议 | ⋯ | 邮箱 | john.smith@acme.com | 客户 | Acme Corp | 电话 | +1 555 0100 | 要点 = crm_contact.highlightFields [full_name, email, crm_accoun"
+      }
+    ]
+  },
+  "RecordDrawerV4Peek.dc.html": {
+    "title": "记录 v4 · 默认分栏 · 列表 464 三列 + 记录 720 单列堆叠 · 顶行「联系人 › John Smith … 3 / 21 ↓ ↑ ⤢ ✕」",
+    "docW": 1600,
+    "docH": 1367,
+    "asides": [
+      {
+        "box": {
+          "x": 0,
+          "y": 48,
+          "w": 200,
+          "h": 1319
+        },
+        "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+      },
+      {
+        "box": {
+          "x": 880,
+          "y": 48,
+          "w": 720,
+          "h": 1319
+        },
+        "style": "min-width:0;display:grid;grid-template-rows:auto auto 1fr;background:var(--bg);border-left:1px solid var(--border)",
+        "text": "联系人 | › | John Smith | 3 / 21 | ↓ | ↑ | ⤢ | ✕ | John Smith | 联系人 | VP Sales · Acme Corp | 记录通话 | 安排会议 | ⋯ | 邮箱 | john.smith@acme.com | 客户 | Acme Corp | 电话 | +1 555 0100 | 要点 = crm_contact.highlightFields [full_name, email, crm_account, phon"
+      }
+    ]
+  },
+  "RecordMobile.dc.html": {
+    "title": "记录页 v4 · 手机端（列表 → 记录页单列堆叠 → 一层下）· 无页签",
+    "docW": 1600,
+    "docH": 1000,
+    "asides": []
+  },
+  "RecordPageV4Enlarged.dc.html": {
+    "title": "记录页 v4 · 子表放大态 = 「任务」页签激活 · 头部原样 · 表格占满 · 不做 modal",
+    "docW": 1600,
+    "docH": 1000,
+    "asides": [
+      {
+        "box": {
+          "x": 0,
+          "y": 48,
+          "w": 200,
+          "h": 852
+        },
+        "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+      }
+    ]
+  },
+  "RecordPageV4Panels.dc.html": {
+    "title": "记录页 v4 · 关联列改为「面板」模型 · 三栏（工作型对象，动态独立成列）",
+    "docW": 1664,
+    "docH": 1006,
+    "asides": [
+      {
+        "box": {
+          "x": 0,
+          "y": 48,
+          "w": 200,
+          "h": 958
+        },
+        "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+      }
+    ]
+  },
+  "RecordPageV4Product.dc.html": {
+    "title": "记录页 v4 · 主数据对象（产品）· 子表行首列跳过回指 FK · 轻量折叠动态",
+    "docW": 1600,
+    "docH": 1000,
+    "asides": [
+      {
+        "box": {
+          "x": 0,
+          "y": 48,
+          "w": 200,
+          "h": 852
+        },
+        "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 产品 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+      }
+    ]
+  },
+  "RecordPageV4TwoCol.dc.html": {
+    "title": "记录页 v4 · 两栏（带侧栏 1200 宽）· 动态作为右栏顶部面板 · 无栏开关",
+    "docW": 1600,
+    "docH": 1000,
+    "asides": [
+      {
+        "box": {
+          "x": 0,
+          "y": 48,
+          "w": 200,
+          "h": 921
+        },
+        "style": "border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 联系人 | 商机 | 报价 | 我的工作 | 我的任务 | 我的商机 | 我的线索 | 我的日历"
+      }
+    ]
+  },
+  "SidebarReports.dc.html": {
+    "title": "侧栏「全部报表」· 现状与方案（条件显示，并入应用自己的报表组）",
+    "docW": 1600,
+    "docH": 1000,
+    "asides": [
+      {
+        "box": {
+          "x": 32,
+          "y": 53,
+          "w": 220,
+          "h": 560
+        },
+        "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 商机 | 报价 | 报表 10 | 销售业绩 | 销售活动 | CRM 总览 | … | 📊 全部报表"
+      },
+      {
+        "box": {
+          "x": 292,
+          "y": 53,
+          "w": 220,
+          "h": 560
+        },
+        "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 销售 | 线索 | 客户 | 商机 | 报价 | 报表 10 | 销售业绩 | 销售活动 | CRM 总览 | … | 全部报表 →"
+      },
+      {
+        "box": {
+          "x": 552,
+          "y": 53,
+          "w": 220,
+          "h": 560
+        },
+        "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 服务 | 工单 | 知识库 | 服务概览 | 📊 全部报表"
+      },
+      {
+        "box": {
+          "x": 812,
+          "y": 53,
+          "w": 220,
+          "h": 560
+        },
+        "style": "width:220px;height:560px;border:1px solid var(--border);border-radius:10px;background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px",
+        "text": "首页 | 销售主页 | 待办 | 我的待办 | 已完成"
+      }
+    ]
+  }
+}

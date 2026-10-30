@@ -1,0 +1,45 @@
+{
+  "tabs1": [
+    "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+    "Tab x1 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[group-label] \"Sales\" inSidebar=true tooltips=[]",
+    "Esc -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]",
+    "Esc again -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]"
+  ],
+  "tabs2": [
+    "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+    "Tab x2 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[\"\",\"Leads\"]",
+    "Esc -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[]",
+    "Esc again -> collapsed/rail sb=48 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[]"
+  ],
+  "tabs3": [
+    "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+    "Tab x3 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true tooltips=[]",
+    "Esc -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]",
+    "Esc again -> collapsed/rail sb=48 main=48+1232 focus=body tooltips=[]"
+  ],
+  "tabs4": [
+    "rail bg click -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+    "Tab x4 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[\"\",\"Accounts\"]",
+    "Esc -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[]",
+    "Esc again -> collapsed/rail sb=48 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[]"
+  ],
+  "keyboardOnly": [
+    "Ctrl+B -> expanded/overlay sb=256 main=48+1232 focus=body tooltips=[]",
+    "Tab 1 -> expanded/overlay sb=256 main=48+1232 focus=A[] \"Skip to content\" inSidebar=false tooltips=[]",
+    "Tab 2 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[trigger] \"Toggle sidebar\" inSidebar=false tooltips=[\"Toggle sidebar\\n⌘B\",\"Toggle sidebar\\n⌘B\"]",
+    "Tab 3 -> expanded/overlay sb=256 main=48+1232 focus=A[] \"ObjectOS home\" inSidebar=false tooltips=[]",
+    "Tab 4 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"CRM\" inSidebar=false tooltips=[]",
+    "Tab 5 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Search…\" inSidebar=false tooltips=[]",
+    "Tab 6 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Open inbox\" inSidebar=false tooltips=[]",
+    "Tab 7 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"Help & Documentation\" inSidebar=false tooltips=[]",
+    "Tab 8 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[] \"DA\" inSidebar=false tooltips=[]",
+    "Tab 9 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[group-label] \"Sales\" inSidebar=true tooltips=[]",
+    "Tab 10 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Leads\" inSidebar=true tooltips=[\"\",\"Leads\"]",
+    "Tab 11 -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-action] \"More actions for Leads\" inSidebar=true tooltips=[]",
+    "Tab 12 -> expanded/overlay sb=256 main=48+1232 focus=A[menu-button] \"Accounts\" inSidebar=true tooltips=[\"\",\"Accounts\"]"
+  ],
+  "keepOpenFocus": [
+    "focus Keep open -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-button] \"Keep sidebar open\" inSidebar=true tooltips=[\"\",\"Keep sidebar open\"]",
+    "Esc -> expanded/overlay sb=256 main=48+1232 focus=BUTTON[menu-button] \"Keep sidebar open\" inSidebar=true tooltips=[]"
+  ]
+}

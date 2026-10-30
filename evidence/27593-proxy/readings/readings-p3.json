@@ -1,0 +1,372 @@
+{
+  "point": 3,
+  "surface": "http://localhost:45293/apps/com.example.crm/crm_contact",
+  "steps": [
+    {
+      "label": "0 initial at 1280",
+      "st": "collapsed",
+      "rail": "rail",
+      "z": "10",
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "",
+      "foot": [],
+      "storage": {
+        "ls": {
+          "os:console-sidebar:wide-open": "true"
+        },
+        "cookie": [
+          "sidebar_state=false"
+        ]
+      }
+    },
+    {
+      "label": "1 expanded via rail background",
+      "st": "expanded",
+      "rail": "overlay",
+      "z": "40",
+      "sbW": 256,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "false",
+          "title": null,
+          "box": [
+            8,
+            856,
+            239,
+            36
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:console-sidebar:wide-open": "true"
+        },
+        "cookie": [
+          "sidebar_state=true"
+        ]
+      }
+    },
+    {
+      "label": "2 after pressing foot item (keep open)",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1024,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "true",
+          "title": null,
+          "box": [
+            8,
+            856,
+            239,
+            36
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=true"
+        ]
+      },
+      "frames": {
+        "frames": 56,
+        "mainX": [
+          48,
+          256
+        ],
+        "mainW": [
+          1024,
+          1232
+        ],
+        "sidebarW": [
+          255,
+          255
+        ]
+      }
+    },
+    {
+      "label": "3 Esc while kept open",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1024,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "true",
+          "title": null,
+          "box": [
+            8,
+            856,
+            239,
+            36
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=true"
+        ]
+      }
+    },
+    {
+      "label": "4 outside click while kept open",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1024,
+      "path": "/apps/com.example.crm/crm_contact",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "true",
+          "title": null,
+          "box": [
+            8,
+            856,
+            239,
+            36
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=true"
+        ]
+      }
+    },
+    {
+      "label": "5 nav choice while kept open",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1024,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "true",
+          "title": null,
+          "box": [
+            8,
+            856,
+            239,
+            36
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=true"
+        ]
+      }
+    },
+    {
+      "label": "6 after reload",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1024,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "true",
+          "title": null,
+          "box": [
+            8,
+            856,
+            239,
+            36
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=true"
+        ]
+      }
+    },
+    {
+      "label": "7 Control+b while kept open",
+      "st": "collapsed",
+      "rail": null,
+      "z": "10",
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "true",
+          "title": null,
+          "box": [
+            8,
+            860,
+            32,
+            32
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=false"
+        ]
+      }
+    },
+    {
+      "label": "8 Control+b again",
+      "st": "expanded",
+      "rail": null,
+      "z": "10",
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1024,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "Keep sidebar open",
+      "foot": [
+        {
+          "text": "Keep sidebar open",
+          "aria": null,
+          "pressed": "true",
+          "title": null,
+          "box": [
+            8,
+            856,
+            239,
+            36
+          ]
+        }
+      ],
+      "storage": {
+        "ls": {
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=true"
+        ]
+      }
+    },
+    {
+      "label": "9 after pressing foot item again",
+      "st": "collapsed",
+      "rail": "rail",
+      "z": "10",
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "foot": [],
+      "storage": {
+        "ls": {
+          "os:console-sidebar:wide-open": "true",
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=false"
+        ]
+      },
+      "frames": {
+        "frames": 53,
+        "mainX": [
+          48,
+          256
+        ],
+        "mainW": [
+          1024,
+          1232
+        ],
+        "sidebarW": [
+          47,
+          255
+        ]
+      }
+    },
+    {
+      "label": "10 after reload (unpinned)",
+      "st": "collapsed",
+      "rail": "rail",
+      "z": "10",
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_account",
+      "footer": "",
+      "foot": [],
+      "storage": {
+        "ls": {
+          "os:console-sidebar:wide-open": "true",
+          "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+        },
+        "cookie": [
+          "sidebar_state=false"
+        ]
+      }
+    }
+  ],
+  "newTabSameContext": {
+    "st": "expanded",
+    "rail": null,
+    "z": "10",
+    "sbW": 256,
+    "mainX": 256,
+    "mainW": 1024,
+    "path": "/apps/com.example.crm/crm_contact",
+    "footer": "Keep sidebar open"
+  }
+}

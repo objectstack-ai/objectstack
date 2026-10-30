@@ -1,0 +1,97 @@
+{
+  "steps": [
+    {
+      "label": "pinned",
+      "st": "expanded",
+      "rail": null,
+      "sbW": 256,
+      "mainX": 256,
+      "mainW": 1024,
+      "path": "/apps/com.example.crm/crm_contact",
+      "ls": {
+        "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+      },
+      "ck": "sidebar_state=true"
+    },
+    {
+      "label": "pinned + Ctrl+B (collapsed docked)",
+      "st": "collapsed",
+      "rail": null,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "ls": {
+        "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+      },
+      "ck": "sidebar_state=false"
+    },
+    {
+      "label": "  reload",
+      "st": "collapsed",
+      "rail": null,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "ls": {
+        "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+      },
+      "ck": "sidebar_state=false"
+    },
+    {
+      "label": "  click rail background",
+      "st": "collapsed",
+      "rail": null,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "ls": {
+        "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+      },
+      "ck": "sidebar_state=false"
+    },
+    {
+      "label": "  Esc",
+      "st": "collapsed",
+      "rail": null,
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "ls": {
+        "os:pref:console.sidebar.keepOpen": "{\"value\":\"on\",\"v\":1}"
+      },
+      "ck": "sidebar_state=false"
+    },
+    {
+      "label": "  press foot pin icon while collapsed",
+      "st": "collapsed",
+      "rail": "rail",
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "ls": {
+        "os:console-sidebar:wide-open": "false",
+        "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+      },
+      "ck": "sidebar_state=false"
+    },
+    {
+      "label": "  reload",
+      "st": "collapsed",
+      "rail": "rail",
+      "sbW": 48,
+      "mainX": 48,
+      "mainW": 1232,
+      "path": "/apps/com.example.crm/crm_contact",
+      "ls": {
+        "os:console-sidebar:wide-open": "false",
+        "os:pref:console.sidebar.keepOpen": "{\"value\":\"off\",\"v\":1}"
+      },
+      "ck": "sidebar_state=false"
+    }
+  ]
+}

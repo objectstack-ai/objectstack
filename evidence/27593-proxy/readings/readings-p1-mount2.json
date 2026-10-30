@@ -1,0 +1,69 @@
+{
+  "fresh context, no prior state": [
+    {
+      "t": 5277,
+      "w": 256,
+      "mode": "rail",
+      "mainX": 48
+    },
+    {
+      "t": 5421,
+      "w": 135,
+      "mode": "rail",
+      "mainX": 48
+    },
+    {
+      "t": 5470,
+      "w": 100,
+      "mode": "rail",
+      "mainX": 48
+    },
+    {
+      "t": 5541,
+      "w": 65,
+      "mode": "rail",
+      "mainX": 48
+    },
+    {
+      "t": 5547,
+      "w": 48,
+      "mode": "rail",
+      "mainX": 48
+    }
+  ],
+  "cookieBefore": "sidebar_state=true",
+  "prior wide-window session with sidebar expanded (cookie true)": [
+    {
+      "t": 5134,
+      "w": 256,
+      "mode": "rail",
+      "mainX": 48
+    },
+    {
+      "t": 5309,
+      "w": 169,
+      "mode": "rail",
+      "mainX": 48
+    },
+    {
+      "t": 5348,
+      "w": 100,
+      "mode": "rail",
+      "mainX": 48
+    },
+    {
+      "t": 5409,
+      "w": 48,
+      "mode": "rail",
+      "mainX": 48
+    }
+  ],
+  "prior narrow session (already visited at 1280)": [
+    {
+      "t": 5220,
+      "w": 48,
+      "mode": "rail",
+      "mainX": 48
+    }
+  ]
+}

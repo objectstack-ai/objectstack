@@ -1,0 +1,29 @@
+[
+  [
+    "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+    "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+    "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+    "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+    "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+    "widen -> 1440: expanded/null sb=256 main=256+1184",
+    "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+  ],
+  [
+    "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+    "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+    "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+    "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+    "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+    "widen -> 1440: expanded/null sb=256 main=256+1184",
+    "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+  ],
+  [
+    "collapse via app bar button @1440 -> 1440: collapsed/null sb=48 main=48+1392",
+    "narrow -> 1280: collapsed/rail sb=48 main=48+1232",
+    "open overlay via app bar button -> 1280: expanded/overlay sb=256 main=48+1232",
+    "Keep sidebar open ON -> 1280: expanded/null sb=256 main=256+1024",
+    "Keep sidebar open OFF -> 1280: collapsed/rail sb=48 main=48+1232",
+    "widen -> 1440: expanded/null sb=256 main=256+1184",
+    "reload @1440 -> 1440: expanded/null sb=256 main=256+1184"
+  ]
+]
