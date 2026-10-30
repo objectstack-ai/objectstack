@@ -793,6 +793,11 @@ const ko = {
     recordCount: "{{count}}개 레코드",
     recordCount_one: "{{count}}개 레코드",
     recordCount_other: "{{count}}개 레코드",
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: "이 기간에 불러온 레코드 {{count}}개",
+    calendarRecordCount_one: "이 기간에 불러온 레코드 {{count}}개",
+    calendarRecordCount_other: "이 기간에 불러온 레코드 {{count}}개",
     addRecord: "레코드 추가",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "모두 보기",
@@ -1146,7 +1151,7 @@ const ko = {
     restoreSize: "원래 크기로",
     recordOf: "{{current}} / {{total}}",
     recordNotFound: "레코드를 찾을 수 없음",
-    recordNotFoundDescription: "찾으시는 레코드가 존재하지 않거나 삭제되었을 수 있습니다.",
+    recordNotFoundDescription: "찾으시는 레코드가 존재하지 않거나, 삭제되었거나, 접근 권한이 없을 수 있습니다.",
     goBack: "뒤로",
     details: "상세정보",
     related: "관련",
@@ -3199,7 +3204,7 @@ const ko = {
     systemSettings: "시스템 설정",
     back: "뒤로",
     recordNotFound: "레코드를 찾을 수 없습니다",
-    recordNotFoundDescription: "찾고 있는 레코드가 존재하지 않거나 삭제되었을 수 있습니다.",
+    recordNotFoundDescription: "찾고 있는 레코드가 존재하지 않거나, 삭제되었거나, 접근 권한이 없을 수 있습니다.",
     recordAccessDenied: "{{object}} 레코드에 접근할 권한이 없습니다",
     recordAccessDeniedDescription: "이 유형의 레코드를 볼 권한이 없습니다. 접근이 필요하면 관리자에게 문의하세요.",
     recordLoadFailed: "이 레코드를 불러오지 못했습니다",

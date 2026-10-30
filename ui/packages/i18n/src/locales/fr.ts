@@ -815,6 +815,12 @@ const fr = {
     recordCount_one: "{{count}} enregistrement",
     recordCount_many: "{{count}} d'enregistrements",
     recordCount_other: "{{count}} enregistrements",
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: "{{count}} enregistrements chargés pour ces dates",
+    calendarRecordCount_one: "{{count}} enregistrement chargé pour ces dates",
+    calendarRecordCount_many: "{{count}} d'enregistrements chargés pour ces dates",
+    calendarRecordCount_other: "{{count}} enregistrements chargés pour ces dates",
     addRecord: "Ajouter un enregistrement",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Tout afficher",
@@ -1176,7 +1182,7 @@ const fr = {
     restoreSize: "Restaurer la taille",
     recordOf: "{{current}} sur {{total}}",
     recordNotFound: "Enregistrement introuvable",
-    recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas ou a peut-être été supprimé.",
+    recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas, a peut-être été supprimé, ou vous n'y avez peut-être pas accès.",
     goBack: "Retour",
     details: "Détails",
     related: "Associés",
@@ -3260,7 +3266,7 @@ const fr = {
     systemSettings: "Paramètres système",
     back: "Retour",
     recordNotFound: "Enregistrement introuvable",
-    recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas ou a peut-être été supprimé.",
+    recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas, a peut-être été supprimé, ou vous n'y avez peut-être pas accès.",
     recordAccessDenied: "Vous n'avez pas accès aux enregistrements {{object}}",
     recordAccessDeniedDescription: "Vous n'avez pas la permission de consulter les enregistrements de ce type. Contactez votre administrateur si vous pensez devoir y accéder.",
     recordLoadFailed: "Impossible de charger cet enregistrement",

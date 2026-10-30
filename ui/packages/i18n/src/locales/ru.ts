@@ -843,6 +843,13 @@ const ru = {
     recordCount_few: "{{count}} записи",
     recordCount_many: "{{count}} записей",
     recordCount_other: "{{count}} записи",
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: "Загружено записей за эти даты: {{count}}",
+    calendarRecordCount_one: "За эти даты загружена {{count}} запись",
+    calendarRecordCount_few: "За эти даты загружены {{count}} записи",
+    calendarRecordCount_many: "За эти даты загружено {{count}} записей",
+    calendarRecordCount_other: "За эти даты загружено {{count}} записи",
     addRecord: "Добавить запись",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Показать все",
@@ -1213,7 +1220,7 @@ const ru = {
     restoreSize: "Восстановить размер",
     recordOf: "{{current}} из {{total}}",
     recordNotFound: "Запись не найдена",
-    recordNotFoundDescription: "Запись, которую вы ищете, не существует или была удалена.",
+    recordNotFoundDescription: "Запись, которую вы ищете, не существует, была удалена или у вас нет к ней доступа.",
     goBack: "Назад",
     details: "Детали",
     related: "Связанные",
@@ -3337,7 +3344,7 @@ const ru = {
     systemSettings: "Системные настройки",
     back: "Назад",
     recordNotFound: "Запись не найдена",
-    recordNotFoundDescription: "Искомая запись не существует или была удалена.",
+    recordNotFoundDescription: "Искомая запись не существует, была удалена или у вас нет к ней доступа.",
     recordAccessDenied: "Нет доступа к записям «{{object}}»",
     recordAccessDeniedDescription: "У вас нет прав на просмотр записей этого типа. Обратитесь к администратору, если считаете, что доступ вам нужен.",
     recordLoadFailed: "Не удалось загрузить эту запись",
