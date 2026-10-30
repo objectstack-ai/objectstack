@@ -26,7 +26,11 @@
  *
  * SECURITY (zero-tolerance):
  *  - System objects (`sys_*`) are NOT exposed by default — fail-closed guard on
- *    every tool that takes an object name, independent of the bridge.
+ *    every tool that takes an object name, independent of the bridge. The
+ *    action tools yield PER ACTION: a `sys_*` action whose author declared
+ *    `ai.exposed: true` (the bridge attests it as `aiExposed`) is listed and
+ *    run like any other exposed action (#27681, ADR-0011) — no other key and
+ *    no deployment switch opens one.
  *  - The bridge is bound to the caller's principal; tools cannot widen it.
  *  - Errors are returned as tool errors (text), never thrown across the wire,
  *    and never include secrets.
@@ -223,6 +227,15 @@ export interface McpActionSummary {
   requiresRecord?: boolean;
   /** True when the action is destructive / an author flagged it for confirmation. */
   requiresConfirmation?: boolean;
+  /**
+   * True when the action's author opted it into the AI surface
+   * (`ai: { exposed: true, description }`, ADR-0011), as the bridge read it off
+   * the declaration. With `allowSystemObjects` off, an action on a `sys_*`
+   * object is listed and run ONLY when this is `true` (#27681): the tool layer
+   * never sees the declaration, so a bridge that does not attest it keeps
+   * every system-object action hidden and refused, exactly as before.
+   */
+  aiExposed?: boolean;
   /** Declared input parameters. */
   params?: McpActionParamSummary[];
 }
@@ -277,7 +290,13 @@ export interface McpActionBridge {
 }
 
 export interface RegisterActionToolsOptions {
-  /** Expose actions on `sys_*` system objects too. Default false (fail-closed). */
+  /**
+   * Expose actions on `sys_*` system objects too. Default false (fail-closed):
+   * a `sys_*` action is then listed and run only when the bridge attests its
+   * author's AI opt-in ({@link McpActionSummary.aiExposed}). This option opens
+   * the TOOL layer's filter only; the runtime bridge still requires the
+   * per-action opt-in for every `sys_*` action (#27681).
+   */
   allowSystemObjects?: boolean;
   /**
    * OAuth 2.1 scopes granted to the caller's access token (#2698) — same
@@ -292,6 +311,24 @@ const DEFAULT_MAX_LIMIT = 50;
 /** A `sys_`-prefixed object is a system table — off-limits to external agents. */
 function isSystemObject(name: string): boolean {
   return /^sys_/i.test(name);
+}
+
+/**
+ * [#27681] Whether the action tools may list a summary with `allowSystemObjects`
+ * off: any action not on a `sys_*` object, and a `sys_*` one only when the
+ * bridge attests its author's `ai.exposed` opt-in. ONE predicate for
+ * `list_actions` and `run_action`, so the two cannot disagree about a system
+ * object's action.
+ */
+function isListableAction(action: McpActionSummary): boolean {
+  return !action.objectName || !isSystemObject(action.objectName) || action.aiExposed === true;
+}
+
+function systemObjectActionRefusal(actionName: string, objectName: string): string {
+  return (
+    `Action "${actionName}" on system object "${objectName}" is not exposed via MCP: a system object's action is ` +
+    'reachable only when its author exposed it to AI (ai.exposed) and list_actions lists it for you'
+  );
 }
 
 function textResult(value: unknown) {
@@ -1225,9 +1262,7 @@ export function registerActionTools(
     async () => {
       try {
         const actions = await bridge.listActions();
-        const visible = allowSystem
-          ? actions
-          : actions.filter((a) => !a.objectName || !isSystemObject(a.objectName));
+        const visible = allowSystem ? actions : actions.filter(isListableAction);
         return textResult({ actions: visible, totalCount: visible.length });
       } catch (err) {
         return errorResultWithCode(err);
@@ -1322,10 +1357,19 @@ export function registerActionTools(
       if (!actionName || typeof actionName !== 'string') {
         return errorResult('actionName is required');
       }
-      if (objectName && !allowSystem && isSystemObject(objectName)) {
-        return errorResult(`Object "${objectName}" is a system object and its actions are not exposed via MCP`);
-      }
       try {
+        // [#27681] A `sys_*` action runs only where `list_actions` would list
+        // it: the bridge's own listing is what attests the author's
+        // `ai.exposed` (see `isListableAction`). A name with no `objectName`
+        // is resolved by the bridge, whose runtime applies the same per-action
+        // rule to the object it resolves.
+        if (objectName && !allowSystem && isSystemObject(objectName)) {
+          const listed = await bridge.listActions();
+          const admitted = listed.some(
+            (a) => a.name === actionName && a.objectName === objectName && isListableAction(a),
+          );
+          if (!admitted) return errorResult(systemObjectActionRefusal(actionName, objectName));
+        }
         const result = await bridge.runAction(actionName, {
           objectName,
           recordId,
