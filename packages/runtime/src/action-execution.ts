@@ -1553,6 +1553,22 @@ export async function forwardApiAction(
  * envelope (the console's `apiHandler` unwraps the same way, so a
  * `resultDialog` path reads identically on both paths), else the body itself
  * (a stock better-auth answer is not enveloped).
+ *
+ * [#27918] A 2xx is read as success whatever its body says: `success: false`
+ * on a 2xx is not a refusal here, so `{ success: false, data }` answers `data`
+ * and `{ success: false, message }` answers the body itself. The status is
+ * the target's verdict and this door relays it rather than sniffing a body.
+ * Measured 2026-10-30 against every same-origin `type: 'api'` target declared
+ * in this repository (the `sys_*` identity actions over better-auth and the
+ * plugin-auth mounts, the approvals routes, the datasource admin routes, the
+ * data door, the showcase's flow endpoint, print and form routes, and the
+ * objectui declarations): none answers a 2xx with a top-level
+ * `success: false`. Each refusal is non-2xx, and the nested
+ * `{ success: true, data: { success: false } }` that a flow endpoint's
+ * unclassified result or a zero-row delete can answer comes back through
+ * this door as the same bytes. A target that starts answering 2xx
+ * `success: false` has the defect itself (failures speak HTTP, #3962), and
+ * the fix goes in that target, never in a body check here (PD #12).
  */
 export function apiActionResultOf(answer: ApiActionForwardAnswer): unknown {
     const body = answer.body;
