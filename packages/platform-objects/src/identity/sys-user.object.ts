@@ -40,6 +40,15 @@ import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$';
 
 /**
+ * The label of the `temporaryPassword` field on the `create_user` and
+ * `set_user_password` result dialogs. It carries the copy-it-now instruction
+ * because the dialog skips a field absent from the response, and the server
+ * returns `temporaryPassword` only when it generated one: the instruction
+ * shows exactly when there is a password to copy.
+ */
+const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
+
+/**
  * sys_user — System User Object
  *
  * Canonical user identity record for the ObjectStack platform.
@@ -318,11 +327,12 @@ export const SysUser = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'User Created',
-        // Hedged for both outcomes: a typed password returns no
-        // `temporaryPassword`, so the dialog must not claim one to copy.
-        // Same sentence and button as `set_user_password` below.
-        description:
-          'If a temporary password was generated, copy it now — it is shown only once and never stored.',
+        // No dialog-level description: it shows on both outcomes, and a typed
+        // password returns no `temporaryPassword`, so any copy-it-now sentence
+        // there talks about a password that is not on screen. The instruction
+        // rides the `temporaryPassword` field's own label instead, which the
+        // dialog draws only when the server minted one. Same shape and button
+        // as `set_user_password` below.
         acknowledge: 'Done',
         fields: [
           // The dialog skips fields whose path is absent from the response, so
@@ -331,7 +341,7 @@ export const SysUser = ObjectSchema.create({
           { path: 'user.email', label: 'Email', format: 'text' },
           { path: 'user.phoneNumber', label: 'Phone Number', format: 'text' },
           { path: 'permissionSet', label: 'Permission Set', format: 'text' },
-          { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
+          { path: 'temporaryPassword', label: TEMPORARY_PASSWORD_LABEL, format: 'secret' },
         ],
       },
     },
@@ -388,11 +398,10 @@ export const SysUser = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'Password Updated',
-        description:
-          'If a temporary password was generated, copy it now — it is shown only once and never stored.',
+        // No description, for the reason given on `create_user` above.
         acknowledge: 'Done',
         fields: [
-          { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
+          { path: 'temporaryPassword', label: TEMPORARY_PASSWORD_LABEL, format: 'secret' },
         ],
       },
     },

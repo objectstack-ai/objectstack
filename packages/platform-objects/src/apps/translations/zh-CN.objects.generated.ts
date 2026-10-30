@@ -195,13 +195,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "用户已创建",
-          description: "如果生成了临时密码，请立即复制——它只显示一次，不会被保存。",
           acknowledge: "完成",
           fields: {
             "user.email": "邮箱",
             "user.phoneNumber": "手机号",
             permissionSet: "权限集",
-            temporaryPassword: "临时密码"
+            temporaryPassword: "临时密码：请立即复制，它只显示一次，不会被保存"
           }
         }
       },
@@ -222,10 +221,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "密码已更新",
-          description: "如果生成了临时密码，请立即复制——它只显示一次，不会被保存。",
           acknowledge: "完成",
           fields: {
-            temporaryPassword: "临时密码"
+            temporaryPassword: "临时密码：请立即复制，它只显示一次，不会被保存"
           }
         }
       },

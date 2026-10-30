@@ -195,13 +195,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Usuario creado",
-          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
           acknowledge: "Hecho",
           fields: {
             "user.email": "Correo electrónico",
             "user.phoneNumber": "Número de teléfono",
             permissionSet: "Conjunto de permisos",
-            temporaryPassword: "Contraseña temporal"
+            temporaryPassword: "Contraseña temporal: cópiela ahora, se muestra una sola vez y no se almacena"
           }
         }
       },
@@ -222,10 +221,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Contraseña actualizada",
-          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
           acknowledge: "Hecho",
           fields: {
-            temporaryPassword: "Contraseña temporal"
+            temporaryPassword: "Contraseña temporal: cópiela ahora, se muestra una sola vez y no se almacena"
           }
         }
       },

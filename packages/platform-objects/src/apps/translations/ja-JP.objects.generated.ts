@@ -195,13 +195,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "ユーザーを作成しました",
-          description: "一時パスワードが生成された場合は今すぐコピーしてください。表示は一度きりで、保存されません。",
           acknowledge: "完了",
           fields: {
             "user.email": "メールアドレス",
             "user.phoneNumber": "電話番号",
             permissionSet: "権限セット",
-            temporaryPassword: "一時パスワード"
+            temporaryPassword: "一時パスワード：今すぐコピーしてください。表示は一度きりで、保存されません"
           }
         }
       },
@@ -222,10 +221,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "パスワードを更新しました",
-          description: "一時パスワードが生成された場合は今すぐコピーしてください。表示は一度きりで、保存されません。",
           acknowledge: "完了",
           fields: {
-            temporaryPassword: "一時パスワード"
+            temporaryPassword: "一時パスワード：今すぐコピーしてください。表示は一度きりで、保存されません"
           }
         }
       },
