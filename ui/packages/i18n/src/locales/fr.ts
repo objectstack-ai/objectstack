@@ -1113,6 +1113,16 @@ const fr = {
     addNewView: "Ajouter une nouvelle vue",
     done: "Terminé",
     noViewsFound: "Aucune vue ne correspond à votre recherche.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Vues",
+      pinned: "Épinglée",
+      recent: "Récentes",
+      all: "Toutes les vues",
+      pin: "Épingler : ouvrir cette vue par défaut",
+      unpin: "Désépingler : la liste rouvre sa vue par défaut",
+      inMenu: "Déjà dans le menu",
+    },
     dragToReorder: "Glisser pour réorganiser",
     defaultView: "Vue par défaut",
     defaultBadge: "par défaut",

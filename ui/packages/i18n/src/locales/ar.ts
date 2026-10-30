@@ -1203,6 +1203,16 @@ const ar = {
     addNewView: "إضافة عرض جديد",
     done: "تم",
     noViewsFound: "لا توجد عروض تطابق بحثك.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "العروض",
+      pinned: "مثبّت",
+      recent: "الأخيرة",
+      all: "كل العروض",
+      pin: "تثبيت: فتح هذا العرض افتراضيًا",
+      unpin: "إلغاء التثبيت: تفتح القائمة عرضها الافتراضي مجددًا",
+      inMenu: "موجود بالفعل في القائمة",
+    },
     dragToReorder: "اسحب لإعادة الترتيب",
     defaultView: "العرض الافتراضي",
     defaultBadge: "افتراضي",

@@ -70,6 +70,9 @@ import {
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
+import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
+import { favoriteAppSegment } from './listViewFavorites.js';
+import type { FavoriteItem } from '../hooks/useFavorites.js';
 
 /**
  * The class the Recent group's label carries so that, once the sidebar
@@ -202,7 +205,7 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
   // A recent entry's text is the item's own, resolved on this render
   // (objectui#11678); the entry stores identity only.
   const recentLabel = useRecentItemLabel();
-  const { favorites, removeFavorite } = useFavorites();
+  const { favorites, removeFavorite, reorderFavorites } = useFavorites();
 
   const { apps: metadataApps } = useMetadata();
   const apps = metadataApps || [];
@@ -470,28 +473,54 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
   // favorites entry removes it. Its Design entry reads the app the favorite's
   // own address names, which need not be this one (objectui#12520). A phone
   // keeps the control it had (no hover).
-  const contentFavorites = favorites.filter(f => f.type !== 'nav').slice(0, 8);
-  const contentFavoriteRows = contentFavorites.length > 0
-    ? contentFavorites.map(item => (
-        <SidebarMenuItem key={item.id}>
-          <SidebarMenuButton asChild tooltip={item.label}>
-            <Link to={item.href}>
+  //
+  // A starred list view (objectstack#27594) is a row of the app it was
+  // starred in, the app its address names, drawn with its object's icon. The
+  // rows are the user's to order: dragged, they keep the order on every device
+  // (the favorites store's `reorderFavorites`). A phone, which draws no drag,
+  // keeps them in that order.
+  const contentFavorites = favorites
+    .filter(f => f.type !== 'nav')
+    .filter(f => f.type !== 'view' || matchAppBySegment(apps.filter((a: any) => a.active !== false), favoriteAppSegment(f.href)) === activeApp)
+    .slice(0, 8);
+  const contentFavoriteRow = (item: FavoriteItem, drag?: FavoriteRowDragProps) => {
+    return (
+      <>
+        <SidebarMenuButton asChild tooltip={item.label}>
+          <Link to={item.href} {...(drag ?? {})}>
+            {item.type === 'view' ? (
+              // `createElement`: the looked-up icon is a value, which
+              // react-hooks/static-components refuses in tag position.
+              React.createElement(getIcon(item.icon), { className: 'h-4 w-4 shrink-0 text-muted-foreground' })
+            ) : (
               <span className="text-muted-foreground">
                 {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : item.type === 'page' ? '📄' : '📋'}
               </span>
-              <span className="truncate">{item.label}</span>
-            </Link>
-          </SidebarMenuButton>
-          <SidebarItemMenu
-            label={item.label}
-            href={item.href}
-            isFavorite
-            onToggleFavorite={() => removeFavorite(item.id)}
-            designPath={favoriteDesignPath(item, apps)}
+            )}
+            <span className="truncate">{item.label}</span>
+          </Link>
+        </SidebarMenuButton>
+        <SidebarItemMenu
+          label={item.label}
+          href={item.href}
+          isFavorite
+          onToggleFavorite={() => removeFavorite(item.id)}
+          designPath={favoriteDesignPath(item, apps)}
+        />
+      </>
+    );
+  };
+  const contentFavoriteRows = contentFavorites.length === 0
+    ? null
+    : isMobile
+      ? contentFavorites.map(item => <SidebarMenuItem key={item.id}>{contentFavoriteRow(item)}</SidebarMenuItem>)
+      : (
+          <SortableFavoriteRows
+            items={contentFavorites}
+            onReorder={reorderFavorites}
+            renderRow={contentFavoriteRow}
           />
-        </SidebarMenuItem>
-      ))
-    : null;
+        );
 
   return (
     <>

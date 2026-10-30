@@ -1118,6 +1118,16 @@ const es = {
     addNewView: "Agregar nueva vista",
     done: "Listo",
     noViewsFound: "Ninguna vista coincide con su búsqueda.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Vistas",
+      pinned: "Fijada",
+      recent: "Recientes",
+      all: "Todas las vistas",
+      pin: "Fijar: abrir esta vista de forma predeterminada",
+      unpin: "Desfijar: la lista vuelve a abrir su vista predeterminada",
+      inMenu: "Ya está en el menú",
+    },
     dragToReorder: "Arrastrar para reordenar",
     defaultView: "Vista predeterminada",
     defaultBadge: "predeterminada",
