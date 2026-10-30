@@ -225,13 +225,18 @@ function unclaimedTopLevelItems(
  * refused here, before anything of the artifact registers, naming each list
  * and the stack.
  *
- * "Names" is judged off the artifact alone — its top level and every package
- * body, objects and `objectExtensions` both — never off the registry, which
- * is still filling while a boot registers.
+ * "Names" is judged off the fields the engine registers from this artifact:
+ * every package body's (its objects, its `objectExtensions` and its nested
+ * `plugins[]`) and the residual's own objects, the set
+ * {@link ObjectQLPlugin.registerUnclaimedTopLevelObjects} judges. ⛔ Never off
+ * the whole top level: in a composed stack a top-level `objectExtensions`
+ * entry, a top-level copy of an object a body declares and a top-level
+ * `plugins[]` entry are registered by no door, so a list only they name is
+ * dropped all the same. And never off the registry, which is still filling
+ * while a boot registers.
  */
 function unreferencedResidualPicklistRefusal(
   residual: UnclaimedTopLevel | undefined,
-  artifact: unknown,
   bodies: readonly unknown[],
 ): PicklistMetadataError | undefined {
   if (!residual) return undefined;
@@ -240,7 +245,8 @@ function unreferencedResidualPicklistRefusal(
     .map((entry) => String((entry.item as { name?: unknown }).name));
   if (picklists.length === 0) return undefined;
   const named = new Set<string>();
-  for (const source of [artifact, ...bodies]) {
+  const residualObjects = residual.items.filter((entry) => entry.type === 'object').map((entry) => entry.item);
+  for (const source of [...bodies, { objects: residualObjects }]) {
     for (const ref of collectManifestPicklistReferences(source, undefined)) named.add(ref.picklist);
   }
   const unreferenced = picklists.filter((name) => !named.has(name));
@@ -250,9 +256,10 @@ function unreferencedResidualPicklistRefusal(
   return picklistMetadataError(
     `${unreferenced.length === 1 ? 'Picklist' : 'Picklists'} ${listed} ${unreferenced.length === 1 ? 'is' : 'are'} `
     + `declared on the top level of stack '${owner}', and no package body declares `
-    + `${unreferenced.length === 1 ? 'it' : 'them'} and no object field names `
-    + `${unreferenced.length === 1 ? 'it' : 'them'}. The engine registers a top-level picklist only through `
-    + 'a package body, so this list would be missing from the engine with nothing said. Declare it inside the '
+    + `${unreferenced.length === 1 ? 'it' : 'them'} and no object field the engine registers names `
+    + `${unreferenced.length === 1 ? 'it' : 'them'} (in a composed stack, a top-level \`objectExtensions\` entry, a `
+    + 'top-level copy of an object a package body declares and a top-level `plugins[]` entry are not '
+    + 'registered). The engine registers a top-level picklist only through a package body, so this list would be missing from the engine with nothing said. Declare it inside the '
     + '`packages[]` entry of the package whose objects use it; or name it from a field of the object meant to '
     + 'use it (a top-level object that does is then listed and not served until both move into a package '
     + 'body); or remove it from the top level.',
@@ -885,7 +892,7 @@ export class ObjectQLPlugin implements Plugin {
         // …and its picklists, which neither of those registers: one that no
         // object field names is refused here, before anything registers. See
         // {@link unreferencedResidualPicklistRefusal}.
-        const unreferencedPicklists = unreferencedResidualPicklistRefusal(residualAnswer, artifact, ordered);
+        const unreferencedPicklists = unreferencedResidualPicklistRefusal(residualAnswer, ordered);
         if (unreferencedPicklists) throw unreferencedPicklists;
 
         if (ordered.length === 0 && residual === undefined && residualItems === undefined) {

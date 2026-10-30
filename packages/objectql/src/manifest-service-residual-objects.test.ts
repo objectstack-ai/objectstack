@@ -561,7 +561,7 @@ describe('ADR-0130 D4 — a residual picklist that no object field names', () =>
     expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
     const message = (refusal as Error).message;
     expect(message).toContain(`Picklist 'acme_unused' is declared on the top level of stack '${RELEASE_ID}'`);
-    expect(message).toContain('no package body declares it and no object field names it');
+    expect(message).toContain('no package body declares it and no object field the engine registers names it');
     expect(message).toContain('Declare it inside the `packages[]` entry of the package whose objects use it');
     expect(message).toContain('name it from a field of the object meant to use it');
     expect(message).toContain('remove it from the top level');
@@ -593,6 +593,44 @@ describe('ADR-0130 D4 — a residual picklist that no object field names', () =>
     const refusal = await refusalOf(Promise.resolve().then(() =>
       manifest.register(residualStack(noteObj(), { picklists: [unusedList()] }))));
     expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    expect(owners(engineOf(kernel))).toEqual({ acme_account: undefined, acme_case: undefined, acme_note: undefined });
+    expect(acmePackageIds(engineOf(kernel))).toEqual([]);
+  });
+
+  /** A residual `acme_status` that only an item the engine never registers in a composed stack names. */
+  const isTopLevelOnlyRefusal = (refusal: unknown): void => {
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    expect((refusal as Error).message).toContain(`Picklist 'acme_status' is declared on the top level of stack '${RELEASE_ID}'`);
+  };
+
+  it('refuses one that only a top-level `objectExtensions` entry names — no door registers that entry in a composed stack', async () => {
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [residualStack(noteObj(), {
+      picklists: [statusList()],
+      objectExtensions: [{ extend: 'acme_case', fields: statusField }],
+    })]))));
+  });
+
+  it('refuses one that only a top-level copy of a body-declared object names, its fields diverging from the body\'s', async () => {
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      objects: [{ ...caseObj(), fields: { ...caseObj().fields, ...statusField } }, accountObj()],
+      picklists: [statusList()],
+      packages: [
+        { manifest: { ...svc, objects: [caseObj()] } },
+        { manifest: { ...app, objects: [accountObj()] } },
+      ],
+    })]))));
+  });
+
+  it('refuses one that only a body\'s `picklistExtensions` entry extends — at boot, and after start() before anything registers', async () => {
+    const extending = () => residualStack(noteObj(), { picklists: [statusList()] }, {
+      picklistExtensions: [{ extend: 'acme_status', options: [{ label: 'Closed', value: 'closed' }] }],
+    });
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [extending()]))));
+
+    const { kernel } = await boot();
+    isTopLevelOnlyRefusal(await refusalOf(Promise.resolve().then(() =>
+      kernel.getService<ManifestService>('manifest').register(extending()))));
     expect(owners(engineOf(kernel))).toEqual({ acme_account: undefined, acme_case: undefined, acme_note: undefined });
     expect(acmePackageIds(engineOf(kernel))).toEqual([]);
   });
