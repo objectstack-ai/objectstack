@@ -188,14 +188,17 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath }: 
             </span>
           </Link>
         </DropdownMenuItem>
-        {setupPath ? (
+        {setupApp && setupPath ? (
           <DropdownMenuItem asChild className="flex items-center gap-2.5 py-2">
             <Link to={setupPath} data-testid="app-switcher-settings">
               <span className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
                 <Settings className="size-4" />
               </span>
               <span className="flex-1 truncate">
-                {t('layout.appSwitcher.settings', { defaultValue: 'Settings' })}
+                {/* The Setup app's own label, as its header draws it once it
+                    is open, so the entry and the app it opens share one name. */}
+                {appLabel({ name: setupApp.name, label: resolveKeyedI18nLabel(setupApp.label, t) }) ||
+                  t('layout.appSwitcher.settings', { defaultValue: 'Settings' })}
               </span>
               {activeApp === setupApp && <Check className="size-3.5 text-primary shrink-0" />}
             </Link>
