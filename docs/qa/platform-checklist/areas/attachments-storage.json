@@ -808,7 +808,7 @@
       "title": "Chunked uploads are resumable; abandoned sessions are reaped and their backend multipart uploads ABORTED before the row (the only pointer) is deleted",
       "since": "v15.1",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -823,7 +823,7 @@
         ]
       },
       "steps": [
-        "POST /api/v1/storage/upload/chunked { filename, mimeType, totalSize, chunkSize } and capture { uploadId, fileId } — the init route's required trio is filename/mimeType/`totalSize` (a body spelling `size` is refused 400 INVALID_REQUEST), and `chunkSize` is floored at 5 MiB, so a smaller requested value silently yields a different totalChunks than the caller computed (storage-routes.ts)",
+        "POST /api/v1/storage/upload/chunked { filename, mimeType, totalSize, chunkSize } and capture { uploadId, fileId } — the init route's required trio is filename/mimeType/`totalSize` (a body spelling `size` is refused 400 INVALID_REQUEST), and the body is parsed with InitiateChunkedUploadRequestSchema: a `totalSize` that is not a whole JSON number of at least 1, or a `chunkSize` below 5 MiB (5242880), is refused 400 INVALID_REQUEST naming the field, never clamped; an omitted `chunkSize` takes the declared 5242880 default (storage-routes.ts)",
         "PUT one chunk, then GET /upload/chunked/<uploadId>/progress and record uploadedChunks/percentComplete/status ('in_progress') — progress is the first step of the SDK's resumeUpload",
         "complete a full session on a second upload and verify its sys_upload_session row reaches status 'completed'",
         "abandon the first session mid-flight; backdate its expires_at past the 1d TTL (system write) and trigger the lifecycle sweep",
@@ -882,7 +882,7 @@
         "packages/services/service-storage/src/attachment-lifecycle.ts#createUploadSessionReapGuard (createUploadSessionReapGuard — abort-before-reap contract, completed/no-backend confirm branches, veto-on-failure)",
         "packages/services/service-storage/src/objects/system-upload-session.object.ts#expires_at (status enum = the variants list; ttl expires_at+1d, retention 7d terminal statuses)",
         "packages/services/service-storage/src/storage-route-ledger.ts (upload-chunked family)",
-        "packages/services/service-storage/src/storage-routes.ts#mimeType (POST /upload/chunked init contract: filename/mimeType/totalSize required, else 400 INVALID_REQUEST; chunkSize = Math.max(reqChunkSize ?? 5242880, 5242880), i.e. a 5 MiB floor)",
+        "packages/services/service-storage/src/storage-routes.ts#mimeType (POST /upload/chunked init contract: filename/mimeType/totalSize required, else 400 INVALID_REQUEST; the body parsed with InitiateChunkedUploadRequestSchema, so a chunkSize below 5242880 is refused 400 INVALID_REQUEST, not floored, and an omitted one takes the 5242880 default)",
         "packages/services/service-storage/src/storage-routes.ts#expireIfPastDeadline (expireIfPastDeadline / markSessionFailed — the #7667 producers for 'expired' and 'failed'; chunk + complete refuse 410 UPLOAD_SESSION_EXPIRED, progress reports the status)",
         "packages/spec/src/api/storage.zod.ts#UploadProgressSchema (UploadProgressSchema.status — the client-facing declaration the enum must stay in step with)",
         "docs/plans/release-15.1-test-plan.md §C4 (#2970 item 4)"
@@ -903,6 +903,12 @@
           "date": "2026-10-28",
           "change": "automated.ref names two more storage-routes cases and the chunked dogfood file. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): storage-routes.test.ts carries two more terminal-status cases (expired on progress, a completed session left alone), and storage-chunked-resume-integrity.dogfood.test.ts drives the chunked doors over HTTP without reading the session row, so acceptance[0] is still unpinned. Re-read at base fd246c22 (storage-routes.test.ts, the two cases named in the ref). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-29",
+          "change": "steps[0] and the storage-routes.ts source line described the 5 MiB chunkSize floor (a smaller requested chunkSize silently clamped up). The init door now parses its body with InitiateChunkedUploadRequestSchema, so a chunkSize below 5242880 and a totalSize that is not a whole number of at least 1 are refused 400 INVALID_REQUEST naming the field; an omitted chunkSize keeps the 5242880 default. Both strings now describe the refusal. No clause, oracle or variant changed",
+          "ref": "#27549"
         }
       ]
     },

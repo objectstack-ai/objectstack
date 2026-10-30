@@ -74,11 +74,11 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 /** What the copilot stub reports, per test. */
-const copilot = vi.hoisted(() => ({ available: true, planPending: false }));
+const copilot = vi.hoisted(() => ({ available: true, planPendingCount: 0 }));
 vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPending: boolean }) => void }) => {
+  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPendingCount: number }) => void }) => {
     React.useEffect(() => {
-      onStatusChange?.({ available: copilot.available, planPending: copilot.planPending });
+      onStatusChange?.({ available: copilot.available, planPendingCount: copilot.planPendingCount });
     }, [onStatusChange]);
     return copilot.available ? <div data-testid="copilot-body">conversation</div> : null;
   },
@@ -114,7 +114,7 @@ const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => bo
 
 beforeEach(() => {
   copilot.available = true;
-  copilot.planPending = false;
+  copilot.planPendingCount = 0;
   window.sessionStorage.clear();
   vi.stubGlobal(
     'fetch',
@@ -280,15 +280,28 @@ describe('Studio right slot: properties OR the copilot (objectui#12725)', () => 
     expect(within(slotProps()).getByTestId('stub-inspector')).toBeVisible();
   });
 
-  it('the copilot tab and strip mark a plan that awaits approval', async () => {
-    copilot.planPending = true;
+  // objectstack#25943 — 「AI 副驾 · N 项待确认」: the count of items the
+  // copilot proposed, on the tab's badge and in the folded strip.
+  it('the copilot tab and strip count the items that await approval', async () => {
+    copilot.planPendingCount = 2;
     await openDashboard();
-    await waitFor(() => expect(screen.getByTestId('studio-slot-plan-pending')).toBeInTheDocument());
-    expect(within(slot()).getAllByRole('tab')[1]).toHaveAccessibleDescription(t('engine.studio.slot.planPending', 'en'));
+    await waitFor(() => expect(screen.getByTestId('studio-slot-plan-pending')).toHaveTextContent('2'));
+    const pending = tFormat('engine.studio.slot.pendingCount', 'en', { count: 2 });
+    expect(within(slot()).getAllByRole('tab')[1]).toHaveAccessibleDescription(pending);
     await selectBlock();
-    expect(screen.getByTestId('studio-slot-strip-plan-pending')).toHaveTextContent(
-      t('engine.studio.slot.planPending', 'en'),
+    expect(screen.getByTestId('studio-slot-strip-plan-pending')).toHaveTextContent(pending);
+    expect(screen.getByTestId('studio-slot-copilot-strip')).toHaveTextContent(
+      `${t('engine.studio.aiCopilot', 'en')} · ${pending}`,
     );
+  });
+
+  it('with nothing awaiting approval, neither the tab nor the strip carries a count', async () => {
+    await openDashboard();
+    expect(screen.queryByTestId('studio-slot-plan-pending')).toBeNull();
+    expect(within(slot()).getAllByRole('tab')[1]).not.toHaveAttribute('aria-describedby');
+    await selectBlock();
+    expect(screen.getByTestId('studio-slot-copilot-strip')).toBeVisible();
+    expect(screen.queryByTestId('studio-slot-strip-plan-pending')).toBeNull();
   });
 
   it('the canvas has no 画布 / 源码 / 属性 tabs: one status line, and the definition opens from the ⋯ menu', async () => {

@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
-import { SeedLoaderService } from './seed-loader.js';
+import { SeedLoaderService, seedLoadPartialWrites } from './seed-loader.js';
 import type {
   FieldFileDescription,
   FieldFileSlot,
@@ -516,5 +516,64 @@ describe('a seed of many files yields to waiting requests (#26670)', () => {
       .map(([, data]: [string, unknown]) => (Array.isArray(data) ? data.length : 1));
     expect(sizes.reduce((a: number, b: number) => a + b, 0)).toBe(ROWS);
     expect(Math.max(...sizes)).toBeLessThanOrEqual(20);
+  });
+});
+
+/**
+ * `seedLoadPartialWrites` — what a load that THREW had already written.
+ *
+ * A load writes dataset by dataset and rolls nothing back when a later one
+ * throws, so the publish batch's `seedApplied` receipt reads the rows that
+ * landed off the error: the finished datasets' and those of the dataset that
+ * threw part-way. The publish-door pins live in `@objectstack/objectql`'s
+ * `publish-package-drafts-seed-receipt-counts.test.ts`; these pin what that
+ * door cannot stage — a throw INSIDE a dataset after one of its rows was
+ * written (the file service failing while that row's seed file is settled) —
+ * and a throw before any dataset ran. Counts are checked against the store.
+ */
+describe('seedLoadPartialWrites: the rows a thrown load had written', () => {
+  /** `pw_tag` loads first (`pw_doc` looks it up); neither looks itself up. */
+  function partialMetadata(fail?: Error): IMetadataService {
+    const objects: Record<string, any> = {
+      pw_tag: { name: 'pw_tag', fields: { name: { type: 'text' } } },
+      pw_doc: { name: 'pw_doc', fields: { code: { type: 'text' }, file: { type: 'file' }, tag: { type: 'lookup', reference: 'pw_tag' } } },
+    };
+    return {
+      getObject: vi.fn(async (name: string) => { if (fail) throw fail; return objects[name]; }),
+    } as unknown as IMetadataService;
+  }
+  const partialSeeds = () => [
+    dataset([{ code: 'D1', tag: 'T1', file: seedFile('fixtures/v1.pdf') }], undefined, { object: 'pw_doc' }),
+    { object: 'pw_tag', mode: 'upsert', env: ['prod', 'dev', 'test'], records: [{ name: 'T1' }, { name: 'T2' }] },
+  ] as any;
+
+  it('counts the finished datasets AND the rows the throwing dataset wrote, naming its object', async () => {
+    const { engine, store } = createEngine();
+    const { service } = createFieldFiles();
+    service.describeFiles = vi.fn(async () => { throw new Error('the storage service is down'); });
+    const seedLoader = new SeedLoaderService(engine, partialMetadata(), createLogger(), { getFieldFiles: () => service });
+
+    const err = await seedLoader.load({ seeds: partialSeeds(), config: CONFIG }).then(() => undefined, (e: unknown) => e);
+
+    expect((err as Error).message).toBe('the storage service is down');
+    expect((store.pw_tag ?? []).map((r) => r.name).sort()).toEqual(['T1', 'T2']);
+    expect((store.pw_doc ?? []).map((r) => r.code)).toEqual(['D1']);
+    expect(seedLoadPartialWrites(err)).toEqual({ inserted: 3, updated: 0, failedObject: 'pw_doc' });
+  });
+
+  it('a load that throws before any dataset wrote: zero, and no object named', async () => {
+    const { engine, store } = createEngine();
+    const seedLoader = new SeedLoaderService(engine, partialMetadata(new Error('metadata store unavailable')), createLogger());
+
+    const err = await seedLoader.load({ seeds: partialSeeds(), config: CONFIG }).then(() => undefined, (e: unknown) => e);
+
+    expect((err as Error).message).toBe('metadata store unavailable');
+    expect(store).toEqual({});
+    expect(seedLoadPartialWrites(err)).toEqual({ inserted: 0, updated: 0 });
+  });
+
+  it('an error that did not come out of a load carries no reading', () => {
+    expect(seedLoadPartialWrites(new Error('elsewhere'))).toBeUndefined();
+    expect(seedLoadPartialWrites('a string')).toBeUndefined();
   });
 });

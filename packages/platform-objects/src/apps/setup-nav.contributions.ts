@@ -126,6 +126,12 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // both directly. No `requiredPermissions` — matches Branding (read perm is
       // the app's base `setup.access`).
       { id: 'nav_settings_localization', type: 'url', label: 'Localization', url: '/apps/setup/system/settings/localization', icon: 'globe' },
+      // Multi-currency M1-1 (epic #8345): the dated rates from the home
+      // currency Localization sets, so the entry sits directly under it. The
+      // list page states the rate direction (`EXCHANGE_RATE_DIRECTION`). No
+      // `requiredPermissions`: the object grant decides who reads and writes
+      // (organization admins), and Setup itself already needs `setup.access`.
+      { id: 'nav_exchange_rates', type: 'object', label: 'Exchange Rates', objectName: 'sys_exchange_rate', viewName: 'all_rates', icon: 'arrow-right-left' },
       { id: 'nav_settings_company', type: 'url', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
       // `nav_settings_branding` is contributed by `@objectstack/service-settings`
       // with the `branding` namespace, which is offered only where no

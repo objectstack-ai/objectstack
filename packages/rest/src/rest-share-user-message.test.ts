@@ -302,14 +302,15 @@ const MARKED: Array<{
     },
     {
         // The sandbox limb with NO declared status: `classifyDataError`'s unwrap
-        // door answers 400 and the nested envelope fills the required `code`
-        // from the catalog floor. The mark rides that arm too — commit 79c46da90's rule is
+        // door answers 400 with the undeclared abort's `HOOK_ABORTED` (#27597;
+        // the nested envelope filled the catalog floor `VALIDATION_ERROR`
+        // before). The mark rides that arm too — commit 79c46da90's rule is
         // branch-agnostic by construction.
         name: 'a sandboxed hook body with a sentence and NO declared status',
         error: sandboxRefusal('sharing is frozen until the access review closes', {
             userMessage: 'The quarterly access review closes on Friday.',
         }),
-        status: 400, code: 'VALIDATION_ERROR',
+        status: 400, code: 'HOOK_ABORTED',
         userMessage: 'The quarterly access review closes on Friday.',
     },
     {

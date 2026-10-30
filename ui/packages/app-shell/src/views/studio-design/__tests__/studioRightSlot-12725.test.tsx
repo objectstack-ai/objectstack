@@ -15,6 +15,10 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { StudioRightSlot } from '../StudioRightSlot';
 import { STUDIO_SLOT_WIDTH, isSlotEscapeExempt, matchStudioSlotShortcut } from '../studioRightSlotState';
 import { t } from '../../metadata-admin/i18n';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+
+// The zh studio catalogue loads on demand; the zh case below reads it.
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 
@@ -57,7 +61,7 @@ function renderSlot(props: Partial<React.ComponentProps<typeof StudioRightSlot>>
       onModeChange={onModeChange}
       hasProps
       copilotAvailable
-      planPending={false}
+      planPendingCount={0}
       copilot={<div data-testid="copilot-body" />}
       propsTargetRef={() => {}}
       locale="en"
@@ -120,5 +124,16 @@ describe('StudioRightSlot', () => {
     expect(slot).not.toHaveClass('w-[300px]');
     fireEvent.click(slot.previousElementSibling as HTMLElement);
     expect(onOverlayDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  // objectstack#25943 — the StudioRailProps strip, 「AI 副驾 · N 项待确认 · 回到对话 →」.
+  it('zh: the folded strip reads 「AI 副驾 · 3 项待确认」 and the copilot tab carries the 3', () => {
+    renderSlot({ mode: 'props', planPendingCount: 3, locale: 'zh-CN' });
+    const strip = screen.getByTestId('studio-slot-copilot-strip');
+    expect(strip).toHaveTextContent('AI 副驾 · 3 项待确认');
+    expect(strip).toHaveTextContent(t('engine.studio.slot.backToChat', 'zh-CN'));
+    const copilotTab = screen.getAllByRole('tab')[1];
+    expect(within(copilotTab).getByTestId('studio-slot-plan-pending')).toHaveTextContent('3');
+    expect(copilotTab).toHaveAccessibleDescription('3 项待确认');
   });
 });

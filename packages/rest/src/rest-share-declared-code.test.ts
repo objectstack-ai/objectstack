@@ -293,9 +293,11 @@ const ABSENT: Array<{ name: string; error: unknown; status: number; code: string
         status: 403, code: 'FORBIDDEN',
     },
     {
+        // [#27597] `code` is the undeclared abort's `HOOK_ABORTED` (the
+        // status-derived `VALIDATION_ERROR` before); still nothing to declare.
         name: 'a sandboxed body that declared NO code has nothing to declare',
         error: sandboxRefusal('sharing is frozen until the quarterly access review closes'),
-        status: 400, code: 'VALIDATION_ERROR',
+        status: 400, code: 'HOOK_ABORTED',
     },
     {
         name: "the ADR-0111 `CODE: message` prefix idiom declares no envelope at all",

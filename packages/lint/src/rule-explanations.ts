@@ -2465,11 +2465,24 @@ const SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION: RuleExplanation = {
     VIRTUAL_FIELD_STORAGE,
     'A formula entry is refused on EVERY surface, the object\'s own set included — the REST ingress ' +
       'answers `400 INVALID_FIELD`, the same answer a stale entry gets: measured, it ' +
-      'matched 0 rows on driver-memory, and 0 rows with no error on driver-sql. Otherwise the ' +
-      'object\'s own `searchableFields` is existence-only: its declared branch scans any stored ' +
-      'column, so a json or lookup column declared there is a narrow choice the engine executes, not ' +
-      'a finding. A system column outside the allowed set is not judged either: its runtime ' +
-      'metadata is registry-owned and invisible here.',
+      'matched 0 rows on driver-memory, and 0 rows with no error on driver-sql. Otherwise, apart ' +
+      'from a credential entry, the object\'s own `searchableFields` is existence-only: its declared ' +
+      'branch scans any stored column, so a json or lookup column declared there is a narrow choice ' +
+      'the engine executes, not a finding. A system column outside the allowed set is not judged ' +
+      'either: its runtime metadata is registry-owned and invisible here.',
+    'A `secret` or `password` entry is refused on EVERY surface as well, the object\'s own set ' +
+      'included. The engine leaves every credential column out of the set a search scans (ADR-0100), ' +
+      'an author-declared one included, and says nothing: a declaration naming one scans a narrower ' +
+      'set than written, and one naming only credential fields falls through to the AUTO-DEFAULT ' +
+      'set. A list view naming one is refused with `400 INVALID_FIELD` when the object\'s set is the ' +
+      'auto-default, which never admits a credential type; when the object declares the entry, the ' +
+      'REST ingress admits it and the engine withholds it, so a view naming only credential fields ' +
+      'searches the object\'s whole set. Credential types are judged by the spec\'s ' +
+      '`isCredentialFieldType`, the predicate the engine\'s credential collector reads, with no ' +
+      'better-auth exemption: the read mask spares a better-auth `password`, the search withhold ' +
+      'does not. An error, as a formula entry is: the entry can never match, and the narrowing is ' +
+      'otherwise silent. The one fix is to drop it — mirroring the value onto a searchable column ' +
+      'would publish what the withhold protects.',
   ],
 };
 

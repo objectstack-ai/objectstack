@@ -28,11 +28,14 @@ import {
 import { FlowSchema, resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { FieldSchema } from '@objectstack/spec/data';
 import { checkFieldCompleteness, FIELD_SUMMARY_WITHOUT_OPERATIONS } from '@objectstack/spec/kernel';
-import { ActionSchema, DashboardWidgetSchema, resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
+import { ActionSchema, DashboardSchema, DashboardWidgetSchema, resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
 import type { MetadataSelection } from '../metadata-admin/preview-registry.js';
-import { t, tFormat, translateValidationMessage } from '../metadata-admin/i18n.js';
+import { t, tFormat, translateSchemaFieldLabel, translateValidationMessage } from '../metadata-admin/i18n.js';
+import { getDashboardForm } from '../metadata-admin/dashboard-schema.js';
+import { prettifyFieldName } from '../metadata-admin/field-source-label.js';
+import type { FormFieldSpec, FormViewSpec } from '../metadata-admin/form-spec.js';
 import {
   fieldsForNodeType,
   getFieldValue,
@@ -674,15 +677,21 @@ export function publishRefusal(
 // what the author finished.
 // ---------------------------------------------------------------------------
 
-/** An edit a pillar holds unsent because its body is incomplete (objectui#11786). */
-export interface StudioHeld {
+/**
+ * An edit a pillar holds unsent because its body is incomplete (objectui#11786).
+ * `Target` widens to `MetadataSelection | null` for a held edit that lives in
+ * the leaf's own properties, which no selection opens (objectstack#27459).
+ */
+export interface StudioHeld<Target extends MetadataSelection | null = MetadataSelection> {
   /**
    * What the edit still needs, as a clause the held line and the Publish
    * refusal both build on, e.g. `the field “Status” needs at least one option`.
    */
   clause: string;
-  /** The selection that opens the input the edit needs. */
-  target: MetadataSelection;
+  /** The selection that opens the input the edit needs; `null` = the leaf's own properties. */
+  target: Target;
+  /** The label of the input "Show me" focuses once the target is open, when it names one. */
+  input?: string;
 }
 
 /** What the write guard asks of a field it refuses: its options, its target, or nothing it names. */
@@ -1037,11 +1046,14 @@ export function widgetMissingInputs(widget: unknown): string[] {
  * The edit the Interfaces pillar holds for `draft`, the dashboard its leaf
  * autosave would send, or `null`: the first widget the spec refuses only for a
  * binding input it leaves out ({@link widgetMissingInputs}), named by its title
- * in the designer locale and selected as the canvas selects it.
+ * in the designer locale and selected as the canvas selects it; else the first
+ * item of one of its own list properties the spec refuses only for inputs it
+ * leaves unset ({@link listItemHeldInput}), placed on the dashboard's
+ * properties (objectstack#27459).
  */
-export function dashboardHeldEdit(draft: SentBody, locale: string): StudioHeld | null {
-  if (!Array.isArray(draft.widgets)) return null;
-  for (const widget of draft.widgets) {
+export function dashboardHeldEdit(draft: SentBody, locale: string): StudioHeld<MetadataSelection | null> | null {
+  const widgets = Array.isArray(draft.widgets) ? draft.widgets : [];
+  for (const widget of widgets) {
     if (!isSentBody(widget) || typeof widget.id !== 'string' || widget.id === '') continue;
     const [key] = widgetMissingInputs(widget);
     const input = WIDGET_BINDING_INPUTS.find((entry) => entry.key === key);
@@ -1056,5 +1068,135 @@ export function dashboardHeldEdit(draft: SentBody, locale: string): StudioHeld |
       target: { kind: 'widget', id: widget.id },
     };
   }
+  const item = listItemHeldInput(draft, DashboardSchema, DASHBOARD_WIDGET_LIST);
+  return item ? heldListItem(item, getDashboardForm(locale), locale) : null;
+}
+
+// ---------------------------------------------------------------------------
+// objectstack#27459 — an item of a leaf's list property held until it is
+// filled in.
+//
+// A properties-panel list ("Add item" under Global Filters, or the header's
+// Actions) appends an item with every input unset, and the installed spec
+// refuses it until its required inputs are given. Sent, the draft door answers
+// 422 for that item, and every later save of the same body is refused for it
+// too, so unrelated edits are lost. Such an item is held as a widget waiting
+// for its binding is ({@link dashboardHeldEdit}): unsent, with a neutral line
+// naming the input, and Publish refusing while it is held.
+//
+// ⛔ No list of required inputs lives here. The judge is the leaf's own spec
+// schema, asked of the body as it stands. An item is merely unfinished when
+// every issue the spec names inside it is on an input the item leaves unset
+// (absent, or a text cleared to `''`); an item refused for a value it holds is
+// finished but wrong, so it is sent, and the refusal it draws shows as before.
+// ---------------------------------------------------------------------------
+
+/** The dashboard list whose items are widgets: judged by {@link widgetMissingInputs}, never as a list item. */
+const DASHBOARD_WIDGET_LIST: ReadonlySet<string> = new Set(['widgets']);
+
+/** An item of a leaf's list property held for an unset input. */
+export interface HeldListItem {
+  /** The path of the list property in the leaf body, e.g. `['header', 'actions']`. */
+  list: string[];
+  /** The item's index in that list. */
+  index: number;
+  /** The item's input the spec refuses it without. */
+  input: string;
+}
+
+/**
+ * The first item of a list property in `body` that `schema` refuses only for
+ * inputs the item leaves unset, with the first such input, or `null`.
+ *
+ * Each issue is placed on the item of the outermost list its path enters; an
+ * issue on no list item, or on a list `skip` names by its first key, is not
+ * this rule's. An item is held only when every issue placed on it names an
+ * unset input directly below it; one issue on the item itself, or on an input
+ * it gives a value, makes it finished but wrong.
+ */
+export function listItemHeldInput(
+  body: SentBody,
+  schema: { safeParse: (value: unknown) => { success: boolean; error?: { issues: ReadonlyArray<{ path: PropertyKey[] }> } } },
+  skip: ReadonlySet<string> = new Set(),
+): HeldListItem | null {
+  const parsed = schema.safeParse(body);
+  if (parsed.success || !parsed.error) return null;
+  // Insertion order is the spec's issue order, so the first held item is the first one it names.
+  const items = new Map<string, HeldListItem | null>();
+  for (const issue of parsed.error.issues) {
+    const path = issue.path.map(String);
+    let value: unknown = body;
+    let at = -1;
+    for (let i = 0; i < path.length; i++) {
+      if (Array.isArray(value) && /^\d+$/.test(path[i])) {
+        at = i;
+        break;
+      }
+      value = isSentBody(value) ? value[path[i]] : undefined;
+    }
+    if (at < 1 || skip.has(path[0])) continue;
+    const list = path.slice(0, at);
+    const index = Number(path[at]);
+    const key = `${list.join('.')}#${index}`;
+    if (items.get(key) === null) continue;
+    const item = (value as unknown[])[index];
+    const input = path[at + 1];
+    if (input === undefined || !isSentBody(item) || !itemInputUnset(item[input])) {
+      items.set(key, null);
+      continue;
+    }
+    if (!items.has(key)) items.set(key, { list, index, input });
+  }
+  for (const item of items.values()) if (item) return item;
   return null;
+}
+
+/** Whether a list item's input holds no value yet: absent, or a text cleared to `''`. */
+function itemInputUnset(value: unknown): boolean {
+  return value === undefined || value === '';
+}
+
+/** The form row of `key` among `fields`, as the form declares it. */
+function formRowOf(fields: ReadonlyArray<string | FormFieldSpec> | undefined, key: string): FormFieldSpec | undefined {
+  for (const row of fields ?? []) {
+    const spec = typeof row === 'string' ? { field: row } : row;
+    if (spec.field === key) return spec;
+  }
+  return undefined;
+}
+
+/** A form row's label as `SchemaForm` shows it when the schema gives it no title: its own, translated, or prettified. */
+function formRowLabel(spec: FormFieldSpec | undefined, key: string, locale: string): string {
+  return spec?.label || translateSchemaFieldLabel(key, undefined, locale) || prettifyFieldName(key);
+}
+
+/**
+ * {@link HeldListItem} as the leaf's held edit: a clause naming the input, the
+ * item by its place in the list (the `#n` its row shows) and the list by the
+ * label `form` gives it; placed on the leaf's own properties, with the list's
+ * label for "Show me" to focus.
+ */
+export function heldListItem(
+  item: HeldListItem,
+  form: FormViewSpec | undefined,
+  locale: string,
+): StudioHeld<MetadataSelection | null> {
+  let rows: ReadonlyArray<string | FormFieldSpec> | undefined = (form?.sections ?? []).flatMap((section) =>
+    'fields' in section && Array.isArray(section.fields) ? section.fields : [],
+  );
+  let listRow: FormFieldSpec | undefined;
+  for (const key of item.list) {
+    listRow = formRowOf(rows, key);
+    rows = listRow?.fields;
+  }
+  const list = formRowLabel(listRow, item.list[item.list.length - 1], locale);
+  return {
+    clause: tFormat('engine.studio.held.listItemNeedsInput', locale, {
+      input: formRowLabel(formRowOf(rows, item.input), item.input, locale),
+      n: item.index + 1,
+      list,
+    }),
+    target: null,
+    input: list,
+  };
 }

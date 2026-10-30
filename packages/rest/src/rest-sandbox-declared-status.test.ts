@@ -99,7 +99,9 @@ describe('[#9967] mapDataError: a sandboxed body that declares a 4xx status keep
         const undeclared = mapDataError(sandboxRefusal(), 'showcase_task');
 
         expect(declared.body).toEqual(undeclared.body);
-        expect(declared.body.code).toBeUndefined();
+        // [#27597] Both carry `HOOK_ABORTED` now (no `code` before): the
+        // body declared a status and no code, so the code is the abort's.
+        expect(declared.body.code).toBe('HOOK_ABORTED');
     });
 
     it('the whole client band is served, off either spelling — same read as every other exit', () => {
@@ -166,12 +168,13 @@ describe('[#9967] a sandboxed body that declares a 5xx takes the sanitised 5xx a
 const CRASH_WORDS = '__OS_SANDBOX_FAULT_7f3a9c__';
 
 describe('[#9967] the pinned defaults are untouched', () => {
-    it('an UNDECLARED body throw keeps the verbatim-message 400 with no code', () => {
+    it('an UNDECLARED body throw keeps the verbatim-message 400, coded HOOK_ABORTED', () => {
         const r = mapDataError(sandboxRefusal(), 'showcase_task');
 
         expect(r.status).toBe(400);
         expect(r.body.error).toBe('close-period lock');
-        expect(r.body.code).toBeUndefined();
+        // [#27597] It carried no code before.
+        expect(r.body.code).toBe('HOOK_ABORTED');
     });
 
     it('a body CRASH stays the sanitised 500 even when it carries a stray `status`', () => {
@@ -252,7 +255,8 @@ describe('[#9967] the reported request on the real data route', () => {
 
         expect(res.statusCode).toBe(403);
         expect(res.body.error).toBe('close-period lock');
-        expect(res.body.code).toBeUndefined();
+        // [#27597] The status is the body's; the code is the undeclared abort's.
+        expect(res.body.code).toBe('HOOK_ABORTED');
     }, 60_000);
 
     it('the declared refusal is not logged as an unhandled fault — 403 is an expected outcome', async () => {

@@ -138,11 +138,49 @@ function nativePackageReason(dir: string): string | undefined {
 }
 
 /**
+ * Who reaches the package at `dir` (a {@link packageRootOf} directory): the
+ * files outside it that import a file inside it, and the shortest chain from
+ * the plugin's own source to it, one step per package — so a transitive hit
+ * (`ws` → `bufferutil`) names the direct dependency that pulled it in.
+ */
+function packageImporters(metafile: Metafile, dir: string): { importers: string[]; chain: string[] } {
+  const inputs = Object.keys(metafile.inputs);
+  const inside = (input: string): boolean => packageRootOf(input)?.dir === dir;
+  const importers = inputs.filter(
+    (i) => !inside(i) && metafile.inputs[i]!.imports.some((imp) => inside(imp.path)),
+  );
+  // Breadth-first from the plugin's own files (outside every `node_modules`).
+  const from = new Map<string, string | null>();
+  const queue = inputs.filter((i) => packageRootOf(i) === undefined);
+  for (const start of queue) from.set(start, null);
+  let hit: string | undefined;
+  while (queue.length > 0 && hit === undefined) {
+    const input = queue.shift()!;
+    for (const imp of metafile.inputs[input]?.imports ?? []) {
+      if (from.has(imp.path) || !(imp.path in metafile.inputs)) continue;
+      from.set(imp.path, input);
+      if (inside(imp.path)) {
+        hit = imp.path;
+        break;
+      }
+      queue.push(imp.path);
+    }
+  }
+  const chain: string[] = [];
+  for (let at: string | undefined = hit; at; at = from.get(at) ?? undefined) {
+    const step = packageRootOf(at)?.name ?? at;
+    if (chain[0] !== step) chain.unshift(step);
+  }
+  return { importers, chain };
+}
+
+/**
  * Every native addon a build would pack or load (ADR-0025 v2 §3.3), one line
  * each: a `.node` module the bundle reaches (named with its importers), a
  * bundled package that builds or ships one (its JS may be bundleable, but the
  * binary it locates at run time — `bindings`, `node-gyp-build` — is not in the
- * artifact), and a `.node` file staged from `assets/`.
+ * artifact; named with its importers and the chain that reaches it from the
+ * plugin's own source), and a `.node` file staged from `assets/`.
  */
 function findNativeAddons(metafile: Metafile, cwd: string, assets: ArchiveFile[]): string[] {
   const found: string[] = [];
@@ -158,7 +196,13 @@ function findNativeAddons(metafile: Metafile, cwd: string, assets: ArchiveFile[]
   }
   for (const { name, dir } of packages.values()) {
     const reason = nativePackageReason(resolvePath(cwd, dir));
-    if (reason) found.push(`package \`${name}\` (${dir}) ${reason}`);
+    if (!reason) continue;
+    const { importers, chain } = packageImporters(metafile, dir);
+    found.push(
+      `package \`${name}\` (${dir}) ${reason}`
+        + (importers.length > 0 ? `, imported by ${importers.join(', ')}` : '')
+        + (chain.length > 1 ? ` (reached through ${chain.join(' → ')})` : ''),
+    );
   }
   for (const asset of assets) {
     if (isNativeAddonPath(asset.path)) found.push(asset.path);

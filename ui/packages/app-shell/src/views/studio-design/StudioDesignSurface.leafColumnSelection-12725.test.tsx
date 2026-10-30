@@ -117,9 +117,9 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPending: boolean }) => void }) => {
+  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPendingCount: number }) => void }) => {
     React.useEffect(() => {
-      onStatusChange?.({ available: true, planPending: false });
+      onStatusChange?.({ available: true, planPendingCount: 0 });
     }, [onStatusChange]);
     return <div data-testid="copilot-body">conversation</div>;
   },

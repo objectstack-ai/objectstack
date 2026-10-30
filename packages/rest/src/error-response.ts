@@ -20,8 +20,8 @@
  * What the file owns, in the order a thrown error meets it:
  *
  *   classification  {@link mapDataError} — the error → `{ status, body }` table,
- *                   with {@link declaredHttpStatus}, {@link isScriptFaultMessage}
- *                   and {@link missingRelationIsObject} as its judgements and
+ *                   with {@link declaredHttpStatus} and {@link isScriptFaultMessage}
+ *                   as its judgements and
  *                   {@link DATA_STORE_FAULT} / {@link UNCLASSIFIED_FAULT} as its
  *                   two sanitised 5xx terminals.
  *   resolution      {@link resolveErrorResponse} — the same answer WITHOUT
@@ -65,6 +65,7 @@ import {
     mapDataError,
     resolveThrownHttpError,
     sandboxBusinessMessage,
+    sandboxRefusalCodeFields,
     structuredCodeAnswer,
     thrownCodeFields,
     truncateClientMessage,
@@ -585,11 +586,20 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // route that passes nothing still answers exactly the bytes it answers
         // today (`classifiedRefusalAnswer` calls this door with no object at
         // all, and its families' key sets are unmoved).
+        //
+        // [#27597] A sandboxed body's refusal that declared no code answers
+        // `UNDECLARED_HOOK_REFUSAL_CODE`, read through the same
+        // `sandboxRefusalCodeFields` the unwrap door in `mapDataError` reads,
+        // so a hook that sets `status` and the one that sets `statusCode` (or
+        // neither) still answer one code. Every other producer keeps
+        // `thrownCodeFields`' answer, which invents nothing.
         return withDeclaredUserMessage(error, {
             status: error.status,
             body: {
                 error: safeMsg,
-                ...thrownCodeFields(error, error.status),
+                ...(businessMessage !== undefined
+                    ? sandboxRefusalCodeFields(error, error.status)
+                    : thrownCodeFields(error, error.status)),
                 ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
                 ...(object ? { object } : {}),
             },
