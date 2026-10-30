@@ -18,9 +18,9 @@
  * #27559 — the same holds for a rule the second package contributes: when the
  * tenant's overlay carries that rule reworded (the Studio GET → edit → PUT of
  * the folded object), the packaged message to compare with is the EXTENSION
- * package's, so the tenant's sentence is served as written; and the fold lets
- * the overlay's copy stand for the extender's rule rather than appending the
- * original beside it, so the refusal answers that one sentence.
+ * package's, so the tenant's sentence is served as written. The fold still
+ * appends the extension's own copy beside it (validations stay additive,
+ * ADR-0029 D9.2a), and that copy, unchanged, is still translated.
  *
  * Both readers are driven off ONE real registry: the refusal of a real write
  * (the engine's validator), and the served object as `/meta` translates it —
@@ -247,44 +247,42 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
     const EXT_REWRITE = 'Tell us what blocks this duty.';
     beforeEach(async () => { await boot(true, EXT_REWRITE); });
 
-    it('folds the overlay copy in place of the extender rule, not beside it', () => {
-      const served = (engine.registry.getObject(OBJ) as any).validations;
-      expect(served.map((r: any) => r.name))
-        .toEqual(['returned_needs_note', 'done_needs_owner', 'ext_blocked_needs_reason']);
-      expect(served[2].message).toBe(EXT_REWRITE);
+    /** Every served message of `ext_blocked_needs_reason`, in fold order. */
+    function servedExtension(header: string): string[] {
+      const doc = translateObject(engine.registry.getObject(OBJ) as any, BUNDLE as any, {
+        locale: preferredLocaleFromHeader(header),
+        fallbackChain: ['en'],
+        packagedBase: protocol.getPackagedObjectBase(OBJ),
+      }) as any;
+      return doc.validations
+        .filter((r: any) => r.name === 'ext_blocked_needs_reason')
+        .map((r: any) => r.message);
+    }
+
+    it('serves and refuses with the rewrite as written, and still translates the extension copy beside it', async () => {
+      // The fold is additive for validations: the overlay's reworded copy, then
+      // the extension's own rule. Only the reworded one diverges from the
+      // extension package's packaged message.
+      const out: Record<string, unknown> = {};
+      for (const header of ['zh-CN', 'zh', 'en']) {
+        out[header] = {
+          served: servedExtension(header),
+          refusal: await refusal(header, { id: 'r3', status: 'blocked' }),
+        };
+      }
+      expect(out).toEqual({
+        'zh-CN': { served: [EXT_REWRITE, ZH.ext_blocked_needs_reason], refusal: `${EXT_REWRITE} | ${ZH.ext_blocked_needs_reason}` },
+        zh: { served: [EXT_REWRITE, ZH.ext_blocked_needs_reason], refusal: `${EXT_REWRITE} | ${ZH.ext_blocked_needs_reason}` },
+        en: {
+          served: [EXT_REWRITE, PACKAGED.ext_blocked_needs_reason],
+          refusal: `${EXT_REWRITE} | ${PACKAGED.ext_blocked_needs_reason}`,
+        },
+      });
     });
 
-    it('serves and refuses with both rewrites as written, and still translates the untouched rule', async () => {
-      const rows = (t: typeof ZH) => ({
-        returned_needs_note: REWRITE,
-        done_needs_owner: t.done_needs_owner,
-        ext_blocked_needs_reason: EXT_REWRITE,
-      });
-      expect(await table()).toEqual({
-        'zh-CN': { served: rows(ZH), refusal: rows(ZH) },
-        zh: { served: rows(ZH), refusal: rows(ZH) },
-        en: { served: rows(PACKAGED), refusal: rows(PACKAGED) },
-      });
-    });
-  });
-
-  describe('[#27559] with the tenant overlay carrying the extension rule untouched', () => {
-    beforeEach(async () => { await boot(true, PACKAGED.ext_blocked_needs_reason); });
-
-    it('serves the extension rule once and translates it on both readers', async () => {
-      const served = (engine.registry.getObject(OBJ) as any).validations;
-      expect(served.map((r: any) => r.name))
-        .toEqual(['returned_needs_note', 'done_needs_owner', 'ext_blocked_needs_reason']);
-      const rows = (t: typeof ZH) => ({
-        returned_needs_note: REWRITE,
-        done_needs_owner: t.done_needs_owner,
-        ext_blocked_needs_reason: t.ext_blocked_needs_reason,
-      });
-      expect(await table()).toEqual({
-        'zh-CN': { served: rows(ZH), refusal: rows(ZH) },
-        zh: { served: rows(ZH), refusal: rows(ZH) },
-        en: { served: rows(PACKAGED), refusal: rows(PACKAGED) },
-      });
+    it('leaves the owner rules as #27543 answers them', async () => {
+      expect(await refusal('zh-CN', { id: 'r1', status: 'returned' })).toBe(REWRITE);
+      expect(await refusal('zh-CN', { id: 'r2', status: 'done' })).toBe(ZH.done_needs_owner);
     });
   });
 

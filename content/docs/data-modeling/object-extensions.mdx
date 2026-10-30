@@ -141,10 +141,8 @@ survive a customized object rather than being dropped by it.
   `description` apply only while the base still carries the **packaged owner's** value.
   Once a tenant has renamed the object, the extension's packaged default yields and the
   tenant's name stands. Fields, validations and indexes are unaffected — they merge
-  either way, with one exception: an extension's validation rule whose `name` the
-  tenant's overlay already carries, and the owner does not declare, is served once, as
-  the overlay has it. There is no escape hatch: a package cannot relabel an object a
-  tenant has deliberately renamed.
+  either way. There is no escape hatch: a package cannot relabel an object a tenant has
+  deliberately renamed.
 </Callout>
 
 ---

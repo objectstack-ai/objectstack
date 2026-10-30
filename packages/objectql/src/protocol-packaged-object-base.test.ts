@@ -281,18 +281,4 @@ describe('#27559 getPackagedObjectBase — the packaged RULE set is the owner pl
         );
         expect(baseOf(s.protocol).validations.map((r: any) => r.message)).toEqual(['Extension says.']);
     });
-
-    it('the fold keeps an owner rule and an extender rule of one name both, as before', () => {
-        // The same-name yield is the OVERLAY's: a name the packaged owner ships
-        // itself is two packaged rules, and the fold still serves both.
-        const s = makeSession();
-        registerPackaged(s.registry);
-        s.registry.registerObject(
-            { name: OBJ, label: PACKAGED_LABEL, validations: [rule('shared', 'Owner says.')] } as any,
-            PKG,
-        );
-        registerRuleExtension(s.registry, [rule('shared', 'Extension says.')]);
-        expect((s.registry.getObject(OBJ) as any).validations.map((r: any) => r.message))
-            .toEqual(['Owner says.', 'Extension says.']);
-    });
 });
