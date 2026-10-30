@@ -9,7 +9,7 @@ import {
 import { expandViewContainer } from '@objectstack/spec/ui';
 import { ActiveOrganizationStorage, TokenStorage, useAuth } from '@object-ui/auth';
 import { isMetaItemAbsentError, MetadataNotFoundError, type ObjectStackAdapter } from '@object-ui/data-objectstack';
-import { markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
+import { isActionSwitchedOff, markSwitchedOffActions, markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import { resolveInlineMode } from '@object-ui/plugin-form';
 import { MetadataCtx, useMetadata, type MetadataContextValue, type MetadataCacheState, type MetadataTypeStatus } from '@object-ui/react';
@@ -358,6 +358,37 @@ export function extractItems(res: unknown): any[] {
     return (res as { items: unknown[] }).items;
   }
   return [];
+}
+
+/**
+ * The ingestion every OBJECT list read runs — the whole list and a package
+ * scope's alike, so a scoped definition is shaped exactly like the same object
+ * in `objects`. In place.
+ *
+ * 1. a legacy `reference_to` / `referenceTo` is folded onto `reference`;
+ * 2. [objectstack#27504] the envelope's `disabledActions`, keyed by object:
+ *    each object's switched-off action entries are stamped (symbol key), so
+ *    the action gates stop offering them.
+ */
+function ingestObjectList(items: any[], res: unknown): void {
+  for (const it of items) normalizeSchemaReferenceKeys(it);
+  if (res && typeof res === 'object' && !Array.isArray(res)) {
+    markSwitchedOffActionsByObject(items, (res as { disabledActions?: unknown }).disabledActions);
+  }
+}
+
+/**
+ * A private copy of an adapter-served object schema. `structuredClone` drops
+ * symbol-keyed properties, so the switched-off stamps the adapter put on the
+ * action entries (objectstack#27504) are carried onto the copy by name.
+ */
+function cloneServedObject(schema: unknown): unknown {
+  const copy = structuredClone(schema);
+  const actions = (schema as { actions?: unknown }).actions;
+  if (Array.isArray(actions)) {
+    markSwitchedOffActions(copy, actions.filter(isActionSwitchedOff).map((a: { name?: unknown }) => a.name));
+  }
+  return copy;
 }
 
 function extractItem(res: unknown): any | null {
@@ -783,7 +814,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   const readObjectThroughAdapter = useCallback((name: string): Promise<unknown> => {
     adapterObjectNamesRef.current.add(name);
     return adapterRef.current.getObjectSchema(name).then(
-      (schema: unknown) => ({ item: schema == null ? schema : structuredClone(schema) }),
+      (schema: unknown) => ({ item: schema == null ? schema : cloneServedObject(schema) }),
       (err: unknown) => {
         throw err instanceof MetadataNotFoundError ? (err.details?.originalError ?? err) : err;
       },
@@ -896,16 +927,9 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           // object field defs at ingestion (the store-side choke point,
           // mirroring the adapter's getObjectSchema pass), so
           // `useMetadata().objects` consumers read `reference` alone
-          // (objectui#11070 round 4). Idempotent, in place.
-          if (type === 'object') {
-            for (const it of items) normalizeSchemaReferenceKeys(it);
-            // [objectstack#27504] The list envelope's `disabledActions`, keyed
-            // by object: each object's switched-off action entries are stamped
-            // (symbol key) so the action gates stop offering them.
-            if (res && typeof res === 'object' && !Array.isArray(res)) {
-              markSwitchedOffActionsByObject(items, (res as { disabledActions?: unknown }).disabledActions);
-            }
-          }
+          // (objectui#11070 round 4), and stamp the switched-off actions
+          // (objectstack#27504) — `ingestObjectList`. Idempotent, in place.
+          if (type === 'object') ingestObjectList(items, res);
           entry.items = items;
           entry.status = 'ready';
           entry.error = null;
@@ -1053,7 +1077,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         .then((res: unknown) => {
           if (scopesRef.current.get(packageId) !== entry) return;
           const items = extractItems(res);
-          for (const it of items) normalizeSchemaReferenceKeys(it);
+          ingestObjectList(items, res);
           const listed = new Set(items.map((it: any) => it?.name));
           // The by-name extras stay until their own answer replaces them.
           const extras = entry.items.filter((it: any) => !listed.has(it?.name) && entry.names.has(it?.name));
