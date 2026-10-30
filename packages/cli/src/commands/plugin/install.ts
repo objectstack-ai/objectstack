@@ -17,7 +17,11 @@
  *      signature that does not match the bytes.
  *   2. Read the archive (the inflate bounded, `MAX_UNPACKED_ARTIFACT_BYTES`)
  *      and its compiled `objectstack.plugin.json`; refuse an entry that could
- *      land outside the install directory.
+ *      land outside the install directory, and a manifest `ManifestSchema`
+ *      refuses (`readCompiledPluginManifest`, the read the boot-time loader
+ *      makes too), with the schema's own message: an artifact built before a
+ *      value was retired (`packaging: 'manifest-deps'`) gets that value's
+ *      prescription here, before anything is unpacked.
  *   3. Re-verify every file against the manifest's `integrity` map; refuse a
  *      digest mismatch, a declared file that is missing, or a file the map
  *      does not declare.
@@ -64,6 +68,7 @@ import {
   loadPluginInstallations,
   pluginInstallDir,
   dispatchPluginRuntime,
+  readCompiledPluginManifest,
   recordPluginInstallation,
   withPluginInstallationsLock,
   PluginInstallationsLockedError,
@@ -291,23 +296,26 @@ export default class PluginInstall extends Command {
       });
       return;
     }
-    let manifest: Record<string, any>;
-    try {
-      const entry = files.find((f) => f.path === MANIFEST_FILENAME);
-      if (!entry) throw new Error(`${MANIFEST_FILENAME} not found in the artifact`);
-      const parsed = JSON.parse(Buffer.from(entry.data).toString('utf8')) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${MANIFEST_FILENAME} is not a JSON object`);
-      manifest = parsed as Record<string, any>;
-    } catch (error) {
-      await refuse({ error: 'manifest_unreadable', message: `Cannot read the artifact's manifest: ${(error as Error).message}` });
+    // Through `ManifestSchema`, the read the boot-time loader makes too: an
+    // artifact built before a schema change is refused here with the
+    // schema's own words (a retired value's prescription), not at boot.
+    const read = readCompiledPluginManifest(files);
+    if (!read.ok) {
+      await refuse(
+        read.reason === 'unreadable'
+          ? { error: 'manifest_unreadable', message: `Cannot read the artifact's manifest: ${read.message}` }
+          : {
+            error: 'manifest_invalid',
+            message:
+              `The artifact's ${MANIFEST_FILENAME} is not a valid plugin manifest, so nothing was installed. `
+              + 'Fix the source manifest and rebuild the artifact with `os plugin build`:',
+            details: read.issues,
+          },
+      );
       return;
     }
-    const id = typeof manifest.id === 'string' ? manifest.id.trim() : '';
-    const version = typeof manifest.version === 'string' ? manifest.version.trim() : '';
-    if (!id || !version) {
-      await refuse({ error: 'manifest_incomplete', message: 'The artifact manifest is missing `id` or `version`. Rebuild it with `os plugin build`.' });
-      return;
-    }
+    const manifest = read.manifest;
+    const { id, version } = manifest;
     const environmentId = pluginEnvironmentId();
     let installDir: string;
     try {
@@ -324,19 +332,9 @@ export default class PluginInstall extends Command {
       );
     }
 
-    // 3. Per-file integrity, re-verified at unpack (ADR-0025 §3.2). ─────
-    const declaredIntegrity = manifest.integrity;
-    if (
-      declaredIntegrity !== undefined && declaredIntegrity !== null
-      && (typeof declaredIntegrity !== 'object' || Array.isArray(declaredIntegrity))
-    ) {
-      await refuse({
-        error: 'integrity_malformed',
-        message: 'The artifact manifest has a malformed `integrity` map (expected an object of path → digest). Rebuild it with `os plugin build`.',
-      });
-      return;
-    }
-    const integrity = verifyIntegrity(files, declaredIntegrity as Record<string, string> | undefined, {
+    // 3. Per-file integrity, re-verified at unpack (ADR-0025 §3.2); the
+    //    map's shape is `ManifestSchema`'s, checked above. ──────────────
+    const integrity = verifyIntegrity(files, manifest.integrity, {
       exempt: [MANIFEST_FILENAME, SIGNATURE_FILENAME],
     });
     if (!integrity.ok) {
@@ -394,9 +392,9 @@ export default class PluginInstall extends Command {
           id,
           version,
           versionId: `${id}@${version}`,
-          runtime: typeof manifest.runtime === 'string' ? manifest.runtime : null,
+          runtime: manifest.runtime ?? null,
           status: 'installed',
-          grantedPermissions: permissions && typeof permissions === 'object' && !Array.isArray(permissions) ? permissions : null,
+          grantedPermissions: permissions ?? null,
           dir: installDir,
           artifact: { file: INSTALLED_ARTIFACT_FILE, sha256: artifactSha },
           signatureFile: signature === null ? null : INSTALLED_SIGNATURE_FILE,

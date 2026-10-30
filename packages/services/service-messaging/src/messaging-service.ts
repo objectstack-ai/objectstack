@@ -387,8 +387,10 @@ export class MessagingService {
      *
      * [#10740] `options.tenantId` is the REQUESTING caller's organization, and
      * it is the whole reason this method takes a second argument: the door in
-     * front of it (`POST /api/v1/webhooks/redeliver`) is open to any
-     * authenticated user, and `sys_http_delivery` is tenant-scoped. The
+     * front of it (`POST /api/v1/webhooks/redeliver`) admits any caller with
+     * edit (`update`) access to `sys_webhook`, as decided by
+     * `packages/plugins/plugin-webhooks/src/redeliver-entitlement.ts` — a caller
+     * in any organization — and `sys_http_delivery` is tenant-scoped. The
      * outbox applies it to the rows it reads and the row it writes, so a
      * caller can only replay deliveries in its own organization; a row
      * elsewhere is `RESOURCE_NOT_FOUND`. ⛔ There is no tenant-audit bypass

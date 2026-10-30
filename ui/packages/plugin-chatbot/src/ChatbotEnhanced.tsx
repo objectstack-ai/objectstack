@@ -766,16 +766,22 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   onBuildResult?: (result: { appName: string; label?: string; live: boolean }) => void;
   /**
-   * objectui#11666 — reports whether this thread's NEWEST proposed plan is
-   * still waiting for the user's approval: its card offers "Build it", i.e.
-   * {@link resolveProposalCardState} reads `pending` for it. Fires once on
-   * mount and again on every change of that boolean. An earlier plan does not
-   * count once a newer one exists (the newer card is the one awaiting); an
-   * approval (the optimistic "Building…" flip) or a build that ran ends it.
-   * Hosts mirror it outside the chat — the console's launchers show a marker
-   * while the chat is closed.
+   * objectui#11666 — reports whether this thread's NEWEST proposal is still
+   * waiting for the user's approval: a proposed plan whose card offers
+   * "Build it", or a change plan (`proposedChanges`) whose card still offers
+   * its confirm / 存为草稿 button, i.e. {@link resolveProposalCardState} reads
+   * `pending` for it. Fires once on mount and again on every change of the
+   * reading. An earlier proposal does not count once a newer one exists (the
+   * newer card is the one awaiting); an approval (the optimistic "Building…" /
+   * applying flip), a build that ran or a confirm that landed ends it.
+   *
+   * `count` is how many items that proposal asks the user to confirm: the rows
+   * of a change plan (its 「修改方案 · N 项」), 1 for a proposed plan, and 0
+   * when nothing is pending. Hosts mirror it outside the chat — the console's
+   * launchers show a marker while the chat is closed, and Studio's right slot
+   * shows 「N 项待确认」 beside the folded copilot (objectstack#25943).
    */
-  onPlanApprovalPendingChange?: (pending: boolean) => void;
+  onPlanApprovalPendingChange?: (pending: boolean, count: number) => void;
   /**
    * ADR-0057 P4 — invoked when the user clicks "Open in Builder →" on an `ask`
    * agent's `suggest_builder` decline. The host opens the build surface seeded
@@ -3012,32 +3018,43 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // newer proposal followed is superseded by it. Computed on every render
     // rather than memoised: it is one pass over the tool calls, and its inputs
     // are memo results whose identity this must not key on (Commandment #10).
-    let newestPlanId: string | undefined;
+    //
+    // objectstack#25943 — a change plan (the copilot's 「修改方案 · N 项」 card)
+    // is a proposal too, and its rows are the count Studio's right slot shows.
+    // "Pending" for it is the card still offering its confirm button: no replay
+    // verdict, no later same-tool commit, no click in flight (`confirmPendingIds`)
+    // and no quota refusal (`quotaBlockedChanges`).
+    let newestProposal: ChatbotEnhancedToolInvocation | undefined;
     for (const message of messages) {
       for (const tool of message.toolInvocations ?? []) {
-        if ((tool.proposedPlan || isUnstructuredBuildProposal(tool)) && tool.toolCallId) {
-          newestPlanId = tool.toolCallId;
+        if ((tool.proposedPlan || tool.proposedChanges || isUnstructuredBuildProposal(tool)) && tool.toolCallId) {
+          newestProposal = tool;
         }
       }
     }
+    const newestProposalId = newestProposal?.toolCallId;
     const planApprovalPending =
-      newestPlanId !== undefined &&
+      newestProposalId !== undefined &&
+      !quotaBlockedChanges.has(newestProposalId) &&
       resolveProposalCardState({
-        replayOutcome: replayOutcomeByProposalId.get(newestPlanId),
-        built: builtPlanIds.has(newestPlanId),
-        confirmed: confirmedChangeIds.has(newestPlanId),
-        approved: approvedPlanIds.has(newestPlanId),
+        replayOutcome: replayOutcomeByProposalId.get(newestProposalId),
+        built: builtPlanIds.has(newestProposalId),
+        confirmed: confirmedChangeIds.has(newestProposalId),
+        approved: approvedPlanIds.has(newestProposalId) || confirmPendingIds.has(newestProposalId),
       }) === 'pending';
+    const planApprovalPendingCount = planApprovalPending
+      ? (newestProposal?.proposedChanges?.changes.length ?? 1)
+      : 0;
     // The host's callback is read through a ref so the effect keys on the
-    // boolean alone — a host that passes a fresh function each render must not
+    // reading alone — a host that passes a fresh function each render must not
     // re-announce an unchanged reading.
     const onPlanApprovalPendingChangeRef = React.useRef(onPlanApprovalPendingChange);
     React.useEffect(() => {
       onPlanApprovalPendingChangeRef.current = onPlanApprovalPendingChange;
     }, [onPlanApprovalPendingChange]);
     React.useEffect(() => {
-      onPlanApprovalPendingChangeRef.current?.(planApprovalPending);
-    }, [planApprovalPending]);
+      onPlanApprovalPendingChangeRef.current?.(planApprovalPending, planApprovalPendingCount);
+    }, [planApprovalPending, planApprovalPendingCount]);
 
     const renderToolDetail = (tool: ChatbotEnhancedToolInvocation) => {
       const state =

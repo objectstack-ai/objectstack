@@ -83,6 +83,7 @@ export const jaJP: TranslationData = {
 
         nav_settings_hub: { label: 'すべての設定' },
         nav_settings_localization: { label: 'ローカリゼーション' },
+        nav_exchange_rates: { label: '為替レート' },
         nav_settings_company: { label: '会社情報' },
         nav_settings_mail: { label: 'メール' },
         nav_settings_branding: { label: 'ブランディング' },

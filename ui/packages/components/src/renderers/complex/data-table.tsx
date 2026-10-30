@@ -31,6 +31,7 @@ import {
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Checkbox } from '../../ui/checkbox';
+import { TriStateCheckbox } from '../../custom/tri-state-checkbox';
 import {
   Select,
   SelectContent,
@@ -3142,7 +3143,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       absolutely placed checkbox. */}
                   {selectionMode === 'multiple' && (
                     <div data-slot="select-all" className={cn("flex items-center", showRowNumbers && "justify-center")}>
-                      <Checkbox
+                      <TriStateCheckbox
                         checked={allPageRowsSelected ? true : somePageRowsSelected ? 'indeterminate' : false}
                         onCheckedChange={handleSelectAll}
                         aria-label={t('table.selectAllRows')}

@@ -32,6 +32,7 @@ import type {
   SettingRowSnapshot,
   SysSecretSweepPlan,
 } from '../../utils/sys-secret-orphan-sweep.js';
+import type { SysSecretHolderReport } from '../../utils/sys-secret-holder-report.js';
 
 /**
  * `os secret orphans` — the operator-run half of #8103.
@@ -93,11 +94,20 @@ import type {
  * make the mistake describable and still permanent. `--delete` without
  * `--export` is refused, the file is written with owner-only permissions, and
  * it is READ BACK and checked against the plan before a single row is removed.
+ *
+ * ## The rows something DOES name (#27721)
+ *
+ * The report also lists, from the same union, each handle more than one holder
+ * names and each handle a column other than its own holds
+ * (`sys-secret-holder-report.ts`), with the predicate-update share listed
+ * apart. Report mode only, and ⛔ nothing acts on it: it is not an input to the
+ * deletion plan, and no repair follows from it here.
  */
 export default class SecretOrphans extends Command {
   static override description =
     'Report `sys_secret` rows no producer references any more, and (only with --delete) remove the '
-    + 'ones attributable to settings. Report-only by default: it writes no row or table and deletes nothing.';
+    + 'ones attributable to settings. Report-only by default: it writes no row or table and deletes nothing. '
+    + 'The report also lists handles more than one holder names, or a column other than their own holds.';
 
   static override examples = [
     '<%= config.bin %> secret orphans',
@@ -200,6 +210,7 @@ export default class SecretOrphans extends Command {
     const { collectSecretReferenceUnion } = await import('../../utils/secret-reference-union.js');
     const { buildPreDeleteExport, planSysSecretOrphanSweep, useHandlePredicate } =
       await import('../../utils/sys-secret-orphan-sweep.js');
+    const { reportSysSecretHolders } = await import('../../utils/sys-secret-holder-report.js');
     const { collectEncryptedSpecifierRefs, isSecretHandle } = await import('@objectstack/service-settings');
     const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
 
@@ -340,8 +351,10 @@ export default class SecretOrphans extends Command {
       reads.notice(json);
 
       if (!flags.delete) {
-        if (json) { await emitJson({ mode: 'report', plan }, 0, { compact: true }); return; }
+        const holders = reportSysSecretHolders({ secrets, union });
+        if (json) { await emitJson({ mode: 'report', plan, holders }, 0, { compact: true }); return; }
         renderPlan(plan);
+        renderHolders(holders);
         printInfo(`Report only — no row or table was written or deleted.${journalNote} (${timer.display()})`);
         printInfo('Re-run with --delete --export <path> to remove the deletable rows.');
         return;
@@ -582,4 +595,26 @@ function renderPlan(plan: SysSecretSweepPlan): void {
 
   console.log(chalk.bold('\n  Read before acting'));
   for (const note of plan.notes) printWarning(note);
+}
+
+/** Render the holder report for a human. Handle ids and holder coordinates only. */
+function renderHolders(report: SysSecretHolderReport): void {
+  console.log(chalk.bold('\n  Named handles — shared, or held out of place'));
+  printInfo(
+    `named ${report.counts.named} · shared ${report.counts.shared} · misplaced ${report.counts.misplaced} · `
+    + `shared in own column ${report.counts.sharedInOwnColumn}`,
+  );
+  const sections: Array<[string, SysSecretHolderReport['shared']]> = [
+    ['SHARED   ', report.shared],
+    ['MISPLACED', report.misplaced],
+    ['OWN COL  ', report.sharedInOwnColumn],
+  ];
+  for (const [tag, findings] of sections) {
+    for (const finding of findings) {
+      console.log(`    ${chalk.yellow(tag)} ${finding.id}  (${finding.namespace}.${finding.key}) · ${finding.holderCount} holder(s)`);
+      for (const holder of finding.holders) console.log(chalk.dim(`      ${holder.placement}: ${holder.family}: ${holder.holder}`));
+      console.log(chalk.dim(`      ${finding.reason}`));
+    }
+  }
+  for (const note of report.notes) printWarning(note);
 }

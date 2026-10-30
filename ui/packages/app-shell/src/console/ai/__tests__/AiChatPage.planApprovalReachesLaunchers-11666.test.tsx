@@ -57,7 +57,7 @@ import type { AgentDescriptor } from '@object-ui/plugin-chatbot';
 import { ChatPane } from '../AiChatPage';
 import { ConsoleChatbotFab } from '../../../layout/ConsoleChatbotFab';
 import { useConversationList } from '../../../hooks/useConversationList';
-import { publishPlanApprovalPending } from '../../../assistant/assistantBus';
+import { publishPlanApprovalPending, usePlanApprovalPendingCount } from '../../../assistant/assistantBus';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -104,10 +104,15 @@ function renderFab() {
 }
 
 /** Play the chat's own reading, as `ChatbotEnhanced` reports it. */
-function chatReports(pending: boolean) {
-  const report = captured.onPlanApprovalPendingChange as (p: boolean) => void;
+function chatReports(pending: boolean, count = pending ? 1 : 0) {
+  const report = captured.onPlanApprovalPendingChange as (p: boolean, c: number) => void;
   expect(typeof report).toBe('function');
-  act(() => report(pending));
+  act(() => report(pending, count));
+}
+
+/** objectstack#25943 — what Studio's right slot reads off the bus. */
+function CountProbe() {
+  return <output data-testid="pending-count">{usePlanApprovalPendingCount()}</output>;
 }
 
 afterEach(() => {
@@ -174,5 +179,21 @@ describe('ChatPane → assistant bus → FAB (objectui#11666)', () => {
       await result.current.remove('conv-1');
     });
     expect(screen.queryByTestId(MARKER)).not.toBeInTheDocument();
+  });
+
+  // objectstack#25943 — the chat's count reaches the bus with its reading.
+  it("the chat's count of items awaiting confirmation reaches the bus, and its end clears it", () => {
+    render(<CountProbe />);
+    renderPane('conv-1');
+    expect(screen.getByTestId('pending-count')).toHaveTextContent('0');
+
+    chatReports(true, 2);
+    expect(screen.getByTestId('pending-count')).toHaveTextContent('2');
+
+    chatReports(true, 3);
+    expect(screen.getByTestId('pending-count')).toHaveTextContent('3');
+
+    chatReports(false);
+    expect(screen.getByTestId('pending-count')).toHaveTextContent('0');
   });
 });

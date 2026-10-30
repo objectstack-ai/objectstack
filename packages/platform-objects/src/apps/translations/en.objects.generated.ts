@@ -3530,5 +3530,46 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Updated At"
       }
     }
+  },
+  sys_exchange_rate: {
+    label: "Exchange Rate",
+    pluralLabel: "Exchange Rates",
+    description: "Exchange rates from the organization's home currency to a foreign currency, by effective date — the rates foreign-currency amounts are converted to the home currency with.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      currency: {
+        label: "Currency",
+        help: "ISO 4217 code of the foreign currency, uppercase (EUR, JPY, CHF)."
+      },
+      rate: {
+        label: "Rate",
+        help: "1 unit of the organization's home currency (Localization → Default currency) = Rate units of this currency. Example: home currency USD, currency EUR, rate 0.92 means 1 USD = 0.92 EUR."
+      },
+      effective_date: {
+        label: "Effective Date",
+        help: "First date this rate applies to. It stays in force until a later row for the same currency takes over."
+      },
+      source: {
+        label: "Source",
+        help: "How the row arrived: typed in Setup (manual), loaded from a file (import), or written by an app flow (app).",
+        options: {
+          manual: "Manual",
+          import: "Import",
+          app: "App"
+        }
+      }
+    },
+    _views: {
+      all_rates: {
+        label: "All",
+        description: "1 unit of the organization's home currency (Localization → Default currency) = Rate units of this currency. Example: home currency USD, currency EUR, rate 0.92 means 1 USD = 0.92 EUR.",
+        emptyState: {
+          title: "No exchange rates yet",
+          message: "Add one row per currency for each date its rate changes, for example one row per currency at the start of each month."
+        }
+      }
+    }
   }
 };
