@@ -14,8 +14,10 @@
  * Both descriptor sources draw the map — the offline table, and the published
  * `configSchema` (`fields: { type: 'object', additionalProperties: true }`,
  * objectstack `service-automation` `builtin/crud-nodes.ts` at `51290bca`) — so
- * every case runs against both. `update_record`'s `filter` map, keyed the same
- * way but not a field-VALUE map, is the control.
+ * every case runs against both. `delete_record`'s `filter` map, keyed the same
+ * way but not a field-VALUE map, is the control. `update_record` picks the same
+ * keys by label (objectstack#27834), pinned in
+ * `FlowNodeInspector.updateRecordTarget-27834.test.tsx`.
  */
 
 import * as React from 'react';
@@ -137,7 +139,7 @@ const SOURCES: Source[] = ['offline', 'engine'];
 
 describe('objectui#11788 — record field-value keys are picked from the target object', () => {
   for (const source of SOURCES) {
-    for (const type of ['create_record', 'update_record'] as const) {
+    for (const type of ['create_record'] as const) {
       it(`${type} — ${source}: the key cell lists the object's fields and the pick is written as the key`, () => {
         const { config } = mount(source, { id: 'write', type, label: 'Write', config: { objectName: 'ticket' } });
         const fields = block('Field values');
@@ -164,8 +166,8 @@ describe('objectui#11788 — record field-value keys are picked from the target 
       expect(within(fields).getByText('Choose the Object above to list its fields.')).toBeInTheDocument();
     });
 
-    it(`${source}: update_record's filter map is not a field-value map — the control`, () => {
-      mount(source, { id: 'write', type: 'update_record', label: 'Write', config: { objectName: 'ticket' } });
+    it(`${source}: delete_record's filter map is not a field-value map — the control`, () => {
+      mount(source, { id: 'write', type: 'delete_record', label: 'Write', config: { objectName: 'ticket' } });
       const filter = block('Filter');
       fireEvent.click(within(filter).getByRole('button', { name: 'Add entry' }));
       expect(keySuggestions(within(filter).getByPlaceholderText('Key'))).toBeNull();

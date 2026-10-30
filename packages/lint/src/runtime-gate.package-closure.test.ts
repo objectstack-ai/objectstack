@@ -582,3 +582,64 @@ describe('the flow door under a package closure (#24669)', () => {
     expect(g).toMatchObject({ severity: 'error', rule: UNKNOWN });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #27827 — the DATASET door under a package closure, and the one prescription
+// the three doors share: a base object outside the closure is refused with the
+// fix the flow and view doors print (ADR-0141 D1), from one builder.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('the dataset door under a package closure, and the shared prescription (#27827)', () => {
+  const objects = packagedTenant(3);
+  const datasetOn = (object: string): AnyRec => ({
+    name: `probe_${object}`,
+    label: 'Probe',
+    object,
+    dimensions: [],
+    measures: [],
+  });
+  const gate = (type: string, item: AnyRec, scope?: RuntimePackageScope) =>
+    runRuntimeAuthoringRules({
+      type,
+      item,
+      context: { objects },
+      ...(scope !== undefined ? { packageScope: scope } : {}),
+    });
+  /** The one refusal each door gives for `other_0_0` under the closure. */
+  const refusalOf = (type: string, item: AnyRec, rule: string): AnyRec => {
+    const fs = gate(type, item, SCOPE).errors.filter((f) => f.rule === rule);
+    expect(fs, `${type} door`).toHaveLength(1);
+    return fs[0]!;
+  };
+
+  it('REFUSES a base object of a package the written one never declared — the fix names the declaration', () => {
+    const f = refusalOf('dataset', datasetOn('other_0_0'), 'object-reference-unknown');
+    expect(f.severity).toBe('error');
+    expect(f.hint).toContain(OWN);
+    expect(f.hint).toContain('`dependencies`');
+    expect(f.hint).toContain('"other_0_0"');
+    // Admitted: the written package, its declared dependency, a platform object.
+    for (const inside of ['crm_account', 'core_user', 'platform_ledger', 'sys_audit_log']) {
+      expect(gate('dataset', datasetOn(inside), SCOPE).errors, inside).toEqual([]);
+    }
+  });
+
+  it('no closure stated: the stranger s object resolves, and a ghost keeps the stack-relative fix', () => {
+    expect(gate('dataset', datasetOn('other_0_0')).errors).toEqual([]);
+    const [f] = gate('dataset', datasetOn('ghost_object')).errors;
+    expect(f).toMatchObject({ severity: 'error', rule: 'object-reference-unknown' });
+    expect(f!.hint.startsWith('Point it at one of this stack\'s objects')).toBe(true);
+  });
+
+  it('the three doors print ONE prescription — the same declaration clause, each door s own alternative', () => {
+    const flow = refusalOf('flow', flowOn('on_other', 'other_0_0'), 'flow-trigger-unknown-object');
+    const view = refusalOf('view', listViewOn('other_0_0', ['name']), 'list-view-object-outside-closure');
+    const dataset = refusalOf('dataset', datasetOn('other_0_0'), 'object-reference-unknown');
+    const clause =
+      `Declare a dependency on the package that defines "other_0_0" in the \`dependencies\` of "${OWN}"'s ` +
+      'manifest, or ';
+    expect(flow.hint).toBe(`${clause}set config.objectName to an object inside that closure`);
+    expect(view.hint).toBe(`${clause}bind the view to an object inside that closure`);
+    expect(dataset.hint).toBe(`${clause}point it at an object inside that closure`);
+  });
+});

@@ -20,7 +20,7 @@ import {
     declaredScreenFieldNames,
     type ScreenFieldVisibility,
 } from './screen-input-contract.js';
-import type { Logger } from '@objectstack/spec/contracts';
+import type { IPubSub, Logger } from '@objectstack/spec/contracts';
 import type { FlowUnboundCause } from '@objectstack/spec/contracts';
 import { FLOW_RESERVED_NODE_TYPES, FLOW_STRUCTURAL_NODE_TYPES } from '@objectstack/spec/automation';
 // [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
@@ -2533,6 +2533,12 @@ export interface ConnectorCredentialDoor {
     list(): Promise<ConnectorCredentialRef[]>;
     set(request: ConnectorCredentialSetRequest): Promise<ConnectorCredentialRef>;
     clear(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef>;
+    /**
+     * [#27428] Attach the cluster transport the door's writes fan out on, and
+     * whose peer writes reconcile this replica — see
+     * {@link AutomationEngine.attachConnectorCredentialPubSub}.
+     */
+    attachClusterPubSub(pubsub: IPubSub, nodeId: string): () => void;
 }
 
 /**
@@ -4798,6 +4804,21 @@ export class AutomationEngine implements IAutomationService {
             ),
             { code: 'SERVICE_UNAVAILABLE', status: 503 },
         );
+    }
+
+    /**
+     * [#27428] Attach a cluster pub/sub transport to the connector credential
+     * door: a write through it publishes the reference on
+     * `connector-credential.mutated`, and a peer's write reconciles the
+     * instances held here. Called by `MetadataClusterBridgePlugin` in
+     * `@objectstack/service-cluster` at `kernel:ready` — lane 4 of
+     * `content/docs/kernel/cluster.mdx` §6.2, duck-typed there so neither
+     * package depends on the other. Only `IPubSub` crosses this seam.
+     *
+     * @returns a disposer that detaches the transport.
+     */
+    attachConnectorCredentialPubSub(pubsub: IPubSub, nodeId: string): () => void {
+        return this.requireConnectorCredentialDoor('attachConnectorCredentialPubSub()').attachClusterPubSub(pubsub, nodeId);
     }
 
     /** [#27237] `IAutomationService.listConnectorCredentialRefs` — references and states, never a value. */

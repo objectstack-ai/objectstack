@@ -391,7 +391,7 @@ export function FlowCanvas({
         id,
         type,
         label,
-        ...defaultNodeExtras(type),
+        ...defaultNodeExtras(type, nodes),
         ...(at ? { position: { x: at.x, y: at.y } } : {}),
       };
       const nextNodes = appendArray(nodes, newNode);
@@ -421,7 +421,7 @@ export function FlowCanvas({
         id,
         type,
         label: defaultNodeLabel(type, locale),
-        ...defaultNodeExtras(type),
+        ...defaultNodeExtras(type, nodes),
       };
       // A→N inherits the original edge's branch semantics; N→B is plain.
       const firstSegment: FlowDesignerEdge = { ...edge, target: id };

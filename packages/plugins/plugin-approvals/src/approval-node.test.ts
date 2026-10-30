@@ -13,10 +13,10 @@ const noopLogger = {
 
 /**
  * The accounts this suite routes `user` approver slots to: a `user` approver
- * holds a slot only when an account carries it (#27397), so the double's
- * directory starts with them.
+ * holds a slot only when an account carries it (#27397), as does an
+ * `expression` id (#27879), so the double's directory starts with them.
  */
-const ROUTED_USERS = ['u1', 'u2', 'u9', 'lead'];
+const ROUTED_USERS = ['u1', 'u2', 'u3', 'u7', 'u8', 'u9', 'lead'];
 
 /**
  * Tiny in-memory ObjectQL stand-in — supports the `where`-equality + `$in`

@@ -3961,6 +3961,17 @@ const OBJECT_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'object by its full name (the platform user object is `sys_user`, not `user`). The verdict names ' +
       'the nearest defined object when one is close; a view container written with an object\'s short ' +
       'name in a namespaced package is told the prefixed spelling.',
+    // [#27827] The closure case, so the explanation does not contradict the
+    // fix line the save door prints under one (ADR-0141 D1).
+    'A dataset written into a package at the runtime save door is judged against that package\'s ' +
+      'closure instead of one stack: the package\'s own objects, the objects of the packages its ' +
+      'manifest declares in `dependencies`, platform objects, and tenant-authored objects that carry ' +
+      'no package. A base object outside it, whether it belongs to a package the manifest never ' +
+      'declared or exists nowhere at all, is refused with the fix the flow and view doors print for ' +
+      'the same closure: declare a dependency on the package that defines the object in the ' +
+      '`dependencies` of the written package\'s manifest, or point the dataset at an object inside the ' +
+      'closure. A write that names no package, and `os validate`, `os build` and `os lint`, state no ' +
+      'closure and print the fix above.',
   ],
 };
 

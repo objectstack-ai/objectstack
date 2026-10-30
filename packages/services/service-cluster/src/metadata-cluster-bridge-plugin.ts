@@ -15,8 +15,8 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  * state-owner packages only need the `IPubSub` interface, which lives in
  * `@objectstack/spec/contracts`.
  *
- * THREE lanes, late-bound independently at `kernel:ready`, because the state
- * that goes stale lives in three different owners (#13331, #13805):
+ * FOUR lanes, late-bound independently at `kernel:ready`, because the state
+ * that goes stale lives in four different owners (#13331, #13805, #27428):
  *
  *  1. **Metadata service** (`attachClusterPubSub()` — `metadata.changed`):
  *     replays watch events into peer `MetadataManager` caches
@@ -43,6 +43,16 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  *     `DELETE /api/v1/datasources/:name` recovered `/api/v1/ready` on the
  *     one replica that served it, and every other replica kept the stuck
  *     driver until restart.
+ *  4. **Automation service** (`attachConnectorCredentialPubSub()` —
+ *     `connector-credential.mutated`): fans a connector credential written or
+ *     cleared through `PUT|DELETE /api/v1/automation/connectors/credential-refs/:ref`
+ *     out to peers, which reconcile their declarative connector instances
+ *     from their OWN read of the shared credential rows. The same family
+ *     (#27428, ruled 2026-10-30 — letter A, attached here so the one place
+ *     that enumerates cluster lanes stays one place): without it a corrected
+ *     credential took effect on the replica that took the request, and an
+ *     instance its upstream had refused stayed held on every other replica
+ *     until a metadata reload or a restart.
  *
  * Activates each lane only when the cluster service and that lane's state
  * owner are present and expose the seam. Late binding is achieved via the
@@ -53,7 +63,9 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  * `metadata.mutated` — payload shape defined by
  * `ClusterMetadataMutationPayload` in `@objectstack/metadata-protocol`;
  * `datasource.mutated` — payload shape defined by
- * `ClusterDatasourceMutationPayload` in `@objectstack/service-datasource`.
+ * `ClusterDatasourceMutationPayload` in `@objectstack/service-datasource`;
+ * `connector-credential.mutated` — payload shape defined by
+ * `ClusterConnectorCredentialMutationPayload` in `@objectstack/service-automation`.
  *
  * See `content/docs/kernel/cluster.mdx` §6.2.
  */
@@ -65,6 +77,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
     private detach?: () => void;
     private detachMutation?: () => void;
     private detachDatasource?: () => void;
+    private detachConnectorCredential?: () => void;
 
     async init(ctx: PluginContext): Promise<void> {
         ctx.hook('kernel:ready', async () => {
@@ -80,6 +93,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
             this.attachMetadataServiceLane(ctx, cluster);
             this.attachProtocolLane(ctx, cluster);
             this.attachDatasourceLane(ctx, cluster);
+            this.attachConnectorCredentialLane(ctx, cluster);
         });
 
         ctx.hook('kernel:shutdown', async () => {
@@ -110,6 +124,15 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 );
             }
             this.detachDatasource = undefined;
+            try {
+                this.detachConnectorCredential?.();
+            } catch (err) {
+                ctx.logger.error(
+                    'MetadataClusterBridgePlugin: connector-credential-lane detach error',
+                    err as Error,
+                );
+            }
+            this.detachConnectorCredential = undefined;
         });
     }
 
@@ -293,6 +316,63 @@ export class MetadataClusterBridgePlugin implements Plugin {
         } catch (err) {
             ctx.logger.error(
                 'MetadataClusterBridgePlugin: datasource-lane attach failed',
+                err as Error,
+            );
+        }
+    }
+
+    /**
+     * Lane 4 — the automation service's `connector-credential.mutated`
+     * fan-out (#27428): the connector credential door adopting the family
+     * lanes 2 and 3 established.
+     *
+     * Duck-typed exactly like lanes 1 to 3 feature-detect their seams: this
+     * package must not depend on `@objectstack/service-automation`. The
+     * automation service publishes on the credential door it already owns and
+     * converges through the reconcile it already runs.
+     *
+     * Guarded on {@link isInProcessClusterDriver} from birth, like lanes 2 and
+     * 3: the in-process memory driver fans out to nobody, and on that driver a
+     * single replica's behaviour stays byte-identical to the pre-bridge one.
+     */
+    private attachConnectorCredentialLane(ctx: PluginContext, cluster: IClusterService): void {
+        let automation: unknown;
+        try {
+            automation = ctx.getService<unknown>('automation');
+        } catch {
+            ctx.logger.debug(
+                'MetadataClusterBridgePlugin: no "automation" service registered, skipping connector-credential fan-out',
+            );
+            return;
+        }
+
+        const attach = (automation as { attachConnectorCredentialPubSub?: unknown })
+            .attachConnectorCredentialPubSub;
+        if (typeof attach !== 'function') {
+            ctx.logger.debug(
+                'MetadataClusterBridgePlugin: automation service does not expose attachConnectorCredentialPubSub(), skipping connector-credential fan-out',
+            );
+            return;
+        }
+
+        if (isInProcessClusterDriver(cluster.driver)) {
+            ctx.logger.debug(
+                `MetadataClusterBridgePlugin: cluster driver "${cluster.driver}" is in-process; connector-credential fan-out has no peers to reach, skipping`,
+            );
+            return;
+        }
+
+        try {
+            this.detachConnectorCredential = (attach as (
+                pubsub: IClusterService['pubsub'],
+                nodeId: string,
+            ) => () => void).call(automation, cluster.pubsub, cluster.nodeId);
+            ctx.logger.info(
+                `MetadataClusterBridgePlugin: bridged connector-credential.mutated → cluster.pubsub (node=${cluster.nodeId})`,
+            );
+        } catch (err) {
+            ctx.logger.error(
+                'MetadataClusterBridgePlugin: connector-credential-lane attach failed',
                 err as Error,
             );
         }
