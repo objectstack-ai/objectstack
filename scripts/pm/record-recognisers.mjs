@@ -2070,7 +2070,7 @@ export function locateReviewOfRecord(pair, carriedHead = null) {
 // stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'the locator: the newest `## Contract review` on this head, on EITHER thread (#17302)': 19,
-  '#18141 · #27979: the head sha sits in a span of ITS OWN on the `Head-sha:` line — the key-in-span spelling and a span in the prose name no head': 10,
+  '#18141 · #27979: the head sha sits in a span of ITS OWN on the `Head-sha:` line — the key-in-span spelling and a span in the prose name no head': 14,
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 29,
@@ -2185,7 +2185,7 @@ export async function selfTest() {
     `**Director seat adoption record** — the verdict on \`${HEAD_9AF9}\` below is adopted verbatim.\n\n---\n\n## Contract review\n\n- **Reviewed-by:** \`${RECORD_SESSION}\``,
   ].map((body, i) => ({ id: 3310 + i, created_at: '2026-09-01T08:52:00Z', body }));
   t('⛔ the RETIRED dialects — the head in the heading (two spellings), on the first body line, in the adoption sentence — read ABSENT: a record names its head on the `Head-sha:` line or not at all', LEGACY.every((row) => locateReviewOfRecord(pairOf({ prComments: [row] })).state === 'absent'));
-  t('a blockquoted heading still reads — H51 tolerates the `>` a seat writes without meaning it', locateReviewOfRecord(pairOf({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '> ## ') }] })).state === 'found');
+  t('⛔ #28024: a blockquoted heading is still the record MARKER (H51 tolerates the `>`), but it opens no head scope — the record names no head and reads ABSENT', locateReviewOfRecord(pairOf({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '> ## ') }] })).state === 'absent');
   t('⛔ a `###` sub-heading is not the marker', locateReviewOfRecord(pairOf({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '### ') }] })).state === 'absent');
   t('⛔ the heading mentioned inside a paragraph is not the marker', locateReviewOfRecord(pairOf({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, 'see the ## ') }] })).state === 'absent');
   const DEV_REPORT = { id: 3303, created_at: '2026-09-01T08:40:00Z', body: `os-dev-report\n\n\`\`\`json\n{ "issue": 13657, "pr": "https://github.com/o/r/pull/13864", "summary": "landed at \`${HEAD_9AF9}\`" }\n\`\`\`` };
@@ -2232,7 +2232,20 @@ export async function selfTest() {
   const deltaOn = (headSha, where) => locateReviewOfRecord(pairOf({ headSha, ...(where === 'card' ? { cardComments: [DELTA] } : { prComments: [DELTA] }) }));
   t('⛔ #27979: a delta record on head A whose prose names head B is ABSENT for B — on the PR thread and on the card alike', deltaOn(DELTA_B, 'PR').state === 'absent' && deltaOn(DELTA_B, 'card').state === 'absent');
   t('⭐ #27979: …and FOUND for A, naming the full sha its `Head-sha:` line carries', (() => { const r = deltaOn(DELTA_A, 'PR'); return r.state === 'found' && r.sha === DELTA_A && r.id === 6516042954; })());
-  t('⛔ #27979: the FIRST `Head-sha:` line decides — a second one lower down (a quoted record) is prose to the reader', locateReviewOfRecord(pairOf({ headSha: DELTA_B, prComments: [{ ...DELTA, body: `${DELTA.body}\n\n> Head-sha: \`${DELTA_B}\`` }] })).state === 'absent' && contractReviewHeadMatch(`Head-sha: \`${DELTA_B}\`\nHead-sha: \`${DELTA_A}\``, DELTA_B) === DELTA_B);
+  t('⛔ #27979: the FIRST `Head-sha:` line below the heading decides — a second one lower down (a quoted record) is prose to the reader', locateReviewOfRecord(pairOf({ headSha: DELTA_B, prComments: [{ ...DELTA, body: `${DELTA.body}\n\n> Head-sha: \`${DELTA_B}\`` }] })).state === 'absent' && contractReviewHeadMatch(`## Contract review\nHead-sha: \`${DELTA_B}\`\nHead-sha: \`${DELTA_A}\``, DELTA_B) === DELTA_B);
+  // ⛔ #28024: the shapes the #28023 review probed — a `Head-sha:` line naming head B that the author CITED rather than wrote,
+  // sitting ABOVE the record's own line: blockquoted, bulleted, fenced, or placed before the heading. The first-line-anywhere
+  // reader took each as the record's head (found at B, absent at A); now each is prose and the record's own line decides.
+  const CITED_LEADS = [[`> Head-sha: \`${DELTA_B}\``], [`- Head-sha: \`${DELTA_B}\``], ['```', `Head-sha: \`${DELTA_B}\``, '```']];
+  const QUOTED_ABOVE = (lead) => ({ id: 6516042955, created_at: '2026-10-30T05:53:38Z', body: ['## Contract review', '', ...lead, `Head-sha: \`${DELTA_A}\``, 'Local-runs: none', '', `Reviewed-by: \`${RECORD_SESSION}\``, '', '**VERDICT: PASS**'].join('\n') });
+  t('⛔ #28024: a blockquoted, bulleted or fenced `Head-sha:` line ABOVE the record\'s own is ABSENT for the head it names — on the PR thread and on the card alike', CITED_LEADS.every((lead) => locateReviewOfRecord(pairOf({ headSha: DELTA_B, prComments: [QUOTED_ABOVE(lead)] })).state === 'absent' && locateReviewOfRecord(pairOf({ headSha: DELTA_B, cardComments: [QUOTED_ABOVE(lead)] })).state === 'absent'));
+  t('⭐ #28024: …and each record is FOUND for the head its OWN line names, with that line\'s full sha', CITED_LEADS.every((lead) => { const r = locateReviewOfRecord(pairOf({ headSha: DELTA_A, prComments: [QUOTED_ABOVE(lead)] })); return r.state === 'found' && r.sha === DELTA_A && r.id === 6516042955; }));
+  const PRE_HEADING = { ...QUOTED_ABOVE([]), body: `Head-sha: \`${DELTA_B}\`\n\n${QUOTED_ABOVE([]).body}` };
+  // ⛔ A fully QUOTED signed record followed by a plain prose line opening `Head-sha:`: the quoted heading opens no scope,
+  // so the plain line is not read against the quoted signature — absent for B, and absent for A (the quoted line is quoted).
+  const QUOTED_RECORD = { id: 6516042956, created_at: '2026-10-30T05:53:38Z', body: QUOTED_ABOVE([]).body.split('\n').map((l) => `> ${l}`).join('\n') + `\n\nHead-sha: \`${DELTA_B}\` is the head the PR has since moved to.` };
+  t('⛔ #28024: a QUOTED record followed by a plain `Head-sha:` prose line is ABSENT for both heads — a blockquoted heading opens no scope', locateReviewOfRecord(pairOf({ headSha: DELTA_B, prComments: [QUOTED_RECORD] })).state === 'absent' && locateReviewOfRecord(pairOf({ headSha: DELTA_A, prComments: [QUOTED_RECORD] })).state === 'absent');
+  t('⛔ #28024: a `Head-sha:` line BEFORE the `## Contract review` heading is not the record\'s — absent for the head it names, found for the one below the heading', locateReviewOfRecord(pairOf({ headSha: DELTA_B, prComments: [PRE_HEADING] })).state === 'absent' && locateReviewOfRecord(pairOf({ headSha: DELTA_A, prComments: [PRE_HEADING] })).state === 'found');
   t('⭐ a correct record beside a refused one is FOUND, in either arrival order', locateReviewOfRecord(pairOf({ prComments: [KEYED_ROW, NEWER_RECORD] })).state === 'found' && locateReviewOfRecord(pairOf({ prComments: [RECORD(HEAD_9AF9, undefined, '2026-09-01T08:45:00Z', 3404), KEYED_ROW] })).state === 'found');
   t('…and the locator chooses the CORRECT one — a refused spelling is never chosen over it, and never chosen at all', locateReviewOfRecord(pairOf({ prComments: [KEYED_ROW, NEWER_RECORD] })).id === 3403 && locateReviewOfRecord(pairOf({ prComments: [RECORD(HEAD_9AF9, undefined, '2026-09-01T08:45:00Z', 3404), KEYED_ROW] })).id === 3404);
   t('the template and the reader name ONE spelling — and the printed template still round-trips', contractReviewHeadMatch(contractReviewTemplateLines({ headSha: HEAD_9AF9 }).join('\n'), HEAD_9AF9) === HEAD_9AF9);
