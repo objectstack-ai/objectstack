@@ -35,8 +35,14 @@ const NAVIGATIONS: Record<string, Array<{ nav: string; target: string; column: s
 
 const objectName = (entitySet: string) => entitySet.toLowerCase();
 
+/** The object definition a PUT /meta/object/:name carried. */
+interface SavedBody {
+  fields: Record<string, unknown>;
+  external: { remoteName?: string; writable?: boolean };
+}
+
 interface Service {
-  saved: Array<{ name: string; body: Record<string, any> }>;
+  saved: Array<{ name: string; body: SavedBody }>;
   drafts: string[];
 }
 
