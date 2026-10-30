@@ -737,8 +737,9 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     + '`ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an '
     + 'activation ledger attached, and then `[]` when none of this object\'s actions is switched off. '
     + 'Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike '
-    + 'the protection keys it is published by the cached branch too, read live and never part of the ETag, '
-    + 'so a cached read that carries it is never answered 304; it is absent on a draft read. The ledger '
+    + 'the protection keys it is published by the cached branch too, read live and folded into the ETag, '
+    + 'so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on '
+    + 'a draft read. The ledger '
     + 'is the answering process\'s engine\'s. Beside `item`, never inside it: `item.actions` is served as '
     + 'declared, a switched-off action included.',
   ),
