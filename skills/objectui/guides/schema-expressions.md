@@ -257,7 +257,8 @@ A JS-only spelling in a bare string faults: a visibility gate hides the node,
 - `list.includes(x)` → `x in list`; `s.includes('x')` → `s.contains('x')`
 - `list.length` → `size(list)`
 - a `data.*` key the scope may lack (`data.x == 1`, `!data.x`, `?.`, `??`) →
-  `has(data.x) && data.x == 1`: CEL faults on a missing key
+  `has(data.x) && data.x == 1`, `!has(data.x) || !data.x`: CEL faults on a
+  missing key
 
 `visibleOn` / `hiddenOn` / `disabledOn` are retired and refused by name —
 rename to `visibleWhen` / `hidden` / `disabled`; the value is unchanged.
