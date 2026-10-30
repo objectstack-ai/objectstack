@@ -194,8 +194,10 @@ export type FileTypeValidation = z.input<typeof FileTypeValidationSchema>;
  * { filename: 'large-video.mp4', mimeType: 'video/mp4', totalSize: 1073741824, chunkSize: 5242880 }
  */
 export const InitiateChunkedUploadRequestSchema = lazySchema(() => z.object({
-  filename: z.string().describe('Original filename'),
-  mimeType: z.string().describe('File MIME type'),
+  // [#27801] Non-empty: the init door has always refused an empty `filename`
+  // or `mimeType` with 400 INVALID_REQUEST, so the declaration says so too.
+  filename: z.string().min(1).describe('Original filename (non-empty)'),
+  mimeType: z.string().min(1).describe('File MIME type (non-empty)'),
   totalSize: z.number().int().min(1).describe('Total file size in bytes'),
   chunkSize: z.number().int().min(5242880).default(5242880)
     .describe('Size of each chunk in bytes (minimum 5MB per S3 spec)'),
