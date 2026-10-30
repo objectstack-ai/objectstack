@@ -551,7 +551,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 9,
   'seat titles: lane, seat, repo, status, account, project': 13,
   'wall notes, closing refs, verdicts and mailboxes': 13,
-  'the fixture snapshot: rows for the three repos': 17,
+  'the fixture snapshot: rows for the three repos': 18,
   'the rendered body: marker, columns, footer, determinism': 9,
   'refusing to overwrite what is not the roster': 6,
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
@@ -646,6 +646,8 @@ async function selfTest() {
     'objectui:domain:ui:1',
     'objectui:domain:ui:4',
   ]);
+  const laneListed = (lane) => (lane.includes(':') ? mailboxOpen.SEAT_LANE_KINDS.includes(lane.slice(0, lane.indexOf(':'))) : mailboxOpen.SEAT_BARE_LANES.includes(lane));
+  t('every fixture lane is a kind or bare word from the opener\'s lane-word lists — imported, not re-spelled', [...new Set(rows.map((r) => r.lane))].map((lane) => `${lane}:${laneListed(lane)}`), ['repo:hotcrm:true', 'domain:devx:true', 'domain:skills:true', 'triage:true', 'domain:ui:true']);
   t('the non-seat issue in the seat list is skipped', rows.some((r) => r.post === 999), false);
   t('today’s three seats carry the right accounts', [row(19287).account, row(6023).account, row(1353, 'objectstack-ai/hotcrm').account], ['os-elon-musk', 'os-elon-musk', 'os-elon-musk']);
   t('devx seat 1: its assigned dispatched card, not seat 2’s', row(6023).inFlight, [{ repo: 'objectstack-ai/objectstack', number: 25416 }]);
