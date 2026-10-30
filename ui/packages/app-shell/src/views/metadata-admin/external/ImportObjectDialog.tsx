@@ -11,7 +11,9 @@
  *      type-compat matrix flagged as lossy/unknown, and the generated
  *      source.
  *   3. "Import as Object" PUTs the draft's definition to the metadata
- *      store (`/meta/object/:name`) and reports success.
+ *      store (`/meta/object/:name`) and reports success. The object is
+ *      read-only unless the author ticks "Allow writes", offered only when
+ *      the datasource itself allows writes (ADR-0015 Gate 3 needs both).
  *
  * The dialog never mutates the remote schema — it only reads the draft and
  * writes a local Object definition.
@@ -21,6 +23,7 @@ import * as React from 'react';
 import { AlertTriangle, Database, FileCode2, Loader2, CheckCircle2 } from 'lucide-react';
 import {
   Button,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -31,6 +34,7 @@ import {
 import {
   generateObjectDraft,
   importObjectDraft,
+  withWriteOptIn,
   ExternalServiceUnavailableError,
   type ObjectDraft,
   type RemoteTable,
@@ -45,6 +49,11 @@ export interface ImportObjectDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Notified after a successful import (so the parent can refresh). */
   onImported?: (objectName: string) => void;
+  /**
+   * Whether the datasource permits writes (`external.allowWrites`). Only then
+   * is the per-object write opt-in offered; the object is read-only otherwise.
+   */
+  allowWrites?: boolean;
 }
 
 type Phase = 'loading' | 'ready' | 'importing' | 'done' | 'error';
@@ -63,6 +72,7 @@ export function ImportObjectDialog({
   open,
   onOpenChange,
   onImported,
+  allowWrites,
 }: ImportObjectDialogProps) {
   // The designer locale the dialog's own words read in (objectui#10862), the
   // one the console's language resolves to — as its host tab reads it.
@@ -70,6 +80,7 @@ export function ImportObjectDialog({
   const [phase, setPhase] = React.useState<Phase>('loading');
   const [draft, setDraft] = React.useState<ObjectDraft | null>(null);
   const [error, setError] = React.useState<string | typeof UNAVAILABLE | null>(null);
+  const [writable, setWritable] = React.useState(false);
 
   // Load the draft whenever the dialog opens for a (new) table.
   React.useEffect(() => {
@@ -78,6 +89,7 @@ export function ImportObjectDialog({
     setPhase('loading');
     setDraft(null);
     setError(null);
+    setWritable(false);
     (async () => {
       try {
         const d = await generateObjectDraft(datasource, table.name, {
@@ -108,14 +120,14 @@ export function ImportObjectDialog({
     setPhase('importing');
     setError(null);
     try {
-      await importObjectDraft(draft);
+      await importObjectDraft(withWriteOptIn(draft, allowWrites === true && writable));
       setPhase('done');
       onImported?.(draft.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('ready');
     }
-  }, [draft, onImported]);
+  }, [draft, onImported, allowWrites, writable]);
 
   const remoteLabel = table ? [table.schema, table.name].filter(Boolean).join('.') : '';
   const errorText = error === UNAVAILABLE ? tr('engine.externalDatasource.unavailable', locale) : error;
@@ -197,6 +209,17 @@ export function ImportObjectDialog({
                   ))}
                 </ul>
               </div>
+            )}
+
+            {allowWrites && (
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  checked={writable}
+                  disabled={phase === 'importing'}
+                  onCheckedChange={(v) => setWritable(v === true)}
+                />
+                {tr('engine.externalDatasource.import.writable', locale)}
+              </label>
             )}
 
             <div className="space-y-1.5">

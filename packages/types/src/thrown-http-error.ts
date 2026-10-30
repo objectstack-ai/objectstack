@@ -94,6 +94,23 @@ import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api
 import { declaresServerFault, looksLikeInternalErrorLeak } from './error-leak.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { unevaluableHookConditionRefusal } from './hook-condition-refusal.js';
+import { sandboxBusinessMessage } from './sandbox-business-message.js';
+
+/**
+ * [#27597] The wire `code` a sandboxed hook body's business refusal answers
+ * with when the body declared none: the hook aborted the operation (its
+ * `onError: 'abort'`, the default) with free text, so the caller learns that
+ * fact from `code` instead of from the absence of one.
+ *
+ * Registered under `@objectstack/types` in the ADR-0112 ledger, and typed
+ * `ErrorCode` so a ledger without the row stops this file compiling.
+ *
+ * [#27672] Declared beside {@link resolveThrownHttpError}, which answers it,
+ * so every door that reads the resolver's `code` (package publish, the
+ * runtime dispatcher's exits) answers the code the `/data` door answers.
+ * `data-error-classification.ts` reads this same constant.
+ */
+export const UNDECLARED_HOOK_REFUSAL_CODE: ErrorCode = 'HOOK_ABORTED';
 
 /** The HTTP answer a thrown error declares. See {@link resolveThrownHttpError}. */
 export interface ThrownHttpError {
@@ -194,7 +211,7 @@ export interface ThrownHttpError {
  * |---|---|
  * | status | `.status` → `.statusCode` → 400 if it is a validation failure → 400 if it is an unevaluable hook condition → `fallbackStatus` |
  * | declaredStatus | the same chain WITHOUT the fallback — absent when the throw declared none |
- * | code | `VALIDATION_FAILED` if it is one → a REGISTERED `.code` → derived from the status |
+ * | code | `VALIDATION_FAILED` if it is one → a REGISTERED `.code` → {@link UNDECLARED_HOOK_REFUSAL_CODE} if it is a sandboxed body's refusal that declared no code, at a 4xx status → derived from the status |
  * | declaredCode | `VALIDATION_FAILED` if it is one → any non-empty string `.code` → the derived code if it is an unevaluable hook condition → absent |
  * | message | `.message` when it is a string → `String(error)` |
  * | userMessage | a non-empty string `.userMessage` → absent (see {@link declaredUserMessage}) |
@@ -238,10 +255,22 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
   const registered = spelled !== undefined && ErrorCode.safeParse(spelled).success
     ? (spelled as ErrorCode)
     : undefined;
+  const declaredCode = validation ? validation.code : (spelled ?? hookCondition?.code);
+  // [#27672] A sandboxed body's business refusal that declared no code is a
+  // hook ABORT, and the `/data` door has answered it `HOOK_ABORTED` since
+  // #27597. Answered here, so the doors that read this `code` instead of that
+  // classification answer the same code rather than the 400's derived
+  // `VALIDATION_ERROR`. Two limits keep it to that one case: a code the body
+  // declared is kept (`declaredCode` is set), and only a 4xx answer is a
+  // refusal — an undeclared throw resolved at a 5xx fallback is a fault, and
+  // keeps the fault's code. `declaredCode` stays absent: the body declared none.
+  const undeclaredHookAbort = declaredCode === undefined
+    && status >= 400 && status < 500
+    && sandboxBusinessMessage(e) !== undefined;
   const code: ErrorCode = validation
     ? validation.code
-    : (registered ?? standardErrorCodeForHttpStatus(status));
-  const declaredCode = validation ? validation.code : (spelled ?? hookCondition?.code);
+    : (registered
+      ?? (undeclaredHookAbort ? UNDECLARED_HOOK_REFUSAL_CODE : standardErrorCodeForHttpStatus(status)));
 
   const issues = Array.isArray(e?.issues) ? e.issues : undefined;
   const details: Record<string, unknown> = {

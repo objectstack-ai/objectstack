@@ -1072,6 +1072,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       fast-xml-parser:
         specifier: ^5.10.1
         version: 5.10.1
@@ -2766,6 +2769,9 @@ importers:
       '@objectstack/driver-mongodb':
         specifier: workspace:*
         version: link:../../drivers/driver-mongodb
+      '@objectstack/driver-odata':
+        specifier: workspace:*
+        version: link:../../drivers/driver-odata
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../../drivers/driver-sqlite-wasm

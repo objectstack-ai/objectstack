@@ -20,12 +20,13 @@
     },
     {
       "id": 2,
-      "prompt": "I need to make a button visible only to admin users AND only when the record status is 'active'. Also, the button should show the record owner's name. Show me the correct schema.",
-      "expected_output": "Produces a schema with combined visible/hidden expression using && operator, and does not put the owner name in props.label — that envelope is evaluated and then discarded. The name is resolved in the host, or carried on a text node's content.",
+      "prompt": "My button should show only to admins AND only while the status is 'active', with the owner's name on it. I wrote \"visibleWhen\": \"data.role === 'admin' && data.status === 'active'\" and it never shows. Fix the schema.",
+      "expected_output": "Says a bare predicate is CEL, so === faults and hides the node; rewrites it with == and &&. The owner name goes on a text node's content, not props.label.",
       "files": [],
       "assertions": {
         "must_contain": [
-          "visible",
+          "CEL",
+          "status == 'active'",
           "&&",
           "${"
         ],

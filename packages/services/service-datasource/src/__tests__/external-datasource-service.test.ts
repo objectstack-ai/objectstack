@@ -11,6 +11,7 @@ import {
   type DatasourceLike,
   type ObjectLike,
 } from '../external-datasource-service.js';
+import { datasourceNotFoundError } from '../datasource-admin-service.js';
 
 /** Build a fake introspected schema for the `warehouse` datasource. */
 function warehouseSchema(): IntrospectedSchema {
@@ -662,13 +663,51 @@ describe('validateDatasource', () => {
     });
   });
 
-  it('answers an empty report for a datasource nothing is bound to — and introspects nothing', async () => {
-    const { svc, introspected } = makeMulti();
+  it('answers an empty report for a saved datasource nothing is bound to — and introspects nothing', async () => {
+    const introspected: string[] = [];
+    const svc = new ExternalDatasourceService({
+      introspect: async (datasource: string) => {
+        introspected.push(datasource);
+        return REMOTE;
+      },
+      getDatasource: async (name: string) => (name === 'wh_empty' ? { name, schemaMode: 'external' } : undefined),
+      getObject: async () => undefined,
+      listObjects: async () => OBJECTS,
+    });
 
-    const report = await svc.validateDatasource('no_such_ds');
+    const report = await svc.validateDatasource('wh_empty');
 
     expect(report).toEqual({ ok: true, results: [] });
     expect(introspected).toEqual([]);
+  });
+
+  // [#27696] A name with no saved datasource is not a datasource with nothing
+  // federated: it is the 404 every by-name door answers, thrown before
+  // anything is listed or introspected.
+  it('throws the 404 datasourceNotFoundError for a name that resolves no saved datasource', async () => {
+    let listed = 0;
+    const introspected: string[] = [];
+    const svc = new ExternalDatasourceService({
+      introspect: async (datasource: string) => {
+        introspected.push(datasource);
+        return REMOTE;
+      },
+      getDatasource: async () => undefined,
+      getObject: async () => undefined,
+      listObjects: async () => {
+        listed++;
+        return OBJECTS;
+      },
+    });
+
+    const thrown = await svc.validateDatasource('no_such_ds').catch((err: unknown) => err);
+
+    expect(thrown).toMatchObject({
+      status: 404,
+      code: 'RESOURCE_NOT_FOUND',
+      message: datasourceNotFoundError('no_such_ds').message,
+    });
+    expect({ listed, introspected }).toEqual({ listed: 0, introspected: [] });
   });
 });
 

@@ -213,16 +213,18 @@ describe('[#10537] POST /external/validate scopes its WORK to :name', () => {
     expect(body.data).toEqual(reference);
   });
 
-  it('an unknown :name answers the same empty report as before — and dials nothing', async () => {
+  // [#27696] Until this ruling an unknown name answered an empty report with
+  // a vacuously true verdict; it is now the 404 every by-name door answers.
+  // `external-datasource-unknown-name.test.ts` pins the 200 a saved datasource
+  // with nothing federated keeps.
+  it('an unknown :name answers 404 RESOURCE_NOT_FOUND — and dials nothing', async () => {
     const { app, introspected, validateAllSpy } = mount();
     const { status, body } = await validate(app, 'no_such_ds');
 
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    // Unchanged: an unknown name is not a 404 on this route, it is an empty
-    // report with a vacuously true verdict.
-    expect(body.data).toEqual(await referenceAnswer('no_such_ds'));
-    expect(body.data).toEqual({ ok: true, results: [] });
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('RESOURCE_NOT_FOUND');
+    expect(body.error.message).toBe('Datasource "no_such_ds" does not exist.');
     expect(introspected).toEqual([]);
     expect(validateAllSpy).not.toHaveBeenCalled();
   });

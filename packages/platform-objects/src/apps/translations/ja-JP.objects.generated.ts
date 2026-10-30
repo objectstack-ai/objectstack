@@ -140,6 +140,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
+        outcomeMessages: {
+          sent: "${result.email} に招待を送信しました",
+          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+        },
         params: {
           role: {
             options: {
@@ -577,6 +581,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
+        outcomeMessages: {
+          sent: "${result.email} に招待を送信しました",
+          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+        },
         params: {
           role: {
             options: {
@@ -664,6 +672,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
+        outcomeMessages: {
+          sent: "${result.email} に招待を送信しました",
+          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+        },
         params: {
           role: {
             options: {
@@ -794,6 +806,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
+        outcomeMessages: {
+          sent: "${result.email} に招待を送信しました",
+          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+        },
         params: {
           role: {
             options: {
@@ -813,7 +829,22 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "招待を再送",
-        successMessage: "招待を再送しました"
+        successMessage: "招待を再送しました",
+        outcomeMessages: {
+          sent: "${result.email} に招待を再送しました",
+          link_only: "${result.email} の招待を更新しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+        }
+      },
+      copy_invitation_link: {
+        label: "招待リンクをコピー",
+        resultDialog: {
+          title: "招待リンク",
+          description: "このリンクを開いた人は誰でも招待を承諾できるため、招待した本人にのみ共有してください。招待が承諾、辞退、キャンセルされるか、期限が切れると、リンクは使えなくなります。",
+          acknowledge: "完了",
+          fields: {
+            acceptUrl: "招待リンク"
+          }
+        }
       },
       accept_invitation: {
         label: "招待を受諾",

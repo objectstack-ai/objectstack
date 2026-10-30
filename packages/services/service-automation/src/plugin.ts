@@ -56,6 +56,8 @@ import {
     type ConnectorCredentialRecord,
     type ConnectorCredentialResolution,
 } from './connector-credentials.js';
+import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
+import { createConnectorCredentialSource } from './connector-credential-source.js';
 import {
     FlowCredentialChannel,
     storedFlowStates,
@@ -675,7 +677,7 @@ export class AutomationServicePlugin implements Plugin {
      * Services init() registers on every path (ADR-0116, #4131) — lets the
      * kernel name this plugin when a consumer requires one before it inits.
      */
-    providesServices = ['automation'];
+    providesServices = ['automation', CONNECTOR_CREDENTIAL_SOURCE_SERVICE];
     version = '1.0.0';
     type = 'standard' as const;
     // Soft dependency on metadata: we look it up at start() and tolerate absence.
@@ -809,6 +811,13 @@ export class AutomationServicePlugin implements Plugin {
      * set by {@link attachCredentialClusterPubSub}.
      */
     private credentialCluster?: { pubsub: IPubSub; nodeId: string; unsubscribe: () => void };
+    /**
+     * [ADR-0015 D7] Moved by every reconcile — which every credential write
+     * runs — so a datasource's borrowed credential is resolved again after a
+     * write or a declaration change instead of serving the value it held
+     * (`./connector-credential-source.ts`).
+     */
+    private credentialGeneration = 0;
     /** [#20790] Serializes the one-time credential move — see {@link scheduleCredentialMigration}. */
     private credentialMigration: Promise<void> = Promise.resolve();
     /** [#20790] The crypto-provider subscription that re-runs the move; dropped at destroy. */
@@ -1082,6 +1091,18 @@ export class AutomationServicePlugin implements Plugin {
             clear: (request) => this.clearConnectorCredential(ctx, request),
             attachClusterPubSub: (pubsub, nodeId) => this.attachCredentialClusterPubSub(ctx, pubsub, nodeId),
         });
+
+        // [ADR-0015 D7] The connector credential source: a datasource that
+        // names a declared instance in `external.connector` borrows that
+        // instance's credential through it, resolved by the same chain the
+        // connector uses. Registered in `init()`, so every `start()` — the
+        // datasource connection path's included — finds it.
+        ctx.registerService(CONNECTOR_CREDENTIAL_SOURCE_SERVICE, createConnectorCredentialSource({
+            readDeclared: () => this.readDeclaredConnectorItems(ctx, { post: true }),
+            chain: () => this.connectorCredentialChain(ctx),
+            vaultWired: () => this.options.credentialResolver !== undefined,
+            generation: () => this.credentialGeneration,
+        }));
 
         // [#20281 stage ③] The connector sync executor, served on the
         // `automation` service's contract (`pullConnectorSource`) — the door a
@@ -2039,6 +2060,8 @@ export class AutomationServicePlugin implements Plugin {
     private async reconcileDeclaredConnectors(ctx: PluginContext, opts: { fatal: boolean }): Promise<void> {
         const engine = this.engine;
         if (!engine || this.destroyed) return;
+        // [ADR-0015 D7] A borrowed credential is resolved again after this run.
+        this.credentialGeneration += 1;
         // This run supersedes any pending degraded-instance retry; it is
         // rescheduled at the end if instances remain degraded.
         this.clearDeclarativeRetryTimer();
