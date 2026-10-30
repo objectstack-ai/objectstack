@@ -5,7 +5,7 @@ import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/s
 // [commit 74155c735] The defaulting node schema `fillQueryAstDefaults` runs author input
 // through — the declared `.default()` stays in `packages/spec`, the engine
 // only invokes it.
-import { SortNodeSchema, FullTextSearchSchema } from '@objectstack/spec/data';
+import { SortNodeSchema, FullTextSearchSchema, resolveSearchFieldResolution } from '@objectstack/spec/data';
 import {
   EngineQueryOptions,
   DataEngineInsertOptions,
@@ -716,7 +716,7 @@ const ENGINE_FIND_OPTION_KEYS: ReadonlySet<string> = new Set([
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
-  'context', 'where', 'multi', 'returning', 'onFieldsDropped', 'onValidationAdvisory', 'strictReadonlyWrites',
+  'context', 'where', 'multi', 'returning', 'onFieldsDropped', 'onValidationAdvisory', 'onMentionsWithheld', 'strictReadonlyWrites',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
@@ -764,6 +764,53 @@ function refuseSearchOverrideNamingNoField(object: string, requested: unknown, p
   );
   err.status = 400;
   err.code = 'VALIDATION_ERROR';
+  err.param = param;
+  err.object = object;
+  throw err;
+}
+
+/**
+ * [#28120] …and an override that names no field the search can scan is refused
+ * `400 INVALID_FIELD`, the code the door answers the same value with
+ * (`assertSearchFieldsAreSearchable`, #4254): every name unknown, unsearchable,
+ * or withheld from the scan (`internal: true`, credential types), or no entry a
+ * field name at all.
+ *
+ * `resolveSearchFields` drops the names outside the allowed set and, when none
+ * is left, falls back to the whole set — the typo or the renamed field the
+ * caller wrote to narrow the search ran over the object's default fields
+ * instead, untold. Judged on the set the expansion resolves over (`allowed`),
+ * so this refuses exactly the overrides that fallback would have widened. An
+ * override naming at least one allowed field is left to the intersection (the
+ * engine's tolerance for the other names stands), and an empty `allowed` is
+ * left to the expansion's own refusal (#24284), which names that cause.
+ */
+function refuseSearchOverrideNamingNoSearchableField(
+  object: string,
+  requested: unknown,
+  param: string,
+  allowed: readonly string[],
+): void {
+  const entries = typeof requested === 'string'
+    ? requested.split(',').map((s) => s.trim()).filter(Boolean)
+    : Array.isArray(requested) ? requested : undefined;
+  if (entries === undefined || entries.length === 0 || allowed.length === 0) return;
+  const allowSet = new Set(allowed);
+  if (entries.some((f) => typeof f === 'string' && allowSet.has(f))) return;
+  const names = entries.filter((f): f is string => typeof f === 'string');
+  const err: any = new Error(
+    `ObjectQL search on '${object}' names no searchable field in '${param}': got ${JSON.stringify(requested)}. `
+    + 'The query was not run: an override naming none of the fields the search scans was dropped, which '
+    + "scans the object's default search fields. Name a searchable field, or leave the override out to "
+    + 'search the default fields.',
+  );
+  err.status = 400;
+  err.httpStatus = 400;
+  err.code = 'INVALID_FIELD';
+  if (names.length > 0) {
+    err.field = names[0];
+    err.fields = names;
+  }
   err.param = param;
   err.object = object;
   throw err;
@@ -13453,8 +13500,9 @@ export class ObjectQL implements IObjectQLEngine {
       // data door instead (`assertSearchFieldsAreSearchable`,
       // `@objectstack/metadata-protocol`), the #4254 posture — an unhonoured
       // narrowing must be a 400, not a silent widening. A direct engine caller
-      // naming one has it intersected away here, the engine's existing tolerant
-      // posture for an unknown requested search field.
+      // naming one beside a searchable field has it intersected away here, the
+      // engine's existing tolerant posture for an unknown requested search
+      // field; naming only such fields is refused below (#28120).
       // [ADR-0100] …and never a `secret` / `password` column either, by the
       // collector the credential guards read: the auto-default already skips
       // those types, and an author-declared `searchableFields` naming one is
@@ -13475,6 +13523,12 @@ export class ObjectQL implements IObjectQLEngine {
         // `displayNameField` is the deprecated alias (still honored).
         displayField: (schema as any).nameField ?? (schema as any).displayNameField,
       };
+      // [#28120] An override naming none of the fields the expansion would
+      // scan is refused, never widened back to the whole set.
+      refuseSearchOverrideNamingNoSearchableField(
+        ast.object, requestedFields, (ast as any).searchFields != null ? 'searchFields' : 'search.fields',
+        resolveSearchFieldResolution(expandOptions).allowed,
+      );
       // [#25672] …and never a column the CALLER may not query. The field-read
       // predicate guard (plugin-security) runs after this expansion and judges
       // the expanded `$or` as the caller's own predicate, so one hidden column
@@ -13503,9 +13557,9 @@ export class ObjectQL implements IObjectQLEngine {
         // set the expansion itself resolved (no second resolver), so it holds
         // for every verb that reaches here (`find` / `findOne` / `aggregate` /
         // the count) and every door (REST, dispatcher, SDK, a hook's
-        // `ctx.api`). An explicit override intersected to nothing falls back
-        // to the allowed set inside `resolveSearchFields`, so it reaches this
-        // only when that set is empty too. [#25672] A set the caller's
+        // `ctx.api`). An explicit override intersected to nothing is refused
+        // before the expansion (#28120) unless the allowed set is empty too, so
+        // it reaches this only then. [#25672] A set the caller's
         // queryable fields withheld down to nothing gets the same answer: the
         // declared set expands without the narrowing, so the refusal says so.
         const withheld = queryableFields !== undefined && expandSearchToFilter(raw, expandOptions) !== null;

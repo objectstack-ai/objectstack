@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `ODataDriver` — a declarative OData v4 datasource driver (epic #27261 Tier B,
- * ruling 6486145005).
+ * `ODataDriver` — a declarative OData datasource driver (epic #27261 Tier B,
+ * ruling 6486145005), over the v4 dialect or, with `version: '2.0'`, the v2
+ * one. The requests below are spelled in v4; `dialect.ts` names what v2
+ * spells differently (`$inlinecount`, the `d` envelope, `MERGE`).
  *
  * An administrator declares a datasource served by this driver and binds
  * objects to its entity sets (`object.external.remoteName`); every read and
@@ -52,6 +54,7 @@ import { findMisplacedReadableIds, readableIdsDriverRefusal } from '@objectstack
 import type { DriverQuery, IDataDriver, IntrospectedSchema, IntrospectedTable } from '@objectstack/spec/contracts';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { EdmEntitySet, EdmEntityType, EdmProperty, ODataDialect, ODataServiceModel } from './dialect.js';
+import { odataV2Dialect } from './dialect-v2.js';
 import { odataV4Dialect } from './dialect-v4.js';
 import { translateWhere, type FilterTarget } from './filter.js';
 import type { ConnectorCredentialHandle } from '@objectstack/types';
@@ -61,7 +64,7 @@ import type { ODataDriverConfig } from './config.js';
 type Row = Record<string, unknown>;
 
 /** The dialects this package ships, by the config's `version`. */
-const DIALECTS: Record<string, ODataDialect> = { '4.0': odataV4Dialect };
+const DIALECTS: Record<string, ODataDialect> = { '4.0': odataV4Dialect, '2.0': odataV2Dialect };
 
 /** How many ETags the driver keeps (by object and id) for `If-Match`. */
 const ETAG_CACHE_LIMIT = 10_000;
@@ -105,6 +108,8 @@ interface ObjectDeclaration {
   remoteName?: string;
   /** remote property → local field */
   columnMap: Record<string, string>;
+  /** local field → its declared type (`date`, `datetime`, …), where the object declares one */
+  fieldTypes: Record<string, string>;
 }
 
 /** An object resolved against the service model. */
@@ -115,6 +120,8 @@ interface Binding extends FilterTarget {
   keyProperties: EdmProperty[];
   /** remote property → local field */
   fieldOfProperty: Map<string, string>;
+  /** remote property → the declared type of the field it backs, where the object declares one */
+  fieldTypeOfProperty: Map<string, string>;
   /** `id` names the (single) key, rather than a property the column map named `id`. */
   idIsKeyAlias: boolean;
 }
@@ -223,9 +230,16 @@ export class ODataDriver implements IDataDriver {
         if (typeof local === 'string') columnMap[remote] = local;
       }
     }
+    const fieldTypes: Record<string, string> = {};
+    if (isRecord(schema.fields)) {
+      for (const [field, definition] of Object.entries(schema.fields)) {
+        if (isRecord(definition) && typeof definition.type === 'string') fieldTypes[field] = definition.type;
+      }
+    }
     this.declarations.set(schema.name, {
       ...(typeof external.remoteName === 'string' ? { remoteName: external.remoteName } : {}),
       columnMap,
+      fieldTypes,
     });
     this.bindings.delete(schema.name);
   }
@@ -359,12 +373,13 @@ export class ODataDriver implements IDataDriver {
     const binding = await this.bind(object);
     const url = this.entityUrl(binding, id);
     if (!url) return null;
+    const verb = this.dialect.updateRequest?.() ?? { method: 'PATCH' as const, headers: {} };
     const response = await this.transport.request({
-      method: 'PATCH',
+      method: verb.method,
       url,
       subject: binding.entitySet.name,
       body: this.toRemote(binding, data, false),
-      headers: { Prefer: 'return=representation', ...this.ifMatch(object, id) },
+      headers: { Prefer: 'return=representation', ...verb.headers, ...this.ifMatch(object, id) },
       accept: [404],
     });
     if (response.status === 404) return null;
@@ -407,7 +422,7 @@ export class ODataDriver implements IDataDriver {
     const cached = this.bindings.get(object);
     if (cached) return cached;
     const model = await this.getServiceModel();
-    const declaration = this.declarations.get(object) ?? { columnMap: {} };
+    const declaration = this.declarations.get(object) ?? { columnMap: {}, fieldTypes: {} };
     const setName = declaration.remoteName ?? object;
     const entitySet = model.entitySets.get(setName);
     if (!entitySet) {
@@ -426,10 +441,13 @@ export class ODataDriver implements IDataDriver {
     }
 
     const fieldOfProperty = new Map<string, string>();
+    const fieldTypeOfProperty = new Map<string, string>();
     const propertyOfField = new Map<string, EdmProperty>();
     for (const property of entityType.properties) {
       const field = declaration.columnMap[property.name] ?? property.name;
       fieldOfProperty.set(property.name, field);
+      const fieldType = declaration.fieldTypes[field];
+      if (fieldType) fieldTypeOfProperty.set(property.name, fieldType);
       propertyOfField.set(field, property);
     }
     // `id` names the key, unless the column map gave the name to a property of its own.
@@ -443,6 +461,7 @@ export class ODataDriver implements IDataDriver {
       entityType,
       keyProperties,
       fieldOfProperty,
+      fieldTypeOfProperty,
       idIsKeyAlias,
       propertyOf: (field) => propertyOfField.get(field),
     };
@@ -477,7 +496,7 @@ export class ODataDriver implements IDataDriver {
     for (const key of keyProperties) {
       const raw = parts.find(([name]) => name === key.name)?.[1];
       if (raw === undefined) return undefined;
-      const value = key.type === 'Edm.String' ? unquote(raw) : raw;
+      const value = this.dialect.keyValue ? this.dialect.keyValue(raw, key.type) : key.type === 'Edm.String' ? unquote(raw) : raw;
       const literal = value === undefined ? undefined : this.dialect.literal(value, key.type, model);
       if (literal === undefined) return undefined;
       spelled.push(`${key.name}=${encodeURIComponent(literal)}`);
@@ -498,16 +517,30 @@ export class ODataDriver implements IDataDriver {
       .join(',');
   }
 
-  private toRow(binding: Binding, entity: Row): Row {
+  private toRow(binding: Binding, written: Row): Row {
+    const entity = this.readValues(binding, written);
     const row: Row = {};
     for (const [key, value] of Object.entries(entity)) {
       if (this.dialect.isAnnotation(key)) continue;
       row[binding.fieldOfProperty.get(key) ?? key] = value;
     }
     row.id = this.idOf(binding, entity);
-    const etag = this.dialect.etagOf(entity);
+    const etag = this.dialect.etagOf(written);
     if (etag) this.rememberEtag(binding.object, row.id as string, etag);
     return row;
+  }
+
+  /** The entity with each declared property's value read through the dialect (as written when it reads none). */
+  private readValues(binding: Binding, entity: Row): Row {
+    const readValue = this.dialect.readValue?.bind(this.dialect);
+    if (!readValue) return entity;
+    const read: Row = { ...entity };
+    for (const property of binding.entityType.properties) {
+      if (property.name in read) {
+        read[property.name] = readValue(read[property.name], property, binding.fieldTypeOfProperty.get(property.name));
+      }
+    }
+    return read;
   }
 
   /** The request body: declared properties only, renamed to the service's names; the key only on create. */
@@ -521,7 +554,7 @@ export class ODataDriver implements IDataDriver {
       const property = binding.propertyOf(field);
       if (!property) continue;
       if (keys.has(property.name) && !withKey) continue;
-      body[property.name] = value;
+      body[property.name] = this.dialect.writeValue ? this.dialect.writeValue(value, property) : value;
     }
     return body;
   }

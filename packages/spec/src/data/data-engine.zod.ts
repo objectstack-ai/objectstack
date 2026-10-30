@@ -185,9 +185,13 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
    * object's declared/derived searchable set (ADR-0061). Read by the engine's
    * `$search` → cross-field `$or` expansion and sent by the protocol layer
    * ever since; it was enforced but undeclared until #4371 (option 2) made
-   * the engine reject undeclared option keys.
+   * the engine reject undeclared option keys. [#28059] It takes the accept
+   * set of `QuerySchema.searchFields` and `FullTextSearchSchema.fields`
+   * (`./search-fields-names-a-field.ts`): an empty list names no field and is
+   * refused, so `searchFields: []` and `search: { fields: [] }` get one answer.
    */
-  searchFields: z.array(z.string()).optional(),
+  searchFields: searchFieldsArray().optional()
+    .describe(`Fields the \`search\` expansion may match against, intersected with the object's searchable set (ADR-0061) — ${SEARCH_FIELDS_ACCEPT_SET}`),
 
   /**
    * Recursive relation loading map (expand).
@@ -509,9 +513,11 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
   /**
    * Fields the `search` expansion may match against — declared exactly as
    * {@link EngineQueryOptionsSchema}'s `searchFields`: intersected with the
-   * object's declared/derived searchable set (ADR-0061), never widened.
+   * object's declared/derived searchable set (ADR-0061), never widened, and
+   * an empty list refused (#28059).
    */
-  searchFields: z.array(z.string()).optional(),
+  searchFields: searchFieldsArray().optional()
+    .describe(`Fields the \`search\` expansion may match against, intersected with the object's searchable set (ADR-0061) — ${SEARCH_FIELDS_ACCEPT_SET}`),
 }).describe('QueryAST-aligned options for DataEngine.aggregate operations'));
 
 // --------------------------------------------------------------------------
@@ -554,9 +560,11 @@ export const EngineCountOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
   /**
    * Fields the `search` expansion may match against — declared exactly as
    * {@link EngineQueryOptionsSchema}'s `searchFields`: intersected with the
-   * object's declared/derived searchable set (ADR-0061), never widened.
+   * object's declared/derived searchable set (ADR-0061), never widened, and
+   * an empty list refused (#28059).
    */
-  searchFields: z.array(z.string()).optional(),
+  searchFields: searchFieldsArray().optional()
+    .describe(`Fields the \`search\` expansion may match against, intersected with the object's searchable set (ADR-0061) — ${SEARCH_FIELDS_ACCEPT_SET}`),
 }).describe('QueryAST-aligned options for DataEngine.count operations'));
 
 // --------------------------------------------------------------------------

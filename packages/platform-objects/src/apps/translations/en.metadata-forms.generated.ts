@@ -2385,13 +2385,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     },
     fields: {
-      name: {
-        label: "Name",
-        helpText: "Machine name (snake_case)"
-      },
       label: {
         label: "Label",
         helpText: "Display label for admins"
+      },
+      name: {
+        label: "Name",
+        helpText: "Filled in from the label's Latin letters and digits when you create the set; if the label has none, type it yourself. snake_case"
       },
       description: {
         label: "Description",

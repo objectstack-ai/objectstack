@@ -297,6 +297,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._views.<view_name>.label
    *   objects.<object>._views.<view_name>.description
    *   objects.<object>._views.<view_name>.title   (a form view's heading)
+   *   objects.<object>._views.<view_name>.submitBehavior.title / .message
+   *                                                (a form's thank-you panel)
    *   objects.<object>._views.<view_name>.emptyState.title
    *   objects.<object>._views.<view_name>.emptyState.message
    *   objects.<object>._views.<view_name>.bulkActions.<def_name>.*
@@ -314,6 +316,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
       // `tabs[]`'s bracket — one address per surface, and the authoring
       // spelling is the one an author reaches for first.
       bulkActionDefs: 'bulkActions', bulkActionDef: 'bulkActions', bulk: 'bulkActions',
+      // The panel's everyday name; the address mirrors the authoring key.
+      thankYou: 'submitBehavior',
     },
     guidance: {
       rowActions:
@@ -343,6 +347,40 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
      * resolves nothing (`objectstack validate` refuses it).
      */
     title: z.string().optional().describe("Translated form view title — overlays a form view's own `title` (`FormViewSchema.title`); only a form that authors one is translated"),
+    /**
+     * A FORM view's thank-you panel — overlays the `title` and `message` of
+     * `FormViewSchema.submitBehavior` when its `kind` is `'thank-you'`, which
+     * a served form item carries at `config.submitBehavior` (the confirmation
+     * an anonymous public form shows after a submit).
+     *
+     * **Nested under `submitBehavior`, not flattened onto the view node.**
+     * The address mirrors the authored path, the way `emptyState.title`
+     * does: the panel's `title` is a second heading beside the form's own
+     * `title` above, and one key cannot stand for two source strings. The
+     * three other kinds (`redirect`, `continue`, `next-record`) author no
+     * copy, so this face carries the thank-you member's two strings only.
+     *
+     * Applied by `translateView` only where the form authors a thank-you
+     * `title` / `message`: a form with another kind, or none, gains no
+     * panel copy, and the console's own default wording stays in charge.
+     */
+    submitBehavior: strictObject({
+      surface: 'this form submit behavior translation',
+      history: TRANSLATION_HISTORY,
+      // Mirrors the thank-you member's own alias table in `ui/view.zod.ts`.
+      aliases: { heading: 'title', text: 'message', body: 'message', description: 'message' },
+      guidance: {
+        url:
+          "`url` is not display copy — a `redirect` submit behavior's path is the same in every "
+          + 'locale. Only a `thank-you` panel authors copy: translate its `title` and `message`.',
+        kind:
+          '`kind` is not display copy — it selects the behavior and is the same in every locale. '
+          + 'Translate the thank-you panel\'s `title` and `message` only.',
+      },
+    }, {
+      title: z.string().optional().describe('Translated thank-you panel heading (overlays `submitBehavior.title`)'),
+      message: z.string().optional().describe('Translated thank-you panel message (overlays `submitBehavior.message`)'),
+    }).optional().describe("Translated thank-you panel copy — overlays a form view's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`; only copy the form authors is translated"),
     emptyState: strictObject({
       surface: 'this view empty-state translation',
       history: TRANSLATION_HISTORY,

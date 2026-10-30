@@ -2385,13 +2385,13 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     },
     fields: {
-      name: {
-        label: "Nombre",
-        helpText: "Nombre de máquina (snake_case)"
-      },
       label: {
         label: "Etiqueta",
         helpText: "Etiqueta mostrada para administradores"
+      },
+      name: {
+        label: "Nombre",
+        helpText: "Se rellena con las letras latinas y los dígitos de la etiqueta al crear el conjunto; si la etiqueta no tiene ninguno, escríbelo. snake_case"
       },
       description: {
         label: "Descripción",

@@ -204,6 +204,12 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
     if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
     if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
+    // [#28099] The caller's posture rung, already resolved beside the grants
+    // above — forwarded, never re-derived or raised, absent when the request
+    // carries none. The run carries those grants, so its setup does not
+    // re-resolve them and this is the only way it gets one.
+    // `AutomationContext.posture` names its readers.
+    if (typeof ec?.posture === 'string' && ec.posture.length > 0) automationContext.posture = ec.posture;
     // [#22450] The caller's language, already resolved (the request's
     // `Accept-Language` first, then the `localization` settings) — forwarded,
     // never re-derived, so a refused run's message renders in the language of

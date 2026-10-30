@@ -15,7 +15,9 @@ import { ObjectTranslationDataSchema } from '@objectstack/spec/system';
 const titleKeys = (config: any) =>
   collectExpectedEntries(config)
     .map((e) => e.path.join('.'))
-    .filter((p) => p.endsWith('.title') && p.includes('._views.'));
+    // The view node's own `title` — not the thank-you panel's
+    // `submitBehavior.title` one level down (`i18n-form-thank-you-coverage`).
+    .filter((p) => /\._views\.[^.]+\.title$/.test(p));
 
 const leadForm = (extra: Record<string, unknown> = {}) => ({
   type: 'simple',

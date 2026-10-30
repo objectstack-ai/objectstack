@@ -18,7 +18,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FLOW_NODE_EXPRESSION_PATHS,
+  FLOW_NODE_SIBLING_EXPRESSION_BLOCKS,
   flowFilterOperands,
+  flowNodeExpressionBlock,
   isExpressionEnvelopeShaped,
   resolveFlowNodeExpressions,
   resolveFlowNodeValueSlots,
@@ -550,7 +552,8 @@ describe('isExpressionEnvelopeShaped — the recognizer a value slot discriminat
 });
 
 describe('every entry older than the value role resolves byte-identically (the ratchet\'s fixtures, restated)', () => {
-  const byKey = (e: FlowNodeExpressionPath) => `${e.nodeType}.${e.path} (${e.role})`;
+  const byKey = (e: FlowNodeExpressionPath) =>
+    `${e.nodeType}.${e.block === undefined ? '' : `${e.block}.`}${e.path} (${e.role})`;
 
   it('the entries that existed before are still declared exactly as they were — each value-slot widening only appended rows', () => {
     // The census: five rows before #19938, seven after, ten after #19939's
@@ -563,7 +566,9 @@ describe('every entry older than the value role resolves byte-identically (the r
     // `flow-template` role to `value` IN PLACE (`screen.fields[].visibleWhen`
     // keeps its `predicate` row beside the screen's value rows). Stage S4
     // appended the three `notify` value rows, stage S5 the `http` body's, and
-    // stage S6 the three CRUD `filter` operand rows.
+    // stage S6 the three CRUD `filter` operand rows. #27968 appended the first
+    // row rooted in a sibling block rather than `config`: a `connector_action`
+    // node's `connectorConfig.input` map.
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
@@ -585,6 +590,7 @@ describe('every entry older than the value role resolves byte-identically (the r
       'get_record.filter (value)',
       'update_record.filter (value)',
       'delete_record.filter (value)',
+      'connector_action.connectorConfig.input.* (value)',
     ]);
   });
 
@@ -876,5 +882,63 @@ describe('every entry older than the value role resolves byte-identically (the r
       // attribution.
       expect(structuralConditionRefusal({ source: 1 })?.source).toBe('');
     });
+  });
+});
+
+/**
+ * [#27968] A ledger path rooted in a node's SIBLING block — a
+ * `connector_action` node's `connectorConfig.input`, the map its executor
+ * evaluates through the per-key value-slot resolver. The resolvers read the
+ * block off the node they are handed, name the block in each result, and
+ * answer a caller that hands only `config` for `config` alone.
+ */
+describe('a path rooted in a sibling block (#27968)', () => {
+  const ENVELOPE = { dialect: 'cel', source: 'record.id' };
+  const connectorNode = (input: Record<string, unknown>) => ({
+    type: 'connector_action',
+    connectorConfig: { connectorId: 'helpdesk', actionId: 'open_ticket', input },
+  });
+
+  it('declares connector_action input.* in the connectorConfig block, as a value slot', () => {
+    const entry = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === 'connector_action');
+    expect(entry).toMatchObject({ block: 'connectorConfig', path: 'input.*', role: 'value' });
+    expect(FLOW_NODE_SIBLING_EXPRESSION_BLOCKS).toEqual({ connectorConfig: 'connector_action' });
+    expect(flowNodeExpressionBlock(entry!)).toBe('connectorConfig');
+    // Every other entry is rooted in `config`.
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.block !== undefined)).toEqual([entry]);
+  });
+
+  it('resolves the envelope in the block, located in it — the node handed, no config', () => {
+    const node = connectorNode({ ticket: ENVELOPE, queue: 'support' });
+    expect(resolveFlowNodeExpressions('connector_action', undefined, node)).toEqual([
+      { entry: expect.objectContaining({ block: 'connectorConfig' }), block: 'connectorConfig', path: 'input.ticket', value: ENVELOPE },
+    ]);
+    // The value walk hands the literal over too, for the template judge.
+    expect(resolveFlowNodeValueSlots('connector_action', undefined, node).map((f) => [f.block, f.path, f.value])).toEqual([
+      ['connectorConfig', 'input.ticket', ENVELOPE],
+      ['connectorConfig', 'input.queue', 'support'],
+    ]);
+  });
+
+  it('answers a caller that hands only config for config alone', () => {
+    const node = connectorNode({ ticket: ENVELOPE });
+    expect(resolveFlowNodeExpressions('connector_action', undefined)).toEqual([]);
+    expect(resolveFlowNodeValueSlots('connector_action', {})).toEqual([]);
+    // A loose `config.input` (refused by the flow parse) is no position the
+    // entry names: the block, never `config`, is read.
+    expect(resolveFlowNodeExpressions('connector_action', { input: { ticket: ENVELOPE } }, { connectorConfig: {} })).toEqual([]);
+    expect(resolveFlowNodeExpressions('connector_action', undefined, node)).toHaveLength(1);
+  });
+
+  it('names `config` as the block of every config-rooted result', () => {
+    const found = resolveFlowNodeExpressions('assignment', TWO_VARIABLE_ASSIGNMENT, connectorNode({ ticket: ENVELOPE }));
+    expect(found.map((f) => [f.block, f.path])).toEqual([['config', 'assignments.digest']]);
+  });
+
+  it('skips a block that is absent, null or not an object', () => {
+    for (const connectorConfig of [undefined, null, 'x', 42]) {
+      expect(resolveFlowNodeValueSlots('connector_action', undefined, { connectorConfig })).toEqual([]);
+    }
+    expect(resolveFlowNodeValueSlots('connector_action', undefined, { connectorConfig: { connectorId: 'a', actionId: 'b' } })).toEqual([]);
   });
 });

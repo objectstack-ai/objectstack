@@ -1,7 +1,8 @@
 # @objectstack/driver-odata
 
-An OData v4 datasource driver for ObjectStack. Declare a datasource over an OData
-service (SAP S/4HANA, Dynamics 365, Dataverse, any CSDL 4.0 service), bind objects to
+An OData v4 and v2 datasource driver for ObjectStack. Declare a datasource over an OData
+service (SAP S/4HANA, Dynamics 365, Dataverse, any CSDL 4.0 service; with `version: '2.0'`,
+SAP Gateway and any other EDMX 1.0 service), bind objects to
 its entity sets, and every view, form, permission and hook works on them, live. No row
 is stored on the platform side, and no code is written per entity set.
 
@@ -66,10 +67,10 @@ export default defineStack({
 | :--- | :--- | :--- |
 | `name` | `odata` | The datasource name, the driver name and its `driver.<name>` service suffix. |
 | `serviceRoot` | — | The service root URL (http or https, no credentials, no query). |
-| `version` | `4.0` | The protocol version. Only the v4 dialect ships. |
+| `version` | `4.0` | The protocol version: `4.0`, or `2.0` for the v2 dialect (verbose JSON, `$inlinecount`, typed literals, `MERGE`, Associations). Vendor mechanics such as SAP's CSRF handshake are not in this package. |
 | `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. Leave it `none` when the datasource borrows a connector instance's credential (below). |
 | `secrets` | (none) | An object with `resolve(credentialsRef)` that the secret is resolved through. When absent, the kernel service `datasource-secret-resolver` is read at the first request; `os serve` registers it over its own `sys_secret` store. A host composing its own kernel passes the binder it gives `DatasourceAdminServicePlugin`, or registers that service. |
-| `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
+| `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`; a v2 service pages by its own size). |
 | `requestTimeoutMs` | `30000` | Per-request timeout. |
 
 ## Borrowing a connector instance's credential

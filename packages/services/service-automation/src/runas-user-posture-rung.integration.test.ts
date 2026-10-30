@@ -31,6 +31,14 @@
  *     administrator reads the deployment-level ledger rows its user's request
  *     reads, and a member's run is served what the member's request is
  *     served, with or without the rung.
+ *
+ * [#28099] The door half: a run started through the REST or action door
+ * carries the caller's resolved grants, so run setup does not re-resolve them,
+ * and its rung is the one the door forwarded (`AutomationContext.posture`).
+ * Both layers pin it: the forwarded rung is carried as forwarded, never
+ * re-derived or raised; no forwarded rung is no rung; a rung forwarded without
+ * grants gives way to the rung of the grants run setup resolves. The doors'
+ * producer half is `flow-run-posture.test.ts` in `@objectstack/runtime`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -186,6 +194,80 @@ describe("[#28070] a runAs:'user' run's data context carries the rung its resolv
   });
 });
 
+describe("[#28099] a door-started run carries the rung its door forwarded, beside the grants it forwarded", () => {
+  /**
+   * What the REST trigger door (`buildAutomationContext`) and the action door
+   * (`dispatchFlowAction`) in `@objectstack/runtime` hand `execute`: the
+   * request's own resolved grants, and since #28099 its rung.
+   */
+  const doorEnvelope = (userId: string, posture?: string) => ({
+    userId, tenantId: 'org_a', event: 'manual', params: {},
+    positions: GRANTS[userId].positions, permissions: GRANTS[userId].permissions,
+    ...(posture !== undefined ? { posture } : {}),
+  });
+
+  it("the platform administrator's door-started run carries the forwarded PLATFORM_ADMIN with the forwarded grants", async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('rung', recordingFlow('rung') as never);
+    await h.engine.execute('rung', doorEnvelope('usr_admin', 'PLATFORM_ADMIN') as never);
+    expect(h.ctxOf('first')).toMatchObject({
+      isSystem: false, userId: 'usr_admin', permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN',
+    });
+  });
+
+  it("the forwarded rung is the run's: run setup does not re-derive it, so it is never raised to the one the resolver would answer", async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('rung', recordingFlow('rung') as never);
+    await h.engine.execute('rung', doorEnvelope('usr_admin', 'MEMBER') as never);
+    expect(h.ctxOf('first')).toMatchObject({ userId: 'usr_admin', permissions: ['admin_full_access'], posture: 'MEMBER' });
+  });
+
+  it('a door that forwarded no rung gives a run without one: absent, never a default', async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('rung', recordingFlow('rung') as never);
+    await h.engine.execute('rung', doorEnvelope('usr_admin') as never);
+    const ctx = h.ctxOf('first');
+    expect(ctx).toMatchObject({ userId: 'usr_admin', permissions: ['admin_full_access'] });
+    expect(ctx).not.toHaveProperty('posture');
+  });
+
+  it('a forwarded rung without forwarded grants is replaced by the rung of the grants run setup resolves', async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('rung', recordingFlow('rung') as never);
+    // A door forwards positions and permission sets only when non-empty: the
+    // rung can arrive alone, and the grants are then re-resolved.
+    await h.engine.execute('rung', { userId: 'usr_member', tenantId: 'org_a', posture: 'PLATFORM_ADMIN' } as never);
+    expect(h.ctxOf('first')).toMatchObject({ userId: 'usr_member', permissions: ['member_default'], posture: 'MEMBER' });
+  });
+
+  it('a forwarded rung without forwarded grants is dropped when the resolution answers none', async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('rung', recordingFlow('rung') as never);
+    h.engine.setUserGrantsResolver(async () => ({ positions: ['everyone'], permissions: ['member_default'] }));
+    await h.engine.execute('rung', { userId: 'usr_member', tenantId: 'org_a', posture: 'PLATFORM_ADMIN' } as never);
+    const ctx = h.ctxOf('first');
+    expect(ctx).toMatchObject({ userId: 'usr_member', permissions: ['member_default'] });
+    expect(ctx).not.toHaveProperty('posture');
+  });
+
+  it('a forwarded rung without forwarded grants is dropped when the resolution fails: the resolver rejects, answers nothing, or is not wired', async () => {
+    const alone = { userId: 'usr_member', tenantId: 'org_a', posture: 'PLATFORM_ADMIN' };
+    for (const resolver of [
+      async () => { throw new Error('grants store unavailable'); },
+      async () => undefined,
+      null,
+    ]) {
+      const h = envelopeHarness();
+      h.engine.registerFlow('rung', recordingFlow('rung') as never);
+      h.engine.setUserGrantsResolver(resolver as never);
+      await h.engine.execute('rung', { ...alone } as never);
+      const ctx = h.ctxOf('first');
+      expect(ctx).toMatchObject({ isSystem: false, userId: 'usr_member' });
+      expect(ctx).not.toHaveProperty('posture');
+    }
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. The real stack
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,6 +401,40 @@ describe("[#28070] a runAs:'user' flow is served the ledger rows its user's requ
     expect(ran, 'the organization row is served; no deployment-level row is').toEqual(orgIds);
     expect(await requestReads(await requestContext(MEMBER))).toEqual(ran);
     expect(await requestReads(await requestContext(MEMBER, { posture: false }))).toEqual(ran);
+  });
+
+  /**
+   * [#28099] What the REST and action doors hand `automation.execute` for the
+   * user's request: its own resolved grants, and its rung unless `posture` is
+   * false (the doors' shape before #28099).
+   */
+  async function doorEnvelope(userId: string, opts: { posture?: boolean } = {}) {
+    const r = await requestContext(userId, opts);
+    return {
+      userId, tenantId: orgA, event: 'manual', params: {},
+      positions: r.positions, permissions: r.permissions,
+      ...('posture' in r ? { posture: r.posture } : {}),
+    };
+  }
+
+  it("[#28099] CONTROL: a door-started run without the forwarded rung (the doors' shape before the fix) is served the organization row only", async () => {
+    const res: any = await automation.execute('qa_ledger_read', (await doorEnvelope(ADMIN, { posture: false })) as never);
+    expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
+    expect(ids(res.output?.rows)).toEqual(orgIds);
+  });
+
+  it("[#28099] the platform administrator's door-started run, carrying the rung the door forwarded, is served every deployment-level row, as their request is", async () => {
+    const res: any = await automation.execute('qa_ledger_read', (await doorEnvelope(ADMIN)) as never);
+    expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
+    expect(ids(res.output?.rows)).toEqual([...standingIds, ...orgIds].sort());
+    expect(ids(res.output?.rows)).toEqual(await requestReads(await requestContext(ADMIN)));
+  });
+
+  it("[#28099] a member's door-started run is served what the member's request is served, and no deployment-level row", async () => {
+    const res: any = await automation.execute('qa_ledger_read', (await doorEnvelope(MEMBER)) as never);
+    expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
+    expect(ids(res.output?.rows)).toEqual(orgIds);
+    expect(await requestReads(await requestContext(MEMBER))).toEqual(orgIds);
   });
 
   it("a runAs:'system' run is unchanged: elevated, it is served every row as before", async () => {
