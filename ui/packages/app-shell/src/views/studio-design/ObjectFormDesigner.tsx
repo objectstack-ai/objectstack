@@ -564,7 +564,9 @@ function Section({
           <span className={cn('px-1 text-sm font-semibold', !isDeclared && 'text-muted-foreground')}>{title}</span>
         )}
         <span className="shrink-0 text-xs text-muted-foreground">
-          {tFormat('engine.studio.data.fieldCount', locale, { count: fieldIds.length })}
+          {tFormat(fieldIds.length === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
+            count: fieldIds.length,
+          })}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
           {isDeclared && !readOnly && (

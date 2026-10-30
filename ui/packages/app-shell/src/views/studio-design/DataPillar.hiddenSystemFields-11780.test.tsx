@@ -327,3 +327,15 @@ describe('isStudioHiddenSystemField — both marks, as booleans (objectui#11780)
     expect(isStudioHiddenSystemField(undefined)).toBe(false);
   });
 });
+
+// objectstack#27521 (Studio row 32) — the object header counted every column,
+// the platform's included, while the canvas drew the author's fields only: it
+// read "8 fields" over four. It now counts what the canvas shows and names the
+// platform's own columns apart.
+describe('the object header counts the author’s fields and names the system ones apart (objectstack#27521)', () => {
+  it('reads "4 fields (+4 system)" for four author fields beside four platform columns', async () => {
+    renderPillar();
+    await waitFor(() => expect(listed('grid-columns')).toContain('name'), { timeout: 4000 });
+    expect(await screen.findByText('4 fields (+4 system)')).toBeInTheDocument();
+  });
+});

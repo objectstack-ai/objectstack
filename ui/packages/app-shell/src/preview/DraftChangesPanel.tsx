@@ -1669,7 +1669,7 @@ export function DraftChangesPanel({
                 ? t('preview.changes.confirmNote', {
                     count: entries!.length,
                     defaultValue:
-                      'Publishing releases all {{count}} pending drafts of this package atomically.',
+                      'Publishing releases all {{count}} pending drafts of this package together: all of them go live, or none do.',
                   })
                 : t('preview.changes.confirmNoteSeparate', {
                     count: entries!.length,
