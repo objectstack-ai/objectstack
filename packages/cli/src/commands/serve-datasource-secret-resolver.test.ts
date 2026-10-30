@@ -29,7 +29,7 @@
  *
  * The driver's side (reading the service at its first request, an explicit
  * `options.secrets` winning, the fail-closed refusal with no service) is
- * pinned in `packages/drivers/driver-odata/src/plugin.test.ts`.
+ * pinned in `@objectstack/driver-odata`'s own plugin tests.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -38,6 +38,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ObjectKernel } from '@objectstack/core';
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { createDatasourceSecretBinder } from '@objectstack/service-datasource';
 import { LocalCryptoProvider } from '@objectstack/service-settings';
 import { DATASOURCE_SECRET_RESOLVER_SERVICE, type IDatasourceSecretResolver } from '@objectstack/types';
@@ -69,13 +70,18 @@ function secretStore() {
   return {
     rows,
     async insert(_object: string, data: Record<string, unknown>) { rows.set(String(data.id), data); return data; },
-    async delete(_object: string, options: { where: Record<string, unknown> }) { rows.delete(String(options.where.id)); },
+    async delete(_object: string, options: { where: Record<string, unknown> }) {
+      assertEngineDeleteDispatch(options);
+      rows.delete(String(options.where.id));
+    },
     async find(_object: string, query: Record<string, unknown>) {
       const where = (query.where ?? {}) as Record<string, unknown>;
-      if (Object.entries(where).some(([k, v]) => k.startsWith('$') || (v !== null && typeof v === 'object'))) {
-        throw new Error('only plain equality filters are implemented by this double');
-      }
-      const hits = [...rows.values()].filter((row) => Object.entries(where).every(([k, v]) => row[k] === v));
+      const hits = [...rows.values()].filter((row) => Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+          throw new Error('only plain equality filters are implemented by this double');
+        }
+        return row[k] === v;
+      }));
       return typeof query.limit === 'number' ? hits.slice(0, query.limit) : hits;
     },
   };
