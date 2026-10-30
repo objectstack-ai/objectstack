@@ -30,7 +30,12 @@ export const CrmApp = App.create({
       label: 'Analytics',
       icon: 'chart-bar',
       children: [
-        { id: 'nav_pipeline_dashboard', type: 'dashboard', dashboardName: 'pipeline_dashboard', label: 'Pipeline', icon: 'layout-dashboard' },
+        // Offered only to a member who can read the opportunities every
+        // Pipeline widget aggregates (`opportunity_metrics` is bound to
+        // `crm_opportunity`); anyone else would open a page whose every tile
+        // the server refuses. `visible` hides; the dataset query's own 403
+        // stays the enforcement (ADR-0066 D4).
+        { id: 'nav_pipeline_dashboard', type: 'dashboard', dashboardName: 'pipeline_dashboard', label: 'Pipeline', icon: 'layout-dashboard', visible: "current_user.can('crm_opportunity', 'read')" },
       ],
     },
   ],
