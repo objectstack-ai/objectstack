@@ -4042,6 +4042,7 @@ const ar = {
       delete_field: "حذف أحد الحقول",
       describe_metadata: "مراجعة البيانات الوصفية",
       describe_object: "مراجعة بنية الكائن",
+      draft_record: "صياغة مسودة السجل الجديد",
       get_active_package: "التحقق من الحزمة النشطة",
       get_authoring_rules: "الاطلاع على قواعد التأليف",
       get_metadata_schema: "الاطلاع على تنسيق البيانات الوصفية",
