@@ -196,6 +196,10 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
         await engine.update('task', { title: 'A4' }, { where: { id: a.id }, onValidationAdvisory: () => {} } as any);
     });
 
+    it('onNotice passes on update (contract-declared write observability, #28000)', async () => {
+        await engine.update('task', { title: 'A6' }, { where: { id: a.id }, onNotice: () => {} } as any);
+    });
+
     it('searchFields passes on find (read by the $search expansion)', async () => {
         // Legality pin only — the $or/$contains expansion itself is covered by
         // the search-filter tests; this mock driver does not evaluate it.
@@ -258,8 +262,10 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
         // in the serializable bag, so the schema cannot vouch for them and
         // this list must. Spelling it here is what keeps the engine from
         // rejecting a key the TS contract declares. [#22726]
-        // `onValidationAdvisory` is the third such member.
-        expectSetMatches('update', EngineUpdateOptionsSchema as any, ['onFieldsDropped', 'onValidationAdvisory', 'strictReadonlyWrites', ...PASSTHROUGH]);
+        // `onValidationAdvisory` is the third such member. `onNotice` (#28000)
+        // is another: the engine only carries it to the hooks, on
+        // `ctx.input.options`.
+        expectSetMatches('update', EngineUpdateOptionsSchema as any, ['onFieldsDropped', 'onValidationAdvisory', 'onNotice', 'strictReadonlyWrites', ...PASSTHROUGH]);
         expectSetMatches('delete', EngineDeleteOptionsSchema as any, PASSTHROUGH);
         expectSetMatches('count', EngineCountOptionsSchema as any, []);
         expectSetMatches('aggregate', EngineAggregateOptionsSchema as any, []);

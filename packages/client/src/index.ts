@@ -490,6 +490,14 @@ export interface CreateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#28000] One author-written message a hook on this write set to tell the
+   * person who made it what the save set in motion (for example "Sent to your
+   * manager for approval"). Info severity, distinct from `warnings`: show it
+   * with, or in place of, your own success message. Present only when a hook
+   * set one; never stored on the record.
+   */
+  notice?: string;
 }
 
 /**
@@ -544,6 +552,14 @@ export interface UpdateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#28000] One author-written message a hook on this write set to tell the
+   * person who made it what the save set in motion (for example "Sent to your
+   * manager for approval"). Info severity, distinct from `warnings`: show it
+   * with, or in place of, your own success message. Present only when a hook
+   * set one; never stored on the record.
+   */
+  notice?: string;
 }
 
 /**

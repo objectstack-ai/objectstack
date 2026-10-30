@@ -13736,9 +13736,16 @@ export class ObjectStackProtocolImplementation implements
         // — the engine reports them through the write's own options, so a
         // nested write a hook makes inside this one never adds to them.
         const warnings: ValidationAdvisoryEvent[] = [];
+        // [#28000] The one message a hook on THIS write set to tell the
+        // requester what the save set in motion, answered as `notice`. The hook
+        // reads the listener off `ctx.input.options`, which is this bag, so a
+        // nested write's hook never reaches it; a later call replaces an
+        // earlier one, and anything but a non-empty string sets nothing.
+        let notice: string | undefined;
         const opts: any = {
             onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
             onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
+            onNotice: (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; },
         };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.insert(request.object, request.data, opts);
@@ -13756,6 +13763,7 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(notice !== undefined ? { notice } : {}),
         };
     }
 
@@ -13904,6 +13912,9 @@ export class ObjectStackProtocolImplementation implements
         // (see `createData`).
         const warnings: ValidationAdvisoryEvent[] = [];
         opts.onValidationAdvisory = (e: ValidationAdvisoryEvent) => { warnings.push(e); };
+        // [#28000] The hook-set message answered as `notice` (see `createData`).
+        let notice: string | undefined;
+        opts.onNotice = (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; };
         // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
         // the path `:id` — and nothing in the payload gets to move it.
         //
@@ -13980,6 +13991,7 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(notice !== undefined ? { notice } : {}),
         };
     }
 
