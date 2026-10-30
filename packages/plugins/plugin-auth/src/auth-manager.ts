@@ -1690,6 +1690,7 @@ export class AuthManager {
       implicitLinkRequiresLocalEmailVerified: (...a) => this.implicitLinkRequiresLocalEmailVerified(...a),
       isAuthGateActive: (...a) => this.isAuthGateActive(...a),
       isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
+      isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
@@ -2694,7 +2695,9 @@ export class AuthManager {
    * the contract gives the package that owns the transport (plugin-email
    * answers `false` for its `log` transport in every environment, and follows a
    * transport swapped from the mail settings at runtime). Read at call time,
-   * never cached at boot.
+   * never cached at boot. [#27843] invite-member's `outcome` asks it too
+   * (`invitation-delivery-outcome.ts`), so an invite answers `link_only` on
+   * exactly the deployments where sign-up would not mail either.
    *
    * ⛔ An implementation WITHOUT the member is NOT live: the contract says an
    * absent member is unknown, and the flow asking — a success answer that only

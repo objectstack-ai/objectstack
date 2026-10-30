@@ -79,6 +79,7 @@ import {
 } from './auth-manager.js';
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
+import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { invitationRoleLabel } from './invitation-role-label.js';
 import { applyDeclaredInvitationVerificationToListing } from './list-user-invitations-verification.js';
@@ -537,12 +538,12 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     // operators / UI can fall back to copy-paste flows. Replace this
     // with a real mail integration when available.
     sendInvitationEmail: async ({ email: recipientEmail, invitation, organization: org, inviter }) => {
-      // The accept-invitation page is a Console SPA route; the Console
-      // builds the very same link for its "copy invitation link" action
-      // (`${origin}${BASE_URL}accept-invitation/<id>`). Compose it through
+      // The accept-invitation page is a Console SPA route. Compose it through
       // the single-source helper so the `/_console` prefix and absolute
-      // https origin are guaranteed.
-      const acceptUrl = this.getConsolePageUrl(`/accept-invitation/${invitation.id}`);
+      // https origin are guaranteed. [#27843] `sys_invitation.copy_invitation_link`
+      // answers this very link, built from the same path and composer
+      // (`invitation-link-action.ts`).
+      const acceptUrl = this.getConsolePageUrl(invitationAcceptPath(String(invitation.id)));
       // #2766 V1.5 — placeholder addresses are never real recipients.
       if (isPlaceholderEmail(recipientEmail)) {
         throw new Error(
