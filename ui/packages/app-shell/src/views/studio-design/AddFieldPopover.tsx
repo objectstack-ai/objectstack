@@ -97,6 +97,7 @@ export function AddFieldPopover({
   const labelId = React.useId();
   const apiNameId = React.useId();
   const apiNameHintId = React.useId();
+  const createReasonId = React.useId();
 
   const setOpen = (next: boolean) => {
     if (openProp === undefined) setOpenState(next);
@@ -131,6 +132,13 @@ export function AddFieldPopover({
       : derivedTaken
         ? fieldNameTakenRefusal(derived, takenNames, locale)
         : t('engine.studio.data.addFieldApiNameNotDerived', locale);
+  // Why Create is off, said on the button itself: it stays focusable and
+  // describes the missing step instead of being skipped by Tab.
+  const createReason = canCreate
+    ? null
+    : !trimmed
+      ? t('engine.studio.data.addFieldNeedsLabel', locale)
+      : (nameHint ?? t('engine.studio.data.addFieldApiNameNotDerived', locale));
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -205,12 +213,19 @@ export function AddFieldPopover({
             <Button
               type="submit"
               size="sm"
-              disabled={!canCreate}
+              aria-disabled={createReason ? true : undefined}
+              aria-describedby={createReason ? createReasonId : undefined}
+              title={createReason ?? undefined}
               data-testid="add-field-create"
-              className="h-7 px-2.5 text-xs"
+              className="h-7 px-2.5 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
             >
               {t('engine.studio.data.addFieldCreate', locale)}
             </Button>
+            {createReason && (
+              <span id={createReasonId} className="sr-only" data-testid="add-field-create-reason">
+                {createReason}
+              </span>
+            )}
           </div>
         </form>
       </PopoverContent>

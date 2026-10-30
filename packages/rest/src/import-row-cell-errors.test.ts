@@ -106,8 +106,12 @@ async function boot() {
     return r.body.results as any[];
   };
 
-  /** The async job's per-row report, read off the results route once the job is terminal. */
-  const jobRows = async (rows: Array<Record<string, unknown>>, dryRun: boolean) => {
+  /**
+   * The async job's per-row report, read off the results route once the job is terminal.
+   * A job whose every row failed ends `failed` (maintainer ruling B, record 6509036166);
+   * one with any row created, updated or skipped ends `succeeded`.
+   */
+  const jobRows = async (rows: Array<Record<string, unknown>>, dryRun: boolean, terminal: 'succeeded' | 'failed' = 'succeeded') => {
     const created = await call('POST', '/api/v1/data/:object/import/jobs', { format: 'json', rows, dryRun });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const jobId = String(created.body.jobId);
@@ -117,7 +121,7 @@ async function boot() {
       if (['succeeded', 'failed', 'cancelled'].includes(progress.body?.status)) break;
       await new Promise((r) => setTimeout(r, 5));
     }
-    expect(progress?.body?.status, JSON.stringify(progress?.body)).toBe('succeeded');
+    expect(progress?.body?.status, JSON.stringify(progress?.body)).toBe(terminal);
     const results = await call('GET', '/api/v1/data/import/jobs/:jobId/results', undefined, { jobId });
     return [...(results.body.results as any[])].sort((a, b) => a.row - b.row);
   };
@@ -174,7 +178,7 @@ describe('[#25582] a row that failed for another reason carries no `errors`', ()
 
   it('the dry run\'s validate verdict (sync and async)', async () => {
     const b = await boot();
-    for (const rows of [await b.syncRows([NO_NAME], true), await b.jobRows([NO_NAME], true)]) {
+    for (const rows of [await b.syncRows([NO_NAME], true), await b.jobRows([NO_NAME], true, 'failed')]) {
       expect(rows[0], JSON.stringify(rows[0])).toMatchObject({ row: 1, ok: false, action: 'failed', field: 'name', code: 'required' });
       expect(rows[0]).not.toHaveProperty('errors');
     }
@@ -182,7 +186,7 @@ describe('[#25582] a row that failed for another reason carries no `errors`', ()
 
   it('the commit\'s refused write (sync and async)', async () => {
     const b = await boot();
-    for (const rows of [await b.syncRows([NO_NAME], false), await b.jobRows([NO_NAME], false)]) {
+    for (const rows of [await b.syncRows([NO_NAME], false), await b.jobRows([NO_NAME], false, 'failed')]) {
       expect(rows[0], JSON.stringify(rows[0])).toMatchObject({ row: 1, ok: false, action: 'failed', field: 'name', code: 'required' });
       expect(rows[0]).not.toHaveProperty('errors');
     }

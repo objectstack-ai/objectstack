@@ -134,7 +134,8 @@ describe('jsonSchemaToFlowFields', () => {
       objectSource: '$trigger',
       map: { user: 'user', org_membership_level: 'org-membership-level', role: 'org-membership-level', position: 'position', team: 'team', department: 'department', manager: 'manager', field: 'object-field', queue: 'queue' },
     });
-    expect(valueCol.placeholder).toBe('User id / membership tier / position / team / department / field — per `type`');
+    expect(valueCol.help).toBe('User id / membership tier / position / team / department / field — per `type`');
+    expect(valueCol.placeholder).toBeUndefined();
   });
 
   it('maps a static-kind xRef column into a reference column', () => {

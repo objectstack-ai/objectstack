@@ -1722,7 +1722,7 @@ const ja = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。",
+      accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セット」で権限セットを使って付与できます。",
     },
     saveAdvisoryTitle: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",
     saveAdvisoryTitle_one: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",
@@ -4381,9 +4381,9 @@ const ja = {
       detailChangedKeys: 'その他の変更：',
       detailNewKeys: '含まれるもの：',
       generatedGroup: 'プラットフォームが生成（{{n}}）',
-      confirmNote: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
-      confirmNote_one: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
-      confirmNote_other: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
+      confirmNote: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて公開されます。すべて公開されるか、何も公開されないかのどちらかです。',
+      confirmNote_one: '公開すると、このパッケージの保留中ドラフト {{count}} 件が公開されます。公開されるか、何も変わらないかのどちらかです。',
+      confirmNote_other: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて公開されます。すべて公開されるか、何も公開されないかのどちらかです。',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: '公開すると、保留中のドラフト {{count}} 件がそれぞれ個別に公開されます。公開に失敗したドラフトは保留中のまま残り、ほかのドラフトは公開されます。',

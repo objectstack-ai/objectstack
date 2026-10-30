@@ -96,7 +96,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
   it('a new Script rule is listed and open, but not written, and says what it needs', () => {
     const onPatch = vi.fn();
     render(<Harness onPatch={onPatch} />);
-    addFromMenu('Script — CEL fail condition');
+    addFromMenu('Condition — reject the save when it is true');
 
     expect(onPatch).not.toHaveBeenCalled();
     // Listed, marked, and open in the editor.
@@ -112,7 +112,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
 
   it('starts on Create + Update', () => {
     render(<Harness onPatch={vi.fn()} />);
-    addFromMenu('Script — CEL fail condition');
+    addFromMenu('Condition — reject the save when it is true');
     expect(screen.getByRole('checkbox', { name: 'Create' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Update' })).toBeChecked();
     // objectui#11923 — the row offers only the spec's events: no Delete box.
@@ -122,7 +122,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
   it('edits before the condition stay unsent and ride along when it is written', () => {
     const onPatch = vi.fn();
     render(<Harness onPatch={onPatch} />);
-    addFromMenu('Script — CEL fail condition');
+    addFromMenu('Condition — reject the save when it is true');
     fireEvent.change(screen.getByPlaceholderText('e.g. Completion date is required when status is Done'), {
       target: { value: 'Too big' },
     });
@@ -135,7 +135,8 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
     expect(written[0]).toEqual((baseDraft.validations as unknown[])[0]);
     expect(written[1]).toMatchObject({
       type: 'script',
-      name: 'validation_2',
+      // objectstack#27521 — the minted name follows the message.
+      name: 'too_big',
       message: 'Too big',
       condition: GUARD,
       events: ['insert', 'update'],
@@ -149,7 +150,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
     // Written, it is an ordinary rule: no mark, no held line, still open.
     expect(screen.queryByTestId('rule-unsaved')).toBeNull();
     expect(screen.queryByTestId('rule-held')).toBeNull();
-    expect(screen.getByDisplayValue('validation_2')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('too_big')).toBeInTheDocument();
   });
 
   it('a Conditional rule waits for its Then rule’s condition too, and says so', () => {
@@ -176,7 +177,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
   it('deleting a rule that was never written writes nothing', () => {
     const onPatch = vi.fn();
     render(<Harness onPatch={onPatch} />);
-    addFromMenu('Cross-field — CEL over multiple fields');
+    addFromMenu('Compare fields — a condition over several fields');
     fireEvent.click(screen.getByTestId('rule-delete'));
     expect(onPatch).not.toHaveBeenCalled();
     expect(screen.queryByText('validation_2')).toBeNull();
@@ -196,7 +197,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
     });
     expect(onPatch).toHaveBeenCalledTimes(1);
     const written = lastValidations(onPatch)[1];
-    expect(written).toMatchObject({ type: 'format', name: 'validation_2', events: ['insert', 'update'] });
+    expect(written).toMatchObject({ type: 'format', name: 'bad_name', events: ['insert', 'update'] });
     expect(ObjectSchema.safeParse({ ...baseDraft, validations: [written] }).success).toBe(true);
     expect(screen.queryByTestId('rule-unsaved')).toBeNull();
   });
@@ -209,7 +210,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
     };
     render(<Harness onPatch={onPatch} initial={initial} />);
     expect(screen.getByTestId('rule-type')).toHaveTextContent('Format — regex / built-in format');
-    await pickType('Script — CEL fail condition');
+    await pickType('Condition — reject the save when it is true');
     expect(onPatch).toHaveBeenCalledTimes(1);
     const written = lastValidations(onPatch)[0];
     expect(written).toMatchObject({ type: 'script', name: 'code_format', message: 'bad', condition: 'false' });
@@ -221,7 +222,7 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
   it('control — the existing rule list and its editor are unchanged by an unsaved rule', () => {
     const onPatch = vi.fn();
     render(<Harness onPatch={onPatch} />);
-    addFromMenu('Script — CEL fail condition');
+    addFromMenu('Condition — reject the save when it is true');
     fireEvent.click(screen.getByText('no_negative'));
     fireEvent.change(screen.getByDisplayValue('no'), { target: { value: 'never negative' } });
     expect(onPatch).toHaveBeenCalledTimes(1);

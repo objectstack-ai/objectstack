@@ -361,7 +361,7 @@ function columnsFor(item: JsonSchemaNode, depth = 0): FlowConfigColumn[] {
           label: prop.title || humanizeKey(key),
           kind: nested.kind,
           ...(nested.columns ? { columns: nested.columns } : {}),
-          ...(prop.description ? { placeholder: prop.description } : {}),
+          ...(prop.description ? { help: prop.description } : {}),
         });
         continue;
       }
@@ -397,8 +397,8 @@ function columnsFor(item: JsonSchemaNode, depth = 0): FlowConfigColumn[] {
       kind,
       ...(options ? { options } : {}),
       ...(ref ? { ref } : {}),
-      // Columns have no help slot — surface the schema description as a hint.
-      ...(prop.description ? { placeholder: prop.description } : {}),
+      // A description is prose, not an example value: it is the column's help.
+      ...(prop.description ? { help: prop.description } : {}),
     });
   }
   return cols;

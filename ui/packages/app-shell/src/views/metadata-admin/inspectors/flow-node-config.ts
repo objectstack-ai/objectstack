@@ -212,6 +212,8 @@ export interface FlowConfigColumn {
     | 'numberList'
     | 'objectList';
   placeholder?: string;
+  /** What the column means, shown under it — a schema description lands here, never in `placeholder`. */
+  help?: string;
   options?: Array<{ value: string; label: string }>;
   /** For `kind: 'reference'` — the picker data source (may be polymorphic). */
   ref?: FlowReferenceSpec;

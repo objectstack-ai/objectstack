@@ -1722,7 +1722,7 @@ const ko = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다.",
+      accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 세트'에서 권한 세트로 부여할 수 있습니다.",
     },
     saveAdvisoryTitle: "저장되었습니다 — 작성 검사에서 {{count}}건의 권장 사항이 발견되었습니다",
     saveAdvisoryTitle_one: "저장되었습니다 — 작성 검사에서 {{count}}건의 권장 사항이 발견되었습니다",
@@ -4378,9 +4378,9 @@ const ko = {
       detailChangedKeys: '기타 변경:',
       detailNewKeys: '포함:',
       generatedGroup: '플랫폼에서 생성됨 ({{n}})',
-      confirmNote: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
-      confirmNote_one: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
-      confirmNote_other: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
+      confirmNote: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 함께 게시됩니다. 모두 게시되거나, 하나도 게시되지 않습니다.',
+      confirmNote_one: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 게시됩니다. 게시되거나, 아무것도 바뀌지 않습니다.',
+      confirmNote_other: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 함께 게시됩니다. 모두 게시되거나, 하나도 게시되지 않습니다.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: '게시하면 대기 중인 초안 {{count}}개가 하나씩 따로 게시됩니다. 게시에 실패한 초안은 대기 상태로 남고, 나머지는 그대로 게시됩니다.',

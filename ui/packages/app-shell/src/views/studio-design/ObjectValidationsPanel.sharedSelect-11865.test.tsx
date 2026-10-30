@@ -154,8 +154,8 @@ describe('the rule editor pickers are the shared Select (objectui#11865)', () =>
  * and re-picking it writes nothing.
  */
 const WRITES: ReadonlyArray<readonly [string, string, string | null, readonly string[]]> = [
-  ['rule-type', 'Script — CEL fail condition', '{"validations":[{"name":"code_format","message":"Bad code","severity":"warning","active":true,"type":"script","condition":"false"}]}', []],
-  ['rule-type', 'Cross-field — CEL over multiple fields', '{"validations":[{"name":"code_format","message":"Bad code","severity":"warning","active":true,"type":"cross_field","condition":"false","fields":["status"]}]}', []],
+  ['rule-type', 'Condition — reject the save when it is true', '{"validations":[{"name":"code_format","message":"Bad code","severity":"warning","active":true,"type":"script","condition":"false"}]}', []],
+  ['rule-type', 'Compare fields — a condition over several fields', '{"validations":[{"name":"code_format","message":"Bad code","severity":"warning","active":true,"type":"cross_field","condition":"false","fields":["status"]}]}', []],
   ['rule-type', 'State machine — allowed transitions', '{"validations":[{"name":"code_format","message":"Bad code","severity":"warning","active":true,"type":"state_machine","field":"status","transitions":{}}]}', []],
   ['rule-type', 'Format — regex / built-in format', null, []],
   ['rule-type', 'JSON schema — validate a JSON field', '{"validations":[{"name":"code_format","message":"Bad code","severity":"warning","active":true,"type":"json_schema","field":"status","schema":{}}]}', []],
@@ -169,7 +169,7 @@ const WRITES: ReadonlyArray<readonly [string, string, string | null, readonly st
   ['rule-format', 'email', null, []],
   ['rule-format', 'phone', '{"validations":[{"type":"format","name":"code_format","message":"Bad code","field":"code","format":"phone","severity":"warning","active":true}]}', []],
   ['rule-format', 'json', '{"validations":[{"type":"format","name":"code_format","message":"Bad code","field":"code","format":"json","severity":"warning","active":true}]}', []],
-  ['rule-severity', 'error (rejects the save)', '{"validations":[{"type":"format","name":"code_format","message":"Bad code","field":"code","format":"email","severity":"error","active":true}]}', []],
+  ['rule-severity', 'Error — the save is rejected', '{"validations":[{"type":"format","name":"code_format","message":"Bad code","field":"code","format":"email","severity":"error","active":true}]}', []],
   ['rule-severity', 'warning', null, []],
   ['rule-severity', 'info', '{"validations":[{"type":"format","name":"code_format","message":"Bad code","field":"code","format":"email","severity":"info","active":true}]}', []],
 ];
@@ -236,7 +236,7 @@ describe('a stored value no option carries is what the trigger shows', () => {
 
   it('a severity the editor does not offer is shown, not the first option', () => {
     renderPanel({ ...RULE, severity: 'critical' });
-    // The native control showed "error (rejects the save)" here.
+    // The native control showed "Error — the save is rejected" here.
     expect(screen.getByTestId('rule-severity')).toHaveTextContent('critical');
   });
 });
