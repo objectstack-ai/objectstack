@@ -3824,7 +3824,7 @@ const STUDIO_EN: Record<string, string> = {
   // The plain sentence the CEL editors lead the catch-all CEL refusal with
   // (`invalid-cel`); the engine's own fault and source excerpt follow it as written.
   'engine.celLint.invalidCel':
-    "This expression can't be read as written. Something is missing, extra or out of place: the ^ mark below points to where reading stopped.",
+    "This expression can't be worked out as written: something is missing, extra, out of place, or doesn't fit the values beside it. The ^ mark below points to the spot.",
   'engine.celLint.notTheRow':
     '`{identifier}` is not the row on this surface: a row predicate binds the record as `{canonical}` and nothing else. The CEL scope vocabulary still accepts `{identifier}`, so nothing here blocks the save, but at runtime the expression faults with `Unknown variable: {identifier}` and the rule never fires. Re-root the reference on `{canonical}`.',
   'engine.pageBlockCanvas.renderFailed':
