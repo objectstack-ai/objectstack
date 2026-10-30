@@ -450,9 +450,10 @@ const ChartLegend = Legend
  * the chart knows better than the colour recharts hands the legend: a mark
  * filled from a gradient hands it a paint-server reference (`url(#…)`), which
  * no swatch can draw. A `comparison` series draws its swatch hollow, the way
- * its mark is muted.
+ * its mark is muted. `none` draws no swatch, only the label: a series whose
+ * marks each carry another colour.
  */
-export type LegendSwatch = { color: string; comparison?: boolean }
+export type LegendSwatch = { color: string; comparison?: boolean; none?: boolean }
 
 function ChartLegendContent({
   className,
@@ -490,7 +491,7 @@ function ChartLegendContent({
                 "[&>svg]:text-muted-foreground flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3"
               )}
             >
-              {itemConfig?.icon && !hideIcon ? (
+              {swatch?.none ? null : itemConfig?.icon && !hideIcon ? (
                 <itemConfig.icon />
               ) : (
                 // The series colour is author-declared, so it reaches the DOM

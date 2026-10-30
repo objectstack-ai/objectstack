@@ -37,6 +37,7 @@ import {
   ReferenceLine,
   ReferenceArea,
   Brush,
+  Text,
   type SankeyLinkProps,
   type SankeyNode,
   type SankeyNodeProps,
@@ -534,6 +535,22 @@ function wrapCategoryLabel(label: string, maxWidthPx: number): { lines: string[]
  * recharts' `tickSize` plus its default `tickMargin` of 2.
  */
 const CATEGORY_TICK_INSET_PX = RECHARTS_TICK_SIZE + 2;
+
+/** An unrotated x-axis label on a phone is cut past this many characters. */
+const PHONE_X_LABEL_MAX_CHARS = 8;
+
+/**
+ * The x axis's category tick: recharts' own tick text, drawn from the axis's
+ * `tickFormatter`, plus the full label (`fullLabel`) as a tooltip whenever the
+ * formatter had to cut it, so a phone's "In Progr…" still names its bucket.
+ */
+function TitledCategoryTick(props: any) {
+  const { fullLabel, tickFormatter, payload, index, ...rest } = props;
+  const shown = String(tickFormatter ? tickFormatter(payload?.value, index) : (payload?.value ?? ''));
+  const full = String(fullLabel(payload?.value) ?? '');
+  const text = <Text {...rest} fill={AXIS_TICK_STYLE.fill}>{shown}</Text>;
+  return shown === full ? text : <g><title>{full}</title>{text}</g>;
+}
 
 /** The line advance of a wrapped category label, in em. */
 const CATEGORY_LABEL_LINE_EM = 1.1;
@@ -2365,8 +2382,8 @@ function AdvancedChartImplInner({
 
   // Format ISO date strings into compact "MMM D" / "MMM YYYY" labels for X-axis ticks.
   // Falls back to the raw value when not parseable as a date. The full label:
-  // `formatTick` below adds the phone cut, which the horizontal-bar category
-  // axis does not take (it wraps instead, see `WrappedCategoryTick`).
+  // the x axis cuts it only where its band needs that (`xAxisTickFormatter`),
+  // and the horizontal-bar category axis wraps it (`WrappedCategoryTick`).
   const formatCategoryLabel = React.useCallback((value: any): string => {
     if (value == null || value === '') return '';
     // A resolved display label for this exact category value — the same
@@ -2418,11 +2435,6 @@ function AdvancedChartImplInner({
     }
     return str;
   }, [data, xAxisKey, config, displayLocale]);
-  const formatTick = React.useCallback((value: any): string => {
-    const str = formatCategoryLabel(value);
-    if (isMobile && str.length > 8) return str.slice(0, 8) + '…';
-    return str;
-  }, [formatCategoryLabel, isMobile]);
 
   // Memoize whether any X-axis label is long enough to warrant angle rotation
   const hasLongLabels = React.useMemo(
@@ -2495,8 +2507,8 @@ function AdvancedChartImplInner({
     yAxisUndrawnNotes(yPlacement, yAxes, categoriesRunDown),
   );
   const xTickFormatter = React.useMemo(
-    () => formatterFor(xAxisSpec?.format, displayLocale) ?? formatTick,
-    [xAxisSpec?.format, displayLocale, formatTick],
+    () => formatterFor(xAxisSpec?.format, displayLocale) ?? formatCategoryLabel,
+    [xAxisSpec?.format, displayLocale, formatCategoryLabel],
   );
 
   // objectui#13241 — whether the drawn labels fit their bands unrotated, read
@@ -2525,19 +2537,33 @@ function AdvancedChartImplInner({
    * is sized from the longest label drawn, so the cap is what keeps that band
    * bounded. See `ROTATED_X_LABEL_MAX_CHARS`.
    *
-   * Kept separate from `xTickFormatter` on purpose — that one also formats the
-   * horizontal-bar family's CATEGORY axis, which is the y axis, sizes its own
-   * width from the longest label, and already draws all of them.
+   * An unrotated label on a phone keeps the eight-character cut, unless the
+   * axis declares a `format`: there the rotated band is what holds a long
+   * label, so a phone rotates its few labels and draws "In Progress" whole
+   * where the cut drew "In Progr…" (objectstack#27520). Either cut leaves the
+   * full label in the tick's tooltip (`TitledCategoryTick`).
+   *
+   * Kept separate from `xTickFormatter` on purpose — that one is the full
+   * label, which the fit and rotation decisions above measure, and which the
+   * tooltip of a cut label carries.
    */
   const xAxisTickFormatter = React.useMemo(() => {
-    if (!rotateXLabels) return xTickFormatter;
-    return (value: any): string => {
-      const label = String(xTickFormatter(value) ?? '');
-      return label.length > ROTATED_X_LABEL_MAX_CHARS
-        ? `${label.slice(0, ROTATED_X_LABEL_MAX_CHARS - 1)}…`
-        : label;
-    };
-  }, [rotateXLabels, xTickFormatter]);
+    if (rotateXLabels) {
+      return (value: any): string => {
+        const label = String(xTickFormatter(value) ?? '');
+        return label.length > ROTATED_X_LABEL_MAX_CHARS
+          ? `${label.slice(0, ROTATED_X_LABEL_MAX_CHARS - 1)}…`
+          : label;
+      };
+    }
+    if (isMobile && !xAxisSpec?.format) {
+      return (value: any): string => {
+        const label = String(xTickFormatter(value) ?? '');
+        return label.length > PHONE_X_LABEL_MAX_CHARS ? `${label.slice(0, PHONE_X_LABEL_MAX_CHARS)}…` : label;
+      };
+    }
+    return xTickFormatter;
+  }, [rotateXLabels, isMobile, xAxisSpec?.format, xTickFormatter]);
 
   // objectui#11796 — the band a rotated x axis reserves, from the longest
   // label it draws (see `rotatedXAxisHeight`). A number, so the axis props
@@ -2737,7 +2763,7 @@ function AdvancedChartImplInner({
   // 180-point daily series at 800px still thinned to 11 ticks with zero
   // overlap, unchanged in kind from before this change.
   const xAxisCommonProps = React.useMemo(() => ({
-    tick: AXIS_TICK_STYLE,
+    tick: (tickProps: any) => <TitledCategoryTick {...tickProps} fullLabel={xTickFormatter} />,
     tickLine: false as const,
     tickMargin: X_AXIS_TICK_MARGIN,
     axisLine: false as const,
@@ -2761,7 +2787,7 @@ function AdvancedChartImplInner({
       textAnchor: 'end' as const,
       height: rotatedXAxisBand,
     }),
-  }), [labelEveryBucket, rotateXLabels, xAxisTickFormatter, xAxisSpec?.title, xAxisAcross, rotatedXAxisBand]);
+  }), [labelEveryBucket, rotateXLabels, xAxisTickFormatter, xTickFormatter, xAxisSpec?.title, xAxisAcross, rotatedXAxisBand]);
 
   // #2942 — the non-series spec families used to fall through the component
   // map's `|| BarChart` into a bar shell whose series marks all returned
@@ -3608,10 +3634,16 @@ function AdvancedChartImplInner({
   // swatch can draw; the swatch takes the series colour instead. A comparison
   // swatch is drawn hollow, the way its mark is muted, so it reads apart from
   // the primary series it shares a colour with.
+  // A lone bar series painted per category draws no swatch: no one colour
+  // names it, and the bars it would sit beside are each another one.
+  const perCategoryBars = (chartType === 'bar' || chartType === 'horizontal-bar')
+    && !!categoryColors && series.length === 1 && series[0]?.variant !== 'comparison' && data.length > 1;
   const legendSwatches: Record<string, LegendSwatch> = Object.fromEntries(
     series.map((s: any, sIdx: number) => [
       String(s.dataKey),
-      { color: seriesColorAt(sIdx), comparison: s.variant === 'comparison' },
+      perCategoryBars
+        ? { color: seriesColorAt(sIdx), none: true }
+        : { color: seriesColorAt(sIdx), comparison: s.variant === 'comparison' },
     ]),
   );
 
@@ -3769,8 +3801,7 @@ function AdvancedChartImplInner({
             // that has one keeps it, every other bar takes the series colour.
             // With a comparison overlay the chart has two series, so each
             // keeps its own series colour.
-            const primaryCount = series.filter((p: any) => p.variant !== 'comparison').length;
-            const semanticPerCategory = !!categoryColors && primaryCount === 1 && !isComparison && series.length === 1 && data.length > 1;
+            const semanticPerCategory = perCategoryBars;
             const pres = seriesStyle(s, 'bar');
             return (
               <Bar key={s.dataKey} dataKey={s.dataKey} fill={`url(#bg-${gslug(seriesColor)})`} radius={4} fillOpacity={pres.fillOpacity} strokeOpacity={pres.strokeOpacity} strokeDasharray={pres.strokeDasharray} {...stackProps} {...axisProps} {...animProps} {...markClickProps(s)}>

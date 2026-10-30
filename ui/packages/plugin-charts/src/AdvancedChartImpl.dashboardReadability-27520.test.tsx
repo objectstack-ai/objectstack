@@ -154,3 +154,67 @@ describe('horizontal bar category labels on a phone (row 18)', () => {
     expect(backlog?.querySelector('title')).toBeNull();
   });
 });
+
+describe('vertical bar category labels on a phone (row 18)', () => {
+  const asPhone = () => {
+    (window as any).innerWidth = 390;
+    window.dispatchEvent(new Event('resize'));
+  };
+  const xTicks = (c: HTMLElement) =>
+    Array.from(c.querySelectorAll<SVGTextElement>('.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value'));
+
+  it('a few buckets rotate and draw "In Progress" whole, where the phone cut drew "In Progr…"', () => {
+    asPhone();
+    const { container } = render(
+      <AdvancedChartImpl
+        chartType="bar"
+        data={[{ s: 'Backlog', n: 2 }, { s: 'To Do', n: 2 }, { s: 'In Progress', n: 2 }, { s: 'In Review', n: 2 }, { s: 'Done', n: 2 }]}
+        xAxisKey="s"
+        series={[{ dataKey: 'n', label: 'Tasks' }]}
+        isAnimationActive={false}
+      />,
+    );
+    const labels = xTicks(container).map((t) => t.textContent);
+    expect(labels).toContain('In Progress');
+    expect(container.textContent).not.toContain('In Progr…');
+  });
+
+  it('a label still cut carries the full label as its tooltip; a whole one carries none', () => {
+    const long = 'Waiting on the customer to confirm';
+    const { container } = render(
+      <AdvancedChartImpl
+        chartType="bar"
+        data={[{ s: long, n: 2 }, { s: 'Done', n: 3 }]}
+        xAxisKey="s"
+        series={[{ dataKey: 'n', label: 'Tasks' }]}
+        isAnimationActive={false}
+      />,
+    );
+    const ticks = Array.from(container.querySelectorAll('.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-label'));
+    const cut = ticks.find((t) => (t.textContent ?? '').includes('…'));
+    expect(cut, 'the long label was not cut, so this measures nothing').toBeDefined();
+    expect(cut!.querySelector('title')?.textContent).toBe(long);
+    const whole = ticks.find((t) => t.querySelector('.recharts-cartesian-axis-tick-value')?.textContent === 'Done');
+    expect(whole?.querySelector('title')).toBeNull();
+  });
+});
+
+describe('a lone bar series painted per category (row 15 control)', () => {
+  it('draws its legend label with no swatch, since no one colour names it', async () => {
+    const { container } = render(
+      <AdvancedChartImpl
+        chartType="bar"
+        data={[{ h: 'green', n: 3 }, { h: 'red', n: 1 }]}
+        xAxisKey="h"
+        series={[{ dataKey: 'n', label: 'Projects' }]}
+        config={{ n: { label: 'Projects' } }}
+        categoryColors={{ green: '#22c55e', red: '#ef4444' }}
+        isAnimationActive={false}
+      />,
+    );
+    await settle();
+    expect(container.querySelector('.recharts-legend-wrapper')?.textContent).toContain('Projects');
+    expect(swatches(container)).toHaveLength(0);
+  });
+});
+
