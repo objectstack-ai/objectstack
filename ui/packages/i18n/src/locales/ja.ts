@@ -1086,6 +1086,16 @@ const ja = {
     addNewView: "新しいビューを追加",
     done: "完了",
     noViewsFound: "検索に一致するビューはありません。",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "ビュー",
+      pinned: "固定",
+      recent: "最近",
+      all: "すべてのビュー",
+      pin: "固定：このビューを既定で開く",
+      unpin: "固定を解除：リストは既定のビューを再び開きます",
+      inMenu: "すでにメニューにあります",
+    },
     dragToReorder: "ドラッグして並べ替え",
     defaultView: "デフォルトビュー",
     defaultBadge: "デフォルト",
@@ -1132,6 +1142,8 @@ const ja = {
     removeFromFavorites: "お気に入りから削除",
     previousRecord: "前のレコード",
     nextRecord: "次のレコード",
+    maximize: "最大化",
+    restoreSize: "元のサイズに戻す",
     recordOf: "{{current}} / {{total}}",
     recordNotFound: "レコードが見つかりません",
     recordNotFoundDescription: "お探しのレコードは存在しないか、削除された可能性があります。",
@@ -2952,6 +2964,7 @@ const ja = {
     starred: "スター付き",
     removeFromFavorites: "お気に入りから {{name}} を削除",
     allReports: "すべてのレポート",
+    keepOpen: "サイドバーを開いたままにする",
   },
   topbar: {
     openAssistant: "{{name}} アシスタントを開く",

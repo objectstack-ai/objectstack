@@ -1086,6 +1086,16 @@ const ko = {
     addNewView: "새 보기 추가",
     done: "완료",
     noViewsFound: "검색과 일치하는 보기가 없습니다.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "보기",
+      pinned: "고정됨",
+      recent: "최근",
+      all: "모든 보기",
+      pin: "고정: 이 보기를 기본으로 열기",
+      unpin: "고정 해제: 목록이 기본 보기를 다시 엽니다",
+      inMenu: "이미 메뉴에 있음",
+    },
     dragToReorder: "드래그하여 순서 변경",
     defaultView: "기본 보기",
     defaultBadge: "기본",
@@ -1132,6 +1142,8 @@ const ko = {
     removeFromFavorites: "즐겨찾기에서 제거",
     previousRecord: "이전 레코드",
     nextRecord: "다음 레코드",
+    maximize: "최대화",
+    restoreSize: "원래 크기로",
     recordOf: "{{current}} / {{total}}",
     recordNotFound: "레코드를 찾을 수 없음",
     recordNotFoundDescription: "찾으시는 레코드가 존재하지 않거나 삭제되었을 수 있습니다.",
@@ -2950,6 +2962,7 @@ const ko = {
     starred: "즐겨찾기",
     removeFromFavorites: "즐겨찾기에서 {{name}} 제거",
     allReports: "모든 보고서",
+    keepOpen: "사이드바를 열어 두기",
   },
   topbar: {
     openAssistant: "{{name}} 어시스턴트 열기",

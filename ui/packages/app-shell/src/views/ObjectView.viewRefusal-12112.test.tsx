@@ -26,12 +26,13 @@
  * list view to refuse, and the console adds no client rule of its own.
  *
  * Harness: `ObjectView.listActionsReadGate-12109.test.tsx`'s, with the plugin
- * view and the tab bar stubbed to report the view they were handed.
+ * view stubbed to report the view it was handed; the view switcher is the
+ * page title's own (objectstack#27594).
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, cleanup, screen } from '@testing-library/react';
+import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
 import { AdapterCtx } from '@object-ui/react';
@@ -61,14 +62,13 @@ vi.mock('sonner', () => ({
   }),
 }));
 
-// objectui#12440 — the page hands its tab strip to the list as the
-// `toolbarLeading` host prop, so the list stand-in draws that node and the
-// plugin view stand-in calls the page's `renderListView`, as the real one does.
+// The list stand-in draws nothing; the plugin view stand-in calls the page's
+// `renderListView`, as the real one does.
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
-  ListView: (props: { toolbarLeading?: React.ReactNode }) => <>{props.toolbarLeading ?? null}</>,
+  ListView: () => null,
 }));
-// The list area and the switcher, reduced to the view each was handed.
+// The list area, reduced to the view it was handed.
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ObjectView: (props: {
@@ -77,13 +77,6 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
   }) => (
     <div data-testid="plugin-object-view" data-active-view={props.activeViewId}>
       {props.renderListView?.({ schema: { type: 'list-view' } })}
-    </div>
-  ),
-  ViewTabBar: (props: { activeViewId: string; views: Array<{ id: string }> }) => (
-    <div data-testid="view-tab-bar" data-active-view={props.activeViewId}>
-      {props.views.map((view) => (
-        <span key={view.id} data-testid={`view-tab:${view.id}`} />
-      ))}
     </div>
   ),
   ManageViewsDialog: () => null,
@@ -194,9 +187,13 @@ describe('objectui#12112 — a refused list view, opened by name, says it was re
     expect(probe).toHaveBeenCalledWith('view', 'clm_contract.legal_review');
     expect(refusal.textContent).toContain(en.list.loadErrorForbiddenTitle);
     expect(refusal.textContent).toContain(REFUSAL);
-    // Not the silent fall-back: no view is drawn, and no tab claims the page.
+    // Not the silent fall-back: no view is drawn, and no view of the title's
+    // switcher claims the page.
     expect(screen.queryByTestId('plugin-object-view')).toBeNull();
-    expect(screen.getByTestId('view-tab-bar').getAttribute('data-active-view')).toBe('');
+    fireEvent.click(screen.getByTestId('list-view-switcher'));
+    const menu = screen.getByTestId('list-view-switcher-menu');
+    expect(menu.querySelectorAll('[data-testid^="view-switcher-row-"]').length).toBeGreaterThan(0);
+    expect(menu.querySelector('[aria-current]')).toBeNull();
   });
 
   it('the same refusal in split navigation, where the list sits beside an open record', async () => {
@@ -237,7 +234,8 @@ describe('objectui#12112 — a refused list view, opened by name, says it was re
     const probe = openView('legal_desk', { verdict: 'denied', message: REFUSAL });
 
     const list = await screen.findByTestId('plugin-object-view');
-    expect(screen.getByTestId('view-tab:legal_desk')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('list-view-switcher'));
+    expect(screen.getAllByTestId('view-switcher-row-legal_desk').length).toBeGreaterThan(0);
     expect(list.getAttribute('data-active-view')).toBe('legal_desk');
     await settle();
     expect(probe).not.toHaveBeenCalled();

@@ -1146,6 +1146,16 @@ const ru = {
     addNewView: "Добавить новое представление",
     done: "Готово",
     noViewsFound: "Представления не найдены.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Представления",
+      pinned: "Закреплено",
+      recent: "Недавние",
+      all: "Все представления",
+      pin: "Закрепить: открывать это представление по умолчанию",
+      unpin: "Открепить: список снова открывает представление по умолчанию",
+      inMenu: "Уже в меню",
+    },
     dragToReorder: "Перетащите для изменения порядка",
     defaultView: "Представление по умолчанию",
     defaultBadge: "по умолчанию",
@@ -1199,6 +1209,8 @@ const ru = {
     removeFromFavorites: "Удалить из избранного",
     previousRecord: "Предыдущая запись",
     nextRecord: "Следующая запись",
+    maximize: "Развернуть",
+    restoreSize: "Восстановить размер",
     recordOf: "{{current}} из {{total}}",
     recordNotFound: "Запись не найдена",
     recordNotFoundDescription: "Запись, которую вы ищете, не существует или была удалена.",
@@ -3073,6 +3085,7 @@ const ru = {
     starred: "Отмеченные",
     removeFromFavorites: "Убрать {{name}} из избранного",
     allReports: "Все отчёты",
+    keepOpen: "Не сворачивать боковую панель",
   },
   topbar: {
     openAssistant: "Открыть ассистента {{name}}",

@@ -1353,6 +1353,16 @@ const en = {
     addNewView: 'Add new view',
     done: 'Done',
     noViewsFound: 'No views match your search.',
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: 'Views',
+      pinned: 'Pinned',
+      recent: 'Recent',
+      all: 'All views',
+      pin: 'Pin: open this view by default',
+      unpin: 'Unpin: the list opens its default view again',
+      inMenu: 'Already in the menu',
+    },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
     defaultBadge: 'default',
@@ -1477,6 +1487,8 @@ const en = {
     removeFromFavorites: 'Remove from favorites',
     previousRecord: 'Previous record',
     nextRecord: 'Next record',
+    maximize: 'Maximize',
+    restoreSize: 'Restore size',
     recordOf: '{{current}} of {{total}}',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist or may have been deleted.',
@@ -3523,6 +3535,7 @@ const en = {
     starred: 'Starred',
     removeFromFavorites: 'Remove {{name}} from favorites',
     allReports: 'All reports',
+    keepOpen: 'Keep sidebar open',
   },
   topbar: {
     aiAssistant: 'AI Assistant',

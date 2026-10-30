@@ -1113,6 +1113,16 @@ const fr = {
     addNewView: "Ajouter une nouvelle vue",
     done: "Terminé",
     noViewsFound: "Aucune vue ne correspond à votre recherche.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Vues",
+      pinned: "Épinglée",
+      recent: "Récentes",
+      all: "Toutes les vues",
+      pin: "Épingler : ouvrir cette vue par défaut",
+      unpin: "Désépingler : la liste rouvre sa vue par défaut",
+      inMenu: "Déjà dans le menu",
+    },
     dragToReorder: "Glisser pour réorganiser",
     defaultView: "Vue par défaut",
     defaultBadge: "par défaut",
@@ -1162,6 +1172,8 @@ const fr = {
     removeFromFavorites: "Retirer des favoris",
     previousRecord: "Enregistrement précédent",
     nextRecord: "Enregistrement suivant",
+    maximize: "Agrandir",
+    restoreSize: "Restaurer la taille",
     recordOf: "{{current}} sur {{total}}",
     recordNotFound: "Enregistrement introuvable",
     recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas ou a peut-être été supprimé.",
@@ -3005,6 +3017,7 @@ const fr = {
     starred: "Étoilés",
     removeFromFavorites: "Retirer {{name}} des favoris",
     allReports: "Tous les rapports",
+    keepOpen: "Garder la barre latérale ouverte",
   },
   topbar: {
     openAssistant: "Ouvrir l'assistant {{name}}",

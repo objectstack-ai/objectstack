@@ -2,7 +2,7 @@
 
 /**
  * objectui#11581, the add-view door through its page: `ObjectView`'s
- * `handleViewCreate`, reached from the view tab bar's add button, persists the
+ * `handleViewCreate`, reached from the view switcher's New view, persists the
  * spec the one builder (`buildNewViewSpec`, via `buildAddViewSpec`) builds,
  * with the columns mirrored into the kanban block the spec requires them in.
  *
@@ -145,7 +145,9 @@ describe('ObjectView.handleViewCreate persists a kanban through the one builder 
       </ExpressionProvider>,
     );
     await settle();
-    fireEvent.click(screen.getByTestId('view-tab-add'));
+    // New view, from the page title's view switcher (objectstack#27594).
+    fireEvent.click(screen.getByTestId('list-view-switcher'));
+    fireEvent.click(screen.getByTestId('list-view-switcher-new'));
     const card = (await screen.findByTestId('create-view-type-kanban')) as HTMLButtonElement;
     await waitFor(() => expect(card.disabled).toBe(false));
     fireEvent.click(card);

@@ -1086,6 +1086,16 @@ const de = {
     addNewView: "Neue Ansicht hinzufügen",
     done: "Fertig",
     noViewsFound: "Keine Ansichten entsprechen Ihrer Suche.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Ansichten",
+      pinned: "Angeheftet",
+      recent: "Zuletzt",
+      all: "Alle Ansichten",
+      pin: "Anheften: diese Ansicht standardmäßig öffnen",
+      unpin: "Lösen: die Liste öffnet wieder ihre Standardansicht",
+      inMenu: "Bereits im Menü",
+    },
     dragToReorder: "Zum Neuanordnen ziehen",
     defaultView: "Standardansicht",
     defaultBadge: "Standard",
@@ -1132,6 +1142,8 @@ const de = {
     removeFromFavorites: "Aus Favoriten entfernen",
     previousRecord: "Vorheriger Datensatz",
     nextRecord: "Nächster Datensatz",
+    maximize: "Maximieren",
+    restoreSize: "Größe wiederherstellen",
     recordOf: "{{current}} von {{total}}",
     recordNotFound: "Datensatz nicht gefunden",
     recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht oder wurde möglicherweise gelöscht.",
@@ -2950,6 +2962,7 @@ const de = {
     starred: "Markiert",
     removeFromFavorites: "{{name}} aus Favoriten entfernen",
     allReports: "Alle Berichte",
+    keepOpen: "Seitenleiste geöffnet lassen",
   },
   topbar: {
     openAssistant: "Assistent {{name}} öffnen",

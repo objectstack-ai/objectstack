@@ -54,22 +54,19 @@ import { ObjectCalendar } from './ObjectCalendar';
  *
  * ⭐ objectui#9299 moved WHERE this is expressed without moving WHAT it resolves
  * to. It used to be an inline `max-width` on the drawer panel, spelled exactly.
- * The shared shell publishes an authored width as a FLOOR on the `--ov-w`
- * custom property — `max(WIDTH, min(60vw, 880px))` — and for this value that
- * expression reduces to `min(960px, 60vw)` at every viewport:
- *
- *   60vw <= 880px        -> max(60vw,  60vw)  = 60vw  = min(960px, 60vw)
- *   880px < 60vw <= 960px-> max(60vw,  880px) = 60vw  = min(960px, 60vw)
- *   60vw > 960px         -> max(960px, 880px) = 960px = min(960px, 60vw)
- *
- * so the pixels are unchanged — which is what objectui#6584 ruled must hold
+ * The shared shell publishes an authored width on the `--ov-w` custom
+ * property. Until objectstack#27545 it published it as a FLOOR —
+ * `max(WIDTH, min(60vw, 880px))`, which for this value reduced to
+ * `min(960px, 60vw)` at every viewport; that card retired the floor (the
+ * record pane is 720 px and the reader drags it), so the property now carries
+ * the value as authored and the pixels are unchanged — which is what objectui#6584 ruled must hold
  * across all four surfaces. ⛔ The literal is NOT retyped here: it lives in one
  * place, `RECORD_OVERLAY_DEFAULT_WIDTH`, and is imported.
  */
-const EXPECTED_WIDTH = `max(${RECORD_OVERLAY_DEFAULT_WIDTH}, min(60vw, 880px))`;
+const EXPECTED_WIDTH = RECORD_OVERLAY_DEFAULT_WIDTH;
 
-/** What an explicitly authored `720px` resolves to under the same floor. */
-const EXPECTED_AUTHORED_WIDTH = 'max(720px, min(60vw, 880px))';
+/** What an explicitly authored `720px` resolves to: itself (objectstack#27545). */
+const EXPECTED_AUTHORED_WIDTH = '720px';
 
 // objectui#9299: the width now crosses into the shared `NavigationOverlay`;
 // `RecordDetailDrawer` is no longer on this path at all. Record what the
@@ -246,12 +243,9 @@ describe('calendar drawer width with no declared `navigation` (objectui#6303)', 
   it('an authored `navigation.width` still reaches the drawer unchanged', async () => {
     await openDrawer({ mode: 'drawer', width: '720px' });
     expect(overlayProps.width).toBe('720px');
-    // ⚠️ objectui#9299 consequence, pinned rather than left to be discovered:
-    // the shared shell treats an authored width as a FLOOR, so an authored
-    // value below `min(60vw, 880px)` widens to it. That is the policy
-    // `ObjectGrid` and `ObjectTree` have always had; the three drawer-only
-    // renderers adopt it along with the shell. The authored value still reaches
-    // the shell unchanged — that is the assertion above.
+    // objectui#9299 made the shell treat an authored width as a FLOOR
+    // (`min(60vw, 880px)`); objectstack#27545 retired the floor, so the
+    // authored value is also what the shell draws.
     expect(readPanelWidth()).toBe(EXPECTED_AUTHORED_WIDTH);
   });
 });

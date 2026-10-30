@@ -1109,6 +1109,16 @@ const zh = {
     addNewView: '新建视图',
     done: '完成',
     noViewsFound: '没有匹配的视图。',
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: '视图',
+      pinned: '固定',
+      recent: '最近',
+      all: '全部',
+      pin: '固定：默认打开此视图',
+      unpin: '取消固定：列表恢复打开默认视图',
+      inMenu: '已在菜单中',
+    },
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
     defaultBadge: '默认',
@@ -1211,6 +1221,8 @@ const zh = {
     removeFromFavorites: '从收藏中移除',
     previousRecord: '上一条记录',
     nextRecord: '下一条记录',
+    maximize: '最大化',
+    restoreSize: '还原',
     recordOf: '第 {{current}} 条，共 {{total}} 条',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在或已被删除。',
@@ -3026,6 +3038,7 @@ const zh = {
     starred: '已收藏',
     removeFromFavorites: '从收藏中移除 {{name}}',
     allReports: '全部报表',
+    keepOpen: '保持侧边栏展开',
   },
   topbar: {
     aiAssistant: 'AI 助手',

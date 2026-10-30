@@ -1118,6 +1118,16 @@ const es = {
     addNewView: "Agregar nueva vista",
     done: "Listo",
     noViewsFound: "Ninguna vista coincide con su búsqueda.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Vistas",
+      pinned: "Fijada",
+      recent: "Recientes",
+      all: "Todas las vistas",
+      pin: "Fijar: abrir esta vista de forma predeterminada",
+      unpin: "Desfijar: la lista vuelve a abrir su vista predeterminada",
+      inMenu: "Ya está en el menú",
+    },
     dragToReorder: "Arrastrar para reordenar",
     defaultView: "Vista predeterminada",
     defaultBadge: "predeterminada",
@@ -1165,6 +1175,8 @@ const es = {
     removeFromFavorites: "Quitar de favoritos",
     previousRecord: "Registro anterior",
     nextRecord: "Siguiente registro",
+    maximize: "Maximizar",
+    restoreSize: "Restaurar tamaño",
     recordOf: "{{current}} de {{total}}",
     recordNotFound: "Registro no encontrado",
     recordNotFoundDescription: "El registro que busca no existe o puede haber sido eliminado.",
@@ -3009,6 +3021,7 @@ const es = {
     starred: "Destacados",
     removeFromFavorites: "Quitar {{name}} de favoritos",
     allReports: "Todos los informes",
+    keepOpen: "Mantener la barra lateral abierta",
   },
   topbar: {
     openAssistant: "Abrir el asistente {{name}}",

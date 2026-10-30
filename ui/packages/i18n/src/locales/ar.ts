@@ -1203,6 +1203,16 @@ const ar = {
     addNewView: "إضافة عرض جديد",
     done: "تم",
     noViewsFound: "لا توجد عروض تطابق بحثك.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "العروض",
+      pinned: "مثبّت",
+      recent: "الأخيرة",
+      all: "كل العروض",
+      pin: "تثبيت: فتح هذا العرض افتراضيًا",
+      unpin: "إلغاء التثبيت: تفتح القائمة عرضها الافتراضي مجددًا",
+      inMenu: "موجود بالفعل في القائمة",
+    },
     dragToReorder: "اسحب لإعادة الترتيب",
     defaultView: "العرض الافتراضي",
     defaultBadge: "افتراضي",
@@ -1258,6 +1268,8 @@ const ar = {
     removeFromFavorites: "إزالة من المفضلة",
     previousRecord: "السجل السابق",
     nextRecord: "السجل التالي",
+    maximize: "تكبير",
+    restoreSize: "استعادة الحجم",
     recordOf: "{{current}} من {{total}}",
     recordNotFound: "لم يتم العثور على السجل",
     recordNotFoundDescription: "السجل الذي تبحث عنه غير موجود أو ربما تم حذفه.",
@@ -3180,6 +3192,7 @@ const ar = {
     starred: "المميزة",
     removeFromFavorites: "إزالة {{name}} من المفضلة",
     allReports: "كل التقارير",
+    keepOpen: "إبقاء الشريط الجانبي مفتوحًا",
   },
   topbar: {
     openAssistant: "فتح مساعد {{name}}",

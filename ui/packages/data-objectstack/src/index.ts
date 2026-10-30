@@ -3309,6 +3309,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // write to a resource drops that resource's entries (see `emitMutation`),
   // so a read asked after a save is never answered by one sent before it.
   private inflightFindOnes = new Map<string, Promise<T | null>>();
+  // objectstack#27626 — `getRecordFieldAccess` asks, keyed by resource + id.
+  // One record open asked the same projection four times in the same
+  // millisecond (`record:details`, `record:highlights`, the form and the
+  // host), so concurrent asks share one request. A settled projection is not
+  // kept — the scopes re-ask after a save and must reach the server — but "no
+  // answer" is: a record the read answers 404 for stays unanswered until a
+  // write to its resource (both maps are dropped in `dropInflightReads`), and
+  // a server without the route (501) is not asked again for any record.
+  private inflightFieldAccess = new Map<string, Promise<RecordFieldAccess | null>>();
+  private unansweredFieldAccess = new Set<string>();
+  private fieldAccessUnsupported = false;
   // Resources that have responded 404 at least once (collection not installed
   // on this backend). Subsequent find() calls short-circuit to an empty result
   // so optional collections like sys_presence don't hammer the server with
@@ -3934,6 +3945,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     const prefix = `${resource}::`;
     for (const key of Array.from(this.inflightFindOnes.keys())) {
       if (key.startsWith(prefix)) this.inflightFindOnes.delete(key);
+    }
+    // objectstack#27626 — the record field projection's shared asks and its
+    // remembered 404s, by the same rule.
+    for (const key of Array.from(this.inflightFieldAccess.keys())) {
+      if (key.startsWith(prefix)) this.inflightFieldAccess.delete(key);
+    }
+    for (const key of Array.from(this.unansweredFieldAccess)) {
+      if (key.startsWith(prefix)) this.unansweredFieldAccess.delete(key);
     }
   }
 
@@ -7260,16 +7279,34 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * `null` when there is no answer to give: a record the caller cannot see
    * (the route answers the record read's own 404), or a server with no
    * record-scoped projection (501). Any other failure is thrown, as a read's.
+   *
+   * Concurrent asks for one record share one request, and both kinds of "no
+   * answer" are remembered (objectstack#27626, see `inflightFieldAccess`).
    */
   async getRecordFieldAccess(resource: string, id: string): Promise<RecordFieldAccess | null> {
-    await this.connect();
-    try {
-      const access = await this.client.data.fieldAccess(resource, String(id));
-      return access ?? null;
-    } catch (error: unknown) {
-      if (is404Error(error) || isNotImplementedError(error)) return null;
-      throw error;
-    }
+    const key = `${resource}::${String(id)}`;
+    if (this.fieldAccessUnsupported || this.unansweredFieldAccess.has(key)) return null;
+    const ask: Promise<RecordFieldAccess | null> = this.shareInFlight(this.inflightFieldAccess, key, async () => {
+      await this.connect();
+      try {
+        const access = await this.client.data.fieldAccess(resource, String(id));
+        return access ?? null;
+      } catch (error: unknown) {
+        if (isNotImplementedError(error)) {
+          this.fieldAccessUnsupported = true;
+          return null;
+        }
+        if (is404Error(error)) {
+          // Not remembered when a write to the resource landed while this ask
+          // was on the wire: the write dropped the entry, and the record may
+          // have moved into the caller's sight since.
+          if (this.inflightFieldAccess.get(key) === ask) this.unansweredFieldAccess.add(key);
+          return null;
+        }
+        throw error;
+      }
+    });
+    return ask;
   }
 
   /**

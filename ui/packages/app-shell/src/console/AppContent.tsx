@@ -38,7 +38,7 @@ import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
-import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
+import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { appAddressSegment, appRouteSegment, canonicalAppPathname, matchAppBySegment } from '../utils/appRoute.js';
 import { resolveHref, type NavTemplateContext } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
@@ -462,8 +462,23 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // Until the app list has loaded, a scope candidate does not know its package
   // yet, and reads nothing (the splash is up).
   const readsWholeRegistry = !scopeCandidate || (!metadataLoading && !objectScope);
+  // objectstack#27626 — a record drawer (`?recordId=`) over a scoped route
+  // reads the whole registry for its related lists, BESIDE the route's scope:
+  // the route slot never waits on it, and once it has landed it joins the
+  // scope, whose own documents keep their identity. The list under the drawer
+  // reads the same object definition before, during and after it, so opening
+  // or closing a record re-reads none of its rows (the skeleton this used to
+  // show remounted the list on every first open).
+  const drawerReadsRegistry = !!objectScope && searchParamsHasRecordDrawer(location.search);
+  const drawerRegistrySettled = useLazyMetadataSettled(drawerReadsRegistry ? 'object' : '', ensureType, getTypeStatus);
+  const scopeObjects: any[] | undefined = objectScope?.objects;
+  const registryObjects: any[] | undefined = drawerReadsRegistry && drawerRegistrySettled ? metadata.objects : undefined;
+  const scopeWithRegistry = useMemo(
+    () => (scopeObjects && registryObjects ? joinRegistryToScope(scopeObjects, registryObjects) : undefined),
+    [scopeObjects, registryObjects],
+  );
   const allObjects: any[] = objectScope
-    ? objectScope.objects
+    ? scopeWithRegistry ?? objectScope.objects
     : readsWholeRegistry ? metadata.objects : NO_OBJECTS;
   const routeReadsKey = [
     ...routeReads.filter((type) => type !== 'object' || readsWholeRegistry),
@@ -1939,6 +1954,25 @@ function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
 function searchParamsHasRecordForm(search: string): boolean {
   const sp = new URLSearchParams(search);
   return sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
+}
+
+/**
+ * objectstack#27626 — whether the record drawer is open in the URL. Over a
+ * scoped route it reads the whole registry beside the scope.
+ */
+function searchParamsHasRecordDrawer(search: string): boolean {
+  return new URLSearchParams(search).has(RECORD_DRAWER_PARAM);
+}
+
+/**
+ * objectstack#27626 — the scope's objects, each the same document, then the
+ * registry's objects the scope does not hold. The scope itself while the
+ * registry adds nothing.
+ */
+function joinRegistryToScope(scope: any[], registry: any[]): any[] {
+  const held = new Set(scope.map((o: any) => o?.name));
+  const extra = registry.filter((o: any) => !held.has(o?.name));
+  return extra.length > 0 ? [...scope, ...extra] : scope;
 }
 
 const NO_OBJECTS: any[] = [];
