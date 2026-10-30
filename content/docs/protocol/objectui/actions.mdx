@@ -230,6 +230,7 @@ interface Action {
   patch?: Record<string, unknown>; // Static field values for operation: 'update', merged under params
   body?: HookBody;              // Inline logic for type: 'script'
   params?: ActionParam[];       // Inputs collected before execution
+  submitText?: I18nLabel;       // The param dialog's submit button verb (default "Confirm")
   method?: 'POST' | 'PATCH' | 'PUT' | 'DELETE'; // for type: 'api'
 
   // UX
@@ -495,6 +496,30 @@ params:
 ```
 
 `ActionParam` fields: `name`, `field`, `objectOverride`, `label`, `type`, `required` (default `false`), `options`, `placeholder`, `helpText`, `defaultValue`, `defaultFromRow`, `visible` (CEL predicate — the dialog omits the param when false), `requiresFeature` (capability gate, lowered into `visible` — see [Capability gates](#capability-gates-requiresfeature)).
+
+### Naming the submit button: `submitText`
+
+An action with `params` collects them in a dialog whose submit button says **Confirm**. `submitText` gives that button the action's own verb, so a send-email action can say **Send** and a log-call action **Log Call**. The dialog's other copy stays where it was: the title is the action's `label`, and the line under it is `description`.
+
+```yaml
+name: log_call
+label: Log Call
+objectName: crm_contact
+type: script
+target: logCall
+description: Record a call with this contact.
+submitText: Log Call
+params:
+  - { name: subject, label: Subject, type: text, required: true }
+  - { name: notes, label: Notes, type: textarea }
+```
+
+- It is an `I18nLabel`: a plain string, translated at `objects.<object>._actions.<action>.submitText` (`globalActions.<action>.submitText` for an action with no `objectName`), or an inline locale map.
+- **Actions with `params` only.** An action with no `params` (or an empty list) opens no param dialog, so `submitText` there is refused at parse, and a translation of it under such an action is reported by `os validate` (`translation-target-unknown`).
+- It is not `confirmText`. `confirmText` is the message of the confirm dialog a param-less action opens; `submitText` is the button of the param dialog an action with params opens instead.
+- A blank string (`''` or whitespace only) is refused at parse. Omit the key to keep **Confirm**.
+- `submitLabel` and `confirmLabel` (the button's spelling on a view's `bulkActionDefs`) are refused with a rename to `submitText`.
+- The console does not draw it yet: until its param dialog reads the key, the button says **Confirm**, and `os validate` warns an author who declares it.
 
 ## AI Tool Exposure (ADR-0011)
 
