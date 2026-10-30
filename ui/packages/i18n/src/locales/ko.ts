@@ -4686,6 +4686,11 @@ const ko = {
     actionsEmptyTitle: "패키지 액션 없음",
     actionsEmptyBody: "이 배포에는 액션을 선언하는 설치된 패키지가 없습니다. 직접 작성한 액션은 Studio에 있습니다.",
     actionsLoadFailed: "패키지 액션을 불러오지 못했습니다.",
+    switchedOn: "\"{{label}}\"을(를) 켰습니다.",
+    switchedOff: "\"{{label}}\"을(를) 이 배포에서 껐습니다.",
+    actionOffTitle: "\"{{label}}\"을(를) 끌까요?",
+    actionOffBody: "다시 켤 때까지 이 배포에서 제공되는 모든 곳에서 모든 사용자에게 실행되지 않습니다.",
+    actionOffConfirm: "끄기",
   },
   element: {
     number: {

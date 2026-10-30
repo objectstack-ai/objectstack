@@ -62,7 +62,16 @@
  */
 
 import * as React from 'react';
+import { toast } from 'sonner';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Badge,
   Empty,
   EmptyDescription,
@@ -76,7 +85,7 @@ import {
   TableHeader,
   TableRow,
 } from '@object-ui/components';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { actionErrorDetail } from '@object-ui/core';
 
 // The LEAF module, for the reason its own header gives: this section joins the
@@ -191,6 +200,7 @@ function rowKey(row: Pick<PackagedActionRow, 'name' | 'objectName'>): string {
 
 export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProps) {
   const { t } = useObjectTranslation();
+  const { objectLabel } = useObjectLabel();
 
   const [rows, setRows] = React.useState<PackagedActionRow[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -198,6 +208,12 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
   const [busyKey, setBusyKey] = React.useState<string | null>(null);
   /** Per-action server refusal, keyed by `<object>:<action>`. Verbatim. */
   const [refusals, setRefusals] = React.useState<Record<string, string>>({});
+  /**
+   * The action whose switch-off waits on its confirm. Off stops the action
+   * everywhere it is offered, for every user, so it is asked first; on
+   * restores it and runs at once.
+   */
+  const [pendingOff, setPendingOff] = React.useState<PackagedActionRow | null>(null);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -282,6 +298,14 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
       const next = typeof reported === 'boolean' ? reported : enabled;
       setRows(
         (prev) => prev?.map((r) => (rowKey(r) === key ? { ...r, enabled: next } : r)) ?? prev,
+      );
+      toast.success(
+        next
+          ? t('packagedAutomation.switchedOn', { defaultValue: '"{{label}}" is switched on.', label: row.label })
+          : t('packagedAutomation.switchedOff', {
+              defaultValue: '"{{label}}" is switched off for this deployment.',
+              label: row.label,
+            }),
       );
     } catch (e) {
       setRefusals((prev) => ({
@@ -368,9 +392,15 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
                     )}
                   </TableCell>
                   <TableCell className="align-top">
-                    {/* The machine name, which is also the `:object` segment
-                        the flip addresses — `global` for an object-less
-                        action, the platform's own spelling. */}
+                    {/* The object's label in the reader's language, over the
+                        machine name, which is also the `:object` segment the
+                        flip addresses — `global` for an object-less action,
+                        the platform's own spelling, drawn alone. */}
+                    {row.objectLabel && (
+                      <div data-testid="packaged-action-object-label">
+                        {objectLabel({ name: row.objectName, label: row.objectLabel })}
+                      </div>
+                    )}
                     <code className="font-mono text-xs text-muted-foreground">{row.objectName}</code>
                   </TableCell>
                   <TableCell className="align-top">
@@ -378,7 +408,9 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
                       <Switch
                         checked={row.enabled}
                         disabled={busyKey === key}
-                        onCheckedChange={(next: boolean) => void onToggle(row, next)}
+                        onCheckedChange={(next: boolean) =>
+                          next ? void onToggle(row, true) : setPendingOff(row)
+                        }
                         // The object is part of the accessible name because it
                         // is part of the identity: two objects may declare the
                         // same action name, and a label without the object
@@ -402,6 +434,40 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
           </TableBody>
         </Table>
       )}
+
+      <AlertDialog open={pendingOff !== null} onOpenChange={(open) => !open && setPendingOff(null)}>
+        <AlertDialogContent data-testid="packaged-action-off-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('packagedAutomation.actionOffTitle', {
+                defaultValue: 'Switch "{{label}}" off?',
+                label: pendingOff?.label ?? '',
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('packagedAutomation.actionOffBody', {
+                defaultValue:
+                  'It stops running everywhere it is offered on this deployment, for every user, until it is switched on again.',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="packaged-action-off-cancel">
+              {t('packagedAutomation.cancel', { defaultValue: 'Cancel' })}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="packaged-action-off-confirm"
+              onClick={() => {
+                const target = pendingOff;
+                setPendingOff(null);
+                if (target) void onToggle(target, false);
+              }}
+            >
+              {t('packagedAutomation.actionOffConfirm', { defaultValue: 'Switch off' })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

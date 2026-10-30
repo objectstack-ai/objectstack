@@ -5166,6 +5166,11 @@ const ar = {
     actionsEmptyTitle: "لا توجد إجراءات من الحزم",
     actionsEmptyBody: "لا توجد حزمة مثبّتة تعلن عن إجراء في هذا النشر. الإجراءات التي تنشئها بنفسك موجودة في Studio.",
     actionsLoadFailed: "تعذّر تحميل إجراءات الحزم.",
+    switchedOn: "تم تشغيل \"{{label}}\".",
+    switchedOff: "تم إيقاف \"{{label}}\" في هذا النشر.",
+    actionOffTitle: "إيقاف \"{{label}}\"؟",
+    actionOffBody: "سيتوقف عن العمل في كل مكان يُعرض فيه ضمن هذا النشر، لجميع المستخدمين، حتى تتم إعادة تشغيله.",
+    actionOffConfirm: "إيقاف",
   },
   element: {
     number: {

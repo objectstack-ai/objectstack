@@ -4802,6 +4802,11 @@ const pt = {
     actionsEmptyTitle: "Nenhuma ação de pacote",
     actionsEmptyBody: "Nenhum pacote instalado declara uma ação nesta implantação. As ações que você mesmo cria ficam no Studio.",
     actionsLoadFailed: "Não foi possível carregar as ações de pacote.",
+    switchedOn: "\"{{label}}\" está ativado.",
+    switchedOff: "\"{{label}}\" está desativado nesta implantação.",
+    actionOffTitle: "Desativar \"{{label}}\"?",
+    actionOffBody: "Ele deixa de ser executado em todos os lugares onde é oferecido nesta implantação, para todos os usuários, até ser ativado novamente.",
+    actionOffConfirm: "Desativar",
   },
   element: {
     number: {

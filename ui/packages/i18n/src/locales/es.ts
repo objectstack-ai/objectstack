@@ -4807,6 +4807,11 @@ const es = {
     actionsEmptyTitle: "Sin acciones de paquete",
     actionsEmptyBody: "Ningún paquete instalado declara una acción en esta implementación. Las acciones que creas tú están en Studio.",
     actionsLoadFailed: "No se pudieron cargar las acciones de paquete.",
+    switchedOn: "\"{{label}}\" está activado.",
+    switchedOff: "\"{{label}}\" está desactivado en esta implementación.",
+    actionOffTitle: "¿Desactivar \"{{label}}\"?",
+    actionOffBody: "Dejará de ejecutarse en todos los lugares donde se ofrece en esta implementación, para todos los usuarios, hasta que se vuelva a activar.",
+    actionOffConfirm: "Desactivar",
   },
   element: {
     number: {

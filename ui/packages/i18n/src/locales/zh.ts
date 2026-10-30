@@ -4746,6 +4746,11 @@ const zh = {
     actionsEmptyTitle: '没有打包动作',
     actionsEmptyBody: '本部署中没有任何已安装软件包声明动作。你自己编写的动作在 Studio 中。',
     actionsLoadFailed: '无法加载打包动作。',
+    switchedOn: '「{{label}}」已开启。',
+    switchedOff: '「{{label}}」已在本部署中关闭。',
+    actionOffTitle: '关闭「{{label}}」？',
+    actionOffBody: '在重新开启之前，它将在本部署中所有提供它的地方对所有用户停止运行。',
+    actionOffConfirm: '关闭',
   },
   element: {
     number: {

@@ -110,6 +110,7 @@
 
 import * as React from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Info, Loader2, Workflow } from 'lucide-react';
 import {
   Badge,
@@ -424,6 +425,14 @@ export function PackagedAutomationPage() {
         return;
       }
       applyToggled(row.name, outcome.enabled);
+      toast.success(
+        outcome.enabled
+          ? t('packagedAutomation.switchedOn', { defaultValue: '"{{label}}" is switched on.', label: row.label })
+          : t('packagedAutomation.switchedOff', {
+              defaultValue: '"{{label}}" is switched off for this deployment.',
+              label: row.label,
+            }),
+      );
     } finally {
       setBusyFlow(null);
     }

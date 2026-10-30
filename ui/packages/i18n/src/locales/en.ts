@@ -5495,6 +5495,13 @@ const en = {
     actionsEmptyBody:
       'No installed package declares an action on this deployment. Actions you author yourself live in Studio.',
     actionsLoadFailed: 'Could not load packaged actions.',
+    // The toast after a switch the server accepted, in both sections, and
+    // the confirm a packaged action's switch-off asks first (objectstack#27521).
+    switchedOn: '"{{label}}" is switched on.',
+    switchedOff: '"{{label}}" is switched off for this deployment.',
+    actionOffTitle: 'Switch "{{label}}" off?',
+    actionOffBody: 'It stops running everywhere it is offered on this deployment, for every user, until it is switched on again.',
+    actionOffConfirm: 'Switch off',
   },
   element: {
     // objectui#10951 — `element:number` authored with an aggregate and no

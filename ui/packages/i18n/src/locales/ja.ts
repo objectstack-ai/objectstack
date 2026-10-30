@@ -4689,6 +4689,11 @@ const ja = {
     actionsEmptyTitle: "パッケージアクションはありません",
     actionsEmptyBody: "このデプロイには、アクションを宣言するインストール済みパッケージがありません。自分で作成したアクションは Studio にあります。",
     actionsLoadFailed: "パッケージアクションを読み込めませんでした。",
+    switchedOn: "「{{label}}」をオンにしました。",
+    switchedOff: "「{{label}}」をこのデプロイでオフにしました。",
+    actionOffTitle: "「{{label}}」をオフにしますか？",
+    actionOffBody: "再びオンにするまで、このデプロイで提供されているすべての場所で、すべてのユーザーに対して実行されなくなります。",
+    actionOffConfirm: "オフにする",
   },
   element: {
     number: {

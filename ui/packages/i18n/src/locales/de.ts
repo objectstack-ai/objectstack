@@ -4688,6 +4688,11 @@ const de = {
     actionsEmptyTitle: "Keine Paket-Aktionen",
     actionsEmptyBody: "In dieser Installation deklariert kein installiertes Paket eine Aktion. Selbst erstellte Aktionen finden Sie im Studio.",
     actionsLoadFailed: "Paket-Aktionen konnten nicht geladen werden.",
+    switchedOn: "„{{label}}“ ist eingeschaltet.",
+    switchedOff: "„{{label}}“ ist für diese Bereitstellung ausgeschaltet.",
+    actionOffTitle: "„{{label}}“ ausschalten?",
+    actionOffBody: "Es wird überall, wo es in dieser Bereitstellung angeboten wird, für alle Benutzer nicht mehr ausgeführt, bis es wieder eingeschaltet wird.",
+    actionOffConfirm: "Ausschalten",
   },
   element: {
     number: {

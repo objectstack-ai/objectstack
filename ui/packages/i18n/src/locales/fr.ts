@@ -4803,6 +4803,11 @@ const fr = {
     actionsEmptyTitle: "Aucune action de package",
     actionsEmptyBody: "Aucun package installé ne déclare d'action sur ce déploiement. Les actions que vous créez vous-même se trouvent dans Studio.",
     actionsLoadFailed: "Impossible de charger les actions des packages.",
+    switchedOn: "« {{label}} » est activé.",
+    switchedOff: "« {{label}} » est désactivé pour ce déploiement.",
+    actionOffTitle: "Désactiver « {{label}} » ?",
+    actionOffBody: "Il cesse de s’exécuter partout où il est proposé dans ce déploiement, pour tous les utilisateurs, jusqu’à ce qu’il soit réactivé.",
+    actionOffConfirm: "Désactiver",
   },
   element: {
     number: {
