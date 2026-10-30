@@ -12,8 +12,8 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
-import { BrowserRouter, Routes, Route, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { RecordFormPage } from './RecordFormPage';
 
@@ -52,10 +52,10 @@ vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => METADATA })
 vi.mock('../providers/AdapterProvider', () => ({ useAdapter: () => null }));
 
 const Where = () => h('div', { 'data-testid': 'where' }, useLocation().pathname);
-let go: NavigateFunction;
-const Nav = () => {
-  go = useNavigate();
-  return null;
+/** The console's own in-app navigation: a react-router push to `to`. */
+const Nav = ({ to }: { to: string }) => {
+  const navigate = useNavigate();
+  return h('button', { type: 'button', 'data-testid': 'push', onClick: () => { void navigate(to); } }, 'push');
 };
 
 const LIST = '/apps/crm/showcase_task';
@@ -78,7 +78,7 @@ async function exitFrom(mode: 'create' | 'edit', exit: 'success' | 'cancel', bef
       children: h(
         BrowserRouter,
         null,
-        h(Nav),
+        h(Nav, { to: form }),
         h(
           Routes,
           null,
@@ -89,7 +89,7 @@ async function exitFrom(mode: 'create' | 'edit', exit: 'success' | 'cancel', bef
       ),
     }),
   );
-  if (before) act(() => { void go(form); });
+  if (before) fireEvent.click(screen.getByTestId('push'));
   fireEvent.click(screen.getByTestId(exit === 'success' ? 'fire-success' : 'fire-cancel'));
   return (await screen.findByTestId('where')).textContent ?? '';
 }

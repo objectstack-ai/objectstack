@@ -12,8 +12,8 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
-import { BrowserRouter, Routes, Route, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { RecordFormPage } from './RecordFormPage';
 
@@ -52,10 +52,18 @@ vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => METADATA })
 vi.mock('../providers/AdapterProvider', () => ({ useAdapter: () => null }));
 
 const Where = () => h('div', { 'data-testid': 'where' }, useLocation().pathname);
-let go: NavigateFunction;
-const Nav = () => {
-  go = useNavigate();
-  return null;
+/**
+ * The console's two navigations: a react-router push to `to`, and the
+ * replace `AppContent` makes on an app-name address (to its package id).
+ */
+const Nav = ({ to, canonical }: { to: string; canonical: string }) => {
+  const navigate = useNavigate();
+  return h(
+    React.Fragment,
+    null,
+    h('button', { type: 'button', 'data-testid': 'push', onClick: () => { void navigate(to); } }, 'push'),
+    h('button', { type: 'button', 'data-testid': 'canonical', onClick: () => { void navigate(canonical, { replace: true }); } }, 'canonical'),
+  );
 };
 
 const ALIAS = '/apps/crm_app/showcase_task';
@@ -84,7 +92,7 @@ async function exitFromAlias(mode: 'create' | 'edit', exit: 'success' | 'cancel'
       children: h(
         BrowserRouter,
         null,
-        h(Nav),
+        h(Nav, { to: formOf(ALIAS, mode), canonical: formOf(APP, mode) }),
         h(
           Routes,
           null,
@@ -95,8 +103,8 @@ async function exitFromAlias(mode: 'create' | 'edit', exit: 'success' | 'cancel'
       ),
     }),
   );
-  if (before) act(() => { void go(formOf(ALIAS, mode)); });
-  act(() => { void go(formOf(APP, mode), { replace: true }); });
+  if (before) fireEvent.click(screen.getByTestId('push'));
+  fireEvent.click(screen.getByTestId('canonical'));
   // The replace minted a key, so the old in-app test read this entry as having history.
   const { key } = window.history.state as { key?: string };
   expect(key).toBeTruthy();
