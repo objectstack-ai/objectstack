@@ -3024,6 +3024,7 @@ const zh = {
     starred: '已收藏',
     removeFromFavorites: '从收藏中移除 {{name}}',
     allReports: '全部报表',
+    keepOpen: '保持侧边栏展开',
   },
   topbar: {
     aiAssistant: 'AI 助手',

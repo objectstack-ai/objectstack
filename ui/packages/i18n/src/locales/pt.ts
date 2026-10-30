@@ -3002,6 +3002,7 @@ const pt = {
     starred: "Favoritos",
     removeFromFavorites: "Remover {{name}} dos favoritos",
     allReports: "Todos os relatórios",
+    keepOpen: "Manter a barra lateral aberta",
   },
   topbar: {
     openAssistant: "Abrir o assistente {{name}}",

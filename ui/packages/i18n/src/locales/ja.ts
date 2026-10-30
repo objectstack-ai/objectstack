@@ -2950,6 +2950,7 @@ const ja = {
     starred: "スター付き",
     removeFromFavorites: "お気に入りから {{name}} を削除",
     allReports: "すべてのレポート",
+    keepOpen: "サイドバーを開いたままにする",
   },
   topbar: {
     openAssistant: "{{name}} アシスタントを開く",

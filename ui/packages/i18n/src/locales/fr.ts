@@ -3003,6 +3003,7 @@ const fr = {
     starred: "Étoilés",
     removeFromFavorites: "Retirer {{name}} des favoris",
     allReports: "Tous les rapports",
+    keepOpen: "Garder la barre latérale ouverte",
   },
   topbar: {
     openAssistant: "Ouvrir l'assistant {{name}}",

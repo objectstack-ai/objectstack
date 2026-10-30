@@ -3521,6 +3521,7 @@ const en = {
     starred: 'Starred',
     removeFromFavorites: 'Remove {{name}} from favorites',
     allReports: 'All reports',
+    keepOpen: 'Keep sidebar open',
   },
   topbar: {
     aiAssistant: 'AI Assistant',
