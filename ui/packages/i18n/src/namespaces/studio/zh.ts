@@ -557,6 +557,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.kv.empty': '暂无条目。',
   'engine.inspector.flowNode.kv.asExpression': '写成 CEL 表达式',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL 表达式，例如 joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个表达式。请填写表达式，或把这个值切回文本。',
   'engine.inspector.flowNode.list.add': '添加项',
   'engine.inspector.flowNode.list.item': '值',
   'engine.inspector.flowNode.list.remove': '删除项',

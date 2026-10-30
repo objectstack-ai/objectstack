@@ -32,6 +32,7 @@ import { describeExprSite, flowNodeIds, nodeIdPositions, type ExprSite } from '.
 import { flowNodeDisplayName } from './flow-canvas-parts.js';
 import { t, tFormat } from '../i18n.js';
 import { uniqueId } from '../inspectors/unique-id.js';
+import { isBlankExpressionRefusal } from '../inspectors/flow-value-envelope.js';
 
 /** What a problem points at on the canvas — drives badge placement + reveal. */
 export type FlowProblemTarget =
@@ -55,6 +56,14 @@ export interface FlowProblem {
    * e.g. every hop of a cycle. The badge + click-reveal still use `target`.
    */
   highlight?: { nodeIds: string[]; edges: Array<{ source: string; target: string }> };
+  /**
+   * Where the server located a problem it could not place on an element: its
+   * own locator, shown as the row's target in place of the bare flow. A
+   * publish finding on a node's config value is located in words (`flow 'x' ·
+   * node 'y' (update_record) … at config.fields.id`), and that is the only
+   * place the row names the node and the field.
+   */
+  location?: string;
 }
 
 /** A server diagnostic entry (subset of the layered record's `_diagnostics`). */
@@ -269,12 +278,17 @@ export function buildFlowProblems({ nodes, edges, serverDiagnostics, variables, 
   (serverDiagnostics ?? []).forEach((diag, i) => {
     const level: DiagnosticLevel = diag.severity === 'warning' ? 'warning' : 'error';
     const target = serverTarget(diag.path, nodes, edges);
+    const location = target.kind === 'flow' ? pathSegments(diag.path).join('.') : '';
     problems.push({
       id: `server:${i}:${targetKey(target)}`,
       level,
-      message: diag.message,
+      // The words the node's value cell uses for the same refusal.
+      message: isBlankExpressionRefusal(diag.message)
+        ? t('engine.inspector.flowNode.kv.expressionNeeded', locale)
+        : diag.message,
       target,
       source: 'server',
+      ...(location ? { location } : {}),
     });
   });
 
