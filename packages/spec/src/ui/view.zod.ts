@@ -2166,6 +2166,37 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
    * card's own defect inverted.
    */
   allDayField: z.string().optional().describe('Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day'),
+  /**
+   * The date the calendar opens on. Without it every calendar opens on the
+   * current month, so a calendar whose records all fall months ahead (a
+   * renewals calendar) opens on an empty grid and the author has no way to say
+   * otherwise.
+   *
+   * Why it lives on this block and not beside `defaultView` (the initial view
+   * MODE, an `object-calendar` component prop): a stored list view has no
+   * other authorable home, and two of the three values are defined in terms of
+   * this block's own `startDateField` binding — the anchor is a question about
+   * the view's records, not a widget preference.
+   *
+   * Spelling: no sibling view config (gantt, timeline, map) declares an
+   * initial date or range, so there is nothing to mirror; `initialDate` names
+   * where the calendar OPENS, and avoids the `default*` prefix, which on this
+   * platform also reads as "fallback value" (`defaultValue`).
+   *
+   * A CLOSED set of relative anchors. ⛔ No fixed calendar date: a date stored
+   * on a view goes stale as time passes — the same view opens on an ever older
+   * month — and no producer asking for one was found. A fixed date is refused
+   * with the enum's own `invalid_value` issue.
+   *
+   * ⛔ No spec-side `.default('today')`, for the reason the gantt `viewMode`
+   * gives: a materialized default would write the key onto every parsed
+   * calendar and read as an author choice. Absence means today, which is what
+   * every calendar stored before this key did.
+   *
+   * Lands ahead of its reader: the renderer seeds its current date from the
+   * clock until the console half reads this key where it seeds that date.
+   */
+  initialDate: z.enum(['today', 'first_record', 'next_record']).optional().describe("Where the calendar opens. 'today' (also what an omitted key does) opens on the period containing today; 'first_record' on the period containing the earliest start date (the startDateField value) among the records the view selects; 'next_record' on the period containing the earliest start date on or after today among those records. When no record qualifies, the calendar opens on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: a date stored on a view goes stale as time passes"),
 }));
 
 /**

@@ -6189,7 +6189,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `endField` aliases among them — was never read.
    */
   calendar: ListViewSchema.shape.calendar
-    .describe('Calendar field config `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` — the same block a list view\'s `calendar` declares; `startDateField` is required'),
+    .describe('Calendar config `{ startDateField, endDateField?, titleField?, colorField?, allDayField?, initialDate? }` — the same block a list view\'s `calendar` declares; `startDateField` is required'),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
