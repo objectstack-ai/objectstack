@@ -205,6 +205,11 @@ export async function seedRunGrants(
     const needsGrants = !Array.isArray(runContext.permissions);
     const needsPeers = runOrgUserIds(runContext) === undefined;
     const needsEmail = !runContext.email;
+    // A rung a door forwarded without grants (#28099) is never kept beside
+    // grants it was not derived from: the resolution below re-seeds the rung
+    // with the grants, and a run whose grants stay unresolved (the resolver
+    // throws, answers nothing, or is not wired) carries none.
+    if (needsGrants) delete (runContext as SeededRunContext).posture;
     if (
         runContext.runAs !== 'system' &&
         runContext.userId &&
