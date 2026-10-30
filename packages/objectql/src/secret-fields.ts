@@ -37,7 +37,7 @@
  * ruling of 2026-08-12 on #7728.
  */
 
-import { isMaskedOnReadFieldType, type ServiceObject } from '@objectstack/spec/data';
+import { isCredentialFieldType, isMaskedOnReadFieldType, type ServiceObject } from '@objectstack/spec/data';
 
 /**
  * Prefix marking a persisted field value as a `sys_secret` handle ref rather
@@ -291,7 +291,7 @@ export function collectCredentialFields(schema: ServiceObject | undefined | null
   if (!fields) return [];
   const out: string[] = [];
   for (const [name, def] of Object.entries(fields)) {
-    if (def && (def.type === 'secret' || def.type === 'password')) out.push(name);
+    if (def && isCredentialFieldType(def.type)) out.push(name);
   }
   return out;
 }
