@@ -105,7 +105,7 @@ describe('ViewSettingsPopover — Open records (objectstack#26681)', () => {
     expect(selectPage).toHaveBeenCalledTimes(1);
   });
 
-  it('objectstack#27545 CONTROL — a host that passes no `selectPage` draws two segments, Split and Drawer, as before', async () => {
+  it('objectstack#27545 CONTROL — a host that passes no `selectPage` draws two segments, now Split then Drawer', async () => {
     openDisplay({ resolvedMode: 'drawer', preference: 'drawer', setPreference: vi.fn() });
     const group = await screen.findByRole('radiogroup', { name: 'Open records' });
     expect(Array.from(group.querySelectorAll('[role="radio"]')).map((radio) => radio.textContent)).toEqual([
