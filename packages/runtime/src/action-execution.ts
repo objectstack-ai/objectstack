@@ -1550,6 +1550,8 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * ({@link API_FORWARD_HEADER_ALLOWLIST}); `Content-Length` / `Host` are the
  * injector's to set. The forward is marked ({@link API_FORWARD_MARK_HEADER})
  * so a door reached by it refuses instead of looping.
+ * One caller is never forwarded: an API-key caller of an identity route,
+ * which cannot read a key ({@link apiActionIdentityRouteKeyRefusal}).
  *
  * Relayed back: the status, the JSON body, and the credential-rotation
  * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
