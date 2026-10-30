@@ -12,7 +12,8 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
-import type { AIActionConfirmation } from '@objectstack/spec/contracts';
+import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
+import { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from '@objectstack/rest';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
@@ -879,7 +880,55 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
         }),
+        // ── Federation surface (McpFederationBridge, #27745) ───────
+        // The `external-datasource` service Studio's datasource page reaches
+        // through `…/external/tables` and `…/tables/:remote/import`, refused
+        // on the same two capabilities those routes gate on.
+        listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
+            (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
+        importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
+            (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
     };
+}
+
+/**
+ * [#27745] The `external-datasource` service for one federation tool call, or
+ * the refusal the REST twin answers: `403 PERMISSION_DENIED` without the
+ * capability the call's kind needs (asked first, as the route asks it, so a
+ * caller without it cannot learn which services the host wires), `503
+ * SERVICE_UNAVAILABLE` on a host with no federation service.
+ */
+async function federationService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    ec: any,
+    kind: 'read' | 'write',
+): Promise<IExternalDatasourceService> {
+    const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
+    const held: unknown[] = Array.isArray(ec?.systemPermissions) ? ec.systemPermissions : [];
+    if (!held.includes(required)) {
+        throw Object.assign(
+            new Error(
+                kind === 'write'
+                    ? `Creating metadata from an external datasource requires the \`${required}\` capability.`
+                    : `Introspecting an external datasource requires the \`${required}\` capability.`,
+            ),
+            { code: 'PERMISSION_DENIED', status: 403 },
+        );
+    }
+    let service: IExternalDatasourceService | undefined;
+    try {
+        service = await deps.resolveService(context, 'external-datasource', context.environmentId);
+    } catch {
+        service = undefined;
+    }
+    if (!service) {
+        throw Object.assign(new Error('The external-datasource service is not available.'), {
+            code: 'SERVICE_UNAVAILABLE',
+            status: 503,
+        });
+    }
+    return service;
 }
 
 /**

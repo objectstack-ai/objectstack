@@ -168,7 +168,7 @@ second at load, per ADR-0019 (app-as-consumer-unit) D3. More audiences are
 | `group`     | `label`, `icon`, `expanded`, `children[]`     | Collapsible group of items |
 | `object`    | `objectName`, `viewName?`, `recordId?`, `filters?`, `label`, `icon` | Link to an object list, a named view, a record deep-link, or a `filters` slice on the bare data surface |
 | `dashboard` | `dashboardName`, `label`, `icon`              | Link to a dashboard |
-| `report`    | `reportName`, `label`, `icon`                 | Link to a report |
+| `report`    | `reportName?`, `label`, `icon`                | A report; no `reportName` = the app's report index |
 | `page`      | `pageName`, `label`, `icon`                   | Link to a custom Page |
 | `url`       | `url`, `label`, `icon`                        | External or custom URL |
 | `action`    | `actionDef` (`{ actionName, params? }`), `label`, `icon` | Run an action instead of navigating |

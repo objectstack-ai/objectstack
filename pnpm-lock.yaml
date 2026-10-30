@@ -2769,6 +2769,9 @@ importers:
       '@objectstack/driver-mongodb':
         specifier: workspace:*
         version: link:../../drivers/driver-mongodb
+      '@objectstack/driver-odata':
+        specifier: workspace:*
+        version: link:../../drivers/driver-odata
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../../drivers/driver-sqlite-wasm
