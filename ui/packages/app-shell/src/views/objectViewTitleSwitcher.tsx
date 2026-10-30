@@ -224,9 +224,12 @@ export function ObjectViewTitleSwitcher({
                         type="button"
                         data-testid="list-view-switcher"
                         title={description}
+                        // No negative margin: the title's width is its content's, and a
+                        // margin pulled out of it truncated the label it was sized for.
                         className={cn(
-                            '-mx-1 inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left',
-                            'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left',
+                            // Inset: the title clips what overflows it (`truncate`), an outer ring included.
+                            'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',
                         )}
                     >
