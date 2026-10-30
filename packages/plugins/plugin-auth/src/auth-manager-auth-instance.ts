@@ -118,6 +118,7 @@ export interface AuthInstanceHost {
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
   resolvePasswordChangeUserId: AuthManager['resolvePasswordChangeUserId'];
   resolvePasswordHasher: AuthManager['resolvePasswordHasher'];
+  roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
   signUpForcedOff: AuthManager['signUpForcedOff'];
@@ -706,6 +707,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
           resolveActor: (...a) => this.resolveActor(...a),
           resolvePasswordChangeUserId: (...a) => this.resolvePasswordChangeUserId(...a),
+          roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...a),
         };
         return globalBeforeHook.call(host, ctx, setShouldSkipSessionRefresh);
@@ -720,6 +722,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
           recordSignInOutcome: (...a) => this.recordSignInOutcome(...a),
+          roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
           stampLastLogin: (...a) => this.stampLastLogin(...a),
           stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
