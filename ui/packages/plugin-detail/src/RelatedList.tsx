@@ -821,8 +821,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * [ADR-0066 D4 / objectui#9782] The `list_toolbar` set this header may draw,
    * with `requiredPermissions` mirrored as a UI hide.
    *
-   * `@objectstack/spec` declares the key as "enforced with 403 on the platform
-   * action route (script/flow/modal + MCP) and **mirrored as a UI hide**". The
+   * `@objectstack/spec` declares the key as "enforced with 403 on every call the
+   * platform action door (`POST /actions/:object/:action` and MCP `run_action`)
+   * dispatches, and **mirrored as a UI hide**" — a declared same-origin
+   * `type: api` action included (ADR-0066 D4 as amended). The
    * same bridge (`RelatedRecordActionsBridge.deriveActions`) feeds the child
    * object's `list_item` actions and these header buttons, and it filters on
    * `locations` alone — so before this the toolbar honoured `visible` and

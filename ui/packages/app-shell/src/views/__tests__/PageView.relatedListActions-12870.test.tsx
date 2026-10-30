@@ -224,11 +224,15 @@ describe('objectui#12870 — an app page serves the record page’s related-list
     expect(rowMenuNames(menu)).toEqual(['change_role', 'remove']);
     expect(unserved()).toBeNull();
 
+    // Declared same-origin api actions run through the action door, which
+    // resolves `{id}` from the row named by `recordId` (objectstack#27611).
     fireEvent.click(within(menu).getByTestId('row-action-change_role'));
-    await waitFor(() => expect(calledUrls()).toContain('/api/v1/members/m-1/role'));
+    await waitFor(() => expect(calledUrls()).toContain(`/api/v1/actions/${CHILD}/change_role`));
+    const [, roleInit] = apiFetch.mock.calls.find(([url]) => String(url).endsWith('/change_role'))!;
+    expect(JSON.parse(String((roleInit as RequestInit).body)).recordId).toBe('m-1');
 
     fireEvent.click(screen.getByTestId('related-toolbar-action-invite_user'));
-    await waitFor(() => expect(calledUrls()).toContain('/api/v1/org/invite'));
+    await waitFor(() => expect(calledUrls()).toContain(`/api/v1/actions/${CHILD}/invite_user`));
   });
 
   it('a list with no parent in scope draws no authored action, and says so', async () => {
