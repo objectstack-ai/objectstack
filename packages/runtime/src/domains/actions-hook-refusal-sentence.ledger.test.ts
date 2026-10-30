@@ -136,7 +136,9 @@ describe('[#22588] the /actions ledger rows, each driven with a real nested hook
             expect(executeAction).toHaveBeenCalled();
             expect(res.response.status).toBe(400);
             expect(res.response.body.success).toBe(false);
-            expect(res.response.body.error.code).toBe('VALIDATION_ERROR');
+            // [#27672] FLIPPED on purpose from `VALIDATION_ERROR`: an undeclared
+            // abort answers `HOOK_ABORTED` here, the code `/data` answers.
+            expect(res.response.body.error.code).toBe('HOOK_ABORTED');
             // The wording IS the defect here, so the sentence is asserted whole.
             expect(res.response.body.error.message).toBe(REFUSAL);
             expect(JSON.stringify(res.response.body)).not.toMatch(/threw:|hook '/);

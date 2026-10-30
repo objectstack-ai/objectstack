@@ -278,12 +278,6 @@ const importRow = (res: any) => res.body?.results?.[0]?.error;
 const jobRow = async (_res: any, b: Booted) => (await terminalJobPatch(b)).results?.items?.[0]?.error;
 
 /**
- * [#22719] An undeclared refusal re-dressed in the nested envelope: the code
- * the classification leaves out is the catalog's own floor for `400`.
- */
-const REFUSED_400 = { status: 400, code: 'VALIDATION_ERROR' } as const;
-
-/**
  * [#27597] The same refusal where the family re-dresses the `/data` door's
  * classification whole: a sandboxed hook's undeclared abort answers the
  * ledgered `HOOK_ABORTED` there (the floor's `VALIDATION_ERROR` before).
@@ -373,8 +367,11 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/approvals/requests/:id/comment': { called: 'approvals.comment', body: {}, answers: HOOK_ABORTED_400 },
     // Package publish: the classification decides the status the door falls
     // back to, the shared read the sentence. Was `500 INTERNAL_ERROR`.
+    // [#27672] FLIPPED on purpose from `400 VALIDATION_ERROR`: the door's code
+    // is `resolveThrownHttpError`'s, which now answers an undeclared hook abort
+    // `HOOK_ABORTED`, the code `/data` answers.
     'POST /api/v1/packages/publish': {
-        called: 'service:package.publish', answers: REFUSED_400,
+        called: 'service:package.publish', answers: HOOK_ABORTED_400,
         body: { manifest: { id: 'p1', version: '1.0.0' }, metadata: {} },
     },
     // External datasources: the shared read only, so status and code are this
