@@ -116,7 +116,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 const p = await this.resolveProtocol(environmentId, req);
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'get', context)) return;
                 if (refuseUnknownQueryParams(req, res, RECORD_PAGE_PARAMS)) return;
 
                 const rawBody = req.body ?? {};
@@ -199,12 +199,15 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                         const where = declared === undefined ? parentScope : { $and: [parentScope, declared] };
                         const found: any = await p.findData({
                             object: entry.object,
+                            // Canonical QueryAST (#16337), with the list's
+                            // `$count` as the request declares it.
                             query: {
-                                filter: where,
-                                top: entry.top,
+                                object: entry.object,
+                                where,
+                                limit: entry.top,
                                 count: true,
                                 ...(entry.sort && entry.sort.length > 0 ? { orderBy: entry.sort } : {}),
-                            } as any,
+                            },
                             ...scope,
                         } satisfies ServerScopedDataRequest<FindDataRequest>);
                         const records = Array.isArray(found?.records) ? found.records : [];

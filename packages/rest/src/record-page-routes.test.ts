@@ -115,6 +115,7 @@ function boot(opts: BootOpts = {}) {
     (rest as any).resolveExecCtx = async () => ('context' in opts ? opts.context : CTX);
     (rest as any).resolveSecurityService = async () => opts.security;
     (rest as any).approvalsServiceProvider = opts.approvals === undefined ? undefined : async () => opts.approvals;
+    const apiGate = vi.spyOn(rest as any, 'enforceApiAccess');
     rest.registerRoutes();
     const route = (rest as any).getRoutes().find(
         (r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object/:id/page',
@@ -125,7 +126,7 @@ function boot(opts: BootOpts = {}) {
         await route.handler({ method: 'POST', params, query, headers: {}, body } as any, res);
         return { status: res.statusCode, body: res.json.mock.calls.at(-1)?.[0] };
     };
-    return { getData, findData, call };
+    return { getData, findData, call, apiGate };
 }
 
 const recordNotFound = () => Object.assign(new Error('Record a1 not found in account'), {
@@ -136,6 +137,14 @@ const permissionDenied = () => Object.assign(new Error('[Security] Access denied
 });
 
 describe('[#27627] POST /data/:object/:id/page', () => {
+    it('asks the object-exposure gate as GET /data/:object/:id does, with the caller\'s context (#27692)', async () => {
+        const { call, apiGate } = boot();
+        expect((await call({})).status).toBe(200);
+        expect(apiGate).toHaveBeenCalledTimes(1);
+        const [, , , environmentId, operation, context] = apiGate.mock.calls[0];
+        expect([environmentId, operation, context]).toEqual([undefined, 'get', CTX]);
+    });
+
     it("answers every part with the call the read it replaces makes, as the caller, in the schema's shape", async () => {
         const getRecordFieldAccess = vi.fn().mockResolvedValue(ACCESS);
         const explain = vi.fn(async (req: any) => DECISION(req.operation));
@@ -168,11 +177,11 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         // Each related list: the parent condition (to the field's arity), AND
         // the declared scope, with `count` — as `GET /data/note` reads it.
         expect(findData.mock.calls.map(([req]) => req)).toEqual([
-            { object: 'note', query: { filter: { account: 'a1' }, top: 3, count: true }, context: CTX },
-            { object: 'note', query: { filter: { $and: [{ account: 'a1' }, { title: 'x' }] }, top: 0, count: true }, context: CTX },
-            { object: 'note', query: { filter: { watchers: { $contains: 'a1' } }, top: 1, count: true, orderBy: [{ field: 'title', order: 'desc' }] }, context: CTX },
+            { object: 'note', query: { object: 'note', where: { account: 'a1' }, limit: 3, count: true }, context: CTX },
+            { object: 'note', query: { object: 'note', where: { $and: [{ account: 'a1' }, { title: 'x' }] }, limit: 0, count: true }, context: CTX },
+            { object: 'note', query: { object: 'note', where: { watchers: { $contains: 'a1' } }, limit: 1, count: true, orderBy: [{ field: 'title', order: 'desc' }] }, context: CTX },
         ]);
-        expect(data.related.map((r) => [r.field, r.total, r.records])).toEqual([
+        expect(data.related.map((r) => ('total' in r ? [r.field, r.total, r.records] : [r.field, r.error]))).toEqual([
             ['account', 7, [{ id: 'note-1' }]],
             ['account', 7, [{ id: 'note-1' }]],
             ['watchers', 7, [{ id: 'note-1' }]],
@@ -241,7 +250,7 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         const [list] = RecordPageResponseSchema.parse(answer.body.data).related;
         expect(list).not.toHaveProperty('total');
         expect(list).not.toHaveProperty('records');
-        expect(list.error).toMatchObject({ code: 'OBJECT_API_DISABLED', status: 404 });
+        expect('error' in list ? list.error : undefined).toMatchObject({ code: 'OBJECT_API_DISABLED', status: 404 });
         expect(findData).not.toHaveBeenCalled();
     });
 
