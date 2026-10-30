@@ -48,6 +48,8 @@ import {
   collectManifestPicklistNames,
   collectManifestPicklistReferences,
   describeUnresolvedPicklistReferences,
+  picklistMetadataError,
+  type PicklistMetadataError,
 } from './picklist-resolution.js';
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
@@ -170,7 +172,9 @@ function unclaimedTopLevelObjects(
  *    residual declares is what the objects rule lists and does not serve, and
  *    a body's field naming one fails the boot's picklist audit — both loud,
  *    and both judged on that premise, so registering the residual's lists here
- *    would change which objects the data door serves;
+ *    would change which objects the data door serves. A residual list no
+ *    object field names is refused instead
+ *    ({@link unreferencedResidualPicklistRefusal});
  *  - `object_extension`: an extension has no slot of its own (it is keyed by
  *    `extend`, and its `name` spelling is a retired alias the schema refuses),
  *    so the residual rule never lists one.
@@ -206,6 +210,53 @@ function unclaimedTopLevelItems(
   return items.length > 0
     ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, items }
     : undefined;
+}
+
+/**
+ * [ADR-0130 D4] The refusal for a residual PICKLIST that no object field of
+ * the stack names — `undefined` when there is none.
+ *
+ * A residual picklist is kept as metadata only (see
+ * {@link RESIDUAL_TYPES_WITH_OWN_PATH}), so the engine never registers it.
+ * One that a field names is loud already: a residual object's field makes
+ * that object listed and not served, and a body's field fails the boot's
+ * picklist audit. One that no field names was neither registered nor
+ * refused, so it went missing from the engine with nothing said. It is
+ * refused here, before anything of the artifact registers, naming each list
+ * and the stack.
+ *
+ * "Names" is judged off the artifact alone — its top level and every package
+ * body, objects and `objectExtensions` both — never off the registry, which
+ * is still filling while a boot registers.
+ */
+function unreferencedResidualPicklistRefusal(
+  residual: UnclaimedTopLevel | undefined,
+  artifact: unknown,
+  bodies: readonly unknown[],
+): PicklistMetadataError | undefined {
+  if (!residual) return undefined;
+  const picklists = residual.items
+    .filter((entry) => entry.type === 'picklist')
+    .map((entry) => String((entry.item as { name?: unknown }).name));
+  if (picklists.length === 0) return undefined;
+  const named = new Set<string>();
+  for (const source of [artifact, ...bodies]) {
+    for (const ref of collectManifestPicklistReferences(source, undefined)) named.add(ref.picklist);
+  }
+  const unreferenced = picklists.filter((name) => !named.has(name));
+  if (unreferenced.length === 0) return undefined;
+  const owner = residual.ownerId ?? '<none>';
+  const listed = unreferenced.map((name) => `'${name}'`).join(', ');
+  return picklistMetadataError(
+    `${unreferenced.length === 1 ? 'Picklist' : 'Picklists'} ${listed} ${unreferenced.length === 1 ? 'is' : 'are'} `
+    + `declared on the top level of stack '${owner}', and no package body declares `
+    + `${unreferenced.length === 1 ? 'it' : 'them'} and no object field names `
+    + `${unreferenced.length === 1 ? 'it' : 'them'}. The engine registers a top-level picklist only through `
+    + 'a package body, so this list would be missing from the engine with nothing said. Declare it inside the '
+    + '`packages[]` entry of the package whose objects use it; or name it from a field of the object meant to '
+    + 'use it (a top-level object that does is then listed and not served until both move into a package '
+    + 'body); or remove it from the top level.',
+  );
 }
 
 /**
@@ -831,6 +882,11 @@ export class ObjectQLPlugin implements Plugin {
         // which readers of the registry alone see only through this. See
         // {@link unclaimedTopLevelItems}.
         const residualItems = unclaimedTopLevelItems(residualAnswer);
+        // …and its picklists, which neither of those registers: one that no
+        // object field names is refused here, before anything registers. See
+        // {@link unreferencedResidualPicklistRefusal}.
+        const unreferencedPicklists = unreferencedResidualPicklistRefusal(residualAnswer, artifact, ordered);
+        if (unreferencedPicklists) throw unreferencedPicklists;
 
         if (ordered.length === 0 && residual === undefined && residualItems === undefined) {
           // An artifact that declared `packages: []` registers nothing. Said out
