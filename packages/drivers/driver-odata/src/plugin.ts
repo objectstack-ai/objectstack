@@ -24,9 +24,29 @@
  * resolve, and a `credentialsRef` declared on a datasource whose scheme is
  * `none` all refuse the request (the engine answers 503 and logs the cause)
  * instead of sending it unauthenticated.
+ *
+ * ## A borrowed credential
+ *
+ * A datasource may instead name a declared connector instance in
+ * `external.connector` and borrow that instance's credential (ADR-0015
+ * amendment D7): one Connect serves the connector's actions and this
+ * datasource's records. The plugin borrows a handle from the kernel service
+ * `connector-credential-source` (registered by `@objectstack/service-automation`)
+ * at the first request, and every request presents it through
+ * `callWithBorrowedCredential` (`@objectstack/types`): refreshed on expiry,
+ * once on a 401, then a 503. The instance's `auth` decides how it is sent, so
+ * the driver config's own `auth.scheme` stays `none` beside it. A source that
+ * is not registered, an instance it refuses to lend, a scheme set beside the
+ * connector, and a `credentialsRef` beside it (two credential channels) all
+ * refuse the request, the same way.
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import {
+  CONNECTOR_CREDENTIAL_SOURCE_SERVICE,
+  type ConnectorCredentialHandle,
+  type IConnectorCredentialSource,
+} from '@objectstack/types';
 import { parseODataDriverConfig, type ODataDriverConfigInput } from './config.js';
 import { ODataDriver } from './odata-driver.js';
 import type { FetchLike } from './transport.js';
@@ -38,7 +58,7 @@ export interface ODataSecretStore {
 
 /** The one engine read this plugin makes: the declared datasource definitions. */
 export interface DatasourceDefinitionSource {
-  listDatasourceDefs(): Array<{ name: string; external?: { credentialsRef?: string } }>;
+  listDatasourceDefs(): Array<{ name: string; external?: { credentialsRef?: string; connector?: string } }>;
 }
 
 export interface ODataDriverPluginOptions extends ODataDriverConfigInput {
@@ -56,9 +76,8 @@ export function createODataDriverPlugin(options: ODataDriverPluginOptions): Plug
   const config = parseODataDriverConfig(input);
   let ctxRef: PluginContext | undefined;
 
-  const credential = async (): Promise<string | undefined> => {
-    if (!ctxRef) throw new Error(`driver-odata: datasource '${config.name}' was used before its plugin initialised`);
-    const engine = ctxRef.getService<DatasourceDefinitionSource | undefined>(ENGINE_SERVICE);
+  const definition = (ctx: PluginContext) => {
+    const engine = ctx.getService<DatasourceDefinitionSource | undefined>(ENGINE_SERVICE);
     if (!engine || typeof engine.listDatasourceDefs !== 'function') {
       throw new Error(`driver-odata: datasource '${config.name}': the engine offers no datasource definitions to read its credentialsRef from`);
     }
@@ -66,7 +85,58 @@ export function createODataDriverPlugin(options: ODataDriverPluginOptions): Plug
     if (!def) {
       throw new Error(`driver-odata: datasource '${config.name}' is not declared, so it has no credentialsRef`);
     }
-    const ref = def.external?.credentialsRef;
+    return def;
+  };
+
+  // The handle, borrowed once per connector name; a refused borrow is not kept, so the next request asks again.
+  let lent: { connector: string; handle: Promise<ConnectorCredentialHandle> } | undefined;
+  const borrowed = async (): Promise<ConnectorCredentialHandle | undefined> => {
+    if (!ctxRef) throw new Error(`driver-odata: datasource '${config.name}' was used before its plugin initialised`);
+    const external = definition(ctxRef).external;
+    const connector = external?.connector;
+    if (!connector) return undefined;
+    if (external.credentialsRef) {
+      throw new Error(
+        `driver-odata: datasource '${config.name}' names both external.connector and external.credentialsRef; `
+        + 'exactly one of them supplies the credential — remove one',
+      );
+    }
+    if (config.auth.scheme !== 'none') {
+      throw new Error(
+        `driver-odata: datasource '${config.name}' borrows connector instance '${connector}''s credential, whose own auth `
+        + `decides how it is sent; its auth scheme '${config.auth.scheme}' would send a second one — set auth.scheme to 'none'`,
+      );
+    }
+    let entry = lent;
+    if (entry?.connector !== connector) {
+      let source: IConnectorCredentialSource | undefined;
+      try {
+        source = ctxRef.getService<IConnectorCredentialSource | undefined>(CONNECTOR_CREDENTIAL_SOURCE_SERVICE);
+      } catch {
+        source = undefined;
+      }
+      if (!source || typeof source.borrow !== 'function') {
+        throw new Error(
+          `driver-odata: datasource '${config.name}' borrows connector instance '${connector}''s credential, but no `
+          + `connector credential source is registered ('${CONNECTOR_CREDENTIAL_SOURCE_SERVICE}'); add the automation `
+          + 'service plugin (@objectstack/service-automation)',
+        );
+      }
+      // A lend refusal is a 422 at the authoring doors; on a read it is a condition the request cannot change, so
+      // it is rethrown without a status, which the engine's floor answers 503.
+      const handle = source.borrow(connector).catch((err: unknown) => {
+        throw new Error(`driver-odata: datasource '${config.name}': ${err instanceof Error ? err.message : String(err)}`);
+      });
+      const borrowing = { connector, handle };
+      lent = entry = borrowing;
+      handle.catch(() => { if (lent === borrowing) lent = undefined; });
+    }
+    return entry.handle;
+  };
+
+  const credential = async (): Promise<string | undefined> => {
+    if (!ctxRef) throw new Error(`driver-odata: datasource '${config.name}' was used before its plugin initialised`);
+    const ref = definition(ctxRef).external?.credentialsRef;
     if (config.auth.scheme === 'none') {
       if (ref) {
         throw new Error(
@@ -96,6 +166,7 @@ export function createODataDriverPlugin(options: ODataDriverPluginOptions): Plug
   const driver = new ODataDriver(config, {
     ...(fetch ? { fetch } : {}),
     credential,
+    borrowed,
   });
 
   return {

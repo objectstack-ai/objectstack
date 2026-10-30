@@ -60,7 +60,12 @@ export default defineConfig({
     // walled bridge sitting in its source. `platform-objects` gets the explicit
     // subpath entry its non-uniform export map needs (the shape
     // `service-settings` uses).
+    // `@objectstack/driver-odata` is a TEST-layer import of the OData draft
+    // pin (`external-object-draft-odata-metadata.test.ts`, objectstack#27745),
+    // which drives the real driver's introspection; aliased so the draft is
+    // judged against the introspection in the driver's source.
     alias: [
+      { find: /^@objectstack\/driver-odata$/, replacement: path.resolve(__dirname, '../../drivers/driver-odata/src/index.ts') },
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
       { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },

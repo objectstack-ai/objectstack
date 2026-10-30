@@ -44,6 +44,7 @@ import type { AuthManager } from './auth-manager.js';
 import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
 import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotation.js';
+import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
@@ -60,6 +61,7 @@ export interface AfterHookHost {
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   externalDirectoryDoorDeps: AuthManager['externalDirectoryDoorDeps'];
+  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
   recordSignInOutcome: AuthManager['recordSignInOutcome'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
@@ -223,6 +225,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // fellow member, team and pending invitation there. See
   // `external-directory-door.ts`.
   await narrowDirectoryForExternalCaller(ctx, this.externalDirectoryDoorDeps());
+
+  // ── #27843: invite-member says whether its mail was delivered ──
+  // A success answers `outcome: 'sent' | 'link_only'` beside the
+  // invitation row, by the one deliverability rule sign-up uses (see
+  // `invitation-delivery-outcome.ts`). A refusal passes untouched.
+  await stampInvitationDeliveryOutcome(ctx, () => this.isEmailDeliveryLive());
 
   // ── #24750: invite-member's unknown-role refusal carries its code ──
   // better-auth throws it with only a message; the spec promises

@@ -7,9 +7,13 @@
  * Flow:
  *   1. Read the `.osplugin` bytes + the detached `.sig` (publisher signature).
  *   2. Extract the compiled `objectstack.plugin.json` from inside the
- *      artifact (id / version / name / runtime / permissions / integrity),
- *      then preflight the artifact files against the manifest's declared
- *      per-file `integrity` digests (ADR-0025 §3.2) — refuse on any
+ *      artifact and parse it through `ManifestSchema`
+ *      (`readCompiledPluginManifest`, the read `os plugin install` and the
+ *      boot-time loader make too): a manifest the schema refuses (one built
+ *      before a value was retired, such as `packaging: 'manifest-deps'`) is
+ *      refused here with the schema's own words, before anything leaves the
+ *      machine. Then preflight the artifact files against the manifest's
+ *      declared per-file `integrity` digests (ADR-0025 §3.2) — refuse on any
  *      mismatch / missing / extra file; an absent map skips the check
  *      (the field is optional).
  *   3. POST /cloud/packages          — ensure the sys_package row exists
@@ -39,6 +43,7 @@ import {
   type ArchiveFile,
 } from '../../utils/osplugin.js';
 import { verifyIntegrity, formatIntegrityViolation } from '@objectstack/core';
+import { readCompiledPluginManifest } from '@objectstack/runtime';
 
 interface PostResult { ok: boolean; status: number; body: any; error?: string }
 
@@ -103,21 +108,42 @@ export default class PluginPublish extends Command {
     const checksum = sha256Hex(bytes);
     const base64 = Buffer.from(bytes).toString('base64');
 
-    // 2. Extract the compiled manifest from inside the artifact. ────────
-    let manifest: Record<string, any>;
+    // 2. Extract the compiled manifest from inside the artifact, through
+    //    `ManifestSchema` (the read `os plugin install` and the boot-time
+    //    loader make too): an artifact built before a schema change is
+    //    refused here, with the schema's own words, not at its consumer's
+    //    install. ⛔ No manifest rule is restated in this command. ────────
     let archiveFiles: ArchiveFile[];
     try {
       archiveFiles = readTarGz(bytes);
-      const entry = archiveFiles.find((f) => f.path === MANIFEST_FILENAME);
-      if (!entry) throw new Error(`${MANIFEST_FILENAME} not found in artifact`);
-      manifest = JSON.parse(Buffer.from(entry.data).toString('utf8')) as Record<string, any>;
     } catch (err: any) {
       printError(`Cannot read manifest from artifact: ${err?.message ?? err}`);
       this.exit(1);
       return;
     }
-    const id = String(flags['manifest-id'] ?? manifest.id ?? '').trim();
-    const version = String(manifest.version ?? '').trim();
+    const read = readCompiledPluginManifest(archiveFiles);
+    if (!read.ok) {
+      if (read.reason === 'unreadable') {
+        printError(`Cannot read manifest from artifact: ${read.message}`);
+      } else {
+        printError(`The artifact's ${MANIFEST_FILENAME} is not a valid plugin manifest, so nothing was published:`);
+        for (const issue of read.issues) console.log(`    • ${issue}`);
+        console.log('\n  Fix the source manifest as above and rebuild the artifact with `os plugin build` (then re-sign it with `os plugin sign`), and publish the fresh artifact.');
+      }
+      this.exit(1);
+      return;
+    }
+    const manifest = read.manifest;
+    // What is uploaded is the manifest the artifact carries, as it carries
+    // it: the parse above stamps the schema's defaults (`scope`,
+    // `defaultDatasource`), which would make the declared manifest differ
+    // from the signed bytes' own. The entry is there and is a JSON object:
+    // the read above answered `ok`.
+    const declaredManifest = JSON.parse(
+      Buffer.from(archiveFiles.find((f) => f.path === MANIFEST_FILENAME)!.data).toString('utf8'),
+    ) as Record<string, unknown>;
+    const id = String(flags['manifest-id'] ?? manifest.id).trim();
+    const version = manifest.version;
     const displayName = String(flags['display-name'] ?? manifest.name ?? id).trim();
     if (!id || !version) { printError('Artifact manifest is missing id or version.'); this.exit(1); return; }
     printStep(`${id}@${version} (${(bytes.byteLength / 1024).toFixed(1)} KB, runtime: ${manifest.runtime ?? 'unset'})`);
@@ -126,21 +152,13 @@ export default class PluginPublish extends Command {
     // bytes against the manifest's own declared per-file digests before
     // upload. Absent map = permissive by contract (the field is
     // `.optional()`; artifacts built before integrity computation stay
-    // publishable). The installing side re-verifies at unpack
-    // (`os plugin install`, ADR-0025 §3.5 M1); this preflight is the
-    // publisher's own check, and the cloud control plane runs none.
-    const declaredIntegrity = manifest.integrity;
-    if (
-      declaredIntegrity !== undefined && declaredIntegrity !== null
-      && (typeof declaredIntegrity !== 'object' || Array.isArray(declaredIntegrity))
-    ) {
-      printError('Artifact manifest has a malformed `integrity` map (expected an object of path → digest). Rebuild with `os plugin build`.');
-      this.exit(1);
-      return;
-    }
+    // publishable). The map's shape is `ManifestSchema`'s, checked above.
+    // The installing side re-verifies at unpack (`os plugin install`,
+    // ADR-0025 §3.5 M1); this preflight is the publisher's own check, and
+    // the cloud control plane runs none.
     const integrityCheck = verifyIntegrity(
       archiveFiles,
-      declaredIntegrity as Record<string, string> | undefined,
+      manifest.integrity,
       { exempt: [MANIFEST_FILENAME, SIGNATURE_FILENAME] },
     );
     if (!integrityCheck.ok) {
@@ -203,7 +221,7 @@ export default class PluginPublish extends Command {
       version,
       artifact_kind: 'plugin',
       osplugin: base64,
-      plugin_manifest: manifest,
+      plugin_manifest: declaredManifest,
       artifact_checksum: checksum,
       is_pre_release: flags['pre-release'] || /-(alpha|beta|rc|dev|preview|staging|pr)/i.test(version),
     };

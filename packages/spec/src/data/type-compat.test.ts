@@ -41,6 +41,31 @@ describe('canonicalizeSqlType (ADR-0015 §4.6)', () => {
     expect(canonicalizeSqlType('objectId', 'mongo')).toBe('text');
   });
 
+  it('applies the odata dialect: EDM primitives, case-insensitively, and collections as arrays', () => {
+    expect(canonicalizeSqlType('Edm.String', 'odata')).toBe('text');
+    expect(canonicalizeSqlType('Edm.Int32', 'odata')).toBe('integer');
+    expect(canonicalizeSqlType('Edm.Int64', 'odata')).toBe('bigint');
+    expect(canonicalizeSqlType('Edm.Decimal', 'odata')).toBe('decimal');
+    expect(canonicalizeSqlType('Edm.Double', 'odata')).toBe('float');
+    expect(canonicalizeSqlType('Edm.Boolean', 'odata')).toBe('boolean');
+    expect(canonicalizeSqlType('Edm.Date', 'odata')).toBe('date');
+    expect(canonicalizeSqlType('Edm.TimeOfDay', 'odata')).toBe('time');
+    expect(canonicalizeSqlType('Edm.DateTimeOffset', 'odata')).toBe('datetime');
+    expect(canonicalizeSqlType('Edm.Guid', 'odata')).toBe('uuid');
+    expect(canonicalizeSqlType('Edm.Binary', 'odata')).toBe('binary');
+    expect(canonicalizeSqlType('Collection(Edm.String)', 'odata')).toBe('array');
+    // The vocabulary is the dialect's own: no other dialect reads an EDM name.
+    expect(canonicalizeSqlType('Edm.Int32')).toBe('unknown');
+    expect(canonicalizeSqlType('Edm.Int32', 'postgres')).toBe('unknown');
+  });
+
+  it('leaves the EDM types with no field type unknown, so a draft flags them', () => {
+    expect(canonicalizeSqlType('Edm.Duration', 'odata')).toBe('unknown');
+    expect(canonicalizeSqlType('Edm.GeographyPoint', 'odata')).toBe('unknown');
+    // An enum or complex type is the service's own qualified name.
+    expect(canonicalizeSqlType('Trippin.PersonGender', 'odata')).toBe('unknown');
+  });
+
   it('falls back to unknown for unrecognised types', () => {
     expect(canonicalizeSqlType('geography')).toBe('unknown');
     expect(canonicalizeSqlType('')).toBe('unknown');
@@ -137,6 +162,25 @@ describe('isCompatible', () => {
     expect(isCompatible('enum', 'text')).toBe(true);
   });
 
+  // A reference field stores the target's id, which on a federated object is
+  // the remote key: a foreign-key column of the key's type backs it exactly,
+  // and Gate 2 must not refuse a lookup over `CustomerID int` or an OData
+  // `ReferentialConstraint` over `Edm.Int32`.
+  it('accepts a foreign-key column of a key type for lookup and master_detail', () => {
+    for (const ft of ['lookup', 'master_detail'] as const) {
+      expect(isCompatible('varchar(36)', ft), ft).toBe(true);
+      expect(isCompatible('integer', ft), ft).toBe(true);
+      expect(isCompatible('bigint', ft), ft).toBe(true);
+      expect(isCompatible('uuid', ft), ft).toBe(true);
+      expect(isCompatible('Edm.Int32', ft, 'odata'), ft).toBe(true);
+      expect(isCompatible('Edm.String', ft, 'odata'), ft).toBe(true);
+      // Not a key type: no reference rides on these.
+      expect(isCompatible('boolean', ft), ft).toBe(false);
+      expect(isCompatible('jsonb', ft, 'postgres'), ft).toBe(false);
+      expect(isCompatible('numeric(10,2)', ft), ft).toBe(false);
+    }
+  });
+
   it('returns "lossy" for usable-but-imperfect mappings', () => {
     expect(isCompatible('jsonb', 'text', 'postgres')).toBe('lossy');
     expect(isCompatible('date', 'datetime')).toBe('lossy');
@@ -176,7 +220,7 @@ describe('canonicalizeSqlType — Object.prototype fall-through', () => {
   // the union declares but `DIALECT_ALIASES` does not populate, which fall
   // through to the base map and must answer just as safely.
   const DIALECTS: readonly SqlDialect[] = [
-    'postgres', 'mysql', 'sqlite', 'snowflake', 'bigquery', 'mongo',
+    'postgres', 'mysql', 'sqlite', 'snowflake', 'bigquery', 'mongo', 'odata',
   ];
 
   // The declared return type is a private union, so the pin names it here.

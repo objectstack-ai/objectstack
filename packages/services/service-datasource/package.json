@@ -63,6 +63,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-mongodb": "workspace:*",
+    "@objectstack/driver-odata": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",

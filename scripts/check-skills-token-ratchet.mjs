@@ -1123,8 +1123,13 @@ export const CEILINGS = new Map([
   // spells its own `must_not_contain` string (-2 bytes). 7154 -> 8034 bytes -> 2009 tokens,
   // ceiling +220, pinned AT the measurement. Same ruling as the line above (2026-10-27, tap A:
   // 「A:先削重复,余额按实测提高」).
-  //   ceil($(wc -c < skills/objectstack-ui/evals/views-apps-actions-pages.json) / 4) == ceil(8034 / 4)
-  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 2009],
+  // 2009 -> 2108 (#27609): case 10, the app's report index entry — `{ type: 'report' }` with no
+  // `reportName` (PR #27566), which the console no longer adds on its own — +398 bytes; the
+  // file's cases still share no sentence, so there was no duplicate to cut (0 bytes).
+  // 8034 -> 8432 bytes -> 2108 tokens, ceiling +99, pinned AT the measurement. Same ruling as
+  // the lines above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
+  //   ceil($(wc -c < skills/objectstack-ui/evals/views-apps-actions-pages.json) / 4) == ceil(8432 / 4)
+  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 2108],
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
   // the remaining skills' eval notes

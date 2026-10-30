@@ -112,6 +112,7 @@ import {
   type DemoStaffRefusal,
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
+import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -1010,6 +1011,25 @@ export class AuthPlugin implements Plugin {
       const ql = ctx.getService<IObjectQLEngine>('objectql');
       if (ql && typeof ql.registerHook === 'function') {
         registerSessionFirstActivity(ql, { packageId: 'com.objectstack.plugin-auth.session-first-activity' });
+      }
+    } catch {
+      // No `objectql` service (mock mode): nothing to register on.
+    }
+
+    // [#27843] `sys_invitation.copy_invitation_link` — the pending
+    // invitation's accept link, for a deployment whose mail is not delivered
+    // (invite-member answers `outcome: 'link_only'` there). Registered in
+    // `start()` beside the hook above, on the same engine: the platform action
+    // door dispatches it like any other declared `script` action, and the
+    // handler enforces the invite gates itself (`invitation-link-action.ts`).
+    try {
+      const ql = ctx.getService<IObjectQLEngine>('objectql');
+      const authManager = this.authManager;
+      if (ql && typeof ql.registerAction === 'function') {
+        registerCopyInvitationLinkAction(ql, {
+          engine: ql,
+          consoleUrl: (path) => authManager.getConsoleUrl(path),
+        });
       }
     } catch {
       // No `objectql` service (mock mode): nothing to register on.
