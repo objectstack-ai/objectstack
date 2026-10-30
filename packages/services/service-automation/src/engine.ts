@@ -8945,6 +8945,12 @@ export class AutomationEngine implements IAutomationService {
      * `assignments`
      * through `builtin/value-slot-map.ts`, the one per-slot resolver
      * (`resolveValueSlotMap`, `resolveValueSlot`, `resolveCollectionSlot`).
+     * One slot reaches it undeclared: a `connector_action`'s
+     * `connectorConfig.input` map (#27327), evaluated through the same
+     * resolver. The ledger addresses only `node.config`, and `connectorConfig`
+     * is a sibling block, so registration does not judge an envelope there
+     * yet — a malformed one registers and faults at run time — until #27968
+     * declares it.
      * The two legacy
      * `assignment` shapes the executor still normalizes (the
      * `assignments: [{ variable, value }]` array and the bare
