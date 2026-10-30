@@ -313,7 +313,42 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
      */
     clientId: z.string(),
   }).optional().describe('ADR-0090 D10 rule 4 dual attribution: the agent that PERFORMED this operation, when the performer is not the principal the write is authorized as. Set only at the /mcp OAuth door, on the same branch that decides principalKind: agent and onBehalfOf; absent everywhere else, and the absence is the record that the principal acted for itself. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied. Surfaced to hooks as HookContext.provenance.performedByClientId and recorded by the audit writer as sys_audit_log.metadata.performed_by beside on_behalf_of; it does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
-  
+
+  /**
+   * [#27908 — ruling 6513869839 on #27681, parameter 3] WHICH DOOR an action
+   * invocation came through, so the audit row of that invocation tells an
+   * agent's call from a click without a second log.
+   *
+   * A closed vocabulary of the doors that invoke a business action today:
+   *
+   * - `rest` — the REST `POST /actions/:object/:action` door, which the
+   *   console's action buttons and the SDK call.
+   * - `mcp` — the `/mcp` bridge's `run_action` and `resume_run` tools, which
+   *   an AI client calls.
+   *
+   * A new member arrives with the door that sets it, never ahead of it.
+   *
+   * Set by those two doors, and only by them, on the envelope of the
+   * invocation they hand the audit writer; absent on every other operation.
+   * The door sets it from its own identity and overwrites whatever an earlier
+   * hop left there, so no request header, body member or upstream envelope
+   * can move it. Unlike {@link performedBy} it is set for every principal,
+   * a human's API key or session on `/mcp` included: the surface is a fact
+   * about the door, the performer a fact about the credential.
+   *
+   * **ATTRIBUTION ONLY**, exactly like {@link performedBy}: no security
+   * middleware reads it, it widens and narrows nothing, it never becomes an
+   * authorization subject, scope or gate, and which actions a door may run
+   * is decided by the gates each door already runs (ADR-0011 `ai.exposed`,
+   * ADR-0066 D4, ADR-0126). Server-constructed only, never client-supplied —
+   * exactly like {@link isSystem}.
+   *
+   * Recorded by the audit writer as `sys_audit_log.metadata.surface` on the
+   * `action_invocation` row, beside `performed_by` / `on_behalf_of` when an
+   * agent performed the call.
+   */
+  surface: z.enum(['rest', 'mcp']).optional().describe('[#27908] The door an action invocation came through: `rest` (the REST POST /actions/:object/:action door — console buttons, the SDK) or `mcp` (the /mcp bridge\'s run_action and resume_run tools — an AI client). Set only by those two doors, on the envelope of the invocation they hand the audit writer, from the door\'s own identity (an upstream value, header or body member never moves it); absent on every other operation. ATTRIBUTION ONLY — no security middleware reads it and it is never an authorization subject, scope or gate. Server-constructed only, never client-supplied. Recorded by the audit writer as sys_audit_log.metadata.surface on the action_invocation row.'),
+
   /** Aggregated permission names (resolved from PermissionSet) */
   permissions: z.array(z.string()).default([]),
 
