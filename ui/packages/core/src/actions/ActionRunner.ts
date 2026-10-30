@@ -1334,6 +1334,8 @@ export class ActionRunner {
   private translate: ((key: string, options: { defaultValue: string }) => string) | null;
   private displayLocale: (() => string | undefined) | null;
   private tenantCurrency: (() => string | undefined) | null;
+  /** Who {@link ActionRunner.subscribeContext} tells of a context change. */
+  private readonly contextListeners = new Set<() => void>();
 
   /**
    * Built-in dispatch, one entry per runnable action type.
@@ -1834,6 +1836,23 @@ export class ActionRunner {
    * `undefined` when there is none. An update-operation action never reaches
    * a registered handler, so it is never asked.
    */
+  /**
+   * The early refusal {@link ActionRunner.execute} would give `action` if it
+   * were launched now, against this runner's context — `undefined` when it
+   * would go on. It is the refusal `execute` asks before the confirmation and
+   * the param dialog: the dispatch handler's `refuseBeforeInput`, translated
+   * when it names a key. Asking runs nothing, sends nothing and shows nothing.
+   *
+   * A surface that draws a launch control asks it to draw the control the way
+   * a launch would end — a list header greys out a single-record action while
+   * the row selection is not exactly one row (objectstack#27831) — so the rule
+   * stays with the handler that dispatches, and `execute` still refuses a
+   * launch that reaches it anyway.
+   */
+  launchRefusal(action: ActionDef): string | undefined {
+    return this.refusalBeforeInput(action, resolveDispatchType(action, (name) => this.handlers.has(name)));
+  }
+
   private refusalBeforeInput(action: ActionDef, actionType: string): string | undefined {
     if (isUpdateOperationAction(action)) return undefined;
     const handler = actionType ? this.handlers.get(actionType) : undefined;
@@ -3037,10 +3056,26 @@ export class ActionRunner {
     // Feed the merged (re-aliased) context so a refreshed `user` also
     // refreshes the derived `os.user` binding in the evaluator scope.
     this.evaluator.updateContext(this.context);
+    for (const listener of [...this.contextListeners]) listener();
   }
 
   getContext(): ActionContext {
     return this.context;
+  }
+
+  /**
+   * Call `listener` after every {@link ActionRunner.updateContext}, until the
+   * returned function is called. The listener is told that the context
+   * changed, not what changed: it reads {@link ActionRunner.getContext}. This
+   * is the store half React's `useSyncExternalStore` needs, so a control drawn
+   * from the context — such as a header action that follows the grid's row
+   * selection (objectstack#27831) — redraws when a sibling publishes into it.
+   */
+  subscribeContext(listener: () => void): () => void {
+    this.contextListeners.add(listener);
+    return () => {
+      this.contextListeners.delete(listener);
+    };
   }
 
   /**
