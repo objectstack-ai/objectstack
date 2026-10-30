@@ -84,29 +84,30 @@ function relatedNodeId(node: any): RelatedCardId | null {
 }
 
 /**
- * A panel's whole face, open in place (objectstack#27055, Target 9): under the
- * record header, at the page's full width, with ‹ to return. Esc returns too;
- * a dialog or menu open over the page keeps its own Esc.
+ * Whether an `Esc` belongs to a layer over the open face: an open menu, alert
+ * or floating content (a select, a tooltip), or a dialog the face is not
+ * inside (a popover, a confirm, a drawer opened over the page that holds the
+ * face). The dialog that holds the face — the record pane's drawer — is not one.
  */
-/**
- * Whether an `Esc` belongs to something other than the open face: a field the
- * reader types in, an open menu or alert, or a dialog the face is not inside
- * (a popover, a confirm, a drawer opened over the page that holds the face).
- * The dialog that holds the face — the record pane's drawer — is not one.
- */
-function escapeOwnedElsewhere(target: EventTarget | null, face: Element | null): boolean {
-  if (!face) return true;
-  if (
-    target instanceof Element &&
-    target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')
-  ) {
-    return true;
-  }
+function escapeOwnedByLayer(face: Element): boolean {
   const doc = face.ownerDocument;
-  if (doc.querySelector('[role="alertdialog"], [role="menu"]')) return true;
+  if (doc.querySelector('[role="alertdialog"], [role="menu"], [data-radix-popper-content-wrapper]')) return true;
   return Array.from(doc.querySelectorAll('[role="dialog"]')).some((dialog) => !dialog.contains(face));
 }
 
+function isTypingTarget(target: EventTarget | null): target is Element {
+  return (
+    target instanceof Element &&
+    !!target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')
+  );
+}
+
+/**
+ * A panel's whole face, open in place (objectstack#27055, Target 9): under the
+ * record header, at the page's full width, with ‹ to return. Esc returns too;
+ * a dialog or menu open over the page keeps its own Esc, and so does a field
+ * the reader types in.
+ */
 const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; children: React.ReactNode }> = ({
   id,
   title,
@@ -123,7 +124,15 @@ const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; 
     // The face takes the key, and keeps it from the pane.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
-      if (escapeOwnedElsewhere(event.target, faceRef.current)) return;
+      const face = faceRef.current;
+      if (!face || escapeOwnedByLayer(face)) return;
+      if (isTypingTarget(event.target)) {
+        // A field keeps its own `Esc` (it closes a mention list, cancels an
+        // inline edit), so the key goes on to it; pressed in the face, it is
+        // marked handled, and the pane around the face stays open.
+        if (face.contains(event.target)) event.preventDefault();
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       onClose();

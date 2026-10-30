@@ -127,11 +127,31 @@ describe('Esc on an open face inside the record pane (objectstack#27524)', () =>
     menu.remove();
   });
 
-  it('a text field owns Esc: the face stays open while the reader types in it', () => {
-    render(pane({}));
+  it('a text field in the face keeps its own Esc, and the drawer stays open around the face', () => {
+    const setIsOpen = vi.fn();
+    render(pane({ setIsOpen }));
     const input = document.createElement('input');
+    face()!.appendChild(input);
+    const fieldEsc = vi.fn();
+    input.addEventListener('keydown', fieldEsc);
+    escape(input);
+    // The key reaches the field (a mention list, an inline edit's cancel), and
+    // it is not the pane's: the face and the drawer stay.
+    expect(fieldEsc).toHaveBeenCalledTimes(1);
+    expect(face()).not.toBeNull();
+    expect(setIsOpen).not.toHaveBeenCalled();
+    escape(face()!);
+    expect(face()).toBeNull();
+    expect(setIsOpen).not.toHaveBeenCalled();
+  });
+
+  it('a text field in the face, in the split pane beside a list: the face and the pane stay', () => {
+    const close = vi.fn();
+    render(pane({ mode: 'split', mainContent: <div>list</div>, close }));
+    const input = document.createElement('textarea');
     face()!.appendChild(input);
     escape(input);
     expect(face()).not.toBeNull();
+    expect(close).not.toHaveBeenCalled();
   });
 });
