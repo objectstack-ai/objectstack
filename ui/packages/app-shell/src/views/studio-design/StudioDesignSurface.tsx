@@ -199,6 +199,7 @@ import {
   listViewColumnFields,
   listViewColumnIndexOf,
   listViewColumnSelection,
+  listViewHeldEdit,
   listViewIsKanban,
   listViewTargetOf,
   ObjectListViewInspector,
@@ -4894,7 +4895,6 @@ export function InterfacesPillar({
   const [navRenamePending, setNavRenamePending] = React.useState<string | null>(null);
   const navRenameClause =
     navRenamePending === null ? null : tFormat('engine.studio.held.navRename', locale, { item: navRenamePending });
-  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? navRenameClause);
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const leafDraftStatus = useStudioItemDraftStatus(
     current ? { type: current.type, name: current.name } : null,
@@ -4906,14 +4906,20 @@ export function InterfacesPillar({
   // the Properties panel and shown on the canvas, autosaved to the package
   // draft like the other two. Blocked on `readOnly` like them.
   const listView = useObjectListViewDraft({ client, packageId, leaf: current, publishNonce, draftOnlyObjects, onDraftSaved });
+  // objectstack#27895 — an edit that clears a required setting of the view
+  // type's own block (a calendar's start date) is held, not sent, as a
+  // leaf's is: asked of the spec's list-view schema (`listViewHeldEdit`).
+  const listViewHeld = listViewHeldEdit(listView, locale);
   const { flush: flushListView } = useDraftAutoSave({
     target: listView.targetKey,
     loadedFor: listView.loadedFor,
     dirty: listView.dirty,
-    blocked: !listView.target || listView.saving || readOnly,
+    blocked: !listView.target || listView.saving || readOnly || listViewHeld !== null,
     snapshot: listView.row,
     save: listView.save,
   });
+  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? listViewHeld?.clause ?? navRenameClause);
+  const heldUnsent = leafHeld !== null || listViewHeld !== null;
   // objectui#12725 — a click on a column header in an `object` leaf's canvas
   // selects that column (`StudioCanvasColumnSelectionContext`): the pillar's
   // one selection, so it shows in the panel's column list, asks the slot for
@@ -5068,13 +5074,13 @@ export function InterfacesPillar({
       // objectstack#26845 — the created item opens at once, and its load
       // replaces the buffer a held widget lives in: asked before the dialog
       // opens, so Cancel costs nothing and the create itself asks nothing.
-      if (!confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+      if (!confirmDropUnsavedWork(heldUnsent, locale)) return;
       setCreateError(null);
       setReportBinding(NO_REPORT_BINDING);
       setPageKind(DEFAULT_PAGE_SOURCE_KIND);
       setCreateKind(kind);
     },
-    [leafHeld, locale],
+    [heldUnsent, locale],
   );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
@@ -5586,7 +5592,7 @@ export function InterfacesPillar({
       }}
       className={cn('flex min-w-0 flex-1 flex-col overflow-auto bg-muted/30 py-4', inSlot ? 'px-4' : 'px-6')}
     >
-      {(error || navError || leafHeld) && (
+      {(error || navError || leafHeld || listViewHeld) && (
         <div className="mb-3 flex shrink-0 flex-col gap-1.5">
           {/* objectui#11776 — the pillar's failure and the nav editor's own,
               each cleared by what settles it, the same failure shown once.
@@ -5622,6 +5628,15 @@ export function InterfacesPillar({
                     ? undefined
                     : (target) => setSelection(target)
               }
+              className="px-3 py-2 text-xs"
+            />
+          )}
+          {listViewHeld && (
+            <StudioHeldNotice
+              held={listViewHeld}
+              locale={locale}
+              // The setting is in the leaf's own panel, which may be collapsed or scrolled past.
+              onShow={() => showLeafRefusal(null, listViewHeld.input)}
               className="px-3 py-2 text-xs"
             />
           )}
@@ -5957,7 +5972,7 @@ export function InterfacesPillar({
   const pickSurface = (s: Surface) => {
     // objectstack#26705 — another leaf's load replaces the buffer the held
     // widget lives in; an entry for the open leaf keeps it.
-    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(heldUnsent, locale)) return;
     setCurrent(s);
     if (isMobile) setRailOpen(false);
   };

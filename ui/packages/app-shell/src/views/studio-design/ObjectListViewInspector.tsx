@@ -98,9 +98,14 @@ import {
   type StudioCanvasNavEntry,
 } from './studio-canvas-preview.js';
 import type { Surface } from './navSurface.js';
-import { issueRefusal, plainRefusal } from './metadataError.js';
+import { issueRefusal, plainRefusal, type StudioHeld } from './metadataError.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
-import { fieldNamesHeldByTypeBlock, ListViewTypeSection, listViewTypeBlockSchema } from './ListViewTypeSection.js';
+import {
+  fieldNamesHeldByTypeBlock,
+  ListViewTypeSection,
+  listViewTypeBlockSchema,
+  listViewTypeHeldEdit,
+} from './ListViewTypeSection.js';
 import {
   addedArrayElements,
   agentDraftMarkOf,
@@ -660,6 +665,18 @@ export function listViewIsKanban(listView: ObjectListViewDraft): boolean {
   const { target, row, notList, seedColumns, loadedFor, targetKey } = listView;
   if (!target || notList || loadedFor !== targetKey) return false;
   return listBodyOf(row ?? newListViewItem(target, seedColumns)).type === 'kanban';
+}
+
+/**
+ * objectstack#27895 — the edit the pillar's list-view autosave holds, or
+ * `null`: an edited view whose type's block lacks a required setting
+ * (`listViewTypeHeldEdit`). An unedited view is never held: nothing would be
+ * sent.
+ */
+export function listViewHeldEdit(listView: ObjectListViewDraft, locale: string): StudioHeld<null> | null {
+  const { row, notList, dirty } = listView;
+  if (!dirty || !row || notList) return null;
+  return listViewTypeHeldEdit(listBodyOf(row), locale);
 }
 
 const noop = (): void => {};

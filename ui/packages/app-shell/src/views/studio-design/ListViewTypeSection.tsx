@@ -20,16 +20,24 @@
  * section (`KanbanCardSection`); and `chart`, whose block binds an ADR-0021
  * dataset and that dataset's measures, not the object's fields — the Create
  * View dialog's dataset pickers are the editor for it.
+ *
+ * A required setting can be cleared (the field picker offers "None"). That
+ * edit is held, not sent, as the pillar holds every edit the spec refuses
+ * only for an unset input (`listViewTypeHeldEdit`): the draft door would
+ * refuse it with a 422, and every later save with it.
  */
 
 import * as React from 'react';
 import type { ListViewVisualization } from '@object-ui/core';
+import { ListViewSchema } from '@objectstack/spec/ui';
 import { SchemaForm } from '../metadata-admin/SchemaForm.js';
 import { getListVariantSchema } from '../metadata-admin/view-schema.js';
 import type { ObjectFieldOption } from '../metadata-admin/widgets.js';
 import type { LoadState } from '../metadata-admin/loadState.js';
-import { t, tFormat } from '../metadata-admin/i18n.js';
+import { t, tFormat, translateSchemaFieldLabel } from '../metadata-admin/i18n.js';
+import { prettifyFieldName } from '../metadata-admin/field-source-label.js';
 import { DraftChip } from './StudioDraftMark.js';
+import { objectHeldInput, type StudioHeld } from './metadataError.js';
 
 type Row = Record<string, unknown>;
 type JsonSchema = Record<string, any>;
@@ -90,6 +98,33 @@ export function fieldNamesHeldByTypeBlock(block: unknown): string[] {
   return held;
 }
 
+function typeLabelOf(type: string, locale: string): string {
+  const key = (VIEW_TYPE_LABEL_KEYS as Record<string, string | undefined>)[type];
+  return key ? t(key, locale) : type;
+}
+
+/**
+ * The edit the pillar holds for a list body whose type's block the spec
+ * refuses only because a required setting is unset, or `null`. Asked of the
+ * spec's `ListViewSchema` (`objectHeldInput`): a block that is finished but
+ * wrong is sent, and its refusal shows as before. `input` is the setting's
+ * label as the section draws it, so "Show me" focuses that control.
+ */
+export function listViewTypeHeldEdit(body: Row, locale: string): StudioHeld<null> | null {
+  const type = body.type;
+  const schema = listViewTypeBlockSchema(type);
+  if (!schema || typeof type !== 'string') return null;
+  const key = objectHeldInput(body, ListViewSchema, type);
+  if (key === null) return null;
+  const input =
+    translateSchemaFieldLabel(key, schema.properties[key]?.title as string | undefined, locale) || prettifyFieldName(key);
+  return {
+    clause: tFormat('engine.studio.held.listViewTypeNeedsInput', locale, { input, type: typeLabelOf(type, locale) }),
+    target: null,
+    input,
+  };
+}
+
 export function ListViewTypeSection({
   type,
   schema,
@@ -112,8 +147,7 @@ export function ListViewTypeSection({
   marked: boolean;
 }): React.ReactElement {
   const block = isPlainObject(body[type]) ? body[type] : undefined;
-  const labelKey = (VIEW_TYPE_LABEL_KEYS as Record<string, string | undefined>)[type];
-  const typeLabel = labelKey ? t(labelKey, locale) : type;
+  const typeLabel = typeLabelOf(type, locale);
   return (
     <div data-testid="list-view-type-settings" data-view-type={type} className="space-y-3 rounded-md border p-2">
       <div>
@@ -132,11 +166,9 @@ export function ListViewTypeSection({
         value={block}
         readOnly={readOnly}
         widgetContext={{ conditionScope: 'none', objectFields: fieldCatalog }}
-        onChange={(next) => {
-          // An emptied block is no block: the spec has no use for `{}`.
-          const { [type]: _old, ...rest } = body;
-          writeBody(Object.keys(next).length > 0 ? { ...rest, [type]: next } : rest);
-        }}
+        // The block stays written when it is emptied: a required setting
+        // cleared is then an unset input, which the pillar holds.
+        onChange={(next) => writeBody({ ...body, [type]: next })}
       />
     </div>
   );
