@@ -18,9 +18,9 @@
  *    its `ReferentialConstraint` names, when the target is imported; every
  *    other navigation is left out of the draft and named in its review.
  *
- * `@objectstack/driver-odata` is imported as a PACKAGE (its `exports` resolve
- * to `dist/`), so this file measures the driver's BUILT output, as the SQL
- * twin (`external-object-draft-real-introspection.test.ts`) does.
+ * `@objectstack/driver-odata` resolves to the driver's `src/` through this
+ * package's vitest alias, so the draft is judged against the introspection in
+ * the checkout, not a build of it.
  */
 
 import { readFileSync } from 'node:fs';
