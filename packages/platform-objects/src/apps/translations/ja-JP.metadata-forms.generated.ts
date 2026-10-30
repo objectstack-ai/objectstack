@@ -2391,7 +2391,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       name: {
         label: "名前",
-        helpText: "作成時に表示名から自動生成されます。snake_case"
+        helpText: "作成時に表示名の英数字から自動入力されます。表示名に英数字がない場合（日本語のみなど）は手動で入力してください。snake_case"
       },
       description: {
         label: "説明",
