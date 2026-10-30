@@ -93,12 +93,12 @@
     },
     {
       "id": 10,
-      "prompt": "Give the crm app a Reports entry listing every report it ships.",
+      "prompt": "Give the crm app a Reports entry listing all reports it ships.",
       "expected_output": "`{ type: 'report' }` with no `reportName` is the app's report index; the console adds none unless navigation declares it.",
       "files": [],
       "assertions": {
         "must_contain": ["type: 'report'"],
-        "must_not_contain": ["reportName"]
+        "must_not_contain": ["reportName:"]
       }
     }
   ]
