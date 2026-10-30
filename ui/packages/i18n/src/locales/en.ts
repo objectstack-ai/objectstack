@@ -2109,7 +2109,7 @@ const en = {
       title: 'Studio',
       // What a principal without `studio.access` reads at the Studio URL they
       // opened (objectui#12035), in place of the silent redirect home.
-      accessRequired: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Sets.',
+      accessRequired: 'You need Studio access to open Studio.',
     },
     saveAdvisoryTitle: 'Saved — the authoring check raised {{count}} advisory finding(s)',
     saveAdvisoryTitle_one: 'Saved — the authoring check raised {{count}} advisory finding',

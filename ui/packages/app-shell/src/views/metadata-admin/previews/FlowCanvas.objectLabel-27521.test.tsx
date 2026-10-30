@@ -47,6 +47,9 @@ describe('FlowCanvas · node cards name objects by label (objectstack#27521)', (
         nodes={nodes}
         edges={edges}
         editable={false}
+        designMode={false}
+        selectedId={null}
+        onSelect={() => {}}
         objectLabels={new Map([['field_service_work_order', 'Work Order']])}
       />,
     );
@@ -57,7 +60,7 @@ describe('FlowCanvas · node cards name objects by label (objectstack#27521)', (
   });
 
   it('CONTROL — with no catalog the cards keep the API names', () => {
-    render(<FlowCanvas nodes={nodes} edges={edges} editable={false} />);
+    render(<FlowCanvas nodes={nodes} edges={edges} editable={false} designMode={false} selectedId={null} onSelect={() => {}} />);
     expect(screen.getByTitle('field_service_work_order')).toBeTruthy();
   });
 });

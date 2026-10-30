@@ -1783,7 +1783,7 @@ const zh = {
   console: {
     studio: {
       title: 'Studio',
-      accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集”中通过权限集授予。',
+      accessRequired: '你需要 Studio 访问权限才能打开 Studio。',
     },
     saveAdvisoryTitle: '已保存 — 编辑检查提出了 {{count}} 条建议',
     saveAdvisoryTitle_one: '已保存 — 编辑检查提出了 {{count}} 条建议',
