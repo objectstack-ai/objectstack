@@ -204,7 +204,7 @@ describe("the card's repro in the sheet (objectstack#25890)", () => {
     const detail = await expandRepairTicket();
     expect(within(detail).getByText('Includes:')).toBeInTheDocument();
     expect(within(detail).queryByText('Also changed:')).toBeNull();
-    expect(within(detail).getByText('+ sharingModel')).toBeInTheDocument();
+    expect(within(detail).getByText('+ Sharing Model')).toBeInTheDocument();
   });
 
   it('opens the group to the five system columns, label first, and the derived nameField', async () => {

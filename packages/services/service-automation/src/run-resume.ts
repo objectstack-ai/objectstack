@@ -21,7 +21,7 @@ import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { runIsUnscopedUserMode, flowTouchesData, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
-import { readCarriedRefusal } from './inner-refusal.js';
+import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`
@@ -1190,7 +1190,19 @@ export async function resumeInternal(
                         error,
                         this.consumedSuspensions.has(childRunId) ? childRunId : undefined,
                     );
-                    return { success: false, error, durationMs: Date.now() - run.startTime, flowLabel: flow.label };
+                    // #27743 — the child's refusal, carried beside the
+                    // re-worded `error` exactly as the synchronous `subflow`
+                    // arm carries it (`inner-refusal.ts`): this is the leg a
+                    // caller holding the PARENT's run id takes, and without it
+                    // a refusal met after the child's pause reached that
+                    // caller as text only. `{}` for a child that met none.
+                    return {
+                        success: false,
+                        error,
+                        durationMs: Date.now() - run.startTime,
+                        flowLabel: flow.label,
+                        ...carriedRefusalOfResult(childRes),
+                    };
                 }
                 // [#18714] DELEGATED-LEG REFUSAL. The child ran to a
                 // refusing terminal — an `end` declaring

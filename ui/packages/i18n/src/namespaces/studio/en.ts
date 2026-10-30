@@ -3141,8 +3141,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
   // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
   'engine.studio.org.openSetup': 'Open in Setup',
-  'engine.studio.publishedAllFlows': 'Published {count} package-less flow drafts',
-  'engine.studio.publishedAllFlowsOne': 'Published {count} package-less flow draft',
+  'engine.studio.publishedAllFlows': 'Published {count} flows',
+  'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
   'engine.studio.designer.select': 'Select…',
   'engine.studio.designer.pickDate': 'Pick a date…',
@@ -4061,6 +4061,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ Add sort…',
   'engine.studio.inspector.listView.sortAsc': '{field} ascending',
   'engine.studio.inspector.listView.sortDesc': '{field} descending',
+  // objectstack#27836 — "Add view": a new list view of the object, its type picked first.
+  'engine.studio.inspector.listView.addView': 'Add view',
+  'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
+  'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',
