@@ -24,10 +24,19 @@
  * Both maps prepare the schema through `usePreparedFormSchema`, the one
  * preparation `ObjectForm` uses, so the labels, field-level security and
  * `{ group }` sections a container draws are the ones the layouts draw.
+ *
+ * As the caller, the block also gives the save its feedback
+ * (`ux-conventions.write-feedback`): a write the container makes toasts the
+ * record-named message the console's record dialogs and record page toast
+ * (`recordSaveMessage`, `Task "Quarterly review" updated`), before the author's
+ * `onSuccess` runs. A host that mounts `DrawerForm` / `ModalForm` itself owns
+ * its own feedback, so it never passes through here and is never toasted twice.
  */
 
-import React from 'react';
+import React, { useCallback } from 'react';
 import type { ObjectFormSchema } from '@object-ui/types';
+import { toast } from '@object-ui/components';
+import { createSafeTranslation, recordSaveMessage, useObjectLabel } from '@object-ui/i18n';
 import { usePreparedFormSchema, ObjectForm, type ObjectFormComponentProps } from './ObjectForm';
 import { DrawerForm } from './DrawerForm';
 import { ModalForm } from './ModalForm';
@@ -54,11 +63,59 @@ export const ObjectFormContainer: React.FC<ObjectFormComponentProps> = ({ schema
   </RecordFieldAccessForForm>
 );
 
+/**
+ * The save message's copy. Falls back to the `en` pack's values when no i18n
+ * provider is mounted, so a provider-less host toasts English, not raw keys.
+ */
+const useSaveFeedbackTranslation = createSafeTranslation(
+  {
+    'form.createdNamed': '{{object}} "{{title}}" created',
+    'form.updatedNamed': '{{object}} "{{title}}" updated',
+    'form.createSuccess': '{{object}} created successfully',
+    'form.updateSuccess': '{{object}} updated successfully',
+    'common.record': 'Record',
+  },
+  'form.createdNamed',
+);
+
+/**
+ * The container's `onSuccess`: toast the save, then hand the record to the
+ * author's `onSuccess`. Only a write the container made is toasted — a
+ * `submitHandler` owns its own persistence and feedback, and an adapter-less
+ * inline-fields collector wrote nothing (its `onSuccess` IS the write).
+ */
+function useContainerSaveFeedback(
+  schema: ReturnType<typeof usePreparedFormSchema>['schema'],
+  dataSource: ObjectFormComponentProps['dataSource'],
+): (saved: unknown) => Promise<void> {
+  const { t } = useSaveFeedbackTranslation();
+  const { objectLabel } = useObjectLabel();
+  const { onSuccess, submitHandler, objectName, mode, successMessage } = schema;
+  return useCallback(async (saved: unknown) => {
+    if (dataSource && !submitHandler && (mode === 'create' || mode === 'edit')) {
+      let message = successMessage;
+      if (!message) {
+        // The adapter caches the definition the form body already read.
+        const objectDef = await Promise.resolve(dataSource.getObjectSchema?.(objectName)).catch(() => undefined);
+        message = recordSaveMessage(t, {
+          label: objectDef?.name ? objectLabel(objectDef) : t('common.record'),
+          objectDef,
+          saved,
+          mode,
+        });
+      }
+      toast.success(message);
+    }
+    await onSuccess?.(saved);
+  }, [dataSource, submitHandler, mode, successMessage, objectName, onSuccess, objectLabel, t]);
+}
+
 const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({
   schema: rawSchema,
   dataSource,
 }) => {
   const { schema, tSec } = usePreparedFormSchema(rawSchema, dataSource);
+  const handleSuccess = useContainerSaveFeedback(schema, dataSource);
 
   if (schema.formType === 'drawer') {
     // `layout` passes through unfolded: it is `vertical | horizontal` on both
@@ -88,6 +145,7 @@ const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({
           })),
           open: schema.open,
           onOpenChange: schema.onOpenChange,
+          onSuccess: handleSuccess,
           drawerSide: schema.drawerSide,
           drawerWidth: schema.drawerWidth,
         }}
@@ -126,6 +184,7 @@ const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({
           })),
           open: schema.open,
           onOpenChange: schema.onOpenChange,
+          onSuccess: handleSuccess,
           modalSize: schema.modalSize,
           modalCloseButton: schema.modalCloseButton,
         }}

@@ -106,6 +106,7 @@ export const jaJP: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'HTTP 配信' },
         nav_datasources: { label: 'データソース' },
+        nav_connector_credentials: { label: 'コネクタ認証情報' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
       },

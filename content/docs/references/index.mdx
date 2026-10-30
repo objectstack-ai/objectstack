@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1555 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1566 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -21,7 +21,7 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 32 | 440 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 33 | 451 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 15 | 77 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 31 | 174 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
@@ -34,7 +34,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 37 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 172 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **202** | **1555** | 14 protocol modules |
+| **Total** | **203** | **1566** | 14 protocol modules |
 
 ---
 
@@ -63,7 +63,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **32 pages, 440 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **33 pages, 451 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -95,6 +95,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`query-adapter.zod.ts`](/docs/references/api/query-adapter) | `ODataQueryAdapter`, `OperatorMapping`, `QueryAdapterConfig`, `QueryAdapterTarget`, `RestQueryAdapter` |
 | [`realtime.zod.ts`](/docs/references/api/realtime) | `RealtimeConfig`, `RealtimeEvent`, `RealtimeEventType`, `RealtimePresence`, `Subscription`, `SubscriptionEvent`, `TransportProtocol` |
 | [`realtime-shared.zod.ts`](/docs/references/api/realtime-shared) | `BasePresence`, `PresenceStatus`, `RealtimeRecordAction` |
+| [`record-page.zod.ts`](/docs/references/api/record-page) | `RecordPageApprovals`, `RecordPageExplainAnswer`, `RecordPageExplainOperation`, `RecordPagePartError`, `RecordPagePartRefusal`, `RecordPageRelatedAnswer`, `RecordPageRelatedRefusal`, `RecordPageRelatedRequest`, `RecordPageRelatedRows`, `RecordPageRequest`, `RecordPageResponse` |
 | [`rest-server.zod.ts`](/docs/references/api/rest-server) | `BatchEndpointsConfig`, `CrudEndpointsConfig`, `CrudOperation`, `EndpointRegistry`, `GeneratedEndpoint`, `MetadataEndpointsConfig`, `RestApiConfig`, `RestServerConfig`, `RouteGenerationConfig` |
 | [`router.zod.ts`](/docs/references/api/router) | `ConflictResolutionStrategy`, `HttpMethod`, `RouteCategory`, `RouteDefinition`, `RouterConfig` |
 | [`sortability.zod.ts`](/docs/references/api/sortability) | `FieldSortability`, `ObjectSortability` |

@@ -106,6 +106,7 @@ export const esES: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'Entregas HTTP' },
         nav_datasources: { label: 'Fuentes de datos' },
+        nav_connector_credentials: { label: 'Credenciales de conectores' },
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
       },

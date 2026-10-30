@@ -198,6 +198,10 @@ interface CensusEntry {
  * unchanged: neither the object state-machine read (`meta-object-state-routes.ts`)
  * nor the published read (now in `meta-item-history-routes.ts`) builds a `query:`
  * slot, so the new module's floor is 0 and the history module's stays 0.
+ *
+ * [#27627] 5 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0 + 0 + 0 + 1:
+ * the record page (`record-page-routes.ts`) builds one `query:` slot, the
+ * related list read, so the new module's floor is 1.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -218,6 +222,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'meta-item-write-routes.ts': 0,
     'meta-item-history-routes.ts': 0,
     'meta-object-state-routes.ts': 0,
+    'record-page-routes.ts': 1,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -426,10 +431,11 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#23050 slice 13e] Length 17 → 18, the sum unchanged (neither the object
         // state-machine read nor the published read carries a slot).
         // [#26433] The list's length is no longer pinned: the list is the authority.
+        // [#27627] The sum 4 → 5: the record page's related list read.
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);
-        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(4);
+        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(5);
     });
 
     it('dropping comment lines leaves the code that is being censused', () => {

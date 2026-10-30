@@ -58,6 +58,7 @@ import {
 } from './connector-credentials.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
+import { CONNECTOR_CREDENTIALS_UI_BUNDLE } from './connector-credentials-ui.js';
 import {
     FlowCredentialChannel,
     storedFlowStates,
@@ -952,6 +953,20 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [#27238] Register {@link CONNECTOR_CREDENTIALS_UI_BUNDLE} — the Setup
+     * entry for the connector credential door this plugin attaches in
+     * `init()`. A composition with no `manifest` service (a bare kernel, a
+     * test) serves no console, so it gets no entry and nothing is lost.
+     */
+    private registerConnectorCredentialsUi(ctx: PluginContext): void {
+        try {
+            ctx.getService<{ register(m: unknown): void }>('manifest').register(CONNECTOR_CREDENTIALS_UI_BUNDLE);
+        } catch {
+            /* no manifest service: no console to carry the entry */
+        }
+    }
+
+    /**
      * [#20790] The data engine the credential channel, its index and the
      * one-time move read and write through — ObjectQL, resolved at call time
      * (it may register after this plugin inits).
@@ -1762,6 +1777,13 @@ export class AutomationServicePlugin implements Plugin {
                     if (this.degradedInstances.size > 0) void this.materializeDeclaredConnectors(ctx, { fatal: false });
                 });
             }
+        });
+
+        // [#27238] Setup → Integrations → Connector Credentials — the door's
+        // nav entry ships with the door (cloud ADR-0009 shape). After the
+        // inert-mode return above: a one-shot tool serves no console.
+        ctx.hook('kernel:ready', async () => {
+            this.registerConnectorCredentialsUi(ctx);
         });
 
         // ── Runtime re-bind: a flow saved, published or deleted at runtime ────

@@ -23,7 +23,8 @@
  * inviter when the signed-out invitation preview answers (#26473,
  * `useInvitationArrival`), and keeps the generic copy when it does not. For an
  * invitation the server no longer knows it draws `InvitationGoneNotice` alone:
- * no prompt and no form (#27509).
+ * no prompt and no form (#27509). A visitor without the link, where sign-up is
+ * by invitation only, is told under the form to open it (`InvitationLinkHint`).
  */
 
 import { useEffect, useState } from 'react';
@@ -45,6 +46,7 @@ import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import {
   InvitationGoneNotice,
+  InvitationLinkHint,
   InvitationSignUpPrompt,
   invitationArrivalCopy,
   useInvitationArrival,
@@ -205,7 +207,17 @@ export function LoginPage() {
       />
   );
 
-  if (!invitationRedirect) return <AuthPageLayout>{form}</AuthPageLayout>;
+  if (!invitationRedirect) {
+    return (
+      <AuthPageLayout>
+        {/* A column, so the hint sits under the form in the layout's row. */}
+        <div className="flex w-full flex-col">
+          {form}
+          <InvitationLinkHint offer={signUpOffer} />
+        </div>
+      </AuthPageLayout>
+    );
+  }
 
   if (invitationArrival.gone) {
     return (

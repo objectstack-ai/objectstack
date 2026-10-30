@@ -35,6 +35,7 @@ import {
   Button,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { useActionDialogReturnFocus } from './actionDialogReturnFocus.js';
 import { Copy, Eye, EyeOff, Check } from 'lucide-react';
 import { toCanvas } from 'qrcode';
 // Aliased per PR #4169's convention — app-shell has its OWN `resolveI18nLabel`
@@ -76,6 +77,8 @@ export function ActionResultDialog({ state, onAcknowledge }: ActionResultDialogP
   // surrounding chrome cannot disagree about the user's language.
   const { t, language } = useObjectTranslation();
   const { spec, data } = state;
+  // Focus returns to the control that started the action (see the helper).
+  const returnFocus = useActionDialogReturnFocus(state.open);
 
   // Each of these three is an `I18nLabel` on the contract: a plain string, or
   // an inline per-locale map. Resolved here, once, on the way INTO JSX — an
@@ -113,6 +116,8 @@ export function ActionResultDialog({ state, onAcknowledge }: ActionResultDialogP
       onOpenChange={(open) => { if (open === false) return; /* swallow */ }}
     >
       <DialogContent
+        ref={returnFocus.contentRef}
+        onCloseAutoFocus={returnFocus.onCloseAutoFocus}
         // Block the X close button's intent too.
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}

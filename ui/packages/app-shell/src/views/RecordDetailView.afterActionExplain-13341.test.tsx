@@ -28,6 +28,9 @@
  * The transport HOLDS every request until the test releases it, so "on the
  * wire" is literal and every count is a count of requests sent.
  *
+ * Since objectstack#27627 the open asks its questions inside the record page
+ * payload (`POST /data/OBJ/ID/page`); a question it carries counts as asked.
+ *
  * Controls, each against the hole a fix could leave:
  *   - the re-check is still sent (one fresh request, not zero), and the
  *     header follows its answer: a save that revokes the edit hides Edit;
@@ -91,7 +94,23 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
+const PAGE = `/api/v1/data/${OBJECT}/${REC}/page`;
+const isPayload = (h: Held) => h.method === 'POST' && h.path === PAGE;
+
 function answerFor(h: Held): unknown {
+  if (isPayload(h)) {
+    const asked = JSON.parse(h.body ?? '{}') as { explain?: string[] };
+    return {
+      success: true,
+      data: {
+        object: OBJECT,
+        id: REC,
+        record: RECORD,
+        related: [],
+        explain: Object.fromEntries((asked.explain ?? []).map((op) => [op, { allowed: true, record: { recordId: REC, visible: verdicts[op] } }])),
+      },
+    };
+  }
   if (h.path.endsWith('/security/explain')) {
     const { operation } = JSON.parse(h.body ?? '{}') as { operation: string };
     return { allowed: true, record: { recordId: REC, visible: verdicts[operation] } };
@@ -155,13 +174,22 @@ async function drain(held: Held[]) {
 
 const isExplain = (h: Held) => h.method === 'POST' && h.path.endsWith('/security/explain');
 
-/** How many requests asked each `object/recordId/operation`, from `from` on. */
+/**
+ * How many requests asked each `object/recordId/operation`, from `from` on: an
+ * explain request, or a record page payload carrying the question.
+ */
 function perQuestion(held: Held[], from: number): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const h of held.slice(from).filter(isExplain)) {
-    const q = JSON.parse(h.body ?? '{}') as { object: string; recordId: string; operation: string };
-    const k = `${q.object}/${q.recordId}/${q.operation}`;
-    out[k] = (out[k] ?? 0) + 1;
+  for (const h of held.slice(from)) {
+    const asked = isExplain(h)
+      ? [JSON.parse(h.body ?? '{}') as { object: string; recordId: string; operation: string }]
+      : isPayload(h)
+        ? ((JSON.parse(h.body ?? '{}').explain ?? []) as string[]).map((operation) => ({ object: OBJECT, recordId: REC, operation }))
+        : [];
+    for (const q of asked) {
+      const k = `${q.object}/${q.recordId}/${q.operation}`;
+      out[k] = (out[k] ?? 0) + 1;
+    }
   }
   return out;
 }
