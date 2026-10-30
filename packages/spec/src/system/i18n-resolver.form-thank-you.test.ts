@@ -175,3 +175,23 @@ describe("translateView — a form view's thank-you panel, keyed `_views.<view>.
     expect(doc.config.submitBehavior).toEqual(CONTAINER.formViews.web_to_lead.submitBehavior);
   });
 });
+
+describe('the `_views.<view>.submitBehavior` translation face', () => {
+  const issuesOf = (node: unknown) => {
+    const parsed = ObjectTranslationDataSchema.safeParse({ _views: { web_to_lead: node } });
+    return parsed.success ? [] : parsed.error.issues;
+  };
+
+  it('carries the thank-you `title` and `message` and nothing else', () => {
+    expect(issuesOf({ submitBehavior: { title: '感谢您！', message: '我们会尽快与您联系。' } })).toEqual([]);
+    const [issue] = issuesOf({ submitBehavior: { title: '感谢您！', url: '/zh/thanks' } });
+    expect(issue?.code).toBe('unrecognized_keys');
+    expect(issue?.path).toEqual(['_views', 'web_to_lead', 'submitBehavior']);
+  });
+
+  it('refuses a copied `kind` with a prescription naming the two translatable strings', () => {
+    const [issue] = issuesOf({ submitBehavior: { kind: 'thank-you', title: '感谢您！' } });
+    expect(issue?.code).toBe('unrecognized_keys');
+    expect(issue?.message).toContain('`title` and `message`');
+  });
+});
