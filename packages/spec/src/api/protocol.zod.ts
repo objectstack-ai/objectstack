@@ -633,10 +633,13 @@ export type MetadataAuthoringClient = z.input<typeof MetadataAuthoringClientSche
  *   (`unregistered` included), and so does this: an empty array is the
  *   statement "nothing here is switched off", which absence is reserved never
  *   to make.
- * - **On the cached default door too, out of the ETag.** A read that carries
- *   it is never answered 304, for the reason {@link
- *   GetMetaItemCachedResponseSchema} gives for `registration`. Absent on a
- *   draft read, whose pending body is not what the doors dispatch from.
+ * - **On the cached default door too, folded into its ETag.** The REST door
+ *   (`GET /meta/object/:name`) folds the list exactly as served into the
+ *   object read's ETag, so a revalidation is answered 304 only while the
+ *   switched-off set is unchanged, and an administrator's switch answers 200
+ *   with the new list (#28044; {@link GetMetaItemCachedResponseSchema}).
+ *   Absent on a draft read, whose pending body is not what the doors
+ *   dispatch from.
  *
  * [#24298] `draftChanges` is a pending draft's per-key provenance: for each
  * changed key path of the draft body, which authoring surface (`copilot`,
@@ -2379,9 +2382,12 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
  * [#27842] …and `disabledActions`, on the same terms: `GET /meta/object/:name`
  * on a default deployment is answered here, so the packaged actions the
  * activation ledger switches off ride beside `data`, read live from the
- * delegate read, and a read that carries them is never answered
- * `notModified` — an administrator's switch moves no byte of the document, so
- * a 304 would keep the caller on the list it was served before the switch.
+ * delegate read, and this method never answers `notModified` for a read that
+ * carries them — an administrator's switch moves no byte of the document, so
+ * its own `etag` cannot see the switch. The REST door that serves
+ * `GET /meta/object/:name` does not rely on that stand-down: it folds the
+ * served list into the ETag it checks (#28044), so its 304 is safe and comes
+ * back only while the switched-off set is unchanged.
  */
 export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheResponseSchema.extend({
   registration: FlowRegistrationSchema.optional().describe(
@@ -2394,8 +2400,9 @@ export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheRes
     'The names in the `actions` of the object in `data` that this deployment\'s activation ledger switches '
     + 'off (a call to any of them is refused 409 `ACTION_DISABLED`), read live on every call and never part '
     + 'of `etag`. Present only for an `object` read answered by a process whose data engine has an '
-    + 'activation ledger attached, `[]` when none is switched off; a read that carries it is never answered '
-    + '`notModified`. Absent otherwise, and absence means no ledger answered, never that nothing is '
+    + 'activation ledger attached, `[]` when none is switched off; this method never answers `notModified` '
+    + 'for a read that carries it (the REST door folds the served list into the ETag it checks instead, so its '
+    + '304 comes back only while the switched-off set is unchanged). Absent otherwise, and absence means no ledger answered, never that nothing is '
     + 'switched off.',
   ),
 }));
