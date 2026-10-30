@@ -280,6 +280,11 @@ jobs:
               - '.nvmrc'
               - '.github/actions/setup-workspace/**'
               - '.github/actions/setup-pnpm/**'
+              # setup-pnpm materialises the pnpm the root manifest's
+              # `packageManager` field pins (#27717), so a diff confined to
+              # that field changes the pnpm Build Docs installs with. `core:`
+              # already carries this row for its own jobs.
+              - 'package.json'
             core:
               - 'packages/**'
               - 'examples/**'
@@ -361,6 +366,19 @@ jobs:
               - 'ui/scripts/check-dist-completeness.mjs'
               - 'ui/scripts/invoked-as.mjs'
               - 'ui/scripts/vitest-invocation-guard.mjs'
+              # TEST INPUTS outside every package (#27961): each `$TURBO_ROOT$/…`
+              # input of turbo.json's generic `test` task. That task runs for
+              # every package Test Core tests, so a diff confined to one moves
+              # every `#test` hash, and before these rows Test Core first ran on
+              # it in the merge queue. `vitest.preset.mts` above and the
+              # `vite-*.ts` / `vitest-invocation-guard.mjs` build rows cover the
+              # other three; check-ci-filter-parity derives the set from
+              # turbo.json and reds while one is uncovered here.
+              - 'ui/vitest.config.mts'
+              - 'ui/vitest.setup.*'
+              - 'ui/scripts/test-shard-*'
+              - 'ui/apps/console/vitest.config.ts'
+              - 'ui/apps/console/vite.config.ts'
               # BUILD CORE'S GUARDS (#21341): every repository script the
               # build-core job's own steps run (named by a `run:` step or
               # reached through its `pnpm check:*` alias) and each one's
@@ -533,6 +551,11 @@ jobs:
               # PR, nor in the queue, where these outputs read the same diff.
               - '.nvmrc'
               - '.github/actions/setup-pnpm/**'
+              # The root manifest, because setup-pnpm reads its `packageManager`
+              # field to pick the pnpm every ui job runs (#27717). A diff
+              # confined to a pnpm bump matched no list here, so the ui jobs
+              # skipped on the PR and in the queue alike.
+              - 'package.json'
             # The seven packages objectui installs from this tree (the set its
             # `.objectstack-pin` used to pack). A change here compiles and builds
             # the Console in the same PR — the check the retired Spec Shape Gate
