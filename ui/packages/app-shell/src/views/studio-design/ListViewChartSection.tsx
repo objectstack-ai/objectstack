@@ -38,7 +38,7 @@ import { datasetOptionLabel, useObjectDatasetBinding } from './objectDatasets.js
 import { DraftChip } from './StudioDraftMark.js';
 
 type Row = Record<string, unknown>;
-type Member = DatasetMeasureInfo | DatasetDimensionInfo;
+type DatasetMember = DatasetMeasureInfo | DatasetDimensionInfo;
 
 function isPlainObject(v: unknown): v is Row {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -104,7 +104,7 @@ function MemberList({
   id: string;
   label: string;
   names: string[];
-  members: ReadonlyArray<Member> | null;
+  members: ReadonlyArray<DatasetMember> | null;
   readOnly: boolean;
   locale: string;
   addText: string;
@@ -216,7 +216,7 @@ export function ListViewChartSection({
     // A catalog entry that lists no member at all may be a name-only summary:
     // nothing is known to carry over, so nothing does.
     const known = !!entry && entry.measures.length + entry.dimensions.length > 0;
-    const keep = (names: string[], members: ReadonlyArray<Member>) =>
+    const keep = (names: string[], members: ReadonlyArray<DatasetMember>) =>
       known ? names.filter((n) => members.some((m) => m.name === n)) : [];
     let next: Row = { ...(chart ?? {}), dataset: name };
     next = withNames(next, 'values', keep(values, entry?.measures ?? []));
