@@ -99,7 +99,7 @@ export function narrowStateMachineOptions<T extends Record<string, any>>(
   } else {
     return fields;
   }
-  return fields.map((f) => {
+  const narrowed = fields.map((f) => {
     if (!f?.name) return f;
     // A multi-value select holds a set, not one state, so no machine applies.
     if (f.multiple || f.field?.multiple) return f;
@@ -116,4 +116,5 @@ export function narrowStateMachineOptions<T extends Record<string, any>>(
         : {}),
     };
   });
+  return narrowed.every((f, i) => f === fields[i]) ? fields : narrowed;
 }
