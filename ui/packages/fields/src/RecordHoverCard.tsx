@@ -41,7 +41,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { HoverCard, HoverCardContent, HoverCardTrigger, LazyIcon, Skeleton, cn } from '@object-ui/components';
+import { HoverCard, HoverCardContent, HoverCardTrigger, LazyIcon, Skeleton } from '@object-ui/components';
 import {
   buildExpandFields,
   getRecordDisplayName,
@@ -78,7 +78,7 @@ export interface RecordHoverCardObjectDef {
   name?: string;
   label?: unknown;
   icon?: unknown;
-  fields?: Record<string, any> | null;
+  fields?: Record<string, Record<string, unknown> | null | undefined> | null;
   highlightFields?: unknown;
   [key: string]: unknown;
 }
@@ -348,10 +348,12 @@ function RecordHoverCardBody({
     ? highlights
         .filter((field) => !isEmptyValue(record[field]))
         .map((field) => {
-          const def = objectSchema!.fields![field] as Record<string, any>;
+          const def = objectSchema!.fields![field]!;
           const caption = fieldLabel(objectName, field, pickLocalized(def.label, language) || humanizeLabel(field));
-          const meta: Record<string, any> = { ...def, name: field, label: caption };
-          if (Array.isArray(def.options)) meta.options = translateOptions(objectName, field, def.options);
+          const meta: Record<string, unknown> = { ...def, name: field, label: caption };
+          if (Array.isArray(def.options)) {
+            meta.options = translateOptions(objectName, field, def.options as Parameters<typeof translateOptions>[2]);
+          }
           const Cell = getCellRenderer(resolveCellRendererType(meta as { type?: string; format?: string }));
           return (
             <React.Fragment key={field}>
