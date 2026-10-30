@@ -309,14 +309,20 @@ describe('ActionActivationProjection — absence means ACTIVE', () => {
         expect(projection.isEnabled('convert_lead')).toBe(true);
     });
 
-    it('the refusal sentence names the ledger and the remedies — and ⛔ never a clone', () => {
+    it('[#27842] the refusal sentence is plain words for the person who clicked — no table, no ADR, ⛔ never a clone', () => {
         const projection = new ActionActivationProjection();
 
         const message = projection.describeDisabled('convert_lead');
 
-        expect(message).toContain("Action 'convert_lead' is disabled");
-        expect(message).toContain('sys_metadata_activation');
-        expect(message).toContain('ADR-0126 §8');
+        // What happened, who can undo it and where, and what to do meanwhile.
+        expect(message).toBe(
+            'This action is turned off for this deployment. An administrator can turn it on again under '
+            + 'Setup › Packaged automation, or you can use another action.',
+        );
+        // The machine half (the ledger table, the ADR) belongs to the log line
+        // and the envelope's code, never to what an end user reads.
+        expect(message).not.toContain('sys_metadata_activation');
+        expect(message).not.toMatch(/ADR-\d+/);
         // Action-CLONE is not chartered (§8 item 2). Recommending one would
         // advertise machinery that does not exist — the FLOW refusal says
         // "clone", and this one must not inherit that sentence.
@@ -349,7 +355,48 @@ describe('ObjectQL engine — the projection the dispatch doors consult', () => 
         engine.registerAction('crm_lead', 'convert_lead', async () => ({ ran: true }), 'metadata-service');
 
         expect(engine.isActionEnabled('convert_lead')).toBe(false);
-        expect(engine.describeDisabledAction('convert_lead')).toContain('ADR-0126 §8');
+        expect(engine.describeDisabledAction('convert_lead')).toBe(new ActionActivationProjection().describeDisabled('convert_lead'));
+    });
+
+    // [#27842] The member the metadata read serves beside an object as
+    // `disabledActions`: the doors' own projection, or nothing while no ledger
+    // is attached — never `[]` for "no ledger", which would tell a client that
+    // nothing is switched off when no ledger answered at all.
+    it('getDisabledActions: undefined with no ledger attached, [] for an empty one, the names once one is off', async () => {
+        const engine = new ObjectQL();
+        expect(engine.getDisabledActions()).toBeUndefined();
+        // The operability read keeps its own answer for the same state.
+        expect(engine.listDisabledActions()).toEqual([]);
+
+        const store = new InMemoryActionActivationStore();
+        engine.setActionActivationStore(store);
+        await engine.hydrateActionActivations();
+        expect(engine.getDisabledActions()).toEqual([]);
+
+        await engine.setActionActive({ name: 'convert_lead', packageId: 'crm', active: false });
+        expect(engine.getDisabledActions()).toEqual(['convert_lead']);
+        expect(engine.isActionEnabled('convert_lead')).toBe(false);
+
+        await engine.setActionActive({ name: 'convert_lead', packageId: 'crm', active: true });
+        expect(engine.getDisabledActions()).toEqual([]);
+    });
+
+    it('[#27842] the sentence leaves the ledger and the ADR out; the log line the engine writes keeps them, with the code', () => {
+        const info = vi.fn();
+        const logger: any = { info, warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        const engine = new ObjectQL({ logger });
+        info.mockClear();
+
+        const sentence = engine.describeDisabledAction('convert_lead');
+
+        expect(sentence).not.toContain('sys_metadata_activation');
+        expect(info).toHaveBeenCalledTimes(1);
+        const [line, meta] = info.mock.calls[0];
+        expect(line).toContain('ACTION_DISABLED');
+        expect(line).toContain("'convert_lead'");
+        expect(line).toContain('sys_metadata_activation');
+        expect(line).toContain('ADR-0126 §8');
+        expect(meta).toEqual({ action: 'convert_lead', refusal: 'ACTION_DISABLED' });
     });
 
     it('setActionActive flips the row and the projection together, in that order', async () => {

@@ -207,7 +207,9 @@ describe('#12359 — actions and NO automation service: the ledger is there', ()
         // no param shape and reads no record. A 400 here would mean the param
         // contract ran first and the switch is not doing its job.
         expect(res.status, `dispatch of a disabled action answered ${res.status}: ${text}`).toBe(409);
-        expect(text).toMatch(/ACTION_DISABLED|is disabled/);
+        // [#27842] The code is the machine handle; the sentence beside it is the
+        // end user's and names no ledger, so only the code is read here.
+        expect(text).toContain('ACTION_DISABLED');
     });
 
     it('re-enabling re-arms dispatch, and the row records the choice rather than vanishing', async () => {

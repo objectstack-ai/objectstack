@@ -1674,7 +1674,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1706,9 +1706,9 @@
       ],
       "acceptance": [
         {
-          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence naming the ledger — and no side effect lands (mark_done's declared done/progress write never ran)",
+          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence, written for the end user: it says the action is turned off for this deployment and that an administrator can turn it on again under Setup › Packaged automation, and names no system table and no ADR (the engine's log line carries those) — and no side effect lands (mark_done's declared done/progress write never ran)",
           "oracle": "api",
-          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. packaged-action-disabled-dispatch-live.dogfood.test.ts scores it over HTTP: the exact code, the sentence (prefix \"Action 'showcase_mark_done' is disabled — \" and the ledger citation), and the real task re-read with done, progress and updated_at unchanged. packaged-activation-ledger-reach.dogfood.test.ts still asserts 409 and /ACTION_DISABLED|is disabled/ only",
+          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. packaged-action-disabled-dispatch-live.dogfood.test.ts scores it over HTTP: the exact code, the sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged automation remedy, and no ledger table or ADR in it), and the real task re-read with done, progress and updated_at unchanged. packaged-activation-ledger-reach.dogfood.test.ts still asserts 409 and the code ACTION_DISABLED only",
           "evidence": "the trace + the control re-reads"
         },
         {
@@ -1833,6 +1833,12 @@
           "date": "2026-10-27",
           "change": "acceptance[0]–[6] and negative[0]–[2] are pinned at the layer their api oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a0, a3, a4, a6 and n1 partial below the HTTP layer, and a1, a5, n0 and n2 unpinned). The new packaged-action-disabled-dispatch-live.dogfood.test.ts drives the REST door, the live MCP transport and a cold boot on one database file; automated.ref names what it asserts and acceptance[0].verify names the pin that carries it. Measured at base c8583f80. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-30",
+          "change": "acceptance[0]'s clause and verify respelled for #27842: the disabled-action sentence is now written for the end user who clicked (what happened, that an administrator can turn the action on again under Setup › Packaged automation, or use another action) and names no system table and no ADR; the engine's describeDisabledAction writes the ledger table, ADR-0126 §8 and the ACTION_DISABLED code to its log line instead. The code and the 409 are unchanged, so every other clause stands; the clause's 'naming the ledger' was the only text that turned false. The dogfood pin's sentence helper and packaged-activation-ledger-reach.dogfood.test.ts's /ACTION_DISABLED|is disabled/ are flipped in the same change (the latter now reads the code alone)",
+          "ref": "#27842"
         }
       ]
     },

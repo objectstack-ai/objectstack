@@ -38,6 +38,7 @@ import {
     offOriginApiActivationRefusal,
     API_FORWARD_MARK_HEADER,
 } from '../action-execution.js';
+import { ActionActivationProjection } from '@objectstack/objectql';
 
 const OBJECT = 'crm_lead';
 const BAN_LEAD = {
@@ -109,9 +110,8 @@ function boot(opts: {
         }),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
         isActionEnabled: (name: string) => !disabled.has(name),
-        describeDisabledAction: (name: string) =>
-            `Action '${name}' is disabled — switched off in the packaged-metadata activation ledger ` +
-            `(sys_metadata_activation, ADR-0126 §8).`,
+        // [#27842] The engine's own sentence, never a transcribed copy of it.
+        describeDisabledAction: (name: string) => new ActionActivationProjection().describeDisabled(name),
     };
     const metadata: any = {
         load: vi.fn(async () => null),
