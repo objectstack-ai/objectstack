@@ -69,7 +69,7 @@ import {
   type WidgetRenderer,
 } from './widgets.js';
 import { useMetadataLocale, t, tFormat, translateValidationMessage, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp } from './i18n.js';
-import { untranslatedFieldLabel } from './field-source-label.js';
+import { prettifyFieldName as prettify, untranslatedFieldLabel } from './field-source-label.js';
 
 /**
  * The form authoring surface — `FormFieldSpec` and the `VisibilityPredicate`
@@ -3435,13 +3435,6 @@ function safeStringify(v: unknown): string {
   } catch {
     return String(v);
   }
-}
-
-function prettify(key: string): string {
-  return key
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function orderKeys(keys: string[], preferred: string[]): string[] {

@@ -25,6 +25,27 @@ const UPLOAD_SCOPE_LABELS: Record<UploadScope, string> = {
 };
 
 /**
+ * The `sys_file` columns the storage service owns: where the bytes live
+ * (`key`), what the backend was told they are (`mime_type`, `size`, `etag`) and
+ * how far the upload got (`status`). A file field refuses a file whose upload
+ * never completed by reading `status`, and judges `accept` / `maxSize` by
+ * reading `mime_type` / `size`, so a caller who could write them could make a
+ * file with no bytes read as uploaded, or one the field forbids read as
+ * allowed.
+ *
+ * Each is declared `readonly` below, so on an UPDATE the engine's static
+ * readonly strip takes a non-system caller's value back out (the PATCH answers
+ * as before and the column keeps what the service wrote). On an INSERT the
+ * engine leaves a `sys_` object's columns to the object's own guard, and that
+ * guard reads this list: `installSysFileStorageOwnedColumnsGuard`
+ * (`sys-file-storage-owned-columns.ts`). Only the service's own writes, all
+ * under the system context, move these columns: the upload doors through
+ * `StorageMetadataStore`, the claim, release and copy of a file field, and the
+ * attachment tombstone.
+ */
+export const SYS_FILE_STORAGE_OWNED_COLUMNS = ['key', 'mime_type', 'size', 'status', 'etag'] as const;
+
+/**
  * System File Object
  *
  * Persisted metadata for files stored via the Storage Service.
@@ -57,10 +78,12 @@ export const SystemFile = ObjectSchema.create({
       readonly: true,
     }),
 
+    // Storage-owned (SYS_FILE_STORAGE_OWNED_COLUMNS).
     key: Field.text({
       label: 'Storage Key',
       required: true,
       searchable: true,
+      readonly: true,
     }),
 
     name: Field.text({
@@ -69,12 +92,16 @@ export const SystemFile = ObjectSchema.create({
       searchable: true,
     }),
 
+    // Storage-owned (SYS_FILE_STORAGE_OWNED_COLUMNS).
     mime_type: Field.text({
       label: 'MIME Type',
+      readonly: true,
     }),
 
+    // Storage-owned (SYS_FILE_STORAGE_OWNED_COLUMNS).
     size: Field.number({
       label: 'Size (bytes)',
+      readonly: true,
     }),
 
     // A logical key prefix and a lifecycle discriminator — never an access
@@ -104,9 +131,11 @@ export const SystemFile = ObjectSchema.create({
       ],
     }),
 
+    // Storage-owned (SYS_FILE_STORAGE_OWNED_COLUMNS).
     status: Field.select({
       label: 'Status',
       required: true,
+      readonly: true,
       options: [
         { label: 'Pending Upload', value: 'pending' },
         { label: 'Committed', value: 'committed' },
@@ -114,8 +143,10 @@ export const SystemFile = ObjectSchema.create({
       ],
     }),
 
+    // Storage-owned (SYS_FILE_STORAGE_OWNED_COLUMNS).
     etag: Field.text({
       label: 'ETag',
+      readonly: true,
     }),
 
     owner_id: Field.text({

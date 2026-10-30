@@ -41,6 +41,12 @@
  * A run that reported `total: 0` with an empty `legacyInlineRows` would be
  * indistinguishable from a broken read, which is why both are asserted with
  * seeded values rather than merely for absence of an error.
+ *
+ * ## [#27721] The holder section, through the same run
+ *
+ * One more seeded handle, named by two settings rows, has to arrive under the
+ * report's `holders.shared` with both holders' coordinates; and nothing the
+ * command prints may carry any seeded cipher material.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -95,6 +101,43 @@ const SEEDED_SETTING = {
   key: 'inline_password',
   value_enc: 'ENC(v1:inline-legacy-ciphertext)',
 };
+
+/**
+ * [#27721] A handle two `sys_setting` rows name: the shape the holder report
+ * lists as shared. Settings mints one handle per row write, so this is never a
+ * share a producer made.
+ */
+const SEEDED_SHARED_SECRET = {
+  id: 'sec_27721_shared_probe',
+  namespace: 'mail',
+  key: 'smtp_password',
+  alg: 'aes-256-gcm',
+  version: 1,
+  kms_key_id: 'kms_local',
+  ciphertext: 'ENC(v1:shared-probe-cipher-material)',
+};
+const SEEDED_SHARING_SETTINGS = [
+  { id: 'set_27721_tenant', namespace: 'mail', key: 'smtp_password', scope: 'tenant', value_enc: SEEDED_SHARED_SECRET.id },
+  { id: 'set_27721_user', namespace: 'mail', key: 'smtp_password', scope: 'user', user_id: 'usr_27721', value_enc: SEEDED_SHARED_SECRET.id },
+];
+
+/** The `--json` report document, as far as these assertions read it. */
+interface ReportPayload {
+  mode?: string;
+  error?: string;
+  plan?: {
+    counts: { total: number };
+    rows: Array<{ id: string }>;
+    legacyInlineRows: Array<{ namespace: string; key: string }>;
+  };
+  holders?: {
+    shared: Array<{
+      id: string;
+      holderCount: number;
+      holders: Array<{ object: string; field: string; record: string | null; placement: string }>;
+    }>;
+  };
+}
 
 interface DriverProbe {
   find(object: string, query: Record<string, unknown>): Promise<unknown>;
@@ -153,6 +196,10 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
     await secretDriver.create('sys_secret', { ...SEEDED_SECRET });
     // The row names an organization: a fresh tenant column is NOT NULL (ADR-0131 D1).
     await settingDriver.create('sys_setting', { ...SEEDED_SETTING, organization_id: 'org_fixture' });
+    await secretDriver.create('sys_secret', { ...SEEDED_SHARED_SECRET });
+    for (const row of SEEDED_SHARING_SETTINGS) {
+      await settingDriver.create('sys_setting', { ...row, organization_id: 'org_fixture' });
+    }
   }, 180_000);
 
   afterAll(async () => {
@@ -230,7 +277,12 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
     expect((await secretDriver.find('sys_secret', {})) as unknown[]).not.toEqual([]);
   }, 60_000);
 
-  it('the command runs against this database and BOTH former call sites carry their rows', async () => {
+  /**
+   * Run the command once, `--json`, against this database. Memoized: every
+   * assertion below reads the one run, so the boot is paid once.
+   */
+  let report: Promise<{ stdout: string; payload: ReportPayload }> | undefined;
+  const runReport = () => (report ??= (async () => {
     const chunks: string[] = [];
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(
       ((chunk: unknown, ...rest: unknown[]) => {
@@ -252,15 +304,13 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
     }
 
     const lines = chunks.join('').split('\n').filter((l) => l.trim() !== '');
-    const payload = JSON.parse(lines[lines.length - 1]) as {
-      mode?: string;
-      error?: string;
-      plan?: {
-        counts: { total: number };
-        rows: Array<{ id: string }>;
-        legacyInlineRows: Array<{ namespace: string; key: string }>;
-      };
-    };
+    const payload = JSON.parse(lines[lines.length - 1]) as ReportPayload;
+
+    return { stdout: chunks.join(''), payload };
+  })());
+
+  it('the command runs against this database and BOTH former call sites carry their rows', async () => {
+    const { payload } = await runReport();
 
     // A boot or read failure lands as an `error` envelope; naming it here beats
     // a downstream `undefined` that reads like a shape change.
@@ -277,5 +327,25 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
     expect(payload.plan!.legacyInlineRows).toContainEqual(
       expect.objectContaining({ namespace: SEEDED_SETTING.namespace, key: SEEDED_SETTING.key }),
     );
+  }, 180_000);
+
+  it('[#27721] lists the handle two settings rows name, and prints no cipher material', async () => {
+    const { stdout, payload } = await runReport();
+    expect(payload.error).toBeUndefined();
+
+    const shared = payload.holders?.shared.find((f) => f.id === SEEDED_SHARED_SECRET.id);
+    expect(shared?.holderCount).toBe(2);
+    expect(shared?.holders.map((h) => [h.object, h.field, h.record, h.placement]).sort()).toEqual([
+      ['sys_setting', 'value_enc', 'set_27721_tenant', 'in_place'],
+      ['sys_setting', 'value_enc', 'set_27721_user', 'in_place'],
+    ]);
+
+    // Anti-vacuity: the run did read the rows whose cipher material is checked.
+    expect(payload.plan!.rows.map((r) => r.id)).toEqual(
+      expect.arrayContaining([SEEDED_SECRET.id, SEEDED_SHARED_SECRET.id]),
+    );
+    for (const cipher of [SEEDED_SECRET.ciphertext, SEEDED_SHARED_SECRET.ciphertext, SEEDED_SETTING.value_enc]) {
+      expect(stdout).not.toContain(cipher);
+    }
   }, 180_000);
 });

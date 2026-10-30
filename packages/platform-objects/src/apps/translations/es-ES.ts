@@ -83,6 +83,7 @@ export const esES: TranslationData = {
 
         nav_settings_hub: { label: 'Todos los Ajustes' },
         nav_settings_localization: { label: 'Localización' },
+        nav_exchange_rates: { label: 'Tipos de cambio' },
         nav_settings_company: { label: 'Empresa' },
         nav_settings_mail: { label: 'Correo' },
         nav_settings_branding: { label: 'Marca' },

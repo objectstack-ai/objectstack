@@ -781,6 +781,9 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_queue', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_queue_member', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its queue by name, not by id; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_assignment_cursor', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its rule by name, not by id; ${D10_SINGLE}`, anchors: [] },
+  // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
+  // administrators author its own rate table; no parent row anchors a rate.
+  { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_import_job', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_user_preference', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
 
