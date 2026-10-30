@@ -9,6 +9,8 @@ Clause-②: yes (widening)
 Metadata-protocol: added
 Ruling-ref: 6523833308
 
+<!-- adr-0087: not-required (no-migration-prescription) No authored key or accepted value is added, removed, renamed or re-shaped: `MapConfigSchema` keeps every key it had, and only the description of `outputVariable` gains a sentence. What changes is a runtime value, the entry a `map` records for an item whose run was cancelled, and a refusal of a resume that used to advance past an unrecorded item. No stored metadata holds either, so `objectstack migrate meta` has nothing to rewrite. -->
+
 `cancelRun` on a `map` item's run terminates that item and leaves the map's run parked on it. Resuming the map's run by its own id used to re-run the map, which moved past the item with nothing recorded: `results` held only the later items' outputs, `results[i]` stopped being item `i`, and the run finished `completed`.
 
 - **A cancelled item keeps its slot.** The resume reads the item run's history. When it says `cancelled`, the map goes on, and that item's entry in `outputVariable` (and in the node's `results`) is the closed marker `{ $status: 'cancelled', $itemRunId }` instead of an output. A downstream node reads it where it reads the results: `results[i]['$status'] == 'cancelled'`. A child flow's output keys are its declared variable names, which never start with `$`, so no real output looks like the marker.
