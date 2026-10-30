@@ -162,11 +162,20 @@ function ResultField({
   value: unknown;
   defaultFormat?: FieldFormat;
 }) {
-  const { language } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const format: FieldFormat = field.format ?? defaultFormat ?? 'json';
   // Same `I18nLabel` contract as the dialog's own three label members, same
   // resolution — a field label is the fourth member the block declares as one.
   const label = resolveInlineI18nLabel(field.label, language);
+  // The accessible name of this field's icon-only copy buttons: the field's
+  // label when it has one, so two fields' buttons are told apart by name.
+  const copyName = label
+    ? t('actions.resultDialog.copyField', { label })
+    : t('actions.resultDialog.copyValue');
+  const copyItemName = (index: number) =>
+    label
+      ? t('actions.resultDialog.copyFieldItem', { label, index })
+      : t('actions.resultDialog.copyItem', { index });
 
   // Type-guard each renderer rather than crash if the server returned an
   // unexpected shape (e.g. format=qrcode but value is undefined). We
@@ -183,11 +192,13 @@ function ResultField({
       {label ? (
         <div className="text-sm font-medium text-foreground/80">{label}</div>
       ) : null}
-      {safeFormat === 'qrcode' ? <QrcodeBlock value={value as string} /> : null}
-      {safeFormat === 'code-list' ? <CodeListBlock value={value as string[]} /> : null}
-      {safeFormat === 'secret' ? <SecretBlock value={value as string} /> : null}
-      {safeFormat === 'text' ? <TextBlock value={value as string} /> : null}
-      {safeFormat === 'json' ? <JsonBlock value={value} /> : null}
+      {safeFormat === 'qrcode' ? <QrcodeBlock value={value as string} copyName={copyName} /> : null}
+      {safeFormat === 'code-list' ? (
+        <CodeListBlock value={value as string[]} copyItemName={copyItemName} />
+      ) : null}
+      {safeFormat === 'secret' ? <SecretBlock value={value as string} copyName={copyName} /> : null}
+      {safeFormat === 'text' ? <TextBlock value={value as string} copyName={copyName} /> : null}
+      {safeFormat === 'json' ? <JsonBlock value={value} copyName={copyName} /> : null}
     </div>
   );
 }
@@ -212,17 +223,33 @@ function useCopy(value: string | undefined) {
   return { copy, copied };
 }
 
-function CopyButton({ value, label }: { value: string | undefined; label?: string }) {
+/**
+ * A copy button. With a visible `label` that text is its accessible name;
+ * an icon-only button takes `name` as its `aria-label` instead. The copied
+ * state is announced through a polite live region, mounted empty before it
+ * fills — a region inserted together with its text is not reliably read.
+ */
+function CopyButton({
+  value,
+  label,
+  name,
+}: { value: string | undefined } & ({ label: string; name?: never } | { label?: never; name: string })) {
+  const { t } = useObjectTranslation();
   const { copy, copied } = useCopy(value);
   return (
-    <Button type="button" variant="outline" size="sm" onClick={copy}>
-      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-      {label ? <span className="ml-2">{label}</span> : null}
-    </Button>
+    <>
+      <Button type="button" variant="outline" size="sm" onClick={copy} aria-label={label ? undefined : name}>
+        {copied ? <Check className="w-4 h-4" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
+        {label ? <span className="ml-2">{label}</span> : null}
+      </Button>
+      <span role="status" className="sr-only">
+        {copied ? t('actions.resultDialog.copied') : ''}
+      </span>
+    </>
   );
 }
 
-function QrcodeBlock({ value }: { value: string }) {
+function QrcodeBlock({ value, copyName }: { value: string; copyName: string }) {
   // QR codes for 2FA carry the shared secret. Render entirely client-side
   // (toCanvas writes into a local <canvas>) — never round-trip to a third
   // party. Falls back to plaintext if rendering fails (e.g. value too long
@@ -247,13 +274,19 @@ function QrcodeBlock({ value }: { value: string }) {
         <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs font-mono">
           {value}
         </code>
-        <CopyButton value={value} />
+        <CopyButton value={value} name={copyName} />
       </div>
     </div>
   );
 }
 
-function CodeListBlock({ value }: { value: string[] }) {
+function CodeListBlock({
+  value,
+  copyItemName,
+}: {
+  value: string[];
+  copyItemName: (index: number) => string;
+}) {
   const { t } = useObjectTranslation();
   const joined = value.join('\n');
   return (
@@ -265,7 +298,7 @@ function CodeListBlock({ value }: { value: string[] }) {
               <code className="flex-1 rounded bg-background px-2 py-1 text-sm font-mono">
                 {code}
               </code>
-              <CopyButton value={code} />
+              <CopyButton value={code} name={copyItemName(i + 1)} />
             </li>
           ))}
         </ul>
@@ -277,7 +310,7 @@ function CodeListBlock({ value }: { value: string[] }) {
   );
 }
 
-function SecretBlock({ value }: { value: string }) {
+function SecretBlock({ value, copyName }: { value: string; copyName: string }) {
   const { t } = useObjectTranslation();
   const [revealed, setRevealed] = useState(false);
   return (
@@ -294,23 +327,23 @@ function SecretBlock({ value }: { value: string }) {
       >
         {revealed ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
       </Button>
-      <CopyButton value={value} />
+      <CopyButton value={value} name={copyName} />
     </div>
   );
 }
 
-function TextBlock({ value }: { value: string }) {
+function TextBlock({ value, copyName }: { value: string; copyName: string }) {
   return (
     <div className="flex items-center gap-2">
       <code className="flex-1 rounded bg-muted px-2 py-1 text-sm font-mono break-all">
         {value}
       </code>
-      <CopyButton value={value} />
+      <CopyButton value={value} name={copyName} />
     </div>
   );
 }
 
-function JsonBlock({ value }: { value: unknown }) {
+function JsonBlock({ value, copyName }: { value: unknown; copyName: string }) {
   const text = useMemo(() => {
     try {
       return JSON.stringify(value, null, 2);
@@ -324,7 +357,7 @@ function JsonBlock({ value }: { value: unknown }) {
         {text}
       </pre>
       <div className="flex justify-end">
-        <CopyButton value={text} />
+        <CopyButton value={text} name={copyName} />
       </div>
     </div>
   );

@@ -150,6 +150,13 @@ const ar = {
       defaultTitle: 'احفظ هذه القيمة الآن',
       acknowledge: 'لقد حفظتها',
       copyAll: 'نسخ الكل',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: 'نسخ {{label}}',
+      copyValue: 'نسخ القيمة',
+      copyFieldItem: 'نسخ {{label}}، العنصر {{index}}',
+      copyItem: 'نسخ العنصر {{index}}',
+      copied: 'تم النسخ إلى الحافظة',
     },
     notAvailableHere: '"{{action}}" غير متاح في الصفحة الحالية.',
     notAvailableForRecord: 'غير متاح لهذا السجل',

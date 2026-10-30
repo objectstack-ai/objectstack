@@ -138,6 +138,13 @@ const pt = {
       defaultTitle: 'Guarde este valor agora',
       acknowledge: 'Eu o salvei',
       copyAll: 'Copiar tudo',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: 'Copiar {{label}}',
+      copyValue: 'Copiar valor',
+      copyFieldItem: 'Copiar {{label}}, item {{index}}',
+      copyItem: 'Copiar item {{index}}',
+      copied: 'Copiado para a área de transferência',
     },
     notAvailableHere: '"{{action}}" não está disponível na página atual.',
     notAvailableForRecord: 'Não disponível para este registro',

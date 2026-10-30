@@ -136,6 +136,13 @@ const de = {
       defaultTitle: 'Diesen Wert jetzt speichern',
       acknowledge: 'Ich habe ihn gespeichert',
       copyAll: 'Alle kopieren',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: '{{label}} kopieren',
+      copyValue: 'Wert kopieren',
+      copyFieldItem: '{{label}}, Eintrag {{index}} kopieren',
+      copyItem: 'Eintrag {{index}} kopieren',
+      copied: 'In die Zwischenablage kopiert',
     },
     notAvailableHere: '„{{action}}“ ist auf der aktuellen Seite nicht verfügbar.',
     notAvailableForRecord: 'Für diesen Datensatz nicht verfügbar',
