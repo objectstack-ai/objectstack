@@ -340,6 +340,12 @@ export function useObjectGridGenerateColumns({
               // Dropped, the cell fell through to the tenant currency while the
               // metric tile and every whole-def cell read the field's own.
               if (objectDefField.currencyConfig) fieldMeta.currencyConfig = objectDefField.currencyConfig;
+              // A formula's declared `returnType` picks its face in the
+              // formula cell (`FormulaCellRenderer`): `currency` draws through
+              // the currency cell with the `currencyConfig` above. Dropped
+              // here, a money formula fell to its value's JS type and read as a
+              // bare number (`90,000.00`) beside its currency sources.
+              if (objectDefField.returnType !== undefined) fieldMeta.returnType = objectDefField.returnType;
               if (objectDefField.precision !== undefined) fieldMeta.precision = objectDefField.precision;
               if ((objectDefField as any).scale !== undefined) (fieldMeta as any).scale = (objectDefField as any).scale;
               // objectui#11026 — the author's digit-grouping hint rides beside
@@ -602,6 +608,8 @@ export function useObjectGridGenerateColumns({
             if (fieldDef.currency) fieldMeta.currency = fieldDef.currency;
             // Verbatim, as the ListColumn path copies it (objectui#10354).
             if (fieldDef.currencyConfig) fieldMeta.currencyConfig = fieldDef.currencyConfig;
+            // The formula's face, as path A copies it.
+            if (fieldDef.returnType !== undefined) fieldMeta.returnType = fieldDef.returnType;
             if (fieldDef.precision !== undefined) fieldMeta.precision = fieldDef.precision;
             if ((fieldDef as any).scale !== undefined) fieldMeta.scale = (fieldDef as any).scale;
             // Beside `scale`, as path A copies it (objectui#11026).
@@ -791,6 +799,8 @@ export function useObjectGridGenerateColumns({
             if (fieldDef.currency) fieldMeta.currency = fieldDef.currency;
             // Verbatim, as the ListColumn path copies it (objectui#10354).
             if (fieldDef.currencyConfig) fieldMeta.currencyConfig = fieldDef.currencyConfig;
+            // The formula's face, as path A copies it.
+            if (fieldDef.returnType !== undefined) fieldMeta.returnType = fieldDef.returnType;
             if (fieldDef.precision !== undefined) fieldMeta.precision = fieldDef.precision;
             if ((fieldDef as any).scale !== undefined) fieldMeta.scale = (fieldDef as any).scale;
             // Beside `scale`, as path A copies it (objectui#11026).

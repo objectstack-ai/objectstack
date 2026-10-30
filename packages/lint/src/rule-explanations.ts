@@ -114,6 +114,18 @@ const SECURITY_OWD_UNSET_EXPLANATION: RuleExplanation = {
       'default); \'public_read\' — everyone reads, the owner writes; \'public_read_write\' — everyone ' +
       'reads and writes; \'controlled_by_parent\' — access derives from the master record (a ' +
       'master-detail child).',
+    'An external object with no provable owner is the exception to that recommendation. On a writable ' +
+      'binding (`external.writable: true`) the remote row carries no `owner_id` or `created_by` the platform can read, so on \'private\' every ' +
+      'member edit is refused, and where the object carries `owner_id` a member reads no row at all ' +
+      '(`os explain security-external-owner-unmapped`). There the fix line names that rule\'s two ways out ' +
+      'instead: \'public_read_write\' with a `beforeUpdate` hook that decides who may edit, or the ownership ' +
+      'column (`owner_id`, or `created_by` on an object without one) declared in `fields` and returned by ' +
+      'the driver, after which \'private\' or \'public_read\' admits edits by the user that column names. ' +
+      'A read-only external binding (`external.writable` not `true`, or a datasource declared with ' +
+      '`external.allowWrites: false`) whose `owner_id` no declared field or `external.columnMap` entry names ' +
+      'is told to declare \'public_read\' instead: no member writes it, and on \'private\' a member reads none ' +
+      'of its rows. An external object whose owner is provable (a declared field, or on a read-only binding ' +
+      'a `columnMap` entry onto `owner_id`) keeps the usual fix line.',
     'System objects (`isSystem: true`, or a name starting with `sys_`) are not judged: the platform ' +
       'owns their posture.',
   ],
@@ -2453,11 +2465,24 @@ const SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION: RuleExplanation = {
     VIRTUAL_FIELD_STORAGE,
     'A formula entry is refused on EVERY surface, the object\'s own set included — the REST ingress ' +
       'answers `400 INVALID_FIELD`, the same answer a stale entry gets: measured, it ' +
-      'matched 0 rows on driver-memory, and 0 rows with no error on driver-sql. Otherwise the ' +
-      'object\'s own `searchableFields` is existence-only: its declared branch scans any stored ' +
-      'column, so a json or lookup column declared there is a narrow choice the engine executes, not ' +
-      'a finding. A system column outside the allowed set is not judged either: its runtime ' +
-      'metadata is registry-owned and invisible here.',
+      'matched 0 rows on driver-memory, and 0 rows with no error on driver-sql. Otherwise, apart ' +
+      'from a credential entry, the object\'s own `searchableFields` is existence-only: its declared ' +
+      'branch scans any stored column, so a json or lookup column declared there is a narrow choice ' +
+      'the engine executes, not a finding. A system column outside the allowed set is not judged ' +
+      'either: its runtime metadata is registry-owned and invisible here.',
+    'A `secret` or `password` entry is refused on EVERY surface as well, the object\'s own set ' +
+      'included. The engine leaves every credential column out of the set a search scans (ADR-0100), ' +
+      'an author-declared one included, and says nothing: a declaration naming one scans a narrower ' +
+      'set than written, and one naming only credential fields falls through to the AUTO-DEFAULT ' +
+      'set. A list view naming one is refused with `400 INVALID_FIELD` when the object\'s set is the ' +
+      'auto-default, which never admits a credential type; when the object declares the entry, the ' +
+      'REST ingress admits it and the engine withholds it, so a view naming only credential fields ' +
+      'searches the object\'s whole set. Credential types are judged by the spec\'s ' +
+      '`isCredentialFieldType`, the predicate the engine\'s credential collector reads, with no ' +
+      'better-auth exemption: the read mask spares a better-auth `password`, the search withhold ' +
+      'does not. An error, as a formula entry is: the entry can never match, and the narrowing is ' +
+      'otherwise silent. The one fix is to drop it — mirroring the value onto a searchable column ' +
+      'would publish what the withhold protects.',
   ],
 };
 
@@ -3862,6 +3887,27 @@ const RELATED_LIST_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'serves: at the publish gate with no package closure in force. Under a closure, and on the ' +
       'CLI, such a child may belong to another package, so this rule does not judge it; on the ' +
       'CLI `defineStack` does, against the artifact\'s packages.',
+  ],
+};
+
+const RELATED_LIST_GROUP_NOT_BODY_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-group-not-body',
+  covers: 'which related list a field group may place',
+  paragraphs: [
+    'A field group\'s `relatedList` places one related list\'s table among the field sections of the ' +
+      'record\'s details column. It only POSITIONS a list that is already a body table; it does not make ' +
+      'one. Whether a list is a body table is decided once, by the relationship\'s own FK field on the ' +
+      'child: `relatedList: \'primary\'`, or a `master_detail` FK that sets `inlineEdit` and declares no ' +
+      '`relatedList`. Every other list is a side card in the related column (`relatedList: true` or ' +
+      'absent), or hidden (`relatedList: false`).',
+    'A group naming a side card or a hidden list draws nothing at the group, silently, so it is an ' +
+      'error, the verdict `defineStack` gives on `os validate` and `os build` and the runtime publish ' +
+      'gate gives too. A bare child name names every FK of that child, so it is refused when any of ' +
+      'them is not a body table. The fix is on the relationship (mark it `relatedList: \'primary\'`), ' +
+      'in the name (`object.field` for the one FK that is a body table), or removing the group\'s ' +
+      '`relatedList`.',
+    'Judged on the children this rule can see, the same ones `related-list-ref-unknown` judges: a ' +
+      'child outside the stack (another package\'s object) is not judged here.',
   ],
 };
 
@@ -5326,6 +5372,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [NAV_TARGET_UNRESOLVED_EXPLANATION.rule]: NAV_TARGET_UNRESOLVED_EXPLANATION,
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_REF_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_REF_UNKNOWN_EXPLANATION,
+  [RELATED_LIST_GROUP_NOT_BODY_EXPLANATION.rule]: RELATED_LIST_GROUP_NOT_BODY_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,

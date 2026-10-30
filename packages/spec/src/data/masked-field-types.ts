@@ -114,10 +114,35 @@ export const MASKED_ON_READ_FIELD_TYPES: Readonly<Partial<Record<FieldType, Fiel
  * site cannot drop the exemption by omission.
  */
 export function isMaskedOnReadFieldType(fieldType: unknown, managedBy: unknown): boolean {
+  if (!isCredentialFieldType(fieldType)) return false;
+  const rule = MASKED_ON_READ_FIELD_TYPES[fieldType as FieldType] as FieldTypeReadMask;
+  return !(rule.exemptManagedBy as readonly unknown[]).includes(managedBy);
+}
+
+/**
+ * Whether `fieldType` is a CREDENTIAL type — one this table masks on read on
+ * at least one object (`secret`, `password`) — whatever object declares it.
+ *
+ * This is the exemption-FREE question, and it is a different one from
+ * {@link isMaskedOnReadFieldType}'s. The read mask exempts `password` on a
+ * better-auth object so login keeps working; nothing else does. Evaluating a
+ * credential — aggregating it, comparing it, searching it — is refused or
+ * withheld on every object, better-auth included, because the answer is an
+ * inference oracle regardless of who owns the table. The consumers that ask it:
+ * the engine's credential collector (`collectCredentialFields`,
+ * `@objectstack/objectql`), which keys the aggregate refusal, the evaluation
+ * guard and the `search` withhold, and the linter's `searchableFields` check
+ * (`validate-searchable-fields`, `@objectstack/lint`), which reports at
+ * authoring time an entry that withhold drops.
+ *
+ * The answer is read from the table's keys, so a type added to the mask is a
+ * credential type for every one of those consumers in the same edit. Total
+ * over its input, like the predicate above: a non-string or unknown value is
+ * not a credential type.
+ */
+export function isCredentialFieldType(fieldType: unknown): boolean {
   if (typeof fieldType !== 'string') return false;
   // Own keys only: `'constructor'` / `'toString'` are properties of every
   // object literal and name no field type.
-  if (!Object.prototype.hasOwnProperty.call(MASKED_ON_READ_FIELD_TYPES, fieldType)) return false;
-  const rule = MASKED_ON_READ_FIELD_TYPES[fieldType as FieldType] as FieldTypeReadMask;
-  return !(rule.exemptManagedBy as readonly unknown[]).includes(managedBy);
+  return Object.prototype.hasOwnProperty.call(MASKED_ON_READ_FIELD_TYPES, fieldType);
 }

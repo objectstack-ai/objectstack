@@ -333,17 +333,23 @@ function withRemaining(remaining: string[]): { remaining?: string[] } {
  * internal datasources and tables, and the message is served to an API caller.
  */
 /**
- * The refusal every by-name lifecycle door answers when `name` resolves no
- * stored datasource — `updateDatasource`, `removeDatasource` and
- * `migrateCredential`.
+ * The refusal every by-name door answers when `name` resolves no stored
+ * datasource: here `updateDatasource`, `removeDatasource` and
+ * `migrateCredential`; in `ExternalDatasourceService`, `testConnection` and
+ * the federation guard every Sync door runs first; and `GET /datasources/:name`
+ * answers in its words.
  *
  * It carries the ADR-0112 envelope (`404` / `RESOURCE_NOT_FOUND`) so the admin
  * routes answer it exactly as `GET /datasources/:name` answers the same name.
  * A plain `Error` here was rendered `400 DATASOURCE_ADMIN_ERROR`, which tells an
  * SDK or AI caller its request was malformed rather than that the datasource
  * does not exist — and the read sibling already said the latter.
+ *
+ * [#27618] ONE helper for the package, so every by-name door names a missing
+ * datasource in one spelling. Exported from this module for its siblings only:
+ * ⛔ not from the package index, which would widen the public surface.
  */
-function datasourceNotFoundError(name: string): Error {
+export function datasourceNotFoundError(name: string): Error {
   // GET's own words, so every by-name door names the missing datasource alike.
   const err = new Error(`Datasource "${name}" does not exist.`) as Error & { code?: string; status?: number };
   err.code = 'RESOURCE_NOT_FOUND';
@@ -643,6 +649,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
 
   async createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary> {
     this.assertValidName(input?.name);
+    this.assertNoDraftCredentialsRef(input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
     this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
@@ -1167,6 +1174,29 @@ export class DatasourceAdminService implements IDatasourceAdminService {
         `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
       );
     }
+  }
+
+  /**
+   * [#27722] The #27582 rule at this door: a write may only seal a new value or
+   * keep its own record's stored reference. A create has no record of its own,
+   * so the only `external.credentialsRef` it stores is the one a supplied
+   * `secret` is bound under, and a draft that names one is refused. One answer
+   * whatever it names: the message names the key and never its value, and
+   * nothing about the reference is looked up. Thrown before anything is
+   * written (a `400` at the route).
+   *
+   * An update needs no such refusal: it keeps the stored reference unless a
+   * supplied secret rewraps it, whatever the patch's `external` says.
+   */
+  private assertNoDraftCredentialsRef(input: DatasourceDraft): void {
+    const external = input.external as { credentialsRef?: unknown } | undefined;
+    if (external?.credentialsRef === undefined) return;
+    throw new Error(
+      `Invalid datasource '${input.name}': \`external.credentialsRef\` is not accepted on create. `
+        + 'It names a credential already stored, and only the reference this door binds a supplied `secret` '
+        + 'under can be stored on a new datasource. Send the credential as `secret`, and leave '
+        + '`external.credentialsRef` out. Nothing was written.',
+    );
   }
 
   private toRecord(input: DatasourceDraft): StoredDatasource {

@@ -163,7 +163,7 @@ interface InstallOptions {
 function install(o: InstallOptions = {}): PluginInstallationRecord & { artifactBytes: Uint8Array } {
   const id = o.id ?? 'com.acme.hello';
   const version = o.version ?? '1.0.0';
-  const manifest = { id, version, name: 'Hello', runtime: 'node', ...o.manifest };
+  const manifest = { id, version, name: 'Hello', type: 'plugin', runtime: 'node', ...o.manifest };
   const entry = o.entry ?? `export default { name: ${JSON.stringify(id)}, version: '1.0.0', init() { globalThis.__initCount = (globalThis.__initCount ?? 0) + 1; } };\n`;
   const files: File[] = [
     { path: 'objectstack.plugin.json', data: text(JSON.stringify(manifest)) },
@@ -366,6 +366,12 @@ describe('every change to an install refuses that plugin by name and imports not
     ['the kept artifact is another version than the record', 'manifest_mismatch', () => {
       install({ manifest: { version: '2.0.0' } });
     }],
+    ['the manifest carries the retired packaging: manifest-deps', 'manifest_invalid', () => {
+      install({ manifest: { packaging: 'manifest-deps' } });
+    }],
+    ['the manifest is not a ManifestSchema manifest (no type)', 'manifest_invalid', () => {
+      install({ manifest: { type: undefined } });
+    }],
     ['the kept artifact is not an archive', 'artifact_unreadable', () => {
       const r = install({ signed: false });
       writeFileSync(join(r.dir, INSTALLED_ARTIFACT_FILE), 'not gzip');
@@ -405,6 +411,20 @@ describe('every change to an install refuses that plugin by name and imports not
     const out = await load();
     expect(out.loaded).toEqual([]);
     expect(out.refused).toEqual([expect.objectContaining({ id: '*', error: 'records_unreadable' })]);
+  });
+
+  it("a pre-retirement artifact (packaging: 'manifest-deps') is refused with the schema's prescription, never imported; the next plugin still loads", async () => {
+    install({ id: 'com.acme.retired', manifest: { packaging: 'manifest-deps' } });
+    install({ id: 'com.acme.fine' });
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ id: 'com.acme.retired', error: 'manifest_invalid' })]);
+    // The schema's own words: the retired value, and the remedy it prescribes.
+    expect(out.refused[0].message).toMatch(/packaging: `packaging: 'manifest-deps'` was removed/);
+    expect(out.refused[0].message).toMatch(/Delete the key/);
+    // Only the valid plugin's entry module was imported.
+    expect(out.imported).toHaveLength(1);
+    expect(out.imported[0]).toContain('com.acme.fine');
+    expect(out.loaded.map((l) => l.record.id)).toEqual(['com.acme.fine']);
   });
 
   it('refuses one plugin and still loads the next', async () => {

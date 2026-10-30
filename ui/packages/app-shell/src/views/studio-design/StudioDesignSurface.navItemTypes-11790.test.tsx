@@ -309,7 +309,6 @@ describe('StudioNavItemInspector — the Type choice is the spec nav-item union 
 const TARGET_CASES: Array<{ type: string; pickIn: string; value: string; written: Record<string, unknown> }> = [
   { type: 'page', pickIn: 'Page', value: 'home', written: { pageName: 'home' } },
   { type: 'dashboard', pickIn: 'Dashboard', value: 'ops_board', written: { dashboardName: 'ops_board' } },
-  { type: 'report', pickIn: 'Report', value: 'tasks_by_status', written: { reportName: 'tasks_by_status' } },
   { type: 'action', pickIn: 'Action', value: 'sync_all', written: { actionDef: { actionName: 'sync_all' } } },
   { type: 'component', pickIn: 'Component', value: 'acme:board', written: { componentRef: 'acme:board' } },
   { type: 'doc', pickIn: 'Doc page', value: 'getting_started', written: { doc: 'getting_started' } },
@@ -330,6 +329,30 @@ describe('StudioNavItemInspector — each target-bearing type picks a target and
     const parsed = NavigationItemSchema.safeParse(entry);
     expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
     expect(navPayloadOf([entry])).toEqual([entry]);
+  });
+
+  // objectstack#27525 — a `report` entry with no report chosen is the app's
+  // report index, not an unbound entry: it parses, a save sends it, and the
+  // picker's empty face says what it opens.
+  it('report: born as the report index, kept by a save; a picked report is written, and the index face removes it', async () => {
+    render(<InspectorHost entry={BORN} />);
+    fireEvent.click(typeChoice('report'));
+    expect(entryNow()).toEqual({ id: 'nav_item_3', type: 'report' });
+    expect(NavigationItemSchema.safeParse(entryNow()).success).toBe(true);
+    expect(navPayloadOf([entryNow()])).toEqual([entryNow()]);
+    expect(screen.queryByText(/left out of the saved navigation/)).toBeNull();
+    expect(screen.getByText(/opens the app's report index/)).toBeInTheDocument();
+    expect(await offered('Report', /tasks_by_status/)).toEqual(['Report index', 'Tasks by status (tasks_by_status)']);
+
+    await pick('Report', 'tasks_by_status');
+    expect(entryNow()).toEqual({ id: 'nav_item_3', type: 'report', reportName: 'tasks_by_status' });
+    expect(NavigationItemSchema.safeParse(entryNow()).success).toBe(true);
+    expect(screen.queryByText(/opens the app's report index/)).toBeNull();
+
+    const listbox = await openPicker('Report');
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Report index' }));
+    expect(entryNow()).toEqual({ id: 'nav_item_3', type: 'report' });
+    expect(navPayloadOf([entryNow()])).toEqual([entryNow()]);
   });
 
   it('url: the address is typed, and the entry parses', async () => {

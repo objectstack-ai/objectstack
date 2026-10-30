@@ -31,7 +31,7 @@ import { BOOLEAN_VALUE_TYPES, expandEmptyOperator, type EmptyOperatorArm } from 
 import { useObjectFields } from '../previews/useObjectFields.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import type { CelLintIssue } from '../celAuthoring.js';
-import { t, useMetadataLocale } from '../i18n.js';
+import { t, tFormat, useMetadataLocale } from '../i18n.js';
 
 type Op = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'truthy' | 'falsy';
 
@@ -40,13 +40,28 @@ type Op = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'truthy' | 'falsy';
  *  (`88b15fddc`) — see {@link fmtValue}. */
 type Quote = '"' | "'";
 
-interface Row { subject: string; op: Op; value: string; quote?: Quote }
+/**
+ * One row of the builder. `guard` is set on an ordering comparison that
+ * compiles behind a null test (`S != null && S > V`, see {@link compileRow}):
+ * on every row the author builds or edits on a catalog field, and on a stored
+ * row written in that shape. A stored comparison written without one keeps
+ * its spelling until the author edits that row (the {@link Quote} rule).
+ */
+interface Row { subject: string; op: Op; value: string; quote?: Quote; guard?: boolean }
 
 type OpChoice = { value: Op; labelKey: string } | { value: Op; symbol: string };
 
 /** The operators that compare with a value: a catalogue key for the worded
  *  ones, a bare symbol for `≥` / `≤`, which read the same in every locale
  *  (objectui#10586). */
+/**
+ * The comparisons CEL has no `null` overload for (objectstack#27513). The
+ * server refuses one whose operand may be null unless an explicit `!= null`
+ * test guards it (`@objectstack/lint`'s null-guard gate, which `has()` does not
+ * satisfy). `==` / `!=` evaluate cleanly against `null` and need none.
+ */
+const ORDERING_OPS: ReadonlySet<Op> = new Set<Op>(['>', '<', '>=', '<=']);
+
 const COMPARE_OPS: ReadonlyArray<OpChoice> = [
   { value: '==', labelKey: 'engine.inspector.condition.op.equals' },
   { value: '!=', labelKey: 'engine.inspector.condition.op.notEquals' },
@@ -634,7 +649,25 @@ function compileRow(r: Row, valueOf: SubjectValueOf): { cel: string; compound: b
     const clauses = emptyCheckClauses(r.subject, declared, empty);
     return { cel: clauses.join(empty ? ' || ' : ' && '), compound: clauses.length > 1 };
   }
-  return { cel: `${r.subject} ${r.op} ${fmtValue(r.value, r.quote)}`, compound: false };
+  const cmp = `${r.subject} ${r.op} ${fmtValue(r.value, r.quote)}`;
+  // objectstack#27513 — an ordering comparison on a field faults on a `null`
+  // value and the server refuses it at publish; behind `!= null` it is well
+  // typed for every value. The same guard the "can't be negative" preset
+  // writes, and the one the server's own message prescribes.
+  if (r.guard && ORDERING_OPS.has(r.op)) return { cel: `${r.subject} != null && ${cmp}`, compound: true };
+  return { cel: cmp, compound: false };
+}
+
+/**
+ * Whether the author's row compiles behind the null guard (objectstack#27513):
+ * an ordering comparison whose subject names a catalog field. ⛔ Not whether
+ * the field may be null — that is the server's verdict to give, and the guard
+ * is well typed on a field that can never be null too. A context subject
+ * (`user.id`) or a flow variable is not a catalog field and is left as it is.
+ */
+function withGuard(r: Row, fieldSubjects: ReadonlySet<string>): Row {
+  const guard = ORDERING_OPS.has(r.op) && fieldSubjects.has(r.subject);
+  return r.guard === guard ? r : { ...r, guard };
 }
 
 /** Compile rows → CEL. Rows without a subject are skipped (in-progress). */
@@ -718,10 +751,23 @@ function parseEmptyCheck(text: string, valueOf: SubjectValueOf): Row | null {
   return compileRow(row, valueOf).cel === text ? row : null;
 }
 
+/**
+ * Read `text` back as a guarded ordering comparison row (`S != null && S > V`),
+ * or `null` (objectstack#27513). Accepts exactly the text {@link compileRow}
+ * emits for such a row: one subject on both sides, the guard first.
+ */
+function parseGuardedCompare(text: string): Row | null {
+  const m = /^([a-zA-Z_][\w.]*)\s*!=\s*null\s*&&\s*([a-zA-Z_][\w.]*)\s*(>=|<=|>|<)\s*(.+)$/.exec(text);
+  if (!m || m[1] !== m[2]) return null;
+  const v = unfmtValue(m[4]);
+  const row: Row = { subject: m[1], op: m[3] as Op, value: v.value, quote: v.quote, guard: true };
+  return compileRow(row, NOTHING_DECLARED).cel === text ? row : null;
+}
+
 /** Read one AND/OR term back as a row, or `null` when it is not a row's shape. */
 function parseTerm(p: string, valueOf: SubjectValueOf): Row | null {
   const group = enclosedGroup(p);
-  if (group !== null) return parseEmptyCheck(group, valueOf);
+  if (group !== null) return parseEmptyCheck(group, valueOf) ?? parseGuardedCompare(group);
   const check = parseEmptyCheck(p, valueOf);
   if (check) return check;
   const cmp = /^([a-zA-Z_][\w.]*)\s*(==|!=|>=|<=|>|<)\s*(.+)$/.exec(p);
@@ -745,7 +791,7 @@ function parse(
   if (!s) return { rows: [], join: '&&' };
   // A lone row whose check is several clauses compiles without parentheses,
   // so the whole text is tried as that one row before it is split.
-  const whole = parseEmptyCheck(s, valueOf);
+  const whole = parseEmptyCheck(s, valueOf) ?? parseGuardedCompare(s);
   if (whole) return { rows: [whole], join: '&&' };
   const split = splitTopLevel(s);
   if (!split) return null;
@@ -774,7 +820,7 @@ function initFrom(value: string, valueOf: SubjectValueOf): { rows: Row[]; join: 
   return { rows: [], join: '&&', raw: !!value };
 }
 
-export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue }: {
+export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue, labelSubjects = false }: {
   label?: string;
   value: string;
   onCommit: (cel: string) => void;
@@ -860,6 +906,11 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
    * builder renders no verdict of its own, so it does not read this.
    */
   scopeIssue?: boolean;
+  /**
+   * The subject dropdown names a field by its label, with the CEL spelling
+   * beside it. Off by default, so a mount that lists spellings keeps them.
+   */
+  labelSubjects?: boolean;
 }) {
   const { fields: hookFields } = useObjectFields(objectName);
   const fields = fieldsProp ?? hookFields;
@@ -875,27 +926,32 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
    * advertisement and the placeholder teaches its whole example, both unchanged.
    */
   const offeredRoots = roots ?? (scope === 'record' ? RECORD_CONDITION_ROOTS : undefined);
+  const locale = useMetadataLocale();
   const subjectOptions = React.useMemo(() => {
     const visible = fields.filter((f) => !f.hidden);
-    const fieldOpts = visible.map((f) => ({
-      value: `${fieldPrefix}${f.name}`,
-      label: `${fieldPrefix}${f.name}`,
-    }));
+    // With `labelSubjects`, a field reads by its label, its spelling beside it.
+    const named = (spelling: string, label: string | undefined) =>
+      labelSubjects && label ? { value: spelling, label, hint: spelling } : { value: spelling, label: spelling, hint: undefined };
+    const fieldOpts = visible.map((f) => named(`${fieldPrefix}${f.name}`, f.label));
     // The whole-record `previous` comes first: `previous == null` is how an
     // author branches on the create leg of a create-or-update trigger, and it
     // reads as the head of the group rather than as one more field.
     const previousOpts = includePrevious
       ? [
-          { value: 'previous', label: 'previous' },
-          ...visible.map((f) => ({ value: `previous.${f.name}`, label: `previous.${f.name}` })),
+          { value: 'previous', label: 'previous', hint: undefined },
+          ...visible.map((f) =>
+            named(
+              `previous.${f.name}`,
+              f.label ? tFormat('engine.inspector.condition.previousField', locale, { field: f.label }) : undefined,
+            ),
+          ),
         ]
       : [];
-    const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value }));
+    const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value, hint: undefined }));
     return [...fieldOpts, ...previousOpts, ...contextOpts];
-  }, [fields, fieldPrefix, includePrevious, contextSubjects]);
+  }, [fields, fieldPrefix, includePrevious, contextSubjects, locale, labelSubjects]);
   // The raw-expression editor's CEL assists (#1582): field-existence lint +
   // autocomplete need the bare field-name catalog and a locale-bound `t`.
-  const locale = useMetadataLocale();
   const tLocal = React.useCallback((k: string) => t(k, locale), [locale]);
   const fieldNames = React.useMemo(
     () => fields.filter((f) => !f.hidden).map((f) => f.name),
@@ -911,6 +967,16 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     [fields, fieldPrefix, includePrevious],
   );
   const valueOf: SubjectValueOf = (subject) => subjectValues.get(subject);
+  /** Every subject spelling that names a catalog field, hidden and untyped
+   *  ones included — what an ordering row is guarded on (objectstack#27513). */
+  const fieldSubjects = React.useMemo(() => {
+    const out = new Set<string>();
+    for (const f of fields) {
+      out.add(`${fieldPrefix}${f.name}`);
+      if (includePrevious) out.add(`previous.${f.name}`);
+    }
+    return out;
+  }, [fields, fieldPrefix, includePrevious]);
   const declaredKey = [...subjectValues].map(([s, v]) => `${s}=${v}`).sort().join('|');
   // Held in a ref so the effects below read this render's catalog without
   // listing a function that is new every render.
@@ -967,9 +1033,13 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
   };
   const update = (nextRows: Row[], nextJoin: '&&' | '||' = join) => {
     editedSinceRead.current = true;
-    setRowsState(nextRows);
+    // A row this edit built or changed is a new object; it compiles as the
+    // builder writes it (objectstack#27513). The rows it left alone keep
+    // their spelling.
+    const settled = nextRows.map((r) => (rows.includes(r) ? r : withGuard(r, fieldSubjects)));
+    setRowsState(settled);
     setJoin(nextJoin);
-    emit(nextRows, nextJoin);
+    emit(settled, nextJoin);
   };
 
   /* ─── Blocking CEL verdicts → the inspector's aggregate (objectui#4527) ───
@@ -1085,7 +1155,12 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
                   <Select value={r.subject} onValueChange={(v) => update(rows.map((x, j) => j === i ? { ...x, subject: v } : x))} disabled={disabled}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue placeholder={tLocal('engine.inspector.condition.subjectPlaceholder')} /></SelectTrigger>
                     <SelectContent>
-                      {subjectOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      {subjectOptions.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                          {o.hint && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{o.hint}</span>}
+                        </SelectItem>
+                      ))}
                       {r.subject && !subjectOptions.some((o) => o.value === r.subject) && (
                         <SelectItem value={r.subject}>{r.subject}</SelectItem>
                       )}

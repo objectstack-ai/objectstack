@@ -943,6 +943,13 @@ export default defineStack({
 });
 ```
 
+Each `url` must be credential-free when the stack is published: a
+`user:password@` URL is refused, like an inline `config.password`. Bind the
+password through `external.credentialsRef` instead, keeping the user in the URL
+(`mongodb://svc@host/db`): the bound secret is injected beside it at connect. The
+[read-only example](#read-only-grant-it-at-the-database-not-in-metadata) below
+shows the binding.
+
 Then in your object definition:
 
 ```typescript
@@ -982,14 +989,21 @@ export const Analytics = defineDatasource({
   label: 'Analytics (read-only account)',
   driver: 'postgres',
   // The connection itself cannot write. Nothing in the app can talk past it.
-  config: { url: process.env.ANALYTICS_RO_URL },
+  config: { host: 'db.internal', database: 'analytics', username: 'analytics_ro' },
+  // The account's password, bound through the secret store (see below).
+  external: { credentialsRef: 'sys_secret:9f2c…' },
   active: true,
 });
 ```
 
-(`external.credentialsRef` is a *federation* key — the parse rejects an
-`external` block on a `managed` datasource — so a managed connection carries its
-credentials in `config`, from the environment as above.)
+The read-only account's password never goes in `config`: the driver contract
+refuses `config.password`, and a `user:password@` URL, at publish. Bind it
+instead. The Setup → Datasources connection form's secret field encrypts it into
+`sys_secret` and stores the opaque handle at `external.credentialsRef`, or you
+write a handle the secret store minted there yourself. `credentialsRef` is the
+one `external` key a `managed` datasource may carry; every federation key is
+still refused there. See
+[Credentials](/docs/data-modeling/external-datasources#4-credentials).
 
 Note that a read-only account also refuses **DDL**, so such a datasource cannot
 run ObjectStack's boot-time schema sync or migrations. That is the honest
@@ -1026,8 +1040,9 @@ through a connection the server will not let write
 `ObjectQLEngine.assertWriteAllowed` before every insert/update/delete — but it
 answers a question about *ownership*, not about connections: which side may
 write to a database ObjectStack does not own. You cannot reach for it on a local
-database: the parse rejects an `external` block whose `schemaMode` is `managed`,
-and the engine check itself returns early for `managed` (and for a definition
+database: the parse rejects every federation key, `allowWrites` included, in an
+`external` block whose `schemaMode` is `managed` (only `credentialsRef` may sit
+there), and the engine check itself returns early for `managed` (and for a definition
 that declares no `schemaMode`) before it ever reads `allowWrites`. See
 [Writes (double opt-in)](/docs/data-modeling/external-datasources#5-writes-double-opt-in).
 

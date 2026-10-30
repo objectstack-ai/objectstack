@@ -34,9 +34,16 @@ import { registerApprovalNode } from './approval-node.js';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
 
+/**
+ * The accounts this suite routes `user` approver slots to: a `user` approver
+ * holds a slot only when an account carries it (#27397), so the double's
+ * directory starts with them.
+ */
+const ROUTED_USERS = ['u1'];
+
 /** In-memory ObjectQL stand-in — the approvals tables outlive the "restart". */
 function makeFakeEngine() {
-  const tables = new Map<string, any[]>();
+  const tables = new Map<string, any[]>([['sys_user', ROUTED_USERS.map((id) => ({ id }))]]);
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
   const matches = (row: any, where: any) => Object.entries(where ?? {}).every(([k, v]) => {
     if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter operator ${k}`);

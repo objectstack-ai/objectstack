@@ -4321,6 +4321,7 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     // Mint an api key bound to `user_9`, then invoke an action authenticated by it.
     const mint = await dispatcher.handleKeys('POST', { name: 'agent' }, {
       request: { headers: {} }, executionContext: { userId: 'user_9', positions: [], permissions: [] },
+      admission: { credential: 'session', authGate: undefined },
     } as any);
     const raw = mint.response.body.data.key;
 

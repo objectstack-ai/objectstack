@@ -63,9 +63,9 @@ function evaluate(source: string, record: Record<string, unknown>): { ok: true; 
   return res.ok ? { ok: true, value: res.value } : { ok: false, error: String(res.error?.message ?? res.error) };
 }
 
-/** The condition-builder row whose subject trigger reads `subject`. */
+/** The condition-builder row whose subject trigger reads `subject` (after the field's label, objectstack#27521). */
 function rowOf(subject: string): HTMLElement {
-  const trigger = screen.getAllByRole('combobox').find((el) => el.textContent === subject);
+  const trigger = screen.getAllByRole('combobox').find((el) => el.textContent?.endsWith(subject));
   expect(trigger, `no condition row names ${subject}`).toBeTruthy();
   // The row box, not the trigger: a Select trigger is `rounded-md` itself.
   return trigger!.parentElement!.closest('.space-y-1.rounded-md') as HTMLElement;

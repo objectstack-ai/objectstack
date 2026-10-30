@@ -72,8 +72,9 @@ const DECLARED_UNEVALUABLE: { readonly dialect: 'cel'; readonly source?: undefin
 /**
  * Wrap a BARE expression as a `${…}` template, and leave a string that already
  * carries template syntax alone (objectui#3871 — rationale in
- * {@link toPredicateInput}'s doc below). One rule, so the two string spellings
- * inside the normalizer cannot drift apart.
+ * {@link toPredicateInput}'s doc below). Used for the `source` of an envelope
+ * whose dialect is not `cel` only: a bare STRING is CEL shorthand and becomes
+ * a `cel` envelope instead (objectstack#27457).
  */
 function wrapIfBare(expression: string): string {
   return expression.includes('${') ? expression : `\${${expression}}`;
@@ -86,9 +87,11 @@ function wrapIfBare(expression: string): string {
  *
  * Accepts:
  *   - `boolean` → returned as-is (predicate evaluation short-circuits).
- *   - `string`  → a BARE expression is wrapped as `${string}` (legacy DX
- *     shorthand); a string that is already a `${…}` template is ALREADY in the
- *     normalized shape and is returned untouched (objectui#3871, below).
+ *   - `string`  → a BARE expression becomes `{ dialect: 'cel', source }`,
+ *     exactly as `@objectstack/spec`'s `ExpressionInputSchema` normalizes it
+ *     on the server (objectstack#27457, below); a string that is already a
+ *     `${…}` template is ALREADY in the normalized shape and is returned
+ *     untouched (objectui#3871, below).
  *   - `Expression` envelope `{ dialect, source }` (the normalized form
  *     `@objectstack/spec`'s `ExpressionInputSchema` produces for every
  *     authored predicate, including bare strings) → a `cel` dialect keeps
@@ -123,6 +126,20 @@ function wrapIfBare(expression: string): string {
  * (since #3367; it used to be an independent twin held in step by a 14-shape
  * normalization parity table, which is exactly the arrangement the paragraph
  * above describes the failure mode of).
+ *
+ * ## Why a bare string is a `cel` envelope, not a `${…}` template (objectstack#27457)
+ *
+ * The spec defines a bare string as shorthand for `{ dialect: 'cel', source }`
+ * — the string arm of `ExpressionInputSchema` transforms it into exactly that,
+ * and so does every evaluated slot's `EvaluatedExpressionInputSchema` — and the
+ * server evaluates it on CEL. This normalizer is the console's copy of that
+ * same input step, so it emits the same envelope (ADR-0032: one CEL language,
+ * no second grammar for the shorthand). It used to wrap the string as
+ * `${string}`, which sent a CEL-only predicate (`'org_owner' in
+ * current_user.positions`, `size(page.items) > 0`) to the legacy JS evaluator,
+ * where it faulted — and a gate that faults closed was hidden from everyone.
+ * `evaluateCondition` reads a raw bare string the same way, for the callers
+ * that hand it the authored value without normalizing first.
  *
  * ## Why an already-`${…}` string is NOT wrapped again (objectui#3871)
  *
@@ -179,7 +196,9 @@ function wrapIfBare(expression: string): string {
 export function toPredicateInput(value: unknown): EvaluatorPredicateInput {
   if (value === null || value === undefined || value === '') return undefined;
   if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') return wrapIfBare(value);
+  if (typeof value === 'string') {
+    return value.includes('${') ? value : { dialect: 'cel', source: value };
+  }
   // Declared, but nothing here can be evaluated (objectui#11358): kept as its
   // own state rather than folded into "absent". See `DECLARED_UNEVALUABLE`.
   if (isUnevaluablePredicate(value)) return DECLARED_UNEVALUABLE;

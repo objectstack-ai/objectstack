@@ -360,6 +360,14 @@ const en = {
     },
   },
   fields: {
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Select currency',
+      search: 'Search currency…',
+      noResults: 'No currency found',
+      available: 'Available',
+      all: 'All currencies (ISO 4217)',
+    },
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Open {{name}}',
@@ -1798,6 +1806,7 @@ const en = {
     datasetUnsupported: 'This data source does not support dataset queries.',
     widgetForbiddenTitle: 'You don’t have access',
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
+    allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
     details: 'Details',
     exportCsv: 'Export CSV',
     openInList: 'Open in list',
@@ -2101,7 +2110,7 @@ const en = {
       title: 'Studio',
       // What a principal without `studio.access` reads at the Studio URL they
       // opened (objectui#12035), in place of the silent redirect home.
-      accessRequired: 'You need Studio access to open Studio.',
+      accessRequired: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Sets.',
     },
     saveAdvisoryTitle: 'Saved — the authoring check raised {{count}} advisory finding(s)',
     saveAdvisoryTitle_one: 'Saved — the authoring check raised {{count}} advisory finding',
@@ -2297,6 +2306,15 @@ const en = {
       title: 'Reports',
       emptyTitle: 'No reports',
       emptyDescription: 'This app has no reports you can open.',
+      viewsLabel: 'Report views',
+      viewAll: 'All reports',
+      viewRecent: 'Recent',
+      searchPlaceholder: 'Search reports…',
+      searchLabel: 'Search reports',
+      otherSection: 'Other',
+      lastOpened: 'Opened {{time}}',
+      recentEmpty: 'No recently opened reports',
+      noMatch: 'No reports match your search.',
     },
     commandPalette: {
       title: 'Command palette',
@@ -2512,6 +2530,8 @@ const en = {
       planApproveDefaultsMessage:
         'Build it with your best assumptions; use sensible defaults for the open questions.',
       planAnswerMessage: 'For "{{question}}", go with: {{option}}.',
+      planExtendExistingMessage: 'Keep improving "{{app}}" instead of building a new app.',
+      planBuildNewAppMessage: 'Build a separate, new app.',
       changesTitle: 'Confirm changes',
       changesConfirmed: 'Confirmed',
       changesConfirm: 'Confirm',
@@ -3111,6 +3131,11 @@ const en = {
       invitationPreviewTitle: '{{inviter}} invited you to join {{organization}}',
       invitationPreviewTitleNoInviter: 'You are invited to join {{organization}}',
       invitationPreviewDescription: 'Use the email address the invitation was sent to ({{email}}).',
+      // #27509 — the card for an invitation link the server no longer knows:
+      // the server's one not-found answer cannot say why, so neither does this.
+      invitationGoneTitle: 'This invitation link is no longer valid',
+      invitationGoneDescription: 'It may have expired, been used, or been withdrawn. Ask the person who invited you to send a new invitation.',
+      invitationGoneSignIn: 'Go to sign in',
       showPasswordText: 'Show password',
       hidePasswordText: 'Hide password',
       footer: {
@@ -3154,6 +3179,10 @@ const en = {
         userExists: 'An account with this email already exists. Try signing in instead.',
         selfRegistrationClosed: 'Self-registration is not open on this system. Ask an administrator for an invitation.',
         emailDomainNotAllowed: "This email's domain is not allowed to register here. Use your organization email, or ask an administrator for an invitation.",
+        // #27509 — `selfRegistrationClosed` for a visitor holding an invitation
+        // link; `{{email}}` is the MASKED address the preview returns.
+        invitationSentTo: 'This invitation was sent to {{email}}. Register with that address to accept it.',
+        invitationAddressOnly: 'This invitation can only be accepted with the address it was sent to. Register with that address.',
       },
       verifyInbox: {
         title: 'Check your inbox',
@@ -3317,6 +3346,7 @@ const en = {
         submit: 'Change password & continue',
         submitting: 'Updating…',
         mismatch: 'New passwords do not match.',
+        sameAsTemporary: 'Choose a new password that is different from your temporary password.',
         failed: 'Could not change password.',
       },
       mfa: {
@@ -3791,6 +3821,7 @@ const en = {
       detailLoading: 'Loading detail…',
       detailLoadFailed: 'Could not load change detail:',
       detailNone: 'No differences detected — the draft matches the published version.',
+      fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Includes changes drafted by the AI copilot',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
@@ -3798,9 +3829,9 @@ const en = {
       detailChangedKeys: 'Also changed:',
       detailNewKeys: 'Includes:',
       generatedGroup: 'Generated by the platform ({{n}})',
-      confirmNote: 'Publishing releases all {{count}} pending drafts of this package atomically.',
-      confirmNote_one: 'Publishing releases the {{count}} pending draft of this package atomically.',
-      confirmNote_other: 'Publishing releases all {{count}} pending drafts of this package atomically.',
+      confirmNote: 'Publishing releases all {{count}} pending drafts of this package together: all of them go live, or none do.',
+      confirmNote_one: 'Publishing releases the {{count}} pending draft of this package: it goes live, or nothing changes.',
+      confirmNote_other: 'Publishing releases all {{count}} pending drafts of this package together: all of them go live, or none do.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
@@ -4163,9 +4194,9 @@ const en = {
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
     badgeTotal: '{{total}} total',
-    badgeNotifications: '{{count}} notifications',
-    badgeNotifications_one: '{{count}} notification',
-    badgeNotifications_other: '{{count}} notifications',
+    badgeNotifications: '{{count}} unread topics',
+    badgeNotifications_one: '{{count}} unread topic',
+    badgeNotifications_other: '{{count}} unread topics',
     badgeApprovals: '{{count}} pending approvals',
     badgeApprovals_one: '{{count}} pending approval',
     badgeApprovals_other: '{{count}} pending approvals',
@@ -4508,6 +4539,13 @@ const en = {
       countSeedData: 'sample data',
       extendTarget: 'Adding to existing app: {{app}}',
       awaitingConfirm: 'Awaiting confirmation',
+      iterateOrNew: {
+        question: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
+        questionUnnamed: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
+        extend: 'Keep improving "{{app}}"',
+        buildNew: 'Build a separate app',
+        replyHint: 'Reply to say which.',
+      },
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
@@ -4924,9 +4962,15 @@ const en = {
     progressEligible: '{{count}} eligible approver(s)',
     progressEligible_one: '{{count}} eligible approver',
     progressEligible_other: '{{count}} eligible approvers',
+    // The chip beside an approver who holds several of the step's slots; the
+    // eligible-approver count beside the tally counts that person once.
+    approverSlots: 'holds {{count}} approver slot(s)',
+    approverSlots_one: 'holds {{count}} approver slot',
+    approverSlots_other: 'holds {{count}} approver slots',
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    snapshotAsSubmitted: 'As submitted',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',
@@ -5081,6 +5125,8 @@ const en = {
     daysAgo_other: '{{count}}d ago',
   },
   filterBuilder: {
+    currency: 'Currency',
+    currencyNeedsAnd: 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
     where: 'Where',
     and: 'AND',
     or: 'OR',

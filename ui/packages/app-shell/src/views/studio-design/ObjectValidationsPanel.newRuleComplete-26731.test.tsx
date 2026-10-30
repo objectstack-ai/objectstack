@@ -124,7 +124,8 @@ describe('a new field rule waits for its field and message (objectstack#26731)',
     const fieldName = /\((\w+)\)$/.exec(fieldLabel)![1];
     expect(written[1]).toMatchObject({
       type,
-      name: 'validation_2',
+      // objectstack#27521 — the minted name follows the message.
+      name: 'bad_value',
       field: fieldName,
       message: 'Bad value',
       events: ['insert', 'update'],

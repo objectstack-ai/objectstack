@@ -6,6 +6,7 @@ import type { FilterArray, FilterCondition } from './filter.zod';
 import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, GroupByNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
 import type { QueryAST, QueryInput } from './query.zod';
 import { PROJECTION_NAMES_NO_FIELD, transportProjectionArray } from './projection-names-a-field';
+import { SEARCH_FIELDS_ACCEPT_SET, searchFieldsArray, searchFieldsString } from './search-fields-names-a-field';
 import { retiredKey } from '../shared/retired-key';
 import { ExecutionContextSchema } from '../kernel/execution-context.zod';
 
@@ -958,9 +959,13 @@ export const QueryTransportParamsSchema = lazySchema(() => z.object({
   /** OData spelling of `search`. */
   $search: z.union([z.string(), FullTextSearchSchema]).nullable().optional()
     .describe('Transport spelling of `search` (OData `$search`)'),
-  /** OData spelling of `searchFields`. */
-  $searchFields: z.union([z.string(), z.array(z.string())]).nullable().optional()
-    .describe('Transport spelling of `searchFields` (OData `$searchFields`)'),
+  /**
+   * OData spelling of `searchFields`. [#27683] Declares the override the door
+   * accepts (`./search-fields-names-a-field.ts`): a value naming no field is
+   * refused, as the canonical `QuerySchema.searchFields` refuses it.
+   */
+  $searchFields: z.union([searchFieldsString(), searchFieldsArray()]).nullable().optional()
+    .describe(`Transport spelling of \`searchFields\` (OData \`$searchFields\`) — ${SEARCH_FIELDS_ACCEPT_SET}`),
   /** OData spelling of the response total-count flag. */
   $count: TransportCountValueSchema.nullable().optional()
     .describe('Transport spelling of the response total-count flag (OData `$count`)'),

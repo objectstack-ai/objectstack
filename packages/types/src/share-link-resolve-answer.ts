@@ -32,7 +32,10 @@
  * Each entry carries only what a read-only renderer needs to draw the value:
  * the authored `label` and `type`; a picklist's `options` (value, label and
  * colour — never `default` or visibility rules); `multiple`; a currency field's
- * `currencyConfig`; and a lookup's `reference` (target object) and authored
+ * `currencyConfig` (its mode, a fixed code, and — for a `record`-mode amount,
+ * ADR-0144 D2 — the `currencyField` pointer, only while `record` also carries
+ * that code field, so a redacted code field's name is never disclosed); and a
+ * lookup's `reference` (target object) and authored
  * `displayField`. The labels are the authored ones the object schema holds:
  * the resolve read path has no caller-locale seam, and this module builds none.
  * A lookup's value stays what the record read returns — the stored id; nothing
@@ -52,6 +55,12 @@ export interface ShareLinkFieldOption {
 export interface ShareLinkFieldCurrencyConfig {
   currencyMode?: string;
   defaultCurrency?: string;
+  /**
+   * A `record`-mode amount's sibling code field (ADR-0144 D2): the page reads
+   * the record's code from it. Projected only when the answer's `record`
+   * carries that field.
+   */
+  currencyField?: string;
 }
 
 /** The display projection of one field the resolve answer's `record` carries. */
@@ -109,7 +118,7 @@ function projectOptions(options: unknown): ShareLinkFieldOption[] | undefined {
   return out;
 }
 
-function projectField(field: Record<string, unknown>): ShareLinkFieldDisplay {
+function projectField(field: Record<string, unknown>, carried: (key: string) => boolean): ShareLinkFieldDisplay {
   const out: ShareLinkFieldDisplay = {};
   if (typeof field.label === 'string') out.label = field.label;
   if (typeof field.type === 'string') out.type = field.type;
@@ -117,10 +126,14 @@ function projectField(field: Record<string, unknown>): ShareLinkFieldDisplay {
   if (options) out.options = options;
   if (field.multiple === true) out.multiple = true;
   if (isPlainObject(field.currencyConfig)) {
-    const { currencyMode, defaultCurrency } = field.currencyConfig;
+    const { currencyMode, defaultCurrency, currencyField } = field.currencyConfig;
     out.currencyConfig = {
       ...(typeof currencyMode === 'string' ? { currencyMode } : {}),
       ...(typeof defaultCurrency === 'string' ? { defaultCurrency } : {}),
+      // The pointer names another field: kept only when that field is one the
+      // record shows, so the answer still describes nothing the record hides.
+      // Without it a record-mode amount renders as a plain number.
+      ...(typeof currencyField === 'string' && carried(currencyField) ? { currencyField } : {}),
     };
   }
   if (typeof field.reference === 'string') out.reference = field.reference;
@@ -142,10 +155,12 @@ export function projectSharedRecordFields(
   const fields: Record<string, ShareLinkFieldDisplay> = {};
   if (!isPlainObject(record) || !isPlainObject(schema) || !isPlainObject(schema.fields)) return fields;
   const declared = schema.fields;
+  const carried = (key: string) =>
+    !redactFields.includes(key) && Object.prototype.hasOwnProperty.call(record, key);
   for (const key of Object.keys(record)) {
     if (redactFields.includes(key) || !Object.prototype.hasOwnProperty.call(declared, key)) continue;
     const field = declared[key];
-    if (isPlainObject(field)) fields[key] = projectField(field);
+    if (isPlainObject(field)) fields[key] = projectField(field, carried);
   }
   return fields;
 }

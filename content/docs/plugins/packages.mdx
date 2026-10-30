@@ -4,7 +4,7 @@ navTitle: Package Overview
 description: Complete guide to all ObjectStack packages, services, drivers, plugins, and adapters
 ---
 
-ObjectStack is organized into **72 package manifests** across multiple categories. This guide provides an overview of the framework packages, services, drivers, plugins, and adapters in the [framework repository](https://github.com/objectstack-ai/objectstack/tree/main/packages).
+ObjectStack is organized into package manifests across multiple categories. This guide provides an overview of the framework packages, services, drivers, plugins, and adapters in the [framework repository](https://github.com/objectstack-ai/objectstack/tree/main/packages).
 
 ### Package categories at a glance
 
@@ -24,7 +24,7 @@ ObjectStack is organized into **72 package manifests** across multiple categorie
 
 **The Constitution** — Protocol schemas, types, and constants for the entire ObjectStack ecosystem.
 
-- **Purpose**: Zod-first schema definitions for all 15 protocol domains
+- **Purpose**: Zod-first schema definitions for every protocol domain
 - **Exports**: Builder functions (`defineStack`, `defineView`, `defineApp`, `defineFlow`, `defineAgent`, `defineTool`, `defineSkill`) from the root entry, plus `ObjectSchema.create()` for objects from the `@objectstack/spec/data` subpath. Protocol namespaces (Data, UI, System, Automation, AI, API, Identity, Security, Kernel, Marketplace, QA, Contracts, Integration, Studio, Shared) are not re-exported from the top-level entry for tree-shaking reasons — import them from subpaths such as `@objectstack/spec/data` and `@objectstack/spec/ui`.
 - **When to use**: Import types, schemas, and builder functions when authoring metadata.
 - **Documentation**: [Protocol Reference](/docs/references)

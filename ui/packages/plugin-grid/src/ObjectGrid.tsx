@@ -3205,7 +3205,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
                       `amountCol` is a column draft and carries neither
                       `currency` nor `currencyConfig`. */}
                   {typeof row[amountCol.accessorKey] === 'number'
-                    ? formatCompactCurrency(row[amountCol.accessorKey], resolveFieldCurrency(objectSchema?.fields?.[amountCol.accessorKey], tenantCurrency), displayLocale)
+                    ? formatCompactCurrency(row[amountCol.accessorKey], resolveFieldCurrency(objectSchema?.fields?.[amountCol.accessorKey], tenantCurrency, row), displayLocale)
                     : (coerceToSafeValue(row[amountCol.accessorKey]) ?? '—')}
                 </span>
               )}

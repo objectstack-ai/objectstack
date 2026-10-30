@@ -45,7 +45,7 @@ describe('ObjectValidationsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
     // Target the menu <button> (the Type picker shows the same text — its
     // trigger is role "combobox", not "button").
-    fireEvent.click(screen.getByRole('button', { name: 'Script — CEL fail condition' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Condition — reject the save when it is true' }));
     // An empty condition 422s the whole draft save (spec ExpressionInputSchema),
     // and the old `'false'` placeholder saved a rule that never fires — so a new
     // guarded rule is listed and open, and nothing reaches the draft yet.
@@ -71,7 +71,7 @@ describe('ObjectValidationsPanel', () => {
     const patch = onPatch.mock.calls[0][0];
     const added = patch.validations[patch.validations.length - 1];
     // Seeded valid: the picked `field` + an (empty) transitions map.
-    expect(added).toMatchObject({ type: 'state_machine', name: 'validation_3', field: 'name', message: 'Bad move' });
+    expect(added).toMatchObject({ type: 'state_machine', name: 'bad_move', field: 'name', message: 'Bad move' });
     expect(added.transitions).toEqual({});
     // objectui#11820 — and it starts on Create + Update.
     expect(added.events).toEqual(['insert', 'update']);
@@ -107,7 +107,7 @@ describe('ObjectValidationsPanel', () => {
     // The Type picker (the shared Select, objectui#11865) holds the current
     // type; switching it converts the rule.
     const typePicker = screen.getByTestId('rule-type');
-    expect(typePicker).toHaveTextContent('Script — CEL fail condition');
+    expect(typePicker).toHaveTextContent('Condition — reject the save when it is true');
     fireEvent.keyDown(typePicker, { key: 'ArrowDown' });
     fireEvent.click(
       within(await screen.findByRole('listbox')).getByRole('option', { name: 'Format — regex / built-in format' }),

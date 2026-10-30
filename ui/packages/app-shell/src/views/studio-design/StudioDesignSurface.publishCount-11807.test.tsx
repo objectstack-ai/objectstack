@@ -35,7 +35,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.b2r4';
 
@@ -246,5 +246,56 @@ describe('the package-less publish names its count, and its zero is no success (
     await publishAt('/studio/~org/automations', 0);
     await waitFor(() => expect(toast.info).toHaveBeenCalled());
     expect(toasts()).toEqual({ success: [], info: [t('engine.studio.publishNoneTitle', 'en')], error: [] });
+  });
+});
+
+// objectstack#27521 (Studio row 35) — a published app or object reaches
+// members only through a permission set, and nothing said so: the author found
+// out when a member reported an empty app. The toast now says it and offers
+// the way to Access.
+describe('a publish that put an app or object live points the author to Access (objectstack#27521)', () => {
+  function LocationProbe() {
+    return <div data-testid="location">{useLocation().pathname}</div>;
+  }
+
+  it('an object went live: the hint, and "Open Access" leads to the Access pillar', async () => {
+    batchBody = batch({
+      outcome: 'published',
+      publishedCount: 1,
+      failedCount: 0,
+      published: published('visit'),
+      failed: [],
+    });
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+        <Routes>
+          <Route path="/studio/:packageId/:tab" element={<><StudioDesignSurface /><LocationProbe /></>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByTestId('publish-all-drafts'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const [title, options] = vi.mocked(toast.success).mock.calls[0] as [
+      string,
+      { description?: string; action?: { label: string; onClick: () => void } },
+    ];
+    expect(title).toBe(tFormat('engine.studio.publishedAllCountOne', 'en', { count: 1 }));
+    expect(options.description).toBe(t('engine.studio.publishedAccessHint', 'en'));
+    expect(options.action?.label).toBe(t('engine.studio.publishedOpenAccess', 'en'));
+    options.action!.onClick();
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${PACKAGE_ID}/access`));
+  });
+
+  it('CONTROL — only a flow went live: the plain toast, no Access hint', async () => {
+    batchBody = batch({
+      outcome: 'published',
+      publishedCount: 1,
+      failedCount: 0,
+      published: [{ type: 'flow', name: 'visit_reminder', version: 'sha256:0' }],
+      failed: [],
+    });
+    await publishAt(`/studio/${PACKAGE_ID}/automations`, 1);
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(vi.mocked(toast.success).mock.calls[0]).toEqual([tFormat('engine.studio.publishedAllCountOne', 'en', { count: 1 })]);
   });
 });

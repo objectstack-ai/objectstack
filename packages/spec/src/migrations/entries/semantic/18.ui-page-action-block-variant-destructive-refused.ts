@@ -16,8 +16,10 @@ export const entry: SemanticMigration = {
     + "dispatches, says `danger`; the action block rows took the Button primitive's word, `destructive`, and "
     + 'refused `danger`, so one destructive action changed spelling between a declaration and a block, and each '
     + 'block renderer translated between the two at its forward to the runner. The blocks now take `danger` and '
-    + 'refuse `destructive` with the rename. Other components that draw the Button primitive directly '
-    + "(`element:button` and the like) keep `destructive`, the primitive's own word, and are not touched. A page's "
+    + 'refuse `destructive` with the rename. `element:button` already spells it `danger` '
+    + '(`ElementButtonPropsSchema.variant`) and refuses `destructive`, so it is not touched. `destructive` is the '
+    + "React Button primitive's own word; the two record blocks that forward a variant to that primitive unchanged, "
+    + "`record:quick_actions` and a `record:alert` action, still take it and are not touched either. A page's "
     + '`properties` is not parsed on the metadata load path, and the next save of the page meets the '
     + 'component-props gate at the metadata save door; `os validate` reports the old value as a '
     + '`component-props-invalid` finding. The D2 conversion `page-action-block-variant-destructive-to-danger` '

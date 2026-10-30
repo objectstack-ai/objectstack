@@ -1713,10 +1713,10 @@
     },
     {
       "id": "cli.plugin-manifest-build-contract",
-      "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `packaging` forks the artifact, and the compiled manifest the artifact carries is readable back",
+      "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `bundled` is the one packaging strategy (the retired `manifest-deps` is refused at the manifest, a native addon is refused by name), and the compiled manifest the artifact carries is readable back",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 6,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -1725,25 +1725,26 @@
       "fixtures": {
         "app": "scaffold",
         "requires": [
-          "a scratch plugin directory OUTSIDE the repo tree holding objectstack.plugin.json (the filename os plugin build reads — NOT objectstack.config.ts), an entry at src/index.ts, and a package.json declaring at least one real runtime dependency that the entry actually imports. ⛔ Without a genuinely imported dependency the two `packaging` modes produce the same bundle and the fork clause is unscoreable — an equal-artifacts observation would then be a fixture defect reported as a product fail",
+          "a scratch plugin directory OUTSIDE the repo tree holding objectstack.plugin.json (the filename os plugin build reads — NOT objectstack.config.ts), an entry at src/index.ts, and a package.json declaring at least one real, pure-JavaScript runtime dependency that the entry actually imports. ⛔ Without a genuinely imported dependency there is nothing to inline and the bundled clause is unscoreable — a bundle that merely lacks an external import would then be a fixture defect read as a product pass",
           "esbuild resolvable from that directory — os plugin build refuses with its own named error when it is not, which is a fixture failure rather than a clause verdict",
-          "a second scratch directory for the refusal probes, so a bad manifest never overwrites the good one"
+          "a second scratch directory for the refusal probes, so a bad manifest never overwrites the good one. The native-addon probes need no compiler: the build refuses a `.node` file by its path and never loads it, so any bytes in a file named addon.node will do, and a dependency that 'declares a node-gyp build' is a hand-written node_modules/<name>/ holding a package.json, an index.js and a binding.gyp"
         ],
         "knownGaps": [
           "os plugin publish CANNOT complete locally: after extracting the artifact manifest it requires a cloud token and posts to <server>/api/v1/cloud/packages. Only its PRE-NETWORK legs are scoreable here — artifact discovery in cwd, manifest extraction, the id/version refusal, and the unsigned-artifact notice. Record blocked(environment) for anything past the auth step; the cloud control plane is not part of this checklist's fixture set",
           "the SERVER-side mirror of the identity refusal — POST /api/v1/packages/publish answering 400 PACKAGE_MANIFEST_INVALID when id or version is missing (packages/rest/src/package-routes.ts) — is deliberately not scored here: it needs a deployment composing the `package` service, and one without it answers 404 with the 'composes no `package` service' message, which is not a failure of anything. Score it from the api lane if a marketplace-capable deployment is available",
-          "the artifact is a gzipped ustar with mtime pinned to 0 and entries emitted in sorted path order, so identical inputs produce byte-identical archives — that is what makes the two packaging builds comparable, and it is also why a stale artifact from an earlier run is indistinguishable from a fresh one by name alone. Build each mode into its own --out path"
+          "the artifact is a gzipped ustar with mtime pinned to 0 and entries emitted in sorted path order, so identical inputs produce byte-identical archives — which is also why a stale artifact from an earlier run is indistinguishable from a fresh one by name alone. Check for the artifact's ABSENCE after every refusal probe in a directory that never held one",
+          "the native-addon refusal reads what the build can SEE: a `.node` module in esbuild's graph, a bundled package that declares a node-gyp build or ships a `.node` file, and a `.node` file under assets/. An addon loaded at run time from an absolute or computed path outside every bundled package is invisible to it, and is not scored here — the artifact would fail at load on a host that lacks it"
         ]
       },
       "steps": [
-        "in the scratch plugin dir, run `os plugin build` on the GOOD manifest (id, version, name, an imported dependency in package.json, no `packaging` key) → capture the full output: the Loaded line, Artifact, Plugin, Files, Integrity entries, Size, sha256. Keep the artifact at its own --out path",
-        "re-run with `packaging: \"manifest-deps\"` in objectstack.plugin.json, into a DIFFERENT --out path → capture the same output block",
-        "compare the two artifacts: extract each (gunzip + tar) and diff the FILE LISTS and the bundled entry. Expect package.json (and pnpm-lock.yaml when present) inside the manifest-deps artifact and absent from the bundled one, and expect the declared dependency's import to survive as an external import in the manifest-deps dist/index.mjs while its code is inlined in the bundled one",
-        "read the compiled manifest out of each artifact (the objectstack.plugin.json entry inside the archive) and compare it to the authored one: expect the authored keys plus `main` and an `integrity` map",
+        "in the scratch plugin dir, run `os plugin build` on the GOOD manifest (id, version, name, an imported dependency in package.json, no `packaging` key) → capture the full output: the Loaded line, Artifact, Plugin, Files, Integrity entries, Size, sha256",
+        "copy the good project into the second scratch dir, set `packaging: \"manifest-deps\"` in ITS objectstack.plugin.json and build there → capture the output, the exit code, and the directory listing after it",
+        "extract the good artifact (gunzip + tar) and read its FILE LIST and its entry bundle. Expect exactly objectstack.plugin.json, dist/index.mjs and SIGNATURE (plus any assets/ the project carries) — no package.json and no lockfile — and expect the declared dependency's code inlined in dist/index.mjs with no import or require of it surviving",
+        "read the compiled manifest out of the artifact (the objectstack.plugin.json entry inside the archive) and compare it to the authored one: expect the authored keys plus `main` and an `integrity` map",
         "run `os plugin publish` against the good artifact with no token → capture the output up to and including the auth refusal; then run it against an artifact whose compiled manifest lacks a version → capture that refusal",
-        "REFUSAL probes, each in the second scratch dir, each followed by a check that NO artifact file was written: (a) objectstack.plugin.json that is not valid JSON; (b) a manifest missing `id`; (c) a manifest whose `version` is not semver; (d) a manifest with `id: \"\"` — which the reverse-domain rule on manifest.id (MANIFEST_ID_PATTERN) refuses at safeParse with a located error; (e) a manifest with no `main` and no src/index.* entry candidate",
+        "REFUSAL probes, each in the second scratch dir, each followed by a check that NO artifact file was written: (a) objectstack.plugin.json that is not valid JSON; (b) a manifest missing `id`; (c) a manifest whose `version` is not semver; (d) a manifest with `id: \"\"` — which the reverse-domain rule on manifest.id (MANIFEST_ID_PATTERN) refuses at safeParse with a located error; (e) a manifest with no `main` and no src/index.* entry candidate. Then, on a VALID manifest: (f) an entry that imports ./native/addon.node; (g) an entry that imports a node_modules dependency declaring a node-gyp build (binding.gyp), beside a pure dependency it also imports; (h) an assets/bin/addon.node beside an ordinary asset",
         "run `os lint` on a scaffold config whose manifest declares NO engines range → capture the finding (rule, severity, path, fix); then run it on a bare metadata fragment that declares no manifest at all → confirm the rule does NOT fire there",
-        "teardown: delete both scratch directories. ⚠️ Do not re-run the packaging comparison over the artifacts of a previous run — each mode writes its own --out path and a leftover file from an earlier run reads exactly like a fresh one"
+        "teardown: delete both scratch directories. ⚠️ Do not re-run a refusal probe in a directory an earlier build wrote an artifact into — a leftover file reads exactly like a fresh one, and the no-artifact half of every refusal clause is then unscoreable"
       ],
       "acceptance": [
         {
@@ -1759,10 +1760,16 @@
           "evidence": "the three refusals side by side, each with its exit code"
         },
         {
-          "clause": "`packaging` FORKS the artifact rather than annotating it: the same source tree built as `bundled` (the default) and as `manifest-deps` produces two DIFFERENT artifacts — manifest-deps keeps every package.json dependency external in the bundle and packs package.json (plus pnpm-lock.yaml when present) into the archive; bundled inlines the dependency's code and packs neither",
+          "clause": "`bundled` is the ONE packaging strategy (ADR-0025 v2 §3.3): the build inlines every dependency the entry imports except the host-provided `@objectstack/*` packages and packs neither package.json nor a lockfile — and the retired `packaging: 'manifest-deps'` is REFUSED at the manifest, a located error under 'objectstack.plugin.json is invalid:' naming `packaging` and telling the author to delete the key, exiting nonzero with no artifact",
           "oracle": "build",
-          "verify": "diff the extracted file lists and the entry bundles of the two artifacts. Both differences must hold: the file-list difference alone could come from any archive change, and the external-import difference alone could come from an esbuild default",
-          "evidence": "the two file lists and the two entry-bundle excerpts showing the dependency inlined in one and imported in the other"
+          "verify": "step 3 for the bundled half — the file list AND the inlined dependency must both hold, since a missing package.json alone could come from any archive change; step 2 for the refusal half, read with its exit code and the directory listing. ⛔ A manifest-deps build that writes an artifact, or prints the Loaded line with `packaging: manifest-deps`, is the retired fork answering again",
+          "evidence": "the good artifact's file list and the entry-bundle excerpt showing the dependency inlined; the manifest-deps refusal with its exit code and the listing after it"
+        },
+        {
+          "clause": "a native (`.node`) addon is REFUSED by name with no artifact (ADR-0025 v2 §3.3) — a `.node` file the entry imports (named with its importer), a bundled dependency that declares a node-gyp build or ships a compiled `.node` binary (named by package), and a `.node` file under assets/ (named by path) each stop the build with 'Native addon refused: …', listing every one found, before the artifact is written",
+          "oracle": "log",
+          "verify": "probes 6f, 6g and 6h, each read with its exit code and the directory listing after it. 6g is scored on BOTH halves: the native package is named, and the pure dependency imported beside it is NOT — a refusal that names every dependency cannot tell the author which one to replace. 6h likewise names assets/bin/addon.node and not the ordinary asset",
+          "evidence": "the three refusals with their exit codes and the listings taken after them"
         },
         {
           "clause": "the artifact carries a COMPILED manifest — the authored manifest plus `main: \"dist/index.mjs\"` and an `integrity` map of archive-relative path → sha256 SRI digest, with the manifest itself and SIGNATURE excluded from the map — and os plugin publish reads that manifest back out of the artifact BEFORE any network call, refusing 'Artifact manifest is missing id or version.' when it cannot",
@@ -1779,9 +1786,9 @@
       ],
       "negative": [
         "an artifact written from a manifest that failed the schema, or from one missing id/version, is the FAIL this item exists for — the refusal is worthless if the build still produces something publishable",
-        "the two packaging modes producing byte-identical artifacts is a FAIL of the fork clause — but check the fixture first: without a dependency the entry genuinely imports there is nothing to externalize, and that is a fixture defect, not a product one",
-        "⛔ the `integrity` map's PRESENCE is not evidence of an integrity CHECK. os plugin build computes it and writes it into the compiled manifest, and nothing re-verifies it at unpack — #11331 is open on exactly that. Scoring the printed 'Integrity entries' count as a working integrity guarantee is the false-compliance shape the enforce-or-remove ledger exists for, and this item asserts only that the map is PRODUCED",
-        "⛔ likewise the plugin trust tier: build and publish both print `runtime: <value|unset>`, and nothing in this repo dispatches on it — #11330 is open. A run that reads that printed line as isolation has scored a log line, not a capability",
+        "a build that accepts `manifest-deps` — writes an artifact, or packs package.json and keeps a dependency external — is a FAIL of the bundled clause: that fork was retired because nothing ever installed the dependencies it left out, so its artifact could not load them. Likewise a native-addon refusal that prints and still writes the .osplugin hands os plugin sign the very artifact it refused",
+        "⛔ the `integrity` map's PRESENCE is not evidence that this item scored an integrity CHECK. os plugin build computes the map and writes it into the compiled manifest, and this item asserts only that the map is PRODUCED. The check is another door's: os plugin install re-hashes every unpacked entry against the map and refuses the install by name (`integrity_mismatch`) before it writes anything (packages/cli/src/commands/plugin/install.ts#PluginInstall, through packages/core/src/security/plugin-artifact-integrity.ts#verifyIntegrity), and os plugin publish runs the same verifier as its own preflight — no clause here scores either. Reading the printed 'Integrity entries' count as that check scores a log line for a capability this item never exercised",
+        "⛔ likewise the plugin trust tier: build and publish both print `runtime: <value|unset>`, and neither dispatches on it. The dispatch is at load — the boot-time loader passes every plugin os plugin install installed through packages/runtime/src/installed-plugin-loader.ts#dispatchPluginRuntime before importing it (`node` loads in process, which is not isolation; `sandbox` and `worker` are refused by name, `runtime_not_dispatched`; an undeclared tier is refused, `runtime_undeclared`), and os plugin install warns when the next boot will refuse the tier. This item scores none of that: a run that reads the printed line as isolation has scored a log line, not a capability",
         "a lint warning that fires on a manifest-less metadata fragment is a FAIL of the scoping half even though the rule itself works"
       ],
       "traps": [
@@ -1789,10 +1796,13 @@
         "destructive-in-place"
       ],
       "source": [
-        "packages/cli/src/commands/plugin/build.ts#formatZodErrors — manifest read + named refusal; ManifestSchema.safeParse + formatZodErrors; the explicit id/version guard; packaging default and the Loaded line; entry resolution; the manifest-deps externalization; the manifest-deps package.json / pnpm-lock.yaml packing; computeIntegrity + the compiled manifest; the artifact write and its printed block",
+        "packages/cli/src/commands/plugin/build.ts#formatZodErrors — manifest read + named refusal; ManifestSchema.safeParse + formatZodErrors; the explicit id/version guard; packaging default and the Loaded line; entry resolution; the bundled-only esbuild call (only `@objectstack/*` external); findNativeAddons and the native-addon refusal ahead of the integrity map; computeIntegrity + the compiled manifest; the artifact write and its printed block",
         "packages/cli/src/utils/osplugin.ts#MANIFEST_FILENAME — MANIFEST_FILENAME = 'objectstack.plugin.json'; OSPLUGIN_EXT; computeIntegrity (manifest and SIGNATURE excluded, keys sorted); the ustar writer with mtime pinned to 0; readOspluginManifest",
         "packages/cli/src/commands/plugin/publish.ts#version — artifact discovery; readOspluginManifest before any network call; the id/version refusal; the unsigned-artifact notice; the auth refusal",
-        "packages/spec/src/kernel/manifest.zod.ts#ManifestSchema — ManifestSchema id and version (both required, version regex-pinned); PluginPackagingSchema ('bundled' | 'manifest-deps', ADR-0025 §3.3); PluginRuntimeSchema (the trust tier, ADR-0025 §3.6)",
+        "packages/cli/src/commands/plugin/install.ts#PluginInstall — the install-time re-verification the integrity negative points at (verifyIntegrity over the unpacked entries, `integrity_mismatch`; a compiled manifest ManifestSchema refuses, a malformed integrity map included, is `manifest_invalid` one step earlier through readCompiledPluginManifest; nothing installed) and the install-time tier warning; not scored here",
+        "packages/core/src/security/plugin-artifact-integrity.ts#verifyIntegrity — the one integrity verifier, shared by the publish preflight and the install-time check; not scored here",
+        "packages/runtime/src/installed-plugin-loader.ts#dispatchPluginRuntime — the boot-time tier dispatch point the trust-tier negative points at (`node` only; `sandbox` / `worker` refused by name; an undeclared tier refused); not scored here",
+        "packages/spec/src/kernel/manifest.zod.ts#ManifestSchema — ManifestSchema id and version (both required, version regex-pinned); PluginPackagingSchema ('bundled' only — 'manifest-deps' is a retired value refused with its migration prescription, ADR-0025 v2 §3.3); PluginRuntimeSchema (the trust tier, ADR-0025 §3.6)",
         "packages/cli/src/commands/lint.ts#manifest — the protocol/missing-engines-range rule, its manifest scoping and its fix string",
         "packages/rest/src/package-routes.ts#PACKAGE_MANIFEST_INVALID — the server mirror (400 PACKAGE_MANIFEST_INVALID), recorded in knownGaps rather than scored here",
         "content/docs/releases/v15.mdx (the release that dated objectstack lint's protocol/missing-engines-range) · ADR-0025 §3.3 / §3.6",
@@ -1816,6 +1826,24 @@
           "date": "2026-10-08",
           "change": "text refresh only, no property change: A2 quoted the package-id refusal headline as 'Invalid package id '' on `manifest.id`. Expected reverse-domain notation …', which manifestIdRefusal (manifest.zod.ts) no longer prints — the headline now names the package id in product words and the key rides in the second sentence as a parenthetical locator. Requoted from the source at 6729e107e. The scored property is unchanged: probe (d) is still a located reverse-domain refusal at safeParse that names manifest.id and echoes the received ''",
           "ref": "#22093"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-29",
+          "change": "A3 rewritten and a native-addon clause added: `packaging` no longer forks the artifact. PluginPackagingSchema is narrowed to `bundled` (manifest.zod.ts), so `manifest-deps` is refused at safeParse with its migration prescription and the build.ts externalize + package.json / pnpm-lock.yaml forks are gone — the old fork clause described a property the build no longer has. os plugin build now also refuses a native `.node` addon by name before writing the artifact (findNativeAddons, build.ts). Steps 2, 3, 4 and 8, the first fixture, the archive knownGap, the second negative and two source rows re-pointed to match; probes 6f-6h added for the addon refusal, and a knownGap records the addon an absolute or computed runtime path loads, which the build cannot see. Verified in the same PR through the real door (PluginBuild.run over on-disk projects, plugin-build-bundled-only.test.ts) — a verification re-run, no qa-run record. Untouched and not re-verified here: the integrity and trust-tier negatives",
+          "ref": "#27123"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-29",
+          "change": "the integrity and trust-tier negatives re-pointed, no clause changed: both said nothing in this repo verifies or dispatches, and both stopped being true with the install loop — os plugin install re-verifies the integrity map at unpack (install.ts#PluginInstall through verifyIntegrity, slice 1, 10f27b6508) and the boot-time loader dispatches on `runtime` before any import (installed-plugin-loader.ts#dispatchPluginRuntime, slice 2, d4ff1a025f). Each negative now names that code as the check this item does NOT score, in place of the tracker numbers it cited, which do not resolve in this repository; three source rows added for the code they point at. The scored clauses and steps are unchanged. Re-verified against the source at 86f2afeb23, no qa-run record",
+          "ref": "#27685"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-30",
+          "change": "one source row re-pointed, no clause changed: os plugin install no longer has an `integrity_malformed` refusal. The compiled manifest is parsed through ManifestSchema first (readCompiledPluginManifest, the parse install and the boot loader share), so a malformed integrity map is refused as `manifest_invalid` before the integrity step; `integrity_mismatch` is unchanged. Re-verified against install.ts and compiled-plugin-manifest.ts at this PR's head, no qa-run record",
+          "ref": "#27686"
         }
       ]
     },

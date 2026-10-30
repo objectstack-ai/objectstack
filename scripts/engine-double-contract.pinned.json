@@ -607,6 +607,16 @@
       "pinned": 2
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.datasource-credentials-ref-own-reference.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.datasource-credentials-ref-own-reference.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1328,6 +1338,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.permission-set-name-cross-package.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.permission-set-name-cross-package.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.permission-set-name-cross-package.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -4112,6 +4137,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-redeliver-entitlement.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-webhooks/src/webhook-redeliver-member.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4273,6 +4303,11 @@
     },
     {
       "file": "packages/rest/src/rest-exposure-gate-one-object-read.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-meta-diagnostics-unknown-params.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

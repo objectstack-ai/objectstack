@@ -23,7 +23,12 @@
  *     declared labels and through the record page's own cells, with the
  *     object's `hidden: true` fields and the reader's unreadable fields left
  *     out. `RecordSnapshotSummary` draws it from the bound row's `payload`
- *     and `payload_display`; see its header for what it reads.
+ *     and `payload_display`: the target record as SUBMITTED, kept as the
+ *     request's evidence of what was submitted (objectstack#10749), never a
+ *     live read. It is headed "As submitted" so a decided request's snapshot
+ *     never reads as the record's current state (objectstack#27502); the
+ *     current record is the Details tab's pointer card. See its header for
+ *     what it reads.
  *  2. **Where the flow stands** (objectui#12491, objectstack#26668) — the
  *     vertical step line of this request's own route, the bound row's
  *     `flow_route` as the approvals get serves it: the steps its run passed,
@@ -208,7 +213,14 @@ function PendingApprovers({ request }: { request: ApprovalRequestLite }) {
             {chip.label}
             {chip.detail && <span className="ml-1 text-muted-foreground">· {chip.detail}</span>}
             {chip.group && <span className="ml-1 text-muted-foreground">· {chip.group}</span>}
-            {chip.count > 1 && <span className="ml-1 text-muted-foreground">×{chip.count}</span>}
+            {chip.count > 1 && (
+              <span className="ml-1 text-muted-foreground">
+                · {String(t('approvalsInbox.approverSlots', {
+                  defaultValue: 'holds {{count}} approver slot(s)',
+                  count: chip.count,
+                }))}
+              </span>
+            )}
           </Badge>
         ))}
       </div>

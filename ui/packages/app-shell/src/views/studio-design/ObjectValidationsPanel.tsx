@@ -100,7 +100,7 @@ import {
 } from '@object-ui/components';
 import { ConditionBuilder, RECORD_CONDITION_SUBJECTS } from '../metadata-admin/inspectors/ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from '../metadata-admin/inspectors/expression-envelope.js';
-import { readFields } from '../metadata-admin/previews/object-fields-io.js';
+import { readFields, toFieldNameOrEmpty } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import type { ExpressionInput } from '@objectstack/spec/shared';
 import { ScriptValidationSchema, type ScriptValidationParsed } from '@objectstack/spec/data';
@@ -347,6 +347,22 @@ function nextRuleName(existing: string[]): string {
   let name = `validation_${i}`;
   const taken = new Set(existing);
   while (taken.has(name)) name = `validation_${++i}`;
+  return name;
+}
+
+/** The longest rule name {@link ruleNameFromMessage} derives, before a suffix. */
+const DERIVED_RULE_NAME_MAX = 48;
+
+/**
+ * A rule name read off its message (`Hours over 40` → `hours_over_40`), made
+ * unique against `taken`; `null` when the message yields no machine name (a
+ * message in a non-Latin script), so the minted name stays.
+ */
+function ruleNameFromMessage(message: string, taken: ReadonlySet<string>): string | null {
+  const base = toFieldNameOrEmpty(message).slice(0, DERIVED_RULE_NAME_MAX).replace(/_+$/, '');
+  if (!base) return null;
+  let name = base;
+  for (let i = 2; taken.has(name); i++) name = `${base}_${i}`;
   return name;
 }
 
@@ -729,6 +745,7 @@ function RuleTypeFields({
         fields={fields}
         disabled={disabled}
         scope="record"
+        labelSubjects
         /* objectui#9855 — the SUBJECT dropdown's half of the narrowing the
            `scope` above buys for the autocomplete. objectql's rule validator
            evaluates this guard against `{ record, previous }` and nothing else
@@ -863,6 +880,8 @@ export function ObjectValidationsPanel({
   onPatch,
   disabled,
   onBlockingIssuesChange,
+  onCelVerdictsChange,
+  focus,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
@@ -874,6 +893,18 @@ export function ObjectValidationsPanel({
    * and refuses to write.
    */
   onBlockingIssuesChange?: (count: number) => void;
+  /**
+   * objectstack#27629 — the same verdicts per rule NAME (only rules in the
+   * draft, `0` included), so the Data pillar can keep each one with the draft
+   * once this panel unmounts and name the rule it holds.
+   */
+  onCelVerdictsChange?: (verdicts: Readonly<Record<string, number>>) => void;
+  /**
+   * objectstack#27629 — the rule the Data pillar's "Show me" asks for, on a
+   * held edit. Each new object selects it once; the author's own picks are
+   * free after that.
+   */
+  focus?: { name: string } | null;
 }) {
   const locale = useMetadataLocale();
   const rules = React.useMemo(() => readRules(draft.validations), [draft.validations]);
@@ -882,7 +913,12 @@ export function ObjectValidationsPanel({
   // in the header). The first edit that gives one its guard writes it.
   const [unsaved, setUnsaved] = React.useState<ValidationRuleDraft[]>([]);
   const listed = React.useMemo(() => [...rules, ...unsaved], [rules, unsaved]);
-  const [selected, setSelected] = React.useState<string | null>(null);
+  const [selected, setSelected] = React.useState<string | null>(() => focus?.name ?? null);
+  const [focusSeen, setFocusSeen] = React.useState(focus);
+  if (focus !== focusSeen) {
+    setFocusSeen(focus);
+    if (focus) setSelected(focus.name);
+  }
   const [addOpen, setAddOpen] = React.useState(false);
   // Default to the first rule so the detail pane isn't a dead "pick one" empty
   // state whenever rules already exist. Falls back automatically when `selected`
@@ -952,22 +988,29 @@ export function ObjectValidationsPanel({
     () => new Set(rules.map((r) => r.name ?? '')),
     [rules],
   );
-  const blockingIssues = React.useMemo(() => {
-    let total = 0;
+  const liveCelErrors = React.useMemo(() => {
+    const live: Record<string, number> = {};
     for (const [name, count] of Object.entries(celErrors)) {
-      if (!liveRuleNames.has(name)) continue; // pruned: the rule is gone
-      total += count;
+      if (liveRuleNames.has(name)) live[name] = count; // else pruned: the rule is gone
     }
-    return total;
+    return live;
   }, [celErrors, liveRuleNames]);
-  // Held in a ref so an unmemoized host callback cannot re-fire the effect.
+  const blockingIssues = Object.values(liveCelErrors).reduce((total, count) => total + count, 0);
+  // Held in refs so an unmemoized host callback cannot re-fire the effects.
   const onBlockingIssuesChangeRef = React.useRef(onBlockingIssuesChange);
+  const onCelVerdictsChangeRef = React.useRef(onCelVerdictsChange);
   React.useEffect(() => {
     onBlockingIssuesChangeRef.current = onBlockingIssuesChange;
+    onCelVerdictsChangeRef.current = onCelVerdictsChange;
   });
   React.useEffect(() => {
     onBlockingIssuesChangeRef.current?.(blockingIssues);
   }, [blockingIssues]);
+  // Keyed on the verdicts' text, not on the memo's identity (ui/AGENTS.md #10).
+  const celVerdictsKey = JSON.stringify(liveCelErrors);
+  React.useEffect(() => {
+    onCelVerdictsChangeRef.current?.(JSON.parse(celVerdictsKey) as Record<string, number>);
+  }, [celVerdictsKey]);
 
   const commit = (next: ValidationRuleDraft[]) => onPatch({ validations: next });
 
@@ -987,6 +1030,23 @@ export function ObjectValidationsPanel({
     setUnsaved((prev) => prev.map((r) => (r.name === name ? next : r)));
   };
 
+  // The names this panel minted for rules it added: such a name follows the
+  // rule's message until the author edits the name, never an authored one.
+  const derivedNames = React.useRef(new Set<string>());
+  const patchMessage = (name: string, message: string) => {
+    const next = derivedNames.current.has(name)
+      ? ruleNameFromMessage(message, new Set(listed.map((r) => r.name ?? '').filter((n) => n !== name)))
+      : null;
+    if (!next || next === name) {
+      patchRule(name, { message });
+      return;
+    }
+    derivedNames.current.delete(name);
+    derivedNames.current.add(next);
+    patchRule(name, { message, name: next });
+    setSelected(next);
+  };
+
   const patchRule = (name: string, patch: Partial<ValidationRuleDraft>) => {
     const pending = unsaved.find((r) => r.name === name);
     if (pending) {
@@ -998,6 +1058,7 @@ export function ObjectValidationsPanel({
 
   /** Put a new rule in place: written when it lacks nothing, held otherwise (objectui#11820, objectstack#26731). */
   const placeNewRule = (rule: ValidationRuleDraft) => {
+    if (rule.name) derivedNames.current.add(rule.name);
     if (missingPart(rule) === null) commit([...rules, rule]);
     else setUnsaved((prev) => [...prev, rule]);
     setSelected(rule.name ?? null);
@@ -1013,8 +1074,9 @@ export function ObjectValidationsPanel({
    * and the editor opens on the condition.
    */
   const addPreset = (preset: ValidationPreset, plan: Extract<PresetPlan, { ready: true }>) => {
+    const taken = listed.map((r) => r.name ?? '');
     const rule: ValidationRuleDraft = {
-      ...newRule(preset.type, nextRuleName(listed.map((r) => r.name ?? '')), firstField),
+      ...newRule(preset.type, ruleNameFromMessage(plan.message, new Set(taken)) ?? nextRuleName(taken), firstField),
       message: plan.message,
     };
     if (plan.fields) rule.fields = plan.fields;
@@ -1297,6 +1359,7 @@ export function ObjectValidationsPanel({
                 disabled={disabled}
                 onChange={(e) => {
                   const name = e.target.value;
+                  derivedNames.current.delete(sel.name!);
                   patchRule(sel.name!, { name });
                   setSelected(name);
                 }}
@@ -1318,7 +1381,7 @@ export function ObjectValidationsPanel({
                 <input
                   value={sel.message ?? ''}
                   disabled={disabled}
-                  onChange={(e) => patchRule(sel.name!, { message: e.target.value })}
+                  onChange={(e) => patchMessage(sel.name!, e.target.value)}
                   placeholder={t('engine.studio.rules.messagePlaceholder', locale)}
                   className={`w-full rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
                 />

@@ -157,6 +157,9 @@ jobs:
       # guard is true and the expression reads exactly as `<output> ||
       # 'true'` did.
       docs: ${{ github.event_name != 'merge_group' && steps.changes.outputs.docs || 'true' }}
+      # Read by `test-plan`, `test` (ORed with `crosspkg`) and `build-core`,
+      # and on push / schedule by `dogfood`, `dogfood-verify` and
+      # `temporal-conformance` — see the `core` filter below and each job's `if:`.
       core: ${{ github.event_name != 'merge_group' && steps.changes.outputs.core || 'true' }}
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
@@ -273,6 +276,10 @@ jobs:
               - 'content/**'
               - 'pnpm-lock.yaml'
               - '.github/workflows/ci.yml'
+              # Build Docs' setup (#27673): see the same three rows under `core:`.
+              - '.nvmrc'
+              - '.github/actions/setup-workspace/**'
+              - '.github/actions/setup-pnpm/**'
             core:
               - 'packages/**'
               - 'examples/**'
@@ -284,6 +291,18 @@ jobs:
               - 'tsconfig.test.base.json'
               - 'vitest.preset.mts'
               - '.github/workflows/ci.yml'
+              # THE SETUP EVERY CORE JOB RUNS FIRST (#27673): each one starts
+              # with `./.github/actions/setup-workspace`, which calls
+              # `./.github/actions/setup-pnpm` and hands actions/setup-node
+              # `.nvmrc` as its `node-version-file`. Before these rows a diff
+              # confined to one of the three matched no list here, so every job
+              # that runs it skipped on the PR and the change first ran in the
+              # merge queue. One row per action, not `.github/actions/**`:
+              # `half-state-patrol` is no step of any job in this file. The
+              # `docs` and `ui` lists carry the rows their own jobs run.
+              - '.nvmrc'
+              - '.github/actions/setup-workspace/**'
+              - '.github/actions/setup-pnpm/**'
               # BUILD INPUTS outside every package (#21202): turbo.json itself,
               # its `globalDependencies`, and each `$TURBO_ROOT$/…` input of a
               # build task Build Core's `pnpm build` runs. A diff confined to
@@ -497,6 +516,13 @@ jobs:
               - 'scripts/sdui-manifest.record.json'
               - 'scripts/gen-sdui-manifest-node.mjs'
               - 'scripts/check-sdui-manifest.mjs'
+              # The setup every ui job runs first (#27673):
+              # `./.github/actions/setup-pnpm`, and `.nvmrc`, which each job's
+              # actions/setup-node step reads as `node-version-file`. A diff
+              # confined to either matched no list, so no ui job ran it on the
+              # PR, nor in the queue, where these outputs read the same diff.
+              - '.nvmrc'
+              - '.github/actions/setup-pnpm/**'
             # The seven packages objectui installs from this tree (the set its
             # `.objectstack-pin` used to pack). A change here compiles and builds
             # the Console in the same PR — the check the retired Spec Shape Gate
@@ -4468,9 +4494,32 @@ jobs:
   # backend through DEV_PROXY_TARGET. ⛔ No retry wrapper and no
   # `continue-on-error` anywhere in this job: a red run is a red check.
   #
-  # Gated as Build & E2E UI is. Not behind Build UI Deps: this job builds a
-  # larger closure (the CLI and the showcase app's) than the seven packages that
-  # job hands on, so it restores Build Core's turbo seed instead.
+  # Gated as Build & E2E UI is, OR'd with `core` (#27550). Build & E2E UI
+  # builds the Console against the seven packages it compiles from, so a diff
+  # that reaches none of them cannot move its answer. This job runs the Console
+  # against a REAL server, and a server-only diff (objectql, runtime, rest, a
+  # plugin, the showcase app) breaks the Console there with no ui path touched:
+  # the access, record-save, Studio-save and screen-flow defects that reached
+  # main before #27550 were all of that kind. `core` (packages/**, examples/**,
+  # apps/!(docs)/** and the root build inputs) is the widening, not a narrower
+  # list of the backend's closure: over the last 60 completed pull_request
+  # runs before #27550 (59 graded, one `action_required`), today's gate ran 35;
+  # `|| core` runs 55; a filter naming only the CLI's and the showcase app's
+  # 67-package dependency closure would run 50. The five runs between the two
+  # were skills-only diffs, and that closure would be a second hand-kept
+  # recognizer of the backend's dependency graph, the drift THE FILTER CONTRACT
+  # fails open against. On merge_group `core` is always 'true', so every queue
+  # entry runs this job too.
+  #
+  # Not behind Build UI Deps: this job builds a larger closure (the CLI and the
+  # showcase app's) than the seven packages that job hands on, so it restores
+  # Build Core's turbo seed instead.
+  #
+  # BUDGET: the "Run the live e2e specs" step stays under 2 minutes (14-24 s,
+  # median 21 s, over the 35 runs above). The widened gate puts this step on
+  # most pull requests and on every queue entry, so a spec that would push it
+  # over stays in `test:e2e:live:nightly` instead of joining the `:ci`
+  # allowlist.
   #
   # Ceiling: there is no CI population yet, so it is derived from one cold
   # local run on 4 shared cores (#27154, 2026-10-28), by the rule above Lint UI:
@@ -4480,7 +4529,7 @@ jobs:
   live-e2e-ui:
     name: Live E2E UI
     needs: filter
-    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false' || needs.filter.outputs.core != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:

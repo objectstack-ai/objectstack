@@ -11,7 +11,7 @@ import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuild
 import type { SortItem } from '@object-ui/components';
 import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
+import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
@@ -33,7 +33,7 @@ import type { DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
 import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
-import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
+import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
 // `resolveI18nLabel`: it resolves the INLINE per-locale map
@@ -4089,6 +4089,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // tree branch spread an untyped block (`...treeCfg`), and one `any` member
   // made the whole union `any`. That spread is retired, so the annotation now
   // says what the inference used to.
+  // A primitive for the memo below: the host's handler is often an inline
+  // arrow, and only its presence is read there (objectstack#27057).
+  const hostRoutesRowClicks = !!onRowClick;
   const viewComponentSchema = React.useMemo((): any => {
     const densityRowHeight = density.mode === 'compact'
       ? 'compact'
@@ -4121,6 +4124,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // Hydrate child grid with previously persisted column state.
       ...(schema.columnState ? { columnState: schema.columnState } : {}),
     };
+    // objectstack#27057 — the calendar and the gantt give a row click to
+    // whoever hands them one and keep their own record drawer for when nobody
+    // does. So they carry this list's click router only when this list's HOST
+    // routes record clicks (`onRowClick`, which the console's object, data and
+    // interface pages all pass): the host then opens the record in the one
+    // record page. A list with no host handler routes nothing by itself for a
+    // view that authored no `navigation` (the absent key is the host's call,
+    // `useNavigationOverlay`), so handing them the router there would turn
+    // their drawer into a click that opens nothing.
+    const { onRowClick: _listRouter, ...basePropsWithoutRouter } = baseProps;
+    const routedByHost = hostRoutesRowClicks ? baseProps : basePropsWithoutRouter;
 
     switch (currentView) {
       // `default` deliberately shares the grid branch: an unrecognized
@@ -4328,7 +4342,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           : undefined;
         return {
           type: 'object-calendar',
-          ...baseProps,
+          ...routedByHost,
           ...(calendarBlock ? { calendar: calendarBlock } : {}),
           // objectui#12081 — the days the calendar draws come back here, and
           // this view's fetch windows on them (`calendarWindowed`). Handed only
@@ -4485,7 +4499,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             : undefined;
         return {
           type: 'object-gantt',
-          ...baseProps,
+          ...routedByHost,
           // objectui#10037 — the EFFECTIVE filter, not the authored one: the
           // chart queries for itself, so this key is the only way the
           // toolbar's Filter control and the `UserFilters` chips reach it.
@@ -4531,17 +4545,20 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           //     `onRowClick` UNCONDITIONALLY, so the authored config would
           //     arrive and then be outranked — declared, delivered, and STILL
           //     not enforced, which is this card's own defect relocated;
-          //   - calendar alone mirrors gantt's `navIsOverlay ? undefined :
-          //     onRowClick`, so it would genuinely CHANGE BEHAVIOUR: today its
-          //     `navConfig` is always the `{ mode: 'drawer' }` fallback and it
-          //     suppresses the host handler; fed an authored `page` it would
-          //     stop suppressing and defer to ListView's overlay instead.
+          //   - calendar, when this was written, suppressed the host handler in
+          //     drawer mode as gantt did, so it would have CHANGED BEHAVIOUR: fed
+          //     an authored `page` it would stop suppressing and defer to
+          //     ListView's overlay instead.
           //
           // That is two sources of truth for one question. `gantt` is the only
           // branch where forwarding settles the question rather than splitting
-          // it: its wrapper drops host props entirely (objectui#7210 /
-          // objectui#7222), so the schema path is the only live carrier and
-          // `onRowClick` is not there to outrank anything.
+          // it: the router reaches it only when this list's host routes clicks
+          // (`routedByHost`, objectstack#27057), and that host then decides how
+          // the record opens (the console's object page reads the view's
+          // `navigation` for it), so without one the schema path is the only
+          // live carrier and `onRowClick` is not there to outrank anything.
+          // Its wrapper forwards no other host prop (objectui#7210 /
+          // objectui#7222).
           //
           // Conditional, not `navigation: schema.navigation` — an ABSENT key,
           // not present-and-undefined, the same distinction the two non-axis
@@ -4685,9 +4702,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   const hasFilters = currentFilters.conditions && currentFilters.conditions.length > 0;
+  // The count the toolbar shows: a record-mode amount's code condition is
+  // part of its amount row (objectstack#27188), not a filter of its own.
+  const shownFilterCount = (currentFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, currentFilters)).length;
 
   /**
    * Every field this view can name, before any per-builder rule narrows it.
@@ -4776,6 +4796,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // picker keys the lookup by its own `id` default, and `plugin-grid`'s
             // copy set copies no id column either.
             displayField: field.displayField,
+            // ADR-0144 D6: a `record`-mode amount's row pairs with its code
+            // field, so the filter compares within one currency.
+            ...(recordCurrencyField(field) ? { currencyField: recordCurrencyField(field) } : {}),
         }));
     }
 
@@ -5753,14 +5776,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 // `title` — with the active-filter count, which the badge
                 // would otherwise be alone in carrying (objectui#12500).
                 aria-label={hasFilters
-                  ? t('list.filterActive', { count: currentFilters.conditions?.length || 0 })
+                  ? t('list.filterActive', { count: shownFilterCount })
                   : t('list.filter')}
                 title={t('list.filter')}
               >
                 <Funnel className="h-3.5 w-3.5" />
                 {hasFilters && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {currentFilters.conditions?.length || 0}
+                    {shownFilterCount}
                   </span>
                 )}
               </Button>

@@ -265,12 +265,13 @@ export type RedeliverGuard = (
  *
  * ## Why the tenant is a REQUIRED property typed `string | undefined`
  * `redeliver` is the one door on `sys_http_delivery` that a request can reach:
- * `POST /api/v1/webhooks/redeliver` is served to any authenticated user. The
- * object is tenant-scoped (the kernel provisions `organization_id`), so on a
- * walled deployment (`OS_TENANCY_POSTURE=isolated|group`) a `redeliver` that
- * does not carry its caller's tenant is an unscoped write reachable by a user
- * — precisely the finding the driver's `auditMissingTenant` gate exists to
- * raise.
+ * `POST /api/v1/webhooks/redeliver`, served to a signed-in caller entitled to
+ * administer webhooks (`plugin-webhooks`' `redeliver-entitlement.ts`, which
+ * also vets the caller's organization). The object is tenant-scoped (the
+ * kernel provisions `organization_id`), so on a walled deployment
+ * (`OS_TENANCY_POSTURE=isolated|group`) a `redeliver` that does not carry its
+ * caller's tenant is an unscoped write reachable by a request — precisely the
+ * finding the driver's `auditMissingTenant` gate exists to raise.
  *
  * ⛔ The remedy for that finding is this field, and it is NEVER
  * `bypassTenantAudit`. Silencing the line would leave the hole and remove the
@@ -486,8 +487,10 @@ export class HttpRedeliverError extends Error {
  * ## Why this is a security refusal and not a tidiness one
  * A parked row has no {@link HttpDelivery.signature}, because the signature is
  * computed at enqueue from the very secret that could not be resolved (#7722,
- * #7799). `POST /api/v1/webhooks/redeliver` is reachable by any authenticated
- * user. Without this refusal, making the drop durable would hand that user a
+ * #7799). `POST /api/v1/webhooks/redeliver` admits a caller with edit
+ * (`update`) access to `sys_webhook`, as decided by
+ * `packages/plugins/plugin-webhooks/src/redeliver-entitlement.ts`. Without this
+ * refusal, making the drop durable would hand any such webhook administrator a
  * button that delivers the webhook UNSIGNED — reopening #7799 through a door
  * nobody would think to audit. **An unsigned redelivery is strictly worse than
  * an unrecorded drop**, which is why this guard lands with — and logically

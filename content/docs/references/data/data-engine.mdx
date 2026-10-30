@@ -549,7 +549,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -616,7 +616,7 @@ QueryAST-aligned options for DataEngine.count operations
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -744,7 +744,7 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -760,7 +760,7 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -882,7 +882,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
-| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
+| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
@@ -899,7 +899,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -918,7 +918,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -939,7 +939,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any` | optional | Filtering criteria (WHERE) — a filter condition, or the input-only `FilterArray` sugar (`['status', '=', 'open']`), which is lowered through `parseFilterAST` before the query is produced. |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `integer` | optional | Max records to return (LIMIT) |
 | **offset** | `integer` | optional | Records to skip (OFFSET) |
@@ -960,7 +960,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
-| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
+| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
@@ -974,7 +974,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
@@ -1008,7 +1008,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -1030,7 +1030,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
@@ -1049,7 +1049,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
-| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
 | **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
 | **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |

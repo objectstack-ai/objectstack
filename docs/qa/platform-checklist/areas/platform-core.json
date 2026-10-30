@@ -304,7 +304,7 @@
       "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -317,7 +317,7 @@
       "steps": [
         "run the pinned suite: pnpm -C examples/app-showcase test:smoke e2e/showcase-smoke.spec.ts (the SURFACES array in e2e/showcase-smoke.spec.ts — all 49 showcase_app nav destinations at revision 5: pages, object lists, the three filter slices, the tabular view, dashboards, reports, the view-gallery pages). On a shared box pass SMOKE_API_URL=http://localhost:<free port>: the config signs in, drives every page and boots `serve --dev -p <that port>` from that one URL, and reuses whatever already answers it — on the default port 3000 that can be somebody else's server. Where the browser cache holds a different chromium build than @playwright/test resolves (RUNNER.md Environment facts), pass OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium. Name the spec: the config's testDir is ./e2e (examples/app-showcase/playwright.config.ts), so a bare `test:smoke` also collects bulk-capability-gate.spec.ts and detail-shapes.spec.ts beside the pin (QA run #25812), and their results are not this item's",
         "GET /api/v1/meta/app?id=showcase_app and extract every nav destination from the response (?id= matches the app NAME; the package-id spelling returns an empty items array and would yield zero destinations)",
-        "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM). Then hand-walk the destinations the console draws on its own, which are on NEITHER side of that diff: today the sidebar's static 'All reports' entry (…/reports, data-testid sidebar-report-index; ui/packages/app-shell/src/layout/UnifiedSidebar.tsx, objectui#13020), absent from meta/app and from SURFACES (QA run #25812 walked it as the 50th surface)",
+        "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM). The console draws no nav destination of its own: the report index (…/reports) renders only where an app's navigation declares a `report` entry with no `reportName` (showcase: nav_report_index in the Reports group), so it is served in meta/app and falls inside that diff like any other entry. #27525 retired the sidebar's injected 'All reports' row (objectui#13020) that QA run #25812 walked as the 50th surface",
         "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
         "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center, Revenue Pulse, Hours by Status (Chart)): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
         "probe the failure path: navigate to a nonexistent route under the app (/_console/apps/com.example.showcase/object_that_does_not_exist); screenshot what renders",
@@ -331,9 +331,9 @@
           "evidence": "test run output + the failing assertion's message for any chart red"
         },
         {
-          "clause": "the smoke's coverage is CURRENT: every nav destination served in meta/app is either in the SURFACES array or hand-walked this run, and every destination the console adds on its own (steps[2]: the 'All reports' entry) is hand-walked — no surface silently outside the net",
+          "clause": "the smoke's coverage is CURRENT: every nav destination served in meta/app is either in the SURFACES array or hand-walked this run — no surface silently outside the net",
           "oracle": "api",
-          "verify": "diff of served nav destinations vs SURFACES + the hand-walk records for the remainder and for the console-added destinations. The run computes that diff itself: nothing in automated.ref asserts it — showcase-smoke.spec.ts drives the SURFACES it lists and never reads meta/app (QA run #25815) — so this clause has no automation and is never scored off the suite",
+          "verify": "diff of served nav destinations vs SURFACES + the hand-walk records for the remainder. The run computes that diff itself: nothing in automated.ref asserts it — showcase-smoke.spec.ts drives the SURFACES it lists and never reads meta/app (QA run #25815) — so this clause has no automation and is never scored off the suite",
           "evidence": "the diff + per-surface screenshots"
         },
         {
@@ -386,6 +386,12 @@
           "date": "2026-10-26",
           "change": "steps[0], steps[2], acceptance[0].verify, acceptance[1] (clause, verify) and automated.ref corrected — three checklist-accuracy findings, one of QA run #25812 (priority:P0 at 6679644a, console b41ed7f68956) and two of QA run #25815 (release-18.2.0-tier1 at 6679644a); wave anchor #25807, card #25845. (1) #25812: the console-added 'All reports' sidebar entry (UnifiedSidebar's static report index, objectui#13020) is in neither meta/app nor SURFACES, so the served-vs-SURFACES diff cannot see it — steps[2] and acceptance[1] now hand-walk it; and step 1's bare `test:smoke` collects every spec under testDir ./e2e, two besides the pin — steps[0] names the spec. (2) #25815: acceptance[0] and negative[0], [1], [3] score only from a suite run against a live showcase with a built Console; otherwise not-run (browser). (3) #25815: nothing in the ref computes the served-nav vs SURFACES diff, so acceptance[1] has no automation; automated.ref now names the clauses the spec scores. Re-read at 9753d163",
           "ref": "#25812"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-29",
+          "change": "steps[2], acceptance[1] (clause, verify) corrected: #27525 stops the console injecting the 'All reports' sidebar row into every app but Studio. The report index is now a navigation entry an app declares (a `report` item with no `reportName`); showcase declares nav_report_index, so it is served in meta/app and the served-vs-SURFACES diff sees it. The hand-walk of console-added destinations is dropped because there are none. Re-read at UnifiedSidebar.tsx and examples/app-showcase/src/ui/apps/index.ts on the #27525 branch",
+          "ref": "#27525"
         }
       ]
     },
@@ -572,7 +578,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -601,7 +607,7 @@
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
-        "cross-check served-vs-rendered: diff each app's meta/app nav destinations against what actually rendered so nothing is silently outside the walk. The console adds one destination meta/app does not carry, to every app but Studio: the 'All reports' sidebar entry (…/reports, ui/packages/app-shell/src/layout/UnifiedSidebar.tsx); walk it in each app and do not read it as an unserved entry"
+        "cross-check served-vs-rendered: diff each app's meta/app nav destinations against what actually rendered so nothing is silently outside the walk. The console adds no destination meta/app does not carry: the report index (…/reports) renders only where an app's navigation declares a `report` entry with no `reportName`, and no built-in app declares one (#27525 retired the injected 'All reports' row), so an 'All reports' row in Setup or Account is a finding, not a console-added entry"
       ],
       "acceptance": [
         {
@@ -706,6 +712,12 @@
           "date": "2026-10-28",
           "change": "fixtures.knownGaps[2] and steps[9] corrected. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26481, priority:P0, at 756220c4; wave anchor #25807, slice B): the marketplace page no longer reads 'HTTP 502 · fetch failed' but 'Failed to load marketplace — The marketplace catalog could not be reached.' (the wire is still 502 MARKETPLACE_PROXY_FAILED), and the console-added 'All reports' sidebar entry was walked in both apps though the item never named it. Re-read at base fd246c22: MarketplacePage.tsx (unreachable class for MARKETPLACE_PROXY_FAILED), ui/packages/i18n/src/locales/en.ts (marketplace load failed/unreachable), UnifiedSidebar.tsx (the static report index, not in Studio). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-29",
+          "change": "steps[9] corrected: #27525 stops the console injecting the 'All reports' sidebar row, so Setup and Account, which declare no report index entry, no longer render one; the step now reads such a row as a finding instead of a console-added destination. No clause changed",
+          "ref": "#27525"
         }
       ]
     },

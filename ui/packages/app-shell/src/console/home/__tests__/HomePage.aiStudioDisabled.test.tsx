@@ -128,6 +128,10 @@ vi.mock('../../../preview/usePublishAllDrafts', () => ({
 }));
 
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
+// Home marks an opened notification read through the bell's own write
+// (`useInboxBell`); this harness serves no inbox feed, so the write is stubbed.
+vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead: vi.fn() }) }));
+
 import { HomePage } from '../HomePage';
 
 /**

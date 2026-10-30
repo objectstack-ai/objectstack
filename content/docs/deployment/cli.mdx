@@ -664,6 +664,19 @@ how you state there are none. Rows nothing attributes are never deleted, nor are
 whose setting still resolves through a legacy inline value, nor rows that were merely
 re-wrapped in place (a re-wrap keeps the handle and is not a retirement).
 
+**The report also lists the rows something names in a way no producer writes.** A
+handle more than one holder record names is listed as *shared*, since a producer seals
+one handle per value. A handle a column holds whose `(namespace, key)` names another
+column is listed as *misplaced*: settings records the setting's own pair, and an
+object's `secret` field records the object and field name. A datasource holder is not
+judged for placement, because the datasource binder records the pair its caller passes.
+A predicate update writes one handle onto every row it matched, all in the column the
+handle was minted for, so a share of exactly that shape is listed apart and not judged:
+stored rows cannot tell it from a reference copied between rows of the same column.
+Each entry names the handle, its holder count and every holder's object, field and
+record, never a secret. Under `--json` this is the `holders` key. It is report-only: it
+changes nothing `--delete` removes and repairs nothing.
+
 <Callout type="warn">
 **This does not retire an exposed credential, and the export is not optional.** On the
 pre-fix rotation path the handle was never repointed, so the value **still in force** is
@@ -2952,9 +2965,13 @@ and rebuild.
 
 **`objectstack.manifest.json` supplies the listing fields.** When that file is
 present in the working directory, publish reads `manifestId`, `displayName`,
-`description`, `category`, `tagline`, `iconUrl`, `homepageUrl`, `license`,
+`description`, `category`, `tags`, `iconUrl`, `homepageUrl`, `license`,
 `readmePath` and a `translations` map from it, so a listing need not be retyped
-as flags on every publish. **CLI flags always win.** A per-locale `readme` entry
+as flags on every publish. **CLI flags always win.** `tags` has no flag and is
+sent as written: the control plane judges the list, and a refusal is its 400,
+printed as it is. A top-level `tagline` is used only as the description, when
+neither `--description` nor the file's `description` gives one; otherwise it is
+not sent, and a warning says so. A per-locale `readme` entry
 may be inlined markdown or a path resolved against the manifest's own directory
 (`README.zh-CN.md`). Publishing without the file is fully supported — it stays
 flag-driven.

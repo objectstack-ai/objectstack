@@ -148,7 +148,17 @@ import {
   mapFieldTypeToFormType,
   resolveFormWidgetType,
 } from '@object-ui/fields';
-import { Tabs, TabsContent, TabsList, TabsTrigger, cn } from '@object-ui/components';
+import {
+  Button,
+  Empty,
+  EmptyDescription,
+  EmptyTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  cn,
+} from '@object-ui/components';
 import {
   SchemaRendererContext,
   extractFieldErrors,
@@ -1585,10 +1595,12 @@ interface LoadedForm {
 /** Public mode: hit the anonymous `/forms/:slug` resolver. */
 async function loadPublicForm(slug: string): Promise<LoadedForm> {
   const res = await apiFetch(`/forms/${encodeURIComponent(slug)}`);
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Failed to load form (${res.status}): ${body || res.statusText}`);
-  }
+  // The resolver answers 404 for a slug that is unknown, unpublished or no
+  // longer anonymous — to a guest, all three mean "no form here".
+  if (res.status === 404) throw new FormNotFoundError(`No public form at /forms/${slug}`);
+  // Any other failure is told to the guest in their language; the server's
+  // body is never read, so it can never reach the page.
+  if (!res.ok) throw new PublicFormUnavailableError(res.status);
   const payload = (await res.json()) as PublicFormPayload;
   return {
     // objectui#8408 — `payload.form?.title` sits AHEAD of the API-name arm.
@@ -1710,6 +1722,40 @@ export function resolveInternalForm(
 }
 
 /**
+ * "No such form" on either route (objectstack-ai/objectstack#27446, #27756):
+ * the internal `/meta/view` read or the public `/forms/:slug` resolver
+ * answered 404. Both answer 404 for a form that does not exist and for one the
+ * caller may not read, on purpose, so the page says the one thing both mean —
+ * nothing here by that name.
+ *
+ * A type of its own, not a message to match, so {@link FormPage} can tell it
+ * from every other load failure and draw the console's shared localized
+ * not-found state for it instead of English text. The message is kept for
+ * anyone who logs the error; the page never renders it.
+ */
+class FormNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FormNotFoundError';
+  }
+}
+
+/**
+ * The public resolver failed for a reason other than "no such form"
+ * (objectstack-ai/objectstack#27756). The visitor is anonymous, so the page
+ * shows the localized `form.errorLoading` line and never this message or the
+ * server's body; the status is kept for anyone who logs the error.
+ */
+class PublicFormUnavailableError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`Failed to load form (${status})`);
+    this.name = 'PublicFormUnavailableError';
+    this.status = status;
+  }
+}
+
+/**
  * Internal mode: pull the FormView metadata directly + the target object's
  * schema, and — when the URL names a record (objectui#4278) — that record.
  *
@@ -1733,8 +1779,9 @@ async function loadInternalForm(
   channel?: ApiFetch,
 ): Promise<LoadedForm> {
   const viewRes = await apiFetch(`/meta/view/${encodeURIComponent(name)}`, undefined, channel);
+  if (viewRes.status === 404) throw new FormNotFoundError(`Form metadata not found: view/${name}`);
   if (!viewRes.ok) {
-    throw new Error(`Form metadata not found: view/${name}`);
+    throw new Error(`Could not load form metadata (${viewRes.status}): view/${name}`);
   }
   const viewBody = await viewRes.json();
   const { label, object: objectName, form } = resolveInternalForm(name, viewBody);
@@ -2337,6 +2384,19 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /**
+   * The load answered "no such form" ({@link FormNotFoundError}). Its own flag
+   * rather than a string in `error`, because the page draws a localized state
+   * for it and never shows the thrown text (objectstack-ai/objectstack#27446).
+   */
+  const [notFound, setNotFound] = useState(false);
+  /**
+   * The public resolver failed for another reason
+   * ({@link PublicFormUnavailableError}). A flag, not a string in `error`, so
+   * the banner's copy follows the session language at render and the thrown
+   * text never reaches the anonymous visitor (objectstack-ai/objectstack#27756).
+   */
+  const [publicUnavailable, setPublicUnavailable] = useState(false);
+  /**
    * The rows the last submit refused, by field name (objectstack-ai/objectstack#27417).
    * The `error` banner and the outcome toast still say the whole refusal; this
    * marks WHICH inputs it names. A string is the reason drawn under the row's
@@ -2421,6 +2481,8 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setNotFound(false);
+    setPublicUnavailable(false);
     setFieldErrors({});
     // A `?recordId=` we cannot make sense of never reaches a loader: it is an
     // edit intent this route cannot honour, and #4278 ruling point 2 says
@@ -2446,7 +2508,9 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // Clear any previously loaded form: a refusal must not leave an
           // editable form on screen behind the error.
           setLoaded(null);
-          setError(e?.message ?? String(e));
+          if (e instanceof FormNotFoundError) setNotFound(true);
+          else if (e instanceof PublicFormUnavailableError) setPublicUnavailable(true);
+          else setError(e?.message ?? String(e));
         }
       })
       .finally(() => {
@@ -2642,6 +2706,32 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     goToStep(currentStep + 1);
   };
 
+  /**
+   * A submit the browser blocks (objectstack-ai/objectstack#27496), such as a
+   * malformed `type="email"`, never reaches `handleSubmit`, so the banner kept
+   * an earlier attempt's text. It describes the current attempt instead: this
+   * page's own checks run again over the rows the submit would judge (nothing
+   * refused clears the banner), and each control the browser refused is marked
+   * with the browser's own message. `invalid` fires once per refused control,
+   * so the marks are re-read from the whole form each time.
+   */
+  const handleNativeInvalid = (e: FormEvent<HTMLFormElement>) => {
+    if (!loaded) return;
+    const refusals = findSubmitRefusals(
+      wizardView && !onLastStep ? [sections[currentStep]] : sections,
+      values,
+      loaded.record,
+      isCreateForm,
+      predicateScope,
+    );
+    if (!reportRefusals(loaded.object, refusals)) setError(null);
+    const native: Record<string, string> = {};
+    for (const el of Array.from(e.currentTarget.elements) as HTMLInputElement[]) {
+      if (el.name && el.validity && !el.validity.valid) native[el.name] = el.validationMessage;
+    }
+    setFieldErrors((prev) => ({ ...prev, ...native }));
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!loaded) return;
@@ -2789,6 +2879,41 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
+      </div>
+    );
+  }
+  if (notFound && !loaded) {
+    // The console's shared not-found state, the one its catch-all route
+    // (`RouteNotFound` in app-shell's `AppContent`) draws, with the same pack
+    // keys: a form is a view, and a missing one is a URL that matches none.
+    // The public route draws no "Go back": its visitor is an anonymous guest
+    // who arrived from a shared link, with no console page behind it to
+    // return to (objectstack-ai/objectstack#27756).
+    return (
+      <div className="flex min-h-[60vh] w-full items-center justify-center p-8" data-testid="form-not-found">
+        <Empty>
+          <EmptyTitle>{t('console.notFound.title')}</EmptyTitle>
+          <EmptyDescription>{t('console.notFound.description')}</EmptyDescription>
+          {mode !== 'public' && (
+            <div className="mt-4">
+              <Button variant="outline" onClick={() => navigate(-1)}>
+                {t('console.notFound.back')}
+              </Button>
+            </div>
+          )}
+        </Empty>
+      </div>
+    );
+  }
+  if (publicUnavailable && !loaded) {
+    return (
+      <div className="mx-auto max-w-2xl p-6">
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+          data-testid="form-load-failed"
+        >
+          {t('form.errorLoading')}
+        </div>
       </div>
     );
   }
@@ -3168,7 +3293,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           <p className="mt-1 text-sm text-muted-foreground">{loaded.form.description}</p>
         )}
       </header>
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} onInvalidCapture={handleNativeInvalid} className="space-y-6">
         {wizardView ? renderWizardSteps() : tabbedView ? renderTabbedSections() : sections.map((sec, i) => {
           // A section conditioned away is skipped IN PLACE rather than filtered
           // out of the list first (objectui#5627). The key here is the section's

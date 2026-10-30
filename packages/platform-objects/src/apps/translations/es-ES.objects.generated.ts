@@ -1154,12 +1154,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       revoke_api_key: {
         label: "Revocar clave de API",
         confirmText: "¿Revocar esta clave de API? Los clientes que la utilicen perderán el acceso inmediatamente.",
-        successMessage: "Clave de API revocada"
+        successMessage: "Clave de API \"{{ record.name }}\" revocada"
       },
       restore_api_key: {
         label: "Restaurar clave de API",
         confirmText: "¿Restaurar esta clave de API revocada? Los clientes existentes que la conserven recuperarán el acceso.",
-        successMessage: "Clave de API restaurada"
+        successMessage: "Clave de API \"{{ record.name }}\" restaurada"
       }
     }
   },
@@ -3528,6 +3528,47 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Actualizado el"
+      }
+    }
+  },
+  sys_exchange_rate: {
+    label: "Tipo de cambio",
+    pluralLabel: "Tipos de cambio",
+    description: "Tipos de cambio de la moneda local de la organización a una moneda extranjera, por fecha de entrada en vigor: los tipos con los que los importes en moneda extranjera se convierten a la moneda local.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      currency: {
+        label: "Moneda",
+        help: "Código ISO 4217 de la moneda extranjera, en mayúsculas (EUR, JPY, CHF)."
+      },
+      rate: {
+        label: "Tipo",
+        help: "1 unidad de la moneda local de la organización (Localización → Moneda predeterminada) = Tipo unidades de esta moneda. Ejemplo: moneda local USD, moneda EUR, tipo 0,92 significa 1 USD = 0,92 EUR."
+      },
+      effective_date: {
+        label: "Fecha de entrada en vigor",
+        help: "Primera fecha a la que se aplica este tipo. Sigue vigente hasta que una fila posterior de la misma moneda lo sustituya."
+      },
+      source: {
+        label: "Origen",
+        help: "Cómo llegó la fila: introducida en Setup (manual), cargada desde un archivo (importación) o escrita por un flujo de una aplicación (aplicación).",
+        options: {
+          manual: "Manual",
+          import: "Importación",
+          app: "Aplicación"
+        }
+      }
+    },
+    _views: {
+      all_rates: {
+        label: "Todos",
+        description: "1 unidad de la moneda local de la organización (Localización → Moneda predeterminada) = Tipo unidades de esta moneda. Ejemplo: moneda local USD, moneda EUR, tipo 0,92 significa 1 USD = 0,92 EUR.",
+        emptyState: {
+          title: "Aún no hay tipos de cambio",
+          message: "Añade una fila por moneda para cada fecha en que cambie su tipo, por ejemplo una fila por moneda al inicio de cada mes."
+        }
       }
     }
   }

@@ -5,7 +5,7 @@
 
 fix(plugin-sharing)!: on a federated object whose `owner_id` is the platform's injected anchor, the read and bulk-write scopes narrow below `org` instead of going unscoped (#27425)
 
-Clause-②: no (narrowing) — `SharingService.buildReadFilter` and `buildWriteFilter` answer a deny-all scope, where they answered `null` (no scope), for a caller below `org` depth on an ADR-0015 federated object that neither declares `owner_id` in `fields` nor maps a remote column onto it; on `private` such an object's refused edit answers 404 where it answered 403. Nothing is widened and no key is added, removed or renamed.
+Clause-②: yes (narrowing) — `SharingService.buildReadFilter` and `buildWriteFilter` answer a deny-all scope, where they answered `null` (no scope), for a caller below `org` depth on an ADR-0015 federated object that neither declares `owner_id` in `fields` nor maps a remote column onto it; on `private` such an object's refused edit answers 404 where it answered 403. One accept set widens: `SharingService.grant()` on a federated object that maps a remote column onto `owner_id` through `external.columnMap` (without declaring it) is no longer refused as inert, because that object's share rows are now read. No key is added, removed or renamed.
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the record-sharing scope of one class of federated object fails closed where it went unscoped. The remedy is a metadata choice the author already has (declare the owner column, or choose the sharing model on purpose), so there is nothing for a migration to rewrite and no tombstone. -->

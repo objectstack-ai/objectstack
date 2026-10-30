@@ -75,16 +75,29 @@ price: Field.currency({
   label: 'Price',
   currencyConfig: {
     currencyMode: 'fixed',      // 'fixed' pins the column to defaultCurrency;
-                                // 'dynamic' (default) shows the tenant default
+                                // 'dynamic' (default) shows the tenant default;
+                                // 'record' reads each record's own code
     defaultCurrency: 'USD',     // the column's currency under 'fixed'
   },
 }),
+
+// Each invoice in its own currency: the code lives in a sibling text field
+currency_code: Field.text({ label: 'Currency', valueDomain: 'iso_4217_currency' }),
+amount: Field.currency({
+  label: 'Amount',
+  currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+}),
 ```
 
-The stored value is a bare number in both modes — never `{ value, currency }`.
+The stored value is a bare number in every mode — never `{ value, currency }`.
 Under `dynamic` (the default) the amount displays in the tenant's
 `localization.currency` setting and `defaultCurrency` is not the displayed
-currency; `fixed` pins the column to `defaultCurrency`.
+currency; `fixed` pins the column to `defaultCurrency`; `record` takes each
+record's ISO 4217 code from the field `currencyField` names, a `text` field
+declaring `valueDomain: 'iso_4217_currency'` (`currency_code` is a convention,
+not a required name). A record-mode amount refuses a write with a blank code and
+an aggregate that does not group by the code: see
+[Currency fields](/docs/data-modeling/currency).
 
 ### Date & Time Types
 

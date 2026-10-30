@@ -4,6 +4,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { hashSpec, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { registerMetadataTypeActions } from '@objectstack/spec/kernel';
+import { resolveDriverId } from '@objectstack/spec/data';
 import type {
   IDatasourceDriverFactory,
   TestConnectionResult,
@@ -19,8 +20,10 @@ import {
   type ConnectionEngineLike,
 } from './datasource-connection-service.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
+import { resolveDatasourceSchemaMode } from './datasource-schema-mode.js';
 import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
+import { resolveTursoUrl } from './turso-driver-config.js';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /**
@@ -400,6 +403,26 @@ export class DatasourceAdminServicePlugin implements Plugin {
     });
     ctx.registerService('datasource-connection', this.connection);
 
+    // [ADR-0015 §4.2 · #25277] The objects bound to a datasource, read from
+    // the engine's object registry (the `objectql` service's `registry`), the
+    // registry the metadata save door writes through to: an object saved
+    // through `PUT /api/v1/meta/object/:name` or imported from a remote table
+    // is in it the moment it is saved, and boot restores the stored rows into
+    // it. ⛔ Not the metadata service's `listObjects()`, which holds a copy of
+    // this registry taken once at boot and never sees a runtime save. A host
+    // with no engine registry serves no objects, so none can be bound.
+    //
+    // Resolved where it is used, never at `init()` (AGENTS.md, "Startup
+    // registry reads"). Two readers: the judgement of a datasource write
+    // (`listObjectsBoundTo`) and the pool's connect (`registerPool`, #27701).
+    const objectsBoundTo = (datasource: string): Array<{ name: unknown; external: unknown }> => {
+      const registry = safeGetService<Partial<Pick<IObjectQLEngine, 'registry'>>>(ctx, 'objectql')?.registry;
+      if (typeof registry?.getAllObjects !== 'function') return [];
+      return (registry.getAllObjects() as Array<{ name?: unknown; datasource?: unknown; external?: unknown }>)
+        .filter((o) => o?.datasource === datasource)
+        .map((o) => ({ name: o.name, external: o.external }));
+    };
+
     const config: DatasourceAdminServiceConfig = {
       probe: (input) => this.probe(factory(), input),
 
@@ -501,24 +524,9 @@ export class DatasourceAdminServicePlugin implements Plugin {
       },
 
       // [ADR-0015 §4.2 · #25277] The objects a datasource write is judged
-      // against. Read from the engine's object registry (the `objectql`
-      // service's `registry`), the registry the metadata save door writes
-      // through to: an object saved through `PUT /api/v1/meta/object/:name` or
-      // imported from a remote table is in it the moment it is saved, and boot
-      // restores the stored rows into it. ⛔ Not the metadata service's
-      // `listObjects()`, which holds a copy of this registry taken once at boot
-      // and never sees a runtime save. A host with no engine registry serves
-      // no objects, so none can be bound.
-      //
-      // Resolved where it is used, never at `init()` (AGENTS.md, "Startup
-      // registry reads").
-      listObjectsBoundTo: async (datasource) => {
-        const registry = safeGetService<Partial<Pick<IObjectQLEngine, 'registry'>>>(ctx, 'objectql')?.registry;
-        if (typeof registry?.getAllObjects !== 'function') return [];
-        return (registry.getAllObjects() as Array<{ name?: unknown; datasource?: unknown; external?: unknown }>)
-          .filter((o) => o?.datasource === datasource)
-          .map((o) => ({ name: o.name, external: o.external }));
-      },
+      // against, read from the engine's object registry (`objectsBoundTo`
+      // above says why that registry, and why per call).
+      listObjectsBoundTo: async (datasource) => objectsBoundTo(datasource),
 
       // Hot pool (de)registration converges on the shared
       // DatasourceConnectionService (ADR-0062 D1) — one connect path for code-
@@ -527,9 +535,26 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // opens the connection, and registers the live driver + datasource def.
       // Runtime-admin connects always degrade-with-warning on failure (never
       // fail-fast), preserving the pre-ADR-0062 admin behavior.
+      //
+      // [#27701] The connect carries the objects already bound to a MANAGED
+      // datasource, so its sync loop gives them their tables, as boot's
+      // `connectDeclared` does for a declared datasource. Boot's schema sync
+      // ran before this driver existed and skipped them; without this a code
+      // object bound to a Setup-created datasource had no table, on create and
+      // after every restart, and every read of it was a 500. ⛔ A datasource
+      // whose schema ObjectStack does not own (`external`, `validate-only`)
+      // passes none: it never gets DDL. Its mode is read the way the driver
+      // factory reads it, so the gate and the driver agree on what it is.
       registerPool: async (record) => {
         this.livePoolRecords.set(record.name, record);
+        const managed = (resolveDatasourceSchemaMode({ ...record, config: record.config ?? {} }) ?? 'managed') === 'managed';
+        const objects = managed
+          ? objectsBoundTo(record.name)
+              .map((o) => o.name)
+              .filter((n): n is string => typeof n === 'string')
+          : [];
         await this.connection?.connect(record, {
+          objects,
           context: { origin: record.origin ?? 'runtime', trigger: 'runtime-admin' },
         });
       },
@@ -872,6 +897,11 @@ export class DatasourceAdminServicePlugin implements Plugin {
     if (!factory.supports(input.driver)) {
       return { ok: false, error: `No driver factory supports driver '${input.driver}'.` };
     }
+    // [#27512] A probe persists nothing, so it may create nothing either.
+    // Judged before the factory builds anything: every file-backed driver
+    // opens its database the way a writing boot does and creates the file.
+    const fileRefusal = await absentDatabaseFileRefusal(input);
+    if (fileRefusal) return { ok: false, error: fileRefusal };
 
     let driver: any;
     try {
@@ -956,6 +986,62 @@ function codeDatasourceNamesOf(ctx: PluginContext): { has(name: string): boolean
  */
 function servedOrigin(ctx: PluginContext, name: string): 'code' | 'runtime' {
   return codeDatasourceNamesOf(ctx)?.has(name) ? 'code' : 'runtime';
+}
+
+/**
+ * The database file a draft opens when its driver is file-backed, or
+ * `undefined` when it opens none — a server database, a remote libSQL url, an
+ * id no file-backed driver answers to. `:memory:` is returned as is; the
+ * judgement below leaves every `:`-prefixed name alone.
+ *
+ * Read as the default driver factory reads the same config: `sqlite` and
+ * `sqlite-wasm` open `config.filename` (`SqliteConfigSchema`, absent ⇒
+ * `:memory:`), and driver-turso's local engine opens the path of a `file:`
+ * url, its scheme matched in any letter case (`TursoDriver.toKnexConfig`).
+ */
+function probedDatabaseFile(input: ProbeInput): string | undefined {
+  const config = (input.config ?? {}) as Record<string, unknown>;
+  switch (resolveDriverId(input.driver)) {
+    case 'sqlite':
+    case 'sqlite-wasm':
+      return typeof config.filename === 'string' ? config.filename : ':memory:';
+    case 'turso': {
+      const url = resolveTursoUrl({ driver: input.driver, config });
+      return url.slice(0, 'file:'.length).toLowerCase() === 'file:' ? url.slice('file:'.length) : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * [#27512] Why the draft probe refuses to open a file-backed draft, or
+ * `undefined` when it may: the file the draft names does not exist, or can be
+ * neither opened nor created. Nothing is written to find out.
+ *
+ * The judgement is driver-sql's one write-free existence check,
+ * `resolveSqliteAbsentFileTarget`: under `'empty-in-memory'` it answers
+ * `openedEmptyInMemory` for an absent file and throws its
+ * `SqliteDatabaseFileError`, naming the file, for one that can be neither
+ * opened nor created — so no second `existsSync` is open-coded here.
+ *
+ * It lives in the probe, not in the driver factory, so it holds whichever
+ * factory the host registered, and a Save, the boot restore and every hot
+ * pool still open the file as before and create it.
+ */
+async function absentDatabaseFileRefusal(input: ProbeInput): Promise<string | undefined> {
+  const filename = probedDatabaseFile(input);
+  if (filename === undefined) return undefined;
+  const { resolveSqliteAbsentFileTarget } = await import('@objectstack/driver-sql');
+  try {
+    if (!resolveSqliteAbsentFileTarget(filename, 'empty-in-memory').openedEmptyInMemory) return undefined;
+  } catch (err) {
+    return errMsg(err);
+  }
+  return (
+    `SQLite database file '${filename}' does not exist. Testing a connection never creates it: `
+    + 'point the draft at an existing database file, or save the datasource to have it created.'
+  );
 }
 
 function errMsg(err: unknown): string {

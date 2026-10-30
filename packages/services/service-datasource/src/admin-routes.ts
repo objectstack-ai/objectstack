@@ -45,6 +45,9 @@ import type { IAuthService, IDataEngine, IHttpServer } from '@objectstack/spec/c
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { inProcessSessionReadInput, sendOk, sendError } from '@objectstack/types';
 import { DRIVER_CATALOG } from './driver-catalog.js';
+// [#27618] The package's one "no such datasource" refusal: GET answers an
+// unknown name in its words, as every other by-name door does.
+import { datasourceNotFoundError } from './datasource-admin-service.js';
 
 /**
  * The services these routes dispatch to.
@@ -86,7 +89,8 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * `DATASOURCE_ADMIN_ERROR` or `EXTERNAL_DATASOURCE_ERROR`. A name that resolves
  * no stored datasource is not a refusal: every `datasource-admin` door that
  * takes `:name` answers it `404` `RESOURCE_NOT_FOUND`, the read and the writes
- * alike (see `badRequest`).
+ * alike, and so do `POST /datasources/:name/test` and the two Sync doors,
+ * `GET …/remote-tables` and `POST …/object-draft` (see `badRequest`).
  *
  * Served by `datasource-admin`:
  *
@@ -641,7 +645,9 @@ export function registerDatasourceAdminRoutes(
    * unknown datasource reads the same at every by-name door, and a caller can
    * tell "no such datasource" from "your request was refused". The throwers
    * today are the admin service's `updateDatasource`, `removeDatasource` and
-   * `migrateCredential` (`datasourceNotFoundError`).
+   * `migrateCredential`, and the external service's `testConnection` and the
+   * federation guard behind `remote-tables` and `object-draft`, all through
+   * the one `datasourceNotFoundError`.
    */
   const badRequest = (res: any, service: ServiceName, err: unknown) => {
     const envelope = err as { code?: unknown; status?: unknown } | null | undefined;
@@ -746,7 +752,7 @@ export function registerDatasourceAdminRoutes(
     if (!svc) return;
     try {
       const datasource = await svc.getDatasource(req.params.name);
-      if (!datasource) return sendError(res, 404, 'RESOURCE_NOT_FOUND', `Datasource "${req.params.name}" does not exist.`);
+      if (!datasource) return sendError(res, 404, 'RESOURCE_NOT_FOUND', datasourceNotFoundError(req.params.name).message);
       sendOk(res, { datasource });
     } catch (err) {
       badRequest(res, 'datasource-admin', err);

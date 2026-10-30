@@ -569,6 +569,15 @@ export { resolveFieldCurrency };
 export { formatCurrency };
 
 /**
+ * `formatNumberFieldValue` lives in `./widgets/number-format.ts` and is
+ * re-exported here so a face outside this package that renders a `number`
+ * field's stored value (the record History tab's change list) makes the same
+ * call `NumberCellRenderer` and `NumberField`'s read-only branch make, rather
+ * than a formatter of its own.
+ */
+export { formatNumberFieldValue };
+
+/**
  * Format currency value in compact form for mobile display.
  * E.g., $150,000 → $150K, $1,200,000 → $1.2M
  * When `currency` is undefined, returns a compact number without symbol.
@@ -821,7 +830,7 @@ function RatingCellRenderer({ value, field }: CellRendererProps): React.ReactEle
 /**
  * Currency field cell renderer
  */
-export function CurrencyCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
+export function CurrencyCellRenderer({ value, field, dependentValues }: CellRendererProps): React.ReactElement {
   // Hooks before the empty-value early return — a value flipping between
   // null and set must not change the hook count between renders.
   const { currency: tenantCurrency } = useLocalization();
@@ -834,8 +843,11 @@ export function CurrencyCellRenderer({ value, field }: CellRendererProps): React
   // Resolve the display currency via the shared precedence: field `currency` →
   // `currencyConfig.defaultCurrency` → the tenant default (ADR-0053). When none
   // is known, render a plain number — never a guessed symbol (silently assuming
-  // USD mis-displays non-USD orgs, e.g. RMB amounts shown as $).
-  const currency = resolveFieldCurrency(field as any, tenantCurrency);
+  // USD mis-displays non-USD orgs, e.g. RMB amounts shown as $). A
+  // `record`-mode amount (ADR-0144 D2) reads its row's code field instead, so
+  // three invoices in USD / EUR / JPY show three symbols; a row with no code
+  // shows a plain number.
+  const currency = resolveFieldCurrency(field as any, tenantCurrency, dependentValues);
   const num = Number(safe);
   // `CurrencyField`'s read-only branch makes this same call, so a table cell
   // and a read-only form show one amount identically: the currency's ISO 4217
@@ -2867,7 +2879,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
  * not import each other; `__tests__/formulaFaces.returnType-11748.test.tsx`
  * compares the two faces' text for every declared type.
  */
-export function FormulaCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
+export function FormulaCellRenderer({ value, field, dependentValues }: CellRendererProps): React.ReactElement {
   // Hooks before the empty-value early return: the hook count must not change
   // when a value flips between null and set. The date face reads the display
   // locale; the boolean face reads the locale's word.
@@ -2910,9 +2922,10 @@ export function FormulaCellRenderer({ value, field }: CellRendererProps): React.
   // renderer reads `currencyConfig` through `resolveFieldCurrency` exactly as
   // it reads a currency field's, so a `fixed` config keeps its own code and an
   // absent one is `dynamic`, the tenant default currency. ⛔ No second money
-  // formatter here.
+  // formatter here. The row rides along for a `record`-mode formula, whose
+  // currency is its row's code field (ADR-0144 D2).
   if (valueType === 'currency') {
-    return <CurrencyCellRenderer value={value} field={field} />;
+    return <CurrencyCellRenderer value={value} field={field} dependentValues={dependentValues} />;
   }
 
   // A declared BOOLEAN reads the locale's Yes / No word (objectui#11748), the
@@ -4267,6 +4280,7 @@ setFieldReadFaceResolver(resolveDeclaredFieldFace);
 // `mapFieldTypeToFormType` moved to './field-type-alias' (re-exported below) so
 // FieldEditWidget can resolve spec aliases without importing this barrel.
 export { mapFieldTypeToFormType } from './field-type-alias.js';
+export { resolveBooleanControl, type BooleanControl } from './widgets/booleanControl.js';
 import { mapFieldTypeToFormType } from './field-type-alias.js';
 // `isRetiredFieldType` is the gate the maintainer ruled onto THIS package's
 // surface (objectui#4914, ruling B) — "export a single `isRetiredFieldType(t)`

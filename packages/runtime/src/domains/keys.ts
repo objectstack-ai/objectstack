@@ -12,6 +12,14 @@
  *    caller and is NEVER read from the request body (no impersonation).
  *    The anonymous decision is the domain's FIRST statement (ADR-0138 D2),
  *    ahead of the method check, so every face answers an anonymous caller 401.
+ *  - Requires an INTERACTIVE SESSION: the principal must have been admitted by
+ *    a signed-in session (`HttpProtocolContext.admission.credential ===
+ *    'session'`, written by the dispatcher's identity step from the shared
+ *    resolver). A principal an API key admitted, or one whose admitting
+ *    credential this door was never told, is refused `403 PERMISSION_DENIED`
+ *    right after the anonymous decision, before the body is read. A key acts
+ *    as its owner for data and automation; managing credentials stays with
+ *    the owner's own sign-in.
  *  - Body is whitelisted to `name` (+ optional `expires_at`); any
  *    `key` / `id` / `user_id` / `revoked` in the body is ignored, so a
  *    caller cannot forge a known-secret or escalate.
@@ -73,6 +81,15 @@ const API_KEY_EXPIRY_TOO_LONG = { code: 'API_KEY_EXPIRY_TOO_LONG', status: 400 }
 const KEYS_ALLOWED_METHODS = 'POST';
 
 /**
+ * The refusal a principal not admitted by a signed-in session receives. It
+ * names the remedy (sign in, then create the key) and nothing about the
+ * credential presented.
+ */
+const KEYS_SESSION_REQUIRED_MESSAGE =
+    'Creating an API key requires a signed-in session. Sign in and create the key from the API Keys '
+    + 'page or the Connect an Agent page; a request authenticated with an API key cannot create keys.';
+
+/**
  * The legacy branch matched `=== '/keys' || startsWith('/keys/') ||
  * startsWith('/keys?')` — a segment match PLUS the query-string form some
  * adapters pass through in `path`. Two entries reproduce that exactly.
@@ -115,6 +132,24 @@ export async function handleKeysRequest(
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
     }
+    // INTERACTIVE-SESSION REQUIREMENT — minting is a credential-lifecycle act,
+    // so it is taken only from a principal a signed-in session admitted. The
+    // credential is the one the shared resolver decided
+    // (`resolveAuthzContext`'s `credential`), handed to this request by the
+    // dispatcher's identity step (`onAdmission`); the envelope itself does not
+    // carry it. Positive on purpose: an API-key admission is refused, and so
+    // is an absent one, because a credential this door was never told about
+    // is not a session. Domain-wide like the baseline above, so every verb
+    // answers it, and ahead of the body read below. The code is the one the
+    // status derives (`PERMISSION_DENIED`), the same answer the membership
+    // refusal further down gives.
+    if (context.admission?.credential !== 'session') {
+        return {
+            handled: true,
+            response: deps.error(KEYS_SESSION_REQUIRED_MESSAGE, 403),
+        };
+    }
+
     // [#24151] The body is read once the baseline above has admitted the
     // caller, never ahead of it (`../deferred-request-body.ts`).
     body = readDispatchedBody(body);
@@ -169,7 +204,7 @@ export async function handleKeysRequest(
     //
     // INHERITED from the caller's active organization (`ExecutionContext
     // .tenantId`, which the one shared resolver fills from the session's
-    // `activeOrganizationId` or from the minting key's own stamp). Never a
+    // `activeOrganizationId`; only a session reaches this line). Never a
     // body parameter: see the header.
     const activeOrganizationId = typeof ec.tenantId === 'string' && ec.tenantId.trim()
         ? ec.tenantId.trim()

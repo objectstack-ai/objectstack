@@ -940,6 +940,127 @@ describe('[#6674] validateSearchableFields — a virtual formula entry', () => {
 });
 
 /**
+ * A credential entry. Since the engine's ADR-0100 search withhold, the search
+ * expansion leaves every `secret` / `password` column out of the field map it
+ * resolves over, an author-declared one included, and says nothing — so the
+ * declared set is silently narrower than written. The finding is that
+ * withhold's build-time voice, at the virtual entry's severity.
+ */
+describe('validateSearchableFields — a secret or password entry', () => {
+  const accountFields = {
+    name: { type: 'text' },
+    billing_email: { type: 'email' },
+    api_key: { type: 'secret' },
+    portal_password: { type: 'password' },
+  };
+
+  it.each([
+    ['secret', 'api_key'],
+    ['password', 'portal_password'],
+  ])("flags a '%s' entry on the OBJECT's own searchableFields — previously clean", (ctype, field) => {
+    const findings = validateSearchableFields({
+      objects: [
+        { name: 'crm_account', fields: accountFields, searchableFields: ['name', field, 'billing_email'] },
+      ],
+    });
+
+    // The text and email entries beside it stay clean: the check reads the TYPE.
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('objects[0].searchableFields[1]');
+    expect(findings[0].where).toBe('object "crm_account"');
+    expect(findings[0].message).toContain(`"${field}"`);
+    expect(findings[0].message).toContain(`is a '${ctype}' field, a credential`);
+    expect(findings[0].hint).toBe(`Drop "${field}": credential fields are never searched`);
+  });
+
+  it.each([
+    ['secret', 'api_key'],
+    ['password', 'portal_password'],
+  ])("flags a '%s' entry on a list view narrowing, under the same verdict", (ctype, field) => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: accountFields,
+          listViews: { all: { type: 'grid', searchableFields: ['name', field] } },
+        },
+      ],
+    });
+
+    // Auto-default object: without the credential check the admissibility pass
+    // would explain this entry by its type alone and offer a text-like field.
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('objects[0].listViews.all.searchableFields[1]');
+    expect(findings[0].message).toContain(`is a '${ctype}' field, a credential`);
+    expect(findings[0].hint).toBe(`Drop "${field}": credential fields are never searched`);
+  });
+
+  it('flags a view entry the object ITSELF declares — the declared set does not make it searchable', () => {
+    // The object's declaration admits the entry at the REST ingress, so the
+    // #4830 admissibility pass passes it; the engine still withholds it.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: accountFields,
+          searchableFields: ['name', 'api_key'],
+          listViews: { all: { type: 'grid', searchableFields: ['api_key'] } },
+        },
+      ],
+    });
+
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [SEARCHABLE_FIELD_UNSEARCHABLE, 'objects[0].searchableFields[1]'],
+      [SEARCHABLE_FIELD_UNSEARCHABLE, 'objects[0].listViews.all.searchableFields[0]'],
+    ]);
+  });
+
+  it('is exemption-free: a `password` on a better-auth object is reported too', () => {
+    // The read mask spares a better-auth `password`; the search withhold does not.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          managedBy: 'better-auth',
+          fields: accountFields,
+          searchableFields: ['name', 'portal_password'],
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('objects[0].searchableFields[1]');
+    expect(findings[0].message).toContain("is a 'password' field, a credential");
+  });
+
+  it('CONTROL — the same declaration with text and email entries only stays clean', () => {
+    expect(
+      validateSearchableFields({
+        objects: [
+          {
+            name: 'crm_account',
+            fields: accountFields,
+            searchableFields: ['name', 'billing_email'],
+            listViews: { all: { type: 'grid', searchableFields: ['name', 'billing_email'] } },
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('`os explain` names the silent withhold and the exemption-free predicate', () => {
+    const text = explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(text).toContain('A `secret` or `password` entry is refused on EVERY surface');
+    expect(text).toContain('`isCredentialFieldType`');
+    expect(text).toContain('no better-auth exemption');
+  });
+});
+
+/**
  * [#8404] The FIFTH blanket-`SYSTEM_FIELDS` read site. Existence and provenance
  * are different questions: on an ADR-0015 `external` object the platform
  * registers `owner_id` and provisions no storage behind it, so the entry
@@ -1132,13 +1253,14 @@ describe('[#22161] one-line verdicts — the three searchable ids', () => {
 describe('[#22161] one-line fixes — the three searchable ids', () => {
   it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
     // Coverage control: every arm fired — both unknown arms, the anchor, and
-    // the four unsearchable arms (virtual, outside a declared set, a reference
-    // column and any other type outside the auto-default set).
+    // the five unsearchable arms (virtual, credential, outside a declared set,
+    // a reference column and any other type outside the auto-default set).
     const hints = fired.map((f) => f.hint);
     expect(hints.some((h) => h.startsWith('Fix the name, or add "')), 'unknown name').toBe(true);
     expect(hints.some((h) => h.startsWith("'search' scans this object's own columns only")), 'dotted').toBe(true);
     expect(hints.some((h) => h.startsWith("If the remote table carries '")), 'anchor').toBe(true);
     expect(hints.some((h) => h.startsWith('Mirror the computed value')), 'virtual').toBe(true);
+    expect(hints.some((h) => h.endsWith(': credential fields are never searched')), 'credential').toBe(true);
     expect(hints.some((h) => h.startsWith('Add "') && h.includes('.searchableFields')), 'declared set').toBe(true);
     expect(hints.some((h) => h.includes("to search by the related record's title")), 'reference').toBe(true);
     expect(hints.some((h) => h.endsWith('or target a text-like field instead')), 'other type').toBe(true);

@@ -22,6 +22,7 @@ export {
   SharingService,
   effectiveSharingModel,
   PHANTOM_ANCHOR_WRITE_DENY_NOTICE,
+  UNSERVED_OWNER_WRITE_DENY_NOTICE,
   type SharingEngine,
   type SharingServiceOptions,
   type OrphanShareSweepOptions,

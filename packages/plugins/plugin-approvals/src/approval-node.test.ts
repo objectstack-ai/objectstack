@@ -12,6 +12,13 @@ const noopLogger = {
 };
 
 /**
+ * The accounts this suite routes `user` approver slots to: a `user` approver
+ * holds a slot only when an account carries it (#27397), so the double's
+ * directory starts with them.
+ */
+const ROUTED_USERS = ['u1', 'u2', 'u9', 'lead'];
+
+/**
  * Tiny in-memory ObjectQL stand-in — supports the `where`-equality + `$in`
  * queries the approval service issues, enough to drive the node bridge.
  */
@@ -23,7 +30,7 @@ function makeFakeEngine(
   // the documented degradation, exercised below rather than assumed.
   schemas?: Record<string, any>,
 ) {
-  const tables = new Map<string, any[]>();
+  const tables = new Map<string, any[]>([['sys_user', ROUTED_USERS.map((id) => ({ id }))]]);
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
   const matches = (row: any, where: any) => Object.entries(where ?? {}).every(([k, v]) => {
     if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter operator ${k}`);

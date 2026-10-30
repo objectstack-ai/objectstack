@@ -902,7 +902,7 @@ Enable package response
 | **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes. |
 | **where** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any` | optional | Filtering criteria (WHERE) — a filter condition, or the input-only `FilterArray` sugar (`['status', '=', 'open']`), which is lowered through `parseFilterAST` before the query is produced. |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
-| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `integer` | optional | Max records to return (LIMIT) |
 | **offset** | `integer` | optional | Records to skip (OFFSET) |
@@ -923,7 +923,7 @@ Enable package response
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
-| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
+| **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) — at least one field name; a value naming no field (blank, only commas and spaces, or an empty list) is refused |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
@@ -2113,7 +2113,7 @@ Install package request
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review) and at boot for a plugin `os plugin install` installed: only `node` is loaded (in process, not isolated); `sandbox` and `worker` are refused until ADR-0025 M3 routes them |
-| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **packaging** | `Enum<'bundled'>` | optional | Dependency packaging strategy (ADR-0025 v2 §3.3): `bundled`, the only one and the default — omit the key or write `bundled` |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 

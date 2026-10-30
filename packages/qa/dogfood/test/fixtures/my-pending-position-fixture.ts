@@ -30,7 +30,12 @@ export const ROUTED_POSITION = 'my_pending_reviewer';
 /** A position the negative-control user holds — never the routed one. */
 export const OTHER_POSITION = 'my_pending_bystander';
 
-/** The named co-approver beside the position: no account is ever this address. */
+/**
+ * The named co-approver beside the position: an account the pin signs up and
+ * no one ever signs in as. It must BE an account — a `user` approver no account
+ * carries adds no slot — or the slate would name no one and the request would
+ * open on the organization's administrators instead.
+ */
 export const CO_APPROVER = 'my-pending-co-approver@example.com';
 
 export const MyPendingRequest = ObjectSchema.create({

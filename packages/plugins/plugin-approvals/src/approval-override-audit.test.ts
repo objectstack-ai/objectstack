@@ -24,9 +24,16 @@ import { ApprovalService } from './approval-service.js';
 
 interface FakeRow { [k: string]: any }
 
+/**
+ * The accounts this suite routes `user` approver slots to: a `user` approver
+ * holds a slot only when an account carries it (#27397), so the double's
+ * directory starts with them.
+ */
+const ROUTED_USERS = ['u9'];
+
 /** The same minimal engine shape `approval-service.test.ts` uses. */
 function makeFakeEngine() {
-  const tables: Record<string, FakeRow[]> = {};
+  const tables: Record<string, FakeRow[]> = { sys_user: ROUTED_USERS.map((id) => ({ id })) };
   const ensure = (n: string) => (tables[n] ??= []);
   function matches(row: FakeRow, filter: any): boolean {
     if (!filter || typeof filter !== 'object') return true;
@@ -103,7 +110,7 @@ describe('approval override audit marker (#4466)', () => {
       clock: { now: () => new Date(baseTime + (n++) * 1000) },
     });
     // The reassign target has an account: a reassign target must name one (#25485).
-    engine._tables['sys_user'] = [{ id: 'u7' }];
+    engine._tables['sys_user'].push({ id: 'u7' });
   });
 
   /** A request whose slate is properly STAFFED — one real, designated user. */

@@ -666,8 +666,13 @@ export class DatasourceConnectionService {
           : true;
       engine.registerDriver(engineDriver, opts.asDefault === true);
       if (!heldBefore) registeredByThisAttempt = engineDriver.name;
+      // [#27666] `driver` rides along: the engine keys its plugin-driver floor
+      // on the def's driver id, and this registration is the ONLY one a
+      // runtime-origin datasource gets (the manifest path never sees it), and
+      // the only one left after `reconnect`'s eviction dropped the stored def.
       engine.registerDatasourceDef?.({
         name,
+        driver: record.driver,
         schemaMode: record.schemaMode,
         external: record.external as { allowWrites?: boolean } | undefined,
       });
@@ -820,7 +825,11 @@ export class DatasourceConnectionService {
    * `unregisterDriver` removes the datasource def together with the driver
    * (the registry owns that invariant), so the keep-old-pool path must restore
    * the def the old pool was serving under — otherwise the write gate would
-   * judge writes for a datasource whose def vanished mid-failure.
+   * judge writes for a datasource whose def vanished mid-failure. It is
+   * REQUIRED ([#27727]): the restored def's `driver` is what keeps a kept
+   * plugin-driver pool behind the engine's correctness floor, and a restore
+   * that cannot name it would serve that pool unfloored, silently. A call
+   * without `previous.driver` is refused before anything is evicted.
    *
    * Not for the DEFAULT datasource: runtime-admin records can never be named
    * `default` (the name is host-reserved), and the default driver's natural-
@@ -830,10 +839,18 @@ export class DatasourceConnectionService {
     record: ConnectableDatasource,
     opts: {
       context?: DatasourceConnectContext;
-      previous?: Pick<ConnectableDatasource, 'schemaMode' | 'external'>;
-    } = {},
+      previous: Pick<ConnectableDatasource, 'driver' | 'schemaMode' | 'external'>;
+    },
   ): Promise<ConnectResult> {
     const name = record.name;
+    if (typeof opts?.previous?.driver !== 'string' || opts.previous.driver === '') {
+      throw new Error(
+        `datasource '${name}': reconnect needs \`previous\`, the record the live pool was built from, ` +
+          'with its `driver` id — without it a kept pool would be restored under a definition that names ' +
+          'no driver, and a plugin driver would be served without the engine\'s correctness floor. ' +
+          'Pass the stored record as it was before this update.',
+      );
+    }
     const engine = this.cfg.engine();
     const oldDriver = engine?.getDriverByName?.(name);
     if (!oldDriver || !engine || typeof engine.unregisterDriver !== 'function') {
@@ -848,10 +865,15 @@ export class DatasourceConnectionService {
 
     const restoreOldPool = (): void => {
       engine.registerDriver?.(oldDriver, false);
+      // [#27666] The OLD record's driver id, not `record.driver`: the kept
+      // pool was built from `previous`, and a reconfigure may have changed the
+      // driver. Without it the engine would read the restored def as "not a
+      // plugin driver" and serve the kept pool unfloored.
       engine.registerDatasourceDef?.({
         name,
-        schemaMode: opts.previous?.schemaMode,
-        external: opts.previous?.external as { allowWrites?: boolean } | undefined,
+        driver: opts.previous.driver,
+        schemaMode: opts.previous.schemaMode,
+        external: opts.previous.external as { allowWrites?: boolean } | undefined,
       });
     };
     const stillServingSuffix =

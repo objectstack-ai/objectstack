@@ -144,6 +144,7 @@ import {
 } from '@objectstack/core';
 // `.js` on purpose — NodeNext resolution requires the extension.
 import { RestServer } from './rest-server.js';
+import { EMAIL_SEND_CAPABILITY } from './email-routes.js';
 
 const STATE_PATH = '/api/v1/meta/object/:name/state/:field';
 const EMAIL_PATH = '/api/v1/email/send';
@@ -494,9 +495,21 @@ describe('[#15405] §4 this consumer agrees with the `computeExecCtx` consumer o
 //    ⚠️ Second observation only: no 404/503 question, no shipped reachability.
 // ---------------------------------------------------------------------------
 
-/** `POST /email/send` gates on `enforceAuth`; the kernel host clears it. */
+/**
+ * `POST /email/send` gates on `enforceAuth`; the kernel host clears it. The
+ * door also requires {@link EMAIL_SEND_CAPABILITY} ahead of the provider
+ * lookup (`email-routes.ts`, bound 1), and this section measures the provider
+ * seam, so the resolved caller is granted it — otherwise every case below
+ * would read the capability refusal, never the seam.
+ */
 function driveEmail(emailServiceProvider: any): Promise<Settled> {
-    return driveOn(boot({ ...kernelHost(), emailServiceProvider }), 'POST', EMAIL_PATH, {
+    const rest = boot({ ...kernelHost(), emailServiceProvider });
+    const resolve = (rest as any).resolveExecCtx.bind(rest);
+    (rest as any).resolveExecCtx = async (...a: unknown[]) => {
+        const ctx = await resolve(...a);
+        return ctx ? { ...ctx, systemPermissions: [...(ctx.systemPermissions ?? []), EMAIL_SEND_CAPABILITY] } : ctx;
+    };
+    return driveOn(rest, 'POST', EMAIL_PATH, {
         body: { to: 'a@example.com', subject: 's', text: 't' },
     });
 }

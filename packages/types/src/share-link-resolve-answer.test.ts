@@ -95,3 +95,30 @@ describe('[#26991] redactSharedRecord keeps the redaction both mounts served', (
     expect(redactSharedRecord(null, ['a'])).toBeNull();
   });
 });
+
+describe('[#27188] a record-mode amount (ADR-0144 D2)', () => {
+  const RECORD_SCHEMA = {
+    name: 'deal',
+    fields: {
+      amount: { name: 'amount', type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+      currency_code: { name: 'currency_code', label: 'Currency', type: 'text', valueDomain: 'iso_4217_currency' },
+    },
+  };
+
+  it('projects the currencyField pointer when the record carries the code field', () => {
+    const fields = projectSharedRecordFields(RECORD_SCHEMA, { amount: 5, currency_code: 'EUR' }, []);
+    expect(fields.amount.currencyConfig).toEqual({ currencyMode: 'record', currencyField: 'currency_code' });
+    expect(fields.currency_code).toEqual({ label: 'Currency', type: 'text' });
+  });
+
+  it('never names a redacted code field', () => {
+    const answer = buildShareLinkResolveAnswer(
+      { amount: 5, currency_code: 'EUR' },
+      { ...RESOLVED, redactFields: ['currency_code'] } as ResolveShareLinkResult,
+      RECORD_SCHEMA,
+    );
+    expect(answer.record).toEqual({ amount: 5 });
+    expect(answer.fields.amount.currencyConfig).toEqual({ currencyMode: 'record' });
+    expect(answer.fields.currency_code).toBeUndefined();
+  });
+});

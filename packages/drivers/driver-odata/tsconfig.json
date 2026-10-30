@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // module re-set from the base's NodeNext: no "type": "module" here, so NodeNext would compile src as CommonJS and refuse its `import.meta` (TS1470, measured).
+    "module": "ES2020",
+    "moduleResolution": "bundler",
+    "outDir": "./dist",
+    "types": ["node"],
+    "lib": ["ES2022"],
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

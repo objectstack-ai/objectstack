@@ -37,9 +37,12 @@
  * column to `owner_id` changes nothing, and the driver must return the field
  * itself. So the author's vouch this rule reads is a DECLARED field — the same
  * provenance the runtime guards read (`resolveInjectedColumnProvenance`,
- * `@objectstack/spec/data`) — never a `columnMap` entry alone. A declared
- * `owner_id` also scopes reads by owner; the platform's own injected one does
- * not (plugin-sharing treats it as unstored and leaves reads unscoped).
+ * `@objectstack/spec/data`) — never a `columnMap` entry alone. Reads follow
+ * the same anchor: a declared `owner_id` scopes them by owner, while the
+ * platform's own injected one, with no `columnMap` entry naming it, proves no
+ * owner, so on an owner-scoped model a member's read scope admits no row
+ * (`isOwnerAnchorUnprovable`, `@objectstack/spec/data`, which plugin-sharing's
+ * `hasPhantomOwnerAnchor` reads; #27425) and an edit answers 404.
  *
  * ## The two arms
  *
@@ -74,7 +77,11 @@
  * accept set.
  */
 
-import { resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import {
+  externalColumnMapTargets,
+  isOwnerAnchorUnprovable,
+  resolveInjectedColumnProvenance,
+} from '@objectstack/spec/data';
 import { recordsOf } from './object-graph.js';
 import { effectiveSharingModelOf } from './validate-sharing-rule-enforceability.js';
 
@@ -99,15 +106,36 @@ type AnyRec = Record<string, unknown>;
 const OWNER_COLUMN = 'owner_id';
 const CREATOR_COLUMN = 'created_by';
 
-const PUBLIC_READ_WRITE_WAY_OUT =
+/**
+ * The two ways out this rule names, as fix-line clauses. `security-owd-unset`
+ * words its fix line for the same objects from these, so an author following
+ * either rule's advice lands on a shape the other does not refuse.
+ */
+export const PUBLIC_READ_WRITE_WAY_OUT =
   "declare sharingModel: 'public_read_write' and decide who may edit in a beforeUpdate hook";
 
-/** Does `external.columnMap` (remote column → local field) map some remote column to `field`? */
-function columnMapTargets(external: AnyRec, field: string): boolean {
-  const map = external.columnMap;
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return false;
-  return Object.values(map as AnyRec).includes(field);
+/**
+ * The declaration way out, for the column {@link externalOwnershipGap} names.
+ * `mapped`: an `external.columnMap` entry already targets the column, so what
+ * is missing is only the declared field.
+ */
+export function declareOwnershipColumnWayOut(column: string, mapped = false): string {
+  const role = column === OWNER_COLUMN ? 'owner' : 'creator';
+  if (mapped) return `declare ${column} in fields (a plugin driver must return the remote ${role} under that name itself)`;
+  return (
+    `declare ${column} in fields and have the driver return the remote ${role} under that name ` +
+    '(a built-in SQL driver does it through external.columnMap; a plugin driver must return it itself)'
+  );
 }
+
+/**
+ * The fix-line clause `security-owd-unset` gives a read-only external binding
+ * whose owner anchor is unprovable ({@link hasUnprovableOwnerAnchor}): no
+ * member writes it, and on 'private' a member reads none of its rows.
+ */
+export const READ_ONLY_EXTERNAL_WAY_OUT =
+  "declare sharingModel: 'public_read' (no member writes a read-only binding, and on 'private' a member " +
+  'reads no row: no declared field or external.columnMap entry names the remote owner_id)';
 
 /**
  * The column whose missing storage refuses every member write on this object,
@@ -129,14 +157,13 @@ function undeclaredOwnershipColumn(obj: AnyRec): { column: string; injected: boo
  * declares no ownership column a remote row serves. Returns the findings
  * (empty = clean); the CLI folds them in as advisory warnings.
  */
-export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharingFinding[] {
-  const out: ExternalOwnerSharingFinding[] = [];
-  if (!stack || typeof stack !== 'object') return out;
-  const objects = recordsOf(stack.objects);
-  // ADR-0015's datasource half of the double write opt-in: a datasource this
-  // stack declares with `external.allowWrites: false` (also the parsed
-  // default) lets no write through, so no ownership check is what refuses.
-  const readOnlyDatasources = new Set(
+/**
+ * ADR-0015's datasource half of the double write opt-in: the datasources this
+ * stack declares with `external.allowWrites: false` (also the parsed default)
+ * let no write through, so no ownership check is what refuses.
+ */
+export function readOnlyExternalDatasources(stack: AnyRec): ReadonlySet<unknown> {
+  return new Set(
     recordsOf(stack.datasources)
       .filter((ds) => {
         const ext = ds.external;
@@ -144,25 +171,60 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
       })
       .map((ds) => ds.name),
   );
+}
+
+/**
+ * The ownership column whose missing storage refuses every member write on
+ * this object under an owner-keyed sharing model — or `undefined` when the
+ * object is not a writable external binding, sits on a datasource that lets
+ * no write through, or declares the column the check reads. `mapped`: an
+ * `external.columnMap` entry targets the column, so only the declaration is
+ * missing. The sharing model itself is the caller's to judge.
+ */
+export function externalOwnershipGap(
+  obj: AnyRec,
+  readOnlyDatasources: ReadonlySet<unknown>,
+): { column: string; injected: boolean; mapped: boolean } | undefined {
+  const external = obj.external;
+  if (!external || typeof external !== 'object' || Array.isArray(external)) return undefined;
+  if ((external as AnyRec).writable !== true) return undefined;
+  if (readOnlyDatasources.has(obj.datasource)) return undefined;
+  const undeclared = undeclaredOwnershipColumn(obj);
+  if (!undeclared) return undefined;
+  return { ...undeclared, mapped: externalColumnMapTargets(obj, undeclared.column) };
+}
+
+/**
+ * [#27425] An external object whose `owner_id` is the platform's injected
+ * anchor (no declared field) and no `external.columnMap` entry targets it. No
+ * owner is provable for such an object, so record sharing admits no row by
+ * ownership on an owner-scoped model, whatever the binding's writability.
+ * The verdict is the spec's `isOwnerAnchorUnprovable`, the same function
+ * plugin-sharing's `hasPhantomOwnerAnchor` reads, so this warning and the
+ * runtime narrowing it describes cannot disagree.
+ */
+export function hasUnprovableOwnerAnchor(obj: AnyRec): boolean {
+  return isOwnerAnchorUnprovable(obj);
+}
+
+export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharingFinding[] {
+  const out: ExternalOwnerSharingFinding[] = [];
+  if (!stack || typeof stack !== 'object') return out;
+  const objects = recordsOf(stack.objects);
+  const readOnlyDatasources = readOnlyExternalDatasources(stack);
 
   objects.forEach((obj, i) => {
-    const external = obj.external;
-    if (!external || typeof external !== 'object' || Array.isArray(external)) return;
-    if ((external as AnyRec).writable !== true) return;
-    if (readOnlyDatasources.has(obj.datasource)) return;
     if (effectiveSharingModelOf(obj) === 'public') return;
-    const undeclared = undeclaredOwnershipColumn(obj);
+    const undeclared = externalOwnershipGap(obj, readOnlyDatasources);
     if (!undeclared) return;
 
-    const { column } = undeclared;
+    const { column, mapped } = undeclared;
     const name = typeof obj.name === 'string' ? obj.name : `(object ${i})`;
     const model = typeof obj.sharingModel === 'string' ? `'${obj.sharingModel}'` : "'private' (the default)";
     const check =
       column === OWNER_COLUMN
         ? 'record sharing reads owner_id'
         : 'with no owner_id, the ownership floor reads created_by == the caller';
-    const mapped = columnMapTargets(external as AnyRec, column);
-    const role = column === OWNER_COLUMN ? 'owner' : 'creator';
     // [#27425] On `private`, record sharing also scopes READS by owner_id, and
     // an owner it cannot read admits no row: the edit's pre-image read finds
     // none, so the refusal is a 404 rather than the write check's 403.
@@ -170,9 +232,7 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
       column === OWNER_COLUMN && effectiveSharingModelOf(obj) === 'private'
         ? "(404: the member's read scope admits no row)"
         : '(403)';
-    const declareWayOut =
-      `declare ${column} in fields and have the driver return the remote ${role} under that name ` +
-      '(a built-in SQL driver does it through external.columnMap; a plugin driver must return it itself)';
+    const declareWayOut = declareOwnershipColumnWayOut(column, mapped);
 
     out.push({
       severity: 'warning',
@@ -191,8 +251,7 @@ export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharin
           `${check} before every edit and delete, so every member write is refused ${refusal} unless an app-authored ` +
           'row-level policy admits the row',
       hint: mapped
-        ? `Declare ${column} in fields (a plugin driver must return the remote ${role} under that name itself), ` +
-          `or ${PUBLIC_READ_WRITE_WAY_OUT}`
+        ? `D${declareWayOut.slice(1)}, or ${PUBLIC_READ_WRITE_WAY_OUT}`
         : `Either ${PUBLIC_READ_WRITE_WAY_OUT}, or ${declareWayOut}`,
     });
   });

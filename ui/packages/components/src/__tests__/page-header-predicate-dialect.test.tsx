@@ -24,11 +24,13 @@
  *   Failed to evaluate expression 'record.f_date < today()':
  *     "today" is not a function
  *
- * These tests pin the three families from the issue plus the fallback that
- * keeps the switch non-breaking: a legacy-dialect string (`${…}`, `===`,
- * `.includes()`) still routes to the old evaluator with its deprecation
+ * These tests pin the three families from the issue plus the fallback: a
+ * `${…}` template still routes to the old evaluator with its deprecation
  * warning, and a predicate that genuinely cannot be evaluated still fails
- * CLOSED, once, with the action named.
+ * CLOSED, once, with the action named. A BARE string with legacy-only syntax
+ * (`===`, `.includes()`) used to fall back too; it is CEL now, as the spec
+ * defines the shorthand (objectstack#27457), so it faults and fails closed —
+ * the deprecation warning still names the CEL spelling.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -247,7 +249,7 @@ describe('page:header — CEL-only constructs in action predicates (#3521)', () 
   });
 });
 
-describe('page:header — legacy dialect still falls back (#3521)', () => {
+describe('page:header — only the `${…}` template falls back to the legacy dialect (#3521, objectstack#27457)', () => {
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -271,20 +273,34 @@ describe('page:header — legacy dialect still falls back (#3521)', () => {
     expect(shown()).toBe(false);
   });
 
-  it('evaluates a bare `===` predicate on the legacy engine', () => {
+  it('a bare `===` predicate is CEL (objectstack#27457): it faults and fails closed, and still warns with the CEL spelling', () => {
     renderHeader({ name: 'zoo_legacy_strict_eq', visible: 'record.f_status === "open"' });
-    expect(shown()).toBe(true);
+    expect(shown()).toBe(false);
     expect(legacyWarnings().length).toBeGreaterThan(0);
-  });
-
-  it('evaluates a JS-only method (`.includes()`) on the legacy engine', () => {
-    renderHeader({ name: 'zoo_legacy_includes', visible: 'record.f_textarea.includes("urgent")' });
+    cleanup();
+    // CONTROL: the CEL spelling of the same predicate holds on the same record.
+    renderHeader({ name: 'zoo_cel_eq', visible: 'record.f_status == "open"' });
     expect(shown()).toBe(true);
   });
 
-  it('routes a legacy `disabled` predicate the same way', () => {
-    renderHeader({ name: 'zoo_legacy_disabled', disabled: 'record.f_status === "open"' });
+  it('a bare JS-only method (`.includes()`) is CEL too: no such method, so it faults and fails closed', () => {
+    renderHeader({ name: 'zoo_legacy_includes', visible: 'record.f_textarea.includes("urgent")' });
+    expect(shown()).toBe(false);
+    cleanup();
+    // CONTROL: CEL's `contains` reads the same field and holds.
+    renderHeader({ name: 'zoo_cel_contains', visible: 'record.f_textarea.contains("urgent")' });
+    expect(shown()).toBe(true);
+  });
+
+  it('a bare legacy `disabled` predicate faults the same way, and the disabled gate fails closed (disabled)', () => {
+    renderHeader({ name: 'zoo_legacy_disabled', disabled: 'record.f_status === "closed"' });
+    // `=== "closed"` is false on this record, so the legacy reading enabled the
+    // button; the CEL fault disables it.
     expect(button()).toBeDisabled();
+    cleanup();
+    // CONTROL: the CEL spelling evaluates to false and leaves the button enabled.
+    renderHeader({ name: 'zoo_cel_disabled', disabled: 'record.f_status == "closed"' });
+    expect(button()).not.toBeDisabled();
   });
 });
 

@@ -195,8 +195,13 @@ describe('DatasourceConnectionService.connect', () => {
     // Driver registered under the DATASOURCE name (engine routes by driver.name).
     expect(engine!.drivers.has('warehouse')).toBe(true);
     expect(engine!.drivers.get('warehouse')!.name).toBe('warehouse');
-    // Datasource definition recorded for the write gate.
-    expect(engine!.defs).toEqual([{ name: 'warehouse', schemaMode: 'external', external: externalDs.external }]);
+    // Datasource definition recorded for the write gate — and, [#27666], with
+    // the driver id the engine keys its plugin-driver floor on: for a
+    // runtime-origin datasource this registration is the only one the engine
+    // ever sees, so a def without `driver` would serve a plugin driver unfloored.
+    expect(engine!.defs).toEqual([
+      { name: 'warehouse', driver: 'sqlite', schemaMode: 'external', external: externalDs.external },
+    ]);
     // Bound external objects got read metadata synced (DDL-free).
     expect(engine!.synced).toEqual(['ext_customer']);
   });
@@ -1355,5 +1360,60 @@ describe('retained connection state (framework#3827)', () => {
       ['a', 'failed'],
       ['b', 'failed'],
     ]);
+  });
+});
+
+describe('[#27727] reconnect requires `previous`, the record the live pool was built from', () => {
+  const pluginDs: ConnectableDatasource = {
+    name: 'tree',
+    driver: 'spike_tree',
+    schemaMode: 'external',
+    external: { allowWrites: true },
+  };
+  const ctx = { origin: 'runtime', trigger: 'runtime-admin' } as const;
+
+  it('a call without `previous` is refused before anything is evicted or rebuilt', async () => {
+    const { service, engine, factory } = svc();
+    await service.connect(pluginDs, { context: ctx });
+    const live = engine!.drivers.get('tree');
+    expect(live).toBeDefined();
+    const defsBefore = engine!.defs.length;
+
+    // @ts-expect-error — `previous` is required: without its `driver` a kept pool would be restored unfloored
+    await expect(service.reconnect(pluginDs, { context: ctx })).rejects.toThrow(/reconnect needs `previous`/);
+    await expect(
+      service.reconnect(pluginDs, { context: ctx, previous: { driver: '' } }),
+    ).rejects.toThrow(/with its `driver` id/);
+
+    expect(engine!.drivers.get('tree')).toBe(live);
+    expect(engine!.defs).toHaveLength(defsBefore);
+    expect(factory!.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('with `previous`, a failed rebuild restores the kept pool under the OLD driver id', async () => {
+    const engine = fakeEngine();
+    let builds = 0;
+    const factory: IDatasourceDriverFactory = {
+      supports: () => true,
+      create: vi.fn(async () => {
+        builds += 1;
+        const driver: any = { name: 'com.fake.driver' };
+        return {
+          driver,
+          connect: builds === 1
+            ? async () => { driver.connected = true; }
+            : async () => { throw new Error('connection refused'); },
+        };
+      }),
+    };
+    const { service } = svc({ engine, factory });
+    await service.connect(pluginDs, { context: ctx });
+    const live = engine.drivers.get('tree');
+
+    const next: ConnectableDatasource = { ...pluginDs, driver: 'sqlite', config: { filename: '/tmp/t.db' } };
+    await service.reconnect(next, { context: ctx, previous: pluginDs });
+
+    expect(engine.drivers.get('tree')).toBe(live);
+    expect(engine.defs[engine.defs.length - 1]).toMatchObject({ name: 'tree', driver: 'spike_tree', schemaMode: 'external' });
   });
 });

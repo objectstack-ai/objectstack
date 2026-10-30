@@ -31,6 +31,7 @@ import {
 } from '@objectstack/spec/automation';
 import { FlowKeyValueField, type FlowKeyValueFieldProps } from './FlowKeyValueField.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
+import { FlowFieldHelp } from './FlowFieldHelp.js';
 import {
   isEditableValueEnvelope,
   isValueEnvelopeSlot,
@@ -621,6 +622,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
             ? {
                 toggleLabel: t('engine.inspector.flowNode.kv.asExpression', locale),
                 expressionPlaceholder: t('engine.inspector.flowNode.kv.expressionPlaceholder', locale),
+                blankExpressionMessage: t('engine.inspector.flowNode.kv.expressionNeeded', locale),
               }
             : undefined,
           // objectui#12101 — a map whose every value is a flow text slot (http
@@ -983,9 +985,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           {describeUnknownRefs(unknownRefs, locale)}
         </p>
       )}
-      {field.help && !exprIssue && unknownRefs.length === 0 && (
-        <p className="text-[11px] leading-snug text-muted-foreground">{field.help}</p>
-      )}
+      {field.help && !exprIssue && unknownRefs.length === 0 && <FlowFieldHelp text={field.help} />}
     </div>
   );
 }

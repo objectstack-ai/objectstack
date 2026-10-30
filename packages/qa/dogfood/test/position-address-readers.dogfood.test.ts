@@ -76,6 +76,7 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         const holderToken = await stack.signUp(HOLDER);
         const bystanderToken = await stack.signUp(BYSTANDER);
         const emailToken = await stack.signUp(EMAIL_APPROVER);
+        await stack.signUp(CO_APPROVER);
         const adminToken = await stack.signIn();
         const holderId = await idOf(HOLDER);
         const bystanderId = await idOf(BYSTANDER);

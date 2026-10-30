@@ -15,19 +15,33 @@
  * the same ambient-transaction rule for the privileged reads. Each method's
  * docblock stays on the method in `engine.ts`, which is still the contract.
  *
+ * [#27495] One later change, on the write side: `encryptSecretFields` seals a
+ * value without writing its `sys_secret` row and hands the row back, and two
+ * bodies joined it — `persistSecretRows` writes the sealed rows immediately
+ * before the record's own driver write, and `releaseSecretHandles` removes a
+ * handle once a write that did not land, or a committed one that moved the
+ * column off it, has left it unreferenced. [#27581] A committed delete hands
+ * the same release every handle the deleted rows held (`deletedSecretSlots`).
+ *
+ * [#27582] And one on the value already spelled as a ref: a non-system write
+ * may only seal a new value or keep its own record's ref. `encryptSecretFields`
+ * takes the write's own stored rows ({@link StoredRowsReader}) and refuses any
+ * other ref with {@link SecretRefWriteError}; the system principal keeps the
+ * pass-through.
+ *
  * ## How the moved bodies reach the class
  *
  * The shape #23050 set for `rest-server.ts` (its `data-action-routes.ts`
  * header carries the full reasoning), applied per method as
- * `engine-realtime-publish.ts` applies it. The class keeps all nine methods —
+ * `engine-realtime-publish.ts` applies it. The class keeps all eleven methods —
  * the published `.d.ts` lists each one's name and position — and each body is
  * one literal of exactly the {@link SecretInternalFieldsHost} members that
- * method reads, plus a `.call`. The three fields the bodies read
- * (`_registry`, `cryptoProvider`, `txStore`) go as GETTERS, so each read
- * happens when the body makes it: `setCryptoProvider` replaces the provider at
- * any time, and a body sees whatever is installed at the moment it reads, as
- * it did. The five methods they call (`getDriver`,
- * `transactionCoversDriverFor`, `omitInternalFields`,
+ * method reads, plus a `.call`. The four fields the bodies read
+ * (`_registry`, `cryptoProvider`, `txStore`, `logger`) go as GETTERS, so each
+ * read happens when the body makes it: `setCryptoProvider` replaces the
+ * provider at any time, and a body sees whatever is installed at the moment it
+ * reads, as it did. The six methods they call (`getDriver`,
+ * `transactionCoversDriverFor`, `isClosedUnitHandle`, `omitInternalFields`,
  * `privilegedReadDriverOptions`, `resolveSecret`) go as late-bound closures
  * over the instance, so a double or spy set on the engine — tests replace
  * `resolveInternalField` and `resolveSecretField` on the instance — is still
@@ -40,8 +54,9 @@
  */
 
 import type { CryptoHandle } from '@objectstack/spec/contracts';
+import type { DriverOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { redactPropagatedDriverFault } from '@objectstack/types';
+import { redactBoundStatement, redactPropagatedDriverFault } from '@objectstack/types';
 import {
   collectSecretFields,
   collectMaskedReadFields,
@@ -68,11 +83,80 @@ export interface SecretInternalFieldsHost {
   readonly _registry: ObjectQL['_registry'];
   readonly cryptoProvider: ObjectQL['cryptoProvider'];
   readonly txStore: ObjectQL['txStore'];
+  readonly logger: ObjectQL['logger'];
   getDriver: ObjectQL['getDriver'];
   transactionCoversDriverFor: ObjectQL['transactionCoversDriverFor'];
+  isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
   omitInternalFields: ObjectQL['omitInternalFields'];
   privilegedReadDriverOptions: ObjectQL['privilegedReadDriverOptions'];
   resolveSecret: ObjectQL['resolveSecret'];
+}
+
+/**
+ * [#27495] A `sys_secret` row the credential pass sealed for one record write
+ * and has not written yet: the column it was minted for, the handle id the
+ * row's ref now names, the row itself, and the driver options the pass was
+ * handed. {@link persistSecretRows} writes it immediately before the record's
+ * own driver write, so a write refused before that point leaves nothing behind.
+ */
+export interface PendingSecretRow {
+  readonly field: string;
+  readonly handleId: string;
+  readonly row: Record<string, unknown>;
+  readonly driverOptions: unknown;
+}
+
+/** [#27495] A handle a write may have left unreferenced, and the column it was minted for. */
+export interface SecretHandleSlot {
+  readonly field: string;
+  readonly handleId: string;
+}
+
+/**
+ * [#27582] The rows a write's own record(s) hold in storage now, read for one
+ * question: is a ref on a non-system payload the value that record's column
+ * already holds? Each call site says what its own rows are — none for an
+ * insert (a new record holds no ref of its own), the pre-image for a by-id
+ * update, the matched rows for a predicate update — and the reader is called
+ * only when a non-system payload carries a ref, so every other write reads
+ * nothing more than it did.
+ */
+export type StoredRowsReader = () => Promise<readonly (Record<string, unknown> | null | undefined)[] | null>;
+
+/**
+ * [#27582] The ADR-0112 pair carried by the refusal of a ref that is not the
+ * record's own. `VALIDATION_ERROR` / 400 is the standard-catalog member the
+ * sibling credential refusals use (`EMPTY_CREDENTIAL_REFUSAL_CODE`): the
+ * payload is wrong and the caller can fix it, so no ledger registration is
+ * needed.
+ */
+export const SECRET_REF_WRITE_REFUSAL_CODE = 'VALIDATION_ERROR';
+export const SECRET_REF_WRITE_REFUSAL_STATUS = 400;
+
+/**
+ * [#27582] Refusal of a `secret:` ref on a non-system write that is not the
+ * value the record's own column already holds. Fail closed, with one answer:
+ * the message names the column and never the ref, and nothing about the handle
+ * the ref names is looked up, so the answer is the same whatever it names.
+ */
+export class SecretRefWriteError extends Error {
+  readonly code = SECRET_REF_WRITE_REFUSAL_CODE;
+  readonly status = SECRET_REF_WRITE_REFUSAL_STATUS;
+  /** The same number under ADR-0112 D5's spelling, as `EmptyCredentialWriteError` carries it. */
+  readonly httpStatus = SECRET_REF_WRITE_REFUSAL_STATUS;
+  readonly object: string;
+  readonly field: string;
+  constructor(object: string, field: string) {
+    super(
+      `Stored-reference value refused for secret field "${object}.${field}": a value that starts with "secret:" `
+        + 'is read as a reference to a credential already stored, not as a credential, and a write may only keep '
+        + 'the reference this record already holds. To set the secret, send its value; to clear it, write null; '
+        + 'to leave it unchanged, omit the field. Nothing was written.',
+    );
+    this.name = 'SecretRefWriteError';
+    this.object = object;
+    this.field = field;
+  }
 }
 
 /** The body of `ObjectQL#encryptSecretFields`; the method's docblock there is its contract. */
@@ -82,9 +166,12 @@ export async function encryptSecretFields(
   row: Record<string, unknown>,
   context: ExecutionContext | undefined,
   driverOptions: unknown,
-): Promise<void> {
-  if (!row || typeof row !== 'object') return;
+  storedRows: StoredRowsReader,
+): Promise<PendingSecretRow[]> {
+  const pending: PendingSecretRow[] = [];
+  if (!row || typeof row !== 'object') return pending;
   const schema = this._registry.getObject(object);
+  let ownRows: readonly (Record<string, unknown> | null | undefined)[] | undefined;
 
   // Echoed-mask drop for every field the read path masks (secret + generic
   // password). The read path returns SECRET_MASK; a client that PATCHes it
@@ -97,7 +184,7 @@ export async function encryptSecretFields(
   }
 
   const secretFields = collectSecretFields(schema);
-  if (secretFields.length === 0) return;
+  if (secretFields.length === 0) return pending;
 
   for (const field of secretFields) {
     if (!(field in row)) continue;
@@ -109,7 +196,22 @@ export async function encryptSecretFields(
     // on the payload, so it must not depend on whether a CryptoProvider or
     // sys_secret store happens to be wired.
     if (value === '') throw new EmptyCredentialWriteError(object, field, 'secret');
-    if (isSecretRef(value)) continue; // already encrypted ref
+    if (isSecretRef(value)) {
+      // The system principal's ref passes through as it always has: a system
+      // writer may copy a ref on purpose (seed replay, migration).
+      if (context?.isSystem === true) continue;
+      // [#27582] A non-system write may only seal a new value or keep its own
+      // record's ref: every row this write lands on must already hold exactly
+      // this value in this column. A write with no own row (an insert, a
+      // predicate that matches nothing) has nothing to keep. Kept, the key is
+      // dropped, as the echoed mask is: the column is not rewritten at all, so
+      // the verdict cannot go stale before the statement runs.
+      ownRows ??= (await storedRows()) ?? [];
+      const keepsOwn = ownRows.length > 0 && ownRows.every((own) => own?.[field] === value);
+      if (!keepsOwn) throw new SecretRefWriteError(object, field);
+      delete row[field];
+      continue;
+    }
 
     if (!this.cryptoProvider) {
       throw new Error(
@@ -129,9 +231,11 @@ export async function encryptSecretFields(
       tenantId: context?.tenantId,
     });
 
-    let secretDriver;
+    // Fail-closed on a missing store HERE, before validation, as before: the
+    // row is only written later (#27495), but whether it could be is a verdict
+    // on the composition, not on the record.
     try {
-      secretDriver = this.getDriver('sys_secret');
+      this.getDriver('sys_secret');
     } catch {
       throw new Error(
         `Cannot persist secret field "${object}.${field}": the sys_secret store is not available. `
@@ -139,9 +243,13 @@ export async function encryptSecretFields(
       );
     }
 
-    await secretDriver.create(
-      'sys_secret',
-      {
+    // [#27495] Sealed, not written: the ref goes on the row now, so validation
+    // and the post-image seam judge the stored reference as they always have,
+    // and the row reaches `sys_secret` only with the record that names it.
+    pending.push({
+      field,
+      handleId: handle.id,
+      row: {
         id: handle.id,
         namespace: object,
         key: field,
@@ -151,10 +259,147 @@ export async function encryptSecretFields(
         ciphertext: handle.ciphertext,
         created_at: new Date().toISOString(),
       },
-      driverOptions as any,
-    );
+      driverOptions,
+    });
 
     row[field] = makeSecretRef(handle.id);
+  }
+  return pending;
+}
+
+/** [#27495] The `secret` fields a write payload carries a key for — the columns the write can move. */
+export function secretFieldsWritten(
+  schema: Parameters<typeof collectSecretFields>[0],
+  payload: unknown,
+): string[] {
+  if (!payload || typeof payload !== 'object') return [];
+  return collectSecretFields(schema).filter((field) => field in (payload as Record<string, unknown>));
+}
+
+/**
+ * [#27495] The handles a committed update moved its columns off: for each
+ * `secret` field the payload carries, every prior row's handle the payload
+ * does not keep — a `null` clear or a new value, never an echoed ref or a
+ * dropped echoed mask. A candidate list, not a verdict: `releaseSecretHandles`
+ * verifies each one against storage before anything is removed.
+ */
+export function retiredSecretSlots(
+  schema: Parameters<typeof collectSecretFields>[0],
+  priorRows: readonly (Record<string, unknown> | null | undefined)[],
+  payload: unknown,
+): SecretHandleSlot[] {
+  const out: SecretHandleSlot[] = [];
+  for (const field of secretFieldsWritten(schema, payload)) {
+    const next = (payload as Record<string, unknown>)[field];
+    for (const prior of priorRows) {
+      const handleId = parseSecretRef(prior?.[field]);
+      if (handleId && next !== makeSecretRef(handleId)) out.push({ field, handleId });
+    }
+  }
+  return out;
+}
+
+/**
+ * [#27581] The `secret` columns a delete reads off the rows it removes, before
+ * its statement takes them away; empty for an object that declares none, so a
+ * delete anywhere else reads nothing more.
+ */
+export function deletedSecretColumns(schema: Parameters<typeof collectSecretFields>[0]): string[] {
+  return collectSecretFields(schema);
+}
+
+/**
+ * [#27581] The handles a committed delete let go of: every handle the deleted
+ * rows held in a `secret` column. A delete lets go of each column's value at
+ * once, so the candidates are exactly what a `null` clear of every one of
+ * those columns retires ({@link retiredSecretSlots}), and the same
+ * `releaseSecretHandles` checks decide each one: there is one release rule.
+ */
+export function deletedSecretSlots(
+  schema: Parameters<typeof collectSecretFields>[0],
+  deletedRows: readonly (Record<string, unknown> | null | undefined)[],
+): SecretHandleSlot[] {
+  const clearEvery = Object.fromEntries(deletedSecretColumns(schema).map((field) => [field, null]));
+  return retiredSecretSlots(schema, deletedRows, clearEvery);
+}
+
+/** The body of `ObjectQL#persistSecretRows`; the method's docblock there is its contract. */
+export async function persistSecretRows(
+  this: Pick<SecretInternalFieldsHost, 'getDriver'>,
+  pending: readonly PendingSecretRow[],
+  written: PendingSecretRow[],
+): Promise<void> {
+  for (const one of pending) {
+    await this.getDriver('sys_secret').create('sys_secret', one.row, one.driverOptions as any);
+    written.push(one);
+  }
+}
+
+/** The body of `ObjectQL#releaseSecretHandles`; the method's docblock there is its contract. */
+export async function releaseSecretHandles(
+  this: Pick<SecretInternalFieldsHost, 'getDriver' | 'txStore' | 'transactionCoversDriverFor' | 'isClosedUnitHandle' | 'logger'>,
+  object: string,
+  slots: readonly SecretHandleSlot[],
+  context: ExecutionContext | undefined,
+  occasion: 'refused' | 'retired',
+): Promise<void> {
+  if (slots.length === 0) return;
+  const kept = (slot: SecretHandleSlot, why: string, error?: unknown): void => {
+    // The column, never the handle id: a handle is what a stored ref names.
+    const what = occasion === 'refused'
+      ? `the sys_secret row sealed for a write on "${object}.${slot.field}" that did not complete`
+      : `the sys_secret row that "${object}.${slot.field}" named before this write`;
+    const redacted = error === undefined ? undefined : redactBoundStatement(error);
+    this.logger.error(
+      `Credential row kept: ${what} was not removed, because ${why}. The write's own answer is unchanged, `
+        + 'but that ciphertext is still stored and decryptable with nothing pointing at it. '
+        + '`os secret orphans` reports it.',
+      redacted instanceof Error ? redacted : undefined,
+      { object, field: slot.field },
+    );
+  };
+  // The unit the record write rode, chosen as `buildDriverOptions` chooses it:
+  // an explicit, still-open handle first, then the ambient one.
+  const explicit = context?.transaction;
+  const tx = explicit !== undefined && !this.isClosedUnitHandle(explicit)
+    ? explicit
+    : this.txStore.getStore()?.transaction;
+  const recordInUnit = tx !== undefined && this.transactionCoversDriverFor(object, tx);
+  const storeInUnit = tx !== undefined && this.transactionCoversDriverFor('sys_secret', tx);
+  const seen = new Set<string>();
+  for (const slot of slots) {
+    const dedupe = `${slot.field}:${slot.handleId}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    // A record write inside a unit the store is not part of can still roll
+    // back after this delete, and would then name a row that is gone: keep
+    // the orphan, the recoverable direction.
+    if (recordInUnit && !storeInUnit) {
+      kept(slot, 'the record write ran in a transaction that does not cover the sys_secret store, so the delete could outlive a rollback');
+      continue;
+    }
+    try {
+      // Verify, never infer: no row of the column may still name the handle —
+      // a predicate write shares one handle across every row it matched.
+      const recordOptions: DriverOptions | undefined = recordInUnit ? { transaction: tx } : undefined;
+      const refs = await this.getDriver(object).count(
+        object,
+        { where: { [slot.field]: makeSecretRef(slot.handleId) } },
+        recordOptions,
+      );
+      if (refs > 0) continue;
+      const storeOptions: DriverOptions | undefined = storeInUnit ? { transaction: tx } : undefined;
+      const secretDriver = this.getDriver('sys_secret');
+      const found = await secretDriver.find('sys_secret', { where: { id: slot.handleId } }, storeOptions);
+      const secret: any = Array.isArray(found) ? found[0] : found;
+      if (!secret) continue;
+      // Only this column's own handle: a ref a system writer copied onto
+      // another column says nothing about the column the handle was minted for.
+      if (secret.namespace !== object || secret.key !== slot.field) continue;
+      await secretDriver.delete('sys_secret', slot.handleId, storeOptions);
+    } catch (e) {
+      kept(slot, 'storage could not confirm the column let go of it, or could not delete it', e);
+    }
   }
 }
 

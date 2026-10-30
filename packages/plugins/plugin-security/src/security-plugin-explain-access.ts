@@ -133,7 +133,10 @@ export async function explainAccessForCaller(
   const recordId = request?.recordId != null && request.recordId !== '' ? String(request.recordId) : undefined;
 
   let targetContext = callerContext ?? {};
-  if (request.userId && request.userId !== callerContext?.userId) {
+  // [#27442] Any `userId` that is not omitted, the empty string included, goes
+  // through the other-user arm: an empty id names nobody, so it is refused
+  // there like an unknown one, never folded into explaining the caller.
+  if (request.userId !== undefined && request.userId !== callerContext?.userId) {
     const callerIsSystem = callerContext?.isSystem === true;
     if (!callerIsSystem) {
       const callerSets = await this.resolvePermissionSetsForContext(callerContext).catch(() => []);

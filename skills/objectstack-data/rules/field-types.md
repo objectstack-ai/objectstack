@@ -6,7 +6,7 @@
 - [Common Field Configurations](#common-field-configurations)
 - [Incorrect vs Correct](#incorrect-vs-correct)
 
-Quick reference for choosing the right field type from 49 available options.
+Quick reference for choosing the right field type from the available options.
 
 ## Two spellings: `Field.*` factory or object literal
 
@@ -122,7 +122,7 @@ Stored as JSON on the parent row — no separate table / FK:
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `formula` | Computed from an expression referencing other fields — virtual: not aggregatable, a dataset measure needs a stored field (objectstack-ui → Dashboards → Dataset-Bound Widgets) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
-| `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field, function, relationshipField?, filter? }) |
+| `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
 | `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"` |
 
 ## Enhanced Types
@@ -181,7 +181,7 @@ Stored as JSON on the parent row — no separate table / FK:
 `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
 (default), the tenant `localization.currency`, else a plain number (never
 `$`); `'record'`, each record's code in the `text` field `currencyField`
-names, declaring `valueDomain: 'iso_4217_currency'`. Under
+names (by convention `currency_code`), with `valueDomain: 'iso_4217_currency'`. Under
 `'fixed'`/`'dynamic'` a measure's own `currency` wins.
 
 ### Select with Default
@@ -254,7 +254,7 @@ const total = {
   type: 'summary',
   summaryOperations: {
     object: 'invoice_line_item',   // child object to aggregate
-    field: 'amount',               // child field (ignored for count)
+    field: 'amount',               // child field
     function: 'sum',               // 'count' | 'sum' | 'min' | 'max' | 'avg'
     // relationshipField / filter — optional (see rules/relationships.md)
   },

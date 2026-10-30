@@ -127,6 +127,7 @@ async function boot(decorateDriver?: (driver: any) => void) {
     list: find('GET', '/api/v1/data/import/jobs'),
     cancel: find('POST', '/api/v1/data/import/jobs/:jobId/cancel'),
     undo: find('POST', '/api/v1/data/import/jobs/:jobId/undo'),
+    dataCreate: find('POST', '/api/v1/data/:object'),
   };
 }
 
@@ -458,5 +459,172 @@ describe('async import job — real engine + protocol integration', () => {
     const restoreWrites = seen.filter((s) => s.object === 'task');
     expect(restoreWrites.length).toBeGreaterThan(0);
     for (const w of restoreWrites) expect(w.context?.preserveAudit).toBeUndefined();
+  });
+});
+
+/**
+ * The async create door resolves the object BEFORE it persists a job: an
+ * object name the runtime does not register is refused up front with the
+ * answer the data door gives the same name (`POST /data/OBJ`, 404
+ * `OBJECT_NOT_FOUND`), and no `sys_import_job` row is written — rather than a
+ * 201, a job id and a job whose every row then fails on that same refusal.
+ */
+describe('async import job — an unregistered object is refused before a job exists', () => {
+  let ctx: Awaited<ReturnType<typeof boot>>;
+  beforeEach(async () => {
+    ctx = await boot();
+    expect(ctx.create && ctx.dataCreate).toBeTruthy();
+  });
+
+  const jobRows = async () => ctx.engine.find('sys_import_job', { where: {} });
+  const call = (route: any, object: string, body: any) => {
+    const res = makeRes();
+    return route.handler({ params: { object }, body } as any, res).then(() => res);
+  };
+
+  it('answers 404 OBJECT_NOT_FOUND, the data door\'s answer, and persists no job row', async () => {
+    expect(await jobRows()).toHaveLength(0);
+
+    const res = await call(ctx.create, 'no_such_object', { format: 'csv', csv: 'title\nx\n' });
+    expect(res._status).toBe(404);
+    expect(res._json?.error?.code ?? res._json?.code).toBe('OBJECT_NOT_FOUND');
+
+    // The same envelope the data door answers for the same name, byte for byte.
+    const door = await call(ctx.dataCreate, 'no_such_object', { title: 'x' });
+    expect(door._status).toBe(404);
+    expect(res._json).toEqual(door._json);
+
+    // Counted at the engine: the refusal wrote no job.
+    expect(await jobRows()).toHaveLength(0);
+  });
+
+  it('control: a registered object still gets 201 and exactly one job row', async () => {
+    const res = await call(ctx.create, 'task', { format: 'json', rows: [{ id: 'k1', title: 'kept' }] });
+    expect(res._status).toBe(201);
+    expect(res._json).toMatchObject({ object: 'task', status: 'pending', total: 1 });
+    await waitForTerminal(ctx.progress, res._json.jobId);
+    const rows = await jobRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: res._json.jobId, object_name: 'task' });
+  });
+});
+
+/**
+ * The terminal status of a job that wrote nothing (maintainer ruling B, record
+ * 6509036166). A job that was not cancelled, had at least one row, and ended
+ * with no row created, updated or skipped ends `failed`, with `error` naming
+ * the outcome and pointing at `results`. Kept `succeeded` on purpose: a job
+ * whose rows partly failed (the partial pin in the first describe above), a job
+ * whose every row was skipped, and a job with no rows. Cancellation still wins.
+ * A dry run follows the same rule.
+ */
+describe('async import job — a job whose every row failed ends failed', () => {
+  let ctx: Awaited<ReturnType<typeof boot>>;
+  beforeEach(async () => {
+    ctx = await boot();
+    expect(ctx.create && ctx.progress && ctx.results && ctx.undo).toBeTruthy();
+  });
+
+  const badRows = (prefix: string) => [
+    { id: `${prefix}1`, title: 'one', score: 'not-a-number' },
+    { id: `${prefix}2`, title: 'two', score: 'nope' },
+    { id: `${prefix}3`, title: 'three', score: 'x' },
+  ];
+
+  it('every row fails: the job ends failed, errors === total, and error is set', async () => {
+    const res = await callCreate(ctx.create, { format: 'json', rows: badRows('af') });
+    expect(res._status).toBe(201);
+    const done = await waitForTerminal(ctx.progress, res._json.jobId);
+    expect(done).toMatchObject({ status: 'failed', total: 3, processed: 3, created: 0, updated: 0, skipped: 0, errors: 3 });
+    expect(done.errors).toBe(done.total);
+    expect(typeof done.error).toBe('string');
+    expect(done.error).toMatch(/results/);
+    // The per-row report is still delivered beside the status.
+    const results = await callJob(ctx.results, res._json.jobId);
+    expect(results._json.results).toHaveLength(3);
+    expect(results._json.results.every((r: any) => r.ok === false)).toBe(true);
+    // Nothing landed, and the undo reader answers as it did for this job before.
+    expect(await ctx.engine.find('task', { where: {} })).toHaveLength(0);
+    expect(done.undoable).toBe(false);
+    const u = await callJob(ctx.undo, res._json.jobId);
+    expect(u._status).toBe(422);
+    expect(u._json.code).toBe('NOT_UNDOABLE');
+    // The history filter sees it under its real status.
+    const failedOnly = await callJob(ctx.list, '', { status: 'failed' });
+    expect(failedOnly._json.jobs.map((j: any) => j.jobId)).toEqual([res._json.jobId]);
+  });
+
+  it('control: every row skipped keeps succeeded', async () => {
+    const res = await callCreate(ctx.create, {
+      format: 'json', writeMode: 'update', matchFields: ['id'],
+      rows: [{ id: 'sk1', title: 'a' }, { id: 'sk2', title: 'b' }],
+    });
+    expect(res._status).toBe(201);
+    const done = await waitForTerminal(ctx.progress, res._json.jobId);
+    expect(done).toMatchObject({ status: 'succeeded', total: 2, created: 0, updated: 0, skipped: 2, errors: 0 });
+    expect(done.error).toBeUndefined();
+  });
+
+  it('control: a job with no rows keeps succeeded', async () => {
+    const res = await callCreate(ctx.create, { format: 'csv', csv: 'id,title\n' });
+    expect(res._status).toBe(201);
+    expect(res._json.total).toBe(0);
+    const done = await waitForTerminal(ctx.progress, res._json.jobId);
+    expect(done).toMatchObject({ status: 'succeeded', total: 0, errors: 0 });
+    expect(done.error).toBeUndefined();
+  });
+
+  it('every row of a dry run fails: the job ends failed', async () => {
+    const res = await callCreate(ctx.create, { format: 'json', dryRun: true, rows: badRows('dr') });
+    expect(res._status).toBe(201);
+    const done = await waitForTerminal(ctx.progress, res._json.jobId);
+    expect(done).toMatchObject({ status: 'failed', dryRun: true, total: 3, created: 0, updated: 0, skipped: 0, errors: 3 });
+    expect(typeof done.error).toBe('string');
+  });
+
+  it('control: a valid dry run keeps succeeded', async () => {
+    const res = await callCreate(ctx.create, { format: 'json', dryRun: true, rows: [{ id: 'dv1', title: 'ok' }] });
+    const done = await waitForTerminal(ctx.progress, res._json.jobId);
+    expect(done).toMatchObject({ status: 'succeeded', dryRun: true, created: 1, errors: 0 });
+  });
+
+  it('control: a cancel that lands after the last row still wins over an all-failed outcome', async () => {
+    // Every row collides with a seeded primary key, so each fails at the
+    // driver; the slowed writes let the cancel land while the job runs, and
+    // the 3-row job has no mid-loop checkpoint, so the loop finishes first.
+    const slowCtx = await boot((driver) => {
+      const bulkCreate = driver.bulkCreate.bind(driver);
+      driver.bulkCreate = async (o: string, rows2: any[], ...rest: any[]) => {
+        if (o === 'task') await new Promise((r) => setImmediate(r));
+        return bulkCreate(o, rows2, ...rest);
+      };
+      const create = driver.create.bind(driver);
+      driver.create = async (o: string, data: any, ...rest: any[]) => {
+        if (o === 'task') await new Promise((r) => setImmediate(r));
+        return create(o, data, ...rest);
+      };
+    });
+    for (const id of ['cf1', 'cf2', 'cf3']) {
+      await slowCtx.protocol.createData({ object: 'task', data: { id, title: 'seeded' } });
+    }
+    const created = await callCreate(slowCtx.create, {
+      format: 'json',
+      rows: [{ id: 'cf1', title: 'a' }, { id: 'cf2', title: 'b' }, { id: 'cf3', title: 'c' }],
+    });
+    const jobId = created._json.jobId;
+    const c = await callJob(slowCtx.cancel, jobId);
+    expect(c._json).toMatchObject({ success: true });
+
+    await waitForTerminal(slowCtx.progress, jobId);
+    // The cancel route writes `cancelled` first; wait until the worker's own
+    // final patch has landed (it is the only write of `results`), then read the row.
+    for (let i = 0; i < 400; i++) {
+      const r = await callJob(slowCtx.results, jobId);
+      if ((r._json?.results ?? []).length === 3) break;
+      await new Promise((rr) => setTimeout(rr, 5));
+    }
+    const after = await callJob(slowCtx.progress, jobId);
+    expect(after._json.status).toBe('cancelled');
+    expect(after._json).toMatchObject({ processed: 3, created: 0, updated: 0, skipped: 0, errors: 3 });
   });
 });

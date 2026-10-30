@@ -437,7 +437,7 @@ describe('AppHeader — Approvals + Activity fill in every variant (#4197)', () 
       );
       expect(screen.getByTestId('inbox-badge-breakdown-total')).toHaveTextContent('3 total');
       expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(
-        '1 notifications',
+        '1 unread topics',
       );
     });
   }
@@ -757,7 +757,7 @@ describe('AppHeader — the bell panel renders what the inbox returns, under BOT
     // the breakdown line spells that out unclamped next to the listed rows.
     await waitFor(() => expect(screen.getByTestId('inbox-bell-badge')).toHaveTextContent('4'));
     expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(
-      '4 notifications',
+      '4 unread topics',
     );
     expect(screen.getByTestId('inbox-badge-breakdown-approvals')).toHaveTextContent(
       '0 pending approvals',

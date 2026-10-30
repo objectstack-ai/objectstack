@@ -117,11 +117,17 @@ export function refusalCarriedBy(err: unknown): CarriedRefusal {
  * through rethrows the SAME object, so the brand reaches the terminal exit
  * unchanged.
  *
- * A container that re-words a child failure into a NEW returned failure of
- * its own (`try_catch` with no catch region, `subflow`) builds a new error,
- * and the brand does not cross it; the run's result then carries no member,
- * which the spec's "present only when a refusal was met" allows and which
- * never invents one.
+ * A container that runs a CHILD flow and re-words its failure into a NEW
+ * returned failure of its own — `subflow`, and `map` for its failing item —
+ * carries the child run's members onto that returned failure
+ * (`carriedRefusalOfResult(child)`), so the engine brands its throw like any
+ * data node's and the refusal reaches the top run however deep it was met.
+ * The child's result is the only source: a child that met no refusal spreads
+ * `{}`, and a `map` stops at its first failing item, so it carries that
+ * item's. A `try_catch` with no catch region still builds a new error the
+ * brand does not cross; the run's result then carries no member, which the
+ * spec's "present only when a refusal was met" allows and which never
+ * invents one.
  */
 export const CARRIED_REFUSAL: unique symbol = Symbol.for(
     'objectstack.automation.carriedRefusal',
@@ -158,7 +164,9 @@ export function readCarriedRefusal(err: unknown): CarriedRefusal {
 /**
  * The members an attempt's RESULT carries — for `retryExecution`, whose
  * exhausted exit reports the last attempt's failure and must report that
- * attempt's refusal beside it, never an earlier attempt's.
+ * attempt's refusal beside it, never an earlier attempt's — and for the
+ * `subflow` / `map` failure arms, which carry their child run's refusal onto
+ * the failure they return.
  */
 export function carriedRefusalOfResult(result: AutomationResult): CarriedRefusal {
     return pickCarried(result);

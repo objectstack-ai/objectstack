@@ -61,7 +61,12 @@ const guestEnvelope = () => ({
     },
 }) as unknown as HttpProtocolContext;
 const MEMBER_EC = { userId: 'usr_member', isSystem: false, positions: [], permissions: [], systemPermissions: [] };
-const member = () => ({ request: { headers: {} }, executionContext: { ...MEMBER_EC } }) as unknown as HttpProtocolContext;
+/** A signed-in member, admitted by a session (the credential the dispatcher's identity step records). */
+const member = () => ({
+    request: { headers: {} },
+    executionContext: { ...MEMBER_EC },
+    admission: { credential: 'session', authGate: undefined },
+}) as unknown as HttpProtocolContext;
 
 const ANONYMOUS_CONTEXTS: ReadonlyArray<readonly [string, () => HttpProtocolContext]> = [
     ['an unresolved context', anonUnresolved],

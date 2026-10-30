@@ -158,7 +158,7 @@ export const SysApiKey = ObjectSchema.create({
       // `action-state-visibility.test.ts`.
       visible: 'has(record.revoked) && record.revoked != true',
       confirmText: 'Revoke this API key? Any clients using it will immediately lose access.',
-      successMessage: 'API key revoked',
+      successMessage: 'API key "{{ record.name }}" revoked',
       refreshAfter: true,
     },
     {
@@ -174,7 +174,7 @@ export const SysApiKey = ObjectSchema.create({
       bodyExtra: { revoked: false },
       visible: 'has(record.revoked) && record.revoked == true',
       confirmText: 'Restore this revoked API key? Existing clients holding the key will regain access.',
-      successMessage: 'API key restored',
+      successMessage: 'API key "{{ record.name }}" restored',
       refreshAfter: true,
     },
   ],

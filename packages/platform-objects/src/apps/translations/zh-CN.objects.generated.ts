@@ -1154,12 +1154,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       revoke_api_key: {
         label: "撤销 API 密钥",
         confirmText: "要撤销该 API 密钥吗？所有使用该密钥的客户端都将立即失去访问权限。",
-        successMessage: "API 密钥已撤销"
+        successMessage: "API 密钥「{{ record.name }}」已撤销"
       },
       restore_api_key: {
         label: "恢复 API 密钥",
         confirmText: "要恢复已撤销的 API 密钥吗？持有该密钥的现有客户端将重新获得访问权限。",
-        successMessage: "API 密钥已恢复"
+        successMessage: "API 密钥「{{ record.name }}」已恢复"
       }
     }
   },
@@ -3528,6 +3528,47 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新时间"
+      }
+    }
+  },
+  sys_exchange_rate: {
+    label: "汇率",
+    pluralLabel: "汇率",
+    description: "从组织本位币到外币的汇率，按生效日期记录——外币金额折算为本位币时所用的汇率。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      currency: {
+        label: "币种",
+        help: "外币的 ISO 4217 代码，大写（EUR、JPY、CHF）。"
+      },
+      rate: {
+        label: "汇率",
+        help: "1 单位组织本位币（本地化 → 默认币种）= 汇率 单位的该币种。示例：本位币 USD、币种 EUR、汇率 0.92，表示 1 USD = 0.92 EUR。"
+      },
+      effective_date: {
+        label: "生效日期",
+        help: "此汇率开始适用的日期。在同一币种的更晚一行接替之前一直有效。"
+      },
+      source: {
+        label: "来源",
+        help: "该行的来源：在 Setup 中录入（手工）、从文件导入（导入），或由应用流程写入（应用）。",
+        options: {
+          manual: "手工",
+          import: "导入",
+          app: "应用"
+        }
+      }
+    },
+    _views: {
+      all_rates: {
+        label: "全部",
+        description: "1 单位组织本位币（本地化 → 默认币种）= 汇率 单位的该币种。示例：本位币 USD、币种 EUR、汇率 0.92，表示 1 USD = 0.92 EUR。",
+        emptyState: {
+          title: "还没有汇率",
+          message: "每个币种在汇率变动的每个日期各录一行，例如每月初为每个币种录一行。"
+        }
       }
     }
   }

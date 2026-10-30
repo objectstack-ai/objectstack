@@ -480,6 +480,60 @@ describe('attachments permission matrix (#2755)', () => {
     expect(anon302.status).toBe(401);
   });
 
+  // ── (h) the file a row names must be one the caller may open ─────────
+  describe('(h) sys_attachment.file_id names a file the caller may open', () => {
+    /** The file-field door's refusal, for the `file_id` field. */
+    const expectFileRefusal = async (res: Response) => {
+      expect(res.status, await res.clone().text()).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe('VALIDATION_FAILED');
+      expect((body.fields ?? []).map((f: any) => [f.field, f.code])).toEqual([['file_id', 'invalid_value']]);
+    };
+
+    it('insert refuses a file reference the caller cannot open, and no row lands; the caller own upload attaches (control)', async () => {
+      const adminFile = await uploadFile(stack, adminTok);
+      expect((await attach(adminTok, 'att_secret', secretId, adminFile)).status).toBeLessThan(300);
+      expect((await stack.apiAs(memberATok, 'GET', `/storage/files/${adminFile}/url`)).status).toBe(403);
+
+      await expectFileRefusal(await attach(memberATok, 'att_case', caseAId, adminFile));
+      const landed = await ql.find('sys_attachment', {
+        where: { parent_object: 'att_case', parent_id: caseAId, file_id: adminFile },
+        context: SYS,
+      });
+      expect(landed).toHaveLength(0);
+      expect((await stack.apiAs(memberATok, 'GET', `/storage/files/${adminFile}/url`)).status).toBe(403);
+
+      // Control: the caller's own freshly uploaded file attaches.
+      const ownFile = await uploadFile(stack, memberATok);
+      expect((await attach(memberATok, 'att_case', caseAId, ownFile)).status).toBeLessThan(300);
+    });
+
+    it('update refuses re-pointing file_id at a file the caller cannot open; re-pointing at the caller own file succeeds (control)', async () => {
+      const adminFile = await uploadFile(stack, adminTok);
+      expect((await attach(adminTok, 'att_secret', secretId, adminFile)).status).toBeLessThan(300);
+
+      const ownFile = await uploadFile(stack, memberATok);
+      expect((await attach(memberATok, 'att_case', caseAId, ownFile)).status).toBeLessThan(300);
+      const row = await ql.findOne('sys_attachment', { where: { file_id: ownFile }, context: SYS });
+
+      await expectFileRefusal(await stack.apiAs(memberATok, 'PATCH', `/data/sys_attachment/${row.id}`, { file_id: adminFile }));
+      expect((await ql.findOne('sys_attachment', { where: { id: row.id }, context: SYS }))?.file_id).toBe(ownFile);
+      expect((await stack.apiAs(memberATok, 'GET', `/storage/files/${adminFile}/url`)).status).toBe(403);
+
+      // Control: re-pointing at another file the caller uploaded is admitted.
+      const secondOwn = await uploadFile(stack, memberATok);
+      const ok = await stack.apiAs(memberATok, 'PATCH', `/data/sys_attachment/${row.id}`, { file_id: secondOwn });
+      expect(ok.status, await ok.clone().text()).toBe(200);
+      expect((await ql.findOne('sys_attachment', { where: { id: row.id }, context: SYS }))?.file_id).toBe(secondOwn);
+    });
+
+    it('the owner of the file attaches it to a record they may edit (control)', async () => {
+      const adminFile = await uploadFile(stack, adminTok);
+      const res = await attach(adminTok, 'att_case', caseAId, adminFile);
+      expect(res.status, await res.clone().text()).toBeLessThan(300);
+    });
+  });
+
   // ── Part 1: sys_file orphan lifecycle, end to end ─────────────────────
   describe('sys_file orphan lifecycle (ADR-0057 reap guard)', () => {
     it('tombstones on last-ref delete, keeps shared files alive, un-tombstones on re-attach', async () => {

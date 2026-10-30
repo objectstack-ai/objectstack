@@ -123,12 +123,16 @@ const BASE = {
   columns: ['name'],
 } as const;
 
-/** Mount ListView on `schema` and return the props its child view was given. */
-async function viewProps(schema: Record<string, any>) {
+/**
+ * Mount ListView on `schema` and return the props its child view was given.
+ * `onRowClick` is the HOST's handler: the calendar and the gantt are handed the
+ * list's click router only when the host passes one (objectstack#27057).
+ */
+async function viewProps(schema: Record<string, any>, onRowClick?: (record: unknown) => void) {
   const dataSource = makeDataSource();
   render(
     <SchemaRendererProvider dataSource={dataSource}>
-      <ListView schema={schema as never} dataSource={dataSource} />
+      <ListView schema={schema as never} dataSource={dataSource} onRowClick={onRowClick} />
     </SchemaRendererProvider>,
   );
   await waitFor(() => expect(captured.length).toBeGreaterThan(0));
@@ -136,7 +140,8 @@ async function viewProps(schema: Record<string, any>) {
 }
 
 /** The node `viewComponentSchema` built for the child view. */
-const viewSchema = async (schema: Record<string, any>) => (await viewProps(schema)).schema;
+const viewSchema = async (schema: Record<string, any>, onRowClick?: (record: unknown) => void) =>
+  (await viewProps(schema, onRowClick)).schema;
 
 beforeEach(() => {
   captured = [];
@@ -204,12 +209,14 @@ describe('ListView forwards an authored `navigation` down the gantt view-schema 
   });
 
   it('CONTROL: the gantt node still carries everything it carried before', async () => {
-    // The forwarding is an addition, not a rewrite of the branch.
+    // The forwarding is an addition, not a rewrite of the branch. Mounted under
+    // a host handler, the one condition the node carries the list's click
+    // router on since objectstack#27057.
     const node = await viewSchema({
       ...BASE,
       navigation: { mode: 'page' },
       gantt: { startDateField: 'start_date', endDateField: 'end_date', titleField: 'name' },
-    });
+    }, vi.fn());
     expect(node.type).toBe('object-gantt');
     // objectstack#25923 — the binding rides the node's own `gantt` block now.
     expect(node.gantt).toEqual({ startDateField: 'start_date', endDateField: 'end_date', titleField: 'name' });
@@ -236,7 +243,9 @@ describe('⛔ no OTHER view type starts receiving `navigation` — one source of
     ['timeline', 'object-timeline-spy'],
   ] as const) {
     it(`\`${viewType}\` gets NO navigation key even when the view authors one`, async () => {
-      const props = await viewProps({ ...BASE, viewType, navigation: { mode: 'page' } });
+      // Under a host handler, so the calendar is handed the router too
+      // (objectstack#27057) and the control below holds for every row.
+      const props = await viewProps({ ...BASE, viewType, navigation: { mode: 'page' } }, vi.fn());
       expect(props.testid).toBe(testid);
       // The negative reading, with its own control in the same breath: this
       // spy demonstrably receives `baseProps` (it has `onRowClick`), so the
