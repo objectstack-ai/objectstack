@@ -3063,9 +3063,9 @@ function unwrapExpression(expr) {
  * Measured when this landed, with the resolver: `main` @ bc496bf7 reads
  * 95, not 93 — the two new lines are `protocol-batch-data.ts`'s
  * `runBatchDataLoop()` and `runUpdateManyLoop()` guarding
- * `this.assertRecordExists()`, seams cut 1 moved out of sight before any
- * cut was screened against this census; both read "no invented answer", so
- * no verdict and no ledger row moved. The cut-34 trial tree reads 95 too
+ * `this.assertRecordExists()`, seams the census stopped seeing when cut 1
+ * moved those bodies; both read "no invented answer", so no verdict and no
+ * ledger row moved. The cut-34 trial tree reads 95 too
  * (89 without the resolver), its four lost lines back.
  *
  * Both are resolutions of a name the census already follows, and the read
