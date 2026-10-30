@@ -4,10 +4,14 @@
 '@objectstack/spec': patch
 ---
 
-fix(cli): `os validate` and `os build` refuse a composed stack's top-level picklist that the boot refuses (#28248)
+fix(cli)!: `os validate` and `os build` refuse a composed stack's top-level picklist that the boot refuses (#28248)
 
-Clause-②: no
+Clause-②: no (narrowing) — `os validate` and `os build` refuse a composed stack whose top level declares a picklist that no package body declares and no object field the engine registers names, which they accepted before; the boot already refuses every such stack, so nothing that boots is newly refused, and nothing is widened
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and the stack schema accepts what it accepted. The two authoring doors now give, ahead of the boot, a refusal the boot already gives, with the same remedy; there is no metadata for a migration to rewrite. -->
+
+**BREAKING** for `os validate` / `os build` on a composed stack only (one that carries `packages[]`), and only for a stack the boot already refuses.
 
 A composed stack (one that carries `packages[]`) whose top level declares a picklist that no package body declares, and that no object field the engine registers names, is refused at boot (`INVALID_METADATA`). `os validate` and `os build` used to pass the same stack, so the author learned of it only at boot.
 
