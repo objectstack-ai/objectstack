@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': minor
+'@objectstack/spec': patch
 '@objectstack/service-storage': patch
 ---
 
 fix(spec)!: `GetPresignedUrlRequestSchema.size` declares a whole, non-negative byte count, and `filename` / `mimeType` declare that they are non-empty, the accept set the presigned-upload door enforces (#27598)
 
 Clause-②: no (narrowing) — the published declaration of the presigned-upload request body refuses a negative or fractional `size` and an empty `filename` or `mimeType`, which it admitted before. Nothing is widened and no key is added, removed or renamed.
-Metadata-protocol: narrowed
+Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no metadata type or stored shape moves: a REST request declaration no metadata type embeds stops admitting a negative or fractional `size` and an empty `filename` or `mimeType`. The door already refused all but the fraction, and a fractional size never named a byte count a stored file can hold. A caller sends the file's whole byte length, name and MIME type; there is nothing for a migration to rewrite and no tombstone. -->
 
