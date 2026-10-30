@@ -77,7 +77,7 @@ import {
   useStudioItemDraftStatus,
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
-import { overlayPath, packagedAutomationPath } from './BuilderLanding.js';
+import { packagedAutomationPath } from './BuilderLanding.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
@@ -807,45 +807,72 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
 
 /**
  * objectui#12453 — a read-only package says so twice: the lock in the app
- * chip, and this link at the right of the open item's header, in every
- * pillar. It names the one way to change an installed package, an
- * environment overlay, and lands on the package's metadata directory
- * (`overlayPath`, the Studio home's read-only package card's route), where
- * each type says whether it accepts an overlay. The pillar's read-only
- * sentence (objectui#11781) is its title.
+ * chip, and this mark at the right of the open item's header, in every
+ * pillar. The pillar's read-only sentence (objectui#11781) is its title.
  *
- * objectui#12707 — at a tab row's end, the link folds to its glyph when the
+ * It offers an environment overlay only where one exists: when the open
+ * item's metadata type declares `allowEnvironmentOverlay` in the served
+ * registry (ADR-0005), it is a link to that item's Setup page, where the
+ * overlay is edited. Any other item, no open item, or a registry not yet
+ * read draws a plain "Read-only" mark that links nowhere.
+ *
+ * objectui#12707 — at a tab row's end, the mark folds to its glyph when the
  * row cannot hold it whole (`useStudioTabRowFold`), rather than being cut
  * mid-word at the row's edge. Folded, its text stays as its accessible name
- * and its title stays its tooltip; where it goes is the same.
+ * and its title stays its tooltip.
  */
-function StudioReadOnlyLink({
-  packageId,
+export function StudioReadOnlyLink({
+  item,
   title,
   locale,
 }: {
-  packageId: string;
+  /** The open item, or `null` when the header has none open. */
+  item: { type: string; name: string } | null;
   title: string;
   locale: string;
 }): React.ReactElement {
-  const ref = React.useRef<HTMLAnchorElement | null>(null);
-  const label = t('engine.studio.pkg.readonlyLink', locale);
+  const client = useMetadataClient();
+  const { entries } = useMetadataTypes(client);
+  const overlayable = item !== null && entries.some((e) => e.type === item.type && e.allowEnvironmentOverlay === true);
+  const ref = React.useRef<HTMLElement | null>(null);
+  const label = t(overlayable ? 'engine.studio.pkg.readonlyLink' : 'engine.studio.pkg.readonly', locale);
   const folded = useStudioTabRowFold(ref, label);
-  return (
+  const className = cn(
+    'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 dark:text-amber-300',
+    overlayable && 'hover:bg-amber-400/25',
+    folded ? 'w-7 justify-center' : 'px-2.5',
+  );
+  const body = (
+    <>
+      {overlayable ? (
+        <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      ) : (
+        <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      )}
+      <span className={folded ? 'sr-only' : undefined}>{label}</span>
+    </>
+  );
+  return overlayable && item ? (
     <Link
-      ref={ref}
-      to={overlayPath(packageId)}
+      ref={ref as React.Ref<HTMLAnchorElement>}
+      to={`/apps/setup/metadata/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
       title={title}
       data-testid="studio-readonly-link"
       data-folded={folded || undefined}
-      className={cn(
-        'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 hover:bg-amber-400/25 dark:text-amber-300',
-        folded ? 'w-7 justify-center' : 'px-2.5',
-      )}
+      className={className}
     >
-      <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className={folded ? 'sr-only' : undefined}>{label}</span>
+      {body}
     </Link>
+  ) : (
+    <span
+      ref={ref as React.Ref<HTMLSpanElement>}
+      title={title}
+      data-testid="studio-readonly-link"
+      data-folded={folded || undefined}
+      className={className}
+    >
+      {body}
+    </span>
   );
 }
 
@@ -5536,7 +5563,7 @@ export function InterfacesPillar({
             </span>
           )}
           {readOnly && (
-            <StudioReadOnlyLink packageId={packageId} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+            <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
           )}
           {isObjectLeaf && openSurface && current && (
             <button
@@ -7662,7 +7689,7 @@ export function DataPillar({
                     read-only sentence the Layout control no longer does. */}
                 {readOnly && (
                   <StudioReadOnlyLink
-                    packageId={packageId}
+                    item={current}
                     title={
                       viewMode === 'form'
                         ? t('engine.studio.data.form.layoutBadgeReadOnly', locale)
@@ -9262,7 +9289,7 @@ export function AutomationsPillar({
   // end, the slot objectui#12456 gave the Access note for the same reason.
   const autoReadOnlyLinkEl =
     readOnly && packageId !== null ? (
-      <StudioReadOnlyLink packageId={packageId} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+      <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
   const flowTabsEl =
     flowOpen ? (
@@ -10126,7 +10153,7 @@ export function AccessPillar({
     <StudioStatusChip {...accessStatus} />
   ) : (
     <StudioReadOnlyLink
-      packageId={packageId}
+      item={current !== null && !owdOpen ? { type: 'permission', name: current } : null}
       title={t('engine.studio.access.bannerTitleReadOnly', locale)}
       locale={locale}
     />

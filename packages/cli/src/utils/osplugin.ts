@@ -38,6 +38,7 @@
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { readTarGz, type ArchiveFile } from '@objectstack/core';
+import type { ObjectStackManifestParsed } from '@objectstack/spec/kernel';
 
 export { readTar, readTarGz, sha256Hex, MAX_UNPACKED_ARTIFACT_BYTES, type ArchiveFile } from '@objectstack/core';
 
@@ -135,11 +136,21 @@ export function createTarGz(files: ArchiveFile[]): Buffer {
 }
 
 /**
- * Extract + parse the compiled `objectstack.plugin.json` from an `.osplugin`
- * blob. Throws if the manifest is absent or not valid JSON.
+ * Extract the compiled `objectstack.plugin.json` from an `.osplugin` blob and
+ * parse it through `ManifestSchema` — `readCompiledPluginManifest`, the one
+ * read `os plugin install` and the boot-time loader make too. Throws with the
+ * helper's message when the manifest is absent, not a JSON object, or refused
+ * by the schema (a retired value such as `packaging: 'manifest-deps'` carries
+ * its prescription in that message).
+ *
+ * The helper is imported on call, not at the top: every `os plugin` command
+ * loads this module, and `@objectstack/runtime`'s root entry would add about
+ * a second to `os plugin build` and `os plugin sign`, which never read a
+ * compiled manifest back.
  */
-export function readOspluginManifest(blob: Uint8Array): Record<string, unknown> {
-  const entry = readTarGz(blob).find((f) => f.path === MANIFEST_FILENAME);
-  if (!entry) throw new Error(`${MANIFEST_FILENAME} not found in artifact`);
-  return JSON.parse(Buffer.from(entry.data).toString('utf8')) as Record<string, unknown>;
+export async function readOspluginManifest(blob: Uint8Array): Promise<ObjectStackManifestParsed> {
+  const { readCompiledPluginManifest } = await import('@objectstack/runtime');
+  const read = readCompiledPluginManifest(readTarGz(blob));
+  if (!read.ok) throw new Error(read.message);
+  return read.manifest;
 }
