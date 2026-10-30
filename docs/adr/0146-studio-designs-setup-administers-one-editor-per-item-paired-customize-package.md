@@ -7,7 +7,7 @@ force until it merges; **this record declares and implements nothing** — the i
 merge ([Rollout](#rollout)).
 **Decided by**: the maintainer's rulings in that thread, 2026-10-30T10:04Z–10:28Z, verbatim and untranslated, each
 quoted at the decision it fixes. **Provenance a repository reader can reach**: the three row rulings (12 B, 14 C,
-19 A1) and the D4–D6 quotes are on the card as ruling record
+19 A1) and the quotes under D5 and D6 in full, and under D4 in part, are on the card as ruling record
 [`6520616687`](https://github.com/objectstack-ai/objectstack/issues/27356#issuecomment-6520616687); the D1–D3
 boundary quotes were spoken in the project thread and have **no GitHub record** — the maintainer's hand-review and
 hand-merge of this record is their verification. The thread's full analysis lives in the project's own files, outside
@@ -22,8 +22,9 @@ base first"; D5/D6 retire the package-less scope and forbid an org dumping groun
 the regimes), [ADR-0010](./0010-metadata-protection-model.md) (the protection envelope a packaged item carries),
 [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D7 (navigation contributions — the
 *contributed item* this record presents; the greyed-with-source presentation is this record's own, see [D3](#d3)),
-[ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) (`manifest.dependencies`, checked before
-install, the namespace it shares co-owned — the dependency [D3](#d3)'s paired package declares),
+[ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) (Proposed; its D2 pre-install check and D5
+dependency co-ownership are on `main` — `manifest.dependencies`, checked before install, the namespace it shares
+co-owned — the dependency [D3](#d3)'s paired package declares),
 [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) D2 (queue membership through the existing
 recipient kinds — the queue page [D7](#d7) waits for).
 **Governs**: the console's two authoring surfaces in `ui/packages/app-shell` — Studio (`views/studio-design/**`,
@@ -62,8 +63,8 @@ Measured on `origin/main` `f8633c7c` (2026-10-30), code read, not run.
    app bar pencil) only for a package Studio lists as `writable` (objectui#12615: "Studio opened a read-only package in
    its browse-only posture with nothing to edit, so an entry drawn there promised an edit Studio cannot deliver"). On a
    deployment whose apps are all code packages the bridge never draws (#27356 row 12). *Overtaken while this record was
-   in review*: PR [#28076](https://github.com/objectstack-ai/objectstack/pull/28076) implements [D5](#d5) and was
-   seat-accepted on 2026-10-30; the reading above is true at `f8633c7c` and false once it merges.
+   in review*: PR [#28076](https://github.com/objectstack-ai/objectstack/pull/28076) implements [D5](#d5) and merged into
+   `main` on 2026-10-30 (`6b125a7a`); the reading above is true at `f8633c7c` and false on `main` since.
 5. **Operational switches live only in Setup.** ADR-0126 §7.4 placed the packaged-flow toggle (the
    `sys_metadata_activation` bit, `POST /api/v1/automation/<name>/toggle`) and the clone
    (`POST /api/v1/automation/<name>/clone`) on Setup › Packaged automation, whose file's doc comment states the charter: "Automation
@@ -150,9 +151,9 @@ for the paired case**: D3 forbade the *silent catch-all* (`com.workspace`, the p
 one-click auto-provision open (ADR-0070 open question 1); a deterministic, per-base, dependency-declaring target is
 neither a catch-all nor silent about where the item went — the item header's chip and the folded switcher say it — so
 the prompt is dropped for this one case and stays everywhere else D3 names. It receives: new items authored from the base's Studio surface, **clones** of the base's flows
-([D4](#d4)), and environment-level permission sets for the base. It is published, reviewed, duplicated and deleted as any
-writable package is today, and exported as ADR-0070 D4 lands (the export door is not on the REST ledger at this head);
-upgrading the base never touches it; ADR-0070 D6 is satisfied (one per base, not a bucket).
+([D4](#d4)), and environment-level permission sets for the base. It is published, reviewed, exported, duplicated and deleted as any
+writable package is (ADR-0070 D4; `GET /packages/:id/export`, `POST /packages/:id/duplicate` and the delete door are on
+the runtime route ledger at this head); upgrading the base never touches it; ADR-0070 D6 is satisfied (one per base, not a bucket).
 
 **On top, one surface.** Studio opens HotCRM and the designer sees **one** HotCRM: the pillar rails list the base's
 items (read-only; the overlay types editable in place per [D2](#d2)) and the customize package's items (writable)
@@ -161,7 +162,7 @@ New and Clone land in the customize package without asking; the pending-changes 
 customize package; the package switcher folds `hotcrm.customize` under HotCRM instead of giving it a row. Items another
 package contributes to the base (flows watching its objects, fields extending its objects, ADR-0029 D7 navigation
 contributions) are listed **greyed, with their source package named** — a presentation this record decides (ADR-0029
-D7 defines the contribution, not how a contributed item is drawn; #26889 and #27928 are the row-20 precedent).
+D7 defines the contribution, not how a contributed item is drawn; #26889 and #27928 are the row-20 cards).
 
 **Upgrade and audit.** "What did we change on HotCRM" is one place: `hotcrm.customize` plus the base's overlays and
 switched-off items. Studio's landing carries one line per package ("n customized, m switched off"); Setup carries
@@ -172,7 +173,8 @@ Maintainer, verbatim: 「假设未来客户安装了很多软件包，对具体�
 word is a typing slip for 界面, "one interface" — editorial note, not part of the quote)
 
 Doors this needs (server cards, Phase 2): the package create door accepts the pairing convention (name
-`<base>.customize`, dependency on the base, idempotent "create if absent"); the flow clone door takes a target
+`<base>.customize`, dependency on the base, **`namespace` set to the base's explicitly** — the install primitive
+otherwise derives one from the id, which for `hotcrm.customize` would be `customize` — idempotent "create if absent"); the flow clone door takes a target
 `packageId` and refuses a package-less target once the convention exists (fixing the Context §6 mismatch with ADR-0070
 D5 on the way).
 
@@ -187,9 +189,12 @@ ADR-0126 §7.4 chose Setup as the first surface for the packaged-flow toggle and
   never one control that means different things by package.
 - **Authority is the ledger door's, not Studio's.** The toggle's gate (`packages/runtime/src/domains/activation-gate.ts`)
   admits `manage_metadata` in the `single` posture and, under the walled `group` / `isolated` postures, only the
-  PLATFORM_ADMIN posture rung (ADR-0126 §5); a tenant administrator there is refused with the operator's name. Studio
-  draws the ledger switch **disabled, with that refusal as its title**, for a principal the gate would refuse — never a
-  live control that always answers 403 (the shape `useCanReadTrail` already avoids).
+  PLATFORM_ADMIN posture rung (ADR-0126 §5); a tenant administrator there is refused with a sentence naming the
+  platform operator. Studio pre-judges that verdict from the two served facts the console already reads for the walled
+  catalog doors (`features.tenancyPosture` through `useTenancyPosture`, and `user.isPlatformAdmin` on the session —
+  `views/metadata-admin/catalog-scope.ts`, `walledCatalogReadOnly`): the switch draws **disabled, in the console's own
+  words**, for a principal those facts refuse, and the server's refusal is shown verbatim after any attempt, as Setup's
+  page shows it today — never a live control that always answers 403, and never a client copy of the gate's sentence.
 - The item's ⋯ menu offers **Clone** (`POST /api/v1/automation/<name>/clone`, a new machine name required, the server's
   notice shown verbatim with the "switch the original off" offer, objectui#13270's shape); the clone lands in the
   paired package ([D3](#d3)).
@@ -261,8 +266,8 @@ Cut as cards after this record merges; nothing below binds a seat before that. E
    "customized" chip and Reset on read-only packages ([D2](#d2); views, dashboards, reports first); (b) the ledger
    switch and Clone on the item ([D4](#d4)); (c) the clone door's `packageId`; (d) the paired-package create
    convention and dependency ([D3](#d3)); (e) the mixed rails, the chip and filter, the folded switcher ([D3](#d3));
-   (f) the browse entry ([D5](#d5)) — #27356 row 12, PR #28076, seat-accepted 2026-10-30; it reverses no wall and lands
-   ahead of this record.
+   (f) the browse entry ([D5](#d5)) — #27356 row 12, PR #28076, merged 2026-10-30; it reversed no wall and landed ahead of
+   this record.
 3. **Phase 3 — the catalog moves** ([D1](#d1), [D7](#d7)): `views/metadata-admin` directory, lists, item page,
    history and diagnostics re-homed under Studio's All-metadata area (per package and across packages); the three Setup
    administration pages; Setup → Metadata routes redirect; QA checklist and e2e door rewrites.
