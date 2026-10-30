@@ -24,6 +24,9 @@ import type {
   ImportJobStatus,
   ImportRowResult,
   ImportWriteMode,
+  RecordPageExplainOperation,
+  RecordPagePartRefusal,
+  RecordPageRequest,
   UndoImportJobResponse,
 } from '@objectstack/spec/api';
 import type { EngineAggregateOptions, FilterArray } from '@objectstack/spec/data';
@@ -375,45 +378,15 @@ export interface RecordFieldAccess {
 }
 
 /** A record-grained operation a record page's header asks a verdict for. */
-export type RecordPageOperation = 'update' | 'delete' | 'transfer';
+export type RecordPageOperation = RecordPageExplainOperation;
 
-/** One related list a record page draws, as {@link RecordPageRequest} names it. */
-export interface RecordPageRelatedRequest {
-  /** The child object. */
-  object: string;
-  /** The child's lookup or master-detail field that points at the record. */
-  field: string;
-  /** The list's own declared scope, AND-composed with the parent condition. */
-  filter?: unknown;
-  /** How many first rows to return with the count (0 = the count alone). */
-  top: number;
-  /** The order of the first rows, as the list's row read sends `$orderby`; absent for the default order. */
-  sort?: Array<{ field: string; order: 'asc' | 'desc' }>;
-}
-
-/**
- * What a record page asks of the server when it opens
- * (`POST /data/{object}/{id}/page`, `RecordPageRequest` in `@objectstack/spec`).
- */
-export interface RecordPageRequest {
-  /** Lookup fields of the record to resolve, as `findOne`'s `$expand`. */
-  expand?: string[];
-  /** The related lists the page draws, in order. */
-  related?: RecordPageRelatedRequest[];
-  /** The operations to answer a record-grained access verdict for. */
-  explain?: RecordPageOperation[];
-  /** Return the caller's field projection of the record. */
-  fieldAccess?: boolean;
-  /** Return the record's approval requests and its approval lock. */
-  approvals?: boolean;
-}
-
-/** The refusal a replaced read answers, carried in place of a part's answer. */
-export interface RecordPagePartRefusal {
-  code: string;
-  status: number;
-  message: string;
-}
+// What a record page asks when it opens (`POST /data/{object}/{id}/page`) and
+// the refusal a replaced read answers are the spec's own shapes.
+export type {
+  RecordPagePartRefusal,
+  RecordPageRelatedRequest,
+  RecordPageRequest,
+} from '@objectstack/spec/api';
 
 /**
  * The answer to {@link RecordPageRequest} (`RecordPageResponse` in
