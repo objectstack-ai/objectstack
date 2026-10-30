@@ -1,6 +1,6 @@
 # Datasources & Federation
 
-A **datasource** (`defineDatasource`, a `*.datasource.ts` metadata file) is a
+A **datasource** (`defineDatasource`, a `*.datasource.ts` file) is a
 connection to a data store. Objects route to one via their `datasource` field
 (default: `'default'`). `default` is host-reserved: the host connects it from
 `OS_DATABASE_URL`, and a stack that declares a datasource named `default` is
@@ -37,7 +37,7 @@ ObjectSchema.create({
 
 ### ✅ / ❌ Column mapping (ADR-0062 D7)
 
-- ✅ Map remote columns with **`external.columnMap`** (`remoteColumn → localField`).
+- ✅ Map remote columns with **`external.columnMap`**.
 - ❌ **`field.columnName` does not exist — on ANY object.** Authoring it is a
   parse error everywhere, not only on a federated object.
 
@@ -55,7 +55,7 @@ A `managed` datasource nothing routes to stays **metadata-only** (not connected)
 
 ⚠️ A `datasourceMapping` rule is **routing, not a hint**. A rule pointing at a
 datasource that cannot be connected fails the boot, and a query against a mapped
-object throws instead of silently resolving the default store.
+object throws.
 
 > `ctx.drivers.register(driver)` in `onEnable` is only an escape hatch for a
 > runtime-built driver; idempotent with auto-connect.
@@ -67,14 +67,15 @@ Never inline a password. `external` names **one** credential channel:
 - **`credentialsRef`** — a secret-store handle, resolved at connect, before the
   driver is built.
 - **`connector`** — an API-backed datasource (a plugin driver such as
-  `@objectstack/driver-odata`) borrows the credential of a declared `connectors`
-  instance that has a `provider` and an `auth` (one Connect serves both):
-  `external: { connector: 'erp_api' }`. Refused beside `credentialsRef`, on a
-  built-in driver, and on a `managed` datasource.
+  `@objectstack/driver-odata`) borrows the credential of a `connectors` instance
+  with a `provider` and an `auth` other than `none`:
+  `schemaMode: 'external', external: { connector: 'erp_api' }`. Refused beside
+  `credentialsRef`, on a built-in driver, on a `managed` datasource, and naming
+  an undeclared instance (at `defineStack`, else at connect).
 
-If it cannot be had (no secret store, an unresolvable handle, an undeclared or
-disabled instance, no automation service), the datasource stays **unconnected
-with a clear error**.
+No secret store, an unresolvable handle, a disabled instance or no automation
+service leaves the datasource **unconnected with a clear error**. A connector
+credential not set yet answers `503` per request.
 
 ## Writes — double opt-in
 
