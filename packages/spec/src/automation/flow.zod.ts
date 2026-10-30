@@ -679,7 +679,7 @@ function flowNodeObject() { return strictObject(
       input: z.record(z.string(), z.unknown().meta({ xExpression: 'value' })).optional().describe(
         'Mapped inputs for the action. Each value is a literal, handed to the action as written, or a CEL value '
           + 'envelope `{ dialect: \'cel\', source }` evaluated in the run\'s scope before dispatch; a `{…}` template '
-          + 'token in a string is refused. The flow definition, this map included, is served to every member who can '
+          + 'token in a string is refused when the flow is registered or validated. The flow definition, this map included, is served to every member who can '
           + 'read flows, so never put a credential here: the connector authenticates through its own '
           + '`auth.credentialRef`.',
       ),
