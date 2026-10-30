@@ -464,6 +464,61 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
     });
 });
 
+describe('[#27444] an object draft without its package namespace prefix', () => {
+    // A package whose manifest DECLARES a namespace, beside the stub's
+    // namespace-less base: the prefix rule judges only the former.
+    const NS_PKG = 'qa.scratch.r2';
+    const nsEngine = () => {
+        const stub = makeStubEngine();
+        const base = stub.engine.registry.getPackage;
+        stub.engine.registry.getPackage = (id: string) =>
+            id === NS_PKG ? { manifest: { id: NS_PKG, namespace: 'r2' } } : base(id);
+        return stub;
+    };
+    const objectBody = (name: string) => ({
+        name,
+        label: 'Formula Pkg',
+        sharingModel: 'private',
+        fields: { name: { type: 'text', label: 'Name' } },
+    });
+    const stage = (protocol: ObjectStackProtocolImplementation, name: string) =>
+        (protocol as any).saveMetaItem({ type: 'object', name, item: objectBody(name), packageId: NS_PKG, mode: 'draft' });
+    const read = async (protocol: ObjectStackProtocolImplementation, name: string) =>
+        ((await protocol.getMetaItem({ type: 'object', name, state: 'draft', packageId: NS_PKG } as any)) as any)
+            .item._diagnostics as { valid: boolean; errors?: Array<{ path: string; message: string; code?: string }> };
+
+    it('saves as a draft, and its read carries the NAMESPACE_PREFIX refusal publish-drafts gives', async () => {
+        const { engine, rows } = nsEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        // The draft still saves (ADR-0129 D2: a draft is judged when it is promoted).
+        expect(await stage(protocol, 'qa_formula_pkg_r2')).toMatchObject({ success: true, state: 'draft' });
+        expect([...rows.values()].filter((r) => r.name === 'qa_formula_pkg_r2').map((r) => r.state)).toEqual(['draft']);
+
+        const diagnostics = await read(protocol, 'qa_formula_pkg_r2');
+
+        // The batch publish still refuses it, as before…
+        const res: any = await protocol.publishPackageDrafts({ packageId: NS_PKG });
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const refused = res.failed.find((f: any) => f.name === 'qa_formula_pkg_r2');
+        expect(refused?.code).toBe('NAMESPACE_PREFIX');
+
+        // …and the draft's verdict is that refusal: its code, its sentence.
+        expect(diagnostics.valid).toBe(false);
+        expect(diagnostics.errors?.filter((e) => e.code === 'NAMESPACE_PREFIX').map((e) => e.message))
+            .toEqual([refused.error]);
+    });
+
+    it('a prefixed draft object in the same package still reads valid:true', async () => {
+        const { engine } = nsEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stage(protocol, 'r2_formula_pkg');
+
+        expect(await read(protocol, 'r2_formula_pkg')).toEqual({ valid: true });
+        expect(await protocol.publishPackageDrafts({ packageId: NS_PKG })).toMatchObject({ success: true, failedCount: 0 });
+    });
+});
+
 describe('[#27445] a stored dashboard carrying an undeclared filterBindings key', () => {
     const board = CASES.find((c) => c.rule === 'dashboard-filter-binding-unknown')!.item;
 

@@ -485,10 +485,13 @@ describe('[#22741] §3 — controls: what the predicate must NOT change', () => 
   it.each([
     ['SQLite', `SQLITE_ERROR: no such table: ${OBJECT}`],
     ['Postgres', `relation "${OBJECT}" does not exist`],
-  ])('CONTROL [#22868] — a real %s unknown-object text on the requested object still answers 404', (_driver, text) => {
+  ])('CONTROL [#22868] — a real %s missing-relation text on the requested object keeps the heuristic\'s reading', (_driver, text) => {
+    // [#27702] That reading is a store fault, not `OBJECT_NOT_FOUND`: no
+    // unregistered name reaches a driver, so the relation is a registered
+    // object's missing storage.
     const door = mapDataError(new Error(text), OBJECT);
-    expect(door.status).toBe(404);
-    expect(door.body.code).toBe('OBJECT_NOT_FOUND');
+    expect(door.status).toBe(500);
+    expect(door.body.code).toBe('DATABASE_ERROR');
   });
 
   it('CONTROL [#22868] — the same object-naming texts, thrown by anything but the sandbox, keep the heuristic\'s 404', () => {

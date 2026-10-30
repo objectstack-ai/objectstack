@@ -1806,6 +1806,7 @@ const en = {
     datasetUnsupported: 'This data source does not support dataset queries.',
     widgetForbiddenTitle: 'You don’t have access',
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
+    allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
     details: 'Details',
     exportCsv: 'Export CSV',
     openInList: 'Open in list',
@@ -4193,9 +4194,9 @@ const en = {
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
     badgeTotal: '{{total}} total',
-    badgeNotifications: '{{count}} notifications',
-    badgeNotifications_one: '{{count}} notification',
-    badgeNotifications_other: '{{count}} notifications',
+    badgeNotifications: '{{count}} unread topics',
+    badgeNotifications_one: '{{count}} unread topic',
+    badgeNotifications_other: '{{count}} unread topics',
     badgeApprovals: '{{count}} pending approvals',
     badgeApprovals_one: '{{count}} pending approval',
     badgeApprovals_other: '{{count}} pending approvals',

@@ -34,6 +34,14 @@
 // sanitised, logged 500; per the direction on this issue the safe way to be
 // wrong is loud, never silently 404.
 //
+// [#27702] The attributed half is gone too: a missing relation is a sanitised,
+// logged 500 even when it names the request's own object. No unregistered name
+// reaches a driver (the registry gates refuse it first, with a structured
+// `OBJECT_NOT_FOUND`), so that relation belongs to a registered object whose
+// storage is missing, and its read already answers `500 DATABASE_ERROR`.
+// § 2's last cell and § 3's driver cell pin it; the reverse-verification table
+// below is #5462's, measured before this change.
+//
 // ---------------------------------------------------------------------------
 // Reverse verification, direction predicted BEFORE running
 // ---------------------------------------------------------------------------
@@ -337,24 +345,25 @@ describe('[#5462] a missing relation is attributed, or it is a fault', () => {
         expect(r.body.code).toBe('DATABASE_ERROR');
     });
 
-    it('a qualified relation name still attributes: schema prefixes are stripped', () => {
-        // Prime Directive #6 — object name IS table name — is what makes the
-        // comparison sound; the schema/catalog qualifier is not part of it.
+    it('[#27702] the requested object\'s OWN relation is a fault too, in every spelling', () => {
+        // These used to attribute to a 404 "Object 'acct' is not registered".
+        // The registry gates refuse an unregistered name before any driver
+        // sees it, so a driver missing the object's own relation is reporting
+        // a REGISTERED object whose storage is missing — the read of it
+        // answers this same `500 DATABASE_ERROR`
+        // (`data-door-missing-relation-registered-object.test.ts`).
         for (const message of [
+            'no such table: acct',
             'no such table: main.acct',
+            'relation "acct" does not exist',
             'relation "public.acct" does not exist',
             'SQLITE_ERROR: no such table: "acct"',
+            'no such table: ACCT',
         ]) {
             const r = mapDataError(driverError(message), 'acct');
-            expect(r.status, message).toBe(404);
-            expect(r.body.code, message).toBe('OBJECT_NOT_FOUND');
+            expect(r.status, message).toBe(500);
+            expect(r.body.code, message).toBe('DATABASE_ERROR');
         }
-    });
-
-    it('attribution is case-insensitive, matching object-name resolution', () => {
-        const r = mapDataError(driverError('no such table: ACCT'), 'acct');
-        expect(r.status).toBe(404);
-        expect(r.body.code).toBe('OBJECT_NOT_FOUND');
     });
 });
 
@@ -362,9 +371,9 @@ describe('[#5462] a missing relation is attributed, or it is a fault', () => {
 // 3. The genuine unknown object must stay a quiet 404 (③)
 // ---------------------------------------------------------------------------
 //
-// The half of the semantics this change is not allowed to break. Both producers
-// of the verdict are checked, because #3770's whole point is that they land on
-// ONE wire envelope.
+// The half of the semantics this change is not allowed to break. Since #27702
+// the registry gate is the verdict's only producer: the driver's missing-table
+// line no longer is, because no unregistered name reaches a driver.
 
 describe('[#5462] a real unknown object is still 404 OBJECT_NOT_FOUND, still silent', () => {
     const registryGate = (object: string) =>
@@ -372,22 +381,22 @@ describe('[#5462] a real unknown object is still 404 OBJECT_NOT_FOUND, still sil
             code: 'OBJECT_NOT_FOUND', status: 404, object,
         });
 
-    it('the driver limb: the missing table IS the object asked for', () => {
-        const r = mapDataError(driverError('no such table: ghost'), 'ghost');
+    it('the registry gate is the 404\'s source (#3770)', () => {
+        const r = mapDataError(registryGate('ghost'), 'ghost');
         expect(r.status).toBe(404);
         expect(r.body.code).toBe('OBJECT_NOT_FOUND');
         expect(r.body.error).toBe("Object 'ghost' is not registered");
     });
 
-    it('gate and driver still produce the identical envelope (#3770)', () => {
-        expect(mapDataError(registryGate('ghost'), 'ghost'))
-            .toEqual(mapDataError(driverError('no such table: ghost'), 'ghost'));
-    });
-
-    it('the Postgres spelling of the same condition also stays 404', () => {
-        const r = mapDataError(driverError('relation "ghost" does not exist'), 'ghost');
-        expect(r.status).toBe(404);
-        expect(r.body.code).toBe('OBJECT_NOT_FOUND');
+    it('[#27702] the driver limb no longer answers it: a missing table behind a name is a store fault', () => {
+        // An unregistered name never reaches a driver — the gate above refuses
+        // it — so the driver's missing-relation line, in either dialect, is
+        // about a registered object whose storage is missing.
+        for (const message of ['no such table: ghost', 'relation "ghost" does not exist']) {
+            const r = mapDataError(driverError(message), 'ghost');
+            expect(r.status, message).toBe(500);
+            expect(r.body.code, message).toBe('DATABASE_ERROR');
+        }
     });
 
     it('the engine-authored limbs are untouched', () => {
@@ -414,7 +423,7 @@ describe('[#5462] a real unknown object is still 404 OBJECT_NOT_FOUND, still sil
                 version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
             }),
             getMetaTypes: vi.fn().mockResolvedValue([]),
-            findData: vi.fn().mockRejectedValue(driverError('no such table: ghost')),
+            findData: vi.fn().mockRejectedValue(registryGate('ghost')),
         });
 
         const res = await callRoute(rest, 'GET', '/api/v1/data/:object', { params: { object: 'ghost' } });
@@ -567,10 +576,9 @@ describe('[#8264] anchored on the driver quoted template, not a bare conjunction
 
     it('§5b decision 2 (the 404 limb): an unquoted "relation <name> does not exist" no longer silently 404s', () => {
         // Crafted to isolate decision 2, which the card's own example cannot
-        // reach: `missingRelationIsObject`'s Postgres branch tolerates
-        // UNQUOTED names (it answers a different, narrower question — which
-        // relation, once one is already suspected), so it still extracts
-        // `acct` and matches it to the object. Under the OLD predicate this
+        // reach: the attribution helper of the time (removed by #27702)
+        // tolerated UNQUOTED names, so it still extracted `acct` and matched
+        // it to the object. Under the OLD predicate this
         // fell through to the `looksLikeMissingRelation` OR-limb of
         // `looksLikeUnknownObject` and silently answered 404 — the exact
         // second consequence the card's own text never measured.
@@ -588,9 +596,9 @@ describe('[#8264] anchored on the driver quoted template, not a bare conjunction
         }
     });
 
-    it('§5d the quoted form still attributes to 404 when the relation IS the object — decision 2, real case, unchanged', () => {
+    it('§5d [#27702] the quoted form names the object itself and is a store fault, not a 404', () => {
         const r = mapDataError(driverError('relation "ghost" does not exist'), 'ghost');
-        expect(r.status).toBe(404);
-        expect(r.body.code).toBe('OBJECT_NOT_FOUND');
+        expect(r.status).toBe(500);
+        expect(r.body.code).toBe('DATABASE_ERROR');
     });
 });

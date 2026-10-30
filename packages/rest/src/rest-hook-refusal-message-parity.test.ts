@@ -693,15 +693,15 @@ describe('[#11588] the analytics dataset face answers in the hook\'s words too',
         // `rest-share-refusal-classification.test.ts`. No live pin was found
         // on the other side of the question, so the fork clause did not fire.
         //
-        // No code, deliberately: the producer declared none and nothing is
-        // invented for it, which is `thrownCodeFields`' answer on `/data` and
-        // ADR-0112's rule. `ANALYTICS_QUERY_FAILED` is ③'s code and ③ is not
-        // where this refusal belongs any more.
+        // [#27597] The code is `/data`'s too: the producer declared none, so
+        // the abort answers the ledgered `HOOK_ABORTED` (it carried no code
+        // before). `ANALYTICS_QUERY_FAILED` is ③'s code and ③ is not where
+        // this refusal belongs any more.
         const res = await analyticsRefusal(sandboxRefusal('month-end close is in progress'));
 
         expect(res.statusCode).toBe(400);
         expect(res.body.message).toBe('month-end close is in progress');
-        expect(res.body.code).toBeUndefined();
+        expect(res.body.code).toBe('HOOK_ABORTED');
         expect(JSON.stringify(res.body)).not.toMatch(WRAPPER_RE);
     }, 60_000);
 

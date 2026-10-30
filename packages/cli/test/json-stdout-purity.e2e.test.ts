@@ -197,6 +197,7 @@ const PREPARE: Record<string, (dir: string, env: Record<string, string>) => Prom
     const manifest = {
       id: 'com.purity.e2e',
       version: '1.0.0',
+      name: 'Purity',
       type: 'plugin',
       runtime: 'node',
       packaging: 'bundled',

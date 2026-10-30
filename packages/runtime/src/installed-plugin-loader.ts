@@ -33,7 +33,11 @@
  *  4. **The tree is the artifact.** The artifact is read back (bounded,
  *     `readTarGz`) and every file in the install directory must be byte-equal
  *     to its entry, with no file the artifact does not hold beside the two the
- *     install keeps. Its manifest's `id` and `version` are the record's.
+ *     install keeps. Its manifest parses through `ManifestSchema`
+ *     (`readCompiledPluginManifest`, the read `os plugin install` makes too),
+ *     so an artifact built before a schema change is refused with the
+ *     schema's own message (`manifest_invalid`) and never imported; its `id`
+ *     and `version` are the record's.
  *  5. **The tier dispatch point** ({@link dispatchPluginRuntime}). M1 wires
  *     `runtime: 'node'` only: the entry module is imported in process.
  *     `sandbox` and `worker` are refused by name until M3 routes them, and a
@@ -98,9 +102,8 @@ import {
   type PluginInstallationRecord,
 } from './plugin-installation-store.js';
 import type { TrustedKeyResolution } from './plugin-trusted-keys.js';
+import { readCompiledPluginManifest } from './compiled-plugin-manifest.js';
 
-/** The manifest an artifact carries at its root. */
-const MANIFEST_FILE = 'objectstack.plugin.json';
 /** The entry `os plugin build` compiles to, when a manifest names none. */
 const DEFAULT_ENTRY = 'dist/index.mjs';
 
@@ -125,6 +128,7 @@ export type InstalledPluginRefusalCode =
   | 'signature_invalid'
   | 'unsigned_without_override'
   | 'artifact_unreadable'
+  | 'manifest_invalid'
   | 'manifest_mismatch'
   | 'tree_changed'
   | 'runtime_undeclared'
@@ -356,16 +360,13 @@ async function checkRecord(
   }
   const unsafe = files.find((f) => !safeEntryPath(f.path));
   if (unsafe) return refuse('artifact_unreadable', `its kept artifact holds the entry ${JSON.stringify(unsafe.path)}, which cannot sit in an install directory.`);
-  let manifest: Record<string, unknown>;
-  try {
-    const entry = files.find((f) => f.path === MANIFEST_FILE);
-    if (!entry) throw new Error(`${MANIFEST_FILE} not found`);
-    const parsed = JSON.parse(Buffer.from(entry.data).toString('utf8')) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${MANIFEST_FILE} is not a JSON object`);
-    manifest = parsed as Record<string, unknown>;
-  } catch (error) {
-    return refuse('artifact_unreadable', `its kept artifact's manifest cannot be read: ${thrownMessage(error)}.`);
+  const read = readCompiledPluginManifest(files);
+  if (!read.ok) {
+    return read.reason === 'unreadable'
+      ? refuse('artifact_unreadable', `its kept artifact's manifest cannot be read: ${read.message}.`)
+      : refuse('manifest_invalid', `its kept artifact's ${read.message}`);
   }
+  const manifest = read.manifest;
   if (manifest.id !== record.id || manifest.version !== record.version) {
     return refuse(
       'manifest_mismatch',

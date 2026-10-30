@@ -436,6 +436,8 @@ import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstall
 import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
+// [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
+import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7218,6 +7220,11 @@ export class ObjectStackProtocolImplementation implements
      * Computed on every draft read rather than stored at save: the verdict
      * depends on the live universe and the package's other drafts, which a
      * stored verdict would not see change.
+     *
+     * [#27444] An object draft is also told the namespace-prefix verdict
+     * ({@link objectNamespacePrefixViolation}, `NAMESPACE_PREFIX`), the one
+     * rule outside the gate that the promotion doors refuse a draft on — the
+     * same judge, on the draft row's package, never a copy of it.
      */
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
@@ -7232,6 +7239,7 @@ export class ObjectStackProtocolImplementation implements
             foldStoredCollection: (...a) => this.foldStoredCollection(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            objectNamespacePrefixViolation: (...a) => this.objectNamespacePrefixViolation(...a),
             orgWallEnforced: (...a) => this.orgWallEnforced(...a),
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
@@ -21280,6 +21288,17 @@ export class ObjectStackProtocolImplementation implements
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+
+        // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
+        // holds: refused 400 before the authoring gate and every write. See {@link datasourceCredentialsRefSaveRefusal}.
+        {
+            const repo = this.getOverlayRepo();
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: request.item,
+                mode, packageId: request.packageId, source: request.source,
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
         }
 
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an

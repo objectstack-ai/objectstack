@@ -3530,5 +3530,46 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "更新日時"
       }
     }
+  },
+  sys_exchange_rate: {
+    label: "為替レート",
+    pluralLabel: "為替レート",
+    description: "組織の基準通貨から外貨への為替レートを適用開始日ごとに記録します。外貨金額を基準通貨に換算する際に使われるレートです。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      currency: {
+        label: "通貨",
+        help: "外貨の ISO 4217 コード（大文字。EUR、JPY、CHF）。"
+      },
+      rate: {
+        label: "レート",
+        help: "組織の基準通貨 1 単位（ローカリゼーション → 既定の通貨）= この通貨のレート単位。例：基準通貨 USD、通貨 EUR、レート 0.92 は 1 USD = 0.92 EUR を意味します。"
+      },
+      effective_date: {
+        label: "適用開始日",
+        help: "このレートが適用され始める日付。同じ通貨のより新しい行に置き換わるまで有効です。"
+      },
+      source: {
+        label: "ソース",
+        help: "行の登録方法：Setup で入力（手動）、ファイルから読み込み（インポート）、またはアプリのフローが書き込み（アプリ）。",
+        options: {
+          manual: "手動",
+          import: "インポート",
+          app: "アプリ"
+        }
+      }
+    },
+    _views: {
+      all_rates: {
+        label: "すべて",
+        description: "組織の基準通貨 1 単位（ローカリゼーション → 既定の通貨）= この通貨のレート単位。例：基準通貨 USD、通貨 EUR、レート 0.92 は 1 USD = 0.92 EUR を意味します。",
+        emptyState: {
+          title: "為替レートはまだありません",
+          message: "通貨ごとに、レートが変わる日付ごとに 1 行追加します。例：毎月初めに通貨ごとに 1 行。"
+        }
+      }
+    }
   }
 };

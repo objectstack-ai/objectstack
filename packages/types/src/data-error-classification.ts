@@ -36,6 +36,7 @@ import {
 } from './thrown-http-error.js';
 import { isNativeErrorName } from './native-error-name.js';
 import { unevaluableHookConditionRefusal } from './hook-condition-refusal.js';
+import type { ErrorCode } from '@objectstack/spec/api';
 
 /**
  * How many characters of a domain error's OWN message reach the client.
@@ -313,29 +314,6 @@ function armSentence(error: any): unknown {
 }
 
 /**
- * [#5462] Does a driver's missing-relation message name the very object this
- * request asked for?
- *
- * Both halves must hold. `object` is the object the ROUTE named (`undefined` on
- * every metadata / UI / discovery route — they call `handleRouteError(res,
- * error)`), and the relation name is whatever the driver's phrasing carries:
- *
- *   SQLite    `SQLITE_ERROR: no such table: acct`      → `acct`
- *   SQLite    `no such table: main.acct`               → `acct` (schema stripped)
- *   Postgres  `relation "public.acct" does not exist`  → `acct`
- *   generic   `table not found`                        → nothing to attribute
- *
- * Prime Directive #6 is what makes the comparison sound rather than a guess:
- * the object `name` IS the table name, always, with no `tableName` mapping to
- * launder it. So "the missing table is not the object you asked for" really
- * does mean the failure is somewhere other than the caller's object — an
- * auxiliary table, a system table, or the metadata plane itself.
- *
- * A message that names NO relation is unattributable and therefore not a
- * match: the fail-loud direction is what this issue asked for, and there is no
- * producer of the bare `table not found` phrasing in this repo to regress.
- */
-/**
  * [#7525] The HTTP status a producer DECLARED for this error, or `undefined`
  * when it declared none — read over BOTH spellings the repo's producers use,
  * `status` first and `statusCode` second.
@@ -474,6 +452,41 @@ function thrownCodeFields(error: any, status: number): { code?: string; declared
 }
 
 /**
+ * [#27597] The wire `code` a sandboxed hook body's business refusal answers
+ * with when the body declared none: the hook aborted the operation (its
+ * `onError: 'abort'`, the default) with free text, so the caller learns that
+ * fact from `code` instead of from the absence of one.
+ *
+ * Registered under `@objectstack/types` in the ADR-0112 ledger, and typed
+ * `ErrorCode` so a ledger without the row stops this file compiling.
+ */
+export const UNDECLARED_HOOK_REFUSAL_CODE: ErrorCode = 'HOOK_ABORTED';
+
+/**
+ * [#27597] {@link thrownCodeFields} for a sandboxed body's business refusal
+ * ({@link sandboxBusinessMessage} answered): the producer's own code when it
+ * declared one — a registered code, a demoted `declaredCode` beside the
+ * status-derived member, or a hook's `refusals` catalogue entry, each exactly
+ * as before — else {@link UNDECLARED_HOOK_REFUSAL_CODE}.
+ *
+ * Before this, an undeclared abort answered with no `code` at all, the one
+ * refusal on the `/data` door a client could not branch on. Ruling
+ * `6431311681` (#26170, letter A) stands: a hook that declares `refusals`
+ * refuses by code only, and a throw its catalogue cannot answer is refused as
+ * a fault before it reaches here. This names only what a hook WITHOUT a
+ * catalogue answers when it throws free text.
+ *
+ * Read by every door that answers a sandbox refusal — the unwrap door and its
+ * wrapper fallback in {@link classifyDataError}, and `@objectstack/rest`'s
+ * declared-status passthrough — so one abort carries one code whichever route
+ * caught it.
+ */
+function sandboxRefusalCodeFields(error: any, status: number): { code?: string; declaredCode?: string } {
+    const declared = thrownCodeFields(error, status);
+    return declared.code !== undefined ? declared : { code: UNDECLARED_HOOK_REFUSAL_CODE };
+}
+
+/**
  * [#12975] The caller-facing half of an ADR-0111 `CODE: message` throw — the
  * message with the leading restatement of the producer's OWN declared `code`
  * removed, or the message unchanged when it carries no such restatement.
@@ -604,21 +617,10 @@ export function declaredServerFaultAnswer(
  * [#8264] Postgres' missing-relation template, anchored on the QUOTED
  * identifier the driver always emits — never on the bare "does not exist"
  * tail, which is ordinary business English. Module-scoped (not re-compiled
- * per {@link mapDataError} call) and named, not inlined, so both of its
- * readers share the literal same pattern. See the long note above
- * `looksLikeMissingRelation`'s definition, further down this file, for why
- * this is one width, not "two widths, on purpose".
+ * per {@link mapDataError} call) and named, not inlined. Its one reader is
+ * `looksLikeMissingRelation`, further down this file.
  */
 const RELATION_DOES_NOT_EXIST = /\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i;
-
-function missingRelationIsObject(raw: string, object: string | undefined): boolean {
-    if (!object) return false;
-    const named =
-        /no such table:?\s*["'`[]?([a-z0-9_.$]+)/i.exec(raw) ||
-        /relation\s+["'`]?([a-z0-9_.$]+)["'`]?\s+does not exist/i.exec(raw);
-    const relation = named?.[1]?.toLowerCase().split('.').pop();
-    return relation !== undefined && relation === object.toLowerCase();
-}
 
 /**
  * Map a data-layer error to a clean HTTP response. Unknown-object errors are
@@ -626,17 +628,21 @@ function missingRelationIsObject(raw: string, object: string | undefined): boole
  * "object isn't registered" from real server faults. Anything else becomes a
  * 400 (bad request) preserving prior behavior. Genuine 500s are still logged.
  *
- * Two sources produce that 404, and since #3770 the FIRST one is the primary:
- *  - `code: 'OBJECT_NOT_FOUND'` from the protocol's registry gate
- *    (`assertObjectRegistered`) — an authoritative, driver-independent answer
- *    raised before the object name is ever turned into a table name.
- *  - Driver error strings (SQLite "no such table", PG "relation does not
- *    exist", …) — retained as the safety net for the *other* failure, an
- *    object that IS registered but whose physical table is missing (metadata /
- *    schema drift), plus engine-direct callers that bypass the protocol.
- *    Before #3770 this string match was the ONLY thing producing the 404,
- *    which is why an unregistered object whose table happened to exist was
- *    served instead of rejected.
+ * The 404's source is `code: 'OBJECT_NOT_FOUND'` from the registry gates —
+ * the protocol's `assertObjectRegistered` and the engine's own name
+ * resolution — an authoritative, driver-independent answer raised before the
+ * object name is ever turned into a table name. Before #3770 a driver string
+ * (SQLite "no such table", PG "relation does not exist") was the ONLY thing
+ * producing it, which is why an unregistered object whose table happened to
+ * exist was served instead of rejected.
+ *
+ * [#27702] A driver's missing-relation string is no longer a source of that
+ * 404 at all. Both gates refuse an unregistered name before any driver sees
+ * it, so a relation the driver cannot find belongs to a REGISTERED object
+ * whose storage is missing (schema drift, a datasource never provisioned) —
+ * a store fault, answered `500 DATABASE_ERROR`, the verdict the SQL driver's
+ * read exits already declare for the same table. An insert and a read on
+ * that object now answer alike.
  *
  * `PermissionDeniedError` (thrown by `SecurityPlugin`) MUST be caught
  * before the unknown-object heuristic, otherwise its message —
@@ -1283,7 +1289,7 @@ function structuredCodeAnswer(
     }
     // [#3770] Object does not exist — thrown by the protocol's registry gate
     // (`assertObjectRegistered`, which covers every data entry point) and by
-    // `cloneData`. Mapped to the SAME envelope the driver-string branch below
+    // `cloneData`. Mapped to the SAME envelope the engine-text branch below
     // produces, so one condition has exactly one wire code (`OBJECT_NOT_FOUND`,
     // a `StandardErrorCode` member) no matter which layer detected it — the
     // point of #3770 is that this 404 no longer depends on a driver erroring
@@ -1522,7 +1528,9 @@ function classifyDataError(error: any, object?: string): { status: number; body:
                 status,
                 body: {
                     error: error.innerMessage,
-                    ...thrownCodeFields(error, status),
+                    // [#27597] …and a body that declared no code answers
+                    // {@link UNDECLARED_HOOK_REFUSAL_CODE} instead of none.
+                    ...sandboxRefusalCodeFields(error, status),
                     ...(object ? { object } : {}),
                 },
             };
@@ -1826,6 +1834,10 @@ function classifyDataError(error: any, object?: string): { status: number; body:
             status: 400,
             body: {
                 error: msg,
+                // [#27597] Byte-identical to the `innerMessage` door above, the
+                // code included. A rethrow that kept the wrapper but lost the
+                // instance lost any declared code with it.
+                ...sandboxRefusalCodeFields(error, 400),
                 ...(object ? { object } : {}),
             },
         };
@@ -1970,6 +1982,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
 
     // [#5462] A driver saying "that relation is missing" is an unknown-OBJECT
     // verdict only when the missing relation IS the object the request named.
+    // [#27702] Not even then, now — the closing paragraph of this note says why.
     //
     // These three limbs are the only ones in the heuristic below whose text is
     // written by the DATABASE rather than by ObjectStack, and the database has
@@ -2028,20 +2041,34 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // this reason — different questions get different patterns even when they
     // share a substring. That precedent does NOT extend to the two USES right
     // here, though: both the 500 gate and the 404 limb are asking this file's
-    // one question, and `missingRelationIsObject` below already gates the 500
-    // path on attribution — so one width for both is correct, not "two
-    // widths, on purpose" a second time. See the reverse-verification note in
+    // one question, so one width for both was correct, not "two widths, on
+    // purpose" a second time. See the reverse-verification note in
     // `rest-unknown-object-heuristic.test.ts` for both paths measured.
+    //
+    // [#27702] …and since this card the 404 limb is gone: a missing relation
+    // is a store fault whoever it names, the request's own object included.
+    // The attribution above made the 404 depend on the relation BEING the
+    // object, and that is exactly the case the registry gates rule out. The
+    // protocol's `assertObjectRegistered` and the engine's name resolution
+    // both refuse an unregistered name with the structured `OBJECT_NOT_FOUND`
+    // (matched far above) before any driver is handed a table name, so a
+    // driver that cannot find the object's relation is reporting a REGISTERED
+    // object whose storage is missing. Answering that "Object '…' is not
+    // registered" sent the caller after the wrong problem, and disagreed with
+    // the read of the same object, which the SQL driver declares `500
+    // DATABASE_ERROR` at its read exits. The write paths leave the driver
+    // undeclared on purpose (a unique violation and an unknown column are
+    // classified here into precise 4xx answers), so this branch is where the
+    // insert's answer is decided, and it is now the read's.
     const looksLikeMissingRelation =
         lower.includes('no such table') ||
         RELATION_DOES_NOT_EXIST.test(raw) ||
         lower.includes('table not found');
-    if (looksLikeMissingRelation && !missingRelationIsObject(raw, object)) {
+    if (looksLikeMissingRelation) {
         return DATA_STORE_FAULT();
     }
 
     const looksLikeUnknownObject =
-        looksLikeMissingRelation ||
         lower.includes('unknown object') ||
         lower.includes('object not found') ||
         lower.includes('no driver available') ||
@@ -2272,6 +2299,7 @@ export function driverNotNullRefusalAnswer(
 export {
     truncateClientMessage,
     thrownCodeFields,
+    sandboxRefusalCodeFields,
     withoutDeclaredCodePrefix,
     withDeclaredUserMessage,
     isSandboxOrigin,
