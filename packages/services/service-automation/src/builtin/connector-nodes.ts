@@ -131,11 +131,11 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
                 .getConnectorDescriptors()
                 .find((d) => d.name === cfg.connectorId)
                 ?.actions.find((a) => a.key === cfg.actionId)?.inputSchema;
-            const violations: string[] = [];
+            const violations: InputSchemaViolations = { lines: [], textForScalar: false };
             collectInputSchemaViolations(inputSchema, input, '', violations);
-            if (violations.length > 0) {
-                const shown = violations.slice(0, MAX_NAMED_VIOLATIONS);
-                const more = violations.length - shown.length;
+            if (violations.lines.length > 0) {
+                const shown = violations.lines.slice(0, MAX_NAMED_VIOLATIONS);
+                const more = violations.lines.length - shown.length;
                 return {
                     success: false,
                     code: 'VALIDATION_ERROR',
@@ -144,7 +144,14 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
                         + `does not match the action's inputSchema — ${shown.join('; ')}`
                         + (more > 0 ? `; and ${more} more` : '')
                         + `. Nothing was sent. Fix connectorConfig.input so it satisfies the inputSchema `
-                        + `GET /api/v1/automation/connectors lists for this action.`,
+                        + `GET /api/v1/automation/connectors lists for this action.`
+                        // Text is never converted here: the executor cannot tell
+                        // a provider that serializes a section to strings from
+                        // one that sends JSON, so the cast is the author's.
+                        + (violations.textForScalar
+                            ? ` A text value for an integer, number or boolean parameter is not converted: `
+                                + `cast it in a CEL envelope with int(), double() or bool().`
+                            : ''),
                 };
             }
 
@@ -180,6 +187,12 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
     });
 
     ctx.logger.info('[Connector] 1 built-in node executor registered (connector_action)');
+}
+
+/** What one judgment found: each violation as a sentence, and whether any was text where a number or boolean is declared. */
+interface InputSchemaViolations {
+    lines: string[];
+    textForScalar: boolean;
 }
 
 /** How many violations one refusal names before it summarises the rest as a count. */
@@ -220,9 +233,11 @@ function matchesType(type: string, value: unknown, kind: string): boolean {
  * `format`, bounds, `additionalProperties`, …) never refuses a call: the
  * remote still judges those, as it did before. A missing piece is the narrow
  * direction on purpose — a call this check refuses is one the declared
- * schema itself says is wrong under every draft.
+ * schema itself says is wrong under every draft. `null` on an optional
+ * property counts as absent (see the property loop), and text is never
+ * coerced to the number or boolean a parameter declares.
  */
-function collectInputSchemaViolations(schema: unknown, value: unknown, path: string, out: string[]): void {
+function collectInputSchemaViolations(schema: unknown, value: unknown, path: string, out: InputSchemaViolations): void {
     if (!isPlainRecord(schema)) return;
     const kind = jsonKindOf(value);
     if (kind === undefined) return;
@@ -234,23 +249,39 @@ function collectInputSchemaViolations(schema: unknown, value: unknown, path: str
         && !(kind === 'null' && schema.nullable === true)
         && !types.some((t) => matchesType(t, value, kind))
     ) {
-        out.push(`'${path || 'input'}' must be ${types.join(' or ')}, got ${kind}`);
+        out.lines.push(`'${path || 'input'}' must be ${types.join(' or ')}, got ${kind}`);
+        if (kind === 'string' && types.some((t) => t === 'integer' || t === 'number' || t === 'boolean')) {
+            out.textForScalar = true;
+        }
         return;
     }
     if (kind === 'object') {
         const record = value as Record<string, unknown>;
-        if (Array.isArray(schema.required)) {
-            for (const key of schema.required) {
-                if (typeof key === 'string' && (!Object.prototype.hasOwnProperty.call(record, key) || record[key] === undefined)) {
-                    out.push(`missing required '${path ? `${path}.${key}` : key}'`);
-                }
+        const properties = isPlainRecord(schema.properties) ? schema.properties : undefined;
+        const required = new Set(
+            Array.isArray(schema.required) ? schema.required.filter((k): k is string => typeof k === 'string') : [],
+        );
+        for (const key of required) {
+            if (!Object.prototype.hasOwnProperty.call(record, key) || record[key] === undefined) {
+                const at = path ? `${path}.${key}` : key;
+                // A missing required SECTION names the parameters it requires
+                // too, so the first refusal already carries the parameter.
+                const sub = properties?.[key];
+                const inner = isPlainRecord(sub) && Array.isArray(sub.required)
+                    ? sub.required.filter((k): k is string => typeof k === 'string').map((k) => `'${at}.${k}'`)
+                    : [];
+                out.lines.push(`missing required '${at}'${inner.length > 0 ? ` (with ${inner.join(', ')})` : ''}`);
             }
         }
-        if (isPlainRecord(schema.properties)) {
-            for (const [key, sub] of Object.entries(schema.properties)) {
-                if (Object.prototype.hasOwnProperty.call(record, key) && record[key] !== undefined) {
-                    collectInputSchemaViolations(sub, record[key], path ? `${path}.${key}` : key, out);
-                }
+        if (properties) {
+            for (const [key, sub] of Object.entries(properties)) {
+                if (!Object.prototype.hasOwnProperty.call(record, key) || record[key] === undefined) continue;
+                // `null` on an OPTIONAL property is read as absent: a provider
+                // that serializes a section drops it, so the wire equals
+                // omission, which the schema permits. On a REQUIRED property
+                // it is still judged — it would be sent as a placeholder.
+                if (record[key] === null && !required.has(key)) continue;
+                collectInputSchemaViolations(sub, record[key], path ? `${path}.${key}` : key, out);
             }
         }
     } else if (kind === 'array' && isPlainRecord(schema.items)) {

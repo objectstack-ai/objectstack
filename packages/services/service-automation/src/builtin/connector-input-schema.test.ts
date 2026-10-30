@@ -16,6 +16,10 @@
  *  2. **Wrong type → refused, nothing sent.** The error names the parameter,
  *     the declared type and the type it got. The EVALUATED input is judged: a
  *     CEL envelope computing the wrong type is refused like a literal one.
+ *     Text is not coerced to a declared number or boolean; the error says to
+ *     cast it with `int()`/`double()`/`bool()`. `null` on a required
+ *     parameter is refused (it would reach the wire as a placeholder); `null`
+ *     on an optional one is read as absent, since a provider drops it.
  *  3. **A valid call dispatches as before**, including one whose required
  *     value is computed by an envelope.
  *  4. **Only the judged subset refuses.** `required`, `type` (with OpenAPI 3.0
@@ -143,7 +147,7 @@ function flowWith(name: string, actionId: string, input: Record<string, unknown>
 
 async function run(engine: AutomationEngine, name: string, actionId: string, input: Record<string, unknown> | undefined, opts: { fault?: boolean } = {}) {
   engine.registerFlow(name, flowWith(name, actionId, input, opts));
-  return engine.execute(name, { params: { rec: { id: 'cus_42', petId: 7, name: 'Rex' } } } as any);
+  return engine.execute(name, { params: { rec: { id: 'cus_42', petId: 7, idText: '7', name: 'Rex', missingFlag: null } } } as any);
 }
 
 describe('1. a missing required parameter is refused before dispatch', () => {
@@ -153,7 +157,7 @@ describe('1. a missing required parameter is refused before dispatch', () => {
     expect(sent).toEqual([]);
     expect(faults).toHaveLength(1);
     expect(faults[0]?.code).toBe('VALIDATION_ERROR');
-    expect(faults[0]?.message).toContain("missing required 'path'");
+    expect(faults[0]?.message).toContain("missing required 'path' (with 'path.petId')");
     expect(result.success).toBe(true);
   });
 
@@ -194,6 +198,28 @@ describe('2. a parameter of the wrong type is refused before dispatch', () => {
     expect(faults[0]?.message).toContain("'path.petId' must be integer, got string");
   });
 
+  it('text for an `integer` says to cast it, and an `int()` cast dispatches', async () => {
+    const { engine, sent } = makeEngine();
+    const refused = await run(engine, 'text_id', 'getPet', { path: { dialect: 'cel', source: '{"petId": rec.idText}' } });
+    expect(refused.success).toBe(false);
+    expect(sent).toEqual([]);
+    expect(refused.error).toContain("'path.petId' must be integer, got string");
+    expect(refused.error).toContain('int()');
+    const cast = await run(engine, 'cast_id', 'getPet', { path: { dialect: 'cel', source: '{"petId": int(rec.idText)}' } });
+    expect(cast.success, cast.error).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(Number((sent[0].input as any).path.petId)).toBe(7);
+  });
+
+  it('`null` on a REQUIRED parameter is still refused: it would be sent as a placeholder', async () => {
+    const { engine, sent } = makeEngine();
+    const result = await run(engine, 'null_required', 'getPet', { path: { petId: null } });
+    expect(result.success).toBe(false);
+    expect(sent).toEqual([]);
+    expect(result.error).toContain("'path.petId' must be integer, got null");
+    expect(result.error).not.toContain('int()');
+  });
+
   it('an envelope evaluating to the wrong type is judged on its evaluated value', async () => {
     const { engine, sent } = makeEngine();
     const result = await run(engine, 'bad_envelope', 'getPet', { path: { petId: 1 }, query: { dialect: 'cel', source: '{"verbose": rec.name}' } });
@@ -217,6 +243,13 @@ describe('3. a valid call dispatches as before', () => {
     const result = await run(engine, 'ok_envelope', 'getPet', { path: { dialect: 'cel', source: '{"petId": rec.petId}' } });
     expect(result.success, result.error).toBe(true);
     expect(sent).toEqual([{ action: 'getPet', input: { path: { petId: 7 } } }]);
+  });
+
+  it('`null` on an OPTIONAL parameter is read as absent, whatever its declared type', async () => {
+    const { engine, sent } = makeEngine();
+    const result = await run(engine, 'ok_null_optional', 'getPet', { path: { petId: 1 }, query: { dialect: 'cel', source: '{"verbose": rec.missingFlag}' } });
+    expect(result.success, result.error).toBe(true);
+    expect(sent).toHaveLength(1);
   });
 
   it('OpenAPI 3.0 `nullable` admits null', async () => {
