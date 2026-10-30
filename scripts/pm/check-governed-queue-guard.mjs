@@ -4677,15 +4677,18 @@ export async function selfTest() {
 
   const REF_HEAD = 'abc1234def5678'.padEnd(40, '0');
   const REF_OLD = '9999888777'.padEnd(40, '0');
-  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER_TOKEN}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = 'PASS' } = {}) => ({
+  // The head sits on the `Head-sha:` line — the ONE line the recognisers read it from (#27979); the
+  // `Head:` first-body-line spelling this fixture once wrote is a retired dialect, pinned refused below.
+  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER_TOKEN}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = 'PASS', prose = [] } = {}) => ({
     id,
     created_at: at,
     body: [
       '## Contract review',
       '',
-      `Head: \`${sha}\``,
+      `Head-sha: \`${sha}\``,
       ...(signed ? ['Reviewed-by: `session_01SEAT`'] : []),
       ...(tierLine ? [tierLine] : []),
+      ...prose,
       '',
       verdictWord,
     ].join('\n'),
@@ -4780,6 +4783,28 @@ export async function selfTest() {
     '⛔ a-record-naming-an-OLDER-head-is-REFUSED-a-record-names-the-head-it-judged',
     tierOldHead.exitCode === EXIT_REFUSED_UNAPPROVED && tierOldHead.entries[0].record.state === 'absent',
     JSON.stringify(tierOldHead.entries[0].record),
+  );
+  // ⛔ #27979, the measured instance (PR #27964, record 6516042954): a DELTA record on the OLDER head whose
+  // prose names the current head three times. The whole-body span scan read it as a review of the current
+  // head and this leg CLEARED a Tier S diff at that head on it; the `Head-sha:` line alone decides now.
+  const tierDelta = await tierRun({
+    comments: [recordComment({
+      sha: REF_OLD.slice(0, 12),
+      prose: ['', `This is a DELTA record. The PR has since moved to \`${REF_HEAD.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${REF_OLD.slice(0, 8)}\` alone. The runs were cancelled by the push of \`${REF_HEAD.slice(0, 8)}\`; landing waits on \`${REF_HEAD}\` and that head's record.`],
+    })],
+  });
+  assert(
+    '⛔ #27979-a-delta-record-on-the-OLDER-head-whose-PROSE-names-the-current-head-is-REFUSED-the-Head-sha-line-alone-decides',
+    tierDelta.exitCode === EXIT_REFUSED_UNAPPROVED && tierDelta.entries[0].record.state === 'absent',
+    JSON.stringify(tierDelta.entries[0].record),
+  );
+  const legacyFirstLine = recordComment();
+  legacyFirstLine.body = legacyFirstLine.body.replace('Head-sha: `', 'Head: `');
+  const tierLegacyFirstLine = await tierRun({ comments: [legacyFirstLine] });
+  assert(
+    '⛔ #27979-the-retired-first-body-line-Head-dialect-names-no-head-and-is-REFUSED',
+    tierLegacyFirstLine.exitCode === EXIT_REFUSED_UNAPPROVED && tierLegacyFirstLine.entries[0].record.state === 'absent',
+    JSON.stringify(tierLegacyFirstLine.entries[0].record),
   );
   const tierNoServed = await tierRun({ comments: [recordComment({ tierLine: null })] });
   assert(
