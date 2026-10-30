@@ -2212,6 +2212,7 @@ const fr = {
       title: "Rapports",
       emptyTitle: "Aucun rapport",
       emptyDescription: "Cette application n’a aucun rapport que vous pouvez ouvrir.",
+      otherApps: "Rapports dans vos autres applications :",
       viewsLabel: "Vues des rapports",
       viewAll: "Tous les rapports",
       viewRecent: "Récents",

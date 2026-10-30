@@ -2160,6 +2160,7 @@ const ja = {
       title: "レポート",
       emptyTitle: "レポートはありません",
       emptyDescription: "このアプリには開けるレポートがありません。",
+      otherApps: "ほかのアプリのレポート：",
       viewsLabel: "レポートビュー",
       viewAll: "すべて",
       viewRecent: "最近",
