@@ -113,6 +113,59 @@ describe('enforceActionParams — the ADR-0104 D2 gate (#14864)', () => {
         });
     });
 
+    describe('[#27738] the `outputs.<key>` decision-output family is admitted for a forwarded `type: \'api\'` action only', () => {
+        // ADR-0104 D2, amended 2026-10-30. The family is the one the api
+        // request folds into its body's `outputs` (`buildApiActionRequest`), so
+        // the admission reaches exactly as far as the fold and no further.
+        const APPROVE = {
+            name: 'approval_approve', type: 'api', target: '/api/v1/approvals/requests/{id}/approve',
+            params: [
+                { name: 'comment', type: 'textarea', required: false },
+                { name: 'attachments', type: 'file', multiple: true, required: false },
+            ],
+        };
+        const DECISION = { 'outputs.next_reviewers': ['u_2'], 'outputs.reason': 'fits budget', 'outputs.note': '' };
+
+        it('admits the family beside the declared params', () => {
+            expect(enforceActionParams(NO_DEPS, APPROVE, NO_OBJECT, { comment: 'ok', ...DECISION }, WHERE)).toBeNull();
+        });
+
+        it('still refuses every key outside the family, and the bare `outputs.` prefix, naming only those', () => {
+            for (const key of ['bogus', 'outputs.', 'output.reason', 'outputs_reason']) {
+                const error = enforceActionParams(NO_DEPS, APPROVE, NO_OBJECT, { ...DECISION, [key]: 'x' }, WHERE);
+                expect(error, key).toContain(`Unknown action param "${key}"`);
+                expect(error, key).not.toContain('outputs.next_reviewers');
+            }
+        });
+
+        it('still judges the declared params themselves', () => {
+            const error = enforceActionParams(NO_DEPS, APPROVE, NO_OBJECT, { attachments: 'not-a-list', ...DECISION }, WHERE);
+            expect(error).toContain('"attachments"');
+        });
+
+        it('refuses the family on every action whose request does not fold it', () => {
+            const notFolded = [
+                { ...APPROVE, type: 'script' },
+                { ...APPROVE, type: undefined },
+                { ...APPROVE, type: 'flow' },
+                // A declarative update writes its bag to the row: `operation` decides, whatever `type` says.
+                { ...APPROVE, operation: 'update', patch: { status: 'approved' } },
+                // Under `bodyShape.wrap` the params are nested and the fold never sees them.
+                { ...APPROVE, bodyShape: { wrap: 'data' } },
+            ];
+            for (const action of notFolded) {
+                const error = enforceActionParams(NO_DEPS, action, NO_OBJECT, { 'outputs.reason': 'x' }, WHERE);
+                expect(error, JSON.stringify(action)).toContain('Unknown action param "outputs.reason"');
+            }
+        });
+
+        it('a param an api action DECLARES under a dotted `outputs.` name is judged as declared', () => {
+            const declared = { ...APPROVE, params: [...APPROVE.params, { name: 'outputs.reason', type: 'text', required: true }] };
+            expect(enforceActionParams(NO_DEPS, declared, NO_OBJECT, {}, WHERE)).toContain('"outputs.reason" is required');
+            expect(enforceActionParams(NO_DEPS, declared, NO_OBJECT, { 'outputs.reason': 'x' }, WHERE)).toBeNull();
+        });
+    });
+
     it('is STRICT by default — no environment variable needed to reject (#3438)', () => {
         vi.stubEnv('OS_ALLOW_LAX_ACTION_PARAMS', '');
         expect(enforceActionParams(NO_DEPS, REQUIRES_TITLE, NO_OBJECT, {}, WHERE)).toContain('Invalid action params');

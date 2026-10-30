@@ -4090,6 +4090,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addView': 'Add view',
   'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
   'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
+  // objectstack#27896 — the panel's view picker: the object's list views, a draft one marked.
+  'engine.studio.inspector.listView.switchView': 'View',
+  'engine.studio.inspector.listView.switchViewDraft': 'Draft',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',

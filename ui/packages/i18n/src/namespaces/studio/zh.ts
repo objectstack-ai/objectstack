@@ -3683,6 +3683,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.inspector.listView.addView': '添加视图',
   'engine.studio.inspector.listView.addViewTaken': '已经有名为「{name}」的视图,请换一个键。',
   'engine.studio.inspector.listView.backToEntry': '返回{view}',
+  'engine.studio.inspector.listView.switchView': '视图',
+  'engine.studio.inspector.listView.switchViewDraft': '草稿',
   'engine.studio.inspector.listView.kanbanCard': '看板卡片',
   'engine.studio.inspector.listView.kanbanCard.intro': '看板上每张卡片显示什么,点一张卡片时打开什么。',
   'engine.studio.inspector.listView.kanbanCard.groupByFirst': '先选分组字段:卡片设置随它一起保存。',

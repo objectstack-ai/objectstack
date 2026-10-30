@@ -17,12 +17,34 @@
  *   is accepted, and so is one naming a disabled instance;
  * - CONTROL: a datasource with no `connector` is untouched by the rule.
  *
+ * …and `composeStacks` judges the same reference over every input's
+ * `connectors` (the composed counterpart, #25211 shape):
+ *
+ * - a dangling name, a descriptor or an instance with nothing to lend, carried
+ *   by an input built with `strict: false`, is refused with the same finding
+ *   and envelope, under `last` and `preserve`;
+ * - a connector name declared twice in one registration slot (the flattened
+ *   artifact's top level) is judged against the later entry, the one the
+ *   registry keeps, and that finding names both declarations and prescribes
+ *   the duplicate's fix;
+ * - a connector name two PACKAGES declare (two slots: the registry keeps
+ *   both, and the first registered lends) is refused as ambiguous in either
+ *   order when one entry can lend and the other cannot, and accepted when
+ *   both can;
+ * - a nested multi-package input (a `manifest: 'preserve'` artifact) is read
+ *   through its package bodies, where its connectors and datasources live,
+ *   and an entry it carries in both halves is read once;
+ * - CONTROL: a datasource borrowing an instance another input declares
+ *   composes, in either order;
+ * - CONTROL: the per-stack strict refusal is unchanged, so a strict input
+ *   never carries a dangling name into a composition.
+ *
  * The pairings the key can never serve (both channels, a built-in driver, a
  * managed datasource) are the datasource schema's half, pinned in
  * `data/datasource.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
-import { defineStack } from './stack.zod';
+import { composeStacks, defineStack } from './stack.zod';
 
 const manifest = { id: 'com.example.erp', name: 'erp', version: '1.0.0', type: 'app' as const };
 
@@ -115,5 +137,178 @@ describe('a datasource borrows the credential of a connector instance its stack 
   it('CONTROL: a datasource with no connector is untouched by the rule', () => {
     const plain = { ...sapOrders(), external: { credentialsRef: 'sys_secret:9f2c' } };
     expect(refusalOf({ manifest, datasources: [plain] })).toBeUndefined();
+  });
+});
+
+describe('composeStacks judges external.connector against the connectors of every input', () => {
+  const pluginManifest = (id: string) => ({
+    id,
+    namespace: id.split('.').pop(),
+    version: '1.0.0',
+    type: 'plugin',
+    name: id.split('.').pop(),
+  });
+  const owner = (connector: Record<string, unknown> = instance()) =>
+    defineStack({ manifest: pluginManifest('com.acme.sap'), connectors: [connector] } as never);
+  const looseBorrower = (connector = 'sap_s4') =>
+    defineStack({ manifest: pluginManifest('com.acme.orders'), datasources: [sapOrders(connector)] } as never, {
+      strict: false,
+    });
+  const composeRefusal = (stacks: unknown[], options?: Record<string, unknown>): Envelope | undefined => {
+    try {
+      composeStacks(stacks as never, options as never);
+      return undefined;
+    } catch (err) {
+      return err as Envelope;
+    }
+  };
+  const expectComposedFinding = (refused: Envelope | undefined, fragment: string): void => {
+    expectOneFinding(refused, fragment);
+    expect(refused?.issues).toHaveLength(1);
+    expect(refused?.message).toContain('composeStacks artifact cross-reference validation failed (1 issue):');
+  };
+
+  it.each([
+    ['owner first, `last`', false, 'last'],
+    ['borrower first, `last`', true, 'last'],
+    ['owner first, `preserve`', false, 'preserve'],
+    ['borrower first, `preserve`', true, 'preserve'],
+  ])('CONTROL: a datasource borrowing an instance another input declares composes — %s', (_order, reversed, manifestOpt) => {
+    const stacks = reversed ? [looseBorrower(), owner()] : [owner(), looseBorrower()];
+    expect(composeRefusal(stacks, { manifest: manifestOpt })).toBeUndefined();
+  });
+
+  it.each(['last', 'preserve'])('refuses a dangling name a `strict: false` input carries (`%s`)', (manifestOpt) => {
+    const refused = composeRefusal([owner(instance({ name: 'sap_ariba' })), looseBorrower()], { manifest: manifestOpt });
+    expectComposedFinding(refused, 'which is not defined in connectors');
+  });
+
+  it('refuses a descriptor, and an instance with nothing to lend, that another input declares', () => {
+    const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
+    expectComposedFinding(composeRefusal([owner(descriptor), looseBorrower()]), 'which declares no provider');
+    expectComposedFinding(
+      composeRefusal([owner(instance({ auth: { type: 'none' } })), looseBorrower()]),
+      'which declares no auth credential',
+    );
+  });
+
+  it('judges a name two inputs declare in the flattened artifact against the later entry, the one the registry keeps', () => {
+    const strictPair = defineStack({
+      manifest: pluginManifest('com.acme.orders'),
+      datasources: [sapOrders()],
+      connectors: [instance()],
+    } as never);
+    const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
+    const refused = composeRefusal([strictPair, owner(descriptor)]);
+    expectComposedFinding(refused, 'which declares no provider in the entry the composed artifact keeps');
+    expect(String(refused?.issues?.[0])).toContain(
+      "Connector 'sap_s4' is declared more than once: 'com.acme.orders' (stack #0) declares an instance " +
+        "that can lend, and 'com.acme.sap' (stack #1) declares the later entry, which the runtime keeps. " +
+        'Rename or remove the later entry',
+    );
+    expect(String(refused?.issues?.[0])).not.toContain('Give it the provider');
+    expect(composeRefusal([owner(descriptor), strictPair])).toBeUndefined();
+  });
+
+  describe('a name two packages of a `preserve` artifact declare: the registry keeps both, the first registered lends', () => {
+    const strictPair = () =>
+      defineStack({
+        manifest: pluginManifest('com.acme.orders'),
+        datasources: [sapOrders()],
+        connectors: [instance()],
+      } as never);
+    const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
+
+    it.each([
+      ['instance first', false],
+      ['descriptor first', true],
+    ])('refuses the borrow as ambiguous when one can lend and the other cannot — %s', (_order, reversed) => {
+      const stacks = reversed ? [owner(descriptor), strictPair()] : [strictPair(), owner(descriptor)];
+      const refused = composeRefusal(stacks, { manifest: 'preserve' });
+      expectComposedFinding(refused, 'which more than one package of the composed artifact declares, and they disagree');
+      const finding = String(refused?.issues?.[0]);
+      expect(finding).toContain("'com.acme.orders' (stack #");
+      expect(finding).toContain("declares an instance that can lend, and 'com.acme.sap' (stack #");
+      expect(finding).toContain('lends from whichever registers first');
+      expect(finding).not.toContain('which the runtime keeps');
+    });
+
+    it('CONTROL: two packages that each declare an instance that can lend compose, in either order', () => {
+      const other = owner(instance({ auth: { type: 'bearer', credentialRef: 'sap_token_2' } }));
+      expect(composeRefusal([strictPair(), other], { manifest: 'preserve' })).toBeUndefined();
+      expect(composeRefusal([other, strictPair()], { manifest: 'preserve' })).toBeUndefined();
+    });
+  });
+
+  it('keeps the per-stack prescription when no declaration of the name could lend', () => {
+    const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
+    const refused = composeRefusal([owner(descriptor), owner(instance({ auth: { type: 'none' } })), looseBorrower()]);
+    expectComposedFinding(refused, 'which declares no auth credential — there is nothing to borrow. Declare the');
+  });
+
+  describe('a nested multi-package input, whose collections live only in its package bodies', () => {
+    const other = () => defineStack({ manifest: pluginManifest('com.acme.other') } as never);
+    const nested = (...stacks: unknown[]) => composeStacks([...stacks, other()] as never, { manifest: 'preserve' });
+
+    it('CONTROL: a borrower resolves against an instance a package body of the nested input carries', () => {
+      const inner = nested(owner());
+      expect((inner as Record<string, unknown>).connectors).toBeUndefined();
+      expect(composeRefusal([inner, looseBorrower()], { manifest: 'preserve' })).toBeUndefined();
+      expect(composeRefusal([looseBorrower(), inner])).toBeUndefined();
+    });
+
+    it("judges a datasource a nested input's package body carries", () => {
+      // Hand-assembled: a composition would refuse the dangling name itself.
+      const inner = defineStack(
+        {
+          manifest: pluginManifest('com.acme.bundle'),
+          packages: [{ manifest: { ...pluginManifest('com.acme.orders'), datasources: [sapOrders('sap_missing')] } }],
+        } as never,
+        { strict: false },
+      );
+      const refused = composeRefusal([owner(), inner], { manifest: 'preserve' });
+      expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'STACK_CROSS_REFERENCE_INVALID', status: 422 });
+      expect(refused?.issues).toEqual([
+        expect.stringMatching(
+          /^Datasource 'sap_orders' borrows the credential of connector 'sap_missing' \(external\.connector\), which is not defined in connectors\./,
+        ),
+      ]);
+    });
+
+    it("treats a package body and another input's top level as two slots, and names the body", () => {
+      const strictPair = defineStack({
+        manifest: pluginManifest('com.acme.orders'),
+        datasources: [sapOrders()],
+        connectors: [instance()],
+      } as never);
+      const refused = composeRefusal([nested(strictPair), owner({ name: 'sap_s4', label: 'SAP', type: 'api' })]);
+      expectComposedFinding(refused, 'which more than one package of the composed artifact declares, and they disagree');
+      expect(String(refused?.issues?.[0])).toContain(
+        "package 'com.acme.orders' of 'com.acme.other' (stack #0) declares an instance that can lend",
+      );
+    });
+
+    it('reads an entry the nested input carries in both halves once', () => {
+      // A nested artifact whose bodies did not reproduce its flattened half
+      // keeps both, holding the same entry objects in each.
+      const borrower = sapOrders('sap_missing');
+      const both = defineStack(
+        {
+          manifest: pluginManifest('com.acme.bundle'),
+          datasources: [borrower],
+          packages: [{ manifest: { ...pluginManifest('com.acme.orders'), datasources: [borrower] } }],
+        } as never,
+        { strict: false },
+      );
+      const refused = composeRefusal([owner(), both]);
+      expect(refused?.issues).toHaveLength(1);
+      expect(refused?.message).toContain('composeStacks artifact cross-reference validation failed (1 issue):');
+    });
+  });
+
+  it('CONTROL: the per-stack strict refusal is unchanged — a strict input never carries a dangling name in', () => {
+    const refused = refusalOf({ manifest: pluginManifest('com.acme.orders'), datasources: [sapOrders()] });
+    expectOneFinding(refused, 'which is not defined in connectors');
+    expect(refused?.message).not.toContain('composeStacks');
   });
 });

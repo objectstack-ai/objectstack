@@ -33,7 +33,8 @@ disagree.
 - **Each entity set you bind has a key.** The key becomes the record's `id`. An entity
   type with no usable key is refused at the first request.
 - **You know how it authenticates.** The driver sends no credential, a bearer token, or
-  HTTP basic. It does not run an OAuth2 flow ([Credentials](#3-credentials)).
+  HTTP basic, or, borrowed from a connector instance, an API key too. It does not run an
+  OAuth2 flow ([Credentials](#3-credentials)).
 
 ## 1. Mount the plugin
 
@@ -61,7 +62,7 @@ export default defineStack({
 | `name` | `odata` | The datasource it serves. It is also the driver name and the `driver.<name>` service suffix. |
 | `serviceRoot` | (required) | The service root URL, http or https, with no credentials and no query string. |
 | `version` | `4.0` | The protocol version. `4.0` is the only value. |
-| `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. |
+| `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. Leave it `none` when the datasource borrows a connector instance's credential ([Credentials](#3-credentials)). |
 | `secrets` | (none) | Where `credentialsRef` is resolved: an object with `resolve(credentialsRef)`. When absent, the host's `datasource-secret-resolver` service is used; `os serve` registers one. |
 | `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
 | `requestTimeoutMs` | `30000` | The timeout of each request. |
@@ -164,8 +165,17 @@ What each piece does on this driver:
 ## 3. Credentials
 
 ⛔ Never put a credential in the stack, in the plugin options, or in the `serviceRoot`
-URL. The secret is the datasource's `external.credentialsRef`, and the plugin resolves it
-through the host's secret store:
+URL. The datasource names exactly one of two channels:
+
+- **A secret of its own**, `external.credentialsRef`, resolved through the host's secret
+  store. This is the example in step 2.
+- **A connector instance's credential**, `external.connector`, when a connector already
+  authorizes the same service
+  ([Borrowing a connector instance's credential](#borrowing-a-connector-instances-credential)).
+
+### A secret of its own: `credentialsRef`
+
+The plugin resolves `external.credentialsRef` through the host's secret store:
 
 - **`bearer`** sends `Authorization: Bearer <secret>`.
 - **`basic`** takes `username` from the options and the password from the secret.
@@ -196,6 +206,56 @@ Resolution fails closed. Each of these refuses the request rather than send it w
 the credential: an auth scheme with no `credentialsRef`, a `credentialsRef` with neither
 `secrets` nor the service, and a handle that does not resolve. The caller is answered
 `503 ERR_DATASOURCE_UNAVAILABLE`, and the cause goes to the server log.
+
+### Borrowing a connector instance's credential
+
+When a [connector instance](/docs/automation/connectors#declaring-a-provider-bound-instance)
+already authorizes the ERP for your flows, the datasource can borrow its credential instead
+of holding a secret of its own (ADR-0015 amendment D7). One credential, set where the
+connector's is set, then serves the connector's actions and the datasource's records.
+Name the instance in `external.connector`, leave `credentialsRef` out, and create the
+plugin with `auth` left at `none`:
+
+```typescript
+connectors: [
+  {
+    name: 'erp_api', label: 'ERP API', type: 'api',
+    provider: 'rest', providerConfig: { baseUrl: 'https://erp.example.com' },
+    auth: { type: 'bearer', credentialRef: 'ERP_API_TOKEN' },
+  },
+],
+datasources: [
+  {
+    name: 'erp', driver: 'erp', schemaMode: 'external', config: {},
+    external: { connector: 'erp_api', allowWrites: true },   // no credentialsRef
+  },
+],
+plugins: [
+  createODataDriverPlugin({
+    name: 'erp',
+    serviceRoot: 'https://erp.example.com/odata/v4/sales/',   // no auth, no secrets
+  }),
+],
+```
+
+- **The instance's `auth` decides how the credential is sent:** `Authorization: Bearer`,
+  `Authorization: Basic`, or an API key in its `headerName` header (default `X-API-Key`)
+  or, with `paramName`, a query parameter.
+- **The plugin borrows at the first request**, from the `connector-credential-source`
+  service that `@objectstack/service-automation` registers, and keeps the handle. Every
+  request then presents the current credential: one past its expiry is obtained afresh
+  before it is sent, and one the service refuses with a `401` is obtained afresh once and
+  the request retried. A second `401` answers `503`, naming the instance in the server
+  log.
+- **It fails closed.** Each of these refuses the request with nothing sent, answered
+  `503 ERR_DATASOURCE_UNAVAILABLE` with the cause in the server log: no automation
+  service in the stack, an instance that cannot lend (not declared, disabled, no
+  `auth`), a credential that is not set yet, a `credentialsRef` beside the connector,
+  and an `auth` scheme other than `none` on the plugin, which would send a second
+  credential. An instance that cannot lend also fails the datasource's connect, so
+  Setup → Integrations → Datasources shows why
+  ([Borrowing a connector instance's credential](/docs/data-modeling/external-datasources#borrowing-a-connector-instances-credential)
+  has the rules the stack is validated against).
 
 ## 4. What the service is asked
 

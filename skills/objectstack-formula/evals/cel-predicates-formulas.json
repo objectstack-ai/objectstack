@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Add a `full_name` formula on `contact` built from salutation, first name and last name, and a `margin_pct` formula on `deal` = (revenue - cost) / cost * 100.",
-      "expected_output": "Two `type: 'formula'` fields whose `expression` is CEL via the `F` tag. The text formula coalesces every nullable operand — `F`coalesce(record.salutation, '') + ' ' + coalesce(record.first_name, '') + ' ' + coalesce(record.last_name, '')`` — because `null + 'foo'` throws. The numeric one guards the divisor: `F`coalesce(record.cost, 0) > 0 ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost : 0.0``.",
+      "expected_output": "Two `type: 'formula'` fields, `expression` under the `F` tag. The text one coalesces every nullable operand — `F`coalesce(record.salutation, '') + ' ' + coalesce(record.first_name, '') + ' ' + coalesce(record.last_name, '')`` — because `null + 'foo'` throws. The numeric one guards the divisor: `F`coalesce(record.cost, 0) > 0 ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost : 0.0``.",
       "files": [],
       "assertions": {
         "must_contain": ["F`", "coalesce(", "record."],
@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "Translate this Salesforce validation rule into ObjectStack: AND(ISBLANK(po_number), amount > 10000, NOT(ISPICKVAL(status, 'draft'))).",
-      "expected_output": "Applies the mechanical legacy → CEL table: `P`isBlank(record.po_number) && record.amount > 10000 && record.status != 'draft'``, noting that a `script` validation is inverted (it FAILS when the expression is true, so keep the failing condition) and that `record.amount > 10000` on a declared-nullable field needs an explicit `record.amount != null &&` guard or the publish gate rejects it.",
+      "expected_output": "By the legacy → CEL table, `P`isBlank(record.po_number) && record.amount > 10000 && record.status != 'draft'``; a `script` validation is inverted (it FAILS when true, so keep the failing condition), and `record.amount > 10000` on a nullable field needs an explicit `record.amount != null &&` guard or the publish gate rejects it.",
       "files": [],
       "assertions": {
         "must_contain": ["isBlank(", "&&", "record.", "P`"],
@@ -34,7 +34,7 @@
     {
       "id": 4,
       "prompt": "Demo opportunities should close 45 days after the package is installed, and a formula should show how many days remain until close.",
-      "expected_output": "Seed value as a CEL envelope, `close_date: cel`daysFromNow(45)``, never a JS `Date` / `Date.now()` (the determinism gate: two `os build` runs must be byte-identical). Days remaining is `daysBetween(today(), record.close_date)` — never `record.close_date - today()` (a duration stored as `{}`) and never date arithmetic on `today()` (it faults).",
+      "expected_output": "Seed value as a CEL envelope, `close_date: cel`daysFromNow(45)``, never a JS `Date` / `Date.now()` (two `os build` runs must be byte-identical). Days remaining is `daysBetween(today(), record.close_date)` — never `record.close_date - today()` (a duration stored as `{}`) and never date arithmetic on `today()` (it faults).",
       "files": [],
       "assertions": {
         "must_contain": ["cel`", "daysFromNow(", "daysBetween("],
@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "Hide `discount_reason` unless a discount amount was entered, and reject any `end_date` earlier than `start_date`.",
-      "expected_output": "`visibleWhen: P`record.discount != null`` (or `!isBlank(record.discount)`) on the field — `has(record.discount)` is not a null check: every declared field exists, so it is always true. The date rule is a `script` validation whose predicate dominates the comparison with explicit null tests: `record.start_date != null && record.end_date != null && record.end_date < record.start_date`; a `has()` guard does not satisfy the publish-time gate.",
+      "expected_output": "`visibleWhen: P`record.discount != null`` (or `!isBlank(record.discount)`) on the field — `has(record.discount)` is not a null check: every declared field exists, so it is always true. The date rule is a `script` validation with explicit null tests ahead of the comparison: `record.start_date != null && record.end_date != null && record.end_date < record.start_date`; a `has()` guard does not satisfy the publish gate.",
       "files": [],
       "assertions": {
         "must_contain": ["visibleWhen", "!= null", "record.end_date"],
@@ -64,11 +64,21 @@
     {
       "id": 7,
       "prompt": "Refuse a `contract_version` save unless its `kind` is the clean copy, and show `signed_at` only once `status` is signed.",
-      "expected_output": "Both are predicates over the STORED value: a `script` validation `P`record.kind != 'clean'`` (it fails when true) and `visibleWhen: P`record.status == 'signed'``. The `label` macro evaluates only in a formula field; in a validation, `visibleWhen` or hook predicate it faults and aborts every write, so compare the stored value, never its option label.",
+      "expected_output": "A `script` validation `P`record.kind != 'clean'`` (it fails when true) and `visibleWhen: P`record.status == 'signed'``. The `label` macro evaluates only in a formula field; in a validation, `visibleWhen` or hook predicate it faults and aborts every write, so compare the stored value, never its option label.",
       "files": [],
       "assertions": {
         "must_contain": ["record.kind", "visibleWhen", "P`"],
         "must_not_contain": ["label(", "{record."]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "An `email_template` that mails one overdue notice per `contract`, the amount shown in that contract's own currency.",
+      "expected_output": "`{{ amount | currency:@currency_code }}` — only a mail template may read the code from the send's data. The stored code is three capitals (`EUR`), exactly as stored; when the template declares `variables`, the path must be one of them or lie under one. A bare path is refused, a literal code fixes one currency for every record, and no argument means the organization's default currency.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["currency:@"],
+        "must_not_contain": ["currency:currency_code", "currency:USD", "currency:CNY", "| currency }}"]
       }
     }
   ]

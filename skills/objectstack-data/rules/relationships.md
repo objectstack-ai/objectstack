@@ -229,8 +229,7 @@ Declare inline editing **on the relationship**, in the data model — not in a f
 view. Set `inlineEdit: true` on the child's `master_detail` (or `lookup`) field
 that points back to the parent. The parent's **standard** create/edit form then
 renders an editable grid for these children and saves parent + children in **one
-atomic transaction** — with no form-view config and no bespoke page. The UI is
-derived from metadata (relationship FK + child fields → grid columns).
+atomic transaction** — with no form-view config and no bespoke page.
 
 ```typescript
 // On the CHILD object's FK field:
@@ -271,10 +270,9 @@ inlineEdit: 'grid'     // editable line-item grid (fast bulk entry; thin childre
 inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL form
 ```
 
-- **`'grid'`** — spreadsheet-like editable grid. Best for *thin* line items
+- **`'grid'`** — best for *thin* line items
   (invoice/order lines): few columns, high volume, keyboard-fast.
-- **`'form'`** — compact read-only list; Add / per-row edit opens the child's
-  complete form. Best for *fat* children (long text, attachments, many fields)
+- **`'form'`** — best for *fat* children (long text, attachments, many fields)
   that don't fit a narrow grid cell.
 - **`true`** / omitted — **smart default**: picks `form` when the child has
   rich/form-only fields (textarea, file, image, json, location…) or more than ~8
@@ -320,11 +318,10 @@ InvoiceLine = {
 
 ### Detail-page related lists (the read-side mirror)
 
-Where `inlineEdit` is the **write** side (child pulled into the parent's entry
-form), the **related list** on the parent's record detail page is the **read**
+Where `inlineEdit` is the **write** side, the **related list** on the parent's record detail page is the **read**
 side. You usually don't declare it: every child relationship
-(`master_detail` and `lookup`) is shown as a related list on the parent's detail
-page **by default** — owned (`master_detail`) children first. The relationship
+(`master_detail` and `lookup`) is shown **by default** — owned (`master_detail`)
+children first. The relationship
 flags exist to *refine* that:
 
 ```typescript
@@ -333,7 +330,7 @@ project: {
   type: 'master_detail',
   reference: 'project',
   inlineEdit: true,                 // write side: edit inline in the Project form
-  relatedList: 'primary',           // read side: a body table (default with inlineEdit)
+  relatedList: 'primary',           // read side: a body table
   relatedListTitle: 'Tasks',        // title of the detail-page list
   relatedListColumns: ['title', 'status', 'priority', 'due_date'],
 },
@@ -344,16 +341,21 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 `relatedList` is tri-state — placement (ADR-0085):
 
-- `'primary'` — main content: a full-width table in the record's body (its own
-  tab on the tabbed page). Default for a `master_detail` FK with `inlineEdit`.
+- `'primary'` — main content: a full-width table in the details column after
+  the first field section (in the Details tab, no tab of its own). Default for a
+  `master_detail` FK with `inlineEdit`.
 - `false` — hidden from the parent's page.
 - `true`, or omitted (except inline-edited `master_detail`) — a side card
   (the shared **Related** tab).
 - Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
-  `object.field`) lists those first; a name matching no inbound FK is refused.
+  `object.field`) lists those first. A child in the stack with no inbound FK is
+  refused everywhere; one that exists nowhere is refused by `os validate` /
+  `os build` (which leave a `sys_` / `cloud_` / `ai_` or sibling-artifact name
+  to the runtime) and by a metadata write naming no package — a write into a
+  package stores it, and the page places nothing.
 
 `relatedListTitle` / `relatedListColumns` override the derived title / columns;
-both are optional — when omitted, columns auto-derive from the child object's
+otherwise columns auto-derive from the child object's
 `highlightFields` (the same source the lookup picker uses). Audit FKs
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
 references the parent through several FKs (e.g. `primary_account` +
