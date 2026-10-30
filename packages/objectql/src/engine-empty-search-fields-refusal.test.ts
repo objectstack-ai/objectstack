@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { QuerySchema, FullTextSearchSchema } from '@objectstack/spec/data';
+import type { EngineQueryOptions, EngineCountOptions, EngineAggregateOptions } from '@objectstack/spec/data';
 import { mapDataError } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
 
@@ -119,13 +120,17 @@ const COUNT = [{ function: 'count' as const, alias: 'n' }];
 type Verb = 'find' | 'findOne' | 'count' | 'aggregate';
 const VERBS: readonly Verb[] = ['find', 'findOne', 'count', 'aggregate'];
 
-/** Run one verb with the search keys in `bag`. */
+/**
+ * Run one verb with the search keys in `bag`. Deliberately off-contract: the
+ * bags carry the comma-string and `null` spellings the engine-side declaration
+ * does not admit, as the wire path hands them over.
+ */
 function run(engine: ObjectQL, verb: Verb, bag: Record<string, unknown>): Promise<unknown> {
   switch (verb) {
-    case 'find': return engine.find(account.name, bag as any);
-    case 'findOne': return engine.findOne(account.name, bag as any);
-    case 'count': return engine.count(account.name, bag as any);
-    case 'aggregate': return engine.aggregate(account.name, { groupBy: ['region'], aggregations: COUNT, ...bag } as any);
+    case 'find': return engine.find(account.name, bag as unknown as EngineQueryOptions);
+    case 'findOne': return engine.findOne(account.name, bag as unknown as EngineQueryOptions);
+    case 'count': return engine.count(account.name, bag as unknown as EngineCountOptions);
+    case 'aggregate': return engine.aggregate(account.name, { groupBy: ['region'], aggregations: COUNT, ...bag } as unknown as EngineAggregateOptions);
   }
 }
 
