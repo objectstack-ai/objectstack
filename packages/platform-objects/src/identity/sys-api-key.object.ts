@@ -160,6 +160,14 @@ export const SysApiKey = ObjectSchema.create({
       confirmText: 'Revoke this API key? Any clients using it will immediately lose access.',
       successMessage: 'API key "{{ record.name }}" revoked',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Revoke an API key (the record): every client using it loses access immediately. It can be restored later. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'restore_api_key',
