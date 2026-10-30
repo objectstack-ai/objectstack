@@ -79,6 +79,22 @@ export function withServerOnlyErrors<T extends { path: string; message: string }
 }
 
 /**
+ * objectstack#27799 — a served verdict as the flat, severity-tagged list a
+ * canvas preview's Problems list reads (`MetadataPreviewProps.diagnostics`):
+ * the errors, then the warnings, each at the path the server wrote. A page
+ * that keeps the verdict and draws a flow hands it this, so the Problems list
+ * says what the publish will refuse, as the inspectors already do.
+ */
+export function verdictPreviewEntries(
+  diagnostics: ServerDiagnostics | undefined,
+): Array<{ path?: string; message: string; severity: 'error' | 'warning' }> {
+  return [
+    ...(diagnostics?.errors ?? []).map((e) => ({ path: e.path || undefined, message: e.message, severity: 'error' as const })),
+    ...(diagnostics?.warnings ?? []).map((w) => ({ path: w.path || undefined, message: w.message, severity: 'warning' as const })),
+  ];
+}
+
+/**
  * objectstack#26858 — the served verdict on the body on screen, for a field
  * that edits one path of it. The page holding the draft read provides it
  * (`ResourceEditPage`, the permission-set editor); a field asks for the errors
