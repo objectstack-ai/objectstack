@@ -52,12 +52,27 @@ const INVITE_PARAMS: ActionParamDef[] = [
  * its action runs, which includes the time its dialog is open, and enabled
  * again a moment after the dialog closes, when the run settles.
  */
-function InviteButtonWithDialog({ params = INVITE_PARAMS }: { params?: ActionParamDef[] }) {
+function InviteButtonWithDialog({
+  params = INVITE_PARAMS,
+  blurWhenDisabled = false,
+}: {
+  params?: ActionParamDef[];
+  /** A browser blurs a focused button that turns disabled; jsdom does not. */
+  blurWhenDisabled?: boolean;
+}) {
   const [running, setRunning] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   return (
     <>
-      <button type="button" disabled={running} onClick={() => { setRunning(true); setOpen(true); }}>
+      <button
+        type="button"
+        disabled={running}
+        onClick={(event) => {
+          if (blurWhenDisabled) event.currentTarget.blur();
+          setRunning(true);
+          setOpen(true);
+        }}
+      >
         Invite User
       </button>
       <ActionParamDialog
@@ -98,6 +113,17 @@ describe('row 23 — closing returns focus to the opener (objectstack#27521)', (
     await user.click(opener);
     await waitFor(() => expect(screen.getByLabelText(/Email/)).toHaveFocus());
     expect(opener).toBeDisabled();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it('…and when the browser blurred that button as it turned disabled, so the dialog opened with focus on body', async () => {
+    const user = userEvent.setup();
+    render(<InviteButtonWithDialog blurWhenDisabled />);
+    const opener = screen.getByRole('button', { name: 'Invite User' });
+    await user.click(opener);
+    await waitFor(() => expect(screen.getByLabelText(/Email/)).toHaveFocus());
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(opener).toHaveFocus());

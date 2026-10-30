@@ -9,10 +9,11 @@
  * - A row menu item. The menu closes as the action starts, so the item is
  *   gone by the time the dialog closes. The opener is the menu's trigger,
  *   which the menu names in `aria-labelledby`.
- * - An action button. It stays disabled while its action runs, and the
- *   dialog closes before the run settles, so it refuses focus at that moment.
- *   Focus waits for it to come back, as long as the user has not put focus
- *   somewhere else in the meantime.
+ * - An action button. It is disabled while its action runs, so a browser
+ *   blurs it before the dialog opens (focus is on `body` then), and it still
+ *   refuses focus when the dialog closes, before the run settles. The opener
+ *   is then the control the user last activated, and focus waits for it to
+ *   come back, as long as the user has not put focus somewhere else meanwhile.
  * - A dialog that hands over to the next one (a param dialog whose run ends
  *   in a result dialog). The next dialog returns to the first one's opener.
  *
@@ -20,12 +21,17 @@
  * opener is gone, Radix's default stays.
  */
 
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
 const DIALOG_SELECTOR = '[role="dialog"], [role="alertdialog"]';
 
 /** How long a closed dialog waits for a disabled opener to come back. */
 const RETURN_FOCUS_WAIT_MS = 10_000;
+
+/** How recent an activation must be to count as the opener of a dialog opening on `body`. */
+const ACTIVATION_WINDOW_MS = 10_000;
+
+const CONTROL_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [role="menuitem"], [tabindex]';
 
 /** The opener each open action dialog returns to, by its content element. */
 const openers = new WeakMap<Element, HTMLElement>();
@@ -36,6 +42,29 @@ const openers = new WeakMap<Element, HTMLElement>();
  * the opener is the control the user started from.
  */
 let pendingReturn: { opener: HTMLElement; stop: () => void } | null = null;
+
+/**
+ * The control the user last pressed or clicked, already resolved to its
+ * opener (a menu item to the menu's trigger), and when. Read only when a
+ * dialog opens with focus on `body`.
+ */
+let lastActivation: { opener: HTMLElement; at: number } | null = null;
+let activationListening = false;
+
+function recordActivation(event: Event): void {
+  const target = event.target as Element | null;
+  const control = target && typeof target.closest === 'function' ? target.closest(CONTROL_SELECTOR) : null;
+  const opener = control ? resolveFocusOpener(control) : null;
+  lastActivation = opener ? { opener, at: Date.now() } : null;
+}
+
+/** Listens once per document, in the capture phase, so no handler can hide an activation. */
+function listenForActivations(doc: Document): void {
+  if (activationListening) return;
+  activationListening = true;
+  doc.addEventListener('pointerdown', recordActivation, true);
+  doc.addEventListener('keydown', recordActivation, true);
+}
 
 function isHtmlElement(node: unknown): node is HTMLElement {
   return !!node && (node as Node).nodeType === 1 && typeof (node as HTMLElement).focus === 'function';
@@ -53,11 +82,15 @@ function focusIsNowhere(doc: Document): boolean {
 export function resolveFocusOpener(active: Element | null): HTMLElement | null {
   if (!isHtmlElement(active)) return null;
   const doc = active.ownerDocument;
-  if (focusIsNowhere(doc)) {
+  if (active === doc.body || active === doc.documentElement) {
     const pending = pendingReturn;
-    if (!pending) return null;
-    pending.stop();
-    return pending.opener.isConnected ? pending.opener : null;
+    if (pending) {
+      pending.stop();
+      return pending.opener.isConnected ? pending.opener : null;
+    }
+    const activation = lastActivation;
+    if (!activation || Date.now() - activation.at > ACTIVATION_WINDOW_MS) return null;
+    return activation.opener.isConnected ? activation.opener : null;
   }
   // Nested menus are walked out one trigger at a time; the bound only guards
   // a menu that names itself.
@@ -118,6 +151,10 @@ export function useActionDialogReturnFocus(open: boolean): {
 } {
   const openerRef = useRef<HTMLElement | null>(null);
   const contentNodeRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') listenForActivations(document);
+  }, []);
 
   // A layout effect runs before Radix's focus scope mounts (the portal draws
   // the content one commit later), so focus is still on the opener here.
