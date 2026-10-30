@@ -6,7 +6,7 @@
  *
  * A read attachment is a block a service sets on each row it serves, computed
  * per caller and never stored. At a served-row site (`SERVED_ROW_SITES`: an
- * action's `visible` and `disabled`), its block name joins the names
+ * action's `visible`, `disabled` and `pressed`), its block name joins the names
  * `record.<x>` resolves to, and the second segment of `record.<block>.<leaf>`
  * is judged against the block's declared leaves — under the EXISTING
  * `unknown-field` refusal, with no new rule and nothing keyed on a block's
@@ -203,6 +203,28 @@ describe('attachedOnRead — record.<block>.<leaf> at a served-row site', () => 
     expect(issues).toHaveLength(1);
     expect(issues[0].where).toBe("stack · action 'approve_probe' disabled");
     expect(issues[0].message).toContain('unknown field `viewer.can_actt` on `approval_probe`');
+  });
+
+  it('an action `pressed` predicate is a served-row site too — the per-reader read it exists for', () => {
+    // The worked case: a reader's own vote is a child row per user, so it
+    // reaches the predicate only as a block the serving side attaches per
+    // caller. `has()` guards a row fetched by another route.
+    const VOTE = { vote: 'text' } as const;
+    const pressedIssuesFor = (pressed: string, declared: boolean) => validateStackExpressions(
+      specValid({
+        objects: [{ ...probe(false), ...(declared ? { attachedOnRead: { reader: VOTE } } : {}) }],
+        actions: [{ name: 'mark_helpful', label: 'Helpful', objectName: 'approval_probe', type: 'script', target: 'fn', pressed }],
+      }),
+    );
+    expect(pressedIssuesFor("has(record.reader) && record.reader.vote == 'helpful'", true)).toEqual([]);
+    const misspelt = pressedIssuesFor("has(record.reader) && record.reader.vot == 'helpful'", true);
+    expect(misspelt).toHaveLength(1);
+    expect(misspelt[0].where).toBe("stack · action 'mark_helpful' pressed");
+    expect(misspelt[0].message).toContain('unknown field `reader.vot` on `approval_probe`');
+    // Control: undeclared, the block is the unknown field it is at run time.
+    const undeclared = pressedIssuesFor("has(record.reader) && record.reader.vote == 'helpful'", false);
+    expect(undeclared.map((i) => [i.where, i.severity])).toContainEqual(["stack · action 'mark_helpful' pressed", 'error']);
+    expect(undeclared.some((i) => i.message.includes('unknown field `reader` on `approval_probe`'))).toBe(true);
   });
 
   it('an object without the key keeps today’s verdict (control)', () => {

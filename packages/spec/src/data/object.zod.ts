@@ -2187,8 +2187,8 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * `@objectstack/formula`, the pair `os build` / `os validate` run, and no other
  * field-existence check. A block is on `record` only where `record` is a row
  * the declaring service SERVED, so the validator reads this key only at those
- * sites: an action's `visible` and `disabled` predicates (`SERVED_ROW_SITES`
- * in `@objectstack/lint`). There each declared block name joins the names
+ * sites: an action's `visible`, `disabled` and `pressed` predicates
+ * (`SERVED_ROW_SITES` in `@objectstack/lint`). There each declared block name joins the names
  * `record.<x>` may resolve to, and `@objectstack/formula`'s field-existence
  * pass judges the SECOND segment of `record.<block>.<leaf>` against the
  * block's declared leaves, under its existing `unknown-field` refusal — so

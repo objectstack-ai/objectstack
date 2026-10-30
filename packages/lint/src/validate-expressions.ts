@@ -278,8 +278,8 @@ function buildAttachedOnReadIndex(objects: AnyRec[]): Map<string, Record<string,
  * on `record` only where `record` is such a served row, and this list names
  * those sites:
  *
- * - an action's `visible` and `disabled` predicates. The client's action
- *   runtime evaluates them against the row the surface fetched, and a surface
+ * - an action's `visible`, `disabled` and `pressed` predicates. The client's
+ *   action runtime evaluates them against the row the surface fetched, and a surface
  *   that reads the declaring service's own routes holds the row that service
  *   served — the console reads `sys_approval_request` through the approvals
  *   routes, whose rows carry the `viewer` block. A surface that fetched the
@@ -310,7 +310,7 @@ function buildAttachedOnReadIndex(objects: AnyRec[]): Map<string, Record<string,
  * new site is fields-only until its binding is shown to be a served row and it
  * is listed.
  */
-const SERVED_ROW_SITES = ['action visible', 'action disabled'] as const;
+const SERVED_ROW_SITES = ['action visible', 'action disabled', 'action pressed'] as const;
 type ServedRowSite = (typeof SERVED_ROW_SITES)[number];
 
 /**
@@ -3470,7 +3470,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
   }
 
-  // ── Action `visible` / `disabled` predicates ───────────────────────
+  // ── Action `visible` / `disabled` / `pressed` predicates ────────────
   // Record-scoped, same as validation rules: a record-header / row action's
   // `visible` is evaluated by ActionEngine against `{ record, recordId,
   // objectName, user, … }` with fail-closed semantics, so a BARE field ref
@@ -3495,6 +3495,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (typeof action.disabled !== 'boolean') {
       check(`${where} · action '${name}' disabled`, action.disabled, obj, 'record', undefined, undefined, 'action disabled');
     }
+    // [#27946] The pressed-state predicate binds the same row as `visible`, and
+    // it is the predicate a per-reader block exists for (`has(record.viewer) &&
+    // record.viewer.vote == 'helpful'`), so it is a served-row site too. No
+    // boolean skip: the schema refuses a boolean literal on this key.
+    check(`${where} · action '${name}' pressed`, action.pressed, obj, 'record', undefined, undefined, 'action pressed');
     // No `checkNullGuards` here, and the reason is measured rather than assumed
     // (#4811). These predicates DO reach real CEL — a bare authored string is
     // normalized to a `{dialect:'cel'}` envelope by `ExpressionInputSchema` and
