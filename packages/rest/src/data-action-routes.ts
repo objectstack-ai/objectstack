@@ -369,7 +369,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // object's `enable.clone` capability, default on). Optional JSON body
     // `{ overrides?: {...} }` (or a bare field map) is applied on top of
     // the copied values, e.g. to set a new name or clear a unique field.
-    // Any other `overrides` (or bare body) is a 400.
+    // Any other `overrides` (or bare body), or `overrides` beside other
+    // top-level keys, is a 400.
     // Distinct path segment (`/clone`) keeps it clear of the greedy
     // `/data/:object/:id` matchers.
     this.routeManager.register({
@@ -392,6 +393,21 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // callers can POST overrides directly without nesting.
                 const nested = isFieldMap(body) && 'overrides' in body;
                 const overrides = nested ? body.overrides : body;
+                // [#27669] Refused, not dropped: `overrides` beside other
+                // top-level keys used to clone with `overrides` alone and
+                // answer `201`, the other keys silently ignored. A record
+                // with a real field named `overrides` sets it through the
+                // nested shape.
+                if (nested) {
+                    const strays = Object.keys(body).filter((key) => key !== 'overrides');
+                    if (strays.length > 0) {
+                        sendEnvelopeError(res, 400, 'VALIDATION_ERROR',
+                            `The clone body carries "overrides" beside other keys (${strays.map((key) => `"${key}"`).join(', ')}). `
+                            + 'Send either { "overrides": {...} } or a bare field map, not both. '
+                            + 'To set a field named "overrides", nest it: { "overrides": { "overrides": ... } }.');
+                        return;
+                    }
+                }
                 // [#27489] Refused, not dropped: a non-object `overrides`
                 // (`"x"`, `1`, `true`, `null`) used to be skipped and answer
                 // `201` with a plain copy, and an array passed the `typeof`
