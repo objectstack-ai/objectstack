@@ -43,7 +43,6 @@ The plugin builds the driver from its options and publishes it as the service
 ```typescript
 import { defineStack } from '@objectstack/spec';
 import { createODataDriverPlugin } from '@objectstack/driver-odata';
-import { erpSecretStore } from './secrets';   // your host's secret store; see Credentials
 
 export default defineStack({
   // …the datasource and objects of step 2…
@@ -51,8 +50,7 @@ export default defineStack({
     createODataDriverPlugin({
       name: 'erp',                                         // = the datasource name
       serviceRoot: 'https://erp.example.com/odata/v4/sales/',
-      auth: { scheme: 'bearer' },
-      secrets: erpSecretStore,
+      auth: { scheme: 'bearer' },                          // under os serve, no `secrets`: see Credentials
     }),
   ],
 });
@@ -64,7 +62,7 @@ export default defineStack({
 | `serviceRoot` | (required) | The service root URL, http or https, with no credentials and no query string. |
 | `version` | `4.0` | The protocol version. `4.0` is the only value. |
 | `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. |
-| `secrets` | (none) | Where `credentialsRef` is resolved: an object with `resolve(credentialsRef)`. Required for `bearer` and `basic`. |
+| `secrets` | (none) | Where `credentialsRef` is resolved: an object with `resolve(credentialsRef)`. When absent, the host's `datasource-secret-resolver` service is used; `os serve` registers one. |
 | `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
 | `requestTimeoutMs` | `30000` | The timeout of each request. |
 
@@ -167,7 +165,7 @@ What each piece does on this driver:
 
 ⛔ Never put a credential in the stack, in the plugin options, or in the `serviceRoot`
 URL. The secret is the datasource's `external.credentialsRef`, and the plugin resolves it
-through the `secrets` store you pass:
+through the host's secret store:
 
 - **`bearer`** sends `Authorization: Bearer <secret>`.
 - **`basic`** takes `username` from the options and the password from the secret.
@@ -180,20 +178,23 @@ old token fails. The driver does not obtain or refresh tokens itself. A service 
 issues short-lived OAuth2 access tokens needs something that keeps the stored secret
 current.
 
-`secrets` is any object with `resolve(credentialsRef)`, answering the secret or
-`undefined`:
+Which store resolves it:
 
-- **A host that composes its own kernel** passes the same binder it gives
-  `DatasourceAdminServicePlugin`. A `sys_secret:<id>` handle that the Add Datasource
-  wizard minted then resolves, as on any federated datasource
+- **Under `os serve`**, pass no `secrets`. The server publishes its own datasource secret
+  store as the kernel service `datasource-secret-resolver`, and the plugin reads it at the
+  first request. A `sys_secret:<id>` handle that the Add Datasource wizard minted
+  resolves, as on any federated datasource
   ([Credentials](/docs/data-modeling/external-datasources#4-credentials)).
-- **`os serve`** builds its secret store internally and does not hand it to a stack's
-  plugins. Pass a `resolve` backed by your host's own secret handling instead, and
-  declare `credentialsRef` as a handle that it resolves.
+- **A host that composes its own kernel** passes `secrets`: the same binder it gives
+  `DatasourceAdminServicePlugin`, or any object with `resolve(credentialsRef)` answering
+  the secret or `undefined`. It can instead register that `resolve` as the
+  `datasource-secret-resolver` service (`DATASOURCE_SECRET_RESOLVER_SERVICE` in
+  `@objectstack/types`), which every plugin driver reading a `credentialsRef` uses the
+  same way. A `secrets` option passed to the plugin always wins over the service.
 
 Resolution fails closed. Each of these refuses the request rather than send it without
-the credential: an auth scheme with no `credentialsRef`, a `credentialsRef` with no
-`secrets`, and a handle that does not resolve. The caller is answered
+the credential: an auth scheme with no `credentialsRef`, a `credentialsRef` with neither
+`secrets` nor the service, and a handle that does not resolve. The caller is answered
 `503 ERR_DATASOURCE_UNAVAILABLE`, and the cause goes to the server log.
 
 ## 4. What the service is asked

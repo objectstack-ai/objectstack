@@ -3,15 +3,17 @@
 /**
  * The plugin: what it publishes, and where the credential comes from — the
  * datasource's `external.credentialsRef`, dereferenced through the host's
- * secret store at the first request, or the connector instance its
+ * secret store at the first request (`options.secrets`, else the host's
+ * `datasource-secret-resolver` service), or the connector instance its
  * `external.connector` borrows from (ADR-0015 D7) — failing closed every way.
  */
 
 import { describe, expect, it } from 'vitest';
-import type { PluginContext } from '@objectstack/core';
+import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { needsExternalDriverFloor } from '@objectstack/objectql';
 import {
   CONNECTOR_CREDENTIAL_SOURCE_SERVICE,
+  DATASOURCE_SECRET_RESOLVER_SERVICE,
   connectorCredentialRefusal,
   type BorrowedConnectorCredential,
   type IConnectorCredentialSource,
@@ -92,6 +94,85 @@ describe('createODataDriverPlugin', () => {
     const { plugin, requests } = await boot(options, defs);
     await expect(plugin.driver.find('trip_person', {})).rejects.toThrow(message);
     expect(requests).toHaveLength(0);
+  });
+
+  describe('the host\'s published secret resolver', () => {
+    const DEFS: Def[] = [{ name: 'trippin', external: { credentialsRef: 'sys_secret:sec_trippin' } }];
+    const HOST_RESOLVER = {
+      asked: [] as string[],
+      async resolve(ref: string) {
+        this.asked.push(ref);
+        return ref === 'sys_secret:sec_trippin' ? 'token-from-the-host' : undefined;
+      },
+    };
+
+    it('resolves the handle through the host\'s service when the plugin was passed no secret store', async () => {
+      HOST_RESOLVER.asked = [];
+      const { plugin, requests } = await boot(
+        { name: 'trippin', auth: { scheme: 'bearer' } },
+        DEFS,
+        { services: { [DATASOURCE_SECRET_RESOLVER_SERVICE]: HOST_RESOLVER } },
+      );
+      await plugin.driver.find('trip_person', {});
+      expect(requests.map((r) => r.headers.Authorization)).toEqual(['Bearer token-from-the-host', 'Bearer token-from-the-host']);
+      expect(HOST_RESOLVER.asked).toEqual(['sys_secret:sec_trippin']);
+    });
+
+    it('an explicit options.secrets wins: the host\'s service is never asked', async () => {
+      HOST_RESOLVER.asked = [];
+      const { plugin, requests } = await boot(
+        { name: 'trippin', auth: { scheme: 'bearer' }, secrets: SECRETS },
+        DEFS,
+        { services: { [DATASOURCE_SECRET_RESOLVER_SERVICE]: HOST_RESOLVER } },
+      );
+      await plugin.driver.find('trip_person', {});
+      expect(requests[0]!.headers.Authorization).toBe('Bearer token-from-the-store');
+      expect(HOST_RESOLVER.asked).toEqual([]);
+    });
+
+    it('fails closed, sending nothing, when the host\'s service does not resolve the handle', async () => {
+      const { plugin, requests } = await boot(
+        { name: 'trippin', auth: { scheme: 'bearer' } },
+        [{ name: 'trippin', external: { credentialsRef: 'sys_secret:gone' } }],
+        { services: { [DATASOURCE_SECRET_RESOLVER_SERVICE]: HOST_RESOLVER } },
+      );
+      await expect(plugin.driver.find('trip_person', {})).rejects.toThrow(/could not be resolved or decrypted/);
+      expect(requests).toHaveLength(0);
+    });
+
+    it('reads the service at the first request, so a resolver registered after the plugin\'s init is seen', async () => {
+      const { plugin, services, requests } = await boot({ name: 'trippin', auth: { scheme: 'bearer' } }, DEFS);
+      services.set(DATASOURCE_SECRET_RESOLVER_SERVICE, HOST_RESOLVER);
+      await plugin.driver.find('trip_person', {});
+      expect(requests[0]!.headers.Authorization).toBe('Bearer token-from-the-host');
+    });
+
+    // A real kernel's getService THROWS on a name nothing registered; the miss must still be the plugin's own
+    // fail-closed refusal naming the service, never the kernel's "not found" text, and nothing may be sent.
+    it('on a real kernel with neither a store nor the service, refuses with its own message and sends nothing', async () => {
+      const service = recordedService([METADATA_EXCHANGE, { url: 'People', body: page([]) }]);
+      const plugin = createODataDriverPlugin({ serviceRoot: SERVICE_ROOT, fetch: service.fetch, name: 'trippin', auth: { scheme: 'bearer' } });
+      const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+      await kernel.use({
+        name: 'com.example.odata-test.engine-stub',
+        version: '1.0.0',
+        init: async (ctx: PluginContext) => {
+          ctx.registerService('data', {});
+          ctx.registerService('objectql', { listDatasourceDefs: () => DEFS } satisfies DatasourceDefinitionSource);
+        },
+      });
+      await kernel.use(plugin);
+      await kernel.bootstrap();
+      try {
+        plugin.driver.registerExternalObject({ name: 'trip_person', external: { remoteName: 'People' } });
+        const refusal = await plugin.driver.find('trip_person', {}).then(() => undefined, (err: unknown) => err as Error);
+        expect(refusal?.message).toMatch(/no secret store was passed to the plugin \(options\.secrets\) and none is registered as the 'datasource-secret-resolver' service/);
+        expect(refusal?.message).not.toMatch(/\[Kernel\]/);
+        expect(service.requests).toHaveLength(0);
+      } finally {
+        await kernel.shutdown();
+      }
+    });
   });
 });
 
