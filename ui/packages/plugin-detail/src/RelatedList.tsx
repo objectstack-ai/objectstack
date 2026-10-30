@@ -2850,8 +2850,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           className={cn('group/panel-head flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold', open && 'cursor-pointer')}
           data-related-panel-head=""
           // The row is the target: a click on its free space opens the list
-          // too. Its own controls stop their clicks.
-          onClick={open ? () => open() : undefined}
+          // too. Its own controls stop their clicks; a click inside the ⋯
+          // menu's portaled content bubbles here through React yet lands
+          // outside the row in the DOM, and is not the row's.
+          onClick={open ? (event) => {
+            if (event.currentTarget.contains(event.target as Node)) open();
+          } : undefined}
         >
           {open ? (
             <button
