@@ -633,6 +633,19 @@ function manifestIdOf(p: any): string | undefined {
 }
 
 /**
+ * [#28039] The datasources a package body declares, as `AppPlugin` reads a
+ * stack's: a list, or a map keyed by name.
+ */
+function declaredDatasources(body: unknown): any[] {
+    const defs = isPlainObject(body) ? body.datasources : undefined;
+    return Array.isArray(defs)
+        ? defs
+        : isPlainObject(defs)
+            ? Object.entries(defs).map(([name, def]) => ({ name, ...(def as any) }))
+            : [];
+}
+
+/**
  * The seed datasets a cached manifest bundles: its `data[]` entries that name
  * an object and carry records. One reading for the two doors that match seed
  * rows — the purge, and the listing's `withSampleData` (#21775).
@@ -3518,58 +3531,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [#21321] Bind an installed package's executable handlers — its
-     * `type: 'script'` action bodies and its body hooks — through
-     * `bindAppArtifactHandlers`, the runtime's ONE binder and the call
-     * `AppPlugin.start` makes for a boot artifact, under the same owner
-     * (`app:<manifestId>`). Called on the install route and on the
-     * `kernel:ready` rehydrate.
-     *
-     * [#21489] …and schedule its jobs through `scheduleAppArtifactJobs`, the
-     * binder's job half and the call `AppPlugin` makes on `kernel:ready`: a job
-     * `body` runs sandboxed on its schedule, hot and after a restart. A
-     * handler-only job never reaches here on an install — the install route
-     * refuses it ({@link unrunnableCode}) — and on a rehydrate of an entry an
-     * older build installed it is reported at `warn` and not run.
-     *
-     * [#21585] This door carries no runtime module, and says so to the binder
-     * (`withholdHooksWithoutBody`): a hook with no `body` is warned and NOT
-     * bound, because its function-name `handler` can never name the package's
-     * own code here. The install route refuses such a hook, so this fires only
-     * on the rehydrate of an entry an older build installed — which before this
-     * bound the hook by name to whatever function the engine held under it.
-     *
-     * Before this, `manifest.register` was the whole install: the package's
-     * actions and hooks were DECLARED and never bound, so every door refused
-     * its script actions ("No handler registered" over MCP, 404 over REST)
-     * before and after a restart, and its body hooks never fired — while an
-     * `os start --artifact` boot of the same file dispatched them.
-     *
-     * The binder replaces the owner's previous set, so a reinstall leaves each
-     * action with exactly one handler and stops whatever the new version
-     * dropped. ⛔ No second registration path lives here: a runtime without the
-     * binder (an older build, or a suite that mocks `@objectstack/runtime`
-     * without it) binds NOTHING and says so — the package's script actions then
-     * stay unrunnable, and `list_actions` does not advertise them. The same
-     * holds for the job half: no job is scheduled here by any other route.
-     *
-     * Resolved lazily through `@objectstack/runtime`, like every other runtime
-     * helper this plugin calls. Never throws.
-     */
-    /**
-     * [#28039] The datasources a package body declares, as `AppPlugin` reads a
-     * stack's: a list, or a map keyed by name.
-     */
-    private static declaredDatasources(body: unknown): any[] {
-        const defs = isPlainObject(body) ? body.datasources : undefined;
-        return Array.isArray(defs)
-            ? defs
-            : isPlainObject(defs)
-                ? Object.entries(defs).map(([name, def]) => ({ name, ...(def as any) }))
-                : [];
-    }
-
-    /**
      * [#28039] Register, record and connect the datasources `manifest`
      * declares, through `connectPackageDatasources` — the ONE path, which
      * `AppPlugin.start` takes for the artifact the host boots: each registered
@@ -3599,7 +3560,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         version: string | undefined,
     ): Promise<Array<{ name: string; status: string }> | undefined> => {
-        const declared = MarketplaceInstallLocalPlugin.declaredDatasources(manifest);
+        const declared = declaredDatasources(manifest);
         let connect: typeof import('@objectstack/runtime')['connectPackageDatasources'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
@@ -3651,7 +3612,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifest: unknown,
         manifestId: string,
     ): Promise<{ name: string; holder: string } | undefined> => {
-        const names = MarketplaceInstallLocalPlugin.declaredDatasources(manifest)
+        const names = declaredDatasources(manifest)
             .map((ds) => ds?.name)
             .filter((name): name is string => typeof name === 'string' && name.length > 0);
         if (names.length === 0) return undefined;
@@ -3674,6 +3635,45 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         return undefined;
     };
 
+    /**
+     * [#21321] Bind an installed package's executable handlers — its
+     * `type: 'script'` action bodies and its body hooks — through
+     * `bindAppArtifactHandlers`, the runtime's ONE binder and the call
+     * `AppPlugin.start` makes for a boot artifact, under the same owner
+     * (`app:<manifestId>`). Called on the install route and on the
+     * `kernel:ready` rehydrate.
+     *
+     * [#21489] …and schedule its jobs through `scheduleAppArtifactJobs`, the
+     * binder's job half and the call `AppPlugin` makes on `kernel:ready`: a job
+     * `body` runs sandboxed on its schedule, hot and after a restart. A
+     * handler-only job never reaches here on an install — the install route
+     * refuses it ({@link unrunnableCode}) — and on a rehydrate of an entry an
+     * older build installed it is reported at `warn` and not run.
+     *
+     * [#21585] This door carries no runtime module, and says so to the binder
+     * (`withholdHooksWithoutBody`): a hook with no `body` is warned and NOT
+     * bound, because its function-name `handler` can never name the package's
+     * own code here. The install route refuses such a hook, so this fires only
+     * on the rehydrate of an entry an older build installed — which before this
+     * bound the hook by name to whatever function the engine held under it.
+     *
+     * Before this, `manifest.register` was the whole install: the package's
+     * actions and hooks were DECLARED and never bound, so every door refused
+     * its script actions ("No handler registered" over MCP, 404 over REST)
+     * before and after a restart, and its body hooks never fired — while an
+     * `os start --artifact` boot of the same file dispatched them.
+     *
+     * The binder replaces the owner's previous set, so a reinstall leaves each
+     * action with exactly one handler and stops whatever the new version
+     * dropped. ⛔ No second registration path lives here: a runtime without the
+     * binder (an older build, or a suite that mocks `@objectstack/runtime`
+     * without it) binds NOTHING and says so — the package's script actions then
+     * stay unrunnable, and `list_actions` does not advertise them. The same
+     * holds for the job half: no job is scheduled here by any other route.
+     *
+     * Resolved lazily through `@objectstack/runtime`, like every other runtime
+     * helper this plugin calls. Never throws.
+     */
     private bindArtifactHandlers = async (ctx: PluginContext, manifest: unknown, manifestId: string): Promise<void> => {
         let ql: IObjectQLEngine | undefined;
         try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
