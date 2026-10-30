@@ -82,8 +82,8 @@ describe('month bucket keys on the category axis (row 15)', () => {
 
 describe('legend swatches (row 15)', () => {
   const compared = [
-    { dataKey: 'n', label: 'Count', variant: 'current' },
-    { dataKey: 'n__compare', label: 'Count · vs last quarter', variant: 'comparison' },
+    { dataKey: 'n', label: 'Count', variant: 'current' as const },
+    { dataKey: 'n__compare', label: 'Count · vs last quarter', variant: 'comparison' as const },
   ];
   const rows = [{ stage: 'Prospecting', n: 3, n__compare: 2 }, { stage: 'Proposal', n: 5, n__compare: 4 }];
 
@@ -101,7 +101,7 @@ describe('legend swatches (row 15)', () => {
     }
   });
 
-  it.each(['bar', 'line', 'area'])('%s: the comparison swatch is hollow and the primary one solid, in the same colour', async (chartType) => {
+  it.each(['bar', 'line', 'area'] as const)('%s: the comparison swatch is hollow and the primary one solid, in the same colour', async (chartType) => {
     const { container } = render(
       <AdvancedChartImpl chartType={chartType} data={rows} xAxisKey="stage" series={compared} isAnimationActive={false} />,
     );

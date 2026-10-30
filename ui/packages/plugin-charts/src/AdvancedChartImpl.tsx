@@ -545,14 +545,15 @@ const CATEGORY_LABEL_LINE_EM = 1.1;
  * characters, which left a bar named only by its first letters ("In Progr…").
  */
 function WrappedCategoryTick(props: any) {
-  const { x, y, payload, textAnchor, maxWidthPx, formatLabel } = props;
+  const { x, y, payload, textAnchor, orientation, maxWidthPx, formatLabel } = props;
   const full = String(formatLabel(payload?.value) ?? '');
   const { lines, truncated } = wrapCategoryLabel(full, maxWidthPx);
   // Centre the block on the tick: the first line rises half the extra lines,
   // and 0.355em puts a line's middle (not its baseline) on `y`.
   const firstDy = `${0.355 - ((lines.length - 1) * CATEGORY_LABEL_LINE_EM) / 2}em`;
   return (
-    <text x={x} y={y} textAnchor={textAnchor ?? 'end'} fill={AXIS_TICK_STYLE.fill} className="recharts-text recharts-cartesian-axis-tick-value">
+    // `orientation` as recharts' own tick text carries it: the side the axis is drawn on.
+    <text x={x} y={y} textAnchor={textAnchor ?? 'end'} fill={AXIS_TICK_STYLE.fill} orientation={orientation} className="recharts-text recharts-cartesian-axis-tick-value">
       {truncated ? <title>{full}</title> : null}
       {lines.map((line, i) => (
         <tspan key={i} x={x} dy={i === 0 ? firstDy : `${CATEGORY_LABEL_LINE_EM}em`}>{line}</tspan>
@@ -621,8 +622,8 @@ const DATA_LABEL_CHART_MARGIN = {
  *
  * ## Why this size
  *
- * Half of a `YYYY-MM` label, the bucket a monthly trend chart draws, at the
- * tick font, by the same upper estimate the rotated band is sized from
+ * Half of a month bucket's label (`Oct 2026`, the face a `YYYY-MM` key draws,
+ * objectstack#27520), the bucket a monthly trend chart draws, at the tick font, by the same upper estimate the rotated band is sized from
  * ({@link estimateLabelWidthPx}), less the chart margin already on that side.
  * A fixed figure, not one sized from each chart's labels, so every line and
  * area chart lays out the same way. It is not a bound on every label: a long
@@ -633,7 +634,7 @@ const DATA_LABEL_CHART_MARGIN = {
  * derived from recharts' layout, not measured in a browser.
  */
 const POINT_X_AXIS_EDGE_PADDING_PX =
-  Math.ceil(estimateLabelWidthPx('0000-00') / 2) - CHART_MARGIN_X_PX / 2;
+  Math.ceil(estimateLabelWidthPx('Mmm 0000') / 2) - CHART_MARGIN_X_PX / 2;
 /** A module constant so recharts' axis settings memo is not defeated per render. */
 const POINT_X_AXIS_PADDING = {
   left: POINT_X_AXIS_EDGE_PADDING_PX,

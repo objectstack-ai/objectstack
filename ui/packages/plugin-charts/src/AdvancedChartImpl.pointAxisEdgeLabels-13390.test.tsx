@@ -6,7 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  *
  * objectui#13390 — a line or area chart cut its last x-axis label at the
- * chart's right edge: "2026-10" was painted as "2026".
+ * chart's right edge: "2026-10" was painted as "2026". The month buckets now
+ * draw as "Oct 2026" (objectstack#27520), and the same inset holds them.
  *
  * recharts lays a line or area chart's categorical x axis out as a POINT
  * scale, so the first and last categories sit ON the plot edges and each label
@@ -70,6 +71,8 @@ const MONTHS = [
   { month: '2026-09', tasks: 18 },
   { month: '2026-10', tasks: 9 },
 ];
+/** The labels the axis draws for them: a month bucket key's face (objectstack#27520). */
+const MONTH_LABELS = ['Aug 2026', 'Sep 2026', 'Oct 2026'];
 
 /** Upper estimate of half a tick label's painted width at the 12px tick font. */
 const halfLabelPx = (label: string) => ([...label].length * 0.65 * 12) / 2;
@@ -105,9 +108,7 @@ function plotOf(container: HTMLElement) {
 /** Each x-axis tick label: its text, the x it is centred on, and whether it is rotated. */
 function xTicksOf(container: HTMLElement) {
   const ticks = [...container.querySelectorAll('.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value')];
-  expect(ticks.map((t) => (t.textContent ?? '').trim()), 'the x axis did not draw every month').toEqual(
-    MONTHS.map((r) => r.month),
-  );
+  expect(ticks.map((t) => (t.textContent ?? '').trim()), 'the x axis did not draw every month').toEqual(MONTH_LABELS);
   return ticks.map((t) => ({
     label: (t.textContent ?? '').trim(),
     x: Number(t.getAttribute('x')),
