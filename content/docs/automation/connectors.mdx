@@ -455,7 +455,7 @@ retry):
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
 | Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
-| A bad entry arrives via **runtime reload** (Studio publish / dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
+| A bad entry arrives via **runtime reload** (a Studio publish, a direct active save through `PUT /api/v1/meta/connector/:name`, or a delete, made on any replica — peers reconcile on [cluster lane 2](/docs/kernel/cluster#62-the-cluster-invalidation-family); or a dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
 
 ## Catalog descriptors: entries without a `provider`
 
