@@ -47,15 +47,22 @@ export interface FavoriteItem {
   /**
    * Item kind.
    *
-   * - `object` / `dashboard` / `page` / `report` / `record` — content favorites
-   *   surfaced on Home (Starred Apps) and the sidebar Favorites section.
+   * - `object` / `dashboard` / `page` / `report` / `record` / `view` — content
+   *   favorites surfaced on Home (Starred Apps) and the sidebar Favorites
+   *   section. A `view` is one list view of an object (objectstack#27594), id
+   *   `view:OBJECT:VIEW`; the sidebar draws it only in the app its `href` names.
    * - `nav` — a sidebar navigation entry promoted to the "Pinned" position via
    *   the in-tree pin toggle (see `useNavPins`). Excluded from Home/Starred and
    *   from the generic sidebar Favorites list so it doesn't render twice.
    */
-  type: 'object' | 'dashboard' | 'page' | 'report' | 'record' | 'nav';
+  type: 'object' | 'dashboard' | 'page' | 'report' | 'record' | 'view' | 'nav';
   /** ISO timestamp of when the item was favorited */
   favoritedAt: string;
+  /**
+   * The icon the sidebar draws for the item, a Lucide name. Set for a `view`
+   * favorite: the icon of the object the view lists (objectstack#27594).
+   */
+  icon?: string;
   /**
    * When true, the item is pinned to the top of the sidebar (Pinned section).
    * `nav`-type items are always pinned by construction; other types may also
@@ -110,6 +117,15 @@ interface FavoritesContextValue {
    * favorite keep their places. An id with no nav favorite is ignored.
    */
   reorderNavPins: (navIds: string[]) => void;
+  /**
+   * Put the named content favorites (not `nav` pins) in this order
+   * (objectstack#27594): the sidebar's Favorites rows after the pinned
+   * entries, as the user dragged them. Like {@link reorderNavPins}, the named
+   * favorites take the positions they already hold, so a favorite that is not
+   * named (one the sidebar of another app draws, say) keeps its place. An id
+   * with no content favorite is ignored.
+   */
+  reorderFavorites: (ids: string[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,11 +200,33 @@ function withNavPinOrder(items: FavoriteItem[], navIds: string[]): FavoriteItem[
   for (const f of items) {
     if (f.type === 'nav' && f.navId && !byNavId.has(f.navId)) byNavId.set(f.navId, f);
   }
+  return withNamedOrder(items, navIds, byNavId);
+}
+
+/**
+ * `items` with the content favorites (every type but `nav`) named by `ids` put
+ * in that order, in the positions they already hold; `items` itself when
+ * nothing moves (objectstack#27594).
+ */
+export function withFavoriteOrder(items: FavoriteItem[], ids: string[]): FavoriteItem[] {
+  const byId = new Map<string, FavoriteItem>();
+  for (const f of items) {
+    if (f.type !== 'nav' && !byId.has(f.id)) byId.set(f.id, f);
+  }
+  return withNamedOrder(items, ids, byId);
+}
+
+/** `items` with the entries `byKey` finds for `keys` put in that order, in the positions they hold. */
+function withNamedOrder(
+  items: FavoriteItem[],
+  keys: string[],
+  byKey: Map<string, FavoriteItem>,
+): FavoriteItem[] {
   const wanted: FavoriteItem[] = [];
   const seen = new Set<string>();
-  for (const id of navIds) {
-    const f = byNavId.get(id);
-    if (f && !seen.has(id)) { wanted.push(f); seen.add(id); }
+  for (const key of keys) {
+    const f = byKey.get(key);
+    if (f && !seen.has(key)) { wanted.push(f); seen.add(key); }
   }
   const moving = new Set(wanted);
   let k = 0;
@@ -505,6 +543,18 @@ export function FavoritesProvider({ children }: FavoritesProviderProps) {
     [commit],
   );
 
+  const reorderFavorites = useCallback(
+    (ids: string[]) => {
+      setFavorites(prev => {
+        const updated = withFavoriteOrder(prev, ids);
+        if (updated === prev) return prev;
+        commit(updated);
+        return updated;
+      });
+    },
+    [commit],
+  );
+
   const value = useMemo<FavoritesContextValue>(() => {
     const pinnedNavIds = new Set<string>();
     for (const f of favorites) {
@@ -522,8 +572,9 @@ export function FavoritesProvider({ children }: FavoritesProviderProps) {
       isPinned: (id: string) => favorites.some(f => f.id === id && !!f.pinned),
       pinnedNavIds,
       reorderNavPins,
+      reorderFavorites,
     };
-  }, [favorites, addFavorite, removeFavorite, toggleFavorite, clearFavorites, refreshLabel, setPinned, reorderNavPins]);
+  }, [favorites, addFavorite, removeFavorite, toggleFavorite, clearFavorites, refreshLabel, setPinned, reorderNavPins, reorderFavorites]);
 
   return (
     <FavoritesContext.Provider value={value}>
@@ -559,6 +610,7 @@ export function useFavorites(): FavoritesContextValue {
       isPinned: () => false,
       pinnedNavIds: new Set<string>(),
       reorderNavPins: () => {},
+      reorderFavorites: () => {},
     };
   }
   return ctx;

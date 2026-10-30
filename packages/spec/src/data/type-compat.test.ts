@@ -181,6 +181,41 @@ describe('isCompatible', () => {
     }
   });
 
+  // A `user` field's target is fixed to `sys_user`, so the column holds a
+  // platform user id: a string (better-auth mints 32 alphanumeric characters,
+  // the SQL driver 16-character nanoids), never an integer. A text column backs
+  // it exactly; an integer column cannot hold one, so it stays refused there,
+  // even though `lookup` is exact on the same rows.
+  it('accepts a text column for a user field and refuses an integer one', () => {
+    expect(isCompatible('varchar(255)', 'user')).toBe(true);
+    expect(isCompatible('text', 'user')).toBe(true);
+    expect(isCompatible('citext', 'user', 'postgres')).toBe(true);
+    expect(isCompatible('STRING', 'user', 'bigquery')).toBe(true);
+    expect(isCompatible('Edm.String', 'user', 'odata')).toBe(true);
+    // The pre-existing exact row, unchanged.
+    expect(isCompatible('uuid', 'user')).toBe(true);
+    expect(isCompatible('Edm.Guid', 'user', 'odata')).toBe(true);
+    // A platform user id is never an integer.
+    expect(isCompatible('integer', 'user')).toBe(false);
+    expect(isCompatible('bigint', 'user')).toBe(false);
+    expect(isCompatible('int8', 'user', 'postgres')).toBe(false);
+    expect(isCompatible('Edm.Int32', 'user', 'odata')).toBe(false);
+    expect(isCompatible('Edm.Int64', 'user', 'odata')).toBe(false);
+    // The same integer columns back a lookup: the difference is the target.
+    expect(isCompatible('integer', 'lookup')).toBe(true);
+    expect(isCompatible('Edm.Int32', 'lookup', 'odata')).toBe(true);
+    // Not key-shaped at all.
+    expect(isCompatible('boolean', 'user')).toBe(false);
+    expect(isCompatible('jsonb', 'user', 'postgres')).toBe(false);
+  });
+
+  it('does not suggest a user field for a text column', () => {
+    // The draft suggests from the column alone and a text column says nothing
+    // about holding user ids, so the suggestion stays `text`.
+    expect(suggestFieldTypeForSqlType('varchar(255)')).toBe('text');
+    expect(suggestFieldTypeForSqlType('Edm.String', 'odata')).toBe('text');
+  });
+
   it('returns "lossy" for usable-but-imperfect mappings', () => {
     expect(isCompatible('jsonb', 'text', 'postgres')).toBe('lossy');
     expect(isCompatible('date', 'datetime')).toBe('lossy');

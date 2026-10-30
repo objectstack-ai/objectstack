@@ -16,8 +16,9 @@
  * kebab); this one never did. The consequence was a contradiction on one
  * screen: the same action was hidden from an unentitled user in the row kebab
  * and offered to them in the bulk bar the moment they ticked a checkbox — and
- * for a `type: 'api'` action pointed at a custom endpoint, nothing behind it
- * was guaranteed to say no.
+ * for a `type: 'api'` action whose `target` is on another origin, which the
+ * platform action door never dispatches (ADR-0066 D4 as amended), nothing
+ * behind it was guaranteed to say no.
  *
  * The rule is the engine's, verbatim: an empty declaration always passes,
  * several are AND-ed, and unknown capabilities fail OPEN (the server is the

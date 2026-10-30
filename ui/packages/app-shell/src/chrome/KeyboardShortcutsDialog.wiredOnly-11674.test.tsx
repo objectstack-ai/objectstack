@@ -118,6 +118,13 @@ function readAdvertised(): Array<{ id: string; chord: ShortcutChord }> {
 
 /** The console chrome as `AppContent` composes it, with the dialog inside. */
 function mountConsole(path: string) {
+  // A wide window: below `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` the console folds
+  // the sidebar to its rail on mount (objectstack#27593), and the sidebar
+  // probe starts from the expanded sidebar.
+  (window as unknown as { happyDOM: { setViewport: (v: { width: number; height: number }) => void } }).happyDOM.setViewport({
+    width: 1440,
+    height: 900,
+  });
   return render(
     <MemoryRouter initialEntries={[path]}>
       <NavigationProvider>

@@ -37,16 +37,27 @@ function buildArtifact(manifestOverride: Record<string, unknown> = manifest, ext
 }
 
 describe('readTarGz / readOspluginManifest (inverse of createTarGz)', () => {
-    it('round-trips the files and extracts the manifest', () => {
+    it('round-trips the files and extracts the manifest', async () => {
         const blob = buildArtifact();
         const files = readTarGz(blob);
         expect(files.map((f) => f.path).sort()).toEqual([MANIFEST_FILENAME, SIGNATURE_FILENAME, 'dist/index.mjs'].sort());
         expect(Buffer.from(files.find((f) => f.path === 'dist/index.mjs')!.data).toString()).toBe('export const x=1;\n');
-        expect(readOspluginManifest(blob)).toMatchObject({ id: 'com.acme.demo', version: '1.2.0' });
+        await expect(readOspluginManifest(blob)).resolves.toMatchObject({ id: 'com.acme.demo', version: '1.2.0' });
     });
-    it('throws when the manifest is absent', () => {
+    it('throws when the manifest is absent', async () => {
         const blob = new Uint8Array(createTarGz([{ path: 'dist/index.mjs', data: new Uint8Array([1, 2, 3]) }]));
-        expect(() => readOspluginManifest(blob)).toThrow(/not found/);
+        await expect(readOspluginManifest(blob)).rejects.toThrow(/not found/);
+    });
+    it("parses through ManifestSchema: a pre-retirement manifest (packaging: 'manifest-deps') throws the schema's prescription", async () => {
+        const blob = buildArtifact({ ...manifest, packaging: 'manifest-deps' });
+        await expect(readOspluginManifest(blob)).rejects.toThrow(/packaging: `packaging: 'manifest-deps'` was removed/);
+        await expect(readOspluginManifest(blob)).rejects.toThrow(/Delete the key/);
+    });
+    it('parses through ManifestSchema: a drifted manifest throws naming each issue', async () => {
+        const drifted: Record<string, unknown> = { ...manifest, integrity: ['not', 'a', 'map'] };
+        delete drifted.name;
+        const blob = buildArtifact(drifted);
+        await expect(readOspluginManifest(blob)).rejects.toThrow(/is not a valid plugin manifest: .*name: .*integrity: /);
     });
 });
 
@@ -101,6 +112,36 @@ describe('os plugin publish (end-to-end, mocked cloud)', () => {
         expect(calls[1].body.plugin_manifest).toMatchObject({ id: 'com.acme.demo', runtime: 'sandbox' });
     });
 
+    it('uploads the manifest the artifact carries, as it carries it (no schema default stamped)', async () => {
+        dir = await mkdtemp(join(tmpdir(), 'plugin-publish-'));
+        const blob = buildArtifact();
+        const artifactPath = join(dir, 'com.acme.demo-1.2.0.osplugin');
+        await writeFile(artifactPath, blob);
+        process.env.OS_CLOUD_URL = 'http://cloud.test';
+        process.env.OS_CLOUD_API_KEY = 'tok_123';
+        const bodies: any[] = [];
+        vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+            bodies.push(JSON.parse(init.body));
+            const data = url.endsWith('/versions') ? { version: '1.2.0' } : { id: 'pkg_1', created: true };
+            return { ok: true, status: 200, json: async () => ({ success: true, data }), statusText: 'OK' } as any;
+        }));
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        try {
+            await PluginPublish.run([artifactPath]);
+        } finally {
+            logSpy.mockRestore();
+        }
+        expect(bodies).toHaveLength(2);
+        // Exactly the artifact's own manifest: `ManifestSchema` would stamp
+        // `scope` and `defaultDatasource`, and neither is uploaded.
+        expect(bodies[1].plugin_manifest).toEqual(manifest);
+        // Key for key, in the archive entry's own order (#27914).
+        const entry = readTarGz(blob).find((f) => f.path === MANIFEST_FILENAME)!;
+        expect(JSON.stringify(bodies[1].plugin_manifest)).toBe(JSON.stringify(JSON.parse(Buffer.from(entry.data).toString('utf8'))));
+        expect(bodies[1].plugin_manifest).not.toHaveProperty('scope');
+        expect(bodies[1].plugin_manifest).not.toHaveProperty('defaultDatasource');
+    });
+
     async function runExpectingRefusal(blob: Uint8Array): Promise<{ output: string; fetchCalls: number }> {
         dir = await mkdtemp(join(tmpdir(), 'plugin-publish-'));
         const artifactPath = join(dir, 'com.acme.demo-1.2.0.osplugin');
@@ -120,6 +161,23 @@ describe('os plugin publish (end-to-end, mocked cloud)', () => {
         }
         return { output: lines.join('\n'), fetchCalls: fetchMock.mock.calls.length };
     }
+
+    it("refuses a pre-retirement artifact (packaging: 'manifest-deps') with the schema's prescription, before any upload", async () => {
+        const { output, fetchCalls } = await runExpectingRefusal(buildArtifact({ ...manifest, packaging: 'manifest-deps' }));
+        expect(fetchCalls).toBe(0); // refused pre-upload — no request left the machine
+        expect(output).toMatch(/^ +• packaging: `packaging: 'manifest-deps'` was removed/m);
+        expect(output).toMatch(/Delete the key/);
+        expect(output).toContain('os plugin build');
+    });
+
+    it('refuses a compiled manifest ManifestSchema refuses, naming each issue, before any upload', async () => {
+        const drifted: Record<string, unknown> = { ...manifest, integrity: ['not', 'a', 'map'] };
+        delete drifted.name;
+        const { output, fetchCalls } = await runExpectingRefusal(buildArtifact(drifted));
+        expect(fetchCalls).toBe(0);
+        expect(output).toMatch(/^ +• name: /m);
+        expect(output).toMatch(/^ +• integrity: /m);
+    });
 
     it('refuses the publish before any upload when a declared digest mismatches', async () => {
         const tampered = { ...manifest, integrity: { 'dist/index.mjs': sriDigest(new Uint8Array(Buffer.from('other bytes'))) } };

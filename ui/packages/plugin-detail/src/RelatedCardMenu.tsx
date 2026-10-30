@@ -12,26 +12,27 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  cn,
 } from '@object-ui/components';
-import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, EyeOff, Maximize2, MoreHorizontal } from 'lucide-react';
+import { EyeOff, GripVertical, MoreHorizontal } from 'lucide-react';
 import type { RelatedCardChrome } from './relatedListCompact';
 import { useDetailTranslation } from './useDetailTranslation';
 
 /**
- * A related card's own `⋯` menu (objectstack#27055, Targets 7 and 10): the
- * keyboard path to everything the pointer does — 上移 / 下移 (the drag's
- * twin), 折叠 / 展开, 隐藏 — plus the enlarge. Drawn on the expanded card and
- * on the collapsed one alike.
+ * A related panel's own `⋯` menu (objectstack#27524, Target 1): it holds
+ * 隐藏 and nothing else. Moving is the ⠿ handle's ({@link RelatedPanelHandle});
+ * a panel does not collapse — its header row opens its whole list.
  */
 export const RelatedCardMenu: React.FC<{
   chrome: RelatedCardChrome;
-  /** The card's title, for the trigger's accessible name. */
+  /** The panel's title, for the trigger's accessible name. */
   title: string;
-  collapsed: boolean;
-  onExpand?: () => void;
-}> = ({ chrome, title, collapsed, onExpand }) => {
+}> = ({ chrome, title }) => {
   const { t } = useDetailTranslation();
   return (
     <DropdownMenu>
@@ -47,38 +48,66 @@ export const RelatedCardMenu: React.FC<{
           <MoreHorizontal className="h-3.5 w-3.5" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
-        {chrome.onEnlarge && (
-          <DropdownMenuItem className="gap-2" onSelect={() => chrome.onEnlarge?.()}>
-            <Maximize2 className="h-3.5 w-3.5" />
-            {t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuItem className="gap-2" disabled={!chrome.onMoveUp} onSelect={() => chrome.onMoveUp?.()}>
-          <ArrowUp className="h-3.5 w-3.5" />
-          {t('detail.relatedCardMoveUp', { defaultValue: 'Move up' })}
-        </DropdownMenuItem>
-        <DropdownMenuItem className="gap-2" disabled={!chrome.onMoveDown} onSelect={() => chrome.onMoveDown?.()}>
-          <ArrowDown className="h-3.5 w-3.5" />
-          {t('detail.relatedCardMoveDown', { defaultValue: 'Move down' })}
-        </DropdownMenuItem>
-        {collapsed ? (
-          <DropdownMenuItem className="gap-2" onSelect={() => onExpand?.()}>
-            <ChevronsUpDown className="h-3.5 w-3.5" />
-            {t('detail.relatedCardExpand', { defaultValue: 'Expand' })}
-          </DropdownMenuItem>
-        ) : (
-          <DropdownMenuItem className="gap-2" onSelect={() => chrome.onCollapse()}>
-            <ChevronsDownUp className="h-3.5 w-3.5" />
-            {t('detail.relatedCardCollapse', { defaultValue: 'Collapse' })}
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
+      <DropdownMenuContent align="end" className="w-36">
         <DropdownMenuItem className="gap-2" onSelect={() => chrome.onHide()}>
           <EyeOff className="h-3.5 w-3.5" />
           {t('detail.relatedCardHide', { defaultValue: 'Hide' })}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+};
+
+/**
+ * A related panel's ⠿ handle (objectstack#27524, Target 1): the drag source
+ * on desktop (the stack draws the drop line) and, focused, the keyboard's way
+ * to reorder — ⌥↑ / ⌥↓ move the panel one place, and the tooltip says so.
+ * The panel header draws it beside ＋ and ⋯, shown on hover or focus.
+ */
+export const RelatedPanelHandle: React.FC<{
+  chrome: RelatedCardChrome;
+  /** The panel's title, for the handle's accessible name. */
+  title: string;
+}> = ({ chrome, title }) => {
+  const { t } = useDetailTranslation();
+  const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+    const move = event.key === 'ArrowUp' ? chrome.onMoveUp : event.key === 'ArrowDown' ? chrome.onMoveDown : undefined;
+    if (!move) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const panel = event.currentTarget.closest('[data-related-card-id]');
+    move();
+    // Moving the panel in the DOM drops the focus; the handle keeps it.
+    requestAnimationFrame(() => {
+      const handle = panel?.isConnected ? panel.querySelector<HTMLElement>('[data-related-panel-handle]') : null;
+      handle?.focus();
+    });
+  };
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              chrome.dragHandleProps?.draggable && 'cursor-grab active:cursor-grabbing',
+            )}
+            aria-label={t('detail.relatedPanelReorder', { title, defaultValue: 'Reorder {{title}}' })}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            data-related-panel-handle=""
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={onKeyDown}
+            {...(chrome.dragHandleProps ?? {})}
+          >
+            <GripVertical className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {t('detail.relatedPanelReorderHint', { defaultValue: 'Drag to reorder · ⌥↑ ⌥↓' })}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 };

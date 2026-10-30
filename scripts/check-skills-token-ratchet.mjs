@@ -124,9 +124,21 @@
  *   - A ceiling may be LOWERED by any PR that shrinks its file. Lowering is
  *     always legitimate and encouraged; the report line below prints every
  *     file's headroom on every run so a shrink is visible the moment it lands.
- *   - Going the other way lands only in a PR whose body quotes a maintainer
- *     ruling authorizing it — the same evidence bar the `.claude/**` ratchet
- *     uses.
+ *   - Going the other way has ONE gate-recognised path — the standing ruling
+ *     (maintainer, 2026-10-27, on the skills-lane decision card 「skills 修复卡
+ *     的教学和 eval 都撞 token 天花板,怎么付?」, verbatim and untranslated:
+ *     「A:先削重复,余额按实测提高」), made the recognised path by ruling record
+ *     6513306068 on #27847 (letter B, maintainer 「其他同意」, 2026-10-30), in
+ *     the form #23606 B gave the `.claude/**` line ratchet. A PR whose diff
+ *     shows deletion of restatement IN THE SAME FILE and whose body quotes
+ *     that ruling (the 2026-10-27 words or record 6513306068) may move the
+ *     row by the measured remainder, pinned AT the measurement, with no
+ *     per-card ruling. A raise with no deletion shown and no ruling quoted
+ *     stays RED; a ruling of record that orders text into a file still
+ *     authorises its own measured delta; the 10402 principle (no growth for
+ *     a small feature) stands. The script cannot read diffs or rulings: the
+ *     deletion and the quote are checked by the seat's contract-review
+ *     record, never here.
  *
  * ## Enumeration, never a hand list
  *
@@ -150,13 +162,26 @@
  * repair; this paragraph exists so the boundary is legible WITHOUT diffing the
  * population against the filesystem, which is what #12392 was filed about.
  *
- * Three populations, and each one's reason:
+ * Four populations, and each one's reason:
  *
- *   1. PRICED — every hand-authored file inside a published skill directory.
- *      A published skill directory is a child of `skills/` carrying a SKILL.md;
- *      everything under it ships into the customer project together, so
- *      everything under it is priced together. `SKILL.md`, `rules/**`,
- *      `evals/**` and hand-authored `references/**` are all this.
+ *   1. PRICED — every hand-authored TEACHING file inside a published skill
+ *      directory. A published skill directory is a child of `skills/` carrying
+ *      a SKILL.md; everything under it ships into the customer project
+ *      together, and everything under it that a customer session LOADS is
+ *      priced together. `SKILL.md`, `rules/**`, `guides/**` and hand-authored
+ *      `references/**` are all this.
+ *
+ *   1b. EVAL FIXTURES — `skills/<name>/evals/**`. Measured and printed in the
+ *      bundle total, NOT ratcheted (ruling record 6513306068 on #27847,
+ *      letter B). An eval fixture scores the skill for its maintainers and is
+ *      inert in a consumer install (`skills/README.md`, the `evals/` entry of
+ *      the layout; no SKILL.md points at one), so it never enters the customer
+ *      context this gate prices — a ceiling on it priced repo bytes as if they
+ *      were customer tokens, and collided with #26369 B (a protocol addition
+ *      owes an eval). Their quality gates (`check:skill-eval-tokens`, the eval
+ *      self-consistency rule) are untouched. A CEILINGS row on an eval path is
+ *      RED, exactly as on a generated file. Membership is the path alone,
+ *      pinned in `--self-test`.
  *
  *   2. EXCLUDED — GENERATOR-OWNED outputs. `skills/<name>/references/_index.md`
  *      is written by `gen:skill-refs` and `references/react-blocks.md` by
@@ -167,7 +192,8 @@
  *      are a function of the schema source, so the author who could pay the
  *      ratchet's price by deleting text is not the author the red would land on.
  *      Their cost is still MEASURED and printed below — excluded from
- *      RATCHETING is not excluded from the bundle total.
+ *      RATCHETING is not excluded from the bundle total. Population 1b takes
+ *      the same treatment.
  *
  *   3. OUTSIDE — `skills/README.md`. Not inside any published skill directory:
  *      it is the catalog's own front page (and itself carries a generated index
@@ -637,7 +663,6 @@ export const CEILINGS = new Map([
   // `references/data-hooks.md` alone was larger than nine of the eleven
   // SKILL.md ceilings, which is the single fact that made #12392 a defect
   // rather than an observation.
-  ['skills/objectstack-data/evals/README.md', 143],
   // 12611 -> 10066: RE-LOCK at the landed count (#19715, card item 4). The file
   // gained a 5-line table of contents (+182 tokens, anchors to its own
   // headings); the row carried 2,727 tokens of headroom left by an earlier
@@ -654,7 +679,15 @@ export const CEILINGS = new Map([
   // zero headroom to absorb any of it, ceiling +126. Maintainer ruling
   // 2026-09-22 on decision batch #213 (item 1 carries the TOCs: 「四个超长 SKILL.md 按 500 行切,整段示例与 platform 的运维尾段下沉 references/,零删内容;同卡顺手:data 的 description 压到约 700 字符、长参考文件加目录」),
   // verbatim and untranslated: 「1 2 4 同意」.
-  ['skills/objectstack-data/rules/field-types.md', 3158],
+  // 3158 -> 3207 (#27994): the Currency resolution paragraph teaches the two `fixed`
+  // refusals #27991 added (a measure `currency` other than the field's `fixed` code; a
+  // derived measure over two `fixed` codes), each fix, and the not-judged tenant case.
+  // PAID DOWN FIRST by the Formula example's `returnType` comment, which restated the
+  // Calculated table's return types. The file is 12827 bytes -> 3207 tokens, zero
+  // headroom, ceiling +49, pinned AT the measurement. Standing ruling (2026-10-27, tap A,
+  // verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per ruling
+  // record 6513306068.
+  ['skills/objectstack-data/rules/field-types.md', 3207],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
@@ -761,72 +794,6 @@ export const CEILINGS = new Map([
   ['skills/objectstack-query/rules/filters.md', 2482],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
-  // objectstack-automation
-  ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
-  // NEW FILE (card #27223): the three integration cases — DocuSign (fails any
-  // answer proposing a platform plugin), Stripe read, vendor without a spec.
-  // Pinned AT its landed count, no headroom. Re-measured in the same PR's
-  // contract-review patch round (`clientSecret` -> `clientSecret:` in case 1's
-  // must_not_contain, so a correct answer naming the absent field still passes):
-  // 4772 -> 4773 bytes, 1193 -> 1194.
-  //   ceil($(wc -c < skills/objectstack-automation/evals/integrations-declared.json) / 4) == ceil(4773 / 4)
-  ['skills/objectstack-automation/evals/integrations-declared.json', 1194],
-
-  // objectstack-ui — the three authored eval files; its `references/react-blocks.md`
-  // is generator-owned and carries no row here on purpose (see the boundary
-  // section). Its JSON twin was retired by #14296 item 3 and is gone entirely.
-  // 289 -> 335 (#26633): the README lists the third eval file,
-  // `report-period-export.json`, in one three-line entry (+196 bytes). The
-  // README's four sections share no sentence, so there was no duplicate to cut
-  // (0 bytes). On `origin/main` the file was 1143 bytes (286 tokens, headroom
-  // 3); the LANDED file is 1339 bytes -> 335 tokens, ceiling +46, pinned AT the
-  // measurement. Same ruling as the `analytics-inline-vs-dataset.json` row
-  // below (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
-  //   ceil($(wc -c < skills/objectstack-ui/evals/README.md) / 4) == ceil(1339 / 4)
-  ['skills/objectstack-ui/evals/README.md', 335],
-  // 1102 -> 1229: the aggregate × field-type rule and the multi-value-dimension
-  // rule (card #24425, the skills half of cloud#2861 ruling B) each gain one
-  // regression case — a `formula` under `sum` and a `multiselect` as the
-  // group-by axis — because the published teaching is the only place an agent
-  // meets the rule before the refusal does, and this fixture is the only
-  // instrument that makes the wrong answer fail loudly at scoring (the repo has
-  // no eval runner). Maintainer ruling 2026-10-19, decision batch #369 item 1,
-  // letter A (the ruling comment on the card is 6259315766), verbatim and
-  // untranslated: 「其他同意」 — the card was presented as 「推荐:A」.
-  // Arithmetic, in bytes because that is what this convention divides, and
-  // PAID DOWN FIRST as the convention asks: on `origin/main` the file was 4388
-  // bytes (1097 tokens, headroom 5). The existing text was folded losslessly
-  // to 3780 bytes (945 tokens) — the description, the five expected_output
-  // strings, eval 2's note and prompts 1/3/4 tightened with every fact and
-  // every assertion kept — and the two cases then added +1135 bytes, so the
-  // LANDED file is 4915 bytes -> 1229 tokens: the 5 tokens of existing headroom
-  // are absorbed and the ceiling moves 1102 -> 1229 (+127). Pinned AT the
-  // measurement — zero headroom, so the next token added here is paid for by
-  // deleting one from this file. Independently reproducible without running
-  // this script:
-  //   ceil($(wc -c < skills/objectstack-ui/evals/analytics-inline-vs-dataset.json) / 4) == ceil(4915 / 4)
-  // 1229 -> 1348 (#26295): one eval prompt for the `duration` measure, +119 tokens in the
-  // file's shape. An eval file is fixtures — nothing in it restates anything, so there was
-  // nothing to delete to fund it; the whole addition is raised, pinned AT the measurement.
-  // Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
-  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  // 1348 -> 1361 (#26602), under the same ruling: the `duration` prompt also asks for the
-  // measure's `polarity`, part funded by deleting two parentheticals that restated an
-  // expected output (eval 2's, and eval 8's own gloss on the asserted value); the balance
-  // is raised, pinned AT the measurement (5443 bytes).
-  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1361],
-  // INITIAL measurement (#26633): the third authored eval file — ONE
-  // report-authoring prompt for `dateRange` on a `type: 'date'` dataset
-  // dimension and `exportOptions` csv / xlsx under the base object's
-  // `allowExport`, the eval owed by the spec PR that added both keys. A new
-  // file because both sibling eval files sat at headroom 0 and the analytics
-  // file was held by an open PR. Nothing in it restates anything (0 bytes
-  // cut); 1828 bytes -> 457 tokens, pinned AT the measurement — zero headroom,
-  // so the next token added here is paid for by deleting one from this file.
-  // Same ruling as the row above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
-  //   ceil($(wc -c < skills/objectstack-ui/evals/report-period-export.json) / 4) == ceil(1828 / 4)
-  ['skills/objectstack-ui/evals/report-period-export.json', 457],
-
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
   // Each row is an INITIAL measurement AT its landed count, so every one starts
   // with exactly zero headroom, on the same terms as the #12392 rows above: the
@@ -868,7 +835,15 @@ export const CEILINGS = new Map([
   // follows it down to the new measurement, the ratchet's ordinary direction.
   // 6239 -> 6221 (#26602): LOWERED. The metric-widget bullet teaches the measure's `polarity`,
   // paid inside the file; the ceiling follows the file down to the measurement (24881 bytes).
-  ['skills/objectstack-ui/rules/dashboards.md', 6221],
+  // 6221 -> 6262 (#27994): the dataset currency comment teaches the two `fixed` refusals
+  // #27991 added, each fix, and the two not-judged cases. PAID DOWN FIRST: the metric
+  // example's `colorVariant` comment no longer restates that the measure's `format` /
+  // `currency` drive the number (Widget `options` says it), and the measure example in the
+  // currency comment shrinks to its `currency` key (the dataset above shows the shape).
+  // The file is 25047 bytes -> 6262 tokens, zero headroom, ceiling +41, pinned AT the
+  // measurement. Standing ruling (2026-10-27, tap A, verbatim and untranslated):
+  // 「A:先削重复,余额按实测提高」; recognised path per ruling record 6513306068.
+  ['skills/objectstack-ui/rules/dashboards.md', 6262],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
@@ -887,252 +862,6 @@ export const CEILINGS = new Map([
   // 2026-09-22 on decision batch #213 item 1, verbatim and untranslated:
   // 「1 2 4 同意」.
   ['skills/objectstack-ui/rules/pages.md', 5692],
-
-  // ── 2026-09-22 evals fixtures — decision batch #213 item 2, PR #19721 ────
-  // Every published skill gained `evals/*.json` in the objectui fixture shape.
-  // The maintainer ruled the work in batch #213, verbatim and untranslated:
-  // 「1 2 4 同意」 on item 2 「objectstack 各 skill 先补 3 题 evals(复用 objectui 的
-  // json 形状),先于第 1 项,好量化『切了没变差』」. The eleven files landed
-  // unpriced on 02b931d2 and this gate redded on every one of them, as the
-  // header says it must; the maintainer's follow-up word, recorded as issue
-  // comment 5776586573 (2026-09-22), verbatim and untranslated —
-  // 「天花板行按照你的意见就行」 — adopts pricing them in. So: one row per file,
-  // each an INITIAL measurement taken on that same tree in the convention
-  // above (re-measured unchanged on the commit that adds the rows) and pinned
-  // AT it — zero headroom, on the same terms as the #12392 extension rows and
-  // the #14296 「NEW FILE … pinned at its landed count」 rows. Nothing else
-  // moves: no existing row is raised, the population is unchanged, and
-  // `evals/**` stays priced.
-  ['skills/objectstack-ai/evals/skills-tools-knowledge.json', 1074],
-  // 1042 -> 1234 (card #26299, the objectstack-api row of the skills gap
-  // audit): one eval for the import mapping's `applyOn: 'create'` — the
-  // published teaching is the only place an author meets the column policy
-  // before a re-run upsert reverts an admin's edit, and this fixture is the
-  // instrument that makes the wrong answer fail at scoring. Maintainer ruling
-  // 2026-10-27 on the seat's decision card 「skills 修复卡的教学和 eval 都撞
-  // token 天花板,怎么付?」, his tap verbatim and untranslated:
-  // 「A:先削重复,余额按实测提高」. Paid down first, as the ruling asks: the
-  // file's five fixtures share no sentence, so there was no duplicate to cut
-  // (0 bytes). Arithmetic in bytes, because that is what this convention
-  // divides: on `origin/main` the file was 4156 bytes (1039 tokens, headroom
-  // 3); the fixture adds +780 bytes, so the LANDED file is 4936 bytes -> 1234
-  // tokens: the 3 tokens of headroom are absorbed and the ceiling moves
-  // 1042 -> 1234 (+192). Pinned AT the measurement — zero headroom, so the
-  // next token added here is paid for by deleting one from this file.
-  // Independently reproducible without running this script:
-  //   ceil($(wc -c < skills/objectstack-api/evals/endpoints-auth-routes.json) / 4) == ceil(4936 / 4)
-  ['skills/objectstack-api/evals/endpoints-auth-routes.json', 1234],
-  // 1255 -> 1823 (card #26298): three eval prompts, one per new teaching — the
-  // applicant email over `{ emailField }`, `requiredPermissions` + `excludeSubmitter`
-  // on one approval, the screen `file` field written by a later `create_record`.
-  // +568 tokens, nothing in the file to delete, zero headroom, ceiling +568.
-  // Same maintainer ruling as the SKILL.md row above (2026-10-27, verbatim and
-  // untranslated): 「A:先削重复,余额按实测提高」.
-  // 1823 -> 2141 (card #26347): one eval prompt for the `record_link` result
-  // screen — a `convert_lead` screen flow that creates an account and a contact
-  // and ends on a screen linking both, the ideal answer written so it never
-  // spells the negated `type: 'record'`. Paid down first: the file's eight
-  // fixtures share no sentence, nothing to cut (0 bytes). 7289 -> 8561 bytes
-  // (+1272) -> ceil(8561 / 4) = 2141; headroom was 3 bytes, 0 tokens, so the
-  // ceiling moves +318, pinned AT the measurement. Same maintainer ruling as
-  // the SKILL.md row above (2026-10-27, verbatim and untranslated):
-  // 「A:先削重复,余额按实测提高」.
-  // 2141 -> 2427 (card #26362): one eval prompt for the record-anchored
-  // approval lock read — a record page that offers an edit to a member who is
-  // not on the approval, whose save the lock hook then refuses; the ideal
-  // answer reads the lock (`client.approvals.getRecordLock`) rather than a
-  // request row the non-participant is never served, written so it never
-  // spells either `must_not_contain` string. Paid down first: the file's nine
-  // fixtures share no sentence, nothing to cut (0 bytes). 8561 -> 9705 bytes
-  // (+1144) -> ceil(9705 / 4) = 2427; headroom was 3 bytes, 0 tokens, so the
-  // ceiling moves +286, pinned AT the measurement. Same maintainer ruling as
-  // the SKILL.md row above (2026-10-27, verbatim and untranslated):
-  // 「A:先削重复,余额按实测提高」.
-  // 9705 -> 10893 (#26502): eval 11, the counter-case to eval 1's readonly sweep
-  // — an author asks a system flow to grant a permission set; the ideal answer
-  // names the `PERMISSION_DENIED` refusal and routes the grant through a
-  // `runAs: 'user'` flow, written so it never spells either `must_not_contain`
-  // string. Paid down first: the file's ten fixtures share no sentence,
-  // nothing to cut (0 bytes). 9705 -> 10893 bytes (+1188) -> ceil(10893 / 4)
-  // = 2724; headroom was 3 bytes, 0 tokens, so the ceiling moves +297, pinned
-  // AT the measurement. Same maintainer ruling as the SKILL.md row above
-  // (2026-10-27, tap A verbatim and untranslated): 「A:先削重复,余额按实测提高」.
-  // 10893 -> 10934 (#26515): no new fixture — three ideal answers rewritten
-  // to agree with their own assertions (eval 5 spelled the negated error-label
-  // string, eval 7 lacked the `type: 'position'` approver and spelled the
-  // negated positions check, eval 8 lacked `type: 'screen'`). Paid down first:
-  // evals 5 and 7 shortened by 25 and 7 bytes; the `approvers` line eval 7
-  // owed costs more than that. +41 bytes -> ceil(10934 / 4) = 2734; headroom
-  // was 3 bytes, 0 tokens, so the ceiling moves +10, pinned AT the
-  // measurement. Same maintainer ruling as the SKILL.md row above (2026-10-27,
-  // tap A verbatim and untranslated): 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2734],
-  // 894 -> 1095 (#26179): one regression case for the field permission `when`
-  // (the contract prompt: lock the legal terms for finance from approval on,
-  // legal keeps the edit) — expected: `when` on the finance set's entries with
-  // `readable: true`, and NO validation rule or `readonlyWhen` locking the
-  // fields for every user. +201 tokens, zero headroom to absorb any of it,
-  // ceiling +201; nothing duplicated in the file to cut first. Same ruling as
-  // the `rules/security.md` row above (2026-10-27, tap A:
-  // 「A:先削重复,余额按实测提高」).
-  // 1095 -> 1404 (#26297): one regression case for the portal membership key
-  // (a portal user reads only the rows of the accounts they belong to —
-  // expected: `membershipKeys` on the roster object, `current_user.KEY` in the
-  // policy, the set bound through a position's `permissionSets`, the
-  // `external` tier), and the seed case gains the job-owned column declared
-  // `applyOn: 'create'`. +309 tokens at headroom 0, ceiling +309; nothing
-  // duplicated in the file to cut first. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
-  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  // 1404 -> 1573 (card #26834, the eval owed by the spec PR that added a
-  // hook's `refusals` catalogue): one case for a save refused over the
-  // account's credit limit in an app serving English and Chinese users —
-  // expected `refusals: { CREDIT_LIMIT: { message } }` on the hook, a
-  // `language: 'js'` body throwing `{ code: 'CREDIT_LIMIT' }`, the zh-CN
-  // sentence under the bundle's `hooks: { HOOK: { refusals } }`; NO sentence
-  // on the throw (`new Error('`), NO `handler:`. Triage 6450886908 (room
-  // inside the package first, no raise) read together with the standing
-  // ruling, strictest first — maintainer ruling 2026-10-27 on the decision
-  // card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim
-  // and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: five
-  // sentences in cases 1–5 that restated their own `must_not_contain`
-  // assertions (case 4 keeps its one non-asserted clause), 453 bytes = 114
-  // units; the case adds 1129 bytes = 283 units. On `origin/main` the file
-  // was 5616 bytes (1404 tokens, headroom 0); the LANDED file is 6292 bytes
-  // -> 1573 tokens, ceiling +169, pinned AT the measurement, zero headroom.
-  // The raising PR's body carries the same arithmetic.
-  //   ceil($(wc -c < skills/objectstack-data/evals/hooks-security-seeds-datasources.json) / 4) == ceil(6292 / 4)
-  // 1573 -> 1674 (card #27660, the Skills-docs follow-up owed by the
-  // objectql PR that refuses a credential column as a filter or sort key):
-  // one case for a list view filtered on a `secret` field by prefix —
-  // expected the redirect to the view dialect's presence rule
-  // (`operator: 'is_not_null'`) and the `INVALID_FIELD` refusal named; NO
-  // `starts_with`. Seat decision on the card's open question, applying the
-  // standing maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的
-  // 教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim and untranslated:
-  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: two clauses that restated
-  // their own case's `must_not_contain` — case 2's "Permission sets, not the
-  // object: " (restating `permissions: {`, 33 bytes) and case 8's " — no
-  // picklist, counter or insert hook" (restating `assigned_to` /
-  // `beforeInsert`, 40 bytes), 73 bytes = 18 units; the case adds 479 bytes =
-  // 120 units. On `origin/main` the file was 6289 bytes (1573 tokens, headroom
-  // 0); the LANDED file is 6695 bytes -> 1674 tokens, ceiling +101, pinned AT
-  // the measurement, zero headroom. The raising PR's thread carries the same
-  // arithmetic.
-  //   ceil($(wc -c < skills/objectstack-data/evals/hooks-security-seeds-datasources.json) / 4) == ceil(6695 / 4)
-  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1674],
-  // 946 -> 1050 (#26297): the invoice-line case gains the owner opt-in
-  // (`ownerMayEdit` on the controlled_by_parent line) and pins `added_by` as
-  // `type: 'user'`, never a lookup to a `user` object. +104 tokens at
-  // headroom 0, ceiling +104; nothing duplicated in the file to cut first.
-  // Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
-  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/evals/objects-fields-relationships.json', 1050],
-  // 1046 -> 1352 (card #26760): two eval cases for the `label(record.FIELD)`
-  // teaching — case 6 asks for a record name built from a select field and
-  // expects `label(record.kind)`, never a hard-coded label ternary; case 7
-  // asks for a validation and a `visibleWhen` and refuses `label(` there,
-  // where it faults and aborts the write. Maintainer ruling 2026-10-27 on the
-  // decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A,
-  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST:
-  // four sentences in cases 1, 2, 3 and 5 that restated their own
-  // `must_not_contain` assertions, 212 bytes = 53 units (1046 -> 993); the two
-  // cases add 1438 bytes = 359 units (993 -> 1352); pinned AT the measurement,
-  // zero headroom. The raising PR's body carries the same arithmetic.
-  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1352],
-  // 1004 -> 1451 (2026-10-27, the objectstack-i18n fix card of the skills gap
-  // audit): two eval prompts for the teaching that card adds — the `reports`,
-  // `positions`, `permissions` and `picklists` groups; a form view `title`, a
-  // section entry's own copy, a `page:tabs` item, an approval step. Maintainer
-  // ruling on the seat thread's decision card 「skills 修复卡的教学和 eval 都撞
-  // token 天花板,怎么付?」, tap label verbatim and untranslated:
-  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: the file carried no duplicated
-  // content to delete (five prompts, five distinct surfaces), so the remainder
-  // is the whole addition; pinned AT the measurement, zero headroom. The
-  // raising PR's body carries the same arithmetic.
-  // 1451 -> 1642 (2026-10-27, the owed Skills-docs follow-up of the spec PR that
-  // made a master-detail field's `inlineTitle` and a joined report's block
-  // `label` / `description` translatable): one eval prompt for both keys. Same
-  // ruling as the row above, tap label verbatim and untranslated:
-  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: case 6's `--no-objects-only`
-  // pin duplicated case 5's (77 bytes cut, 20 tokens); the remainder is the new
-  // case; pinned AT the measurement, zero headroom. The raising PR's body carries
-  // the same arithmetic.
-  // 1642 -> 1790 (2026-10-28, the owed Skills-docs follow-up of the spec PR that
-  // added the `books` translation group): one eval prompt for a doc book's
-  // spine copy — `books.<book>.label` / `.description` and
-  // `books.<book>.groups.<key>.label`. Same ruling as the rows above, tap label
-  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: five
-  // sentences restated a rule whose home the reader already reads — case 1's
-  // "no ICU plural/select" (SKILL.md "No ICU MessageFormat" + its own
-  // `{count, plural` pin), case 3's "retired o.* dialect" (SKILL.md "The
-  // Retired o.* Shape" + its own `o: {` pin), case 5's "extract --check is the
-  // freshness gate" (SKILL.md "os i18n extract --check — freshness, not
-  // coverage"), case 6's "inherited by every field referencing the picklist"
-  // (SKILL.md's `picklists` entry in the top-level group list), case 8's
-  // "neither is a pages.*.components key" (its own `components.open_block`
-  // pin): 227 bytes = 57 units (6567 -> 6340 bytes, 1642 -> 1585); the new case
-  // adds 817 bytes = 205 units (6340 -> 7157 bytes, 1585 -> 1790):
-  //   ceil($(wc -c < skills/objectstack-i18n/evals/bundles-locales-coverage.json) / 4) == ceil(7157 / 4)
-  // pinned AT the measurement, zero headroom. The raising PR's body carries the
-  // same arithmetic.
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1790],
-  // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
-  // expected: both in `demoStaff` with a declared `position` /
-  // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform
-  // set such as `admin_full_access`. Same ruling as the `SKILL.md` row above
-  // (2026-10-27, tap A: 「A:先削重复,余额按实测提高」); the file's six fixtures
-  // share no sentence, so there was no duplicate to cut (0 bytes). On
-  // `origin/main` the file was 4842 bytes (1211 tokens, headroom 0); the
-  // fixture adds +989 bytes, so the LANDED file is 5831 bytes -> 1458 tokens,
-  // ceiling +247, pinned AT the measurement.
-  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5831 / 4)
-  // 1458 -> 1469 (card #26302 follow-up): eval 7's expected output says what a
-  // seeded `sys_user` row becomes instead of "(refused)" — +42 bytes, so the
-  // file is 5831 -> 5873 bytes -> 1469 tokens, ceiling +11, pinned AT the
-  // measurement.
-  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5873 / 4)
-  // 1469 -> 1690 (card #26764, the eval the SKILL.md row above was paid with):
-  // one case for a demo account that reports to another — expected
-  // `manager: '<the other entry's email>'` on the subordinate's `demoStaff`
-  // entry and nothing else, `os dev` writing `manager_id` itself; NO seed row
-  // or hook writing `manager_id`, NO `reportsTo` alias. Triage 6448202744
-  // (room inside the package first) and the spec seat's note 6445537040 (the
-  // standing ruling, tap A verbatim: 「A:先削重复,余额按实测提高」). PAID DOWN
-  // FIRST: the file's seven fixtures share no sentence, so there was no
-  // duplicate to cut (0 bytes) and the remainder is the whole addition. On
-  // `origin/main` the file was 5873 bytes (1469 tokens, headroom 0); the
-  // fixture adds +885 bytes, so the LANDED file is 6758 bytes -> 1690 tokens,
-  // ceiling +221, pinned AT the measurement. The raising PR's body carries
-  // the same arithmetic.
-  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(6758 / 4)
-  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1690],
-  // 955 -> 1175: one regression case for the now-anchored comparand (the
-  // overdue-by-grace-days prompt) — expected `{ $now: true, addDays: { $field:
-  // 'grace_days_offset' } }` as the whole comparand of `$lt`, and NO stored
-  // formula field or `subDays`. +220 tokens, zero headroom to absorb any of
-  // it, ceiling +220; nothing duplicated in the file to cut first. Same ruling
-  // as the `rules/filters.md` row above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
-  ['skills/objectstack-query/evals/filters-pagination-search.json', 1175],
-  // 1505 -> 1789 (#26295): two eval prompts — list grouping with `orderBy`, and the copy hole
-  // + `onSuccess` pair — +284 tokens in the file's shape; fixtures, nothing to delete, the
-  // whole addition raised and pinned AT the measurement. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
-  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  // 1789 -> 2009: case 9, the `disabledReason` beside a `disabled` predicate (the reason never in
-  // `description`, the near-miss spellings refused) — +882 bytes; the file's cases share no
-  // sentence, so there was no duplicate to cut (0 bytes); cases 5 and 8 reworded so neither
-  // spells its own `must_not_contain` string (-2 bytes). 7154 -> 8034 bytes -> 2009 tokens,
-  // ceiling +220, pinned AT the measurement. Same ruling as the line above (2026-10-27, tap A:
-  // 「A:先削重复,余额按实测提高」).
-  // 2009 -> 2108 (#27609): case 10, the app's report index entry — `{ type: 'report' }` with no
-  // `reportName` (PR #27566), which the console no longer adds on its own — +398 bytes; the
-  // file's cases still share no sentence, so there was no duplicate to cut (0 bytes).
-  // 8034 -> 8432 bytes -> 2108 tokens, ceiling +99, pinned AT the measurement. Same ruling as
-  // the lines above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
-  //   ceil($(wc -c < skills/objectstack-ui/evals/views-apps-actions-pages.json) / 4) == ceil(8432 / 4)
-  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 2108],
-  ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
-
-  // the remaining skills' eval notes
 
   // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
   // The maintainer ruled the four over-500-line published SKILL.md files split
@@ -1155,7 +884,25 @@ export const CEILINGS = new Map([
   // request body or response, so the derived schema silently loses it):
   // 8705 -> 8814 bytes, 2177 -> 2204.
   //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8814 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2204],
+  // 8814 -> 8942 (card #27982): the "Holds on every recipe" input bullet
+  // re-teaches `connectorConfig.input` as an evaluated value-slot map, with a
+  // record-field example and the not-yet-judged-at-`os validate` note, and
+  // recipe 1's closing sentence teaches `providerConfig.include` (the `mcp`
+  // allowlist meaning, a non-array or unknown entry fatal) instead of denying
+  // the key. Paid down first, three restatements each with a surviving home:
+  // recipe 1's comment "3.x only, … every `$ref` dereferenced offline" (the
+  // same comment says "OpenAPI 3.x document"; the paragraph under the recipe
+  // says to dereference every `$ref` offline), recipe 5's comment ", written
+  // from the vendor's docs" (its heading says write the document by hand),
+  // and the OAuth bullet's "four variants and" (the Holds `auth` bullet lists
+  // them). Arithmetic: 8814 -> 8942 (+128 net) -> ceil(8942 / 4) = 2236;
+  // headroom was 0 tokens, so the ceiling moves +32, pinned AT the
+  // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
+  // ruling record 6513306068 on #27847.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8942 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2236],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching
@@ -1204,38 +951,12 @@ export const CEILINGS = new Map([
   // measurement of the moved file on the PR that moves it, after that PR's own
   // edits (the reserved-word rewrite, the `visibleWhen` key, the stamped
   // `metadata.version`, whose line is not priced), pinned AT it — zero
-  // headroom, on the same terms as the #12392 extension and the evals rows.
+  // headroom, on the same terms as the #12392 extension rows.
   // No existing row moves. Adding the rows is the pricing act the header
   // reserves to the maintainer; the PR that adds them is Tier H and lands only
   // on the maintainer's approval, which is that word.
   ['skills/objectui/README.md', 735],
   ['skills/objectui/SKILL.md', 1852],
-  ['skills/objectui/evals/app-composition.json', 810],
-  ['skills/objectui/evals/auth-permissions.json', 366],
-  ['skills/objectui/evals/data-integration.json', 471],
-  ['skills/objectui/evals/i18n.json', 439],
-  ['skills/objectui/evals/mobile.json', 452],
-  // 560 -> 684 (card #27243, the `Skills-docs: follow-up owed` of the
-  // `destructive` -> `danger` rename on the action blocks): eval 4, the first
-  // case in the bundle to exercise an action block's `variant` — a 'Delete
-  // product' button that must read as destructive and confirm first; the ideal
-  // answer writes `"variant": "danger"` with a `confirmText` on an
-  // `action:button`, and `"variant": "destructive"` (the Button primitive's
-  // word, refused on an action block at save) is a `must_not_contain`, spelled
-  // as the JSON key-value so a correct answer naming the primitive's word still
-  // passes. PAID DOWN FIRST: the three existing prompts and rubrics tightened,
-  // every `must_contain` token and fact kept (1206 -> 914 prose bytes, -292).
-  // Arithmetic in priced bytes: 2238 -> 2735 (+789 added, -292 cut, +497 net)
-  // -> ceil(2735 / 4) = 684; headroom was 2 bytes, 0 tokens, so the ceiling
-  // moves +124, pinned AT the measurement. Maintainer ruling 2026-10-27 on the
-  // seat's decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
-  // tap A verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectui/evals/page-builder.json', 684],
-  ['skills/objectui/evals/plugin-development.json', 492],
-  ['skills/objectui/evals/project-setup.json', 786],
-  ['skills/objectui/evals/protocol.json', 761],
-  ['skills/objectui/evals/schema-expressions.json', 536],
-  ['skills/objectui/evals/testing.json', 466],
   ['skills/objectui/guides/app-composition.md', 1079],
   ['skills/objectui/guides/architecture.md', 1045],
   ['skills/objectui/guides/auth-permissions.md', 3866],
@@ -1364,6 +1085,19 @@ export function generatorOwning(rel) {
 }
 
 /**
+ * Is this bundle path an eval fixture (population 1b)? `evals/` directly under
+ * a published skill directory, by path alone — the layout `skills/README.md`
+ * documents, and the directory the eval scorer reads. Measured, never
+ * ratcheted (ruling record 6513306068 on #27847, letter B).
+ *
+ * @param {string} rel
+ * @returns {boolean}
+ */
+export function isEvalFixture(rel) {
+  return /^skills\/[^/]+\/evals\//.test(rel);
+}
+
+/**
  * @param {string} rel
  * @param {number} tokens
  * @param {number | undefined} ceiling
@@ -1394,6 +1128,22 @@ export function verdict(rel, tokens, ceiling, generated = null) {
       msg: `${rel} is ${tokens} tokens — generator-owned (\`${generated.generator}\`), measured but not ratcheted.`,
     };
   }
+  if (isEvalFixture(rel)) {
+    // Same shape as the generated-file guard: a row here prices bytes no
+    // customer session loads, and reds the eval #26369 B says a protocol
+    // addition owes. The row is the error.
+    if (ceiling !== undefined) {
+      return {
+        ok: false,
+        msg:
+          `${rel} carries a CEILINGS row but is an EVAL FIXTURE. Eval fixtures are measured, never ratcheted `
+          + '(ruling record 6513306068 on #27847, letter B): they score the skill for its maintainers and are '
+          + 'inert in a consumer install, so no customer session pays for their bytes. Remove the row — the '
+          + 'file stays in the printed bundle total either way.',
+      };
+    }
+    return { ok: true, msg: `${rel} is ${tokens} tokens — eval fixture, measured but not ratcheted.` };
+  }
   if (ceiling === undefined) {
     return {
       ok: false,
@@ -1418,8 +1168,11 @@ export function verdict(rel, tokens, ceiling, generated = null) {
         + 'length is a per-token cost paid again in every customer session. New text is paid for by '
         + 'deleting text IN THE SAME FILE — genuine deletion, never a re-wrap, which moves no tokens '
         + 'and pays nothing. Loosening a ceiling to fit new text is not the fix: these ceilings are '
-        + 'shrink-only. The other direction lands only in a PR whose body quotes a maintainer ruling '
-        + `authorizing it. ${RATCHET_AUTHORITY_MARKER}`,
+        + 'shrink-only. The other direction has one gate-recognised path (ruling record 6513306068, letter B): '
+        + 'a PR whose diff shows deletion of restatement in the same file and whose body quotes the standing '
+        + 'maintainer ruling 2026-10-27 「A:先削重复,余额按实测提高」 may move the row by the measured '
+        + 'remainder, pinned AT the measurement. A raise with no deletion shown and no ruling quoted stays '
+        + `red. ${RATCHET_AUTHORITY_MARKER}`,
     };
   }
   return { ok: true, msg: `${rel} is ${tokens} tokens (ceiling ${ceiling}; headroom ${ceiling - tokens}).` };
@@ -1439,10 +1192,16 @@ export function reportLines(rows) {
   let pricedTokens = 0;
   let pricedCeiling = 0;
   let generatedTokens = 0;
+  let evalTokens = 0;
   for (const { rel, tokens, ceiling, generated } of rows) {
     if (generated) {
       generatedTokens += tokens;
       out.push(`   ${rel.padEnd(58)} ${String(tokens).padStart(6)} /      —   (generated)`);
+      continue;
+    }
+    if (isEvalFixture(rel)) {
+      evalTokens += tokens;
+      out.push(`   ${rel.padEnd(58)} ${String(tokens).padStart(6)} /      —   (eval fixture)`);
       continue;
     }
     pricedTokens += tokens;
@@ -1462,7 +1221,8 @@ export function reportLines(rows) {
     + `   (${net >= 0 ? '+' : ''}${net})`,
   );
   out.push(`   ${'generator-owned (measured, not ratcheted)'.padEnd(58)} ${String(generatedTokens).padStart(6)} /      —`);
-  out.push(`   ${'bundle total (whole shipped tree)'.padEnd(58)} ${String(pricedTokens + generatedTokens).padStart(6)}`);
+  out.push(`   ${'eval fixtures (measured, not ratcheted)'.padEnd(58)} ${String(evalTokens).padStart(6)} /      —`);
+  out.push(`   ${'bundle total (whole shipped tree)'.padEnd(58)} ${String(pricedTokens + generatedTokens + evalTokens).padStart(6)}`);
   return out;
 }
 
@@ -1500,7 +1260,8 @@ function run() {
     console.log(`✓ check-skills-token-ratchet: ${v.msg}${note}`);
   }
 
-  const ratcheted = rows.filter((r) => !r.generated).length;
+  const ratcheted = rows.filter((r) => !r.generated && !isEvalFixture(r.rel)).length;
+  const evalFixtures = rows.filter((r) => isEvalFixture(r.rel)).length;
 
   console.log('');
   for (const line of reportLines(rows)) console.log(line);
@@ -1511,7 +1272,8 @@ function run() {
   }
   console.log(
     `\n✓ check-skills-token-ratchet: ${ratcheted} authored bundle file(s) within their ceilings; `
-    + `${covered.length - ratcheted} generator-owned file(s) measured, not ratcheted.`,
+    + `${covered.length - ratcheted - evalFixtures} generator-owned file(s) and ${evalFixtures} eval fixture(s) `
+    + 'measured, not ratcheted.',
   );
 }
 
@@ -1588,6 +1350,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the unpriced-file remedy carries the authority token': 1,
   'no remedy tells the author to raise a ceiling': 1,
   'the raise is bound to a quoted maintainer ruling': 1,
+  'the standing path names its ruling of record': 1,
+  'the standing path requires deletion of restatement in the same file': 1,
+  'the standing path pins the row AT the measurement': 1,
+  'a raise with no deletion shown and no ruling quoted stays red': 1,
   'four ASCII bytes are one token': 1,
   'five ASCII bytes round up to two': 1,
   'the unit is UTF-8 BYTES, not JS characters (a 3-byte CJK char is not free)': 1,
@@ -1652,6 +1418,20 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a generator-owned file is counted in the bundle total': 1,
   'a generator-owned file is NOT counted into the ratcheted subtotal': 1,
   'the report separates the generator-owned subtotal': 1,
+  'an evals/** path is an eval fixture': 1,
+  'a nested evals/** path is an eval fixture': 1,
+  'a SKILL.md, a rule and a hand-authored reference are NOT eval fixtures': 1,
+  'an evals/ directory outside a skill directory is NOT an eval fixture': 1,
+  'an eval fixture with no ceiling is GREEN, not an unpriced red': 1,
+  'its green says eval fixture, measured but not ratcheted': 1,
+  'a CEILINGS row on an eval fixture is RED': 1,
+  'that red names the ruling that took evals out of the priced population': 1,
+  'no ceiling names an eval fixture': 1,
+  'the real tree has eval fixtures (the population is not inert)': 1,
+  'the walk still finds eval fixtures, so they are measured': 1,
+  'an eval fixture is counted in the bundle total': 1,
+  'an eval fixture is NOT counted into the ratcheted subtotal': 1,
+  'the report separates the eval-fixture subtotal': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1660,15 +1440,21 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 79;
+const SELF_TEST_BATTERY_FLOOR = 97;
 
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
   const over = verdict(rel, 26000, 25154).msg;
   const unpriced = verdict('skills/objectstack-new/SKILL.md', 4000, undefined).msg;
   const discovered = discoverBundleFiles();
-  const authored = discovered.filter((p) => !generatorOwning(p));
+  const authored = discovered.filter((p) => !generatorOwning(p) && !isEvalFixture(p));
   const generated = discovered.filter((p) => generatorOwning(p));
+  const evalFixtures = discovered.filter((p) => isEvalFixture(p));
+
+  // The population-1b fixtures (ruling record 6513306068, letter B), real paths.
+  const evalReal = 'skills/objectstack-ui/evals/README.md';
+  const evalGreen = verdict(evalReal, 335, undefined);
+  const evalPriced = verdict(evalReal, 335, 335);
 
   // The #12392 boundary fixtures, all real paths on this tree.
   const genIndex = 'skills/objectstack-ai/references/_index.md';
@@ -1780,7 +1566,17 @@ function selfTest() {
     // loosening the ratchet. Pinned as an ABSENCE, because that is the shape
     // the failure takes — a helpful sentence appended a year from now.
     ['no remedy tells the author to raise a ceiling', /raise (?:the |a |its )?ceiling to|bump the ceiling|update the ceiling to/i.test(`${over} ${unpriced}`), false],
-    ['the raise is bound to a quoted maintainer ruling', over.includes('quotes a maintainer ruling'), true],
+    ['the raise is bound to a quoted maintainer ruling', over.includes('quotes the standing maintainer ruling'), true],
+    // The standing path (ruling record 6513306068, letter B): both conditions
+    // and the pin are in the author-facing text, because the script cannot
+    // read a diff or a PR body — the seat's contract-review record checks
+    // them, and this text is what it checks against.
+    ['the standing path names its ruling of record', over.includes('6513306068'), true],
+    ['the standing path requires deletion of restatement in the same file',
+      over.includes('deletion of restatement in the same file'), true],
+    ['the standing path pins the row AT the measurement', over.includes('pinned AT the measurement'), true],
+    ['a raise with no deletion shown and no ruling quoted stays red',
+      over.includes('no deletion shown and no ruling quoted stays red'), true],
 
     // ── the counting convention ──────────────────────────────────────────
     ['four ASCII bytes are one token', countTokens('abcd'), 1],
@@ -1961,6 +1757,34 @@ function selfTest() {
         .some((l) => l.includes('ratcheted (authored)') && / 0 \/ +0/.test(l)), true],
     ['the report separates the generator-owned subtotal',
       reportLines([]).some((l) => l.includes('generator-owned (measured, not ratcheted)')), true],
+
+    // ── #27847: eval fixtures leave the priced population (ruling 6513306068 B) ──
+    // Membership is the path alone — `evals/` directly under a skill directory —
+    // pinned in both directions, and the walk still measures them.
+    ['an evals/** path is an eval fixture', isEvalFixture(evalReal), true],
+    ['a nested evals/** path is an eval fixture', isEvalFixture('skills/demo/evals/deep/deeper/case.md'), true],
+    ['a SKILL.md, a rule and a hand-authored reference are NOT eval fixtures',
+      [rel, authoredRule, authoredRef].map(isEvalFixture), [false, false, false]],
+    ['an evals/ directory outside a skill directory is NOT an eval fixture',
+      [isEvalFixture('evals/x.json'), isEvalFixture('skills/README.md'), isEvalFixture('skills/demo/rules/evals/x.md')],
+      [false, false, false]],
+    // Leg one of the ruling: an eval file is not priced, but it is still printed.
+    ['an eval fixture with no ceiling is GREEN, not an unpriced red', evalGreen.ok, true],
+    ['its green says eval fixture, measured but not ratcheted',
+      evalGreen.msg.includes('eval fixture') && evalGreen.msg.includes('not ratcheted'), true],
+    ['a CEILINGS row on an eval fixture is RED', evalPriced.ok, false],
+    ['that red names the ruling that took evals out of the priced population', evalPriced.msg.includes('6513306068'), true],
+    ['no ceiling names an eval fixture', [...CEILINGS.keys()].filter(isEvalFixture), []],
+    ['the real tree has eval fixtures (the population is not inert)', evalFixtures.length > 0, true],
+    ['the walk still finds eval fixtures, so they are measured', walked.includes('skills/demo/evals/deep/deeper/case.md'), true],
+    ['an eval fixture is counted in the bundle total',
+      reportLines([{ rel: evalReal, tokens: 335, ceiling: undefined }])
+        .some((l) => l.includes('bundle total (whole shipped tree)') && l.includes('335')), true],
+    ['an eval fixture is NOT counted into the ratcheted subtotal',
+      reportLines([{ rel: evalReal, tokens: 335, ceiling: undefined }])
+        .some((l) => l.includes('ratcheted (authored)') && / 0 \/ +0/.test(l)), true],
+    ['the report separates the eval-fixture subtotal',
+      reportLines([]).some((l) => l.includes('eval fixtures (measured, not ratcheted)')), true],
   ];
 
   // The ledger this self-test's floor is evaluated against (#13489).

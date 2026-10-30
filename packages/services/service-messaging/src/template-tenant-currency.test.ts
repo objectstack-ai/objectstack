@@ -8,11 +8,13 @@
  * the render refuses such a hole (`TEMPLATE_INVALID`) instead of guessing.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { createEmailChannel } from './email-channel.js';
 import { createInboxChannel } from './inbox-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
+import { MessagingServicePlugin } from './messaging-service-plugin.js';
+import type { MessagingService } from './messaging-service.js';
 import type { Delivery } from './channel.js';
 
 function silentCtx() {
@@ -157,5 +159,234 @@ describe('inbox channel: the template arm carries the organization\'s default cu
         await ch.send(silentCtx(), templateDelivery('inbox'));
         expect(r.calls).toHaveLength(1);
         expect(r.calls[0]).not.toHaveProperty('currency');
+    });
+});
+
+// [#27257] Through the plugin's own wiring: `getTenantCurrency` is
+// `resolveLocalizationContext` over the `data` engine, and a `sys_setting` read
+// that FAILED must not be graded like one that found no default. The first
+// learned nothing, so a refusal it caused is retried; only the second is
+// permanent, with the render's prescription on the row.
+describe('a failed settings read is retried; a read that finds no default is permanent', () => {
+    const REFUSAL =
+        'TEMPLATE_INVALID: email template crm.large_deal_won (locale=en-US): the hole {{ amount | currency }} has no currency argument and the organization has no default currency; set localization.currency, or write currency:EUR';
+
+    /** The plugin's `data` engine: its `sys_setting` read answers `rows`, or throws when `broken`. */
+    function settingsEngine(opts: { broken: boolean }, rows: Array<Record<string, unknown>> = []) {
+        const base = fakeData();
+        const reads: string[] = [];
+        const healthyFind = async (object: string, query: any) => {
+            if (object !== 'sys_setting') return [];
+            reads.push(object);
+            const where = query?.where ?? {};
+            const matched = rows.filter((r) => r.organization_id === where.organization_id && where.key?.$in?.includes(r.key));
+            // Hold the caller's bound, after the filter and by presence.
+            return typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+        };
+        const brokenFind = async (object: string): Promise<unknown[]> => {
+            if (object !== 'sys_setting') return [];
+            reads.push(object);
+            throw new Error('connection reset reading sys_setting');
+        };
+        return { reads, engine: { ...base, find: opts.broken ? brokenFind : healthyFind } };
+    }
+
+    /** The render the real `email` service does: a no-argument hole needs a `currency`. */
+    /** A refusal no default cures: a `currency:@path` hole whose value is not a code. */
+    const PATH_REFUSAL =
+        "TEMPLATE_INVALID: email template crm.large_deal_won (locale=en-US): the hole {{ amount | currency:@deal.code }} reads 'dollars' at deal.code, which is not an ISO 4217 code";
+
+    /**
+     * The render the real `email` service does. `missing-currency`: a no-argument
+     * hole needs a `currency`. `path-value`: an `@path` hole refuses whatever the
+     * default. `both`: the first refusal met is the missing default, and with a
+     * default the `@path` one still stands.
+     */
+    function mailService(opts: { refuses?: 'missing-currency' | 'path-value' | 'both' | 'not-found' } = {}) {
+        const calls: any[] = [];
+        let sent = 0;
+        const render = (input: any) => {
+            calls.push(input);
+            if (opts.refuses === 'not-found') throw new Error('TEMPLATE_NOT_FOUND: email template crm.large_deal_won');
+            const needsDefault = opts.refuses === 'missing-currency' || opts.refuses === 'both';
+            if (needsDefault && !input.currency) throw new Error(REFUSAL);
+            if (opts.refuses === 'path-value' || opts.refuses === 'both') throw new Error(PATH_REFUSAL);
+            return { subject: 'Deal won', html: '<p>x</p>', text: `Won ${input.currency ?? ''}` };
+        };
+        return {
+            calls,
+            sent: () => sent,
+            service: {
+                async send() { return { id: 'x' }; },
+                async sendTemplate(input: any) { render(input); sent += 1; return { id: 'email_row_1', status: 'sent' }; },
+                async renderTemplate(input: any) { return render(input); },
+            },
+        };
+    }
+
+    async function bootPlugin(engine: unknown, email: unknown) {
+        const services = new Map<string, unknown>([['data', engine], ['email', email], ['manifest', { register() {} }]]);
+        const readyHooks: Array<() => Promise<void> | void> = [];
+        const ctx = {
+            logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => ctx.logger },
+            getService(name: string) {
+                if (!services.has(name)) throw new Error(`service '${name}' is not registered`);
+                return services.get(name);
+            },
+            registerService(name: string, svc: unknown) { services.set(name, svc); },
+            hook(event: string, fn: () => Promise<void> | void) { if (event === 'kernel:ready') readyHooks.push(fn); },
+        } as any;
+        await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
+        for (const fn of readyHooks) await fn();
+        return { ctx, messaging: services.get('messaging') as MessagingService };
+    }
+
+    for (const channelId of ['email', 'inbox'] as const) {
+        describe(`${channelId} channel`, () => {
+            it('a failed read renders without a currency; the refusal it causes is graded retryable, never TEMPLATE_*', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService({ refuses: 'missing-currency' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(data.reads).toHaveLength(1);
+                expect(mail.calls[0]).not.toHaveProperty('currency');
+                // The probe: rendered once more with the "no currency" code, never sent.
+                expect(mail.calls).toHaveLength(2);
+                expect(mail.calls[1].currency).toBe('XXX');
+                expect(mail.sent()).toBe(0);
+                expect(r.ok).toBe(false);
+                expect(r.error).not.toMatch(/TEMPLATE_/);
+                expect(r.error).toContain("organization 'org_apex'");
+                expect(channel.classifyError?.(r.error)).toBe('retryable');
+            });
+
+            it('a failed read served from the failure memo keeps its kind: retryable again, with no second read', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService({ refuses: 'missing-currency' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                const again = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(data.reads).toHaveLength(1);
+                expect(channel.classifyError?.(again.error)).toBe('retryable');
+            });
+
+            it('a read that SUCCEEDS and finds no default is refused TEMPLATE_INVALID, permanent, with the prescription', async () => {
+                const data = settingsEngine({ broken: false });
+                const mail = mailService({ refuses: 'missing-currency' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(data.reads).toHaveLength(1);
+                expect(r).toEqual({ ok: false, error: REFUSAL });
+                expect(channel.classifyError?.(r.error)).toBe('permanent');
+            });
+
+            it('a failed read leaves a refusal no default cures as it stands: permanent, its own sentence on the row', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService({ refuses: 'path-value' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(r).toEqual({ ok: false, error: PATH_REFUSAL });
+                expect(channel.classifyError?.(r.error)).toBe('permanent');
+            });
+
+            it('a failed read, a template with the default hole AND a refusal no default cures: the standing refusal, permanent', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService({ refuses: 'both' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(r).toEqual({ ok: false, error: PATH_REFUSAL });
+                expect(channel.classifyError?.(r.error)).toBe('permanent');
+                expect(mail.sent()).toBe(0);
+            });
+
+            it('a failed read does not stop a template that needs no default: it is delivered', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService();
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const r = await messaging.getChannel(channelId)!.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(r.ok).toBe(true);
+                expect(mail.calls[0]).not.toHaveProperty('currency');
+            });
+
+            it('a failed read leaves every other template failure as it was: TEMPLATE_NOT_FOUND stays permanent', async () => {
+                const data = settingsEngine({ broken: true });
+                const mail = mailService({ refuses: 'not-found' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const channel = messaging.getChannel(channelId)!;
+                const r = await channel.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(r.error).toMatch(/^TEMPLATE_NOT_FOUND: /);
+                expect(channel.classifyError?.(r.error)).toBe('permanent');
+            });
+
+            it('a read that finds the default formats in it', async () => {
+                const data = settingsEngine({ broken: false }, [
+                    { namespace: 'localization', key: 'currency', scope: 'tenant', organization_id: 'org_apex', value: 'CNY' },
+                ]);
+                const mail = mailService({ refuses: 'missing-currency' });
+                const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+                const r = await messaging.getChannel(channelId)!.send(ctx, templateDelivery(channelId, 'org_apex'));
+                expect(r.ok).toBe(true);
+                expect(mail.calls[0].currency).toBe('CNY');
+            });
+        });
+    }
+
+    // [#27733] The read can fail one step earlier: a delivery that names no
+    // organization, where no wall stands, reads the rows of the organization
+    // the `sys_organization` probe derives. A store fault there read no row,
+    // so it is graded like a failed settings read: retryable, never TEMPLATE_*.
+    describe('a failed organization probe (#27733)', () => {
+        afterEach(() => {
+            vi.unstubAllEnvs();
+        });
+
+        /** The plugin's `data` engine: the `sys_organization` probe throws while `broken`, else holds `org_apex` with `CNY`. */
+        function probeEngine(state: { broken: boolean }) {
+            const base = fakeData();
+            const reads: string[] = [];
+            const find = async (object: string, query: any) => {
+                if (object === 'sys_organization') {
+                    reads.push(object);
+                    if (state.broken) throw Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+                    return [{ id: 'org_apex' }].slice(0, query?.limit ?? 1);
+                }
+                if (object !== 'sys_setting') return [];
+                reads.push(object);
+                const where = query?.where ?? {};
+                const rows = [{ namespace: 'localization', key: 'currency', scope: 'tenant', organization_id: 'org_apex', value: 'CNY' }];
+                const matched = rows.filter((r) => r.organization_id === where.organization_id && where.key?.$in?.includes(r.key));
+                // Hold the caller's bound, after the filter and by presence.
+                return typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+            };
+            return { reads, engine: { ...base, find } };
+        }
+
+        it('email channel: a delivery with no organization whose probe fails is graded retryable, never TEMPLATE_*', async () => {
+            vi.stubEnv('OS_TENANCY_POSTURE', 'single');
+            const state = { broken: true };
+            const data = probeEngine(state);
+            const mail = mailService({ refuses: 'missing-currency' });
+            const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+            const channel = messaging.getChannel('email')!;
+            const r = await channel.send(ctx, templateDelivery('email'));
+            expect(data.reads).toEqual(['sys_organization']);
+            expect(mail.calls[0]).not.toHaveProperty('currency');
+            expect(mail.calls[1].currency).toBe('XXX');
+            expect(mail.sent()).toBe(0);
+            expect(r.ok).toBe(false);
+            expect(r.error).not.toMatch(/TEMPLATE_/);
+            expect(channel.classifyError?.(r.error)).toBe('retryable');
+
+            // No memo was written: once the probe answers, the next delivery reads the default.
+            state.broken = false;
+            const again = await channel.send(ctx, templateDelivery('email'));
+            expect(again.ok).toBe(true);
+            expect(mail.calls[mail.calls.length - 1].currency).toBe('CNY');
+        });
     });
 });

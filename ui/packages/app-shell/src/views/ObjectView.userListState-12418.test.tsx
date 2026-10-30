@@ -108,15 +108,14 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 /**
  * The props the object page hands its list: captured, not rendered. The
- * stand-in draws only the page's `toolbarLeading` node — the view tab strip
- * rides the list's toolbar row since objectui#12440.
+ * stand-in draws nothing.
  */
 let listProps: any = null;
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
   ListView: (props: any) => {
     listProps = props;
-    return props.toolbarLeading ?? null;
+    return null;
   },
 }));
 
@@ -269,10 +268,17 @@ function mountWithFamily(dataSource: ConsoleObjectViewProps['dataSource'], famil
 
 const wait = (ms: number) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-/** The list is mounted and the page's own reads (saved views) have landed. */
+/**
+ * The list is mounted and the page's own reads (saved views) have landed: the
+ * saved view is a row of the title's view switcher (objectstack#27594), which
+ * is closed again.
+ */
 async function listReady() {
   await waitFor(() => expect(typeof listProps?.onSortChange).toBe('function'));
-  await screen.findByText('Pipeline');
+  fireEvent.click(await screen.findByTestId('list-view-switcher'));
+  await screen.findByTestId(`view-switcher-row-${SAVED_ID}`);
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByTestId('list-view-switcher-menu')).toBeNull());
   await wait(50);
 }
 

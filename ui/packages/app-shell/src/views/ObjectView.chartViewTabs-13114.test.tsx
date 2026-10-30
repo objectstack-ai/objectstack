@@ -7,25 +7,28 @@
  */
 
 /**
- * objectui#13114 — a `type: 'chart'` saved view keeps the view tabs.
+ * objectui#13114 — a `type: 'chart'` saved view keeps a way to the other views.
  *
- * Since objectui#12440 the console list page hands its `ViewTabBar` to
- * `ListView` as `toolbarLeading`. `renderListView`'s chart branch returns
- * before `ListView` is reached, so a chart view drew no tabs at all: the
- * view switcher vanished and the only way back to the grid was the browser's
- * Back button. The chart branch now draws the strip itself, as a row of its
- * own above the chart (`view-tab-row`).
+ * `renderListView`'s chart branch returns before `ListView` is reached, so a
+ * switcher carried by the list's toolbar vanished on a chart view, and the
+ * only way back to the grid was the browser's Back button. Since
+ * objectstack#27594 the view switcher is the page title, above every face, so
+ * a chart view has it like any other and no face draws a row of view tabs.
  *
  * Everything here is the real chain: the real `ObjectView`, the real plugin
- * `ObjectView` calling the page's `renderListView`, the real `ListView`, the
- * real `ViewTabBar` and the real `ObjectChart`.
+ * `ObjectView` calling the page's `renderListView`, the real `ListView` and the
+ * real `ObjectChart`.
  *
  * WHAT IS PINNED.
- *  - A chart view draws exactly one tab bar, in its own row, beside the chart
- *    face; clicking a grid tab from there switches back to the grid.
- *  - CONTROL: a grid view draws exactly one tab bar, inside the list's toolbar
- *    slot, and no standalone row (objectui#12440's placement, unchanged).
- *  - CONTROL: below `sm` a chart view hands out no strip either.
+ *  - A chart view draws the title switcher and no view-tab row; choosing the
+ *    grid view from it switches back to the grid.
+ *  - CONTROL: a grid view draws the same one switcher, and no tab bar in the
+ *    list's toolbar.
+ *  - CONTROL: the switcher sits in the page header the phone does not draw
+ *    (`hidden sm:block`); the app bar's switcher is the phone's control.
+ *  - The view description is shown once (objectui#12528): a chart face, with
+ *    no toolbar row, carries it as the switcher's tooltip; a grid face draws it
+ *    as the list's info control, and the switcher carries none.
  */
 
 import * as React from 'react';
@@ -92,11 +95,17 @@ const PROJECT = {
     name: { type: 'text', label: 'Name' },
   },
   listViews: {
-    all: { name: 'all', label: 'All Projects', type: 'grid', columns: ['name'] },
+    all: { name: 'all', label: 'All Projects', type: 'grid', columns: ['name'], description: 'Every project' },
     // An unbound chart: `ObjectChart` refuses it on screen
     // (`chart-missing-category-axis`), which is enough to prove the chart
     // face — not the grid — is what is drawn.
-    budget_chart: { name: 'budget_chart', label: 'Budget by Account', type: 'chart', chart: { chartType: 'bar' } },
+    budget_chart: {
+      name: 'budget_chart',
+      label: 'Budget by Account',
+      type: 'chart',
+      description: 'Budget per account',
+      chart: { chartType: 'bar' },
+    },
   },
 };
 
@@ -148,44 +157,66 @@ afterEach(() => {
   setViewportWidth(DESKTOP_WIDTH);
 });
 
-describe('objectui#13114 — a chart view keeps the view tabs', () => {
-  it('a chart view draws one tab bar in its own row, and its grid tab switches back to the grid', async () => {
+/** Open the title's view switcher and choose the view `viewId`. */
+function chooseView(viewId: string) {
+  fireEvent.click(screen.getByTestId('list-view-switcher'));
+  const row = screen.getAllByTestId(`view-switcher-row-${viewId}`).at(-1)!;
+  fireEvent.click(row.querySelector('button')!);
+}
+
+describe('objectui#13114 — a chart view keeps the view switcher', () => {
+  it('a chart view draws the title switcher and no tab row, and the switcher goes back to the grid', async () => {
     setViewportWidth(1440);
     mountProjects('budget_chart');
     await chartFace();
 
-    const row = screen.getByTestId('view-tab-row');
-    const tabBar = screen.getByTestId('view-tab-bar');
-    expect(row.contains(tabBar)).toBe(true);
-    expect(screen.getAllByTestId('view-tab-bar')).toHaveLength(1);
-    // No grid on this face, so no toolbar slot carries a second strip.
+    expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
+    expect(screen.getByTestId('list-view-switcher')).toHaveTextContent('Budget by Account');
+    expect(screen.queryByTestId('view-tab-row')).toBeNull();
+    expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('list-toolbar-leading')).toBeNull();
-    expect(screen.getByTestId('view-tab-budget_chart')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('view-tab-all'));
+    chooseView('all');
     await listToolbar();
 
     expect(screen.queryByTestId('chart-missing-category-axis')).toBeNull();
+    expect(screen.getByTestId('list-view-switcher')).toHaveTextContent('All Projects');
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
-    expect(screen.getAllByTestId('view-tab-bar')).toHaveLength(1);
-    expect(screen.getByTestId('list-toolbar-leading').contains(screen.getByTestId('view-tab-bar'))).toBe(true);
+    expect(screen.queryByTestId('view-tab-bar')).toBeNull();
   });
 
-  it('CONTROL: a grid view keeps its one tab bar in the list toolbar slot', async () => {
+  it('CONTROL: a grid view draws the same one switcher, and no tab bar in the list toolbar', async () => {
     setViewportWidth(1440);
     mountProjects('all');
     await listToolbar();
 
-    expect(screen.getAllByTestId('view-tab-bar')).toHaveLength(1);
-    expect(screen.getByTestId('list-toolbar-leading').contains(screen.getByTestId('view-tab-bar'))).toBe(true);
+    expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
+    expect(screen.queryByTestId('view-tab-bar')).toBeNull();
+    expect(screen.queryByTestId('list-toolbar-leading')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
   });
 
-  it('CONTROL: below `sm` a chart view draws no strip — the app bar switcher is the phone\'s control', async () => {
+  it('a chart face carries its description on the switcher; a grid face draws it as the list\'s info control', async () => {
+    setViewportWidth(1440);
+    mountProjects('budget_chart');
+    await chartFace();
+
+    expect(screen.getByTestId('list-view-switcher')).toHaveAttribute('title', 'Budget per account');
+    expect(screen.queryByTestId('view-description-info')).toBeNull();
+
+    chooseView('all');
+    await listToolbar();
+
+    expect(screen.getByTestId('list-view-switcher').hasAttribute('title')).toBe(false);
+    expect(screen.getByTestId('view-description-info')).toHaveAttribute('title', 'Every project');
+  });
+
+  it('CONTROL: the switcher is in the page header a phone does not draw — the app bar switcher is the phone\'s control', async () => {
     setViewportWidth(390);
     mountProjects('budget_chart');
     await chartFace();
 
+    expect(screen.getByTestId('list-view-switcher').closest('.hidden.sm\\:block')).not.toBeNull();
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
   });

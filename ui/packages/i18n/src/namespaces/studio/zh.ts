@@ -562,6 +562,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.kv.asExpression': '写成 CEL 表达式',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL 表达式，例如 joinNonEmpty(…)',
   'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个表达式。请填写表达式，或把这个值切回文本。',
+  // objectstack#27834 — the Update Records filter's "Triggering record" target.
+  'engine.inspector.flowNode.triggeringRecord.use': '更新触发记录',
+  'engine.inspector.flowNode.triggeringRecord.hint': '目标为启动此流程的那条 {object} 记录。',
+  'engine.inspector.flowNode.triggeringRecord.active': '更新启动此流程的那条 {object} 记录。',
   'engine.inspector.flowNode.list.add': '添加项',
   'engine.inspector.flowNode.list.item': '值',
   'engine.inspector.flowNode.list.remove': '删除项',
@@ -1260,6 +1264,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.view.type.timeline': '时间线',
   'engine.inspector.view.type.map': '地图',
   'engine.inspector.view.type.chart': '图表',
+  'engine.inspector.view.type.tree': '树形',
   // Report default ("home") inspector
   'engine.inspector.report.kind': '报表',
   'engine.inspector.report.close': '关闭报表',
@@ -2710,6 +2715,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
   // objectstack#27785 — a report's chart held until its axes are picked.
   'engine.studio.held.reportChartNeedsInput': '报表图表的「{input}」需要填写',
+  // objectstack#27895 — a list view held until a required setting of its type's own block is picked again.
+  'engine.studio.held.listViewTypeNeedsInput': '视图{type}设置中的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',
   // objectstack#27464 — a navigation rename typed but not committed yet.
   'engine.studio.held.navRename': '导航项「{item}」的重命名尚未完成',
@@ -3676,6 +3683,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.inspector.listView.addView': '添加视图',
   'engine.studio.inspector.listView.addViewTaken': '已经有名为「{name}」的视图,请换一个键。',
   'engine.studio.inspector.listView.backToEntry': '返回{view}',
+  'engine.studio.inspector.listView.switchView': '视图',
+  'engine.studio.inspector.listView.switchViewDraft': '草稿',
   'engine.studio.inspector.listView.kanbanCard': '看板卡片',
   'engine.studio.inspector.listView.kanbanCard.intro': '看板上每张卡片显示什么,点一张卡片时打开什么。',
   'engine.studio.inspector.listView.kanbanCard.groupByFirst': '先选分组字段:卡片设置随它一起保存。',
@@ -3690,6 +3699,26 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.inspector.listView.kanbanCard.mode.none': '不打开',
   'engine.studio.inspector.listView.kanbanCard.groupBy': '分组字段',
   'engine.studio.inspector.listView.kanbanCard.pickField': '选择字段',
+  // objectstack#27895 — the section of a view type's own settings (calendar, gallery, timeline, …).
+  'engine.studio.inspector.listView.typeSettings': '{type}设置',
+  'engine.studio.inspector.listView.typeSettings.intro': '这种视图自身的设置。指向字段的设置,从本对象的字段中挑选。',
+  // objectstack#27933 — a chart view's dataset binding: the dataset, its measures and dimensions, the chart type.
+  'engine.studio.inspector.listView.chart': '图表数据',
+  'engine.studio.inspector.listView.chart.intro': '这个图表读取的数据集,以及它绘制的度量和维度。只列出以本对象为基础的数据集。',
+  'engine.studio.inspector.listView.chart.dataset': '数据集',
+  'engine.studio.inspector.listView.chart.pickDataset': '选择数据集',
+  'engine.studio.inspector.listView.chart.measures': '度量',
+  'engine.studio.inspector.listView.chart.dimensions': '维度',
+  'engine.studio.inspector.listView.chart.addMeasure': '添加度量',
+  'engine.studio.inspector.listView.chart.addDimension': '添加维度',
+  'engine.studio.inspector.listView.chart.allAdded': '已全部添加',
+  'engine.studio.inspector.listView.chart.noMeasures': '这个数据集没有声明度量。',
+  'engine.studio.inspector.listView.chart.noDimensions': '这个数据集没有声明维度。',
+  'engine.studio.inspector.listView.chart.notInDataset': '不在这个数据集中',
+  'engine.studio.inspector.listView.chart.notObjectDataset': '不是本对象的数据集',
+  'engine.studio.inspector.listView.chart.noDatasets': '本对象上还没有数据集,这个图表没有可绑定的数据。',
+  'engine.studio.inspector.listView.chart.readFailed': '无法读取数据集({reason})。绑定按已保存的内容显示。',
+  'engine.studio.inspector.listView.chart.membersFailed': '无法读取这个数据集的度量和维度({reason})。它们按已保存的内容显示。',
   'engine.studio.inspector.designersMissing': '本次会话没有注册任何元数据设计器,这里没有可编辑的内容。',
   'engine.studio.inspector.noPageSchema': '页面设置不可用——无法加载页面 schema。',
   // ── AppNavCanvas (nav-tree editor, used by Studio + AppPreview) ─────────

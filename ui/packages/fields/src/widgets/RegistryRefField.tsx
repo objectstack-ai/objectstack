@@ -11,8 +11,8 @@ import { AlertTriangle } from 'lucide-react';
 import { Combobox, EmptyValue, Input, cn } from '@object-ui/components';
 import { SchemaRendererContext } from '@object-ui/react';
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
-import type { DataSource } from '@object-ui/types';
 import type { FieldWidgetComponentProps } from './types.js';
+import { registryLister, type RegistryItemHeader } from './registryCatalog.js';
 import { toDomProps } from './toDomProps.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
 
@@ -65,11 +65,7 @@ import { useFieldTranslation } from './useFieldTranslation.js';
  * no id, no first-item default.
  */
 
-/** One listed item of a registry: the name stored, the label shown beside it. */
-export interface RegistryItemHeader {
-  name: string;
-  label?: string;
-}
+export type { RegistryItemHeader };
 
 /** The catalog, in whichever of its four states the load is actually in. */
 export type RegistryCatalogState =
@@ -80,20 +76,6 @@ export type RegistryCatalogState =
 
 const IDLE: RegistryCatalogState = { status: 'idle' };
 const LOADING: RegistryCatalogState = { status: 'loading' };
-
-type RegistryLister = Required<Pick<DataSource, 'listMetadataItems'>>;
-
-/**
- * The data source's registry list, when it has one. The widget contract keeps
- * `dataSource` structural (`unknown`, see `FieldWidgetComponentProps`), so the
- * member is narrowed here, by the name the `DataSource` contract declares.
- */
-function registryLister(dataSource: unknown): RegistryLister | null {
-  const candidate = dataSource as Partial<RegistryLister> | null | undefined;
-  return candidate && typeof candidate.listMetadataItems === 'function'
-    ? (candidate as RegistryLister)
-    : null;
-}
 
 function failureMessage(err: unknown): string {
   if (err instanceof Error) return err.message;

@@ -5,7 +5,7 @@ import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/s
 // [commit 74155c735] The defaulting node schema `fillQueryAstDefaults` runs author input
 // through — the declared `.default()` stays in `packages/spec`, the engine
 // only invokes it.
-import { SortNodeSchema } from '@objectstack/spec/data';
+import { SortNodeSchema, FullTextSearchSchema } from '@objectstack/spec/data';
 import {
   EngineQueryOptions,
   DataEngineInsertOptions,
@@ -734,6 +734,40 @@ const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
 ]);
+
+/**
+ * [#27732] A search-field override — `searchFields`, or the object-form
+ * `search.fields` — that names no field is refused `400 VALIDATION_ERROR`:
+ * an empty list, or a comma string with no name in it (the `GET` door's
+ * transport spelling, which reaches the engine as sent). Absent (or `null`)
+ * still searches the object's default search fields.
+ *
+ * `resolveSearchFields` reads an empty override as absent, so the search
+ * widened to the whole default set: the caller wrote the key to narrow and was
+ * not told. The door refuses this set (`assertSearchFieldsAreSearchable`,
+ * #27484) and `QuerySchema.searchFields` / `FullTextSearchSchema.fields`
+ * declare the same refusal (#27683); the words are read off that declaration
+ * rather than copied, and the status and code are the door's, so
+ * `mapDataError` answers an in-process caller and a REST caller alike. Any
+ * other value is left to the expansion's existing tolerance.
+ */
+function refuseSearchOverrideNamingNoField(object: string, requested: unknown, param: string): void {
+  const names = typeof requested === 'string'
+    ? requested.split(',').map((s) => s.trim()).filter(Boolean)
+    : Array.isArray(requested) ? requested : undefined;
+  if (names === undefined || names.length > 0) return;
+  const declared = FullTextSearchSchema.shape.fields.safeParse([]).error?.issues[0]?.message;
+  const err: any = new Error(
+    `ObjectQL search on '${object}' names no field in '${param}': got ${JSON.stringify(requested)}. The query was not run: `
+    + "an empty search-field list was read as no narrowing, which scans the object's default search fields. "
+    + `${declared}.`,
+  );
+  err.status = 400;
+  err.code = 'VALIDATION_ERROR';
+  err.param = param;
+  err.object = object;
+  throw err;
+}
 
 /**
  * Rows per page for the autonumber seeding scan (#6249). This is a PAGE size,
@@ -5851,7 +5885,7 @@ export class ObjectQL implements IObjectQLEngine {
   // [ADR-0126 §8] Packaged-action activation
   // ========================================
   //
-  // Five thin members over {@link ActionActivationProjection}. They are on the
+  // Seven thin members over {@link ActionActivationProjection}. They are on the
   // engine — rather than reached as a free-standing service — because the
   // dispatch doors already hold `ql` and nothing else they hold is
   // per-environment, unconditional and alive at boot at the same time.
@@ -5901,10 +5935,35 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#27842] `IObjectQLEngine.getDisabledActions` — what the metadata read
+   * serves beside an object as `disabledActions`: the names the projection
+   * the doors consult switches off, or `undefined` while no ledger is
+   * attached, so the read serves no key rather than claiming that nothing is
+   * off. {@link listDisabledActions} answers `[]` for both cases, and keeps
+   * that answer.
+   */
+  getDisabledActions(): string[] | undefined {
+    return this.actionActivation.durable ? this.actionActivation.disabledNames() : undefined;
+  }
+
+  /**
    * The `ACTION_DISABLED` refusal SENTENCE, produced by the projection so both
    * dispatch doors state one refusal rather than two that agree today.
+   *
+   * [#27842] The sentence is written for the person who clicked, so it names
+   * no table and no ADR. Those, with the code and the action's name, go to
+   * the log line written here: both doors ask for the sentence exactly when
+   * they refuse (`disabledActionRefusal` in `@objectstack/runtime`), so this
+   * is the one place every refusal passes that holds the host's logger. It is
+   * `info`, not `warn`: the refusal is handed to the caller, and nothing is
+   * degraded (AGENTS.md "Degradation log levels").
    */
   describeDisabledAction(actionName: string): string {
+    this.logger.info(
+      `ACTION_DISABLED: packaged action '${actionName}' refused — it is switched off in the activation ledger ` +
+        '(sys_metadata_activation, ADR-0126 §8 item 2).',
+      { action: actionName, refusal: 'ACTION_DISABLED' },
+    );
     return this.actionActivation.describeDisabled(actionName);
   }
 
@@ -13372,6 +13431,11 @@ export class ObjectQL implements IObjectQLEngine {
     // unknown option — rejected at the entry point, not silently dropped
     // (#4371).
     const raw = (ast as any).search;
+    // [#27732] An override naming no field is refused, never read as absent.
+    // Judged before the expansion and so before any driver read, whether or
+    // not a search term rode along, on both slots, as the door does.
+    refuseSearchOverrideNamingNoField(ast.object, (ast as any).searchFields, 'searchFields');
+    if (raw !== null && typeof raw === 'object') refuseSearchOverrideNamingNoField(ast.object, raw.fields, 'search.fields');
     if (raw != null && schema?.fields) {
       const requestedFields = (ast as any).searchFields
         ?? (typeof raw === 'object' ? raw?.fields : undefined);

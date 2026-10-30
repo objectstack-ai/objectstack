@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PlatformTranslationData } from '@objectstack/spec/system';
+import { countryOptionLabels } from '../manifests/company.manifest.js';
 
 /**
  * Español (es-ES) — built-in settings manifest translations.
@@ -10,7 +11,7 @@ export const esES: PlatformTranslationData = {
     sourceLabels: {
       env: 'Entorno',
       global: 'Global',
-      tenant: 'Inquilino',
+      tenant: 'Organización',
       user: 'Usuario',
       default: 'Predeterminado',
     },
@@ -130,7 +131,7 @@ export const esES: PlatformTranslationData = {
         social: {
           title: 'Inicio de sesión social',
           description:
-            'Configura el proveedor de inicio de sesión de Google integrado. Las variables de entorno del despliegue siguen teniendo prioridad.',
+            'Configura el proveedor de inicio de sesión de Google integrado. Las credenciales definidas en la configuración del servidor siguen teniendo prioridad.',
         },
       },
       keys: {
@@ -150,7 +151,7 @@ export const esES: PlatformTranslationData = {
         },
         audience_posture: {
           label: 'Audiencia de autorregistro',
-          help: '«Solo por invitación» cierra el autorregistro: los usuarios solo se crean mediante un acto del operador (invitación, creación/importación por un administrador, SCIM o SSO empresarial). «Dominios de correo» lo abre solo a los dominios de la lista inferior; «Abierto» admite a cualquiera. «Dominios de correo» y «Abierto» requieren el conjunto de permisos de autorregistro inferior. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, o emailAndPassword.requireEmailVerification: false en la configuración del stack); un false guardado en esta consola se rechaza bajo «Abierto».',
+          help: '«Solo por invitación» cierra el autorregistro: los usuarios solo se crean mediante un acto del operador (invitación, creación/importación por un administrador, SCIM o SSO empresarial). «Dominios de correo» lo abre solo a los dominios de la lista inferior; «Abierto» admite a cualquiera. «Dominios de correo» y «Abierto» requieren el conjunto de permisos de autorregistro inferior. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que la configuración del servidor la desactive; desactivarla en esta consola se rechaza bajo «Abierto».',
           options: {
             invite_only: 'Solo por invitación — sin autorregistro (predeterminado)',
             email_domain: 'Solo dominios de correo permitidos',
@@ -163,7 +164,7 @@ export const esES: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'Conjunto de permisos de autorregistro',
-          help: 'Nombre del conjunto de permisos que recibe cada usuario autorregistrado (declarar member_default explícitamente es válido; admin_full_access se rechaza).',
+          help: 'Nombre del conjunto de permisos que recibe cada usuario autorregistrado. El conjunto estándar de miembro es válido; el conjunto de administrador completo se rechaza. Obligatorio cuando la audiencia permite el autorregistro.',
         },
         password_min_length: { label: 'Longitud mínima de contraseña' },
         password_max_length: { label: 'Longitud máxima de contraseña', help: 'Un límite superior protege frente a la denegación de servicio por el hasheo de contraseñas muy largas.' },
@@ -227,7 +228,7 @@ export const esES: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: 'Rangos de IP permitidos',
-          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos, y también cualquier solicitud cuya dirección de cliente el servidor no pueda determinar. Vacío = sin restricción. Se evalúa la dirección del extremo de la conexión; detrás de un proxy inverso, declare server.trustProxy en el stack para que se evalúe en su lugar la dirección de cliente reenviada.',
+          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos, y también cualquier solicitud cuya dirección de cliente el servidor no pueda determinar. Vacío = sin restricción. Se evalúa la dirección de origen de la conexión; detrás de un proxy inverso, la configuración del servidor debe confiar en ese proxy para que se evalúe en su lugar la dirección original del cliente.',
         },
         api_key_default_expiry_days: {
           label: 'Duración predeterminada de la clave (días)',
@@ -235,11 +236,11 @@ export const esES: PlatformTranslationData = {
         },
         api_key_max_expiry_days: {
           label: 'Duración máxima de la clave (días)',
-          help: 'La fecha de caducidad más lejana que puede pedir una clave nueva, contada desde su creación. Una más lejana se rechaza (API_KEY_EXPIRY_TOO_LONG); exactamente este número de días se acepta.',
+          help: 'La fecha de caducidad más lejana que puede pedir una clave nueva, contada desde su creación. Una más lejana se rechaza; exactamente este número de días se acepta.',
         },
         api_key_inactivity_days: {
           label: 'Caducidad por inactividad (días)',
-          help: 'Una clave sin uso registrado durante este número de días se rechaza (API_KEY_INACTIVE). No se revoca; cree una clave nueva. Una clave nunca usada cuenta desde su creación, o desde el inicio de la política de abajo si es anterior. 0 desactiva la caducidad por inactividad.',
+          help: 'Una clave sin uso registrado durante este número de días se rechaza. No se revoca; cree una clave nueva. Una clave nunca usada cuenta desde su creación, o desde el inicio de la política de abajo si es anterior. 0 desactiva la caducidad por inactividad.',
         },
         api_key_policy_started_at: {
           label: 'Inicio de la política de claves',
@@ -247,15 +248,15 @@ export const esES: PlatformTranslationData = {
         },
         google_enabled: {
           label: 'Habilitar inicio de sesión con Google',
-          help: 'Ofrece el inicio de sesión con Google cuando se resuelven tanto un ID de cliente como un secreto de cliente: los guardados abajo, o GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en el servidor, que tienen prioridad sobre los valores guardados. Hasta que ambos se resuelvan, la página de inicio de sesión no muestra el botón de Google, aunque esta opción esté activada. Desactivada, retira el inicio de sesión con Google aunque el servidor defina ambos. Crea el cliente OAuth en Google Cloud Console.',
+          help: 'Ofrece el inicio de sesión con Google cuando están disponibles tanto un ID de cliente como un secreto de cliente: los guardados abajo, o los definidos en la configuración del servidor, que tienen prioridad sobre los valores guardados. Hasta que ambos estén disponibles, la página de inicio de sesión no muestra el botón de Google, aunque esta opción esté activada. Desactivada, retira el inicio de sesión con Google aunque el servidor defina ambos. Crea el cliente OAuth en Google Cloud Console.',
         },
         google_client_id: {
           label: 'ID de cliente de Google',
-          help: 'ID de cliente de OAuth desde Google Cloud Console. También se puede definir GOOGLE_CLIENT_ID en el servidor.',
+          help: 'ID de cliente de OAuth desde Google Cloud Console. También se puede definir en la configuración del servidor.',
         },
         google_client_secret: {
           label: 'Secreto de cliente de Google',
-          help: 'Se almacena cifrado en reposo. También se puede definir GOOGLE_CLIENT_SECRET en el servidor.',
+          help: 'Se almacena cifrado en reposo. También se puede definir en la configuración del servidor.',
         },
       },
     },
@@ -313,7 +314,11 @@ export const esES: PlatformTranslationData = {
         city: { label: 'Ciudad' },
         state: { label: 'Provincia / Estado' },
         postal_code: { label: 'Código postal' },
-        country: { label: 'País', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN).' },
+        country: {
+          label: 'País',
+          help: 'País de la dirección registrada. Escribe el nombre de un país y elígelo de la lista.',
+          options: countryOptionLabels('es-ES'),
+        },
         phone: { label: 'Teléfono', help: 'Teléfono principal de la empresa (se recomienda E.164, p. ej. +1 415 555 0100).' },
         website: { label: 'Sitio web', help: 'Ejemplo: https://example.com' },
         primary_contact_name: { label: 'Nombre del contacto principal' },
@@ -331,7 +336,11 @@ export const esES: PlatformTranslationData = {
       keys: {
         timezone: { label: 'Zona horaria predeterminada', help: 'Determina qué significa «hoy» en las fórmulas, cómo agrupan las fechas los informes y cómo se muestran las fechas y horas. Acepta cualquier nombre de zona horaria IANA (p. ej. Europe/Madrid). Es la zona horaria vigente para la organización: el campo Zona horaria del registro de la organización no la cambia.' },
         locale: { label: 'Idioma predeterminado', help: 'Configuración regional BCP-47 para los catálogos de mensajes y el formato de números/fechas.' },
-        default_country: { label: 'País predeterminado', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN). Se usa para los valores por defecto de dirección y teléfono.' },
+        default_country: {
+          label: 'País predeterminado',
+          help: 'Se usa para los valores por defecto de dirección y teléfono. Escribe el nombre de un país y elígelo de la lista.',
+          options: countryOptionLabels('es-ES'),
+        },
         currency: { label: 'Moneda predeterminada', help: 'Código ISO 4217 aplicado cuando un campo de moneda no indica la suya.' },
         fiscal_year_start: { label: 'Inicio del año fiscal', help: 'Primer mes del año fiscal: determina «este trimestre / año fiscal» en los informes.' },
       },
@@ -355,7 +364,7 @@ export const esES: PlatformTranslationData = {
       },
       banners: {
         beta_notice: { title: 'Atención',
-          text: 'Las funciones beta pueden cambiar sin previo aviso. Fíjalas con variables de entorno (p. ej., `OS_FEATURE_FLAGS_AI_ENABLED=true`) para bloquearlas en todo el despliegue.' },
+          text: 'Las funciones beta pueden cambiar sin previo aviso. Una función definida en la configuración del servidor queda fijada, activada o desactivada, en todo el despliegue y no se puede cambiar aquí.' },
       },
     },
 

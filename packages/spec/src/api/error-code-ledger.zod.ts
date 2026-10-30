@@ -1323,6 +1323,7 @@ export const ERROR_CODE_LEDGER = {
     // line — no HTTP door; registered under `@objectstack/metadata-protocol`
     // too, so this row is provenance, not identity.
     'NOT_OVERRIDABLE',
+    'RESUME_CHILD_PENDING',       // [#27877] parent-id resume of a map whose item child run is still suspended (409; resume the named child)
     'RESUME_IN_PROGRESS',         // duplicate resume refused while the first is running
     'RUN_NOT_FOUND',              // no suspension for this run id — unresumable for good
     'STORE_UNAVAILABLE',          // durable suspended-run store unreadable — existence unknown

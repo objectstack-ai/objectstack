@@ -440,9 +440,10 @@ export type NavDocAudienceGate = (entry: any) => boolean;
  * Load the object metadata items for the current protocol/environment,
  * coerced to a plain array. Returns `[]` when metadata is unavailable so
  * callers fail OPEN (the data call itself needs the same metadata and will
- * surface any real error). Shared by the cross-object batch route (all ops,
- * fetched once) and the nav-servability gate; the single-object exposure gate
- * reads its one object by name ({@link loadObjectItem}).
+ * surface any real error). Read by the nav-servability gate, and by
+ * {@link loadObjectItem} for a protocol with no by-name read; the exposure
+ * gate of every data door, the cross-object batch route's per-op gate
+ * included, reads its object by name through {@link loadObjectItem}.
  */
 export async function loadObjectItems(source: MetaReadGateListSource): Promise<any[]> {
     try {

@@ -159,8 +159,10 @@ describe('the console top bar is one 48 px bar in every frame (objectui#12639)',
       CONSOLE_BELOW_TOP_BAR,
       'The app sidebar starts where the bar ends and is the viewport less the bar: both numbers follow `h-N`.',
     ).toBe(`!top-${step} !h-[calc(100svh-${step / 4}rem)]`);
+    // The sidebar's class leads with it; the narrow-window overlay adds its own
+    // after it (objectstack#27593).
     expect(code('packages/app-shell/src/layout/UnifiedSidebar.tsx')).toMatch(
-      /<Sidebar\b[^>]*\bclassName=\{CONSOLE_BELOW_TOP_BAR\}/,
+      /<Sidebar\b[^>]*\bclassName=\{(?:cn\()?CONSOLE_BELOW_TOP_BAR\b/,
     );
   });
 

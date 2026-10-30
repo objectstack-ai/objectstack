@@ -52,6 +52,7 @@ import {
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Minimize2 } from 'lucide-react';
 import { NavigationOverlay, type NavigationOverlayMode } from '@object-ui/components';
+import { overlayWidthFor } from '@object-ui/plugin-view';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
@@ -625,7 +626,9 @@ export function RecordPageDrawerHost({
   );
 
   const rootDef = root ? objects.find((o) => (o as { name?: unknown } | null)?.name === root.objectName) : undefined;
-  const rootWidth = (rootDef as { navigation?: { width?: string | number } } | undefined)?.navigation?.width;
+  // The pane's own width (objectstack#27545): an authored one, else `md`.
+  const rootWidth = (rootDef as { navigation?: { width?: string | number } } | undefined)?.navigation?.width
+    ?? overlayWidthFor('md', rootDef);
 
   return (
     <RecordDrawerContext.Provider value={api}>

@@ -47,7 +47,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
-import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer } from '@object-ui/fields';
+import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard } from '@object-ui/fields';
 import {
   buildExpandFields,
   collectPredicateFieldRefs,
@@ -65,6 +65,8 @@ import {
   listViewPredicates,
   parentRelationshipFieldDef,
   PLATFORM_RECORD_COLUMNS,
+  recordDisplayValueAt,
+  resolveNameField,
   composeParentScopeFilter,
   isMultiValueRelationship,
   mergeFilterNodes,
@@ -92,7 +94,7 @@ import {
   useSeenOnce,
 } from './relatedListCompact';
 import { relatedCardId } from './synth/relatedArrangement';
-import { RelatedCardMenu } from './RelatedCardMenu';
+import { RelatedCardMenu, RelatedPanelHandle } from './RelatedCardMenu';
 import { detectStatusField } from '@object-ui/types';
 
 export interface RelatedListProps {
@@ -821,8 +823,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * [ADR-0066 D4 / objectui#9782] The `list_toolbar` set this header may draw,
    * with `requiredPermissions` mirrored as a UI hide.
    *
-   * `@objectstack/spec` declares the key as "enforced with 403 on the platform
-   * action route (script/flow/modal + MCP) and **mirrored as a UI hide**". The
+   * `@objectstack/spec` declares the key as "enforced with 403 on every call the
+   * platform action door (`POST /actions/:object/:action` and MCP `run_action`)
+   * dispatches, and **mirrored as a UI hide**" — a declared same-origin
+   * `type: api` action included (ADR-0066 D4 as amended). The
    * same bridge (`RelatedRecordActionsBridge.deriveActions`) feeds the child
    * object's `list_item` actions and these header buttons, and it filters on
    * `locations` alone — so before this the toolbar honoured `visible` and
@@ -1192,8 +1196,42 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   }, [compact, objectSchema, columns, redactedFields]);
 
   /**
+   * The compact row's first column when the child's name field IS the foreign
+   * key back to this record (objectstack#27524, Target 11): a product's line
+   * items named by their product all read the product page's own name, so the
+   * row names the first column that is not that key — the list's authored
+   * columns, then the child's fields in declaration order — skipping platform
+   * columns, redacted and unreadable fields. The key is skipped even when no
+   * authored column survives: the declared fields are read next. `undefined`:
+   * the row names the record as everywhere else.
+   */
+  const compactNameField = React.useMemo((): string | undefined => {
+    if (!compact || !objectSchema || !referenceField) return undefined;
+    if (resolveNameField(objectSchema) !== referenceField) return undefined;
+    const relatedObjectName = objectName || api || '';
+    const authored = dropRedactedColumns(Array.isArray(columns) ? columns : [], redactedFields)
+      .map(drawnColumnKey)
+      .filter((key): key is string => !!key);
+    const fields = objectSchema.fields;
+    const declared = Array.isArray(fields)
+      ? fields.map((f: any) => f?.name).filter((n: unknown): n is string => typeof n === 'string')
+      : fields && typeof fields === 'object'
+        ? Object.keys(fields)
+        : [];
+    return [...authored, ...declared].find(
+      (key) =>
+        key !== referenceField &&
+        !redactedFields.has(key) &&
+        !PLATFORM_RECORD_COLUMNS.has(key) &&
+        parentRelationshipFieldDef(fields, key) !== undefined &&
+        !(perms?.isLoaded && relatedObjectName && !perms.checkField(relatedObjectName, key, 'read')),
+    );
+  }, [compact, objectSchema, referenceField, columns, redactedFields, objectName, api, perms]);
+
+  /**
    * The compact card's projection (objectstack#27056, Target 2): `id`, the
-   * record's name field and the chip — what the card draws, nothing more. A
+   * record's name field (or the column that stands in for it,
+   * `compactNameField`) and the chip — what the card draws, nothing more. A
    * field only when the child declares it (or it is a platform column) and
    * the principal may read it. `undefined` — the list's own projection — when
    * the name cannot be read off a known field: no child definition, a legacy
@@ -1208,7 +1246,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     if (!declaredName && !derivedName) return undefined;
     const relatedObjectName = objectName || api || '';
     const projection = new Set<string>(['id']);
-    for (const field of [declaredName, derivedName, compactChipField]) {
+    for (const field of [compactNameField ?? declaredName, compactNameField ? undefined : derivedName, compactChipField]) {
       if (!field || redactedFields.has(field)) continue;
       const known = parentRelationshipFieldDef(objectSchema.fields, field) !== undefined;
       if (!known && !PLATFORM_RECORD_COLUMNS.has(field)) continue;
@@ -1216,7 +1254,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       projection.add(field);
     }
     return Array.from(projection);
-  }, [compact, objectSchema, objectName, api, perms, redactedFields, compactChipField]);
+  }, [compact, objectSchema, objectName, api, perms, redactedFields, compactChipField, compactNameField]);
   // What goes on the wire: the card's projection, and the reference roots it
   // names, when it has one; the list's own otherwise.
   const wireSelect = compactSelect ?? selectFields;
@@ -1906,7 +1944,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // returns a falsy renderer — measured over seven spellings, including
       // ones no producer can emit, all of which resolved to `TextCellRenderer`.
       if (!def?.type) return undefined;
-      const rendererType = resolveCellRendererType({ type: def.type, format: def.format }) || def.type;
+      const rendererType = resolveCellRendererType({ type: def.type, format: def.format, widget: def.widget }) || def.type;
       const CellRenderer = getCellRenderer(rendererType);
       if (!CellRenderer) return undefined;
       const isLookup = def.type === 'lookup' || def.type === 'master_detail';
@@ -2529,11 +2567,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
   // In the tabbed tier's 关联 tab the reader's arrangement hands the full
-  // list its chrome (objectstack#27055): the title collapses it — a write to
-  // the reader's arrangement, after which the tab draws it collapsed — and
-  // its ⋯ menu moves and hides it.
+  // list its chrome (objectstack#27055): ⠿ moves it and ⋯ hides it. It does
+  // not collapse: a related list has no collapsed state (objectstack#27524).
   const arrangedFull = !compact && !!cardChrome;
-  const isCollapsible = collapsible || bodyTable || arrangedFull;
+  const isCollapsible = collapsible || bodyTable;
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -2629,9 +2666,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
 
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
-  const handleHeaderClick = arrangedFull
-    ? () => cardChrome!.onCollapse()
-    : isCollapsible ? () => setCollapsed((c) => !c) : undefined;
+  const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
 
   const SectionIcon = resolveIconComponent(icon);
   // Badge shows the COLLECTION size: the server total in windowed mode (only
@@ -2765,14 +2800,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     </>
   );
 
-  // objectstack#27055, Target 4 — the compact card of the record page's
-  // related column: title + count + ＋ in one row, no table header, up to
-  // three rows of the record's name and ONE status / date chip, ⤢ to enlarge
-  // the list in place. The filter and sort are the list's own; the read asks
-  // for the rows the card names and the fields it draws (objectstack#27056).
-  // No 「查看全部」 footer: the one way to the whole list is ⤢ (Target 9) — the
-  // child's list page is reached from navigation. A card counted at 0 is its
-  // title row alone.
+  // objectstack#27055, Target 4 — the panel of the record page's related
+  // column: its header, no table header, up to three rows of the record's
+  // name and ONE status / date chip. The filter and sort are the list's own;
+  // the read asks for the rows the panel names and the fields it draws
+  // (objectstack#27056). A panel counted at 0 is its header alone.
+  //
+  // objectstack#27524, Target 1 — the header is the title and the count
+  // chip; the row (or the chip) opens the whole list, and on hover the
+  // title's end shows › with 「查看全部 N 条」. On hover or focus its right
+  // end shows ⠿ (drag, ⌥↑ / ⌥↓), ＋ and ⋯ (隐藏 alone). No collapse, no ⤢:
+  // the whole list is the enlarged face. Nothing is reserved on the left.
   if (compact) {
     const rows = paginatedData.slice(0, COMPACT_RELATED_ROWS);
     const chipOf = (row: any): React.ReactNode => {
@@ -2798,10 +2836,19 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         </Badge>
       );
     };
-    const enlarge = cardChrome?.onEnlarge;
+    const open = cardChrome?.onEnlarge;
     // Rows still to come: one placeholder per row the count says the card
     // names, so the card does not grow when they land.
     const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
+    const countChip = !loadFailure && (
+      <span
+        className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal text-foreground"
+        data-related-card-count=""
+      >
+        {recordCount}
+      </span>
+    );
+    const viewAll = t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
     return (
       <section
         ref={setCompactCard}
@@ -2812,36 +2859,50 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         aria-busy={pendingRows > 0 || undefined}
       >
         <div
-          className={cn(
-            'flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold',
-            cardChrome?.dragHandleProps?.draggable && 'cursor-grab active:cursor-grabbing',
-          )}
-          {...(cardChrome?.dragHandleProps ?? {})}
+          className="group/panel-head relative flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
+          data-related-panel-head=""
         >
-          <span className={cn('min-w-0 truncate', isEmpty && 'text-muted-foreground font-medium')}>{title}</span>
+          {open ? (
+            // The row is the target: the button's ::after stretches over the
+            // whole header, so a click on its free space opens the list too,
+            // and the row stays one control. The controls sit above it.
+            // `transform: none` keeps the console's pressed-button scale off
+            // it: a transform makes the button the containing block of its own
+            // ::after, which shrinks to the button mid-press, so the release
+            // lands on the header and the click never reaches the button.
+            <button
+              type="button"
+              className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              style={{ transform: 'none' }}
+              title={viewAll}
+              data-related-panel-open=""
+              onClick={() => open()}
+            >
+              <span className={cn('min-w-0 truncate', isEmpty && 'text-muted-foreground font-medium')}>{title}</span>
+              {countChip}
+              <ChevronRight
+                className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/panel-head:opacity-100 group-focus-within/panel-head:opacity-100"
+                aria-hidden
+              />
+            </button>
+          ) : (
+            <>
+              <span className={cn('min-w-0 truncate', isEmpty && 'text-muted-foreground font-medium')}>{title}</span>
+              {countChip}
+            </>
+          )}
           {cardChrome?.fresh && (
             <Badge className="h-4 shrink-0 px-1 text-[10px] font-normal" data-related-card-new="">
               {t('detail.relatedCardNew', { defaultValue: 'New' })}
             </Badge>
           )}
-          {!loadFailure && (
-            enlarge ? (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); enlarge(); }}
-                className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal text-foreground hover:bg-muted/70"
-                aria-label={t('detail.relatedCardCount', { count: recordCount, defaultValue: '{{count}} records — enlarge' })}
-                data-related-card-count=""
-              >
-                {recordCount}
-              </button>
-            ) : (
-              <span className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal" data-related-card-count="">
-                {recordCount}
-              </span>
-            )
-          )}
-          <span className="ml-auto flex shrink-0 items-center gap-0.5">
+          {/* Drawn on hover or focus, and while the ⋯ menu is open: its
+              content is portaled, so neither holds there. */}
+          <span
+            className="relative z-10 ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/panel-head:opacity-100 group-focus-within/panel-head:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100"
+            data-related-panel-controls=""
+          >
+            {cardChrome && <RelatedPanelHandle chrome={cardChrome} title={title} />}
             {onNew && (
               <Button
                 variant="ghost"
@@ -2867,19 +2928,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 <Plus className="h-3.5 w-3.5" />
               </Button>
             )}
-            {enlarge && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 text-muted-foreground"
-                aria-label={t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
-                data-related-card-enlarge=""
-                onClick={(e) => { e.stopPropagation(); enlarge(); }}
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
-            {cardChrome && <RelatedCardMenu chrome={cardChrome} title={title} collapsed={false} />}
+            {cardChrome && <RelatedCardMenu chrome={cardChrome} title={title} />}
           </span>
         </div>
         {loadFailure ? (
@@ -2902,24 +2951,38 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{t('detail.noRelatedRecords')}</div>
         ) : (
           rows.map((row: any, index: number) => {
-            const name = getRecordDisplayName(objectSchema, row) || String(row?.id ?? '');
+            const name =
+              (compactNameField ? recordDisplayValueAt(row, compactNameField) : getRecordDisplayName(objectSchema, row)) ||
+              String(row?.id ?? '');
             return (
               <div
                 key={row?.id ?? index}
                 className="flex h-8 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
                 data-related-card-row=""
               >
-                {handleRowClick ? (
-                  <button
-                    type="button"
-                    className="min-w-0 truncate text-left text-primary hover:underline"
-                    onClick={(e) => handleRowClick(row, e)}
-                  >
-                    {name}
-                  </button>
-                ) : (
-                  <span className="min-w-0 truncate">{name}</span>
-                )}
+                {/* objectstack#27604 — hovering the name (or Space on it)
+                    shows the record's card; its title opens the record the
+                    way this name does. */}
+                <RecordHoverCard
+                  objectName={api}
+                  recordId={row?.id}
+                  objectSchema={objectSchema}
+                  label={name}
+                  dataSource={dataSource}
+                  onOpen={handleRowClick ? (e) => handleRowClick(row, e) : undefined}
+                >
+                  {handleRowClick ? (
+                    <button
+                      type="button"
+                      className="min-w-0 truncate text-left text-primary hover:underline"
+                      onClick={(e) => handleRowClick(row, e)}
+                    >
+                      {name}
+                    </button>
+                  ) : (
+                    <span className="min-w-0 truncate">{name}</span>
+                  )}
+                </RecordHoverCard>
                 {chipOf(row)}
               </div>
             );
@@ -3011,7 +3074,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
               </Button>
             )}
-            {arrangedFull && <RelatedCardMenu chrome={cardChrome!} title={title} collapsed={false} />}
+            {arrangedFull && <RelatedPanelHandle chrome={cardChrome!} title={title} />}
+            {arrangedFull && <RelatedCardMenu chrome={cardChrome!} title={title} />}
             {bodyTable && enlargeRelated && ownRelationshipId && (
               <Button
                 variant="ghost"

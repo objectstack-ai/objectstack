@@ -20,6 +20,7 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 // declaration its type names, so the refusal and the type cannot drift apart.
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
@@ -99,6 +100,50 @@ export {
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
 export function isSystemObjectName(name: string): boolean {
     return /^sys_/i.test(name);
+}
+
+/**
+ * [#27681 / ADR-0011] The `sys_*` gate of the MCP action surface, PER ACTION.
+ * Returns a human-readable refusal for an action on a system object that its
+ * author did not opt into the AI surface, or `null` when the action may pass
+ * (a non-system object, or a system-object action declaring `ai.exposed: true`).
+ *
+ * Maintainer ruling 6513869839 (letter B): a `sys_*` action is reachable over
+ * MCP only when the action itself declares `ai: { exposed: true, description }`.
+ * The guard that stood here refused EVERY action on a `sys_*` object by name,
+ * ahead of the exposure check, so no declaration could open one, while the REST
+ * `/actions` door served the same action to the same principal. The refusal now
+ * yields to the author's opt-in and to nothing else:
+ *
+ *  - no deployment switch reaches it (the MCP package's `allowSystemObjects`
+ *    stays on the tool layer and gains no reach here — ruling parameter 1);
+ *  - every later gate still runs behind it, unchanged: the ADR-0066 D4
+ *    capability gate, the ADR-0126 §8 activation consult, the param contract,
+ *    the `ai.requiresConfirmation` gate and the subject load under RLS.
+ *
+ * ONE predicate for the three MCP sites that ask it — `run_action`
+ * ({@link invokeBusinessAction}), the `list_actions` bridge and the
+ * `resume_run` admission (`domains/mcp.ts`) — so an agent that lists sees
+ * exactly the system-object actions it may run.
+ */
+export function systemObjectActionExposureError(_deps: ActionExecutionDeps, action: any, objectName: string): string | null {
+    if (!isSystemObjectName(objectName)) return null;
+    // [#21594] The stored-metadata family is NOT opened by the flag: the MCP
+    // door never reaches the subject load for one of its tables (a row carries
+    // a stored metadata body, credential material included). That boundary
+    // predates the ruling, which opened identity actions and named no family
+    // table; it held here only because every `sys_*` action was refused.
+    if (isStoredMetadataBodyObject(objectName)) {
+        return (
+            `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') that stores metadata bodies ` +
+            `and is never exposed via MCP — read and change those through the metadata API`
+        );
+    }
+    if (action?.ai?.exposed === true) return null;
+    return (
+        `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') and is not exposed via MCP — ` +
+        `a system object's action is reachable here only when its author declares \`ai: { exposed: true, description: … }\` on it`
+    );
 }
 
 /**
@@ -939,10 +984,12 @@ export function disabledActionRefusal(
 
     // The SENTENCE is the engine's (`describeDisabledAction`), so both doors
     // state one refusal instead of two that agree today; the fallback covers an
-    // engine that answers the boolean but not the prose.
+    // engine that answers the boolean but not the prose. [#27842] Both are
+    // written for the person who clicked: no table, no ADR (the engine logs
+    // those when it is asked for the sentence; the code rides the envelope).
     const message = typeof ql.describeDisabledAction === 'function'
         ? String(ql.describeDisabledAction(name))
-        : `Action '${name}' is disabled for this installation (ADR-0126 §8).`;
+        : 'This action is turned off for this deployment.';
     return { code: ACTION_DISABLED_CODE, status: ACTION_DISABLED_STATUS, message };
 }
 
@@ -1186,6 +1233,43 @@ function carriesPageToken(value: unknown): boolean {
 }
 
 /**
+ * [#3447] The decision-output param family: `outputs.<key>`, one param per
+ * output an approval node declares (`decisionOutputs`), filled in by the
+ * approver while deciding. The key set belongs to the pending request, not to
+ * the action, so no `params` list can declare it. A `type: 'api'` request
+ * folds the family into its body's `outputs` object
+ * ({@link buildApiActionRequest}), the body the approvals decide routes read,
+ * and the param contract admits exactly what folds
+ * ({@link foldsApiDecisionOutputs}; ADR-0104 D2, amended 2026-10-30). The
+ * console's api handler folds the same family by the same rule.
+ */
+const API_DECISION_OUTPUT_PREFIX = 'outputs.';
+
+/** Is `key` a member of the `outputs.<key>` family — the prefix and a non-empty key? */
+export function isApiDecisionOutputParam(key: string): boolean {
+    return key.startsWith(API_DECISION_OUTPUT_PREFIX) && key.length > API_DECISION_OUTPUT_PREFIX.length;
+}
+
+/** The `bodyShape.wrap` key an api request nests its params under, when the declaration names one. */
+function apiBodyWrap(action: any): string | undefined {
+    return action?.bodyShape && typeof action.bodyShape === 'object' && typeof action.bodyShape.wrap === 'string' && action.bodyShape.wrap
+        ? action.bodyShape.wrap
+        : undefined;
+}
+
+/**
+ * [#27738] Does this action's request fold the `outputs.<key>` family? Only a
+ * forwarded `type: 'api'` action whose params sit flat in its body. Under
+ * `bodyShape.wrap` the params are nested and the fold never reaches them, and
+ * a declarative update (`operation: 'update'`, whatever its `type` says)
+ * writes its bag to the row instead of sending it anywhere — so for both, and
+ * for every other type, the family stays an unknown param.
+ */
+export function foldsApiDecisionOutputs(action: any): boolean {
+    return !isDeclarativeUpdateAction(action) && action?.type === 'api' && apiBodyWrap(action) === undefined;
+}
+
+/**
  * Assemble the request a same-origin `type: 'api'` action makes — method,
  * path and JSON body — from its DECLARATION and the dispatch inputs, by the
  * same rules the console's api handler applies at a click
@@ -1268,18 +1352,15 @@ export function buildApiActionRequest(
                 `the action from the page that owns the variable.`,
         };
     }
-    const wrap: string | undefined =
-        action?.bodyShape && typeof action.bodyShape === 'object' && typeof action.bodyShape.wrap === 'string' && action.bodyShape.wrap
-            ? action.bodyShape.wrap
-            : undefined;
+    const wrap = apiBodyWrap(action);
     const body: Record<string, unknown> = wrap ? { [wrap]: { ...input.params } } : { ...input.params };
     // [#3447] decision outputs: `outputs.<key>` params fold into `outputs`.
     for (const k of Object.keys(body)) {
-        if (k.startsWith('outputs.') && k.length > 'outputs.'.length) {
+        if (isApiDecisionOutputParam(k)) {
             const value = body[k];
             delete body[k];
             if (value === undefined || value === '') continue;
-            ((body.outputs ??= {}) as Record<string, unknown>)[k.slice('outputs.'.length)] = value;
+            ((body.outputs ??= {}) as Record<string, unknown>)[k.slice(API_DECISION_OUTPUT_PREFIX.length)] = value;
         }
     }
     // [#8018] `recordIdParam`, seeded from the row or refused — never silently
@@ -1519,6 +1600,22 @@ export async function forwardApiAction(
  * envelope (the console's `apiHandler` unwraps the same way, so a
  * `resultDialog` path reads identically on both paths), else the body itself
  * (a stock better-auth answer is not enveloped).
+ *
+ * [#27918] A 2xx is read as success whatever its body says: `success: false`
+ * on a 2xx is not a refusal here, so `{ success: false, data }` answers `data`
+ * and `{ success: false, message }` answers the body itself. The status is
+ * the target's verdict and this door relays it rather than sniffing a body.
+ * Measured 2026-10-30 against every same-origin `type: 'api'` target declared
+ * in this repository (the `sys_*` identity actions over better-auth and the
+ * plugin-auth mounts, the approvals routes, the datasource admin routes, the
+ * data door, the showcase's flow endpoint, print and form routes, and the
+ * objectui declarations): none answers a 2xx with a top-level
+ * `success: false`. Each refusal is non-2xx, and the nested
+ * `{ success: true, data: { success: false } }` that a flow endpoint's
+ * unclassified result or a zero-row delete can answer comes back through
+ * this door as the same bytes. A target that starts answering 2xx
+ * `success: false` has the defect itself (failures speak HTTP, #3962), and
+ * the fix goes in that target, never in a body check here (PD #12).
  */
 export function apiActionResultOf(answer: ApiActionForwardAnswer): unknown {
     const body = answer.body;
@@ -1528,9 +1625,39 @@ export function apiActionResultOf(answer: ApiActionForwardAnswer): unknown {
 }
 
 /**
+ * [#27738] The members the target's refusal ENVELOPE carries beside `code`,
+ * `message` and `httpStatus` — `details`, `userMessage`, `declaredCode`, any
+ * other — exactly as the target wrote them; `undefined` when the target did
+ * not envelope its refusal (`{ success: false, error: { code, … } }`): a stock
+ * better-auth `{ code, message }`, a non-JSON or an empty body.
+ *
+ * Both doors relay these WHOLE. The REST door used to rebuild the envelope
+ * from `code` alone, which dropped everything a caller branches on beside
+ * the code: a flow endpoint's `details.innerRefusal` and `userMessage`, an
+ * entitlement refusal's `details` (`upgrade_url`, `contact_url`, `plan`,
+ * `current`, `limit`). The forward carries the caller's own credentials
+ * through the same HTTP stack, so this is the answer the caller gets by
+ * calling the target itself: relaying it whole discloses nothing new, and
+ * the target's own boundary has already applied its message discipline.
+ */
+export function apiActionRefusalMembers(answer: ApiActionForwardAnswer): Record<string, unknown> | undefined {
+    const body = answer.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body) || body.success !== false) return undefined;
+    const error = body.error;
+    if (!error || typeof error !== 'object' || Array.isArray(error) || typeof error.code !== 'string' || !error.code) return undefined;
+    const members: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(error as Record<string, unknown>)) {
+        if (key !== 'code' && key !== 'message' && key !== 'httpStatus') members[key] = value;
+    }
+    return members;
+}
+
+/**
  * The thrown shape for a forward the target REFUSED (a non-2xx), for the MCP
  * bridge: `code` + `status` ride the error so `resolveThrownHttpError` serves
  * the target's own status and the agent reads the target's own sentence.
+ * [#27738] The envelope's `details` ride it too ({@link apiActionRefusalMembers}),
+ * which `run_action` renders beside the code, as the REST door relays them.
  */
 export function apiActionForwardRefusal(action: any, answer: ApiActionForwardAnswer): Error {
     const body = answer.body;
@@ -1542,7 +1669,8 @@ export function apiActionForwardRefusal(action: any, answer: ApiActionForwardAns
         (body && typeof body === 'object' && typeof body.error?.code === 'string' && body.error.code) ||
         (body && typeof body === 'object' && typeof body.code === 'string' && body.code) ||
         standardErrorCodeForHttpStatus(answer.status);
-    return Object.assign(new Error(message), { code, status: answer.status });
+    const details = apiActionRefusalMembers(answer)?.details;
+    return Object.assign(new Error(message), { code, status: answer.status, ...(details !== undefined ? { details } : {}) });
 }
 
 /**
@@ -2175,6 +2303,12 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
         ...(declarativeUpdate ? { operation: DECLARATIVE_UPDATE_OPERATION } : {}),
         requiresRecord: Boolean(requiresRecord),
         requiresConfirmation: actionLooksDestructive(deps, action),
+        // [#27681] The author's AI opt-in, attested by the bridge that read the
+        // declaration. The MCP tool layer reads it to let a `sys_*` action
+        // through its own fail-closed filter (`allowSystemObjects` off): it
+        // never sees the declaration, so this is the only way the per-action
+        // flag reaches it. Emitted only when declared, like `operation`.
+        ...(action?.ai?.exposed === true ? { aiExposed: true } : {}),
         ...(params.length > 0 ? { params } : {}),
     };
 }
@@ -2345,6 +2479,26 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
 }
 
 /**
+ * The bag ADR-0104 D2 judges: the request's own, less its UNDECLARED
+ * `outputs.<key>` decision outputs when this action's request folds them
+ * ({@link foldsApiDecisionOutputs}; D2 amended 2026-10-30, #27738). Those
+ * keys are per request, so no declaration can name them; the forwarded target
+ * (the approvals decide route) judges their values against the request's own
+ * `decisionOutputs`. A declared param stays judged as declared, whatever its
+ * name, and every other undeclared key is refused exactly as before.
+ */
+function paramBagUnderContract(action: any, resolved: ResolvedActionParam[], bag: Record<string, unknown>): Record<string, unknown> {
+    if (!foldsApiDecisionOutputs(action)) return bag;
+    const declared = new Set(resolved.map((p) => p.name));
+    const judged: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(bag)) {
+        if (isApiDecisionOutputParam(key) && !declared.has(key)) continue;
+        judged[key] = value;
+    }
+    return judged;
+}
+
+/**
  * Enforce an action's declared param contract against the request bag
  * BEFORE the handler runs (ADR-0104 D2). Returns a `400`-worthy error message
  * when the contract is violated, `null` when the bag conforms.
@@ -2377,6 +2531,13 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
  * built-ins: the same message, the same 400 at the REST door, the same
  * `OS_ALLOW_LAX_ACTION_PARAMS` escape hatch a declared-params action gets. No
  * switch of its own.
+ *
+ * ## One undeclared family a forwarded api action admits (#27738)
+ *
+ * A `type: 'api'` action whose request folds the `outputs.<key>` decision
+ * outputs is judged without them ({@link paramBagUnderContract}), so an
+ * Approve or Reject carrying the approver's decision outputs reaches the fold
+ * instead of a 400. Every other key is judged as above.
  */
 export function enforceActionParams(deps: ActionExecutionDeps,
     action: any,
@@ -2387,7 +2548,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
     if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
     const resolved = resolveDeclaredActionParams(deps, action, obj);
-    const issues = validateActionParams(resolved, bag);
+    const issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
     if (issues.length === 0) return null;
     const summary = issues.map((i) => i.message).join('; ');
     if (!laxActionParams()) {
@@ -3208,10 +3369,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     const { action, objectName, obj } = resolved;
 
-    // Fail-closed on system-object actions (mirrors the object-tool guard).
-    if (isSystemObjectName(objectName)) {
-        throw new Error(`Action '${name}' is on a system object and is not exposed via MCP`);
-    }
+    // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
+    // action passes only on its author's `ai.exposed` opt-in, and every gate
+    // below still runs for it.
+    const systemObjectError = systemObjectActionExposureError(deps, action, objectName);
+    if (systemObjectError) throw new Error(systemObjectError);
     const hasAutomation = Boolean(await resolveAutomationService(deps, requestContext, envId));
     if (!isHeadlessInvokableAction(deps, action, hasAutomation)) {
         throw new Error(

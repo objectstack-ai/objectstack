@@ -1379,7 +1379,7 @@ describe('[#27727] reconnect requires `previous`, the record the live pool was b
     expect(live).toBeDefined();
     const defsBefore = engine!.defs.length;
 
-    // @ts-expect-error — `previous` is required: without its `driver` a kept pool would be restored unfloored
+    // @ts-expect-error — `previous` is required: without its `driver`, when a pool is live, a failed rebuild would restore it unfloored
     await expect(service.reconnect(pluginDs, { context: ctx })).rejects.toThrow(/reconnect needs `previous`/);
     await expect(
       service.reconnect(pluginDs, { context: ctx, previous: { driver: '' } }),

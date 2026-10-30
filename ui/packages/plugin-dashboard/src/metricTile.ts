@@ -13,9 +13,10 @@
  *    narrower than 160 px, 24 px from 160 px up. A longer one — a seven-digit
  *    money figure with cents — takes a size ladder from 14 px to 24 px whose
  *    steps start where that size fits (`metricTileValueClass`).
- *  - The measure label (dataset-bound tile only) is an 11 px muted line under
- *    the value, dropped below 160 px. The title's tooltip carries it, so it is
- *    still there at every width.
+ *  - The caption (dataset-bound tile only) is an 11 px muted line under the
+ *    value, dropped below 160 px: the widget's description when one is
+ *    authored, else the measure label. The title's tooltip carries the measure
+ *    label, so it is still there at every width and under a description.
  *
  * Width rules key off the TILE's own box (`@container` on the tile, `@[160px]:`
  * variants), never the viewport: a dashboard grid, a page block and the
@@ -100,7 +101,7 @@ export function metricTileValueClass(value: string | number): string {
   return `${METRIC_TILE_VALUE_BASE} ${rung ? rung.sizes : METRIC_TILE_VALUE_FINAL_SIZES}`;
 }
 
-/** The measure label: an 11 px muted line under the value, dropped below 160 px. */
+/** The caption (description, else measure label): an 11 px muted line under the value, dropped below 160 px. */
 export const METRIC_TILE_MEASURE_LABEL_CLASS = 'hidden max-w-full truncate text-[11px] text-muted-foreground @[160px]:block';
 
 /**

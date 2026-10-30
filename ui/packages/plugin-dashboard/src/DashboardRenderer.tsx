@@ -1093,10 +1093,9 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         // objectui#12528 — a dataset-bound METRIC tile draws no card header:
         // the header (title, then a description paragraph under a rule) and
         // the tile (value, then the measure label) stacked four lines for one
-        // number. The tile draws the title and the measure label on one line
-        // above the value instead, and the description is the title's tooltip.
-        // The spec declares no widget key to show it inline, so it shows
-        // nowhere else. Every other widget keeps the frame as it was.
+        // number. The tile draws the title above the value instead, and the
+        // description is the caption under it in place of the measure label
+        // (objectstack#27430). Every other widget keeps the frame as it was.
         const datasetMetric = datasetBound && entryType === 'metric';
         const resolvedTitle = tWidgetTitle(widget);
         const resolvedDescription = tWidgetDescription(widget);

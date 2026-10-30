@@ -88,7 +88,8 @@
  *
  * The two module-level helpers only this body called moved with it, verbatim,
  * and sit at the end of this file: the reference sweep's declared-refusal
- * re-dresser and the intake reasons' ETag dimension. Five names declared in
+ * re-dresser and the intake reasons' ETag dimension. [#28044] A third, the
+ * switched-off actions' ETag dimension, was born here. Five names declared in
  * `rest-server.ts` stay there and are imported from it: the reference sweep's
  * closed query set (its tests import it from there), the package binding and
  * the draft admission (both already exported), and the absence answer and the
@@ -765,6 +766,25 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         const cachedRegistration = metaType === 'flow' && result.registration !== undefined
                             ? { registration: result.registration }
                             : {};
+                        // [#27842] The action twin, for an OBJECT: the
+                        // packaged actions the activation ledger switches
+                        // off, beside the document, read live on every call.
+                        // This branch is the default door of
+                        // `GET /meta/object/:name`. An object's validator is
+                        // folded and judged HERE (`audienceFolds`), so unlike
+                        // `registration` the key need not stand the 304
+                        // down: [#28044] the served list is folded into the
+                        // validator below (`disabledActionsFingerprint`), so
+                        // an administrator's switch moves the ETag and an
+                        // unchanged switch set still revalidates to 304.
+                        const cachedDisabledActions = metaType === 'object' && result.disabledActions !== undefined
+                            ? { disabledActions: result.disabledActions }
+                            : {};
+                        const cachedBeside = { ...cachedRegistration, ...cachedDisabledActions };
+                        // Only what is beside the document and in NO
+                        // validator stands the 304 down — `registration`.
+                        const besideJudged = Object.keys(cachedRegistration).length > 0;
+                        const disabledActionsFingerprint = cachedDisabledActionsFingerprint(cachedDisabledActions.disabledActions);
 
                         if (result.notModified) {
                             res.status(304).send();
@@ -835,7 +855,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             res.header('Vary', 'Accept-Language');
                             res.json(await this.translateMetaEnvelope(
                                 req, req.params.type, environmentId,
-                                { type: metaType, name: req.params.name, ...cachedRegistration },
+                                { type: metaType, name: req.params.name, ...cachedBeside },
                                 cachedDocument, cacheI18n, runtimeView.document,
                             ));
                             return;
@@ -856,22 +876,29 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // [#22639] …and so does what the read gate
                             // withheld: a caller who no longer holds a list
                             // view's capability is never answered a `304`
-                            // for the body that carried it.
+                            // for the body that carried it. [#28044] …and so
+                            // does the switched-off list served beside an
+                            // object: a switch flipped off or on is never
+                            // answered a `304` for the list it replaced.
                             const value = foldVisibilityFingerprintIntoEtag(
                                 foldVisibilityFingerprintIntoEtag(
                                     foldVisibilityFingerprintIntoEtag(
-                                        foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
-                                        runtimeView.fingerprint,
+                                        foldVisibilityFingerprintIntoEtag(
+                                            foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                            runtimeView.fingerprint,
+                                        ),
+                                        intakeFingerprint,
                                     ),
-                                    intakeFingerprint,
+                                    audienceFingerprint,
                                 ),
-                                audienceFingerprint,
+                                disabledActionsFingerprint,
                             );
                             const etagValue = result.etag.weak
                                 ? `W/"${value}"`
                                 : `"${value}"`;
                             res.header('ETag', etagValue);
-                            if ((maskApplies || intakeFolds || audienceFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
+                            if ((maskApplies || intakeFolds || audienceFolds) && !besideJudged
+                                && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
                                 res.status(304).send();
                                 return;
                             }
@@ -921,7 +948,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         const cachedEnvelope = {
                             type: metaType,
                             name: req.params.name,
-                            ...cachedRegistration,
+                            ...cachedBeside,
                         };
                         res.json(await this.translateMetaEnvelope(
                             req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,
@@ -1212,4 +1239,15 @@ function notImplementedRefusalAnswer(
 /** [#21476] Those reasons' ETag dimension; empty when there is none (the ADR-0106 D3 fold). */
 function anonymousFormIntakeFingerprint(warnings: ReadonlyArray<{ path: string; message: string }>): string {
     return objectFieldVisibilityFingerprint(warnings.map((w) => JSON.stringify([w.path, w.message])));
+}
+
+/**
+ * [#28044] The ETag dimension of the `disabledActions` served beside an object
+ * (#27842), hashed over the list exactly as served, so the validator describes
+ * the representation sent. Absent (no ledger answered) folds nothing and keeps
+ * the ETag byte-identical; `[]` (a ledger that switches none of them off) folds
+ * a fingerprint of its own, so a ledger attaching or detaching moves it too.
+ */
+function cachedDisabledActionsFingerprint(disabledActions: readonly string[] | undefined): string {
+    return disabledActions === undefined ? '' : objectFieldVisibilityFingerprint([JSON.stringify(disabledActions)]);
 }

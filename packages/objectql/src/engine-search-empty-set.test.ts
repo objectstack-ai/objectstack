@@ -138,7 +138,10 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
     });
 
     it('an explicit searchFields narrowing does not rescue it — the allowed set is empty, so the fallback is too', async () => {
-        for (const searchFields of [['title'], ['book'], ['nope'], []]) {
+        // [#27732] An empty override is no longer a narrowing to rescue: it
+        // names no field, and is refused before the expansion
+        // (engine-empty-search-fields-refusal.test.ts).
+        for (const searchFields of [['title'], ['book'], ['nope']]) {
             const err: any = await engine.find('lib_loan', { search: 'Dune', searchFields }).then(() => null, (e) => e);
             expect(err, `searchFields ${JSON.stringify(searchFields)}`).toMatchObject(REFUSAL);
         }

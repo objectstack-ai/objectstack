@@ -91,6 +91,7 @@ import type { GetMetaItemsRequest } from '@objectstack/spec/api';
 import { truncateClientMessage } from '@objectstack/types';
 import { handleRouteError, sendFieldVisibilityFault } from './error-response.js';
 import * as metaReadGate from './meta-item-read-gate.js';
+import { unknownQueryParamRefusalMessage } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
 import type { RouteManager } from './route-manager.js';
@@ -200,6 +201,15 @@ export interface MetaCollectionRouteHost {
 function diagnosticsRefusal(message: string): Error {
     return Object.assign(new Error(message), { code: 'INVALID_REQUEST', status: 400 });
 }
+
+/**
+ * [#27633] The closed query-parameter set of `GET {metaPath}/diagnostics`.
+ * **Measured**: the three names the handler reads — `type`, `severity` and
+ * `package` — and the three both SDKs send (`client.meta.getDiagnostics`,
+ * the Console's `metadata-client`). Each is single-valued, so the same list
+ * is the route's multiplicity declaration (#6877).
+ */
+const META_DIAGNOSTICS_PARAMS: readonly string[] = ['type', 'severity', 'package'];
 
 /**
  * [#27514] Is this a classified `400 INVALID_REQUEST` refusal of the
@@ -314,7 +324,14 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // [#6877] All three narrow the diagnostics query to ONE
                     // value each; the `as string` casts are exactly the
                     // laundering that kept `tsc` silent about the array arm.
-                    if (refuseRepeatedQueryParams(req, res, ['severity', 'type', 'package'])) return;
+                    // [#27633] Recognition first, as the closed-set rule orders
+                    // it: an unknown NAME (`?typ=view`) was ignored and answered
+                    // the full sweep, the same false all-clear #27514 closed for
+                    // unknown values. The decision is the shared one; the refusal
+                    // is thrown so it leaves in this route's one envelope.
+                    const unknownParams = unknownQueryParamRefusalMessage(req.query, META_DIAGNOSTICS_PARAMS);
+                    if (unknownParams !== undefined) throw diagnosticsRefusal(unknownParams);
+                    if (refuseRepeatedQueryParams(req, res, META_DIAGNOSTICS_PARAMS)) return;
                     // [#27514] The sweep reports one of two severities, and any
                     // other value used to be read as `error` and answered 200:
                     // a caller asking for something this sweep does not have
@@ -356,7 +373,8 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // [#27514] ONE envelope for every refusal this route
                     // answers. The repeated-parameter refusal above writes the
                     // ADR-0112 nested `{ error: { code, message } }`, and the
-                    // classified 400s that are THROWN (the severity check above,
+                    // classified 400s that are THROWN (the [#27633] unknown
+                    // parameter name and the severity check above,
                     // the list door's unknown-type verdict, and the sweep's
                     // [#8924] near-miss spelling and unknown package) used to
                     // leave through `handleRouteError` as `{ error: '…', code }`,

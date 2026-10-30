@@ -45,6 +45,7 @@ import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
 import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
+import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
 import type { ListViewProps } from '@object-ui/plugin-list';
 import { defaultListViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
@@ -70,7 +71,7 @@ import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectViewListUrlState.js';
-import { useObjectViewTabBar } from './objectViewTabBar.js';
+import { useObjectViewTitleSwitcher } from './objectViewTitleSwitcher.js';
 import { useObjectViewPluginSchema } from './objectViewPluginSchema.js';
 import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import { ObjectViewPageHeader } from './objectViewPageHeader.js';
@@ -217,6 +218,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     
     // Record count tracking for footer
     const [recordCount, setRecordCount] = useState<number | undefined>(undefined);
+    // objectstack#27594 — the records the open view matched, as its list
+    // reported them, for the title's 「VIEW ▾ · COUNT」.
+    const [viewTotal, setViewTotal] = useState<{ viewId: string; total: number } | null>(null);
     
     // Admin users automatically get design tools (no toggle needed)
     const { user, activeOrganization } = useAuth();
@@ -563,11 +567,24 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     }, [objectDef, savedViews, viewOverrides, t, orgAttribution, prefViewOrderKey]);
 
     // Active View State — merge saved draft if available for this view.
-    // Resolution priority: URL viewId → ?view= → user-marked default → first.
+    // Resolution priority: URL viewId → ?view= → the reader's pinned view →
+    // user-marked default → first.
     const defaultViewId = useMemo(() => {
         const def = views.find((v: any) => v.isDefault);
         return def?.id;
     }, [views]);
+    // objectstack#27594 — the view this reader pinned for the object (📌 in the
+    // title's view switcher), kept per object in the reader's workspace
+    // preferences. A pin naming a view the list no longer offers is no pin.
+    const [pinnedViewChoice, setPinnedViewChoice] = useWorkspacePreference(
+        LIST_PINNED_VIEW_PREFERENCE,
+        objectPreferenceScope(objectDef.name),
+        null,
+    );
+    const pinnedViewId = useMemo(
+        () => resolveViewId(pinnedViewChoice, views.map((v: any) => v.id), objectDef.name) ?? null,
+        [pinnedViewChoice, views, objectDef.name],
+    );
     // Canonical view ids are fully qualified (`<object>.<viewKind>`, see
     // MetadataProvider), but nav items emit `viewName` verbatim — usually
     // the short form — and legacy embedded listViews carry bare keys (incl.
@@ -598,7 +615,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? (requestedViewId.includes('.') ? requestedViewId : `${objectDef.name}.${requestedViewId}`)
         : null;
     const viewAccess = useMetaItemRefusal('view', missedViewName);
-    const activeViewId = resolvedViewId || defaultViewId || views[0]?.id;
+    const activeViewId = resolvedViewId || pinnedViewId || defaultViewId || views[0]?.id;
     const baseView = views.find((v: any) => v.id === activeViewId) || views[0];
     const activeView = viewDraft && viewDraft.id === baseView?.id
         ? { ...baseView, ...viewDraft }
@@ -764,9 +781,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ownListParamsRef,
     });
 
-    // objectstack#25992 slice 9: the view tab items, the `ViewTabBar` strip and its
-    // own-row face moved to `./objectViewTabBar.tsx`.
-    const { viewTabItems, viewTabBar, viewTabRow } = useObjectViewTabBar({
+    // objectstack#27594: the list title is the view switcher, which replaced the
+    // view tab strip; the view items `ManageViewsDialog` lists come with it.
+    const { viewTabItems, titleSwitcher } = useObjectViewTitleSwitcher({
         views,
         savedViews,
         objectDef,
@@ -780,13 +797,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleViewChange,
         isAdmin,
         handleAddView,
-        handleRenameView,
-        handleDeleteView,
-        handlePinView,
-        handleSetDefaultView,
-        handleConfigView,
         setManageViewsOpen,
+        pinnedViewId,
+        setPinnedViewId: setPinnedViewChoice,
+        appSegment: appName,
+        viewTotal,
     });
+    const handleListTotalChange = useCallback((total: number) => {
+        if (!activeViewId) return;
+        setViewTotal((prev) => (prev?.viewId === activeViewId && prev.total === total ? prev : { viewId: activeViewId, total }));
+    }, [activeViewId]);
 
     // objectstack#25992 slice 11a: the column-declaration flags, the held list refs and
     // `renderListView` moved to `./objectViewListRenderer.tsx`.
@@ -822,8 +842,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         urlFilters,
         initialUfSelections,
         handleUserFilterSelectionsChange,
-        viewTabRow,
-        viewTabBar,
+        handleListTotalChange,
     });
 
     // objectstack#25992 slice 9: the merged views and the plugin's `ObjectViewSchema`
@@ -897,6 +916,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
              <ObjectViewPageHeader
                  objectDef={objectDef}
+                 titleSwitcher={titleSwitcher}
                  objectPluralLabel={objectPluralLabel}
                  objectDesc={objectDesc}
                  createButton={createButton}
@@ -1004,16 +1024,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                </Suspense>
              )}
 
-             {/* View Tabs — drawn in the list's toolbar row (`viewTabBar`,
-                 objectui#12440). The one exception is a view the server
-                 refused: no list is drawn, so no toolbar can carry the strip,
-                 and the tabs are the way off that view — they keep a row of
-                 their own there (`viewTabRow`, which a chart view draws
-                 above its chart too, objectui#13114). Below `sm` the mobile
-                 view switcher is
-                 rendered by AppHeader via MobileViewSwitcherContext
-                 (registered above). */}
-             {refusedViewFace && viewTabRow}
+             {/* Views are switched from the page title (`titleSwitcher`,
+                 objectstack#27594), on every face: a list, a chart and a view
+                 the server refused alike. Its Manage views opens the dialog
+                 below. Below `sm` the mobile view switcher is rendered by
+                 AppHeader via MobileViewSwitcherContext (registered above). */}
              {isAdmin && views.length >= 1 && (
                <ManageViewsDialog
                  open={manageViewsOpen}

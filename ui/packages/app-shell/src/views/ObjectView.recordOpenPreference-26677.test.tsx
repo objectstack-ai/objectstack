@@ -153,7 +153,7 @@ async function openRecord(objects: ReturnType<typeof objectsWith>) {
     </I18nProvider>,
   );
   // The list's own page is drawn in every row; the overlay settles after it.
-  await screen.findByTestId('view-tab-bar', undefined, { timeout: 5000 });
+  await screen.findByTestId('list-view-switcher', undefined, { timeout: 5000 });
   await new Promise((settle) => setTimeout(settle, 80));
 }
 

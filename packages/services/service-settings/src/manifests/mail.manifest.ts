@@ -115,7 +115,7 @@ const manifest = {
       description: 'How outbound mail is handed to the provider.' },
     { type: 'toggle', key: 'queue_delivery', label: 'Durable queue delivery', required: false,
       default: false,
-      description: 'Hand each message to the job queue (sys_job_queue) instead of sending it inline. '
+      description: 'Hand each message to the job queue instead of sending it inline. '
         + 'Sends return as soon as the message is recorded, and a delivery that fails is retried with '
         + 'backoff by a worker — so it survives a restart — reaching the dead-letter queue only after the '
         + 'attempts are exhausted. Requires the queue capability with a durable adapter; without one, mail '

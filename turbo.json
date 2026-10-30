@@ -15,14 +15,33 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/scripts/tsup-drop-sources-content.mjs",
         "$TURBO_ROOT$/scripts/check-dts-emitted.mjs",
-        "$TURBO_ROOT$/scripts/invoked-as.mjs"
+        "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/ui/tsconfig.json",
+        "$TURBO_ROOT$/ui/scripts/vite-*.ts",
+        "$TURBO_ROOT$/ui/scripts/build-plugin-stylesheet.mjs",
+        "$TURBO_ROOT$/ui/scripts/check-dist-completeness.mjs",
+        "$TURBO_ROOT$/ui/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/ui/scripts/vitest-invocation-guard.mjs"
       ]
     },
     "test": {
       "dependsOn": ["^build"],
       "outputs": [],
       "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
-      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**", "$TURBO_ROOT$/vitest.preset.mts"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/vitest.preset.mts",
+        "$TURBO_ROOT$/ui/vitest.config.mts",
+        "$TURBO_ROOT$/ui/vitest.setup.*",
+        "$TURBO_ROOT$/ui/scripts/vitest-invocation-guard.mjs",
+        "$TURBO_ROOT$/ui/scripts/test-shard-*",
+        "$TURBO_ROOT$/ui/scripts/vite-*.ts",
+        "$TURBO_ROOT$/ui/apps/console/vitest.config.ts",
+        "$TURBO_ROOT$/ui/apps/console/vite.config.ts"
+      ]
     },
     "test:repo": {
       "dependsOn": ["^build"],

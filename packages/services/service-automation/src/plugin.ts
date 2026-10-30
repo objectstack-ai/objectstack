@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
-import type { IJobService } from '@objectstack/spec/contracts';
+import type { IJobService, IPubSub } from '@objectstack/spec/contracts';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -37,6 +37,7 @@ import {
     CONNECTOR_CREDENTIAL_VALUE_MAX_LENGTH,
     ConnectorCredentialStore,
     ConnectorCredentialUnavailableError,
+    CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL,
     SECRET_HANDLE_PREFIX,
     connectorCredentialFingerprint,
     credentialDoorRefusal,
@@ -50,10 +51,13 @@ import {
     resolveConnectorCredential,
     upstreamRefusalMessage,
     withoutCredentialThrown,
+    type ClusterConnectorCredentialMutationPayload,
     type ConnectorCredentialChain,
     type ConnectorCredentialRecord,
     type ConnectorCredentialResolution,
 } from './connector-credentials.js';
+import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
+import { createConnectorCredentialSource } from './connector-credential-source.js';
 import {
     FlowCredentialChannel,
     storedFlowStates,
@@ -673,7 +677,7 @@ export class AutomationServicePlugin implements Plugin {
      * Services init() registers on every path (ADR-0116, #4131) — lets the
      * kernel name this plugin when a consumer requires one before it inits.
      */
-    providesServices = ['automation'];
+    providesServices = ['automation', CONNECTOR_CREDENTIAL_SOURCE_SERVICE];
     version = '1.0.0';
     type = 'standard' as const;
     // Soft dependency on metadata: we look it up at start() and tolerate absence.
@@ -738,6 +742,10 @@ export class AutomationServicePlugin implements Plugin {
      * it. A refused value the door does not hold (an environment variable,
      * the host's resolver) is never held: it can change where this process
      * cannot see it, so its instance retries on the backoff.
+     *
+     * [#27992] A degraded instance whose provider answers with a configuration
+     * fault is held the same way, with the configuration reason: only a change
+     * of its declaration or a restart re-attempts it.
      */
     private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string; held?: boolean }>();
     /**
@@ -801,6 +809,19 @@ export class AutomationServicePlugin implements Plugin {
      * credential door writes. See `./connector-credentials.ts`.
      */
     private connectorCredentialStore?: ConnectorCredentialStore;
+    /**
+     * [#27428] The cluster transport the credential door's writes fan out on,
+     * this node's id (stamps `originNode`), and the subscription's disposer —
+     * set by {@link attachCredentialClusterPubSub}.
+     */
+    private credentialCluster?: { pubsub: IPubSub; nodeId: string; unsubscribe: () => void };
+    /**
+     * [ADR-0015 D7] Moved by every reconcile — which every credential write
+     * runs — so a datasource's borrowed credential is resolved again after a
+     * write or a declaration change instead of serving the value it held
+     * (`./connector-credential-source.ts`).
+     */
+    private credentialGeneration = 0;
     /** [#20790] Serializes the one-time credential move — see {@link scheduleCredentialMigration}. */
     private credentialMigration: Promise<void> = Promise.resolve();
     /** [#20790] The crypto-provider subscription that re-runs the move; dropped at destroy. */
@@ -821,7 +842,13 @@ export class AutomationServicePlugin implements Plugin {
      * registration per publish, not two.
      */
     private mutationArmedFlows = new Map<string, string>();
-    /** [#21725] The `onMetadataMutation` subscription; dropped at destroy. */
+    /**
+     * [#28002] A connector reconcile the metadata mutation signal queued and
+     * that has not started yet: every connector mutation reported before it
+     * starts is answered by that one run, which re-reads the whole declaration.
+     */
+    private connectorMutationReconcilePending = false;
+    /** [#21725] The `onMetadataMutation` subscription (flows, and connectors since #28002); dropped at destroy. */
     private unsubscribeFlowMutations?: () => void;
 
     constructor(options: AutomationServicePluginOptions = {}) {
@@ -1072,7 +1099,20 @@ export class AutomationServicePlugin implements Plugin {
             list: () => this.listConnectorCredentialRefs(ctx),
             set: (request) => this.setConnectorCredential(ctx, request),
             clear: (request) => this.clearConnectorCredential(ctx, request),
+            attachClusterPubSub: (pubsub, nodeId) => this.attachCredentialClusterPubSub(ctx, pubsub, nodeId),
         });
+
+        // [ADR-0015 D7] The connector credential source: a datasource that
+        // names a declared instance in `external.connector` borrows that
+        // instance's credential through it, resolved by the same chain the
+        // connector uses. Registered in `init()`, so every `start()` — the
+        // datasource connection path's included — finds it.
+        ctx.registerService(CONNECTOR_CREDENTIAL_SOURCE_SERVICE, createConnectorCredentialSource({
+            readDeclared: () => this.readDeclaredConnectorItems(ctx, { post: true }),
+            chain: () => this.connectorCredentialChain(ctx),
+            vaultWired: () => this.options.credentialResolver !== undefined,
+            generation: () => this.credentialGeneration,
+        }));
 
         // [#20281 stage ③] The connector sync executor, served on the
         // `automation` service's contract (`pullConnectorSource`) — the door a
@@ -1417,6 +1457,10 @@ export class AutomationServicePlugin implements Plugin {
                         // policy reading `current_user.email` resolves for the
                         // run as it does for the user's own request.
                         ...(grants.email ? { email: grants.email } : {}),
+                        // The rung the request path carries for this user
+                        // (`resolveAuthzContext` copies it off this same
+                        // resolution), derived once there and never here.
+                        ...(grants.posture ? { posture: grants.posture } : {}),
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });
@@ -1430,10 +1474,18 @@ export class AutomationServicePlugin implements Plugin {
                 // argument: the read a request resolves `ExecutionContext.currency`
                 // with, over the same engine and the `settings` service, probed at
                 // run setup so a late-registered settings service is seen.
+                // [#28056] A read that FAILED rejects, as the messaging
+                // channels' reader does (#27257): it learned nothing, so a
+                // hole that then refuses for want of a default is graded a
+                // runtime failure, never "the organization has none".
                 this.engine.setTenantCurrencyResolver(async (tenantId) => {
                     let settings: unknown;
                     try { settings = ctx.getService('settings'); } catch { settings = undefined; }
                     const localization = await resolveLocalizationContext({ ql: engineQl, settings, organizationId: tenantId });
+                    if (localization.readFailed) {
+                        const of = tenantId ? ` of organization '${tenantId}'` : '';
+                        throw new Error(`the localization settings${of} could not be read`);
+                    }
                     return localization.currency;
                 });
 
@@ -2030,6 +2082,8 @@ export class AutomationServicePlugin implements Plugin {
     private async reconcileDeclaredConnectors(ctx: PluginContext, opts: { fatal: boolean }): Promise<void> {
         const engine = this.engine;
         if (!engine || this.destroyed) return;
+        // [ADR-0015 D7] A borrowed credential is resolved again after this run.
+        this.credentialGeneration += 1;
         // This run supersedes any pending degraded-instance retry; it is
         // rescheduled at the end if instances remain degraded.
         this.clearDeclarativeRetryTimer();
@@ -2323,6 +2377,21 @@ export class AutomationServicePlugin implements Plugin {
                     });
                     continue;
                 }
+                // [#27992] A configuration fault met by an instance that is
+                // degraded — its backoff retry, or a reload — ends the retry:
+                // ADR-0097 does not retry a configuration fault.
+                if (!opts.fatal && this.degradedInstances.has(name)) {
+                    this.failDegradedConnectorInstance(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        hasLive: existing !== undefined,
+                        reason: thrownMessageText(thrown),
+                        cause: thrown,
+                    });
+                    continue;
+                }
                 // #5575 — a provider factory is third-party code ADR-0097 invites
                 // people to write, and the first one that validates its
                 // `providerConfig` with Zod throws a message whose first line is
@@ -2480,6 +2549,59 @@ export class AutomationServicePlugin implements Plugin {
                     ? 'the previously-materialized connector keeps serving'
                     : 'instance registered degraded (no actions)') +
                 `; retrying with backoff, attempt ${attempts}.`,
+            undefined,
+            describeThrownForLog(info.cause),
+        );
+    }
+
+    /**
+     * [#27992] End the retry of a degraded instance whose provider now answers
+     * with a configuration fault (an `include` naming what the upstream does
+     * not offer): ADR-0097 does not retry a configuration fault, and the
+     * "could not reach" reason the husk carried is no longer true. The
+     * instance is held — neither the retry timer nor an unchanged reload
+     * re-attempts it; a change of its declaration or a restart does, as for a
+     * refused credential — and its husk (unless a previously-materialized
+     * connector keeps serving) now carries the configuration reason.
+     */
+    private failDegradedConnectorInstance(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            hasLive: boolean;
+            reason: string;
+            cause: unknown;
+        },
+    ): void {
+        this.degradedInstances.set(info.name, { attempts: 1, signature: info.signature, reason: info.reason, held: true });
+        if (!info.hasLive) {
+            try {
+                // [#28016] Held: the husk says so, and a dispatch names the edit.
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(info.name, info.entry),
+                    info.reason,
+                    'declarative',
+                    info.cause,
+                    { kind: 'declaration' },
+                );
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
+                        'connector registry until its declaration changes.',
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        // #5575 — the provider's message rides `meta`, never the message.
+        ctx.logger.error(
+            `[Automation] failed to materialize connector instance '${info.name}' via provider '${info.provider}' (ADR-0097): ` +
+                'a configuration fault, so the instance is no longer retried. ' +
+                (info.hasLive ? 'The previously-materialized connector keeps serving. ' : '') +
+                'Fix its declaration; an edit or a restart re-attempts it.',
             undefined,
             describeThrownForLog(info.cause),
         );
@@ -2811,6 +2933,7 @@ export class AutomationServicePlugin implements Plugin {
                 `[Automation] connector credential '${ref}' set (revision ${revision})${userId ? ` by user '${userId}'` : ''}; ` +
                     `reconciling ${declaredBy.map((c) => `'${c.name}'`).join(', ')}.`,
             );
+            this.publishCredentialMutation(ctx, ref);
             await this.reconcileDeclaredConnectors(ctx, { fatal: false });
         });
         return this.describeCredentialRef(chain, ref, declaredBy, await this.readCredentialRowsForDoor(chain));
@@ -2843,10 +2966,93 @@ export class AutomationServicePlugin implements Plugin {
                 throw credentialDoorRefusal(`Nothing is stored for credential '${ref}'.`, 'RESOURCE_NOT_FOUND', 404);
             }
             ctx.logger.info(`[Automation] connector credential '${ref}' cleared${userId ? ` by user '${userId}'` : ''}.`);
+            this.publishCredentialMutation(ctx, ref);
             await this.reconcileDeclaredConnectors(ctx, { fatal: false });
         });
         const declared = await this.declaredCredentialRefs(ctx);
         return this.describeCredentialRef(chain, ref, declared.get(ref), await this.readCredentialRowsForDoor(chain));
+    }
+
+    /**
+     * [#27428] Attach the cluster transport for connector credential writes —
+     * the door half of lane 4 of the cluster-invalidation family
+     * (`content/docs/kernel/cluster.mdx` §6.2), reached through
+     * `AutomationEngine.attachConnectorCredentialPubSub()`, which
+     * `MetadataClusterBridgePlugin` calls once per boot at `kernel:ready`.
+     * Idempotent on the `(pubsub, nodeId)` pair, as lanes 2 and 3 are.
+     *
+     * ⭐ Receipt runs CONVERGENCE, not trust: a peer's signal names a
+     * reference, and this replica answers it with its own reconcile on the
+     * reconcile queue, which re-reads the shared rows — the revision joins
+     * each instance's signature, so exactly the instances naming a changed
+     * reference re-materialize, a held one included. A duplicate runs a
+     * reconcile that changes nothing. Loss is bounded the way it always was,
+     * by the next metadata reload or boot: no shipped driver exceeds
+     * at-most-once delivery.
+     *
+     * @returns a disposer that detaches the transport.
+     */
+    private attachCredentialClusterPubSub(ctx: PluginContext, pubsub: IPubSub, nodeId: string): () => void {
+        const current = this.credentialCluster;
+        if (current?.pubsub === pubsub && current.nodeId === nodeId) {
+            return () => this.detachCredentialClusterPubSub();
+        }
+        this.detachCredentialClusterPubSub();
+        const unsubscribe = pubsub.subscribe<ClusterConnectorCredentialMutationPayload>(
+            CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL,
+            (msg) => {
+                const p = msg.payload;
+                // Loopback guard — the door that wrote the row already
+                // reconciled this replica, on the same queue.
+                if (p?.originNode && p.originNode === nodeId) return;
+                if (typeof p?.ref !== 'string' || p.ref.length === 0) return;
+                ctx.logger.info(
+                    `[Automation] connector credential '${p.ref}' was written on node '${p.originNode ?? 'unknown'}'; `
+                        + `reconciling the connectors on node '${nodeId}'.`,
+                );
+                void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch((err) => {
+                    ctx.logger.warn(
+                        `[Automation] reconciling after a peer's write of connector credential '${p.ref}' failed; `
+                            + 'the next metadata reload or restart reconciles it.',
+                        describeThrownForLog(err),
+                    );
+                });
+            },
+        );
+        this.credentialCluster = { pubsub, nodeId, unsubscribe };
+        return () => this.detachCredentialClusterPubSub();
+    }
+
+    /** [#27428] Tear down the credential cluster wiring. Safe to call multiple times. */
+    private detachCredentialClusterPubSub(): void {
+        const current = this.credentialCluster;
+        this.credentialCluster = undefined;
+        try {
+            current?.unsubscribe();
+        } catch {
+            /* idempotent */
+        }
+    }
+
+    /**
+     * [#27428] The cluster half of a credential door write: publish the
+     * reference to peers, after the row is written or cleared. Best-effort and
+     * fire-and-forget, as lanes 2 and 3 publish — the row is already stored
+     * and this replica's reconcile follows it, so a publish failure never
+     * fails the write it announces. No-op until a bridge attaches a transport.
+     */
+    private publishCredentialMutation(ctx: PluginContext, ref: string): void {
+        const cluster = this.credentialCluster;
+        if (!cluster) return;
+        const payload: ClusterConnectorCredentialMutationPayload = { originNode: cluster.nodeId, ref };
+        void cluster.pubsub
+            .publish(CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL, payload, { partitionKey: `connector-credential:${ref}` })
+            .catch((err) => {
+                ctx.logger.warn(
+                    `[Automation] publishing connector credential '${ref}' to peer replicas failed; they follow it on their next metadata reload or restart.`,
+                    describeThrownForLog(err),
+                );
+            });
     }
 
     /**
@@ -2909,7 +3115,16 @@ export class AutomationServicePlugin implements Plugin {
         }
         if (!hasLive) {
             try {
-                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), info.reason, 'declarative', info.cause);
+                // [#28016] A held husk names what re-attempts it: setting the
+                // stored value again, or (no `credentialRef`) an edit of the
+                // declaration that carries the credential.
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(info.name, info.entry),
+                    info.reason,
+                    'declarative',
+                    info.cause,
+                    held ? (stored ? { kind: 'credential', ref: stored.ref } : { kind: 'declaration' }) : undefined,
+                );
             } catch (err) {
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
@@ -3461,6 +3676,9 @@ export class AutomationServicePlugin implements Plugin {
      * run on the flow sync queue ({@link syncMutatedFlows}). The save's own
      * answer therefore precedes the arming by that one read.
      *
+     * [#28002] A `connector` mutation queues a connector reconcile instead
+     * ({@link queueConnectorMutationReconcile}); every other type is ignored.
+     *
      * Resolved at `start()`, once every plugin has inited, so a protocol that
      * registers after this plugin is seen.
      */
@@ -3487,12 +3705,47 @@ export class AutomationServicePlugin implements Plugin {
             return;
         }
         this.unsubscribeFlowMutations = protocol.onMetadataMutation((evt) => {
-            if (evt?.type !== 'flow' || evt.state === 'draft') return;
+            if (!evt || evt.state === 'draft') return;
             if (typeof evt.name !== 'string' || evt.name === '') return;
+            if (evt.type === 'connector') {
+                this.queueConnectorMutationReconcile(ctx);
+                return;
+            }
+            if (evt.type !== 'flow') return;
             const idle = this.pendingFlowMutations.size === 0;
             this.pendingFlowMutations.add(evt.name);
             // One queued sync drains every name reported before it starts.
             if (idle) void this.enqueueFlowSync(() => this.syncMutatedFlows(ctx)).catch(() => undefined);
+        });
+    }
+
+    /**
+     * [#28002] Reconcile this replica's connectors after a connector was saved
+     * active, published or deleted — the reconcile `metadata:reloaded` runs
+     * ({@link materializeDeclaredConnectors}, soft mode), on the reconcile
+     * queue. The mutation signal is what reaches a PEER: lane 2 of the cluster
+     * family replays a write made on another replica into this protocol's
+     * listeners, while `metadata:reloaded` is a kernel-local hook. It also
+     * covers a direct active save (`PUT /api/v1/meta/connector/:name`), which
+     * raises no reload anywhere.
+     *
+     * A publish on this replica raises both signals; the second reconcile
+     * finds every signature unchanged and leaves the instances alone.
+     * Coalesced: a reconcile queued and not yet started answers every
+     * connector mutation reported before it starts.
+     */
+    private queueConnectorMutationReconcile(ctx: PluginContext): void {
+        if (this.connectorMutationReconcilePending) return;
+        this.connectorMutationReconcilePending = true;
+        void this.onReconcileQueue(async () => {
+            this.connectorMutationReconcilePending = false;
+            await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+        }).catch((err) => {
+            ctx.logger.warn(
+                '[Automation] reconciling the connectors after a connector metadata change failed; '
+                    + 'the next metadata reload or restart reconciles them.',
+                describeThrownForLog(err),
+            );
         });
     }
 
@@ -3579,6 +3832,8 @@ export class AutomationServicePlugin implements Plugin {
         // Stop the degraded-instance retry loop first (#3017): mark destroyed so
         // an already-queued reconcile no-ops, and cancel any armed timer.
         this.destroyed = true;
+        // [#27428] No peer credential write reconciles after shutdown.
+        this.detachCredentialClusterPubSub();
         // [#20790] No credential move after shutdown, and none left in flight.
         this.unsubscribeCryptoProvider?.();
         this.unsubscribeCryptoProvider = undefined;

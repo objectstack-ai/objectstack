@@ -7,17 +7,10 @@
  */
 
 import * as React from 'react';
-import { Badge, RelatedCountStore, Skeleton, cn, useRelatedCount } from '@object-ui/components';
+import { Skeleton } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
 import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
-import { ChevronRight } from 'lucide-react';
-import {
-  RELATED_CARD_DROP_LINE,
-  RelatedCardChromeContext,
-  RelatedCardCountContext,
-  type RelatedCardChrome,
-} from './relatedListCompact';
-import { RelatedCardMenu } from './RelatedCardMenu';
+import { RelatedCardChromeContext, RelatedCardCountContext, type RelatedCardChrome } from './relatedListCompact';
 import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
 import { useRelatedArrangement } from './useRelatedArrangement';
 import { useDetailTranslation } from './useDetailTranslation';
@@ -62,75 +55,6 @@ function cardIdOf(node: unknown): RelatedCardId | null {
 }
 
 /**
- * A collapsed card: its title and its count, nothing else (objectstack#27055,
- * Target 7: 「a collapsed card fetches no rows」). The count comes from the
- * shared count store, the same one-row `$count` probe the tab strip's badges
- * ask, so the card reads no rows. A stack that counted its cards up front
- * hands the card its `count` (objectstack#27056), and the card asks nothing.
- */
-export const CollapsedRelatedCard: React.FC<{
-  node: PageNode;
-  chrome: RelatedCardChrome;
-  onExpand: () => void;
-  count?: number;
-}> = ({ node, chrome, onExpand, count: counted }) => {
-  const p = propsOf(node);
-  const ctx = useRecordContext();
-  const parentId = ctx?.recordId ?? undefined;
-  const dataSource = ctx?.dataSource as any;
-  const probed = useRelatedCount(p.objectName, p.relationshipField, parentId, p.filter);
-  const count = counted ?? probed;
-  const isCounted = counted !== undefined;
-  React.useEffect(() => {
-    if (isCounted || !dataSource || !parentId || typeof dataSource.find !== 'function') return;
-    void RelatedCountStore.fetch(
-      (object: string, query: any) => dataSource.find(object, query),
-      p.objectName,
-      p.relationshipField,
-      parentId,
-      p.filter,
-    ).catch(() => 0);
-  }, [isCounted, dataSource, parentId, p.objectName, p.relationshipField, p.filter]);
-  const title = typeof p.title === 'string' && p.title ? p.title : p.objectName;
-  return (
-    <section
-      className={cn('rounded-[10px] border border-border bg-card', RELATED_CARD_DROP_LINE)}
-      data-related-card=""
-      data-related-card-id={chrome.id}
-      data-related-card-collapsed=""
-      aria-label={title}
-    >
-      <div
-        className={cn(
-          'flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold',
-          chrome.dragHandleProps?.draggable && 'cursor-grab active:cursor-grabbing',
-        )}
-        {...(chrome.dragHandleProps ?? {})}
-      >
-        <button
-          type="button"
-          className="flex min-w-0 items-center gap-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-expanded={false}
-          onClick={onExpand}
-        >
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate">{title}</span>
-        </button>
-        {chrome.fresh && <FreshBadge />}
-        {count !== undefined && (
-          <span className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal" data-related-card-count="">
-            {count}
-          </span>
-        )}
-        <span className="ml-auto flex shrink-0 items-center">
-          <RelatedCardMenu chrome={chrome} title={title} collapsed onExpand={onExpand} />
-        </span>
-      </div>
-    </section>
-  );
-};
-
-/**
  * A card whose count is still out (objectstack#27056, Target 3): its title and
  * a placeholder where the count goes, the height of a folded card, so the
  * column holds its shape while the counts land and the details beside it are
@@ -156,33 +80,27 @@ const PendingRelatedCard: React.FC<{ node: PageNode; chrome: RelatedCardChrome }
   );
 };
 
-const FreshBadge: React.FC = () => {
-  const { t } = useDetailTranslation();
-  return (
-    <Badge className="h-4 shrink-0 px-1 text-[10px] font-normal" data-related-card-new="">
-      {t('detail.relatedCardNew', { defaultValue: 'New' })}
-    </Badge>
-  );
-};
-
 /**
- * The related column's cards in the reader's arrangement (objectstack#27055,
- * Targets 4, 7 and 10).
+ * The related column's panels in the reader's arrangement (objectstack#27055,
+ * Targets 4, 7 and 10; objectstack#27524, Targets 1–3 and 10).
  *
- * Each `record:related_list` is a card the reader arranges: on desktop its
- * title row is a drag handle (a drop line marks where it lands); its `⋯`
- * menu is the keyboard path — 上移 / 下移 / 折叠 / 隐藏; a collapsed card is
- * its title and count and reads no rows. The order, collapsed and hidden
- * state are the reader's (the host's workspace preference), laid over the
- * default order by `resolveRelatedArrangement`; the column says when the
- * default changed under a dragged order (「默认顺序已更新 · 恢复默认」), and its
- * foot says how many cards are hidden (「已隐藏 N 张 · 显示」) and, once the
- * reader has moved or hidden any, offers 「恢复默认顺序」 (objectstack#27241).
+ * Each `record:related_list` is a panel the reader arranges: on desktop its
+ * ⠿ handle drags it (a drop line marks where it lands), and focused, ⌥↑ /
+ * ⌥↓ move it; its `⋯` menu hides it. A panel never collapses — its header
+ * opens its whole list. The order and the hidden set are the reader's (the
+ * host's workspace preference), laid over the default order by
+ * `resolveRelatedArrangement`; the column says when the default changed
+ * under a dragged order (「默认顺序已更新 · 恢复默认」), and its foot says how
+ * many panels are hidden (「已隐藏 N 张 · 显示」) and, once the reader has moved
+ * or hidden any, offers 「恢复默认顺序」, which restores the order and the
+ * hidden set (objectstack#27241). Panels at 0 rows fold into one line
+ * (`RelatedListEmptyFold`'s panel line, 「还有 N 个空关联 · … · 展开」).
  *
- * The cards' counts are asked up front, together (objectstack#27056,
- * `useRelatedCounts`): until they answer each card is a placeholder, then its
- * header draws from its count, a card at 0 reads no rows, and a card above 0
- * reads its first rows once it is in view (`RelatedList`'s compact face).
+ * The panels' counts are asked up front, together (objectstack#27056,
+ * `useRelatedCounts`): until they answer each panel is a placeholder, then
+ * its header draws from its count, a panel at 0 reads no rows, and a panel
+ * above 0 reads its first rows once it is in view (`RelatedList`'s compact
+ * face).
  *
  * ⛔ No wrapper element per card: the lists stay DOM siblings, so the
  * empty-list fold (`RelatedListEmptyFold`, which reads its stack off the
@@ -220,8 +138,8 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
     onDragStart: setDragId,
     onDragEnd: endDrag,
   });
-  // The cards the reader sees — collapsed ones too, whose line shows the
-  // count — are counted in one set; a hidden card is not drawn, so not asked.
+  // The panels the reader sees are counted in one set; a hidden panel is not
+  // drawn, so not asked.
   const countTargets: RelatedCountTarget[] = [];
   for (const id of resolved.order) {
     const target = relatedCountTargetOf(cards.get(id));
@@ -285,15 +203,7 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
         const state = counts.stateOf(id);
         if (state.kind === 'pending') return <PendingRelatedCard key={id} node={node} chrome={chrome} />;
         const count = state.kind === 'counted' ? state.count : null;
-        return resolved.collapsed.has(id) ? (
-          <CollapsedRelatedCard
-            key={id}
-            node={node}
-            chrome={chrome}
-            onExpand={() => edit({ kind: 'collapse', id, collapsed: false })}
-            count={count ?? undefined}
-          />
-        ) : (
+        return (
           <RelatedCardChromeContext.Provider key={id} value={chrome}>
             <RelatedCardCountContext.Provider value={count}>
               <SchemaRenderer schema={toRenderableSchema(node as any)} />

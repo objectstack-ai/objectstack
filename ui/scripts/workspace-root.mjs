@@ -20,9 +20,11 @@
  *   - the root `package.json`'s `pnpm` block (overrides, patchedDependencies)
  *                            moved to the workspace root's manifest and
  *                            workspace file
- *   - `turbo.json`           parked as `turbo.objectui.json`; the parent's
- *                            carries objectui's tasks with their repo-root
- *                            inputs re-rooted to `$TURBO_ROOT$/ui/...`
+ *   - `turbo.json`           deleted; the parent's carries objectui's tasks
+ *                            with their repo-root inputs re-rooted to
+ *                            `$TURBO_ROOT$/ui/...` (the parked pre-merge copy,
+ *                            `turbo.objectui.json`, went with objectstack#27283:
+ *                            no run read it)
  *
  * Every reader that joined `uiRoot()` with one of those names was the first red
  * in the merged tree's CI (objectstack#25723). This module is where that join
@@ -45,10 +47,10 @@
  *       the objectui root package's own declared dependencies, and the store
  *       every installed copy lives in is the workspace root's (objectstack#25733).
  *   (d) `turboConfigPath()` is the nearest `turbo.json` upward (what turbo
- *       hashes from); `uiTurboConfigPath()` is objectui's OWN task declaration,
- *       `turbo.json` at `uiRoot()` or the parked `turbo.objectui.json`; and
- *       `uiScopedTurboConfig()` is the nearest config narrowed to the objectui
- *       subset (`$TURBO_ROOT$/ui/x` read as `$TURBO_ROOT$/x`, the rest dropped).
+ *       hashes from), and `uiScopedTurboConfig()` is that config narrowed to
+ *       the objectui subset (`$TURBO_ROOT$/ui/x` read as `$TURBO_ROOT$/x`, the
+ *       rest dropped). There is no second, tree-own task declaration to read:
+ *       a guard that pins objectui's task shapes reads the narrowed config.
  *
  * Every function takes an optional explicit root for fixtures: a test that
  * writes its own `pnpm-workspace.yaml` into a scratch directory is a workspace
@@ -115,8 +117,6 @@ export const ROOT_MANIFEST = 'package.json';
 export const TURBO_CONFIG = 'turbo.json';
 /** The Changesets config, relative to the root that holds it. */
 export const CHANGESET_CONFIG = '.changeset/config.json';
-/** Where the cutover parks objectui's own `turbo.json` (a nested one must `extends` the root). */
-export const PARKED_TURBO_CONFIG = 'turbo.objectui.json';
 export const TURBO_ROOT_PREFIX = '$TURBO_ROOT$/';
 /** pnpm's virtual store directory, inside the workspace root's `node_modules`. */
 export const VIRTUAL_STORE = '.pnpm';
@@ -313,24 +313,6 @@ export function changesetConfigPath(root = uiRoot()) {
   const parent = path.dirname(own);
   if (parent !== own && fs.existsSync(path.join(parent, CHANGESET_CONFIG))) return path.join(parent, CHANGESET_CONFIG);
   throw new Error(`no ${CHANGESET_CONFIG} at ${own} or at ${parent} (objectstack#25711).`);
-}
-
-/**
- * objectui's OWN task declaration, for a test that pins objectui's task shapes
- * (`$TURBO_ROOT$` inputs relative to the objectui tree, `//#` root tasks of its
- * own manifest): `turbo.json` at `root`, else the parked `turbo.objectui.json`,
- * else a throw.
- *
- * @param {string} [root]
- * @returns {string}
- */
-export function uiTurboConfigPath(root = uiRoot()) {
-  const own = path.resolve(root);
-  for (const name of [TURBO_CONFIG, PARKED_TURBO_CONFIG]) {
-    const file = path.join(own, name);
-    if (fs.existsSync(file)) return file;
-  }
-  throw new Error(`neither ${TURBO_CONFIG} nor ${PARKED_TURBO_CONFIG} at ${own} (objectstack#25723).`);
 }
 
 /**

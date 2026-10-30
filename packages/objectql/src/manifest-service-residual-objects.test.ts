@@ -277,3 +277,112 @@ describe('ADR-0130 D4 — a residual arriving after start()', () => {
     expect(bridged?._packageId).toBe(RELEASE_ID);
   });
 });
+
+/**
+ * [ADR-0015 D7] The residual's CONNECTORS reach the registry too: the
+ * connector credential lender and the ADR-0097 reconcile read
+ * `registry.listItems('connector')` alone, so a residual instance registered
+ * by the metadata door only could not lend at boot, while the composed check
+ * accepted a borrow of it. The borrow itself is pinned on a kernel in
+ * `service-automation` (`connector-credential-residual-connector.test.ts`).
+ */
+describe('ADR-0015 D7 — the manifest service registers the residual\'s connectors', () => {
+  const sap = (name = 'acme_sap') => ({
+    name,
+    label: 'SAP',
+    type: 'api',
+    provider: 'openapi',
+    auth: { type: 'bearer', credentialRef: 'acme_sap_token' },
+  });
+  const connectorOwners = (ql: ObjectQL) =>
+    (ql.registry.listItems('connector') as Array<{ name?: string; _packageId?: string; _packageVersion?: string }>)
+      .map((c) => [c.name, c._packageId, c._packageVersion])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+  it('registers a residual connector under the stack\'s manifest id and version, beside a body\'s own', async () => {
+    const residualEntry = sap();
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { connectors: [residualEntry] }, { connectors: [sap('acme_crm')] }),
+    ]));
+    expect(connectorOwners(engineOf(kernel))).toEqual([
+      ['acme_crm', SERVICE_ID, '2.4.0'],
+      ['acme_sap', RELEASE_ID, '1.0.0'],
+    ]);
+    // The artifact's own entry is left as it arrived.
+    expect((residualEntry as { _packageId?: string })._packageId).toBeUndefined();
+  });
+
+  it('registers a residual connector when the stack has no residual object', async () => {
+    const { kernel } = await boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      objects: [caseObj(), accountObj()],
+      connectors: [sap()],
+      packages: [
+        { manifest: { ...svc, objects: [caseObj()] } },
+        { manifest: { ...app, objects: [accountObj()] } },
+      ],
+    })]));
+    expect(connectorOwners(engineOf(kernel))).toEqual([['acme_sap', RELEASE_ID, '1.0.0']]);
+  });
+
+  it('CONTROL: a top-level connector a body repeats is the body\'s, registered once', async () => {
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { connectors: [sap()] }, { connectors: [sap()] }),
+    ]));
+    expect(connectorOwners(engineOf(kernel))).toEqual([['acme_sap', SERVICE_ID, '2.4.0']]);
+  });
+});
+
+/**
+ * [ADR-0130 D4] The residual's FLOWS reach the registry too: the automation
+ * plugin's boot pull reads `registry.listItems('flow')` alone, so a residual
+ * flow registered by the metadata door only was listed by `/meta` and never
+ * registered with the engine. The boot-and-run reading is pinned on a kernel
+ * in `service-automation` (`residual-top-level-flow-boot.test.ts`).
+ */
+describe('ADR-0130 D4 — the manifest service registers the residual\'s flows', () => {
+  const flow = (name = 'acme_escalate') => ({
+    name,
+    label: 'Escalate',
+    type: 'autolaunched',
+    nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  });
+  const flowOwners = (ql: ObjectQL) =>
+    (ql.registry.listItems('flow') as Array<{ name?: string; _packageId?: string; _packageVersion?: string }>)
+      .map((f) => [f.name, f._packageId, f._packageVersion])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+  it('registers a residual flow under the stack\'s manifest id and version, beside a body\'s own', async () => {
+    const residualEntry = flow();
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { flows: [residualEntry] }, { flows: [flow('acme_route')] }),
+    ]));
+    expect(flowOwners(engineOf(kernel))).toEqual([
+      ['acme_escalate', RELEASE_ID, '1.0.0'],
+      ['acme_route', SERVICE_ID, '2.4.0'],
+    ]);
+    // The artifact's own entry is left as it arrived.
+    expect((residualEntry as { _packageId?: string })._packageId).toBeUndefined();
+  });
+
+  it('registers a residual flow when the stack has no other residual item', async () => {
+    const { kernel } = await boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      objects: [caseObj(), accountObj()],
+      flows: [flow()],
+      packages: [
+        { manifest: { ...svc, objects: [caseObj()] } },
+        { manifest: { ...app, objects: [accountObj()] } },
+      ],
+    })]));
+    expect(flowOwners(engineOf(kernel))).toEqual([['acme_escalate', RELEASE_ID, '1.0.0']]);
+  });
+
+  it('CONTROL: a top-level flow a body repeats is the body\'s, registered once', async () => {
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { flows: [flow()] }, { flows: [flow()] }),
+    ]));
+    expect(flowOwners(engineOf(kernel))).toEqual([['acme_escalate', SERVICE_ID, '2.4.0']]);
+  });
+});

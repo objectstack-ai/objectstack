@@ -351,6 +351,16 @@ jobs:
               - 'scripts/ts-parse.mjs'
               - 'scripts/tsup-drop-sources-content.mjs'
               - 'scripts/workspace-enumerator.mjs'
+              # The ui tree's root build inputs (#27283): turbo.json's generic
+              # `build` task hashes them for every `@object-ui/*` build, and the
+              # same task runs for every package `pnpm build` builds, so a diff
+              # confined to one moves Build Core's hashes too.
+              - 'ui/tsconfig.json'
+              - 'ui/scripts/vite-*.ts'
+              - 'ui/scripts/build-plugin-stylesheet.mjs'
+              - 'ui/scripts/check-dist-completeness.mjs'
+              - 'ui/scripts/invoked-as.mjs'
+              - 'ui/scripts/vitest-invocation-guard.mjs'
               # BUILD CORE'S GUARDS (#21341): every repository script the
               # build-core job's own steps run (named by a `run:` step or
               # reached through its `pnpm check:*` alias) and each one's

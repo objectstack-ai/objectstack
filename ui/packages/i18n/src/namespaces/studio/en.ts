@@ -658,6 +658,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
   'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  // objectstack#27834 — the Update Records filter's "Triggering record" target.
+  'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -1411,6 +1415,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.timeline': 'Timeline',
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
+  'engine.inspector.view.type.tree': 'Tree',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -3046,6 +3051,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27785 — a report's chart held until its axes are picked; `input`
   // is the chart panel's own label for the axis it still needs.
   'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
+  // objectstack#27895 — a list view held until a required setting of its type's own block is picked again;
+  // `input` is the setting's label in the panel's type settings section.
+  'engine.studio.held.listViewTypeNeedsInput': '{input} in the view’s {type} settings needs a value',
   // objectstack#27461 — a roll-up held until it is set up; `input` is the field
   // inspector's own label for the roll-up input it still needs.
   'engine.studio.held.fieldNeedsInput': '{input} on the field “{field}” needs a value',
@@ -4082,6 +4090,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addView': 'Add view',
   'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
   'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
+  // objectstack#27896 — the panel's view picker: the object's list views, a draft one marked.
+  'engine.studio.inspector.listView.switchView': 'View',
+  'engine.studio.inspector.listView.switchViewDraft': 'Draft',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',
@@ -4097,6 +4108,26 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kanbanCard.mode.none': "Don't open",
   'engine.studio.inspector.listView.kanbanCard.groupBy': 'Group by field',
   'engine.studio.inspector.listView.kanbanCard.pickField': 'Pick a field',
+  // objectstack#27895 — the section of a view type's own settings (calendar, gallery, timeline, …).
+  'engine.studio.inspector.listView.typeSettings': '{type} settings',
+  'engine.studio.inspector.listView.typeSettings.intro': 'The settings this type of view has. A setting that names a field is picked from the object’s fields.',
+  // objectstack#27933 — a chart view's dataset binding: the dataset, its measures and dimensions, the chart type.
+  'engine.studio.inspector.listView.chart': 'Chart data',
+  'engine.studio.inspector.listView.chart.intro': 'The dataset this chart reads, and the measures and dimensions it plots. Only datasets built on this object are offered.',
+  'engine.studio.inspector.listView.chart.dataset': 'Dataset',
+  'engine.studio.inspector.listView.chart.pickDataset': 'Pick a dataset',
+  'engine.studio.inspector.listView.chart.measures': 'Measures',
+  'engine.studio.inspector.listView.chart.dimensions': 'Dimensions',
+  'engine.studio.inspector.listView.chart.addMeasure': 'Add a measure',
+  'engine.studio.inspector.listView.chart.addDimension': 'Add a dimension',
+  'engine.studio.inspector.listView.chart.allAdded': 'All added',
+  'engine.studio.inspector.listView.chart.noMeasures': 'This dataset declares no measures.',
+  'engine.studio.inspector.listView.chart.noDimensions': 'This dataset declares no dimensions.',
+  'engine.studio.inspector.listView.chart.notInDataset': 'Not in this dataset',
+  'engine.studio.inspector.listView.chart.notObjectDataset': 'Not a dataset of this object',
+  'engine.studio.inspector.listView.chart.noDatasets': 'No dataset is built on this object, so this chart has nothing to bind to.',
+  'engine.studio.inspector.listView.chart.readFailed': 'The datasets could not be read ({reason}). The binding is shown as saved.',
+  'engine.studio.inspector.listView.chart.membersFailed': 'This dataset’s measures and dimensions could not be read ({reason}). They are shown as saved.',
   'engine.studio.inspector.designersMissing':
     'No metadata designers are registered in this session, so there is nothing to edit here.',
   'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',

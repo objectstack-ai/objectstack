@@ -14,17 +14,14 @@ import { useRelatedArrangement } from './useRelatedArrangement';
 
 /**
  * The reader's arrangement as the tabbed tier's 关联 tab reads it
- * (objectstack#27055, Target 7: 「The same order and collapsed state apply in
- * the tabbed tier's 关联 tab」). Read by the `record:related_list` renderer: a
- * collapsed list draws as its title + count (no rows read), every other list
- * gets its chrome (the ⋯ menu), and the tab's LAST list draws the column's
- * two lines after itself — the changed-default hint and the foot line
- * (「已隐藏 N 张 · 显示」 · 「恢复默认顺序」).
+ * (objectstack#27055, Target 7: 「The same order … apply in the tabbed tier's
+ * 关联 tab」). Read by the `record:related_list` renderer: every list gets
+ * its chrome (the ⠿ handle's ⌥↑ / ⌥↓, the ⋯ menu's 隐藏), and the tab's LAST
+ * list draws the column's two lines after itself — the changed-default hint
+ * and the foot line (「已隐藏 N 张 · 显示」 · 「恢复默认顺序」).
  */
 export interface RelatedArrangementScope {
   chromeOf: (id: RelatedCardId) => RelatedCardChrome | null;
-  isCollapsed: (id: RelatedCardId) => boolean;
-  expand: (id: RelatedCardId) => void;
   /** The list that draws the tab's closing lines. */
   lastId: RelatedCardId | null;
   hiddenCount: number;
@@ -67,8 +64,8 @@ const relatedListIdOf = (node: unknown): RelatedCardId | null => relatedListIdsI
  * Lays the reader's arrangement over a synthesized page's 关联 tab
  * (objectstack#27055): its lists in the reader's order, hidden lists left out,
  * any other child (the attachments) after them; and the scope the
- * `record:related_list` renderer reads for the collapsed state, the chrome and
- * the closing lines. A page with no 关联 tab is handed through unchanged.
+ * `record:related_list` renderer reads for the chrome and the closing lines.
+ * A page with no 关联 tab is handed through unchanged.
  */
 export const ArrangedRelatedTab: React.FC<{
   page: unknown;
@@ -108,8 +105,6 @@ export const ArrangedRelatedTab: React.FC<{
       const index = resolved.order.indexOf(id);
       return index >= 0 ? chromeOf(id, index) : null;
     },
-    isCollapsed: (id) => resolved.collapsed.has(id),
-    expand: (id) => edit({ kind: 'collapse', id, collapsed: false }),
     lastId: resolved.order.length > 0 ? resolved.order[resolved.order.length - 1] : null,
     hiddenCount: resolved.hidden.length,
     showHidden: () => edit({ kind: 'show-hidden' }),

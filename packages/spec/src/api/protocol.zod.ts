@@ -319,6 +319,12 @@ export const FlowRegistrationSchema = lazySchema(() => z.discriminatedUnion('sta
  * ({@link FlowRegistrationSchema}): the items stay bare documents, so the
  * verdict sits beside them, keyed by each item's `name` — readable without a
  * per-item read, and never inside an item.
+ *
+ * [#27842] `disabledActions` is the same position for the packaged-action
+ * activation ledger on an `object` list: each listed object's entry is what
+ * its item read serves as `disabledActions` ({@link GetMetaItemResponseSchema}
+ * says why it is beside the item, why absence means no ledger answered, and
+ * why `[]` is stated), keyed by the object's `name`.
  */
 export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -329,6 +335,15 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
     + 'runs an automation service; absent otherwise, and absence means no engine judged them, never '
     + '`registered`. The verdict is the answering process\'s engine. Beside the items, never inside one: '
     + 'an item\'s `status` stays what its author declared.',
+  ),
+  disabledActions: z.record(z.string(), z.array(z.string())).optional().describe(
+    'For each listed object, keyed by the item\'s `name`: the names in its `actions` that this '
+    + 'deployment\'s activation ledger switches off, so a call to any of them is refused 409 '
+    + '`ACTION_DISABLED` (the item read\'s `disabledActions`). One entry per listed object that is not a '
+    + 'pending draft, `[]` when none of its actions is switched off. Present only on an `object` list '
+    + 'answered by a process whose data engine has an activation ledger attached; absent otherwise, and '
+    + 'absence means no ledger answered, never that nothing is switched off. Beside the items, never '
+    + 'inside one: each item\'s `actions` is served as declared.',
   ),
 }));
 
@@ -596,6 +611,36 @@ export type MetadataAuthoringClient = z.input<typeof MetadataAuthoringClientSche
  * is absent wherever no automation engine answered, so absence is never read
  * as `registered`.
  *
+ * [#27842] `disabledActions` is the action twin of `registration`, on an
+ * `object` read: the names in `item.actions` that this deployment's
+ * packaged-action activation ledger switches off (ADR-0126 §8 item 2), so a
+ * call to any of them is refused 409 `ACTION_DISABLED`. It is the fact the
+ * dispatch doors consult — the data engine's projection of the ledger, read
+ * per call through the kernel's service table (`IObjectQLEngine
+ * .getDisabledActions`) — so the read and the refusal cannot disagree. Four
+ * measured choices, the first three the ones `registration` made:
+ *
+ * - **Beside `item`, never inside it.** `item.actions` stays what was
+ *   declared, a switched-off action included: the Setup page lists from it to
+ *   offer the switch back on, and a `visible` / `disabled` rewrite inside the
+ *   item would ride the GET → edit → PUT round trip into the stored body.
+ * - **Absent means no ledger answered.** A process whose engine has no ledger
+ *   attached (a composition without `sys_metadata_activation`, a metadata-only
+ *   host) serves no key, so a consumer that sees none keeps today's behaviour:
+ *   the action is offered and a click is refused loudly.
+ * - **`[]` when a ledger answered and none of this object's actions is off.**
+ *   Where the engine answered, `registration` always states a verdict
+ *   (`unregistered` included), and so does this: an empty array is the
+ *   statement "nothing here is switched off", which absence is reserved never
+ *   to make.
+ * - **On the cached default door too, folded into its ETag.** The REST door
+ *   (`GET /meta/object/:name`) folds the list exactly as served into the
+ *   object read's ETag, so a revalidation is answered 304 only while the
+ *   switched-off set is unchanged, and an administrator's switch answers 200
+ *   with the new list (#28044; {@link GetMetaItemCachedResponseSchema}).
+ *   Absent on a draft read, whose pending body is not what the doors
+ *   dispatch from.
+ *
  * [#24298] `draftChanges` is a pending draft's per-key provenance: for each
  * changed key path of the draft body, which authoring surface (`copilot`,
  * `mcp`, `studio`, `api`) last changed it, under which actor, and when. It is what
@@ -688,6 +733,18 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     + 'answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is '
     + 'the answering process\'s engine. Beside `item`, never inside it: the item\'s `status` stays what '
     + 'its author declared.',
+  ),
+  disabledActions: z.array(z.string()).optional().describe(
+    'The names in `item.actions` that this deployment\'s activation ledger switches off (an administrator '
+    + 'turned them off under Setup › Packaged automation): a call to any of them is refused 409 '
+    + '`ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an '
+    + 'activation ledger attached, and then `[]` when none of this object\'s actions is switched off. '
+    + 'Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike '
+    + 'the protection keys it is published by the cached branch too, read live and folded into the ETag, '
+    + 'so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on '
+    + 'a draft read. The ledger '
+    + 'is the answering process\'s engine\'s. Beside `item`, never inside it: `item.actions` is served as '
+    + 'declared, a switched-off action included.',
   ),
   draftChanges: z.array(z.object({
     path: z.array(z.string().min(1)).describe(
@@ -2321,6 +2378,16 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
  * folded into `etag`, so a read that carries it is never answered
  * `notModified`: a 304 would pin the caller to the verdict it was served
  * before, which the validator cannot see change.
+ *
+ * [#27842] …and `disabledActions`, on the same terms: `GET /meta/object/:name`
+ * on a default deployment is answered here, so the packaged actions the
+ * activation ledger switches off ride beside `data`, read live from the
+ * delegate read, and this method never answers `notModified` for a read that
+ * carries them — an administrator's switch moves no byte of the document, so
+ * its own `etag` cannot see the switch. The REST door that serves
+ * `GET /meta/object/:name` does not rely on that stand-down: it folds the
+ * served list into the ETag it checks (#28044), so its 304 is safe and comes
+ * back only while the switched-off set is unchanged.
  */
 export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheResponseSchema.extend({
   registration: FlowRegistrationSchema.optional().describe(
@@ -2328,6 +2395,15 @@ export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheRes
     + '`etag` (see `FlowRegistrationSchema`). Present only for a `flow` read answered by a process that '
     + 'runs an automation service; a read that carries it is never answered `notModified`. Absent '
     + 'otherwise, and absence means no engine judged it, never `registered`.',
+  ),
+  disabledActions: z.array(z.string()).optional().describe(
+    'The names in the `actions` of the object in `data` that this deployment\'s activation ledger switches '
+    + 'off (a call to any of them is refused 409 `ACTION_DISABLED`), read live on every call and never part '
+    + 'of `etag`. Present only for an `object` read answered by a process whose data engine has an '
+    + 'activation ledger attached, `[]` when none is switched off; this method never answers `notModified` '
+    + 'for a read that carries it (the REST door folds the served list into the ETag it checks instead, so its '
+    + '304 comes back only while the switched-off set is unchanged). Absent otherwise, and absence means no ledger answered, never that nothing is '
+    + 'switched off.',
   ),
 }));
 
