@@ -1716,7 +1716,7 @@
       "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `bundled` is the one packaging strategy (the retired `manifest-deps` is refused at the manifest, a native addon is refused by name), and the compiled manifest the artifact carries is readable back",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -1799,7 +1799,7 @@
         "packages/cli/src/commands/plugin/build.ts#formatZodErrors — manifest read + named refusal; ManifestSchema.safeParse + formatZodErrors; the explicit id/version guard; packaging default and the Loaded line; entry resolution; the bundled-only esbuild call (only `@objectstack/*` external); findNativeAddons and the native-addon refusal ahead of the integrity map; computeIntegrity + the compiled manifest; the artifact write and its printed block",
         "packages/cli/src/utils/osplugin.ts#MANIFEST_FILENAME — MANIFEST_FILENAME = 'objectstack.plugin.json'; OSPLUGIN_EXT; computeIntegrity (manifest and SIGNATURE excluded, keys sorted); the ustar writer with mtime pinned to 0; readOspluginManifest",
         "packages/cli/src/commands/plugin/publish.ts#version — artifact discovery; readOspluginManifest before any network call; the id/version refusal; the unsigned-artifact notice; the auth refusal",
-        "packages/cli/src/commands/plugin/install.ts#PluginInstall — the install-time re-verification the integrity negative points at (verifyIntegrity over the unpacked entries, `integrity_mismatch` / `integrity_malformed`, nothing installed) and the install-time tier warning; not scored here",
+        "packages/cli/src/commands/plugin/install.ts#PluginInstall — the install-time re-verification the integrity negative points at (verifyIntegrity over the unpacked entries, `integrity_mismatch`; a compiled manifest ManifestSchema refuses, a malformed integrity map included, is `manifest_invalid` one step earlier through readCompiledPluginManifest; nothing installed) and the install-time tier warning; not scored here",
         "packages/core/src/security/plugin-artifact-integrity.ts#verifyIntegrity — the one integrity verifier, shared by the publish preflight and the install-time check; not scored here",
         "packages/runtime/src/installed-plugin-loader.ts#dispatchPluginRuntime — the boot-time tier dispatch point the trust-tier negative points at (`node` only; `sandbox` / `worker` refused by name; an undeclared tier refused); not scored here",
         "packages/spec/src/kernel/manifest.zod.ts#ManifestSchema — ManifestSchema id and version (both required, version regex-pinned); PluginPackagingSchema ('bundled' only — 'manifest-deps' is a retired value refused with its migration prescription, ADR-0025 v2 §3.3); PluginRuntimeSchema (the trust tier, ADR-0025 §3.6)",
@@ -1838,6 +1838,12 @@
           "date": "2026-10-29",
           "change": "the integrity and trust-tier negatives re-pointed, no clause changed: both said nothing in this repo verifies or dispatches, and both stopped being true with the install loop — os plugin install re-verifies the integrity map at unpack (install.ts#PluginInstall through verifyIntegrity, slice 1, 10f27b6508) and the boot-time loader dispatches on `runtime` before any import (installed-plugin-loader.ts#dispatchPluginRuntime, slice 2, d4ff1a025f). Each negative now names that code as the check this item does NOT score, in place of the tracker numbers it cited, which do not resolve in this repository; three source rows added for the code they point at. The scored clauses and steps are unchanged. Re-verified against the source at 86f2afeb23, no qa-run record",
           "ref": "#27685"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-30",
+          "change": "one source row re-pointed, no clause changed: os plugin install no longer has an `integrity_malformed` refusal. The compiled manifest is parsed through ManifestSchema first (readCompiledPluginManifest, the parse install and the boot loader share), so a malformed integrity map is refused as `manifest_invalid` before the integrity step; `integrity_mismatch` is unchanged. Re-verified against install.ts and compiled-plugin-manifest.ts at this PR's head, no qa-run record",
+          "ref": "#27686"
         }
       ]
     },

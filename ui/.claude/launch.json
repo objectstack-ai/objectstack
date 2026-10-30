@@ -16,9 +16,9 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/zhuangjianguo/Documents/GitHub/objectui/.wt-aipicker/apps/console && VITE_SERVER_URL= DEV_PROXY_TARGET=http://localhost:4000 exec pnpm dev --port 5181 --strictPort"
+        "cd apps/console && VITE_SERVER_URL= DEV_PROXY_TARGET=http://localhost:4010 exec pnpm dev --port 5190 --strictPort"
       ],
-      "port": 5181
+      "port": 5190
     },
     {
       "name": "grid-bulk-demo",

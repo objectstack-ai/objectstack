@@ -1,0 +1,5 @@
+{
+  "file": "packages/spec/src/stack.zod.ts",
+  "adrs": ["ADR-0015", "ADR-0143"],
+  "invariant": "ADR-0015 amendment D7: a datasource's `external.connector` borrows the credential of a connector instance its own stack declares — a `connectors` entry with a `provider` and an ADR-0143 instance `auth` other than `none`. `collectDatasourceConnectorErrors` refuses an undeclared name, a provider-less catalog descriptor or an auth-less instance at build, so an API-backed datasource never reaches its first read with no credential to present."
+}

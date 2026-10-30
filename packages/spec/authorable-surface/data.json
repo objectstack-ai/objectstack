@@ -271,6 +271,7 @@
     "data/ExternalColumn:suggestedFieldType",
     "data/ExternalDatasourceSettings:allowWrites",
     "data/ExternalDatasourceSettings:allowedSchemas",
+    "data/ExternalDatasourceSettings:connector",
     "data/ExternalDatasourceSettings:credentialsRef",
     "data/ExternalDatasourceSettings:queryTimeoutMs",
     "data/ExternalDatasourceSettings:validation",

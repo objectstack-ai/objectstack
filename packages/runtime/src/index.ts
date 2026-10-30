@@ -70,6 +70,10 @@ export {
   verifyInstalledPlugins,
   loadInstalledPlugins,
 } from './installed-plugin-loader.js';
+// The one read of an artifact's compiled manifest, through `ManifestSchema`:
+// `os plugin install` and the boot-time loader both ask it.
+export { readCompiledPluginManifest } from './compiled-plugin-manifest.js';
+export type { CompiledPluginManifestRead } from './compiled-plugin-manifest.js';
 export type {
   InstalledPluginRefusalCode,
   InstalledPluginRefusal,

@@ -621,6 +621,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
             ? {
                 toggleLabel: t('engine.inspector.flowNode.kv.asExpression', locale),
                 expressionPlaceholder: t('engine.inspector.flowNode.kv.expressionPlaceholder', locale),
+                blankExpressionMessage: t('engine.inspector.flowNode.kv.expressionNeeded', locale),
               }
             : undefined,
           // objectui#12101 — a map whose every value is a flow text slot (http
