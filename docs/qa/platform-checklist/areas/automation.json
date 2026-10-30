@@ -1634,7 +1634,7 @@
       "title": "The flow-dispatch HTTP status contract: every never-dispatched, ran-and-failed and non-terminal outcome answers its own status + ADR-0112 code, at every door that dispatches a flow",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)", "org member for the resume 403 arm — created by the admin with POST /api/v1/auth/admin/create-user and past its password change (POST /api/v1/auth/change-password): a held session answers 403 PASSWORD_RESET_REQUIRED, the right status for the wrong reason"],
@@ -1728,7 +1728,7 @@
         "resume · 400 INVALID_SIGNAL — signal wrote the engine's $ namespace, retryable",
         "resume · 400 INVALID_SCREEN_INPUT — bag violates the screen's field contract, retryable",
         "resume · 409 RESUME_IN_PROGRESS — a concurrent resume holds the run, retryable",
-        "resume · 409 RESUME_CHILD_PENDING — a parent-id resume of a map whose item run is still suspended; the message names the item run to resume, retryable. No stock flow reaches it: showcase_release_signoff's item parks on an approval, which answers 403 PERMISSION_DENIED first, so a run stages a map over a raw-resumable item (a screen) and resumes the map's own run id",
+        "resume · 409 RESUME_CHILD_PENDING — a parent-id resume of a map whose item run is still suspended; the message names the item run to resume, retryable. The same code answers when the item's suspension is gone without a cancelled entry in its run history (no entry, or an unreadable store); the message names the remedy, cancelling the parent run, and nothing moves. A CANCELLED item is not refused: the map continues and records {$status: 'cancelled', $itemRunId} in its slot. No stock flow reaches it: showcase_release_signoff's item parks on an approval, which answers 403 PERMISSION_DENIED first, so a run stages a map over a raw-resumable item (a screen) and resumes the map's own run id",
         "resume · 503 STORE_UNAVAILABLE — durable store unreadable, retryable",
         "resume · 404 RUN_NOT_FOUND — no such suspension, or a STALE one; terminal",
         "resume · 400 FLOW_FAILED — the resumed run consumed its pause and failed; terminal",
@@ -1799,6 +1799,12 @@
           "revision": 9,
           "date": "2026-10-30",
           "change": "acceptance[4] and the variants name the resume door's map-item refusal, 409 RESUME_CHILD_PENDING (PR #27951): a parent-id resume of a map whose item run is still suspended is refused before anything moves, naming the item run. Read at base f6adf480 (run-resume.ts refuseMapItemSkip; runtime automation.ts code→status table)",
+          "ref": "#27971"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-30",
+          "change": "the RESUME_CHILD_PENDING variant names the code's second arm and the cancelled-item record (PR #28176): an item whose suspension is gone without a cancelled history entry is refused with the same 409, naming the remedy (cancel the parent run); a cancelled item is recorded in its slot and the map continues. Read at head of PR #28176 (run-resume.ts continuePastCancelledMapItem; builtin/map-node.ts)",
           "ref": "#27971"
         }
       ]
