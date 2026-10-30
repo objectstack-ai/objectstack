@@ -1,0 +1,34 @@
+{
+  "number": 28002,
+  "kind": "issue",
+  "title": "automation (cluster): a published connector definition change re-materialises only on the publishing replica; peers keep the old instance until reload",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T07:14:32Z",
+  "updated_at": "2026-10-30T08:23:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28002",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① measured, by the #27977 measurement (branch `claude/project-thread-8uxskf`, commit `31f0ebd6`, a two-kernel test pinning the gap as `it.fails` citing #27977). Filed by the `domain:server` seat as the fix card that triage 6516940014 on #27977 asks for. ⛔ Not a claim; grading and the lane are triage's.\n\n## Measured\n\nSetup: two `ObjectKernel`s (the `ObjectQLPlugin` protocol plus `AutomationServicePlugin`) over one shared SQLite store and one shared bus, with lanes 2 and 4 attached as the cluster bridge attaches them (built like #27941's `connector-credential-cluster.test.ts`).\n\n1. Replica A publishes a changed connector definition through the per-item door (a draft save, then `publishMetaItem`). **A re-materialises** the instance through its own `metadata:reloaded` (`ObjectQLPlugin.announcePerItemPublish`).\n2. Lane 2 delivers `connector/<name>` into B's protocol mutation listeners. **B's provider is never called**: B keeps serving the old definition.\n3. Control: a `metadata:reloaded` raised on B converges B from its own read of the shared store. Only the trigger is missing, not the read.\n\nCause (the dev's reading): `service-automation`'s `onMetadataMutation` listener (`plugin.ts`, `subscribeFlowMutations`) returns early for every type but `flow`, and `metadata:reloaded` is kernel-local.\n\n## Side finding, same suspected root (throwaway probe, not pinned)\n\nA direct active save (`PUT /api/v1/meta/connector/:name`, without the publish door) does not re-materialise the instance **even on the writing replica**: A stays on the old definition.\n\n## Wanted (route is triage's)\n\nA connector definition change converges on every replica. Under §6.2 (one signal, no second propagation channel, triage 6490140325), the dev's recommendation is **lane 2**. It already reaches B's local mutation listeners, so the fix widens the existing listener to queue a connector reconcile for a `connector` mutation. That is a recommendation, not a ruling. Triage decides the lane, and whether the side finding rides here or on its own card.\n\nFlip the `it.fails` pin from #27977 to a passing test, and add a pin for the direct active save on the writing replica.\n\n## Dedupe\n\n#27977 (the measurement), #27428 / PR #27941 (lane 4, credentials). No open card covers definition propagation or the direct-save path."
+}

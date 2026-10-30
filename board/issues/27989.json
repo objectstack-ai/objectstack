@@ -1,0 +1,33 @@
+{
+  "number": 27989,
+  "kind": "issue",
+  "title": "pm-dispatch(unlock): after PR-target release-on-merged, H4 prose, the SKILL.md status row and the issue_read reading still say closed, and a card whose only target is an abandoned PR is held silently",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T06:30:44Z",
+  "updated_at": "2026-10-30T07:00:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27989",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work, from the contract review of PR #27983 (#27925). The review is on that PR and lists should-fixes 1–4 plus the routed readings (a)–(d). Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After PR #27983 a `Blocked-by:` line can name a PR, and the PR releases on **merged**. But three readers still speak of a PR target as \"closed\", and nothing asks what happens to a card whose only target is a PR that was closed without merging. Such a card stays held forever, silently.\n**Reader who acts:** the pm-dispatch protocol and the half-state patrol owner.\n\n## Measured (PR #27983 head `ffe534a1`, 2026-10-30)\n\n1. `scripts/pm/check-half-states.mjs` `proseBlockerClause` (H4 prose half) still filters `state === 'closed'` and calls a prose-named abandoned PR \"ALREADY CLOSED … due back in pm:queue\". The resolution already carries `unmerged: true`, so the fix is one filter plus a pin.\n2. `.claude/skills/pm-dispatch/SKILL.md:110`: the pm:blocked status row 「#N 关闭时由解锁扫描或…刷新放回」 is false for a PR target and disagrees with `state-machine.md:24`. The in-row edit is line-neutral (319/319).\n3. `platform-readings.md:252` names `issue_read` + `merged_at`. The `merged_at` shape was measured only through REST `GET /issues/N`. Measure once whether MCP `issue_read` on a PR number returns `pull_request.merged_at`. If it does not, the line names the REST read.\n4. H19 now holds a card whose only target is a closed-unmerged PR and names nothing to do. Following the ruling that set the direction (held, not released) is right. The open question is who notices: H26 asks \"can this target ever release\" of open targets only. `state-machine.md:27` already tells the seat to re-derive the blocker on an upstream close.\n5. H28 counts an abandoned body PR as \"spent\" with the word closed. The verdict and the remedy (rewrite the body line) are unchanged, so only the wording is imprecise.\n\n## Wanted\n\n- Items 1–3 as measured: one PR, report-only rows, line-neutral rule text.\n- Item 4, triage's call: either H26's question also covers a closed-unmerged PR target (report-only, no new gate), or the rule text says the seat re-derives the blocker on such a close, under `state-machine.md:27`.\n- Item 5: wording only, and only if the PR touches H28 anyway.\n- ⛔ No new gate.\n\n## Blocked-by\n\nPR #27983 (the PR-target merged reading this builds on).\n\nBlocked-by: #27983\n\n## Dedupe\n\nSearched open issues for \"closed unmerged PR Blocked-by\" and \"H19 abandoned PR\": none.\n"
+}

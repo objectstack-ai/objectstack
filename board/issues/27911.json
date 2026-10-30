@@ -1,0 +1,35 @@
+{
+  "number": 27911,
+  "kind": "pull_request",
+  "title": "fix(service-datasource)!: external validate answers an unknown datasource 404 RESOURCE_NOT_FOUND",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T03:26:14Z",
+  "updated_at": "2026-10-30T04:28:33Z",
+  "closed_at": "2026-10-30T04:28:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T04:28:31Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27911",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D3czSGepvH7z6EH8Tx6ZZYv)_\n\nFixes #27696\n\nClause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no `skills/**` file or authored doc teaches what validate answers for an unknown name (`git grep \"external/validate\" -- skills content docs` hits only release notes and QA checklist items about the auth floor and the in-sync report)\n\n**BREAKING** for a caller of `POST /api/v1/datasources/:name/external/validate`, or of `ExternalDatasourceService.validateDatasource`, that addresses a datasource name that does not exist: `200 { ok: true, results: [] }` becomes `404 RESOURCE_NOT_FOUND`. The changeset carries the before / now / fix and its ADR-0087 marker (`not-required (no-migration-prescription)`).\n\n## 维护者速读\n\n- 改了什么：外部数据源校验接口 `POST /datasources/NAME/external/validate` 遇到不存在的数据源名时，改为返回 404「数据源不存在」，与查看数据源和其它联邦接口一致。\n- 为什么改：以前返回 200 和一份空的「全部通过」报告，调用方分不清「这个数据源没有联邦对象」和「这个数据源根本不存在」。\n- 风险与回滚：只影响不存在的名字；已保存的数据源（含托管数据源与主数据源）照旧 200。后台漂移检查若碰到已删除的数据源，会多记一条 warn。回滚即还原本 PR。\n- 先看：`packages/services/service-datasource/src/external-datasource-service.ts` 的 `validateDatasource` 开头三行；再看 `packages/rest/src/external-datasource-unknown-name.test.ts` 新增的三个用例。\n- 两分钟验证：`pnpm --filter @objectstack/rest exec vitest run src/external-datasource-unknown-name.test.ts`，预期 15 个用例全绿，其中未知名字 404、`warehouse` 与 `default` 仍 200 空报告。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `ExternalDatasourceService.validateDatasource(name)` (service-datasource) now checks the datasource exists before anything is listed or introspected, the same check `testConnection` makes (#27510): the primary datasource is not looked up (it may have no stored record), and any other name with no saved record throws the package's one `datasourceNotFoundError` (`404`, `RESOURCE_NOT_FOUND`, `Datasource \"NAME\" does not exist.`).\n- The REST route needed no code change: its catch already relays that envelope as `404` since #27618 (`answerThrown`). It gains a comment naming the answer.\n- Only existence is asked, not the full federation guard (`assertFederationSource`): that guard refuses managed datasources and the primary one with `400`, and the ruling keeps a datasource that exists and has nothing federated at its `200` empty report.\n- The method's doc comment, which said the unknown-name question was left for a separate ruling, now records this ruling.\n- Side effect, in the changeset: the runtime drift check (`external-validation-plugin.ts`) also calls `validateDatasource`; for a datasource deleted after its timer was armed, a tick lands in its existing catch (one `warn`, no events) instead of returning an empty report silently. No code change there.\n- File surface: the claim was amended (seat, before push) to add `external-datasource-service.ts` and its test; the dispatch order had named only the route file.\n\n## Tests\n\n- `packages/rest/src/external-datasource-unknown-name.test.ts`: validate on `no_such_ds` answers `404 RESOURCE_NOT_FOUND` in `GET /datasources/:name`'s words; validate on a saved managed datasource (`warehouse`) and on `default` keeps `200 { ok: true, results: [] }`. Real `ExternalDatasourceService` over the real `HonoHttpServer`.\n- `packages/rest/src/external-datasource-validate-scope.test.ts`: the cell that pinned the old empty `200` for an unknown name now pins the `404`, still with no introspection and no `validateAll` call.\n- `packages/services/service-datasource/src/__tests__/external-datasource-service.test.ts`: `validateDatasource` on an unknown name rejects with `status 404` / `code RESOURCE_NOT_FOUND` / `datasourceNotFoundError`'s message, with `listObjects` never called and nothing introspected; a saved datasource nothing is bound to still answers the empty report.\n\n<details><summary>Red on main, ablation, results</summary>\n\n- On `main` (da94c113) with only the new pins: rest validate cell red, `expected { status: 200, success: true, … } to deeply equal { status: 404, success: false, … }`; the two `200` cells green.\n- Ablation (the three-line check removed from the service, then restored): service pin red (1 failed / 42), rest pin red (1 failed / 14); restored: 43/43 and 15/15. Both suites resolve `@objectstack/service-datasource` to `src/` (rest's vitest alias), so no rebuild was in the path.\n- `packages/rest`: Test Files 352 passed (352), Tests 7023 passed / 350 skipped.\n- `packages/services/service-datasource`: Test Files 63 passed (63), Tests 1029 passed.\n- `packages/runtime` `src/external-validation*`: Test Files 4 passed, Tests 44 passed.\n- `tsc --noEmit`: rest exit 0, service-datasource exit 0.\n\n</details>\n\n## Acceptance notes\n\n- None outside the card.\n\n## Verification\n\n<details><summary>Gates at bdbdaae5</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 62 families derived. All run; 61 exit 0; `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET, needs every package's dist), NOT MEASURED locally, CI runs it.\n- `dispatch-gates --ran`: 62 derived, 61 run, 1 NOT-MEASURED, 0 UNRUN.\n- `pnpm lint`: exit 0.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: exit 0.\n- Full dogfood battery at the final head: reported in the os-dev-report comment.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cx56cEs32AZSfABRR8)_\n"
+}

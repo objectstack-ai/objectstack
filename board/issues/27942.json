@@ -1,0 +1,34 @@
+{
+  "number": 27942,
+  "kind": "pull_request",
+  "title": "pm-dispatch(decision-analysis): write or re-read a decision card's four-axis analysis at the ceiling tier when available",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:44:18Z",
+  "updated_at": "2026-10-30T05:37:59Z",
+  "closed_at": "2026-10-30T05:37:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T05:37:57Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27942",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D7umuhQHbtifzCQo7sEiZzA)_\n\nFixes #27265\n\n## What changes\n\nOne line of guidance at the end of `.claude/skills/pm-dispatch/references/decision-analysis.md` 〈落卡分析模板〉:\n\n> - 四维与推荐:天花板档可用即用它写成或复读后落卡;否则按席位档落,加 `Analysis-tier:` 行。\n\nA seat filing a decision card writes or re-reads the four-axis analysis and the recommendation at the ceiling tier (`CONTRACT_REVIEW_TIER`) when it is available. When it is not, the seat files at its own tier and adds an `Analysis-tier:` body line. ⛔ No gate, no recogniser, no half-state row: the line is per-card guidance, not a surface mandate (standing ruling 「同意,维持面强制,不全上 fable」).\n\n## Why\n\nThe maintainer's words on the card, verbatim and in order:\n\n1. 「立决策卡时,如果有fable,是否建议先用 fable 审核之后再立?」\n2. On the seat's recommendation (four-axis analysis only, use when available, not a new gate, one line, an `Analysis-tier:` line otherwise): 「同意」\n\n## Line budget (paid in the same file, as #27846 did)\n\n- Ceiling row `['.claude/skills/pm-dispatch/references/decision-analysis.md', 49]` in `scripts/pm/check-skill-line-ratchet.mjs` is unmoved: 49 → 49.\n- +1: the new line, 119 bytes (cap 120).\n- −1: the two opening bullets of 〈四棱卡面块固定形状〉 folded into one 110-byte line. Only restated words were deleted, with no re-wrap:\n  - 「⛔ 不留待维护者到场再补」 restates 「落卡即带」.\n  - 「用中文写」 restates SKILL.md's invariant (四维 is one of the four Chinese channels; 四维中文只管新记录).\n  - 「机器可寻」 is restated by the next line's 「提取按字面 grep」.\n  - 「任一即满足」 restates 「等价」.\n- Home is not SKILL.md: SKILL.md is at its ceiling and the template a filing seat copies from is this file.\n- The wording names the ceiling tier (天花板档), not a model id. SKILL.md's claim template spells the ceiling `CONTRACT_REVIEW_TIER` and refuses copied model ids.\n\n## The claim-line checker (reported, not changed)\n\n`post-stamped.mjs`'s claim-line owner (`containerModelRefusal`, imported from `dispatch-gates.mjs`) accepts a ceiling `model:` line that carries `reason: …` naming the per-card ruling. The value is free text, so it needs no stable anchor. A claim cites this rule as `reason: decision-analysis.md 〈落卡分析模板〉, maintainer ruling on #27265`. No checker change is owed.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 17 families on `194b3ea06`. All 17 ran and exited 0. `--ran` reports 「17 run, 0 NOT-MEASURED」. `check:doc-formula-expressions` first exited 3 (prerequisite: unbuilt `@objectstack/formula` and `@objectstack/lint`); it exited 0 after the printed `turbo run build`. The list was re-derived after the commit and is identical. `check:pm-skill-ratchet` and `check:pm-skill-id-lint` are green. No changeset is derived as owed (nothing published), so this PR carries `skip-changeset`.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n## 维护者速读\n\n- 改了什么:决策卡分析模板加一行,四维分析与推荐在 fable 可用时用它写成或复读后再落卡,不可用则正文注 `Analysis-tier:`。\n- 为什么改:落实您 10-28 对 #27265 的「同意」;决策卡是您亲自裁的文本,值得最高档来写。\n- 风险与回滚:只是一行指引,不加门禁也不加检查;同文件合并两行旧文字付行,行数仍 49;回滚就是 revert 本 PR。\n- 先看:`decision-analysis.md` 新增的第 32 行,以及第 36 行合并后的那一行。\n- 两分钟验证:`pnpm check:pm-skill-ratchet && pnpm check:pm-skill-id-lint` 两项绿。\n- 需要你做的:暂无;本 PR 欠一次 fable 契约复审,落地档位以登记册在 PR 时的读数为准。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwL4FAJsMLvKcqSyo9\n"
+}

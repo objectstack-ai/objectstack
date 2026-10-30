@@ -11,19 +11,22 @@
     "type": "Bot"
   },
   "labels": [
+    "area:devpath",
+    "domain:skills",
     "finding",
-    "pm:blocked",
+    "pm:queue",
+    "priority:p3",
     "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T02:01:22Z",
-  "updated_at": "2026-10-30T02:01:22Z",
+  "updated_at": "2026-10-30T05:07:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27848",
   "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ②: a governed rules line made stale by in-flight work. Found by the contract review of PR #27845 (#27809, the disarm rule), record 6513017524, should-fix 3. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\nBusiness reason: PR #27845 makes `automerge_disable` (and `pr_draft` where disable alone does not dequeue) a mandatory seat act on a FAIL or a moved head. `.claude/skills/pm-dispatch/references/rest-channel.md:57` still says the two reverse ops were never called (「反向两 op 未实调」), so a seat reading it cannot tell whether the ops it is now required to send are known to work.\nReader who acts: the `domain:skills` lane, after the first real invocation of either op through the relay.\n\n## Wanted\n\n- After the first relay stroke that sends `automerge_disable` or `pr_draft`, `rest-channel.md:57` records the measured reading (the run, the stored state read back, and whether the PR left the queue) in place of 「反向两 op 未实调」. If a dequeue is observed, also update `references/platform-readings.md:41-43`.\n- Rule text only, no gate. Governed `.claude/**`.\n\n## Blocked-by\n\nPR #27845 (the rule that mandates the ops). This also waits on the first real invocation, which a seat records here when it happens.\n\nBlocked-by: #27845\n\n## Dedupe\n\nIssues searched for `反向两 op 未实调` and `automerge_disable rest-channel`: no card.\n"

@@ -1,0 +1,35 @@
+{
+  "number": 28011,
+  "kind": "pull_request",
+  "title": "fix(spec): a user field over a text column passes the type-compat check; ADR-0015 names the odata vocabulary",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs:contract-review",
+    "protocol:data",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T07:44:51Z",
+  "updated_at": "2026-10-30T08:17:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28011",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiH18zL8aJRKfkWPzKCnyMP2)_\n\nFixes #27917\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n**Fable review owed.** The Fable quota was out when this PR was opened, so the work was done on Opus. It stays draft until the independent full Fable review, the contract review PASS on head and an authorized approval (Tier H: `docs/adr/**`).\n\n## 维护者速读\n\n- **改了什么：** 一是 ADR-0015 §4.6 的方言清单补上 `odata`，并指向 `DIALECT_ALIASES.odata`（代码在 #27880 已加）。二是 `user` 字段加入类型矩阵 `text` 行的 exact 集合：外部表里用文本列存平台用户 id 的 `user` 字段，启动校验不再报 `type_mismatch` 错误。整数行（`integer` / `bigint`）不加。\n- **为什么：** 实测平台用户 id（`sys_user.id`）永远是字符串：better-auth 为每个用户生成 32 位字母数字串，引擎直写时 SQL 驱动生成 16 位 nanoid，既不是 UUID 也不是整数。文本列装得下，整数列装不下，所以只放宽 `text` 行。\n- **风险与回滚：** 只放宽一个接受集合，之前通过的不会变成失败；回滚即 revert。\n- **需要您做的：** 合并前批准（改了 ADR，Tier H）。\n\n## What changes\n\n- **`packages/spec/src/data/type-compat.ts`.** `user` joins the `text` row's exact set (it was already exact under `uuid`). A comment on the row records the measurement and why the integer rows stay closed while `lookup` / `master_detail` are open there: a `user` field's target is fixed to `sys_user`, so the column holds a platform user id, whose shape is the platform's and not the remote system's.\n- **`docs/adr/0015-external-datasource-federation.md`.** §4.6 lists `odata` among the dialects, with one sentence pointing at `DIALECT_ALIASES.odata` as the non-SQL vocabulary of EDM primitive types. The `Amended by` line records it as a dialect-list-only amendment.\n- **`packages/spec/src/data/type-compat.test.ts`.** One case pins the decision both ways: `user` is exact over `varchar(255)`, `text`, postgres `citext`, bigquery `STRING`, odata `Edm.String` (and still over `uuid` / `Edm.Guid`); it is refused over `integer`, `bigint`, postgres `int8`, `Edm.Int32`, `Edm.Int64`, `boolean` and `jsonb`, while `lookup` stays exact over the same integer columns. A second case pins that the draft still suggests `text` for a text column (the suggestion is read from the column alone).\n- **`.changeset/27917-type-compat-user-text.md`.** `@objectstack/spec` patch, with both declaration lines.\n\n## Why\n\n### The measurement (`sys_user.id`)\n\n- **better-auth 1.7.12, the version `@objectstack/plugin-auth` pins.** Five `auth.api.signUpEmail` calls through a `createAdapterFactory` adapter configured as `objectql-adapter.ts` configures it (no `advanced.database.generateId`) wrote five `user` rows. Every id was 32 characters, all alphanumeric, not all-digit, not UUID-shaped (for example `jaS4bSf4BGL50JWp7UaSlvZFEEAKHKiE`). Admin create and the user import go through `auth.api.createUser`, the same id path.\n- **The SQL driver.** A row written through the engine without an id gets `nanoid(DEFAULT_ID_LENGTH)` with `DEFAULT_ID_LENGTH = 16` (`packages/drivers/driver-sql/src/sql-driver.ts`), a string; a caller-supplied id is stored verbatim.\n- **Decision.** A text column carries every one of those, so `user` is exact under `text`. No path produces an integer user id, so `user` stays refused under `integer` / `bigint`. This follows the card's own condition (\"the integer rows only if a platform user id can be an integer\").\n\n### What an author can declare\n\nThe `user` field's own schema is unchanged. The only reader of the matrix that refuses is Gate 2 (`validateObject` in `service-datasource`): a federated object with a `user` field over a text column used to get a `type_mismatch` **error** (boot fails under `onMismatch: 'fail'`) and now passes. Nothing that passed before fails now. The draft generator never suggests `user` (suggestion is per column and stays `text`), so imports are unchanged.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec exec vitest run src/data/type-compat.test.ts`: 29 passed.\n- Reverse check from the committed fix: removing `'user'` from the `text` row alone fails the new case at the `varchar(255)` assertion (`expected false to be true`, line 190); restored with `git checkout HEAD --`.\n- `dispatch-gates --commands` derived 85 families on `ecf8b5c4`; all 85 run with exit codes recorded before any pipe. Four exited 3 on the first pass (not measured: plugin-teardown self-test fixture, doc-formula-expressions, dual-build-cjs-loads, lean-entry-closure) and exit 0 after fetching the fixture commit and building `./packages/**`. `--ran`: 85 derived, 85 run, 0 NOT-MEASURED (a derived zero).\n- `pnpm --filter @objectstack/spec typecheck`: exit 0 (test-typecheck ledger held). `vitest run src/data/` in spec: 149 files, 4588 passed.\n\n## Acceptance notes\n\n- **Integer rows.** Left closed by measurement, not by caution. If a deployment ever configures better-auth with numeric ids, that is a new id shape and its own card.\n- **Memory and Mongo drivers** mint their own ids for engine-direct writes; those were not measured. Every user the platform creates goes through better-auth, which mints the id before the driver sees the row.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (A matrix entry and its test only.)\n- [x] 2. Every name I added uses the casing for its kind. (No new names.)\n- [x] 3. No formatter ran (`pnpm lint` is CI's).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: the type-compat matrix and its test, no schema.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the repo's own Chinese reader section).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2dhraZ7BwSanQPGEAb\n"
+}

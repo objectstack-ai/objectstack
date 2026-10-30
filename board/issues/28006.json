@@ -1,0 +1,35 @@
+{
+  "number": 28006,
+  "kind": "issue",
+  "title": "composeStacks connector check: say why a top-level connector beside package bodies is refused as ambiguous, and pin the preserve reading of a mixed nested input",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T07:20:24Z",
+  "updated_at": "2026-10-30T07:45:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28006",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① should-fix 1 of the contract review of PR #27939 (record 6516406275, VERDICT PASS), not taken into that PR.\nRuling-ref: none (wording and a test; no accept-set change)\nDedupe (open AND closed): \"providedCollectionEntries artifact slot package bodies ambiguous connector\" → none this work.\nReader: the epic PM (#27261) dispatches it in the epic subtree.\ntype: Task\n\n## 维护者速读\n\n- **做什么：** #27939 让 `composeStacks` 在合成时检查数据源借用的连接器。有一种情形：`last` 产物顶层的连接器和某个包体里的连接器同名。检查的拒收结论是对的，但给出的理由不对。错误信息、`slot` 文档和测试名都说「运行时每个包保留一条，先注册的那条出借」。实际上，开机时包体已占用的名字，顶层那条会被丢弃；开发态重载时，顶层那条会替换包体那条。这张卡把理由写对，并补一个 `preserve` 下混合嵌套输入的测试。\n- **为什么：** 结论正确但理由错误，会误导作者判断该改哪一条声明。\n- **需要您做的：** 无（只改注释、提示文字和测试，不改接受集）。\n\n## Task\n\n- [ ] Make the `'artifact'` slot's stated mechanism true where a `last` artifact's top level sits beside package bodies. At boot, `unclaimedTopLevel` (metadata/plugin.ts) drops a top-level entry whose name a body claims. On a dev reload, `mergeDeclaredConnectorSources` replaces the body's entry with the top-level one. Do one of two things: word the ambiguity sentence for that case, or state the mechanism once in `ProvidedCollectionEntry.slot`'s doc and in `providedCollectionEntries`' docblock (`packages/spec/src/stack.zod.ts`).\n- [ ] Rename the test \"treats a package body and another input's top level as two slots\" so it asserts the refusal, not \"two slots\".\n- [ ] Pin the `preserve` reading of a mixed nested input: a nested input that carries `packages` and its own un-reproduced top level gets slot `package:${ownId}`, while the residual rule registers that top level under the composed artifact's `manifest.id` (the last input's).\n- [ ] The verdict does not change in either direction. If the fix would change one, stop and report to the epic PM.\n\n`Clause-②: no` expected (message text, docs and tests only) · `Metadata-protocol: none`. Touches `packages/spec/src/**`, so a contract review is owed before landing."
+}

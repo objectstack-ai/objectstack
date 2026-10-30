@@ -1,0 +1,33 @@
+{
+  "number": 27986,
+  "kind": "pull_request",
+  "title": "fix(pm): mailbox doorbell key fields read the seat with seatKey, which refuses reserved domain lane names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T06:26:33Z",
+  "updated_at": "2026-10-30T07:17:43Z",
+  "closed_at": "2026-10-30T07:17:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T07:17:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27986",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DGworhuv2mwSdzy4ZEH46c4)_\n\nFixes #27891\n\n## What changes\n\n- `scripts/pm/record-recognisers.mjs`: the seven doorbell keys' `LANE#N` fields (`Notify: seat-online`, `seat-offline`, `split`) are read with `seatKey`, imported from `mailbox-open.mjs`. The second, looser seat shape `SEAT_REF` is deleted. The short form `skills#2` is now refused in a key field (`unreadable`, \"does not spell its template\"), exactly as it is on the `To:` line. An absent number reads as seat 1 (`triage` → `triage#1`), and the `seat` reading carries the canonical `key` beside `lane` and `n`.\n- `scripts/pm/mailbox-open.mjs`: `seatKey` refuses a `domain:` lane named after a reserved lane word — `domain:triage`, `domain:director`, `domain:repo-…` — whose slug would be another seat's (`triage-1`, `repo-cloud-1`). The lane words are lifted into the exported `SEAT_LANE_KINDS` and `SEAT_BARE_LANES`, the one spelling that `SEAT_SHAPE` and the reserved set are both built from. A name that merely contains a reserved word (`domain:triage-tools`, `domain:directory`) still reads.\n- Pins: 4 new cases in the mailbox-open self-test (short form refused, reserved name refused, containing-a-word still reads, the shape and the reserved set share one list), 3 new and 1 reworded in the recognisers' doorbell battery (well-formed `domain:X#N` reads as before with its `key`; the short form refused in a key field and on `To:`; a reserved name refused in both places).\n\n## Why\n\nPR #27881 (card #27637) keyed the mailbox by seat and read the `To:` line with `seatKey`, but left the key fields on `SEAT_REF`, which accepted `skills#2`. One message could then name a seat `To:` refused — two grammars for one thing. The contract review of #27881 (record 6513700361, should-fixes 1 and 4) asked for one grammar and for the reserved-word refusal the `mailbox-open.mjs` header assumed but did not enforce; triage 6513886980 ruled both in, and ruled that a well-formed `To: domain:X#N` line behaves exactly as before.\n\n`Clause-②: no` — the accepted set narrows (the short form and the reserved names are refused; nothing new is accepted). No gate, workflow or queue guard reads a mailbox, so nothing lands or fails differently. `.claude/skills/pm-dispatch/references/project-forms.md` 〈信箱 PR〉 is untouched: it spells `LANE#N` and `To: <席位>`, neither of which now reads wrong.\n\n## Verification\n\n- `node scripts/pm/mailbox-open.mjs --self-test` — 71 cases in 10 batteries pass (was 67).\n- `node scripts/pm/record-recognisers.mjs --self-test` — 329 cases pass (was 326).\n- Ablations, each run once and the tree restored: dropping the reserved refusal in `seatKey` fails the two reserved pins in mailbox-open and the reserved pin in the recognisers; letting `readSeat` fall back to the old loose shape fails the short-form pin and the reserved pin; dropping `key` from the reading fails the three `key`-carrying pins. Nothing else moves.\n- Gate families derived by `node scripts/pm/dispatch-gates.mjs --commands` (2 paths vs merge base 9cd54faae): 31 families (`check-closing-keyword-parity`, `check-declaration-mirrors`, `check-self-test-wired`, `check-self-test-workflow-commands`, `check-whole-set-label-write`, `plan-test-core-shards --self-test`, `bare-root-worklist --self-test`, `check:pm-record-recognisers`, `check:pm-dispatch-gates`, `check:scripts-symbol-anchors`, `check:entry-guard`, `check:parse-guard` and the rest of the derived list) all exit 0 after `pnpm install --frozen-lockfile --ignore-scripts`; `--ran` with the recorded codes: 31 accounted for, 31 run, 0 NOT-MEASURED. `eslint` on the two files exit 0. `git merge-tree` against `origin/main` 4a5396b8 clean; no commit on main since the base touches either file.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes on the two files.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes: `scripts/pm/**` only, `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n## 维护者速读\n\n- 改了什么:信箱门铃七键里的 `LANE#N` 字段改用 `seatKey` 读,短写 `skills#2` 一律拒收;`seatKey` 另拒收撞保留车道词的 `domain:` 名(`domain:triage`、`domain:repo-…`)。\n- 为什么改:#27881 之后 `To:` 行与键字段各用一套席位语法,一条消息可能一边读通一边拒收;分诊 6513886980 裁定统一到一套。\n- 风险与回滚:只收窄接受集;无门禁、workflow 或队列守卫读信箱,落地行为不变。回滚即 revert 本 PR。\n- 先看:`scripts/pm/record-recognisers.mjs` 的 `readSeat`,与 `scripts/pm/mailbox-open.mjs` 的 `seatKey`。\n- 两分钟验证:`node scripts/pm/mailbox-open.mjs --self-test && node scripts/pm/record-recognisers.mjs --self-test`。\n- 需要你做的:无。契约复审欠席位(contract review owed);落地档以登记簿为准(`check-governed-merges.mjs --pr`)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1a5iE1F79QjJupxQe\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 27899,
+  "kind": "issue",
+  "title": "rest: the cross-object `POST /batch` per-op exposure gate keys objects by name, so a legacy `ns__short` object addressed by its short name keeps the pass-through #27728/#27729 closed on the `/data` routes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T03:03:50Z",
+  "updated_at": "2026-10-30T06:17:35Z",
+  "closed_at": "2026-10-30T06:12:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27899",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① product defect with a named fix site (`finding`, class b: code read, not measured). Rule level only.\n\n**Found by:** the #27728/#27729 card thread and the contract review of PR #27897. Filed by `domain:server` seat 3.\n\n## What is wrong\n\nPR #27897 makes the `/data/:object` exposure gate (`enforceApiAccess` → `loadObjectItem`) read an object exactly as the data door does (`registry.getObject`, including the legacy `ns__short` resolution). A legacy-named object that someone addresses by its short name is then judged by its own `enable` settings (`apiEnabled`, `apiMethods`).\n\nThe cross-object `POST /batch` door's per-op gate (`packages/rest/src/batch-routes.ts`) still keys its object list by name, so the old short-name pass-through remains on that one door. This predates #27897, and #27897 does not make it worse. As far as we know, no shipped object carries a `__` name today.\n\n## Expected\n\nThe per-op gate reads each op's object through the same read the `/data` gate now uses, and refuses it the same way. Pin it with a legacy-named object that is not exposed, addressed by its short name.\n\n## Business reason\n\nThe data doors should all give one answer about whether an object is exposed. This is the last door that answers differently.\n\n**Reader:** the `domain:server` lane seat. It is serial behind PR #27897, because it reuses the gate's read.\n\n**Dedupe:** I searched \"batch per-op gate short name ns__short exposure\". #27711, #27728 and #27729 cover the import and data doors only.\n\nFiled without `domain:*`; grading is triage's. Contract review suggests p3.\n\nBlocked-by: #27897\n"
+}

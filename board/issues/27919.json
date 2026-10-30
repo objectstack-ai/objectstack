@@ -1,0 +1,38 @@
+{
+  "number": 27919,
+  "kind": "issue",
+  "title": "connector credential borrowing follow-ups of #27746: an adopted plugin driver's boot-time failed-credentials verdict clears once the instance is repaired, and the connector path reuses borrowedCredentialForms — epic #27261",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T03:50:36Z",
+  "updated_at": "2026-10-30T07:37:56Z",
+  "closed_at": "2026-10-30T07:16:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27919",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① should-fixes of the delta contract review of PR #27819 (record 6514494060, VERDICT PASS on `3351ae35`), not taken into that PR.\nRuling-ref: 6486136301 (#27298, D7)\nDedupe (open AND closed): \"failed-credentials adopted plugin driver borrowedCredentialForms credentialForms\" → none this work.\nReader: the epic PM (#27261) dispatches it in the epic subtree.\nBlocked-by: #27746\ntype: Bug\n\n## 维护者速读\n\n- **做什么：** 两处收尾。一是插件驱动的数据源若在启动时因连接器实例未声明或已停用而被判 `failed-credentials`，修好实例后这个判定要到重启才消失；应在下一次借用成功时清除，或者明确写成\"启动时判定\"。二是连接器自身路径的 `credentialForms`（`connector-credentials.ts`）和 #27746 新加的 `borrowedCredentialForms` 重复，而且少了表单编码那一种写法，可能让凭据以表单编码的形式出现在错误信息里而没被抹掉。\n- **为什么：** 第一件影响管理员修复后的体验；第二件是一处凭据脱敏缺口，要收敛到同一实现。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] An adopted plugin driver's `failed-credentials` verdict and its unavailable mark clear on the next successful borrow (preferred), or the guard comment and the datasource banner say the verdict is the boot-time judgment, until restart. Pin the chosen behaviour.\n- [ ] `packages/services/service-automation/src/connector-credentials.ts`'s `credentialForms` is replaced by `borrowedCredentialForms` from `@objectstack/types`, so the connector path also scrubs the form-encoded spelling. Pin it with a case that echoes a form-encoded credential in an upstream message.\n\n`Clause-②:` decided by the dev from the diff · `Metadata-protocol: none`."
+}

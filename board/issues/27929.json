@@ -1,0 +1,35 @@
+{
+  "number": 27929,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a try_catch whose catch region fails carries the refusal it met",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:17:42Z",
+  "updated_at": "2026-10-30T05:23:55Z",
+  "closed_at": "2026-10-30T05:23:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T05:23:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27929",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFixes #27876\n\n## 维护者速读\n\n- 改了什么：`try_catch` 的 catch 区域自身失败时，返回的失败现在带上 catch 区域遇到的拒绝（`innerRefusal` / `userMessage`），沿用无 catch 路径已有的 `readCarriedRefusal` 一行承载，无新词汇。\n- 为什么改：之前 catch 区域遇到的业务拒绝（校验规则、权限、重复、应用钩子）到达流程调用方时只剩文本，控制台无法显示业务消息；这是 #27743 的 catch 区域那一半。\n- 风险与回滚：只新增两个可选成员，`error` 文本逐字不变；带的是 catch 区域自己的拒绝，绝不是它已处理的 try 区域的拒绝；catch 区域遇到故障时两个成员都不出现；回滚即还原本 PR 的单个提交。\n- 先看：`packages/services/service-automation/src/builtin/try-catch-node.ts` 中 catch 区域失败的 return（一行展开 + 注释）。\n- 两分钟验证：`pnpm --filter @objectstack/service-automation exec vitest run src/flow-inner-refusal.test.ts`，看 `#27876` 下三条用例通过（29/29）。\n- 需要你做的：审阅并合并即可；无规格变更、无治理面路径、无需契约复核。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- `packages/services/service-automation/src/builtin/try-catch-node.ts`: the catch-region failure return spreads `readCarriedRefusal(catchErr)`, the same carriage the no-catch return already spreads (`...lastCarried`). The carried members are the ones the catch region's own throw carried. The `error` text and `childSteps` are unchanged.\n- `packages/services/service-automation/src/inner-refusal.ts`: header only. The carrier list now names this path, and the paragraph that called it \"Not a carrier\" is removed.\n- `packages/services/service-automation/src/flow-inner-refusal.test.ts`: three pins through `engine.execute` (try = [`create_record`], catch = [`create_record`]):\n  1. Both regions are refused by a validation rule (the card's measured case). The run carries `innerRefusal: { code: 'VALIDATION_FAILED', message: 'Amount must be positive' }` and no `userMessage`, and `error` keeps its chain byte for byte.\n  2. The try region is refused by a permission and the catch region by an app hook's marked refusal. The run carries the catch region's `RESOURCE_CONFLICT` and its `userMessage`, never the try region's `PERMISSION_DENIED`.\n  3. Control: the try region is refused and the catch region meets a fault. The run carries neither member.\n- `.changeset/27876-try-catch-catch-region-carry-refusal.md`: `patch` for `@objectstack/service-automation`.\n\n## Why\n\nPR #27872 made a refusal met inside a `try_catch` with no catch region reach the flow's caller as the structured refusal. When the catch region itself failed, the return still re-worded the handler's failure into a new one. The engine's carried-refusal brand on the handler's throw does not cross that re-wording, so the caller got text only and a runner had no business message to show. This uses the same one-line carriage and adds no new vocabulary.\n\n## Verification\n\nAll readings are against `objectstack-ai/objectstack` at base `2a3dec2d`, in worktree branch `wip-27876`.\n\n- **Before (measured through `engine.execute`, without the fix):** `status: failed`, `error: \"Node 'guard' failed: try_catch 'guard': catch region failed — Node 'b' failed: create_record(crm_account) failed: Amount must be positive\"`, `'innerRefusal' in result === false`, `'userMessage' in result === false`.\n- **After:** the same `error` text byte for byte, plus `innerRefusal: { code: 'VALIDATION_FAILED', message: 'Amount must be positive' }`. `userMessage` stays absent because a validation rule marks none.\n- **Red first:** with the pins in place and no fix, `flow-inner-refusal.test.ts` had 2 failed and 27 passed (29). Pins 1 and 2 failed with `expected undefined to deeply equal { code: … }`. Pin 3, the control, passed, as a control should.\n- **Ablation:** I deleted the single spread line from the committed fix, and pins 1 and 2 turned red again (2 failed, 27 passed). Then I restored the file with `git restore --source=HEAD --staged --worktree`. Its `git hash-object` (`09436a8a…`) is the same before the ablation, after the restore, and in `HEAD`.\n- **Package:** `@objectstack/service-automation` `pnpm test` passed 218 files and 2806 tests. `pnpm typecheck` (tsc plus `check:test-typecheck`) exited 0. Root `pnpm lint` exited 0.\n- **Gates:** `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 59 commands for the four changed paths. I ran each one and recorded its exit code before any pipe. 58 exited 0. 1 is NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3 with `PREREQUISITE NOT MET` because it reads every package's built `dist/`, which needs a whole-tree build that was not run here. `--ran` reconciliation: 59 derived, 58 run, 1 NOT-MEASURED, 0 UNRUN. The derivation is identical byte for byte when taken from the tree at `origin/main` `f552fa81`, which is 12 commits past the base, and none of those commits touch `service-automation`. Not measured locally: the CI-only steps the tool lists (Build Core, the Test Core shard plan, and the push-only Dogfood and Temporal jobs), the 4 families that take a workflow value, and the 11 families with a wide population.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1Np3hU7RQnA13YZcL\n"
+}

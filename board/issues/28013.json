@@ -1,0 +1,29 @@
+{
+  "number": 28013,
+  "kind": "pull_request",
+  "title": "chore(scripts): route-envelope ledger note names the enveloped-refusal relay",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T07:55:45Z",
+  "updated_at": "2026-10-30T08:01:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28013",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nRefs #27738\n\n## 维护者速读\n- 改了什么：`scripts/check-route-envelope.mjs` 里 `actions.ts` 账本条目的说明文字和旁边的注释，现在写明 api 转发的非 2xx 回应在目标已有信封时由 `apiErrorResponse` 构建，否则仍是 `deps.error`。只改文字。\n- 为什么改：PR #27915（#27738）让带信封的拒绝改走 `apiErrorResponse`，原句「the non-2xx relay (`deps.error` spread)」因此只说对一半。seat 2 在 #27915 上提出（6517332525），席位答应合并后补上（6517352523）。\n- 风险与回滚：无行为变化；`handBuilt: 3` 不变，检查逻辑未动。回滚即还原本 PR。\n- 先看：`scripts/check-route-envelope.mjs` 的 `DISPATCHER_DOMAINS['actions.ts']`。\n- 两分钟验证：`pnpm check:route-envelope` 退出 0。\n- 需要你做的：无。\n\nClause-②: no — a comment and a ledger note string change; no gate verdict, count or runtime path moves.\nMetadata-protocol: none\n\n## What changes\n- The `actions.ts` entry's `note` now reads \"the non-2xx relay (`apiErrorResponse` for an enveloped refusal, else `deps.error`, spread)\".\n- The block comment above it says the enveloped refusal is built by `apiErrorResponse`, which takes no headers either, and is spread the same way.\n\n## Verification\n- Not run locally: this worktree has no `node_modules`, and `check-route-envelope.mjs` imports `typescript` (it exits 3, prerequisite not met, measuring nothing). CI's lint job runs `check:route-envelope` and ESLint on this head.\n- `check-empty-changeset --base origin/main` and `check-commit-card-trailers --range origin/main..HEAD`: exit 0. No changeset: no package changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1Np3hU7RQnA13YZcL\n"
+}

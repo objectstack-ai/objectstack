@@ -1,0 +1,36 @@
+{
+  "number": 27977,
+  "kind": "issue",
+  "title": "automation (cluster): measure whether a published connector definition change materialises on every replica or only on the publishing one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T05:53:34Z",
+  "updated_at": "2026-10-30T08:15:06Z",
+  "closed_at": "2026-10-30T08:14:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27977",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ② an unmeasured observation that a maintainer ruling ordered measured on its own card. Ruling 6513279565 on #27428, out-of-scope item: \"the dev's earlier unmeasured observation (a published connector change may materialise only on the publishing replica) is measured after this lands, on its own card\". #27428 landed as PR #27941 at 2026-10-30T05:52Z. ⛔ Not a claim.\n\n## Question\n\n#27941 added lane 4 (`connector-credential.mutated`) of the §6.2 cluster-invalidation family. Through it, a peer re-runs its connector reconcile when a **credential** is written. The open question is the **definition** side. When a connector instance's declared definition changes through a metadata publish on one replica, does every peer re-materialise it? The candidate paths are lane 1 (`metadata.changed`) or lane 2 (`metadata.mutated`) reaching the automation plugin's reconcile. The alternative is that only the publishing replica rebuilds, until a reload or restart.\n\n## Wanted\n\n- A two-kernel measurement over one store and one shared bus, built like #27941's `connector-credential-cluster.test.ts`. Publish a changed connector definition on node A and read node B's live instance.\n- If B converges, pin that and close the card.\n- If B does not converge, report which lane should carry the change, under the §6.2 principle of one signal and no second propagation channel (triage 6490140325). Do not build a fix without a ruling on that lane.\n\n## Reader\n\n`domain:server` (`service-automation`, `service-cluster`).\n\n## Dedupe\n\n#27428 / PR #27941 (credential lane). No open card covers definition propagation."
+}

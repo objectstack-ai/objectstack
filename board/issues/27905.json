@@ -1,0 +1,33 @@
+{
+  "number": 27905,
+  "kind": "pull_request",
+  "title": "docs(platform-objects): sys_trusted_key docblock names install's verifier and the shipped boot-time loader",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T03:10:49Z",
+  "updated_at": "2026-10-30T04:11:36Z",
+  "closed_at": "2026-10-30T04:11:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T04:11:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27905",
+  "body": "domain:server#2 · os-sales · session_01L6bhgUCizoYWQVJWjhdR6F\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPMZ8BHWtPf6nBTp51qSM64)_\n\nFixes #27840\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — a comment-only change in `packages/platform-objects`; no `skills/**` text names this docblock\n\n## 维护者速读\n\n- 改了什么:只改 `sys_trusted_key` 对象文件顶部的注释两处,不动任何代码与对象定义。\n- 为什么改:注释把安装命令的验签函数写成了 `verifyPluginArtifact`,实际调用的是 `verifyPublisherSignature`;还说启动时的加载器\"建好之后\"才读这张表,其实它已经上线并在每次启动时复核密钥。\n- 风险与回滚:零运行时风险(只改注释);回滚即 revert 本 PR。\n- 先看:`packages/platform-objects/src/system/sys-trusted-key.object.ts` 第 10–14 行与第 40–48 行。\n- 两分钟验证:`git grep -n \"verifyPublisherSignature\" packages/cli/src/commands/plugin/install.ts` 应命中第 65 行与第 259 行;`git grep -n \"verifyPluginArtifact\" packages/runtime/src/installed-plugin-loader.ts` 应命中加载器的调用。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`packages/platform-objects/src/system/sys-trusted-key.object.ts`, docblock only:\n\n1. The install verifier. `os plugin install` calls `verifyPublisherSignature` from `@objectstack/core` (`packages/cli/src/commands/plugin/install.ts:65` import, `:259` call). The docblock now names that function and says `verifyPluginArtifact` wraps it and adds the platform counter-signature chain (`packages/core/src/security/plugin-artifact-signature.ts:264`, which calls `verifyPublisherSignature` first).\n2. The boot-time loader. The docblock said it would be a reader \"once it is built\". It shipped (`packages/runtime/src/installed-plugin-loader.ts`; `os serve` runs it through `packages/cli/src/utils/installed-plugins-boot.ts` before the kernel bootstraps). The docblock now names it and states what it reads from this table: the row for the install's key id must be `active` and carry the `fingerprint` the install recorded, and its `public_key` must verify the kept bytes (`verifyPluginArtifact` with `requirePlatform: false`, so only the publisher chain). So a key revoked after install refuses that plugin at its next boot (loader check 3, refusals `signature_key_untrusted` / `signature_key_revoked` / `trusted_key_invalid` / `trusted_key_changed` / `signature_invalid`).\n\nThe object's `description` string does not repeat either sentence, and no translation bundle carries the docblock (`git grep` of `verifyPluginArtifact` / `once it is built` under `packages/platform-objects` hits only this file), so no generator run is needed.\n\n## Tests\n\nNo behaviour change, so no new test and no ablation.\n\n- `pnpm --filter @objectstack/platform-objects typecheck && pnpm --filter @objectstack/platform-objects test` under the verify lock: `VERDICT command-exit 0`, `Test Files 99 passed (99)`, `Tests 1400 passed (1400)`.\n- `pnpm exec eslint --no-inline-config packages/platform-objects`: exit 0.\n\n## Acceptance notes\n\n- Changeset: none, `skip-changeset` label. A comment-only edit is in os-dev's no-publish fast lane. Measured for the record: the docblock text does reach `dist/system/index.d.ts` (JSDoc in the emitted declarations), so the corrected wording ships with the next release of the package anyway, in a file nothing parses.\n\n## Verification\n\nLocal readings on head `41af415b` (the branch merged with `origin/main` `c91a004f` once).\n\n<details><summary>Derived gate families — 44 derived, 44 run, every exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 44 commands from the one changed path. Each ran with its exit code captured before any pipe: 44 of 44 exited 0. `--ran` reconciliation: `44 derived famil(ies) accounted for — 44 run, 0 NOT-MEASURED`.\n\nThree first answered exit 3 (PREREQUISITE NOT MET: `check:i18n`, `check:lean-entry-closure`, `check:dual-build-cjs-loads`), so they were read as NOT MEASURED, not as passes. After building their prerequisite closures under the verify lock, all three re-ran green: `check-i18n-bundles: OK (10 package(s) — all bundles in sync, no undeclared authoring keys)`.\n</details>\n\n<details><summary>Package checks</summary>\n\n- `pnpm --filter '@objectstack/platform-objects...' build`: `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/platform-objects typecheck && … test`: `VERDICT command-exit 0`, 99/99 files, 1400/1400 tests.\n- `pnpm exec eslint --no-inline-config packages/platform-objects`: exit 0.\n- No open PR touches `sys-trusted-key.object.ts` (files of all 24 open PRs read).\n</details>\n\nCI-owned families (artifact rosters, wide-population families, Build Core, type-check lanes) are left to this PR's check-runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUCizoYWQVJWjhdR6F)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUCizoYWQVJWjhdR6F\n"
+}

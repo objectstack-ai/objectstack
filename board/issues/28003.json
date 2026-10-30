@@ -1,0 +1,34 @@
+{
+  "number": 28003,
+  "kind": "pull_request",
+  "title": "fix(fields): an empty currency box shows the field's own placeholder, or none, instead of 0.00 (#27398)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T07:15:35Z",
+  "updated_at": "2026-10-30T07:56:29Z",
+  "closed_at": "2026-10-30T07:56:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T07:56:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28003",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CaJoinvGQSbHeDaWBe\n<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg4i9JiKjEjwtuVzd4gKy9hB)_\n\n## 维护者速读\n\n- 改了什么：金额输入框为空时不再显示占位符「0.00」（百分比输入框的「0」同样去掉），只显示字段自己声明的占位符，没有就留空。公开表单、记录表单、表格内联编辑三处都生效。\n- 为什么改：HotCRM 的「联系我们」公开表单里，没人填的「年收入」看起来像已经填了 0；日元这类无小数的币种还被提示两位小数。\n- 风险与回滚：一行改动，形状与数字字段（NumberField）一致；字段自带的占位符、表单行覆盖的占位符、真实的 0 都照旧显示。回滚即还原这一行。\n- 先看：`ui/packages/fields/src/widgets/CurrencyField.tsx`（placeholder 那一行）；`ui/packages/fields/src/__tests__/CurrencyField.emptyPlaceholder-27398.test.tsx`；`ui/apps/console/src/components/FormPage.currencyPlaceholder-27398.test.tsx`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/fields/src/__tests__/CurrencyField.emptyPlaceholder-27398.test.tsx apps/console/src/components/FormPage.currencyPlaceholder-27398.test.tsx`，预期 2 个文件 10 个用例全绿。\n- 需要你做的：无，席位落地。\n\nFixes #27398\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nRow 2 of #27398 (row 1 is #27606; row 3 is carded, see Acceptance notes).\n\n- `CurrencyField` (edit mode) passed `placeholder={field.placeholder || '0.00'}` to its number input, so an empty optional amount with no declared placeholder showed `0.00`, which reads as a filled-in zero. An authored empty placeholder was replaced by `0.00` too, and a zero-decimal currency (JPY) was offered a two-decimal stand-in. It now passes the field's own `placeholder`, or none, the same shape `NumberField` has.\n- One change point covers every host: the public form page (`FormPage`, through the lazy field-widget registry, handing the row's merged placeholder), the record form (the form renderer's `currency` widget) and the grid's inline editor (`FieldEditWidget`) all draw this widget with the field they were handed. No host passes a placeholder of its own that the old fallback was standing in for.\n- Hosts that relied on the `0.00` hint, measured on `origin/main` at 4a5396b8: none. No test, e2e spec, doc or README asserts it; the only `0.00` placeholders in the tree are authored ones (`ui/examples/schema-catalog` currency and number samples, a FlowRunner `number` field fixture), and an authored placeholder is still shown.\n- Changeset: `@object-ui/fields` patch.\n\n## Tests\n\n- `ui/packages/fields/src/__tests__/CurrencyField.emptyPlaceholder-27398.test.tsx` (7 cases): the widget with no placeholder, with JPY, with an authored empty placeholder, two controls (authored placeholder shown, a real zero shown as a value), and the two package hosts: the form renderer and `FieldEditWidget`.\n- `ui/apps/console/src/components/FormPage.currencyPlaceholder-27398.test.tsx` (3 cases): the real public route `/f/:slug` over a served payload: an empty optional amount has no placeholder; controls for the object field's placeholder and the form row's override.\n\n<details><summary>Runs</summary>\n\n- New files: `Test Files 2 passed (2)`, `Tests 10 passed (10)`.\n- Ablation (fix reverted to the `|| '0.00'` fallback through `scripts/ablation-replace.mjs`, restored with blob equal to HEAD and an empty `git diff HEAD`): `Tests 6 failed | 4 passed (10)`. The 6 reds are every no-placeholder pin across the widget, both package hosts and the public form; the 4 greens are the controls.\n- `pnpm --dir ui exec vitest run packages/fields/`: `Test Files 285 passed | 1 skipped (286)`, `Tests 4349 passed | 7 skipped (4356)`.\n- `pnpm --filter @object-ui/fields run type-check`: exit 0.\n\n</details>\n\n## Acceptance notes\n\nPer-row disposition of #27398 rows 2–3, re-measured on `origin/main` at 4a5396b8:\n\n| Row | Bucket | Reason |\n|---|---|---|\n| 2 · empty currency shows `0.00` | TAKE | This PR. |\n| 3a · thank-you text cannot name the created record | CARD (spec, then server) | The thank-you `title` / `message` are plain strings with no template slot, and `POST /api/v1/forms/:slug/submit` answers `{ id }` only on purpose: the form-routes comment says the stored row can carry values an elevated hook derived from records the anonymous grant may never read, so the answer echoes nothing the insert stored. Naming a case number re-opens that trade-off, which is a contract decision, not a renderer change. |\n| 3b · `submitBehavior` text is not translated | CARD (spec) | Not ui-only. The translation bundle's `_views.VIEW` entry (strict) declares `label`, `description`, `title`, `emptyState` and `bulkActions`, and no `submitBehavior` copy; `translateView` overlays only `bulkActionDefs`, `sections` and `title`. The public form door already serves the translated view config under `Accept-Language`, and the page reads `form.submitBehavior` from it, so a spec-side key plus overlay reaches both form pages with no ui change. |\n\nThe seat filed both cards: 3a is #28005, 3b is #28004. `PercentField` fell back to the placeholder `0` the same way; on the seat's rework it is fixed here too, as one line in `PercentField.tsx` pinned by `PercentField.emptyPlaceholder-27398.test.tsx`, and the changeset names it.\n\n## Verification\n\nLocal gate subset derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on this diff, each recorded with its exit code before any pipe and reconciled with `--ran`; every family CI runs is read from this PR's check-runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZBg559ZS19rzt9ki8)_\n"
+}

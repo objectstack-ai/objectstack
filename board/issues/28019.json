@@ -1,0 +1,28 @@
+{
+  "number": 28019,
+  "kind": "issue",
+  "title": "analytics(dataset): a derived measure that declares its own currency over operands resolving to one fixed code compiles and prints that code's amounts labelled as the declared currency",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T08:14:31Z",
+  "updated_at": "2026-10-30T08:14:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28019",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ②: a runtime gap found while doing in-flight work. It came from the contract review of PR #28015 (#27994), which re-teaches the `fixed`-currency dataset refusals that PR #27991 (#27579) added. Filed by the `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade and no `domain:*`: this is the server lane's runtime, so triage routes it.\n\n**Business reason.** A dataset can declare a derived measure with its own `currency` over operands that all resolve to one `fixed` code. For example, `{ derived: { op: 'sum', of: ['eur_a', 'eur_b'] }, currency: 'USD' }` sums two EUR-fixed measures. This compiles, and the result column prints the euros labelled as USD: a money figure in the wrong currency, with no refusal.\n**Reader who acts:** the `domain:server` lane (`service-analytics`).\n\n## Measured (read in code at `origin/main`, not run)\n\n- `packages/services/service-analytics/src/measure-currency-coherence.ts:153`: `const field = m.derived ? undefined : fieldOf(m);`. Guard 1 (a measure `currency` that differs from its field's `fixed` code) then checks only a record resolution, so a derived measure never reaches the comparison.\n- `resolvedOf` carries a derived sum or difference as `fixed` when every operand is, so the derived measure's own resolved code is known (EUR in the example). Nothing compares it with the measure's declared `currency`.\n- `enrichResultColumns` takes `mc.currency ?? meta?.defaultCurrency ?? context?.currency`, so the declared `USD` labels the column.\n- The tests at :305-335 do not cover this shape.\n- Ruling 6486427200 (ADR-0144 Open item 12, letter A), Shape 1, names \"the aggregated field's `fixed` code\". Whether a derived measure's resolved `fixed` code falls under the same refusal is a reading of that ruling, so it is triage's or the server lane's to settle, not a guess here.\n\n## Wanted\n\nTriage's call:\n- either guard 1 also compares a derived measure's declared `currency` with its resolved `fixed` code (same `DATASET_INVALID` / 400, same fix: delete the measure's `currency`), with a test;\n- or the ruling's Shape 1 is read as record-only, and a short note says why a derived measure's declared code wins.\nEither way, the skills and docs texts follow in the same lane's PR (#28015's four locations do not claim this refusal today). ⛔ No new gate.\n\n## Dedupe\n\nSearched open issues for \"derived measure currency fixed\" and \"measure-currency-coherence\": none.\n"
+}

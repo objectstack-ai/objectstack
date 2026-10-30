@@ -1,0 +1,37 @@
+{
+  "number": 27876,
+  "kind": "issue",
+  "title": "service-automation: a refusal met inside a `try_catch` catch region is dropped — the flow caller gets the catch-region failure as text without `innerRefusal` / `userMessage`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:29:21Z",
+  "updated_at": "2026-10-30T05:25:08Z",
+  "closed_at": "2026-10-30T05:23:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27876",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① a product defect measured beside a ruled card, by the #27743 dev (PR #27872, os-dev-report 6513464095, out-of-scope finding 1). Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n**Business reason.** #27743 (PR #27872) makes a refusal met inside a `try_catch` try region with no catch region reach the flow's caller with its structured members. When the catch region itself meets a refusal, the caller still gets only text, so the console cannot show the business message.\n\n## Measured (engine.execute, on PR #27872's head)\n\nA `try_catch` with try = [`create_record`] and catch = [`create_record`], both refused by a validation rule: the run ends `failed` with `Node guard failed: try_catch guard: catch region failed — Node b failed: create_record(…) failed: Amount must be positive`; `innerRefusal` and `userMessage` are absent.\n\n## Where\n\n`packages/services/service-automation/src/builtin/try-catch-node.ts`, the catch-region failure return. The existing carriage (`readCarriedRefusal` of the catch error) is the same one-line shape PR #27872 uses for the no-catch path; no new vocabulary.\n\n## Wanted (route is triage's)\n\nThe catch-region failure carries the refusal it met, pinned; the `inner-refusal.ts` header's carrier list updated.\n\n## Dedupe\n\nRead the open `domain:server` titles for `try_catch`, `catch region`, `innerRefusal`: only #27743 (which covers the no-catch path and resume). **New.**\n\nLinks back: #27743, PR #27872, #27601\n\nBlocked-by: #27872\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 27903,
+  "kind": "pull_request",
+  "title": "docs(skills): teach the report-index navigation item beside the named report",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T03:07:51Z",
+  "updated_at": "2026-10-30T04:11:36Z",
+  "closed_at": "2026-10-30T04:11:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-30T04:11:34Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27903",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DNvPy54H5n7j69Aajt6Kkjc)_\n\ndomain:skills#2 · os-elon-musk · session_016WV4cyZb8pD9989yV2qXKE\n\nFixes #27609\n\n## What changes\n\n- `skills/objectstack-ui/SKILL.md` (navigation item table): the `report` row marks `reportName?` optional and says that without it the entry is the app's report index.\n- `skills/objectstack-ui/rules/navigation.md`: the compiled `App.create` example gains `{ id: 'nav_reports', type: 'report', label: 'Reports', icon: 'library' }` beside the named report, with a comment that the console adds no index entry itself. Paid for by shortening the `filters`-slice comment above it, which restated the Run Modes table and decision rule further down the same file.\n- `skills/objectui/guides/app-composition.md` (added to the file surface by the seat's claim amendment): the route table gains `{type:'report'}` → `/reports`. Paid for by dropping the Contract Reminders' parenthetical list of target keys, which restated the table's first column.\n- `skills/objectstack-ui/evals/views-apps-actions-pages.json`: case 10 asks for an app's Reports entry and expects `{ type: 'report' }` with no `reportName`.\n- `scripts/check-skills-token-ratchet.mjs`: one row raised (the eval file), under the standing ruling quoted verbatim in the row comment.\n- Changeset: `@objectstack/skills` patch.\n\n## Why\n\nPR #27566 (`bf658d1b8`) made `ReportNavItemSchema.reportName` optional (`packages/spec/src/ui/app.zod.ts:687`): absent, the entry opens the app's report index (`resolveHref` → `${basePath}/reports`, `ui/packages/layout/src/NavigationRenderer.tsx:1013`), and the console stopped injecting an \"All reports\" row, so an app shows the index only where its navigation declares it. The published skills still taught only the named form, so an agent following them shipped an app with no report index entry. No other skill page claims an injected \"All reports\" row (grep of `skills/**` for \"All reports\" / \"report index\": none before this PR).\n\n## Verification\n\nToken measurements (`node scripts/check-skills-token-ratchet.mjs`, ceil(bytes/4)):\n\n| File | Before | After | Ceiling |\n|:--|--:|--:|:--|\n| `skills/objectstack-ui/SKILL.md` | 3840 | 3848 | 3851 (unchanged) |\n| `skills/objectstack-ui/rules/navigation.md` | 2271 | 2273 | 2273 (unchanged) |\n| `skills/objectui/guides/app-composition.md` | 1078 | 1078 | 1079 (unchanged) |\n| `skills/objectstack-ui/evals/views-apps-actions-pages.json` | 2009 | 2108 | 2009 → 2108 |\n\nThe eval row moves under the maintainer ruling of 2026-10-27, verbatim: 「A:先削重复,余额按实测提高」. The file's cases share no sentence, so there was no duplicate to cut first; the ceiling is pinned at the measurement (8432 bytes).\n\nGates: `node scripts/pm/dispatch-gates.mjs --ran` on `8af37ee5`: 65 derived families accounted for, 61 run and green, 4 NOT MEASURED (exit 3, prerequisite: whole-tree `dist/`): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. `check:skill-examples` (274 prose examples type-check, the edited `os:check` block included) and `check:doc-formula-expressions` were green after building their prerequisites. `pnpm --dir ui exec vitest run scripts/` was red once on the first run (`spec-symbol-ledger-plugin-detail-7265.test.ts`), green alone on both this head and `main`, and green on a full rerun (169 files, 4902 tests). `eslint` on the edited script: clean.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; eslint on the edited script passes (full `pnpm lint` left to CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n## 维护者速读\n\n- 改了什么:技能教会报表导航项的「索引」写法:`{ type: 'report' }` 不写 `reportName` 就打开该应用的报表索引(`/reports`)。\n- 为什么:#27566 之后控制台不再自动注入「All reports」行,应用只在导航声明处才有报表索引入口;技能只教具名报表,AI 照着写会漏掉索引入口。\n- 改动面:objectstack-ui 的导航表一行与导航示例一项,objectui 路由表一行,新增 eval 第 10 例;无 schema、键或行为变更。\n- token:三个文档文件都在原上限内(删去同文件重复句付账);eval 文件上限 2009→2108,依据 2026-10-27 裁决「A:先削重复,余额按实测提高」。\n- 验证:65 族 gates 中 61 族绿,4 族因整树未构建为 NOT MEASURED;skill-examples 274 例类型检查通过。\n- 落地:欠 CONTRACT_REVIEW_TIER 契约复审,落地为 Tier H(待受管批准人批准)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyZb8pD9989yV2qXKE\n"
+}

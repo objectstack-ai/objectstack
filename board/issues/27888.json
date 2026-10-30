@@ -1,0 +1,35 @@
+{
+  "number": 27888,
+  "kind": "pull_request",
+  "title": "fix(rest): a refused xlsx export answers the 400 envelope, not a 200 workbook stream",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:40:30Z",
+  "updated_at": "2026-10-30T03:29:38Z",
+  "closed_at": "2026-10-30T03:29:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T03:29:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27888",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DSK85qKE6pSk5Ekis1FkEnW)_\n\ndomain:server#4 · os-elon-musk · session_016WV4cyUucJoh7384vix5rh\n\nFixes #27755\n\n## 维护者速读\n\n- 改了什么：导出接口选 Excel（xlsx）格式时，先读第一页数据，再开始生成工作簿；与 #27753 对 json 的修法相同。\n- 为什么改：之前工作簿一打开就把响应定成 200，查询被拒（例如按不存在的字段搜索）时用户拿到的是一个坏的或空的 Excel 文件，而不是说明错误的 400。\n- 风险与回滚：改动只有导出函数里的一行挪位；成功导出的状态码、响应头和单元格内容不变。回滚即还原这一行。\n- 先看：`packages/rest/src/data-action-routes.ts` 导出循环里新增的 `createXlsxStream` 那一行。\n- 两分钟验证：`GET /api/v1/data/OBJECT/export?format=xlsx&search=x&searchFields=nope` 应回 400 INVALID_FIELD，与 csv 一致；不带错误参数的 xlsx 导出照常下载可打开的工作簿。\n- 需要你做的：无；席位复核通过、CI 全绿后按本席落地口径落地。\n\n## What changes\n\n- `packages/rest/src/data-action-routes.ts`: the xlsx export opens its workbook writer (`createXlsxStream`) after the first `findData` answers, not before the read loop. The writer is opened inside the loop on the first chunk, placed before the zero-row break next to json's opening bracket (#27753), so an empty export is still a readable workbook. Nothing else in the route changes, and the async import-job region (#27795) is untouched.\n- `packages/rest/src/export-xlsx-refusal-envelope.test.ts` (new): pins both halves through the real `HonoHttpServer`.\n- `.changeset/27755-xlsx-export-read-first.md`: patch for `@objectstack/rest`.\n\n## Why\n\nOpening the exceljs streaming writer commits the Hono adapter to a streaming 200. Opening it before the first read meant a query that read refused reached the client as a 200 workbook download, while `format=csv` (and, since #27753, `format=json`) answered the 400 envelope. Triage 6510461172: the xlsx writer opens after the first page is read and answers the same envelope. A refusal on a later page is not widened here.\n\n## Verification\n\n- Pin, over a real `SqlDriver` (SQLite): `?search=x&searchFields=nope` (`400 INVALID_FIELD`) and `?search=x&searchFields=,` (`400 VALIDATION_ERROR`) answer the same status and body for `format=xlsx` as for `format=csv`. Ablation: on the unfixed code both xlsx rows are red (`expected 200 to be 400`); with the fix, green.\n- Preservation: a successful xlsx export over one page, three pages (`page=50`, 120 rows) and zero rows answers 200, the workbook content type, `X-Export-Styles: applied`, the same number of reads, and a workbook that loads with the same cells (header + rows; empty for zero rows). Green on the unfixed code too, so the success path did not move.\n- `dispatch-gates --ran`: 59 derived families, 58 run green, 1 NOT MEASURED (`check:dual-build-cjs-loads`, exit 3, needs a whole-tree build). `pnpm lint` green. After merging `main` (which brought #27795): `@objectstack/rest` `tsc --noEmit` green and full suite green (353 files, 7027 passed, 350 skipped); the derived gate list is unchanged.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyUucJoh7384vix5rh\n"
+}

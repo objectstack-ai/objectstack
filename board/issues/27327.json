@@ -2,8 +2,8 @@
   "number": 27327,
   "kind": "issue",
   "title": "automation: a `connector_action` node's `connectorConfig.input` is handed to the provider as written — a CEL envelope there passes `os validate` and is never evaluated, so a flow cannot send a per-record value to a declarative connector",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,19 +15,23 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:epic",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T17:00:47Z",
-  "updated_at": "2026-10-29T04:05:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T06:48:51Z",
+  "closed_at": "2026-10-30T06:48:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27327",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (c) (a trap that leads an AI author to write metadata the runtime silently does not honour). Found by the os-dev on #27223 (PR #27322) and re-measured by this seat. Child of #27293 (the declarative-integration road). ⛔ Not a claim.\n\n`reach:` public door — the flow schema `os validate` runs accepts a CEL envelope under `connectorConfig.input` (the #27223 dev's `FlowSchema.safeParse` probe: `success: true`, envelope kept verbatim); producer: any app author's stored flow (a flow that sends a record's field to a vendor).\n\n## The defect\n\n- `packages/services/service-automation/src/builtin/connector-nodes.ts:108`: `handler((cfg.input ?? {}) as Record<string, unknown>, handlerCtx)`. The input goes to the provider exactly as authored.\n- `packages/services/service-automation/src/builtin/value-slot-map.ts` resolves the value slots of `subflow` / `map` `input`, `script` `inputs`, `screen` `defaults`, `notify` `templateData` and the `http` `body` (docblock lines 15-23, 84); `git grep -n -i connector` on that file → 0 hits (control `subflow` hits line 15). Nothing in the history marks the connector slot as excluded on purpose (#19939, the value-slot card, never mentions connectors).\n- Result: the `openapi` handler interpolates a path parameter from `String(value)`, so the vendor receives `[object Object]` (or the envelope's JSON) instead of the record's value, and the flow reports success or an upstream 4xx with no hint at the authoring mistake.\n\nRead at `origin/main` `65b49208`, 2026-10-28T16:40Z.\n\n## Business reason\n\nEvery declarative integration #27293 builds toward (a Stripe customer looked up by the record's id, a DocuSign envelope for the contract being approved) needs a per-record value in the connector call. Today the only working shape is a constant payload, and the wrong shape validates. #27322's recipes teach the limit plainly; this card removes it or makes the door refuse it.\n\n## Reader\n\nThe triage seat routes it (likely `domain:server`, `service-automation`; the spec half, if the slot must be declared evaluated, goes to the spec seat). Direction is enforce-or-remove: evaluate `connectorConfig.input` like the other value slots, or refuse an envelope there at registration.\n\n## Dedupe\n\n- Semantic search \"connector_action input not evaluated CEL expression flow variable passed verbatim to connector provider value slot\", all states: 5 hits, none this defect (#20418 closed: a node with no `connectorConfig`; #15137 closed: assignment executor; #15811 closed: other `ExpressionInputSchema` slots; #20287, #4336 closed)."

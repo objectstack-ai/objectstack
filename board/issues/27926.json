@@ -1,0 +1,37 @@
+{
+  "number": 27926,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): an expression approver id that names no account adds no phantom slot",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:11:34Z",
+  "updated_at": "2026-10-30T05:23:55Z",
+  "closed_at": "2026-10-30T05:23:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T05:23:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27926",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D35BVMvmrWmGVm1vFf7pyuh)_\n\nFixes #27879\n\n## 维护者速读\n\n- 改了什么：审批节点里，用表达式算出审批人（`expression`，默认按用户解析）时，如果算出的 id 没有对应账号，不再生成一个没人能处理的空槽位。\n- 为什么改：`user` 和 `field` 两条路径已经在 #27749、#27852 修好，表达式这条兄弟路径还会让审批单卡在一个不存在的人身上，节点的兜底策略也不触发。\n- 风险与回滚：只改 `plugin-approvals` 的表达式审批人展开，复用 #27852 的同一个判定；目录读取失败时保留原槽位。回滚即还原这一个提交。\n- 先看：`approval-service.ts` 里 `resolveExpressionApprovers` 的 `resolveAs === 'user'` 分支。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-approvals exec vitest run src/approval-service.test.ts -t 27879`，5 条用例全绿。\n- 需要你做的：无。\n\n## What changes\n\n- **`expression` with `resolveAs: 'user'`** (`resolveExpressionApprovers`): each id the expression yields now takes #27852's `field` treatment. It is a slot only when an account carries it, asked through the same private `namesNoAccount` predicate (reused, not copied). An id no account carries logs the shared \"expanded to nobody\" warning (naming the id and the expression source), adds no slot, and a slate it empties reaches the node's `onEmptyApprovers`. A failed directory read keeps the slot. Out-of-office delegation keeps #27852's fallback: a dead delegate routes back to the expression's id.\n- Graph kinds (`resolveAs: department / position / team`) are untouched.\n\n## Why\n\n#27397 and #27752 closed the phantom-slot path for `user` and `field` approvers. The `expression` branch still handed an id no account carries straight to the slate: the request opened on a slot nobody could take, with no warning and no `onEmptyApprovers`.\n\n## Verification\n\n- Measured on `main` first: of the 5 new cases, 2 were red (the warning/no-slot case and the emptied-slate fallback case), and the 3 pins (live ids quiet, failed read keeps the slot, dead delegate falls back to the id) were green.\n- Ablation: disabling the new check reds exactly those 2 cases. Restored: all green.\n- `plugin-approvals` full suite: 105 files, 1352 tests pass. Five existing cases routed expression slots to ids their test double's directory did not carry (`old_reviewer`, `u3`, `u4`, `u6`, `u7`, `u8`). Their fixtures now staff those accounts, test-only, as #27852 did for `field`.\n- Every `dispatch-gates --commands` family plus `pnpm lint`: reported on the card thread.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czYgbnZDQp3qTKCWae\n"
+}

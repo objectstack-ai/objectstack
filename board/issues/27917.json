@@ -1,0 +1,35 @@
+{
+  "number": 27917,
+  "kind": "issue",
+  "title": "type-compat follow-ups of #27745: ADR-0015 names the odata dialect, and a ruling on whether a user field may sit on a text or integer key — epic #27261",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T03:47:24Z",
+  "updated_at": "2026-10-30T07:45:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27917",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① should-fixes of the contract review of PR #27880 (record 6514424141, VERDICT PASS), not taken into that PR.\nRuling-ref: 6512853588 / 6512860835 (option A on #27745: the `odata` matrix arm; `lookup` / `master_detail` exact on text, integer and bigint rows)\nDedupe (open AND closed): \"type-compat user field uuid odata dialect ADR-0015\" → none this work.\nReader: the epic PM (#27261) dispatches it in the epic subtree.\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 两件小事。一是 ADR-0015 里类型矩阵的方言清单补上 `odata`（#27880 已经加进代码）；二是判断\"用户\"字段（`user`）能不能像 lookup 一样落在文本或整数列上。今天只有 uuid 列可以，外部系统里用整数或文本存用户 id 的列会在启动校验时报类型不匹配。\n- **为什么：** 第一件让 ADR 与代码一致；第二件和 #27880 放宽 lookup 的理由相同，但 `user` 指向平台用户，平台用户的 id 形状决定答案，需要实测后再定。\n- **需要您做的：** 合并前批准（改 ADR，Tier H）。\n\n## Task\n\n- [ ] ADR-0015's type-compat section lists `odata` among the dialects the matrix knows, with a one-line pointer to `DIALECT_ALIASES.odata`.\n- [ ] Measure the shape of a platform user id (`sys_user.id`), and decide from the measurement whether `user` joins the exact sets of the `text` row (and the integer rows only if a platform user id can be an integer). State the measurement and the decision in the PR. If the answer changes what an author can declare, stop and report it to the epic PM, because that is a design decision.\n- [ ] Tests in `packages/spec/src/data/type-compat.test.ts` pin the decision both ways.\n\n`Clause-②:` decided by the dev from the diff · `Metadata-protocol: none`. Touches `docs/adr/**` and `packages/spec/src/**`: contract review before landing; Tier H."
+}

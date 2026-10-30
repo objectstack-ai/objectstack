@@ -2,8 +2,8 @@
   "number": 27745,
   "kind": "issue",
   "title": "datasource import: generate object drafts from an OData $metadata document, and the Studio datasource page lists and imports its entity sets — epic #27261 P2",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T22:05:24Z",
-  "updated_at": "2026-10-30T01:42:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T04:32:17Z",
+  "closed_at": "2026-10-30T04:21:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27745",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ maintainer-directed — 田騏 at 2026-10-29T21:58Z 「现在启动全部 P2」 (epic comment 6509296853, D1 amended), at 2026-10-29T21:59Z 「OData 驱动 只做 v4」 (6509311454), at 2026-10-29T22:01Z 「同意」 (generic P2 parts open source in this repository; vendor-specific drivers such as Salesforce stay out of it).\nRuling-ref: 6486145005 (#27299, Tier B = declarative OData) · 6486136301 (#27298, D7) · 6471382887 (#27261 D1–D6)\nDedupe (open AND closed): \"OData datasource driver $metadata import connector credential external datasource\" → 5 hits, none this work (#27298 is the ruled decision card).\nReader: the epic PM (#27261) dispatches it in the epic subtree.\nBlocked-by: #27741\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 在 Studio 里指向一个 OData 数据源，列出它的实体集，勾选后生成对象草稿（字段、类型、主键、关联）；AI 通过 MCP 的同一入口也能做。\n- **为什么：** 不写代码接入的另一半：没有导入，管理员仍要手写对象。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `IExternalDatasourceService.generateObjectDraft` / `importObject` work for an `odata` datasource through the driver's `introspectSchema` (`$metadata`): EDM types map to field types, the key to the id, navigation properties to lookups when the target is also imported (else left out and named).\n- [ ] Studio's datasource page (`ui/packages/app-shell/src/views/metadata-admin`) lists an OData datasource's entity sets with an import action; imported objects are external, read-only unless the author opts in.\n- [ ] MCP: `list_remote_tables` / `import_object` reach the same path.\n- [ ] Tests: draft generation from a recorded `$metadata` fixture; the Studio flow against a mocked service.\n\n`Clause-②:` decided by the dev from the diff · `Metadata-protocol: none`."

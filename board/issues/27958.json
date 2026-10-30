@@ -1,0 +1,34 @@
+{
+  "number": 27958,
+  "kind": "pull_request",
+  "title": "docs(skills): a primary related list is a body table in the Details tab, and the relatedLists refusal states its package boundary",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T05:03:06Z",
+  "updated_at": "2026-10-30T07:55:01Z",
+  "closed_at": "2026-10-30T07:55:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-30T07:55:00Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27958",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D9EoRyLJMPig8fRoFZTwL2h)_\n\ndomain:skills#2 · os-elon-musk · session_016WV4cyuFKhHVaGYSSdTHG8\n\nFixes #27354\n\n## What changes\n\n- `skills/objectstack-ui/SKILL.md` (read side, related-list layout): a `relatedList: 'primary'` child is a full-width body table in the details column after the first field section, inside the Details tab with no tab of its own; every other list is a side card in the one shared **Related** tab; field changes (`trackHistory`) join the Timeline tab under its Changes filter, and there is no History tab. The paragraph also stops teaching an app-level `relatedLayout: 'tabs' | 'stack'` override as surviving: objectstack#27055 removed it from the synthesizer (`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts:163-171`), and no spec schema carries it.\n- `skills/objectstack-data/rules/relationships.md` (Detail-page related lists): the `'primary'` bullet says the same placement, and the `relatedLists` refusal states its boundary: a child in the stack with no inbound FK is refused everywhere; one that exists nowhere is refused by `os validate` / `os build` and by a metadata write naming no package; a write into a package stores it, and the page places nothing.\n- `.changeset/27354-skills-related-list-body-table.md`: `@objectstack/skills` patch.\n\n## Why\n\nBoth pages still taught the pre-v3 page after PR #27310 (`eef83734d`, record page v3) and PR #27352 (`ad3a640e3`, rewritten describes, seat ruling A on #27311). The new text follows `packages/spec/src/data/field.zod.ts:1831` (`relatedList`), `packages/spec/src/data/object.zod.ts:3178` (`relatedLists`), `:277` (`trackHistory`), and `buildDefaultTabs` in `buildDefaultPageSchema.ts:1016-1121`.\n\nMeasured on `origin/main` `ca54eaca`: a shared Related tab still exists for non-primary lists (and attachments); History is no tab, it is the Timeline stream's Changes filter. `grep -rniE \"own tab|related tab|matching no inbound\"` over `skills/**` (evals included, every package) hits only the two passages fixed here; `content/docs/ui/pages.mdx:187` already teaches the side-card Related tab correctly. No eval teaches the old text.\n\n## Token ratchet (`node scripts/check-skills-token-ratchet.mjs`)\n\n| File | Before | After | Ceiling | Ceiling moved |\n|:--|--:|--:|--:|:--|\n| `skills/objectstack-ui/SKILL.md` | 3848 | 3851 | 3851 | no |\n| `skills/objectstack-data/rules/relationships.md` | 3872 | 3848 | 3873 | no |\n\nPaid in-file by deleting restated text, no re-wrap: in `objectstack-ui`, the primary bullet's tab clause (now said once, in the layout paragraph), \"Promoting a child table to a tab is a one-word change\" and the surviving-`relatedLayout` sentence; in `relationships.md`, \"The UI is derived from metadata (…)\" (restates the sentence before it), the `'grid'` / `'form'` bullets' restatement of the code block's comments, the write-side parenthetical, \"on the parent's detail page\" in the default sentence, \"(default with inlineEdit)\" in the example comment (the bullet says it) and \"both are optional — when omitted\". No ceiling row is raised.\n\n## Verification\n\n- `pnpm install --frozen-lockfile --ignore-scripts` (exit 0), then every family `node scripts/pm/dispatch-gates.mjs --commands` derives at `46c30d4c`: 45 families, re-derived after commit (identical). 40 exit 0 on the first run; 5 exit 3 (prerequisite: dists) until `pnpm exec turbo run build` (116 tasks, exit 0), then exit 0. `dispatch-gates --ran`: 45 derived, 45 run, 0 NOT-MEASURED, 0 UNRUN.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran. (Markdown only; `pnpm lint` not run locally, CI runs it.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to generated references, changelogs or release notes.\n- [x] 8. Title, body and comments are in English.\n\n## 维护者速读\n\n- 改了什么:两份对外技能(objectstack-ui、objectstack-data)里关于记录页「相关列表」的说法改成现状:主相关列表是详情页签里的整宽表格,不再单独占一个页签;其余列表是共享「关联」页签里的侧卡;字段变更在时间线的「变更」筛选里,没有历史页签。\n- 为什么改:记录页 v3(#27310)与规范描述重写(#27352)落地后,技能还在教旧页面,AI 照着写会设计出不存在的页签,还以为任何拼错的 `relatedLists` 名都会被拒。\n- 风险与回滚:只改文档文字,无代码、无 schema;回滚即撤回本 PR。两份文件都在 token 天花板之内,没有提高任何上限。\n- 先看:`skills/objectstack-ui/SKILL.md` 的 Related-list layout 段,和 `relationships.md` 的 `relatedList` 三态列表。\n- 两分钟验证:对照 `field.zod.ts:1831` 与 `object.zod.ts:3178` 的 describe 读两段新文字;跑 `node scripts/check-skills-token-ratchet.mjs`。\n- 需要你做的:受管面 `skills/**`,欠一次契约复审(fable 档),落地为 Tier H,需受管审批人批准。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyuFKhHVaGYSSdTHG8\n"
+}

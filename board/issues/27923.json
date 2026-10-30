@@ -1,0 +1,33 @@
+{
+  "number": 27923,
+  "kind": "pull_request",
+  "title": "chore(ui/.claude): delete the nested guard hooks that no session loads",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:03:40Z",
+  "updated_at": "2026-10-30T07:42:18Z",
+  "closed_at": "2026-10-30T07:42:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-30T07:42:16Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27923",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DCQsbnenFEWhSBPJaqbcCS9)_\n\nFixes #27260\nPart of #26080\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nAfter the monorepo merge, `ui/` is no session's project root: Claude Code reads the root `.claude/settings.json`, never `ui/.claude/settings.json`. So the four nested ui guard hooks never fire, yet they read as live guardrails and cost a governed review on every change.\n\n- Delete `ui/.claude/hooks/*` (8 files: `guard-main-checkout{,-bash}`, `guard-shared-stash`, `guard-tree-enum`, each `.sh` + `.selftest.sh`).\n- Delete the `hooks` block of `ui/.claude/settings.json` that wired them (old L37–61). The `permissions` block stays; the file is still valid JSON.\n- Move the `ui-claude-tree` specimen in `scripts/pm/check-governed-merges.mjs` self-test from `ui/.claude/hooks/guard-main-checkout.sh` to `ui/.claude/skills/verify/SKILL.md`, a surviving file under the same row, so the row's Tier H assertions (`the-ui-claude-tree-specimen-is-governed-by-its-own-row-alone`, `every-ui-row-lands-Tier-H-the-ui-claude-tree-included`) keep their teeth.\n\nOut of scope and untouched: `ui/.claude/launch.json`, `ui/.claude/skills/**`, the `permissions` block, and the synthetic `.claude/hooks/*` fixtures in `ui/scripts/__tests__/*`.\n\n## Per-hook coverage (measured on `8c7021dfb`)\n\nEach ui hook carried a `# copied from objectstack@…` header. Compared with comment lines stripped, the verdict logic is identical to the root copy; only issue references and the refusal message wording differ.\n\n| ui hook (deleted) | Root replacement | Root wiring | Verdict |\n|:--|:--|:--|:--|\n| `guard-main-checkout.sh` (+ selftest) | `.claude/hooks/guard-main-checkout.sh` | `.claude/settings.json` PreToolUse `Edit\\|Write\\|NotebookEdit` | Covered by root. Code identical once comments are stripped |\n| `guard-main-checkout-bash.sh` (+ selftest) | `.claude/hooks/guard-main-checkout-bash.sh` | root PreToolUse `Bash` | Covered by root. Only the refusal text's issue ref differs (`objectui#3435` vs `#5790`) |\n| `guard-shared-stash.sh` (+ selftest) | `.claude/hooks/guard-shared-stash.sh` | root PreToolUse `Bash` | Covered by root. Root refusal text is a superset (adds the commit-first reverse-verification recipe) |\n| `guard-tree-enum.sh` (+ selftest) | `.claude/hooks/guard-tree-enum.sh` | root PreToolUse `Bash` | Covered by root. Only one message line's wording differs |\n\nThe root guards protect the whole checkout, `ui/**` included, because `ui/` sits inside it. The root self-tests keep running in `lint.yml` (`find .claude/hooks -name '*.selftest.sh'`, root only), so CI loses no self-test.\n\n## Readers swept before the edit\n\n- `ui/.claude/settings.json` L44/L53/L57/L61: edited (block removed).\n- `scripts/pm/check-governed-merges.mjs:4519`: specimen moved; `:4525` reads it through `UI_SPECIMENS`.\n- Not readers of these files, left as they are: `ui/scripts/check-bash32-floor.mjs:242` declares `.claude/hooks/**` as a population root (it is now an empty root; `pnpm --dir ui run check:bash32-floor` still finds 5 shell files and passes); `ui/scripts/check-governed-queue-guard.mjs:1326` (synthetic path string); `ui/scripts/dependabot-merge-gate.mjs:232` (prose about objectui's old workflow); `ui/scripts/__tests__/bash32-floor-wiring.test.ts:126` and `check-shell-escape-residue.test.ts` (synthetic fixtures).\n\n## Gates\n\n`node scripts/pm/check-governed-merges.mjs --self-test`: 537 assertions before and after, exit 0. Every family `dispatch-gates --commands` derives (36) ran green; see the card report. `ui` bash32-floor `--self-test` and run: exit 0.\n\n## 维护者速读\n\n- 改了什么：删掉 `ui/.claude/hooks/` 下 8 个守卫脚本，以及 `ui/.claude/settings.json` 里接线它们的 hooks 段；治理自测的 `ui-claude-tree` 样本改指 `ui/.claude/skills/verify/SKILL.md`。\n- 为什么改：合仓后 `ui/` 不是任何会话的项目根，这些嵌套 hook 从不触发，却看起来像在保护，每次改动还要走受管评审。\n- 风险与回滚：根目录 `.claude/hooks/` 有同名四个守卫，判定逻辑一致，已在根 settings 接线，保护不减；回滚即 revert 本 PR。\n- 先看：PR 正文的逐 hook 覆盖表，和 `check-governed-merges.mjs` 那一行样本改动。\n- 两分钟验证：`node scripts/pm/check-governed-merges.mjs --self-test` 仍是 537 条全过；`ui/.claude/settings.json` 仍是合法 JSON。\n- 需要你做的：欠一次契约复审（fable）；落地是 Tier H，需受管审批人批准。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxp4Fjwh9pEpn19fBR\n"
+}

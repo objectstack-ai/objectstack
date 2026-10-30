@@ -1,0 +1,34 @@
+{
+  "number": 27935,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the record highlights strip draws a boolean as one neutral chip",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:31:28Z",
+  "updated_at": "2026-10-30T05:37:59Z",
+  "closed_at": "2026-10-30T05:37:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T05:37:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27935",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CaJoinvGQSbHeDaWBe\n<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg4i9JiKjEjwtuVzd4gKy9hB)_\n\n## 维护者速读\n- 改了什么：记录页顶部的「亮点条」（record:highlights）里，布尔字段不再是「是=绿、否=琥珀」两种颜色，统一画成一个中性的小标签，只显示「是 / 否」字样。\n- 为什么改：HotCRM 发现「SLA 已违约：否」被画成警告色，其实「否」才是好事；元数据并没有说哪个值是好的，详情区本来就只画一个中性的词，亮点条应与它一致。\n- 风险与回滚：只改一个渲染分支的样式类，不动数据和元数据；回滚即还原这一个提交。\n- 先看：`ui/packages/plugin-detail/src/HeaderHighlight.tsx` 布尔分支；`HeaderHighlight.booleanNeutral-27434.test.tsx`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/HeaderHighlight.booleanNeutral-27434.test.tsx`，预期 3 个用例全绿。\n- 需要你做的：无，席位落地。\n\nFixes #27434\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nCard #27434 lists seven gaps HotCRM measured on 18.2.0. Each row was re-measured on `main` at e41642dd. This PR takes row 4; the other rows are answered below, and the rows that need a new key, a spec change or a change outside `ui/` go to cards of their own, now filed by the seat: #27944 (row 2), #27945 (row 3), #27946 (row 5), #27947 (row 6) and #27948 (rows 7 and 1). With every row taken or carded, this PR closes the card.\n\n**Row 4 (taken).** `HeaderHighlight` drew a boolean `true` as an emerald \"✓ Yes\" chip and `false` as an amber \"× No\" chip, whatever the field means. Both values now share one neutral chip (`bg-muted`, `text-foreground`, `ring-border`), carrying the locale's Yes / No word from `useBooleanValueLabel` and no glyph. That matches the details body, which draws the same read-only field as the plain word. The now-unused `Check` and `X` icon imports are dropped. A field-level key that says which value is the bad one is not invented here: that is a spec question (see Acceptance notes).\n\n| Row | Bucket | Reading on `main` |\n|---|---|---|\n| 1 | Already done; the residual joins row 7 | The row reaches the dialog from both doors. The record header (`page:header` `dispatchHeaderAction`) and a list row's menu (`objectGridActionsColumn`) both stash it under `params._rowRecord`. Both param-collection handlers seed `defaultFromRow` from it (by the param's `field`, else its `name`). The runner's `interpolate` fills `${record.x}` in `description` and `helpText` on both doors (objectui#12967, shipped in 18.0.0). What prints raw is a `{{ record.x }}` hole. Measured through the runner: `Email {{ record.display_name }} / ${record.display_name}` reads `Email {{ record.display_name }} / Acme` from both doors. That is the hole-syntax split of row 7. |\n| 2 | Card (spec + ui) | No action key names the dialog's submit verb; the footer reads `actionDialog.confirm`. |\n| 3 | Card (spec + form) | A form has no lookup-pick autofill. The only one is the line-item grid column's `autofill`, which copies same-named fields and exists only in that grid. |\n| 4 | Taken here | See above. |\n| 5 | Card (spec) | `ActionSchema` has no per-reader `active` / `pressed` predicate. |\n| 6 | Card (server) | `resolveRef` in the import runner (`@objectstack/core`) still tries `id`, `displayField`, the title field, then `name`/`title`/`label`/`full_name`/`email`/`username`. It never tries the target's `unique` fields. |\n| 7 | Card (spec + runtime), with row 1's residual | `composeSuccessMessage` fills `outcomeMessages` through `substituteScopeTokens` (`${result.x}`), and `successMessage` through `fillTemplateHoles` (`{{ }}`). The param dialog's `description` and `helpText` read `${…}` through the evaluator. `confirmText` reads `{{ }}`, and the spec tells an author with params to move the confirm question onto `description`, where the same `{{ record.x }}` hole stops filling. |\n\n## Tests\n\n- New `HeaderHighlight.booleanNeutral-27434.test.tsx` (3 cases): neither chip carries a state colour class or a glyph; the `true` and `false` chips share one class list and differ only by the word; a control that the strip drew its non-boolean value.\n- Ablation, run twice against the committed fix and restored from `HEAD` each time (`git hash-object` matched the HEAD blob after both):\n  - The file restored to `origin/main`: 2 of 3 cases red.\n  - Through `scripts/ablation-replace.mjs`, `rounded-full bg-muted px-2` replaced by `rounded-full bg-amber-500/10 px-2` (anchor 1 to 0, blob changed): case 1 red.\n- Every `plugin-detail` highlights, record page and summary-chip test file (22 files; `HeaderHighlight.booleanLocale-11689` included): 21 passed, 1 skipped, 177 tests passed.\n- `@object-ui/plugin-detail` `type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0.\n\n## Acceptance notes\n\n- Row 4's \"a field-level key saying which value is the bad one\" is the spec half of that row. It is not built here; the neutral default is what the details body already does.\n- Out of scope, for the seat to file as cards: rows 2, 3, 5 and 6, and row 7 together with row 1's `{{ }}` residual. Titles, bodies, landing sites and dedupe words are in the os-dev report on #27434.\n- No i18n string changed: the chip reads the existing `useBooleanValueLabel` words.\n\n## Verification\n\nEach command was run on 189ad8a2, with its exit code captured before any pipe. The derived gate list was reconciled with `dispatch-gates --ran`; the full list is in the report on #27434.\n"
+}

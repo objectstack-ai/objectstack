@@ -1,0 +1,34 @@
+{
+  "number": 27959,
+  "kind": "pull_request",
+  "title": "docs(deployment): name the /meta/diagnostics query refusals and the canonical stats key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T05:05:50Z",
+  "updated_at": "2026-10-30T06:05:59Z",
+  "closed_at": "2026-10-30T06:05:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T06:05:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27959",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYmTYfaPbLQD4BJfomW\n\nRefs #27632 (the #27620 half: the three value refusals and the canonical `stats` key; the #27913 parameter-name refusal stays on the card until #27913 lands)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`validating-metadata.mdx` 的 `GET /api/v1/meta/diagnostics` 参数表补上三种 400 拒收(未知 `type`、`severity`、`package`),并说明 `stats` 按规范类型名作键。\n- 为什么改:#27620 之后该路由已拒收这三类错误值，文档没写，读文档的 AI 和 CI 作者仍以为拼错会得到空的「全部通过」。\n- 风险与回滚：仅文档，一个文件、一节;回滚即 revert 本 PR,不影响任何发布包。\n- 先看:`content/docs/deployment/validating-metadata.mdx` 的 diagnostics 一节(参数表与其后两段)。\n- 两分钟验证:`git diff origin/main -- content/docs/deployment/validating-metadata.mdx`,预期只见该节的表格加一列、两段新文字。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThe `GET /api/v1/meta/diagnostics` section of `content/docs/deployment/validating-metadata.mdx` now states what the route does since #27620, each sentence written from the code on `origin/main` (`ed0e71db94`):\n\n- The query table gains a column naming each parameter's `400 INVALID_REQUEST` refusal:\n  - `severity`: any value other than `error` / `warning` (`packages/rest/src/meta-collection-routes.ts`, the severity check).\n  - `type`: a misspelling of a declared type, whose message names the accepted spellings (`canonicalizeMetaRequestType` in `packages/metadata-protocol/src/protocol.ts`), or a name that is neither a declared type nor in the deployment's live type set (`refuseUnknownMetaListType` in `packages/rest/src/meta-item-read-gate.ts`). A live type outside the static contract still answers 200.\n  - `package`: a package that is not installed and that no swept item is bound to (`packages/metadata-protocol/src/protocol-meta-diagnostics.ts`). An installed package with no items answers zero counts. `all` sweeps every package (`metaItemPackageBinding`).\n- An empty value keeps the default. Every refusal uses the nested `{ error: { code, message } }` envelope, and a repeated parameter answers `VALIDATION_ERROR` in the same envelope (`refuseRepeatedQueryParams`).\n- `stats` and each entry's `type` use the canonical type name, so `type=views` answers under `stats.view`, the same as `type=view` (`canonicalMetaUrlType` in the sweep).\n- The CI-gate sentence now says that a misspelled `type` or `package` answers the 400 rather than an empty sweep.\n\nLeft out: the refusal of an unknown query parameter NAME (#27633 / PR #27913). That PR was still open on `origin/main` `ed0e71db94` when this branch was cut. Card comment 6514340216 carries the text to add once it lands.\n\n## Tests\n\nDocs only, so there is no test to run. The route's own pins in `packages/rest/src/rest-meta-diagnostics-unknown-params.test.ts` (unchanged) back each documented clause: the three refusals, the near-miss message naming `'view'`, the repeated-parameter `VALIDATION_ERROR`, the canonical `stats.view` for `type=views`, and the preservation cases (empty severity, `package=all`, an installed package with no items, items bound to an uninstalled package, a live type outside the static contract).\n\n## Acceptance notes\n\n- No finding filed.\n\n## Verification\n\nMeasured at head `26a0c3bd1b` (objectstack-ai/objectstack).\n\n<details><summary>Derived gate families: 43 derived, 43 run, all exit 0</summary>\n\n- Derivation: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, exit 0, 43 commands, change set of 1 path (+15 / -7).\n- Each command's exit code was written to disk before any pipe. On the first pass, four gates refused with exit 3, PREREQUISITE NOT MET (unbuilt `@objectstack/formula`, `@objectstack/lint` and client dist): `check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples` and `check:docs-transcript-drift`. After `turbo run build` of those closures under the verify lock (VERDICT command-exit 0, 38/38 tasks), all four re-ran with exit 0.\n- `check:doc-authoring`: exit 0 (\"70 published skill files clean\", \"19837 customer-facing string(s) ... clean\").\n- `check:nul-bytes`: exit 0.\n- Reconciliation: `dispatch-gates.mjs --repo objectstack-ai/objectstack --ran` (each line recorded with its exit code) answered \"43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero — all 43 recorded an exit code and none of them is 3)\".\n\n</details>\n\n<details><summary>Not measured locally</summary>\n\n- NOT MEASURED: CI's `Build Docs` and `Plan Test Core shards` jobs, and the type-check lanes. The derivation names no local invocation for them, so they are left to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n\n"
+}

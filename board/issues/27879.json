@@ -1,0 +1,38 @@
+{
+  "number": 27879,
+  "kind": "issue",
+  "title": "plugin-approvals: an `expression` approver with `resolveAs: 'user'` whose value names no account still opens a slot no one can take (the third sibling of #27397 / #27752)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:34:58Z",
+  "updated_at": "2026-10-30T05:24:36Z",
+  "closed_at": "2026-10-30T05:23:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27879",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① product defect with a named fix site (`finding`, class b: code read, not measured).\n\n**Found by:** the #27752 card thread (PR #27852, os-dev-report 6513516469, out-of-scope note). Filed by `domain:server` seat 3.\n\n## What may be wrong\n\n#27397 (`type: 'user'`) and #27752 (`type: 'field'`, out-of-office delegate) make an approver id that no account carries add no slot: they log the \"expanded to nobody\" warning, and a slate left empty reaches the node's `onEmptyApprovers`. The `expression` approver's `resolveAs: 'user'` branch (the default) in `packages/plugins/plugin-approvals/src/approval-service.ts` treats each value the expression yields as a person and opens a slot for it unchecked. So an id no account carries is still a phantom slot.\n\n## Expected\n\nMeasure it first. If the slot opens, give it the same treatment as #27752's field branch: the private `namesNoAccount` predicate that PR #27852 adds, the same warning, no slot, and `onEmptyApprovers` for an emptied slate. A failed read keeps the slot. Pin it.\n\n## Business reason\n\nAn approval routed by an expression to a removed or misspelled user waits forever on nobody, and the node's own fallback never fires.\n\n**Reader:** the `domain:server` lane seat. Serial behind PR #27852 (same file, reuses its predicate).\n\n**Dedupe:** I searched \"approvals expression resolveAs user names no account phantom slot\". #27397 and #27752 cover `user` and `field` only.\n\nFiled without `domain:*`; grading is triage's.\n\nBlocked-by: #27852\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 28010,
+  "kind": "pull_request",
+  "title": "test(service-automation): measure a connector definition published on one replica across two replicas (#27977)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T07:39:23Z",
+  "updated_at": "2026-10-30T08:14:25Z",
+  "closed_at": "2026-10-30T08:14:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T08:14:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28010",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU7tsm5bu7hCcGfaFJtkLYA)_\nFixes #27977\n\ndomain:server#3 · os-elon-musk · session_016WV4cx4GVsYbtK2oE4scBf\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只加一个测试文件 `connector-definition-cluster.test.ts`,用两个内核(各自 ObjectQLPlugin 元数据协议 + 自动化插件)共享一个 SQLite 文件和一条总线,测量「在 A 上发布改过的连接器定义,B 会不会跟着重建」。不改任何运行时代码。\n- 为什么改:#27428 的裁决 6513279565 要求单独测量这一点。结论:B 不跟。lane 2 把变更送到了 B 的协议监听器,但自动化插件的监听只认 `flow`,`metadata:reloaded` 又只在本内核触发,所以 B 一直用旧定义,直到重载或重启。缺口以 `it.fails` 钉住,修复卡是 #28002。\n- 风险与回滚:零运行时风险,测试不进发布包(`files` 只发 `dist`)。回滚即删掉这个文件。\n- 先看:`packages/services/service-automation/src/connector-definition-cluster.test.ts`,`it.fails` 那一例和其后的对照例。\n- 两分钟验证:`pnpm --filter @objectstack/service-automation exec vitest run src/connector-definition-cluster.test.ts`,预期 `2 passed | 1 expected fail (3)`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOne new test file, `packages/services/service-automation/src/connector-definition-cluster.test.ts`, built like `connector-credential-cluster.test.ts` (#27941): two `ObjectKernel` replicas, each running `ObjectQLPlugin`'s metadata protocol and `AutomationServicePlugin`, over ONE better-sqlite3 file both open, joined by a bus that delivers every publish to every subscriber (publisher included). Each replica is attached the way `MetadataClusterBridgePlugin` attaches it at `kernel:ready`: lane 2 (`attachMetadataMutationPubSub`) and lane 4 (`attachConnectorCredentialPubSub`). Lane 1 (`metadata.changed`) is not attached: it replays into a `MetadataManager`'s caches, and the connector reconcile reads the ObjectQL registry and the protocol's execution view, never that manager.\n\nA definition change is published on A through the per-item door (a draft `saveMetaItem`, then `publishMetaItem`), changing `providerConfig.endpoint` from V1 to V2.\n\n## Measurement\n\n| | result |\n|:--|:--|\n| A, the publishing replica | re-materializes with V2 (ObjectQLPlugin announces A's own `metadata:reloaded` after the per-item publish) |\n| lane 2 to B | delivered: B's protocol replays `connector/NAME` into B's mutation listeners |\n| B's live instance, no reload on B | **does not converge**: B's provider is never called (`expected undefined to be 'https://v2.billing.example.test'`) |\n| control: `metadata:reloaded` on B | B materializes V2 from its own read of the shared store |\n\nCause, read from the code: `subscribeFlowMutations` in `plugin.ts` returns early for any mutation whose type is not `flow`, and `metadata:reloaded` is a kernel-local hook a peer never receives. So the gap is the trigger, not the store or the read. The lane choice for the fix belongs to #28002.\n\n## Tests\n\n- `connector-definition-cluster.test.ts`: `Tests 2 passed | 1 expected fail (3)`.\n  - Harness health, a plain `it`: A converges and lane 2 reaches B. This keeps the `it.fails` from passing on a broken harness.\n  - The gap, `it.fails` naming #27977 and #28002: B converges with no reload on B. Its failure was read with the case temporarily run as a plain `it`: the one assertion that fails is B's last endpoint, `undefined` instead of V2.\n  - Control, a plain `it`: B holds no instance before the reload, and holds V2 after it.\n- `pnpm --filter @objectstack/service-automation test`: `Test Files 222 passed (222) · Tests 2832 passed | 1 expected fail (2833)`, lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/service-automation typecheck`: lock VERDICT command-exit 0.\n\n## Acceptance notes\n\n- Side finding, same root, measured with a throwaway probe that is not committed: a direct active save (`saveMetaItem` with no mode, what `PUT /api/v1/meta/connector/:name` calls) does not re-materialize even on the writing replica. A stayed on V1 after saving V2, and its listeners heard the mutation. The seat recorded it on #28002.\n- No changeset (`skip-changeset`): the package publishes only `dist`. After `pnpm --filter @objectstack/service-automation build`, `grep` for the test's names in `dist` gave 0 hits, and the positive control `AutomationServicePlugin` gave 4 files.\n\n## Verification\n\nHead `022ad12c`, base `46943657`.\n\n<details><summary>Derived gate families and lint</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 50 families over the 1 changed path. 49 exited 0. `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: it needs every package's `dist` in this worktree), so it is NOT MEASURED locally and CI runs it. `check-plugin-teardown-shape --self-test` exited 3 on the shallow clone and 0 after `git fetch --unshallow`. `--ran` reconciliation: `50 derived, 49 run, 1 NOT-MEASURED, 0 UNRUN`. `pnpm lint` exited 0.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (Not touched.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset: nothing published, `skip-changeset`.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cx4GVsYbtK2oE4scBf)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cx4GVsYbtK2oE4scBf\n"
+}

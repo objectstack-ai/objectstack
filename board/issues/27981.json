@@ -1,0 +1,35 @@
+{
+  "number": 27981,
+  "kind": "pull_request",
+  "title": "fix(connector-openapi): path-item parameters reach every operation's input schema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T06:13:50Z",
+  "updated_at": "2026-10-30T06:49:17Z",
+  "closed_at": "2026-10-30T06:49:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T06:49:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27981",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFixes #27463\n\n## 维护者速读\n- 改了什么：`connector-openapi` 的 `collectOperations` 现在把 OpenAPI 3.x Path Item 上的 `parameters` 合并进该路径下每个操作的参数；操作里 `name` + `in` 相同的条目整条覆盖路径级条目。另加四个固定测试和一个 patch changeset。\n- 为什么改：路径级参数从来不被读取，所以在路径上声明的必填 id（GET / PATCH / DELETE 共用的常见写法）不会出现在动作的 `inputSchema` 里，作者和流程设计器看到的输入定义缺了必填项。\n- 风险与回滚：只改动作的 `inputSchema`；运行时不会用它校验调用输入，实测缺 `petId` 的调用修复前后一样被派发，没有原本被接受、现在被拒绝的调用。回滚就是 revert 这一个提交。\n- 先看：`packages/connectors/connector-openapi/src/openapi-connector.ts` 的 `collectOperations` / `mergeParameters`。\n- 两分钟验证：`pnpm --filter @objectstack/connector-openapi test -t \"path-item-level\"`，四个测试都绿；把 `openapi-connector.ts` 还原到 base 后，其中三个变红。\n- 需要你做的：审阅并合并。另外，经 `normalize-openapi` 转换的 Swagger 2.0 文档也会受益：实测升级器把路径级参数留在 path item 上，并没有下沉到操作里，与卡片描述不同。\n\nClause-②: no — only the generated action's `inputSchema` gains the path-level parameters the document already declares; nothing validates a call's input against it, so every call accepted before is still dispatched as before (measured end to end).\nMetadata-protocol: none\n\n## What changes\n- `collectOperations` merges each path item's `parameters` into every operation under that path: path-level entries first, then the operation's own. An operation entry with the same `name` + `in` replaces the path-level one whole (its schema and its `required`), as OpenAPI 3.x defines. A path-level and an operation-level parameter that share a name but not `in` are both kept.\n- A path item with no `parameters` leaves the operation's array exactly as it was. A `$ref` entry has no `name`/`in` to match on, so it is kept as is; `buildInputSchema` skips an unresolved one, as before.\n- `OpenApiPathItem` declares the optional `parameters` key.\n\n## Why\nThe generator built each operation from `record[method]` only, so a parameter declared once on the path never reached the action's `inputSchema`. Measured at bacb3e6a through `createOpenApiProviderFactory`: an OpenAPI 3.0.3 document with `'/pets/{petId}': { parameters: [{ name: 'petId', in: 'path', required: true }], get: … }` materialized `getPet` with `inputSchema: null`. Agents and flows built from that schema call the action wrong.\n\nSwagger 2.0 documents converted by `normalize-openapi` have the same shape: measured, the upgrader keeps path-level parameters on the path item (in 3.x form) and does not copy them into operations. They now get the same fix, and the normalizer's own tests are unchanged and green.\n\n## Verification\n- Pins in `openapi-provider.test.ts`, one per shape, all through the provider factory: path-level only (GET and DELETE both get `petId`, required), operation override (whole-entry replacement; a concatenation would keep the path-level `required`), same name with a different `in` (both kept), and the operation-only control.\n- Red first: pins 1–3 red before the fix, the control green. Ablation: with the fix reverted in the tree, the same three go red and the other 40 tests in the file stay green; restored, the file hash equals the committed one.\n- Clause-②: a real boot (LiteKernel + AutomationServicePlugin + ConnectorOpenApiPlugin, declared `provider: 'openapi'`) runs a `connector_action` flow calling `getPet` with `input: {}`. It succeeds and requests the same URL before and after the fix; nothing refuses it.\n- `pnpm --filter @objectstack/connector-openapi test` (67/67), `typecheck`, `pnpm lint`: all exit 0. `dispatch-gates --ran`: 58 derived, 57 run green, 1 not measured (`check:dual-build-cjs-loads` needs a whole-tree build), 0 unrun.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1Np3hU7RQnA13YZcL\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 27874,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): a pool rebuild syncs the managed objects bound to the datasource (#27750)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:27:33Z",
+  "updated_at": "2026-10-30T03:13:41Z",
+  "closed_at": "2026-10-30T03:13:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T03:13:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27874",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D8TexLjwJ2KtVSbiAujiwfF)_\n\nFixes #27750\n\n## 维护者速读\n\n- 改了什么：管理员修改一个 Setup 创建的托管数据源（换库、换凭据、改 schemaMode 或重新启用）导致连接池重建时，绑定到它的代码对象会在新库上建表。\n- 为什么改：#27701 只修了\"创建\"和\"重启\"两条路；\"修改后重建\"仍不建表，换库后该对象每次读取都失败，只能手工建表。\n- 风险与回滚：只对 `schemaMode: managed` 生效，`external` / `validate-only` 依旧零 DDL；重建失败保留旧池时不同步。回滚 = revert 本 PR。\n- 先看：`datasource-admin-plugin.ts` 新的共用 helper `managedObjectsBoundTo`，以及 `reconnect` 新增的 `objects` 参数。\n- 两分钟验证：`pnpm --filter @objectstack/service-datasource exec vitest run src/__tests__/runtime-datasource-bound-object-storage.test.ts`（新增 3 例；回退连接服务的改动后换库那例变红）。\n- 需要你做的：无（Tier S，按本期落地授权由席位落地）。\n\n## What changes\n\n- `DatasourceConnectionService.reconnect` takes an optional `objects` list and forwards it to both of its inner `connect` calls (the swap rebuild and the nothing-to-swap plain connect), so the connect's sync loop gives those objects their tables on the pool the new record opens. The kept-old-pool path syncs nothing.\n- `DatasourceAdminServicePlugin`: the managed-only gate and bound-name list that `registerPool` computed inline (#27701) moved into one helper, `managedObjectsBoundTo`, which both `registerPool` and `reregisterPool` call. `reregisterPool` passes the objects bound to the NEW record.\n- ⛔ `schemaMode: external` / `validate-only` still pass no objects, so they never get DDL.\n\n## Why\n\n#27701 synced bound managed objects when a runtime datasource's pool opens. An admin update that rebuilds the pool (`PATCH /api/v1/datasources/:name` → `updateDatasource` → `reregisterPool` → `reconnect`) still passed none, so moving `warehouse` to a new database left `wh_note` without a table there and every read of it failed.\n\n## Verification\n\n- Pinned red on `main` first: in `runtime-datasource-bound-object-storage.test.ts` (real plugin, real `ObjectQL`, SQLite), create `warehouse` on `a.db`, update `config` to `b.db` → `hasTable('wh_note')` was `false` on `b.db`. Green with the fix; ablating the connection-service change turns it red again, restoring turns it green.\n- New ⛔ cases: `external` and `validate-only` datasources updated to a new database sync nothing and create no table.\n- `@objectstack/service-datasource`: 63 files / 1031 tests pass; `tsc --noEmit` clean.\n- `dispatch-gates --ran`: 60 derived families accounted for: 59 run green, 1 NOT MEASURED (`check:dual-build-cjs-loads`, exit 3, needs a whole-tree build; CI runs it). `pnpm lint` exit 0. `check:commit-card-trailers` green.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\nSerial note: draft PR #27819 (#27746) edits both files; this PR keeps to `reconnect`, `registerPool` / `reregisterPool` and the shared helper. The later lander merges `main`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1ZEsJ6Xne4sn5EXtT\n"
+}

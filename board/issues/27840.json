@@ -2,8 +2,8 @@
   "number": 27840,
   "kind": "issue",
   "title": "platform-objects: the sys_trusted_key docblock names verifyPluginArtifact as install's verifier and calls the shipped boot-time loader unbuilt",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,11 +24,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T01:23:28Z",
-  "updated_at": "2026-10-30T02:13:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T04:11:36Z",
+  "closed_at": "2026-10-30T04:11:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27840",
   "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a docblock that names the wrong verifier and calls a shipped loader unbuilt, with named locations. Found by the contract review of PR #27815 (#27684, ADR-0025 v2 text), record 6512098408 on head `c49a117f`, follow-up 5. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. Filed without `domain:*`: the fix is in `packages/platform-objects`; triage sets the lane.\n\nBusiness reason: `sys_trusted_key` is the store an author or an AI reads to learn how plugin signatures are checked. Its docblock sends a reader to the wrong function and says the boot-time check does not exist yet, so someone tracing why a boot refused a plugin starts from a false picture.\nReader who acts: the lane triage assigns. One os-dev, one docblock edit, no behaviour change.\nDedupe: issues searched for `sys-trusted-key docblock verifyPluginArtifact` → no card.\n\n## Measured (read from source on `main` `fec60e00b`, not run live)\n\n- `packages/platform-objects/src/system/sys-trusted-key.object.ts:12` says install verifies the artifact bytes with `verifyPluginArtifact`. `packages/cli/src/commands/plugin/install.ts` imports and calls `verifyPublisherSignature` (`:65`, `:259`); `verifyPluginArtifact` wraps it.\n- `:41` says the readers are the install command \"and ADR-0025 M1's boot-time loader in the runtime once it is built\". That loader is built (#27374; `packages/runtime/src/installed-plugin-loader.ts` resolves the same key id and refuses `signature_key_untrusted` / `signature_key_revoked`).\n\n## Wanted\n\n- `:12` names `verifyPublisherSignature` (or names both, with which one install calls).\n- `:41` names the boot-time loader as a current reader, `packages/runtime/src/installed-plugin-loader.ts`.\n\n## Acceptance\n\n- Both lines match the tree; no code change; `skip-changeset` unless the package's changeset rules say a docblock needs one.\n"

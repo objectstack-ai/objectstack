@@ -1,0 +1,37 @@
+{
+  "number": 27913,
+  "kind": "pull_request",
+  "title": "fix(rest): GET /meta/diagnostics refuses an unknown query parameter name instead of answering the full sweep",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T03:31:41Z",
+  "updated_at": "2026-10-30T05:58:44Z",
+  "closed_at": "2026-10-30T05:58:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T05:58:42Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27913",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DADd6hnVtG5rSJrF9DUrLEF)_\n\nFixes #27633\n\nClause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: follow-up #27632 (the same `/meta/diagnostics` query table; the unknown-name refusal is added to that card in a comment)\n\n> **BREAKING** for a caller that sends `GET /meta/diagnostics` a query parameter outside `type`, `severity` and `package`: it was ignored and now answers `400 INVALID_REQUEST`. The remedy is to drop it or use the supported spelling (`package`, not `packageId`). ADR-0087 disposition: `not-required (no-migration-prescription)`, in the changeset.\n\n## 维护者速读\n\n- **改了什么**：诊断接口 `GET /meta/diagnostics` 现在只认 `type`、`severity`、`package` 三个查询参数，拼错或多传一个参数名（如 `?typ=view`）会回 400 并列出支持的参数，而不是悄悄忽略、回全量扫描。\n- **为什么改**：#27620 已经让它拒绝未知的参数「值」；参数「名」拼错时仍回 200 全量结果，调用方以为只看了 `view`，其实是全部类型，同样是假的「全部正常」。\n- **风险与回滚**：只收窄这一个只读接口的请求面。两个官方 SDK（`client.meta.getDiagnostics` 与 Console 的 `metadata-client`）只发这三个参数，不受影响。回滚即还原本 PR。\n- **先看**：`packages/rest/src/meta-collection-routes.ts` 里诊断路由开头新增的两行，以及文件顶部的 `META_DIAGNOSTICS_PARAMS`。\n- **两分钟验证**：`pnpm --filter @objectstack/rest exec vitest run src/rest-meta-diagnostics-unknown-params.test.ts`，16 条全绿（其中 #27633 的 5 条）。\n- **需要你做的**：无（合同复审由席位安排）。\n\n## What changes\n\n- `GET {metaPath}/diagnostics` declares its closed query-parameter set, `META_DIAGNOSTICS_PARAMS = ['type', 'severity', 'package']`, measured from the handler's read points and matching what both SDKs send.\n- The handler asks the shared closed-set decision, `unknownQueryParamRefusalMessage` from `query-allowlist.ts` (the one `refuseUnknownQueryParams` writes; no second helper), and throws the route's own `diagnosticsRefusal`. So the refusal is `400 INVALID_REQUEST` in the nested `{ error: { code, message } }` envelope, the code every other thrown refusal of this route answers since #27514. The message names the unknown parameter and lists the supported set.\n- Recognition runs before the repeated-parameter refusal, as the closed-set rule orders it. The multiplicity call now reads the same list (all three names are single-valued).\n\n## Why\n\n#27514 / #27620 closed the false all-clear for unknown VALUES. An unknown NAME was still dropped: `?typ=view` answered `200` with every type swept, and a caller who believed the answer was narrowed could not tell.\n\n## Verification\n\n- Pinned on `main` first (b13a1ed3): of 5 new cases, the 4 refusal pins were red (`?typ=view`, `?packageId=`, an unknown name beside known ones with an empty value, an unknown name with a repeated known one) and the preservation pin (all three known names together answer 200) was green.\n- Ablation: disabling the new throw reds exactly those 4; restored, 16/16 green.\n- `pnpm --filter @objectstack/rest exec vitest run`: 352 files passed, 7025 tests passed, 350 skipped. `tsc --noEmit` on `packages/rest`: exit 0.\n- `dispatch-gates --ran`: 60 derived, 58 run (exit 0), 2 NOT-MEASURED (exit 3, prerequisite in a fresh container: `check-plugin-teardown-shape --self-test` needs an unshallow clone, `check:dual-build-cjs-loads` needs every package's dist), 0 UNRUN.\n- `pnpm lint`: exit 0.\n- Dogfood battery at the final head: posted as a PR comment when the run completes.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxscKusnsCNkzSsjxM\n"
+}

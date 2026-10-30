@@ -1,0 +1,38 @@
+{
+  "number": 27891,
+  "kind": "issue",
+  "title": "record-recognisers: the doorbell key fields still parse seats with SEAT_REF (accepts skills#2) while To: lines use seatKey; unify on one seat grammar",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:47:33Z",
+  "updated_at": "2026-10-30T07:18:26Z",
+  "closed_at": "2026-10-30T07:17:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27891",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ②: tooling made inconsistent by in-flight work. Contract review of PR #27881 (#27637), record 6513700361, should-fixes 1 and 4. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. Grade and lane are triage's.\n\nBusiness reason: after PR #27881 the mailbox reader has two seat grammars. `To:` lines go through `seatKey` (`domain:skills#2`), while the doorbell key fields still parse with `SEAT_REF` in `scripts/pm/record-recognisers.mjs`, which also accepts the short form `skills#2`. So `To: skills#2` is refused but `Notify: split · skills#2 · …` reads. One message can name its addressee in two spellings, and only one of them reads.\n\n## Wanted\n\n- Unify the key fields on `seatKey` (one seat grammar for `To:` and the key fields), or state in `project-forms.md` 〈信箱 PR〉 which short form is legal where. Pin it in the doorbell battery.\n- `seatKey` refuses a `domain:` lane whose name collides with the reserved lane words (`triage`, `director`, `repo-…`), so the seat slug stays one-to-one, as its docblock states.\n- No behaviour change for a well-formed `To: domain:X#N` line.\n\n## Blocked-by\n\nBlocked-by: #27637\n\n## Dedupe\n\nIssues searched for `SEAT_REF seatKey` and `mailbox seat grammar`: none.\n"
+}

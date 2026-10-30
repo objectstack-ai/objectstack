@@ -1,0 +1,34 @@
+{
+  "number": 27978,
+  "kind": "pull_request",
+  "title": "fix(flow designer): a flow wider than the canvas opens zoomed out to fit its width",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T06:03:03Z",
+  "updated_at": "2026-10-30T07:21:10Z",
+  "closed_at": "2026-10-30T07:21:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T07:21:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27978",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg4i9JiKjEjwtuVzd4gKy9hB)_\n\n## 维护者速读\n\n- 改了什么：流程画布打开时，如果流程图比画布宽（例如手机宽度下有分支的流程），会先缩小到宽度放得下（最低 40%）并居中；放得下的流程仍按 100% 打开，打开时从不放大。\n- 为什么改：HotCRM 浏览器走查（#27356 第 22 行）在手机宽度下看到流程画布按 100% 打开，两侧的分支节点被切掉。\n- 风险与回滚：只改画布挂载时的一次缩放计算，不改缩放按钮、适应视图和宽度变化时的重新适配；回滚就是 revert 本 PR。\n- 先看：`FlowCanvas.tsx` 里挂载时居中的那个 effect（`#27356 row 22` 注释处）。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/previews/FlowCanvas.openFit-27356.test.tsx`，应见 4 passed。\n- 需要你做的：无，席位落地。\n\nPart of #27356 (row 22, hotcrm#2320 Studio S11: the flow canvas opens fitted at phone width)\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **A diagram wider than the canvas opens fitted to its width.** `FlowCanvas` framed every flow at 100%, centred, on mount. On a phone-width canvas a branching flow's outer branch nodes hung off both edges until the author pressed fit-to-view. The mount framing now takes `z = max(MIN_ZOOM, min(1, (canvasWidth - 32) / diagramWidth))` and centres the diagram at that zoom.\n  - It never zooms in: a diagram that fits opens at 100%, as before.\n  - Width only: a tall linear flow still opens at 1:1, top-aligned, and the author scrolls down. This keeps the \"familiar 1:1 on open\" promise the effect's comment makes for every diagram that fits across.\n  - A 0-wide (hidden) canvas opens at 100%, the same \"nothing to fit\" reading the width-change re-fit (objectui#11795) uses.\n- Unchanged: the zoom buttons, fit-to-view, the re-fit on a canvas width change, and the `addNode` / `insertOnEdge` call sites (another card is changing those two).\n- The surface: `views/metadata-admin/previews/FlowCanvas.tsx` is outside this order's declared Studio surface; the seat widened it to this one file for row 22.\n\n## Tests\n\n- New `FlowCanvas.openFit-27356.test.tsx` (4 tests) on the real canvas, with the viewport's box and `ResizeObserver` doubled as in `FlowCanvas.resizeFit-11795`: a three-branch flow at 390px opens below 100%, centred, its whole width inside the canvas, and the zoom readout shows that zoom; the same flow at 1400px opens at 100%, centred; a linear flow that fits 390px opens at 100%; a 0-wide canvas opens at 100%.\n\n<details><summary>Readings (head 881dbf54, run on bf7e1c77, the same tree before a message-only amend; branch rebuilt from origin/main bacb3e6a after #27927 merged; install and app-shell closure rebuilt)</summary>\n\n- New file: 4/4 passed.\n- Every ui test file naming `FlowCanvas` (19 files, including #27930's `FlowCanvas.updateRecordSeed-27834`): 19 passed, 293 passed.\n- `pnpm --filter @object-ui/app-shell run type-check`: exit 0 (lock VERDICT command-exit 0).\n- Ablation through `scripts/ablation-replace.mjs` (anchor 1 to 0): the mount zoom back to `const z = 1;`: 1 failed / 3 passed (the 390px branching case red); restored blob = HEAD blob `776392e9d921`, `git diff HEAD` empty. vitest resolves `@object-ui/*` to source, so no rebuild leg.\n- `pnpm --dir ui run check:i18n-drift`: no en value changed.\n\n</details>\n\n## Acceptance notes\n\n- **Row 22's second half is ALREADY DONE on our side.** The record cards' lines already come from the object's `highlightFields` (ADR-0085): `plugin-grid` `objectGridGenerateColumns` and `plugin-list` `ListView` lead with them when the object declares them, and Studio's object Settings tab edits them. \"Account Name (Normalized)\" is a HotCRM field that is not `hidden`, on an object that declares no `highlightFields`, so the default branch shows it. The fix is HotCRM's metadata (declare `highlightFields`, or mark the field hidden), outside this repo.\n- The 40% floor is the canvas's existing `MIN_ZOOM`. A diagram wider than 2.5 canvas widths still overflows at 40%; it was not measured on a real HotCRM flow.\n- Measured in happy-dom, which lays nothing out: the canvas and diagram widths are the box the test sets and the layout's computed size, not a rendered phone.\n\n## Verification\n\nOn head `881dbf54` (tree identical to `bf7e1c77`, where they ran): `dispatch-gates --commands` derived 34 families for this diff; all 34 were run locally, each exit 0, and `--ran` reconciled 34 run, 0 NOT-MEASURED, 0 UNRUN. `check:new-line-citations`: 0 new. CI check-runs were in progress when this was opened.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrsFMFmWFsxTaq2Bu)_\n"
+}

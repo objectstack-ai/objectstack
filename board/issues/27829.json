@@ -2,8 +2,8 @@
   "number": 27829,
   "kind": "issue",
   "title": "data: `$searchFields` naming only a `secret` / `password` field the object lists in `searchableFields` answers 200 and searches the rest of the allowed set; the door admits what the engine withholds",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T01:03:39Z",
-  "updated_at": "2026-10-30T02:14:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T06:11:40Z",
+  "closed_at": "2026-10-30T05:58:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27829",
   "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ① a product defect with a measured reproduction (a narrower request answered wider at the REST data door). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade yet: triage sets the grade and the domain.\nSource: open question 1 in PR #27811's acceptance notes (#27705), carried by its contract review `6512125643` ③; the seat said on #27705 it would measure through the data door before filing.\nReader: most likely `domain:server` (the door is `packages/metadata-protocol`); triage decides.\nDedupe (open AND closed): semantic search \"$searchFields credential secret password field declared searchableFields accepted search widened whole set\" → 14 hits. #27732 is the engine's empty-override stage (an empty list, not a credential name); #27484 is the blank / comma-only `$searchFields`; #27683 is the declaration's empty list; #27822 is the seat's own pin of `SEARCH_AUTO_EXCLUDED_TYPES` against the mask table (auto default only, not a declared list); #21880 is the pinyin companion. None covers a declared credential entry admitted by the door. **New.**\nreach: any object whose `searchableFields` names a `secret` or `password` field (lint flags these after PR #27811, but a deployed object can still carry one). **No credential leak**: the credential column never reaches the driver's WHERE clause, and masked reads stay masked.\n\n## Measured\n\n`origin/main` `359e935df2`, through `GET /api/v1/data/:object` (REST + the metadata-protocol door + the ObjectQL engine), on both the sqlite `SqlDriver` and the `InMemoryDriver`, same results on both. Fixture: field `name` (text) and field `api_key` (`secret` in one object, `password` in another), with three rows; the driver's received `where` was captured.\n\n| Object's `searchableFields` | Request | Status | Driver `where` | Reading |\n|---|---|---|---|---|\n| `[name, api_key]` (`secret` or `password`) | `$search=qq7&$searchFields=api_key` | **200**, 1 row (match in `name`) | `name $icontains qq7` | asked for `api_key` only, searched `name`: **narrower asked, wider answered** |\n| same | `$search=zz9&$searchFields=api_key` (term only in `api_key`) | 200, 0 rows | `name $icontains zz9` | the credential is not searched (no leak) |\n| same | `$search=zz9&$searchFields=name,api_key` | 200, 0 rows | `name $icontains zz9` | `api_key` silently dropped from the list |\n| `[name]` (credential unlisted) | `$searchFields=api_key` | 400 `INVALID_FIELD` | none | refused: \"not searchable … outside 'searchableFields'\" |\n| none (auto default) | `$searchFields=api_key` | 400 `INVALID_FIELD` | none | refused: \"'api_key' is type 'secret'\" |\n| any | `$searchFields=name` / no `$searchFields` | 200 | `name $icontains …` | controls, as expected |\n\n## Code path (`origin/main` `059611506a`)\n\n- The door: `assertSearchFieldsAreSearchable` (`packages/metadata-protocol/src/protocol-query-validation.ts:839`) refuses `internal: true` names (`:910`), then resolves the allowed set with `resolveSearchFieldResolution` over the **unfiltered** `gate.fields` (`:930`). For a declared list, that set is the declaration minus unknown and virtual names (`packages/spec/src/data/search-fields.ts:246`), so a declared `secret` / `password` entry is \"allowed\" and the request passes.\n- The engine: `expandSearchOnAst` withholds credential fields from the scan set (`packages/objectql/src/engine.ts:13430`, `collectCredentialFields`, ADR-0100), so `resolveSearchFields` validates the requested `api_key` to an empty list and, by its tolerant design, returns the whole allowed set (`search-fields.ts:263`–`:273`).\n- The engine comment at `engine.ts:13421` states the posture this breaks: \"an unhonoured narrowing must be a 400, not a silent widening\" (#4254). The door and the engine disagree about which fields are searchable.\n\n## Wanted\n\n- The door refuses a credential-typed name in `$searchFields` / `searchFields` / `search.fields` with `400 INVALID_FIELD`, judged by the same credential predicate the engine reads (after PR #27811, `isCredentialFieldType` from `@objectstack/spec/data`), and its message names the credential type and the remedy (remove it from `searchableFields`). The `internal: true` refusal at `:910` is the existing shape to follow.\n- A test at the door over a declared list naming a `secret` and a `password` field: the credential-only and the mixed request are both refused.\n- This narrows the door's accept set: `Clause-②: no (narrowing)`, a `domain:server` change (no `packages/spec/src/**` hunk expected). **Metadata-protocol:** the data-door refusal only.\n\nRaw readings: 64 cases (4 objects × 8 requests × 2 drivers), kept by the seat (measurement test + JSON); available on request."

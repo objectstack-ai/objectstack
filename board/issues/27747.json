@@ -2,8 +2,8 @@
   "number": 27747,
   "kind": "issue",
   "title": "docs: the external-systems guide gains the OData datasource section and the three-way choice (declarative OData, plugin driver, DataSync mirror) — epic #27261 P2",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "domain:devx",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T22:06:37Z",
-  "updated_at": "2026-10-30T01:39:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T03:25:29Z",
+  "closed_at": "2026-10-30T03:02:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27747",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ maintainer-directed — 田騏 at 2026-10-29T21:58Z 「现在启动全部 P2」 (epic comment 6509296853, D1 amended), at 2026-10-29T21:59Z 「OData 驱动 只做 v4」 (6509311454), at 2026-10-29T22:01Z 「同意」 (generic P2 parts open source in this repository; vendor-specific drivers such as Salesforce stay out of it).\nRuling-ref: 6486145005 (#27299, Tier B = declarative OData) · 6486136301 (#27298, D7) · 6471382887 (#27261 D1–D6)\nDedupe (open AND closed): \"OData datasource driver $metadata import connector credential external datasource\" → 5 hits, none this work (#27298 is the ruled decision card).\nReader: the epic PM (#27261) dispatches it in the epic subtree.\nBlocked-by: #27741\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 指南加一节：用 OData 声明式接入 SAP / Dynamics 365 的完整示例，以及什么时候该写插件驱动、什么时候该用 DataSync 同步成真表。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `content/docs/data-modeling/virtual-objects.mdx` (or a sibling page): an OData datasource + object binding example, pushdown and the floor explained, write gates, auth through `credentialsRef` and (once landed) a connector instance.\n- [ ] The three-way rule: OData endpoint available ⇒ declarative; no OData, computed rows or a private API ⇒ plugin driver; slow-changing reference data ⇒ real object + DataSync.\n- [ ] A note that Salesforce exposes no OData for its own data, so it takes a driver of its own.\n\n`Clause-②: no` · `Metadata-protocol: none`."

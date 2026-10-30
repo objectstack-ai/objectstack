@@ -1,0 +1,34 @@
+{
+  "number": 27878,
+  "kind": "pull_request",
+  "title": "test(dogfood): flip the three hook-abort pins to the ruled HOOK_ABORTED wire",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:31:47Z",
+  "updated_at": "2026-10-30T03:15:33Z",
+  "closed_at": "2026-10-30T03:15:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T03:15:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27878",
+  "body": "Fixes #27806\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:把两个 dogfood 测试文件里三处仍断言\"hook 中止不带 code\"的旧线形 pin,翻成裁决后的 `code: 'HOOK_ABORTED'`;句子原文与\"未写入任何行\"的断言原样保留。\n- 为什么改:#27667 按裁决(#27597,6431311681 letter A)让未声明 code 的 hook 中止在 /data 门回 `HOOK_ABORTED`,这三处 pin 没跟上,main 每次跑 Dogfood 分片 1/3 都红。\n- 风险与回滚:只改测试断言与注释,不动产品代码、不跳过、不放宽;回滚即 revert 本 PR(main 会重新变红)。\n- 先看:`packages/qa/dogfood/test/object-hook-lifecycle-scratch.dogfood.test.ts`(acceptance[6] 的 deep-equal)、`packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts`(acceptance[1] 两个写门的 code 断言)。\n- 两分钟验证:`pnpm --filter @objectstack/dogfood exec vitest run test/error-sentences-live.dogfood.test.ts test/object-hook-lifecycle-scratch.dogfood.test.ts`,预期 2 个文件、8 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nA stop-bleed for the main-red `Dogfood Regression Gate (1/3)` since `21c4bdd8`. #27667 made an undeclared hook abort answer the /data write door with `code: 'HOOK_ABORTED'` (ruling `6431311681` letter A on #27597; a declared code is kept). Three pins still asserted the old code-less body. Each now asserts the ruled wire:\n\n- `packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts`, acceptance[1], for `POST /data/OBJECT` and `POST /data/OBJECT/createMany` (two pins, one per door). It was `'code' in body` is false. It is now `body.code` is `'HOOK_ABORTED'`. The `body.error === HOOK_SENTENCE` assert and the nothing-written assert stay. The case title and the header comment now name the ruled wire.\n- `packages/qa/dogfood/test/object-hook-lifecycle-scratch.dogfood.test.ts`, acceptance[6] / negative[0]. The deep-equal is now `{ error: ABORT_MSG, code: 'HOOK_ABORTED', object: ABORT }`. The no-unhandled-error log assert and the no-row assert stay. The comment cites #27597.\n\nNo skip, no `.todo`, no retry, no product change, and no other test touched. The spelling follows the existing pin at `hook-error-format.dogfood.test.ts:124`.\n\n## Tests\n\nAll runs used the dependency closure built locally (`pnpm --filter '@objectstack/dogfood^...' build`, lock VERDICT command-exit 0).\n\n- **Red reproduced at origin/main `0a4b0fb223`, before any edit:** the two files gave `Tests 3 failed | 5 passed (8)`. The failures are exactly the three pins:\n  - `error-sentences-live.dogfood.test.ts:79` failed for both doors. Received `{\"error\":\"A budget line needs an approver before it can be recorded.\",\"code\":\"HOOK_ABORTED\",\"object\":\"errsent_budget\"}`.\n  - `object-hook-lifecycle-scratch.dogfood.test.ts:134` failed. The diff was `+ \"code\": \"HOOK_ABORTED\"`.\n- **Green after the flip:** `Test Files 2 passed (2)`, `Tests 8 passed (8)`, at `17b16000d7` and again at the final head `bd2646adfa` (after merging origin/main).\n- **The flips have teeth.** Each mutation went through `scripts/ablation-replace.mjs`, which verified the anchor 1 -> 0 and the blob change, then restored blob == HEAD with `git diff HEAD` empty:\n  - The deep-equal reverted to the code-less body gives `Tests 1 failed | 3 passed (4)`.\n  - The error-sentences assert reverted to `'code' in body` false gives `Tests 2 failed | 2 passed (4)`.\n- **Sibling hook-refusal files in shard 1** (`hook-after-abort-rollback`, `hook-after-condition-rollback`, `hook-capability-refusal`, `hook-error-format`, `hook-refusal-user-facing-marking`, `hook-runas-fls`, `lowered-body-door`, `organization-delete-refuse-nonempty`, `object-hook-lifecycle-showcase`) gave `Test Files 9 passed (9)`, `Tests 59 passed (59)`. A grep of `packages/qa/dogfood/test` finds no other pin asserting a code-less hook abort.\n- `pnpm --filter @objectstack/dogfood typecheck` exits 0. The tsconfig `include` is `test/**/*`, so it covers both files.\n\n## Acceptance notes\n\n- The card records that the merge-queue run skipped the dogfood shards while the main push ran them, a filter-parity blind spot. This PR does not fix that, as the card says.\n- `skip-changeset`: `@objectstack/dogfood` is `\"private\": true`, and the diff touches only its `test/` files, so nothing is published.\n\n## Verification\n\nThe gates derived by `node scripts/pm/dispatch-gates.mjs --commands` were run locally on `bd2646adfa`, with each exit code captured before any pipe. `check:dual-build-cjs-loads` was NOT MEASURED: it reported PREREQUISITE NOT MET because it needs a full `pnpm build` of unrelated packages. CI runs it. Full results are in the os-dev-report on #27806.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n"
+}

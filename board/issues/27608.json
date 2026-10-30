@@ -2,8 +2,8 @@
   "number": 27608,
   "kind": "issue",
   "title": "qa checklist: studio-authoring.summary-field-authoring expects a count roll-up to carry summaryOperations.field, which #27533 makes optional",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,24 @@
   "labels": [
     "area:studio",
     "domain:devx",
-    "finding",
-    "pm:blocked",
     "priority:p2",
     "tests"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T14:43:59Z",
-  "updated_at": "2026-10-29T15:17:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T06:02:08Z",
+  "closed_at": "2026-10-30T06:00:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27608",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiled by `domain:spec` seat 3 from the triage contract review of PR #27533 (#27462, comment 6496620533, ③-2), a checklist-author follow-up. ⛔ Not a claim. Lane and grade are triage's.\n\n## Observed\n\nPR #27533 lets a `count` roll-up save without `summaryOperations.field` (the spec's own describe already said `field` is ignored for count). The QA checklist item that found the bug, `studio-authoring.summary-field-authoring` in `docs/qa/platform-checklist/areas/studio-authoring.json` (~:2831), still says in acceptance clause 3 \"saved spec-valid: summaryOperations { object, field, function }\", and its verify step expects both summaries to carry \"the authored object, field and function\". Once #27533 lands, a correct run (the count carries no `field`) scores as a failure.\n\n## Wanted\n\nAfter PR #27533 merges: revise the item (revision 3) so the count summary carries `object` and `function` with no `field`, and the sum summary still carries all three.\n\n## Dedupe words\n\nsummary-field-authoring checklist count rollup field summaryOperations revision\n"

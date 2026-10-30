@@ -2,8 +2,8 @@
   "number": 27818,
   "kind": "issue",
   "title": "secrets: hold a datasource's restore doors and already-stored rows to the #27582 own-reference rule for `external.credentialsRef` (the residue of #27762)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:auth",
     "domain:server",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T00:42:56Z",
-  "updated_at": "2026-10-30T02:18:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T03:04:46Z",
+  "closed_at": "2026-10-30T03:02:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27818",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① security audit with named doors, rule level only (`security`).\n\n**Found by:** the #27762 card thread (PR #27817), from a code read outside its claimed surface. Not measured. Filed by `domain:server` seat 3. Rule level only; any mechanism goes to the maintainer off GitHub.\n\n## What to do\n\nPR #27817 applies the #27582 own-reference rule (a non-system write may only seal a new value or keep its own record's stored reference) to the metadata save door for a `datasource` item. Two things are outside it, by design of that PR:\n\n1. **Restore doors.** Restoring a metadata item from its own history (`rollbackMetaItem`, `revertCommit`) does not go through the save door's new judge. Measure whether a restore can bring back a `datasource` version whose `external.credentialsRef` its current row does not hold, and pin the answer. If it can, apply the same rule there (refused `400`, one answer whatever it names, before anything is written).\n2. **Rows stored before the fix.** Stored rows are not re-judged. Decide whether existing `datasource` rows need an audit for a reference they did not mint. `os secret orphans` now reports handles named by more than one holder (#27721, PR #27792), which may serve as the reading.\n\nAlso for the maintainer to decide: whether a read of a datasource's definition should keep serving `external.credentialsRef` to every reader that can read the definition.\n\n## Business reason\n\nThe rule closes the write doors one by one. A restore door that skips it, or a row written before it, leaves the same gap open by another route.\n\n**Reader:** the `domain:server` lane seat that claims it. The fix site is in `packages/metadata-protocol` (`protocol.ts` is a hot file on the `#25467` serial queue; a helper beside it is preferred, as #27817 did).\n\n**Dedupe:** searched \"credentialsRef restore rollback revert own-reference\": #27722 (admin doors), #27762 (save door), #27582/#27695 (`Field.secret()` family). None covers restore doors or stored rows.\n\nFiled without `domain:*`; grading is triage's."

@@ -1,0 +1,35 @@
+{
+  "number": 27898,
+  "kind": "pull_request",
+  "title": "fix(types): an undeclared hook abort answers HOOK_ABORTED on package publish and the runtime /actions doors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:59:28Z",
+  "updated_at": "2026-10-30T03:53:21Z",
+  "closed_at": "2026-10-30T03:53:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T03:53:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27898",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DNWHtgDxNLpTCKKRCiYAQZ8)_\nFixes #27672\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么：钩子用自由文本中止写入且没声明错误码时，包发布与 runtime `/actions` 两类门现在也答 `HOOK_ABORTED`，与 `/api/v1/data` 一致，不再答 `VALIDATION_ERROR`。\n- 为什么改：#27597 只让 `/data` 答 `HOOK_ABORTED`，其它从 `resolveThrownHttpError` 取码的门仍按 400 推导，客户端按码分支时得先知道是哪个门。\n- 风险与回滚：只换这一种中止的码（状态、文案不变）；声明了码的照旧，崩溃仍是 500。回滚即 revert 本 PR。\n- 先看：`packages/types/src/thrown-http-error.ts`（`undeclaredHookAbort` 一段）、`packages/types/src/data-error-classification.ts`（搬出 `sandboxBusinessMessage`）、`packages/runtime/src/domains/actions-undeclared-hook-abort-code.test.ts`。\n- 两分钟验证：`pnpm --filter @objectstack/runtime exec vitest run src/domains/actions-undeclared-hook-abort-code.test.ts`，预期 7 个全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `resolveThrownHttpError` (`@objectstack/types`) now answers `UNDECLARED_HOOK_REFUSAL_CODE` (`HOOK_ABORTED`) for a sandboxed body's refusal that declared no code, at a 4xx status. It is the one constant `/api/v1/data` has read since #27597, now declared beside the resolver; `sandboxRefusalCodeFields` reads the same constant.\n- So the doors that take their code from the resolver answer the same code as `/data`: `POST /api/v1/packages/publish` (`@objectstack/rest`, `sendThrownError`) and the runtime `/actions` doors (`errorFromThrown`). No route source changes; both already call the resolver.\n- `sandboxBusinessMessage` (with its private `isScriptFaultMessage`) moved verbatim to `packages/types/src/sandbox-business-message.ts`: `data-error-classification.ts` imports `thrown-http-error.ts`, so the resolver could not read it from there without a cycle. `data-error-classification.ts` re-exports it, so `@objectstack/types` exports the same names as before. The platform-checklist anchor for it follows the move.\n- Unchanged: a declared code is kept (registered → its own `code`; unregistered → `declaredCode` beside the derived `code`); `declaredCode` stays absent for an undeclared abort; a non-sandbox producer, a crash, and a sandboxed refusal resolved at a 5xx answer as before.\n\n## Tests\n\n- New: `packages/types/src/thrown-http-error-undeclared-hook-abort.test.ts` (resolver, §1 the card, §2 controls), `packages/rest/src/package-door-undeclared-hook-abort-code.test.ts` (publish door), `packages/runtime/src/domains/actions-undeclared-hook-abort-code.test.ts` (`/actions`: an action body's throw, a hook abort relayed through an action body, a declared 4xx status; controls).\n- Flipped on purpose from `VALIDATION_ERROR` to `HOOK_ABORTED`, each with a `[#27672] FLIPPED` note: the publish row of `rest-write-route-hook-refusal-sentence.ledger.test.ts`; the four rows of `actions-hook-refusal-sentence.ledger.test.ts`; `nested-hook-refusal-is-a-rejection.test.ts` (\"matches /data\", which it does again); the thrown-Error control in `sandbox-plain-object-throw-client-sentence.test.ts`; `throw ''` and `throw Object.create(null)` in `sandbox-unreadable-rejection-door.test.ts`.\n\n## Acceptance notes\n\n- Premise measured: the dispatch placed `resolveThrownHttpError` in `packages/rest/src/error-response.ts`; it is defined in `packages/types/src/thrown-http-error.ts` (rest imports it). The fix is there, per the ruling (\"`resolveThrownHttpError` answers `HOOK_ABORTED`\"); the seat amended the claim's file surface. `logUnexpectedRouteError` (#27508) is untouched.\n- The wrapper fallback in `classifyDataError` (an abort whose `SandboxError` instance was lost, no `innerMessage`) keeps answering the constant through `sandboxRefusalCodeFields`, because the resolver has no marker to read there.\n\n## Verification\n\n<details><summary>Ablation (resolver arm removed, types rebuilt) → restore</summary>\n\n- Ablated: types new pin 2 failed / 6 passed; rest (new publish pin + publish ledger row + /data pins) 3 failed / 603 passed, the `/data` pins staying green; runtime (5 touched files) 11 failed / 21 passed. Every control stayed green.\n- Restored + rebuilt: types 8/8, rest 606/606, runtime 32/32.\n</details>\n\n<details><summary>Suites on the final tree (after merging main)</summary>\n\n- `@objectstack/types`: Test Files 32 passed, Tests 817 passed.\n- `@objectstack/rest`: Test Files 353 passed, Tests 7025 passed | 350 skipped.\n- `@objectstack/runtime`: Test Files 484 passed, Tests 8784 passed | 19 skipped.\n- Other readers of the resolver's code, before the merge: `@objectstack/metadata-protocol` 21822 passed | 26 skipped, `@objectstack/service-automation` 2795 passed, `@objectstack/plugin-hono-server` 448 passed, `@objectstack/cloud-connection` 758 passed. No pin moved there.\n</details>\n\n<details><summary>Gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --ran`: 64 derived families accounted for — 63 run (exit 0), 1 NOT MEASURED: `pnpm check:dual-build-cjs-loads` exit 3 (needs every package's dist; CI builds the whole tree).\n- `pnpm lint`: exit 0.\n- `check-governed-merges --test` on the touched paths: NOT governed.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1iG6EQSWf7veWbAar)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1iG6EQSWf7veWbAar\n"
+}

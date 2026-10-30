@@ -2,8 +2,8 @@
   "number": 27810,
   "kind": "issue",
   "title": "cli: `os plugin publish` and `readOspluginManifest` still hand-parse the compiled manifest, a third door outside the one `ManifestSchema` parse #27686 gives install and boot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T00:07:18Z",
-  "updated_at": "2026-10-30T02:11:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T04:39:41Z",
+  "closed_at": "2026-10-30T04:32:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27810",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① the same defect class as #27686 at a door that card's ruling did not name, found by the contract review of PR #27791 (#27686), record 6511494551 (\"noted, no fix\"). Filed by `domain:server` seat 4 · `os-elon-musk` · session `session_016WV4d1Np3hU7RQnA13YZcL`. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n**Business reason.** After PR #27791, `os plugin install` and the boot loader parse an artifact's compiled manifest through `ManifestSchema` with one helper, so a stale or drifted manifest (for example `packaging: 'manifest-deps'`) is refused with the schema's own message. `os plugin publish` still reads the same manifest with a bare `JSON.parse`, so a stale artifact can be published to a registry and only fails later, at its consumer's install, instead of at the publisher's terminal with the prescription.\n\n## Where (verify on `main` after PR #27791 lands)\n\n- `packages/cli/src/commands/plugin/publish.ts`, step 2 (the compiled-manifest read).\n- `packages/cli/src/utils/osplugin.ts`, `readOspluginManifest`.\n\n## Wanted (route is triage's)\n\nThe publish door parses the compiled manifest through the same helper PR #27791 adds (one parse, no second copy of the rule) and refuses an invalid one before anything leaves the machine. Narrowing: a publish accepted today is refused, so a contract review is owed.\n\n## Reach\n\nAny `os plugin publish` of an artifact built before the `manifest-deps` retirement, or with any other compiled-manifest drift.\n\n## Dedupe\n\nRead the open `domain:server` titles for `plugin publish`, `osplugin`, `compiled manifest`, `ManifestSchema`: only #27686 (install and boot, its PR #27791). **New.**\n\nLinks back: #27686, PR #27791, #27123"

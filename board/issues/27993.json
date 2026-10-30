@@ -1,0 +1,34 @@
+{
+  "number": 27993,
+  "kind": "pull_request",
+  "title": "docs(deployment): name the /meta/diagnostics refusal of an unknown query parameter name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T06:40:45Z",
+  "updated_at": "2026-10-30T07:16:42Z",
+  "closed_at": "2026-10-30T07:16:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T07:16:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27993",
+  "body": "Fixes #27632\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`validating-metadata.mdx` 的 `GET /api/v1/meta/diagnostics` 一节补一句：该路由只认 `type`、`severity`、`package` 三个参数名，其他参数名(如 `?typ=view`)回 400 `INVALID_REQUEST`,不再悄悄回全量扫描。\n- 为什么改:#27913 已让路由拒收未知参数名，文档还没写;读文档的 AI 和 CI 作者会以为拼错参数名只是被忽略。\n- 风险与回滚：仅文档，一个文件、一段(+7 / -3);回滚即 revert 本 PR,不影响任何发布包。\n- 先看:`content/docs/deployment/validating-metadata.mdx` diagnostics 一节表格下方第一段。\n- 两分钟验证:`git diff origin/main -- content/docs/deployment/validating-metadata.mdx`,预期只见表格下方那一段改写，多出参数名拒收与先后顺序两句。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThe paragraph below the `GET /api/v1/meta/diagnostics` query table in `content/docs/deployment/validating-metadata.mdx` now states the refusal PR #27913 added. Each clause is written from the code on `origin/main` (`fece78120c`, which contains #27913's merge `9cd54faae5`):\n\n- The route accepts exactly three parameter names: `META_DIAGNOSTICS_PARAMS = ['type', 'severity', 'package']` in `packages/rest/src/meta-collection-routes.ts`. There is no wider declared set.\n- Any other name (`?typ=view`, `?packageId=…`) is refused with `400 INVALID_REQUEST`, even when its value is empty. The handler asks `unknownQueryParamRefusalMessage` (`packages/rest/src/query-allowlist.ts`) and throws `diagnosticsRefusal`. `isDiagnosticsRefusal` writes it in the nested `{ error: { code, message } }` envelope. The message names the unknown parameter and the supported set (`Supported parameters: package, severity, type.`). The route no longer answers the full sweep.\n- The name check runs before `refuseRepeatedQueryParams`, so an unknown name beside a repeated known one answers `INVALID_REQUEST`. A repeated known parameter alone still answers `VALIDATION_ERROR`.\n\nThe page's existing sentence \"Every refusal answers in the nested envelope\" now covers the new refusal as well, because the new text sits before it.\n\n## Tests\n\nDocs only, so there is no test to run. The route's own pins in `packages/rest/src/rest-meta-diagnostics-unknown-params.test.ts` (unchanged, in the `[#27633]` describe block) back each new clause: `?typ=view` refused with the supported set in the message, `?packageId=` refused, an unknown name with an empty value refused, an unknown name outranking a repeated one, and the three known names together answering 200.\n\n## Acceptance notes\n\n- No finding filed.\n- Card comment 6514340216 says the closed set is \"`type`, `severity`, `package`, and the rest of the declared set\". The code declares exactly those three, so the page names three.\n\n## Verification\n\nMeasured at head `5c6293d280` (objectstack-ai/objectstack).\n\n<details><summary>Derived gate families: 43 derived, 43 run, all exit 0</summary>\n\n- Derivation: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, exit 0, 43 commands, change set of 1 path (+7 / -3).\n- Each command's exit code was written to disk before any pipe. First pass: 38 exit 0. Four gates refused with exit 3, PREREQUISITE NOT MET, because `@objectstack/formula`, `@objectstack/lint`, the spec declarations and the client SDK were not built: `check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples` and `check:docs-transcript-drift`. One more, `check:docs`, refused with exit 1 because `packages/spec/json-schema` was missing; that is a gitignored build artifact, not a finding.\n- I built those closures under the verify lock: `turbo run build` for formula, lint and spec (VERDICT command-exit 0, 4/4 tasks), then the `@objectstack/client-react` closure (VERDICT command-exit 0, 38/38 tasks). All five gates then re-ran with exit 0.\n- `check:doc-authoring`: exit 0 (\"19837 customer-facing string(s) ... clean\"). `check:nul-bytes`: exit 0.\n- Reconciliation: `dispatch-gates.mjs --repo objectstack-ai/objectstack --ran` answered \"43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero — all 43 recorded an exit code and none of them is 3)\".\n\n</details>\n\n<details><summary>Not measured locally</summary>\n\n- NOT MEASURED: CI's `Build Docs` and `Plan Test Core shards` jobs, and the type-check lanes. The derivation names no local invocation for them, so they are left to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n"
+}

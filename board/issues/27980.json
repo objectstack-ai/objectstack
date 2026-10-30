@@ -1,0 +1,37 @@
+{
+  "number": 27980,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a connector_action evaluates a CEL envelope in connectorConfig.input",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T06:12:12Z",
+  "updated_at": "2026-10-30T06:48:12Z",
+  "closed_at": "2026-10-30T06:48:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T06:48:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27980",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DCaRwnRt6LWFUubxDRhe1CA)_\n\nFixes #27327\n\n## What changes\n\n- `connector-nodes.ts`: the `connector_action` executor resolves `connectorConfig.input` through `resolveValueSlotMap` (the one per-key value-slot resolver `subflow`/`map` `input`, `script` `inputs`, `screen` `defaults` and `notify` `templateData` use) before dispatch, and hands the handler the result. A top-level CEL envelope is evaluated in the run's scope; every other value is handed on as a copy of what was written. Resolved before the `try`, so an envelope that faults fails the step with `input.<key>` and its source, and the handler is never called.\n- `value-slot-map.ts`: the docblock lists the new slot.\n- `engine.ts` (comment only): the `evaluateValueEnvelope` docblock no longer says only ledger-declared slots reach it; it names `connectorConfig.input` as the one undeclared slot and points to #27968.\n- New `connector-input-value-slot.test.ts`; changeset (`@objectstack/service-automation` minor).\n\n## Why\n\nBefore, the input map reached the handler as authored, so an envelope reading a record field arrived as the object `{ dialect: 'cel', source: '…' }` and a declarative connector put `[object Object]` into the request. Triage ruling 6487582764: enforce through the same value-slot map, one evaluator, constant payloads unchanged.\n\n## Acceptance notes\n\n- **Registration half is NOT in this PR: #27968.** `registerFlow` and `objectstack validate` judge value slots only through the spec ledger `FLOW_NODE_EXPRESSION_PATHS`, whose paths point into `node.config`; `connectorConfig` is a sibling block the ledger cannot address without a `packages/spec` change. Measured on `registerFlow`: `{ dialect: 'cel', source: 'rec.' }`, a `template` envelope and `'{rec.id}'` all REGISTER under `connectorConfig.input`, while the same three under `subflow` `config.input` are REFUSED. Until #27968 lands there are two reject sets for this slot: a malformed envelope registers and fails the step at run time (with its source) instead of being refused at the door. Before this PR it was sent to the vendor verbatim. Seat ruling B; no `packages/spec` edit and no service-automation-only judge here.\n- A `{token}` string in `connectorConfig.input` stays a literal, as before (the refusal of the retired dialect rides the ledger too: #27968).\n- **Skills-docs:** three files under `skills/` still teach the old limit, and are left to a skills-lane edit (fable tier, outside this card's surface): `skills/objectstack-automation/references/integration-recipes.md:18`, `skills/objectstack-automation/SKILL.md:88`, `skills/objectstack-automation/evals/integrations-declared.json:7`. Nothing under `content/docs` states it.\n\n## Verification\n\n- Measured first: the new test is red on `main` (handler receives the envelope objects); the constant-payload and no-input controls pass on both.\n- Ablation (`scripts/ablation-replace.mjs`, call site back to `cfg.input ?? {}`): 3 of 4 cells red (evaluated, copied, fault); restored.\n- `service-automation`: 221 files / 2830 tests green after merging `main` (including #27941); `tsc --noEmit` clean.\n- `dispatch-gates --ran`: 62 derived families, 61 run green, 1 NOT MEASURED (`check:dual-build-cjs-loads`, exit 3, needs a whole-tree build); `pnpm lint` green.\n\nClause-②: no\nMetadata-protocol: semantic\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czwdEVkNtLnwVK4j6Z\n"
+}

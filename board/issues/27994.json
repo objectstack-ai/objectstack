@@ -1,0 +1,34 @@
+{
+  "number": 27994,
+  "kind": "issue",
+  "title": "skills/docs (currency): four texts teach that a dataset measure's own `currency` always wins over a `fixed` field; after #27579 a contradicting code is refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T06:42:48Z",
+  "updated_at": "2026-10-30T08:15:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27994",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① skills and docs text that will contradict the runtime at named locations. Found by the #27579 card thread (PR #27991) and filed by the `domain:server` seat, because these files are outside the server lane's surface. ⛔ Not a claim.\n\n## Drift (lands with PR #27991)\n\nPR #27991 (#27579, maintainer ruling 6486427200, ADR-0144 Open item 12 letter A) adds two `fixed`-currency refusals to dataset compile, both `DATASET_INVALID` / 400:\n\n- a measure `currency` that differs from its aggregated field's `fixed` code (restating the same code stays legal);\n- a derived measure, any op, whose monetary operands resolve to two different `fixed` codes.\n\nNot judged, unchanged: a `fixed` code against the tenant currency, and a measure `currency` over a `dynamic` field.\n\nThese texts teach the old rule or only the record-mode refusals from #27338:\n\n1. `skills/objectstack-data/rules/field-types.md:185`: \"Under `'fixed'`/`'dynamic'` a measure's own `currency` wins.\" This becomes false for a contradicting `fixed` code.\n2. `skills/objectstack-ui/rules/dashboards.md:298-300`: the currency-chain comment.\n3. `content/docs/data-modeling/currency.mdx:165-168` (Roll-ups and datasets): lists only the record-mode refusals.\n4. `content/docs/api/data-api.mdx:498-505`: the currency chain.\n\nGrep used: `git grep -n -iE \"measure.{0,40}currency|currency.{0,40}measure\" -- 'skills/**' 'content/docs/**'`.\n\n## Wanted\n\nState the two `fixed` refusals and their fixes next to the record-mode ones, in the words each file already uses. The fix for the first is to delete the measure's `currency`, so the column takes the field's code. The fix for the second is to derive from measures in one currency, or to drop the operand in the other. Keep the two not-judged cases explicit.\n\n⛔ Do not edit before PR #27991 merges. Until then the texts are still true.\n\n## Dedupe\n\n#27579 / PR #27991 (runtime), #27338 (record-mode arms), epic #8345 (the ADR-0144 dated note stays with the epic PM). No open card covers these lines.\n\nBlocked-by: #27991\n"
+}

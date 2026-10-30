@@ -1,0 +1,36 @@
+{
+  "number": 27889,
+  "kind": "pull_request",
+  "title": "docs(skills): objectui teaches CEL for bare-string predicates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:43:09Z",
+  "updated_at": "2026-10-30T03:53:23Z",
+  "closed_at": "2026-10-30T03:53:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-30T03:53:19Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27889",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DSWGkYzR3Hx2Jbcc8B45cVD)_\n\ndomain:skills#2 · os-elon-musk · session_016WV4d1Ffw7D64ARzogMukj\n\nFixes #27587\n\n## 维护者速读\n\n- 改了什么：`skills/objectui` 里的裸字符串谓词示例全部改成 CEL 写法（`==`、`!=`、`&&`、`!`），运算符清单注明只适用于 `${…}` 模板；指南新增一张 JS → CEL 对照短表；eval 2 改为给出 JS 写法、要求改写成 CEL。\n- 为什么改：#27584 合入后，控制台把裸字符串谓词按 CEL 读（和规范、服务端一致），技能还在教 `===` 这类 JS 写法，照抄的 AI 写出的 `hidden` / `visibleWhen` 会出错并把节点藏起来。\n- 风险与回滚：只改文档与 eval，无代码、无 schema 变化；回滚即 revert 本 PR。三个文件都在令牌天花板内，没有抬任何一行。\n- 先看：`skills/objectui/guides/schema-expressions.md` 的 \"Condition fields\" 一节（新增的 FROM → TO 清单）。\n- 两分钟验证：`node scripts/check-skills-token-ratchet.mjs` 全绿；`pnpm --dir ui exec vitest run scripts/__tests__/check-skill-eval-tokens.test.ts` 29/29 通过。\n- 需要你做的：本 PR 欠一次契约复审（fable 档，席位负责），落地为 Tier H，需治理审批人批准。\n\n## What changes\n\n- `rules/protocol.md`: the evaluated-fields table shows `\"hidden\": \"data.status == 'draft'\"` (was `===`), and the `visibleWhen` row says a bare string is CEL.\n- `guides/schema-expressions.md`:\n  - The architecture overview says a bare condition string is CEL, evaluated by `@objectstack/formula` as on the server; the recursive-descent parser is named for `${…}` templates only.\n  - \"Supported operators (full list)\" now says it is the `${…}` grammar only.\n  - \"Condition fields\": the bare example is `data.status != 'active'`, and a FROM → TO list follows: `===` / `!==` → `==` / `!=`; `list.includes(x)` → `x in list`, `s.includes('x')` → `s.contains('x')`; `list.length` → `size(list)`; a `data.*` key the scope may lack (`data.x == 1`, `!data.x`, `?.`, `??`) → `has(data.x) && data.x == 1`.\n  - The row-predicate bullet says only a `${…}` `condition` still reads on the legacy engine; a bare `===` / `.includes()` faults on CEL.\n  - The field-level section no longer says node-level conditions run on `SafeExpressionParser`; troubleshooting item 4 says \"a bare CEL string or a `${}` template\".\n  - Paid down in the same file: the bindable-text-keys paragraph under \"What gets expression-evaluated\" restated troubleshooting item 1 word for word and is cut.\n- `evals/schema-expressions.json`: eval 2 now hands over `\"visibleWhen\": \"data.role === 'admin' && data.status === 'active'\"` and expects the CEL rewrite (`must_contain` `CEL` and `status == 'active'`, a token the guide teaches).\n- `.changeset/27587-objectui-skill-teaches-cel-predicates.md`: `@objectstack/skills` patch.\n\n## Why\n\nPR #27584 (#27457) made the console read a bare-string predicate as CEL, the way `@objectstack/spec` defines it and the server reads it. Its changeset carries `not-required (no-migration-prescription)`, so the skill is where the JavaScript spellings get redirected. Until now the skill taught those spellings, and an agent following it wrote a gate that faulted and hid the node.\n\n## Verification\n\nEach FROM → TO row was measured on the console's `ExpressionEvaluator.evaluateCondition` (built `@objectstack/formula`, `throwOnError` and `onFault`), on this branch's base:\n\n| Spelling | Console reading |\n|---|---|\n| `data.status === 'draft'` | parse fault, `Unexpected character: =` |\n| `data.status == 'draft'` | `true` |\n| `data.tags.includes('vip')` / `data.name.includes('urgent')` | runtime fault, `no matching overload for 'dyn.includes(string)'` |\n| `'vip' in data.tags` / `data.name.contains('urgent')` | `true` |\n| `data.items.length > 0` | runtime fault, `No such key: length` |\n| `size(data.items) > 0` / `data.items.size() > 0` | `true` |\n| `data.missing == 'x'`, `!data.missing` | runtime fault, `No such key: missing` |\n| `has(data.missing)` / `has(data.missing) && data.missing == 'x'` | `false`, no fault |\n| `data.missing?.x` / `data.missing ?? 'd'` | parse fault |\n| `data.isAuthenticated && data.permissions.canEdit`, `!data.canPerformAction \\|\\| data.isLocked`, `!data.hasPermission` (the guide's other bare examples) | evaluate, no fault |\n\nThe fault policy quoted in the guide (\"a visibility gate hides the node, `disabled` disables\") is the one `SchemaRenderer`'s `visibilityFaultOutcome` and #27584's changeset state.\n\nRe-grep of `skills/objectui/**`, evals included, for `===`, `!==`, `&&`, `||`, `.includes(`, `.length`: the remaining hits are `${…}` templates (which keep their own grammar), TypeScript / JSX code, or eval `must_not_contain` JSX strings. No other bare predicate uses a JS-only spelling.\n\nToken ratchet (`node scripts/check-skills-token-ratchet.mjs`), priced tokens:\n\n| File | Before | After | Ceiling |\n|---|---:|---:|---:|\n| `skills/objectui/guides/schema-expressions.md` | 6565 | 6562 | 6571 |\n| `skills/objectui/rules/protocol.md` | 4366 | 4364 | 4368 |\n| `skills/objectui/evals/schema-expressions.json` | 536 | 531 | 536 |\n\nNo ceiling row moves.\n\nGates: `node scripts/pm/dispatch-gates.mjs --commands` derives 45 families on this head; all 45 ran locally after a whole-tree `turbo run build` and exited 0; `dispatch-gates --ran` reconciles 45 derived / 45 run / 0 NOT-MEASURED.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran. (`pnpm lint` not run: no source file is touched; the derived gate families are listed under Verification.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (except the `## 维护者速读` block).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1Ffw7D64ARzogMukj\n"
+}

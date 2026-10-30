@@ -1,0 +1,38 @@
+{
+  "number": 27925,
+  "kind": "issue",
+  "title": "pm-dispatch(unlock): a body Blocked-by line naming a PR is invisible to the reverse unlock scan, H19 reads a closed-unmerged PR as outlived, and state-machine.md points a PR wait at its Fixes card — settle one form after #27846",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:08:16Z",
+  "updated_at": "2026-10-30T06:50:06Z",
+  "closed_at": "2026-10-30T06:49:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27925",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ②: a process defect with measured reach, found while building #27846 (PR #27924) and reported out of its file surface. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** Triage's option 1 on #27846 lets a parked card name a **PR** in its body `Blocked-by:` line. PR #27924 makes the full-run card step hold a closed-unmerged PR. But the paths that release ordinary cards still do not see a PR target, so a card parked on a PR can strand the same way the 14 `domain:server` cards did on 2026-10-30.\n**Reader who acts:** the triage routine's owner and the pm-dispatch protocol.\n\n## Measured (PR #27924's card thread, on `origin/main` 2a3dec2d, 2026-10-30)\n\n1. `scheduled-full-run` judges a block only for its own CI card on a new red (`fileOrRefreshCard` → `judgeCardBlock` is the only caller). Ordinary `pm:blocked` cards are released only by the seat and triage scans.\n2. Triage's hourly reverse unlock scan (`dispatch-runbook.md` 〈分诊两级盘点细则〉 item 2) lists `state=CLOSED` items since a time and joins them with the index. The listing it uses returns no PR: since 02:30Z it returned 15 closed rows and 0 PRs, although #27888, #27882 and #27870 merged in the window. So a `Blocked-by: #PR` target is never matched.\n3. `state-machine.md` 〈pm:blocked〉 line 2 says a card waiting on a PR points at the card that closes then (the card the PR fixes). Option 1 says \"an issue or PR number\". The two disagree; pointing at the Fixes card keeps both scans working.\n4. `check-half-states.mjs` `resolveBlockerTarget` (H19) reads `/issues/N` state only, so it reports a block on a closed-UNMERGED PR as outlived (report-only; same reading PR #27924 fixes in the card step).\n\nNoted, not filed here (PR #27924 Acceptance notes): H4 clears a comment-borne `Blocked-by:` while `platform-readings.md` says the seat scan greps the body only; `state-machine.md`'s full-run refresh sentence does not say a PR target must have merged.\n\n## Wanted\n\nTriage's call, one of:\n- A. Keep \"issue or PR number\": the reverse scan also lists merged PRs (or resolves each PR target forward), H19 reads `merged_at` for a PR, and `state-machine.md` line 2 is reworded to match.\n- B. Point a PR wait at the card the PR fixes (`state-machine.md` as written): `triage-duties.md`'s option-1 line says so, and the scans stay as they are.\n\nEither way, H19's closed-unmerged reading is corrected. No new gate.\n\n## Blocked-by\n\nPR #27924 (the option-1 line and the card-step fix this builds on).\n\nBlocked-by: #27924\n\n## Dedupe\n\nSearched open issues for \"Blocked-by unlock PR merged\": no card covers the reverse scan or H19 on a PR target.\n"
+}

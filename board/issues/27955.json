@@ -1,0 +1,33 @@
+{
+  "number": 27955,
+  "kind": "pull_request",
+  "title": "docs(qa): summary-field-authoring revision 3 — a count roll-up carries no summaryOperations.field",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T05:01:03Z",
+  "updated_at": "2026-10-30T06:00:50Z",
+  "closed_at": "2026-10-30T06:00:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T06:00:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27955",
+  "body": "Fixes #27608\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：QA 清单条目 `studio-authoring.summary-field-authoring` 升到 revision 3：验收第 3 条改为 count 汇总只带 `object` 与 `function`、不带 `field`，sum 汇总仍带三者；补一条 history。\n- 为什么改：#27533 已让 count 汇总在不写 `summaryOperations.field` 时也能保存，Studio 在 count 下不再给出字段控件；旧条款要求两个汇总都带 field，会把正确的运行判为失败。\n- 风险与回滚：只改一份 QA 清单 JSON 的一个条目，不涉及任何发布包或运行时；回滚即还原本 PR。\n- 先看：`docs/qa/platform-checklist/areas/studio-authoring.json` 中该条目的 `acceptance[2]`（clause 与 verify 两行）和新增的 history revision 3。\n- 两分钟验证：`pnpm check:platform-checklist`，应见 `check-platform-checklist: OK — 16 areas, 352 items`，退出码 0。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nOne item, `studio-authoring.summary-field-authoring` in `docs/qa/platform-checklist/areas/studio-authoring.json`, revision 2 to 3:\n\n- `acceptance[2].clause`: was \"the configured summary is saved spec-valid: summaryOperations { object, field, function }\". Now the count's `summaryOperations` is `{ object, function }` with no `field`, and the sum's is `{ object, field, function }`.\n- `acceptance[2].verify`: was \"carries both summaries with the authored object, field and function\". Now the count carries the authored object and function and no `field` key, and the sum carries all three. A parenthetical tells the runner to author the count as count from the start. Studio shows no field control for count, but it keeps a `field` that was already stored when a summary is switched to count. The spec accepts that field and ignores it.\n- `revision` 3, plus a `history` entry in the file's existing `{ revision, date, change, ref }` shape. The entry cites #27533 (`fbb8bec3e7`) and this card.\n\nNo other clause, step, fixture, negative or source line changed.\n\n### Premise, measured at `origin/main` `ed0e71db94`\n\n- `fbb8bec3e7` (#27533) is an ancestor of the base (`merge-base --is-ancestor` exit 0).\n- `packages/spec/src/data/field.zod.ts`: `summaryOperations.field` is `z.string().optional()`. Its describe reads \"Required for sum, min, max and avg; count counts the child rows and reads no field, so a count may omit it (ignored when given)\". `refuseSummaryWithoutField` refuses a missing `field` only when `summaryFunctionReadsField(function)` is true, which is every function except `count`.\n- `ObjectFieldInspector.tsx` `SummaryConfigFields`: the field combo renders only when `summaryFunctionReadsField(fn)` is true. Its comment says \"A `field` already stored on a count is left as it is (ignored), so switching back keeps it\". So a count authored as count saves with no `field` at all. A summary switched to count keeps any `field` it already had.\n\n## Tests\n\nNo code changed. No test applies.\n\n## Acceptance notes\n\n- `fixtures.knownGaps[0]` (acceptance[0] and [1] fail today) is untouched. #27533 changed neither the hold nor the numeric-only picker.\n\n## Verification\n\n<details><summary>Derived gates at head 6521b1605d: 16 derived, 16 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 16 commands, and each exit code was captured before any pipe:\n\n```text\nnode scripts/check-adr-links.mjs :: exit 0\nnode scripts/check-adr-links.mjs --self-test :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0 (first run exit 3, a prerequisite refusal; re-run after building @objectstack/formula and @objectstack/lint)\npnpm check:ci-filter-parity :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:platform-checklist :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n`check:platform-checklist`: `check-platform-checklist: OK — 16 areas, 352 items (347 active, 1 planned)`.\n\n`--ran` reconciliation: `16 derived famil(ies) accounted for — 16 run, 0 NOT-MEASURED (a DERIVED zero — all 16 recorded an exit code and none of them is 3)`.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n"
+}

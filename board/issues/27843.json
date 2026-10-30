@@ -2,8 +2,8 @@
   "number": 27843,
   "kind": "issue",
   "title": "invite-member answers `outcome` by mail delivery and `sys_invitation` gains a server `copy_invitation_link` action that answers the accept URL (ruling E on #27797)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:identity",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T01:39:32Z",
-  "updated_at": "2026-10-30T02:19:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T04:14:43Z",
+  "closed_at": "2026-10-30T04:07:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27843",
   "body": "director#1 · os-bill · session_01Utp6Cb7FDwjs2e5wWuRbRq\n\nRuling-ref: https://github.com/objectstack-ai/objectstack/issues/27797#issuecomment-6512831254 · letter E · 2026-10-30T01:41Z\n\nFiling gate: ③ ruling-directed split. The maintainer ruled letter **E** on #27797 in the project decision thread 「决定无邮件时邀请如何分享链接」: 「同意你的建议，但是你应该等车道开发，着急的标记高优先」. The ruling comment on #27797 carries the full record; this card is its server half. ⛔ Not a claim. Lane `domain:server`; this card waits for a server seat (the maintainer's word: wait for the lane, no cross-lane exception). Grade p2 as the parent split (#27521 row 6); raise only on the maintainer's word.\n\nBlocks: #27797 (`domain:ui`), whose remaining half is a live re-measure and a pin once this card is on `main`.\n\n## Business reason\n\nAn administrator who invites someone on a deployment with no live mail transport (the stock `log` transport, or no email service at all) is told \"Invitation sent to …\". Nothing left the server, and Setup → Invitations offers no way to hand the accept link over by hand, so the invitee never arrives and nobody knows why. The workspace Invitations page already shows the link after creation, but the governed invite action (role-cap option gate, `cloudManaged` gate, membership reach) is the metadata one, and that one dead-ends.\n\n## What was measured (`origin/main` `561b7642`, source read)\n\n- The toast is `invite_user.successMessage: 'Invitation sent to {{ result.email }}'` in `packages/platform-objects/src/identity/sys-invitation.object.ts`, mirrored in `sys-user`, `sys-member` and `sys-organization`; `resend_invitation` says \"Invitation resent\" the same way. The renderer shows it as declared.\n- The row menu and the detail drawer render the object's `list_item` actions. No action answers the accept link.\n- The one reader of mail deliverability is `AuthManager.isEmailDeliveryLive()` (private, `packages/plugins/plugin-auth/src/auth-manager.ts`): `IEmailService.isConfigured() === true`, so the `log` transport is NOT live — the same rule sign-up uses. Nothing carries that fact to the client.\n- The accept link already has one server-side constructor: `getConsolePageUrl('/accept-invitation/<id>')` in `sendInvitationEmail` (`auth-manager-organization-plugin.ts`), the link the mail carries.\n- The spec already has what both halves need, so no spec change: `ActionSchema.outcomeMessages` (success copy per server `outcome`, for `type: 'api'` and `type: 'script'`), and `resultDialog` with `format: 'text'` (\"plain text with copy\"; precedent `sys_oauth_application.rotate_client_secret`). In the console a `type: 'script'` action dispatches to the platform action route `POST /api/v1/actions/<object>/<action>`, whose handlers are registered with `engine.registerAction(object, action, handler)`.\n\n## Wanted (the ruling's execution parameters, fixed)\n\n1. **Delivery outcome on the answer.** A successful `POST /api/v1/auth/organization/invite-member` (invite and resend) answers with a top-level `outcome: 'sent' | 'link_only'`, decided by `isEmailDeliveryLive()` at call time — ⛔ not `hasEmailTransport` / `isEmailServiceAvailable` (a wired `log` transport is not delivery). The mechanism (better-auth after-hook rewriting the success body, a wrap of the route in the auth plugin, or the action door) is the server seat's to choose; the contract is the one field name, beside the invitation row the answer already carries (`{{ result.email }}` keeps reading).\n2. **A server action that answers the link.** `sys_invitation.copy_invitation_link` registered by plugin-auth through `engine.registerAction('sys_invitation', 'copy_invitation_link', …)`; it answers `{ acceptUrl }` built by the existing `getConsolePageUrl('/accept-invitation/<id>')` — the same single-source link the mail carries, so no second link builder exists. Reach: the same gates as `resend_invitation` (`requiresFeature: 'organization'`, `requiresMembershipReach: 'invite_member'`, hidden while `features.cloudManaged`), and the record's `status == 'pending'`. ⛔ The URL is a bearer credential: never logged outside dev (the existing `sendInvitationEmail` rule), answered only to a caller the gates admit.\n3. **Metadata, in `sys_invitation` and the three mirrors.** `invite_user` declares `outcomeMessages: { sent: 'Invitation sent to ${result.email}', link_only: 'Invitation created for ${result.email}. Mail is not configured on this server — use Copy invite link to share it.' }` (wording is the seat's; it must never say \"sent\" on `link_only`); `resend_invitation` the same pair. A new action `copy_invitation_link` (label \"Copy invite link\", `locations: ['list_item', 'record_header']`, `type: 'script'`, `resultDialog: { title, description, format: 'text', fields: [{ path: 'acceptUrl', label }], acknowledge }`). Generated translation bundles follow their existing path.\n4. **Pins.** (a) `log` transport → invite answers `outcome: 'link_only'` and the declared copy for it contains no \"sent\"; a configured transport → `outcome: 'sent'`. (b) The action's `acceptUrl` equals the URL `sendInvitationEmail` would put in the mail for the same invitation (mount `uiBasePath` and canonical origin included). (c) The action is refused for a caller outside the invite reach and for a non-pending row. (d) Hidden under `cloudManaged`.\n\nClause-②: no (no `packages/spec` change expected; the seat measures from the diff). Metadata-protocol: none expected. Review tier: by the touched paths (`packages/plugins/plugin-auth`, `packages/platform-objects`).\n\n## Dedupe\n\nRead the open `domain:server` titles for `invitation`, `invite-member`, `accept URL`, `outcome`. #25335 (closed: Setup → Email states the live transport) and #8090 (closed, `not_planned`: workspace copied-link URL) do not cover this. **New.**\n\nLinks back: #27797 (ui half, blocked by this card), #27521 (row 6), #25335, #8090.\nSize: S/M."

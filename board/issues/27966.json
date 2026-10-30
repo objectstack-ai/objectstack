@@ -1,0 +1,32 @@
+{
+  "number": 27966,
+  "kind": "issue",
+  "title": "automation: a switched-off packaged flow is refused FLOW_DISABLED with a sentence naming sys_metadata_activation and ADR-0126 §7.2, the flow twin of the action sentence #27842 rewrites",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T05:32:51Z",
+  "updated_at": "2026-10-30T05:58:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27966",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a finding a dev report carried out of scope (#27842's os-dev-report 6515747732, out-of-scope finding 2; PR #27964). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade and no lane: triage sets both (the code is `packages/services/service-automation`).\nReader: the lane triage assigns; one small PR.\nDedupe (open AND closed): semantic search \"FLOW_DISABLED message names sys_metadata_activation ADR plain sentence end user flow switched off describeDisabledFlow\" → 14 hits. #27504 is the action button and toast (its serve half is #27842); #26474 / #26506 are the switch's actor; #20678 is the subflow-disable remedy; #23316 is the flow registration read. None rewrites the `FLOW_DISABLED` sentence. **New.**\nreach: read in code on `origin/main`, not driven through a public door. Any caller of a packaged flow an administrator switched off under Setup › Packaged automation that reads the refusal's `error` text: the run door's `FLOW_DISABLED` envelope (`packages/services/service-automation/src/engine.ts:5765`, `dag-traversal.ts:1144`).\n\n## What the code says\n\n`describeDisabledFlow` (`packages/services/service-automation/src/subflow-guards.ts:47–57`) answers a flow switched off in the activation ledger with:\n\n> Flow 'NAME' is disabled — it is switched off for this installation in the packaged-metadata activation ledger (sys_metadata_activation, ADR-0126 §7.2). Re-enable the packaged flow to arm it again, or run a clone of it under a new name.\n\nIt names a system table and an ADR section in a string a person reads. That is what AGENTS.md's runtime-string rule forbids (\"the lesson goes into the text\"). PR #27964 (#27842) rewrites the action twin, `ActionActivationProjection.describeDisabled()`, to \"This action is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or you can use another action.\", with `ACTION_DISABLED` / 409 kept and the ledger + ADR moved to a log line.\n\n## Wanted\n\n- The ledger branch of `describeDisabledFlow` says the same thing in plain words, in the action sentence's shape: what happened, who can undo it and where, and what the caller can do meanwhile. The `FLOW_DISABLED` code stays; the table and ADR reference go to a log line, as #27842 does for actions. Whether \"run a clone of it under a new name\" stays depends on whether flow clone is chartered (ADR-0126 §7.2); measure that, and do not advertise machinery that does not exist.\n- The status-dimension sentence (`Flow 'NAME' is disabled`) is out of scope.\n- Flip every pin of the old sentence in one pass (grep the sentence and `FLOW_DISABLED` repo-wide, including `docs/qa/platform-checklist/**`, which the #27842 dev reports keys on that message).\n\nLands after PR #27964, so the two sentences end up in one shape. **Clause-②:** `no`. **Metadata-protocol:** `none`.\n\nBlocked-by: #27964\n"
+}

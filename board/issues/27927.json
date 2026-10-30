@@ -1,0 +1,34 @@
+{
+  "number": 27927,
+  "kind": "pull_request",
+  "title": "fix(studio): the read-only header offers an overlay only for a type that takes one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:12:30Z",
+  "updated_at": "2026-10-30T05:23:55Z",
+  "closed_at": "2026-10-30T05:23:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T05:23:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27927",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg4i9JiKjEjwtuVzd4gKy9hB)_\n\n## 维护者速读\n\n- 改了什么：Studio 里只读软件包（代码包或已安装包）的条目页头，只有当前条目的类型在服务端类型注册表里声明了 `allowEnvironmentOverlay` 时，才显示「Read-only · Customize with an overlay」，并直接打开该条目在 Setup 的页面；其他类型（对象、流程、页面、权限集等）只显示带锁的「Read-only」，不再是链接。\n- 为什么改：HotCRM 浏览器走查（#27356 第 13 行）发现，对象、流程这些根本不能做 overlay 的条目也挂着「用 overlay 定制」，点进去是整个包的元数据目录，找不到能做的事。\n- 风险与回滚：只改页头这一个标记，不改只读判定和任何写入；回滚就是 revert 本 PR。\n- 先看：`StudioDesignSurface.tsx` 里的 `StudioReadOnlyLink`（读 `useMetadataTypes` 判定 overlay），以及四个 pillar 的调用点传入的 `item`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioReadOnlyLink.overlay-27356.test.tsx`，应见 5 passed。\n- 需要你做的：无，席位落地。\n\nPart of #27356 (row 13, hotcrm#2320 Studio S2: the read-only header offers an overlay only where one exists)\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **The overlay link appears only for a type that takes an overlay.** `StudioReadOnlyLink`, the mark at the right of an open item's header in a read-only package, used to read \"Read-only · Customize with an overlay\" on every pillar and link to the package's metadata directory (`overlayPath`). It now takes the open item (`{ type, name }`, or `null`) and reads the served type registry (`useMetadataTypes`, `/meta/types`). When that item's type declares `allowEnvironmentOverlay: true` (ADR-0005), the mark keeps its text and Layers icon and links to the item's own Setup page, `/apps/setup/metadata/TYPE/NAME`, where the overlay is edited. Otherwise, and also with no item open or the registry not yet read, it is a plain `<span>` with a Lock icon reading \"Read-only\" (the existing `engine.studio.pkg.readonly` key). It keeps the same `data-testid`, tooltip (the pillar's read-only sentence) and fold-to-glyph behaviour (objectui#12707).\n- **Call sites.** Interfaces, Data and Automations pass their open `current` item. Access passes `{ type: 'permission', name }` for an open permission set and `null` on the OWD overview.\n- **i18n.** No key added, renamed or removed, and no value changed.\n- `overlayPath` itself is unchanged and still used by the Studio home's read-only package card.\n\n## Tests\n\n- New `StudioReadOnlyLink.overlay-27356.test.tsx` (5 tests, registry mocked at `useMetadataTypes`): an overlay-able type links to its Setup page with the overlay text; a non-overlay type, a type missing from the registry, no open item, and an empty (not yet read) registry each render a plain \"Read-only\" span with no href.\n- Updated pins that asserted the old always-a-link behaviour on non-overlay items:\n  - `StudioDesignSurface.readOnlyPosture-12453.test.tsx`: the mark on a read-only object is a span reading \"Read-only\" with no href.\n  - `StudioDesignSurface.readOnlyChipFold-12707.test.tsx`: the folded mark carries the read-only text, with no href; it reads text content rather than the link's accessible name.\n  - `DataPillar.headerActions-12511.test.tsx`: the header's only control is the rail toggle; the mark reads \"Read-only\".\n\n<details><summary>Readings (head 281d7857, branch rebuilt from origin/main d770b150 after #27882 merged)</summary>\n\n- The six read-only mark files (the new one, the three updated, plus `readOnlyWording-11781` and `StudioItemHeader.statusPlace-12524` unchanged): 6 files, 31 passed.\n- Every ui test file naming `StudioDesignSurface` or `StudioReadOnlyLink` (190 files): 190 passed, 1430 passed.\n- `pnpm --filter @object-ui/app-shell run type-check`: exit 0 (lock VERDICT command-exit 0).\n- Ablation through `scripts/ablation-replace.mjs`: `const overlayable = item !== null && entries.some(...)` to `const overlayable = item !== null;` (every open item offered the overlay): 3 failed / 2 passed (the three non-overlay cases red); restored blob = HEAD blob `b97b32176c04`, `git diff HEAD` empty. vitest resolves `@object-ui/*` to source, so no rebuild leg.\n- `pnpm --dir ui run check:i18n-drift`: no en value changed in this range (packs and designer table).\n\n</details>\n\n## Acceptance notes\n\n- **Types that now show a plain \"Read-only\".** The served registry marks only `view`, `dashboard`, `report`, `translation` and `email_template` as overlay-able. Items of type `object`, `flow`, `page`, `permission`, `app` and `dataset` (among others) no longer offer an overlay; in practice most Data and Automations items, Interfaces pages and every Access permission set show the plain mark. That is the intent of row 13: offer the overlay only where the server accepts one.\n- The decision reads the server's registry, not a Studio list, so a type the server later makes overlay-able gets the link with no Studio change.\n- The link goes to the item's own Setup page. Whether that page's overlay editor covers every overlay-able type was not measured here.\n\n## Verification\n\nOn head `281d7857`: `dispatch-gates --commands` derived 34 families for this diff; all 34 were run locally, each exit 0, and `--ran` reconciled 34 run, 0 NOT-MEASURED, 0 UNRUN. `check:new-line-citations`: 0 new. CI check-runs were in progress when this was opened.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrsFMFmWFsxTaq2Bu)_\n"
+}

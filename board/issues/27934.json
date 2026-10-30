@@ -1,0 +1,37 @@
+{
+  "number": 27934,
+  "kind": "pull_request",
+  "title": "fix(rest)!: clone refuses a body that carries overrides beside other top-level keys",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T04:29:26Z",
+  "updated_at": "2026-10-30T05:37:59Z",
+  "closed_at": "2026-10-30T05:37:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T05:37:57Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27934",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DHZ7P4hcXjQQUXjv2w7ACfa)_\n\nFixes #27669\n\nClause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no skill teaches the clone door's body shapes, and `content/docs/api/data-api.mdx` describes only the two accepted shapes, which are unchanged\n\n## 维护者速读\n\n- **改了什么**:克隆接口 `POST /data/OBJ/ID/clone` 的请求体若同时带 `overrides` 和其它顶层键(例如 `{\"overrides\":{\"name\":\"Copy\"},\"status\":\"draft\"}`),现在返回 400,不再只读 `overrides`、悄悄丢掉 `status` 并返回 201。\n- **为什么改**:调用方以为两个值都生效了,实际只生效一半;与 #27489 修过的「静默丢弃」同一类。\n- **风险与回滚**:风险是混用两种请求体形状、曾「侥幸成功」的调用方现在收到 400;单独的 `{\"overrides\":{...}}`、不带 `overrides` 键的裸字段表、`{}`、无 body 行为不变。回滚即删掉克隆处理器里的这一段守卫。\n- **先看**:`packages/rest/src/data-action-routes.ts`(克隆处理器的 `strays` 守卫)、`packages/rest/src/clone-overrides-refusal.test.ts`(新的 `[#27669]` 一组)。\n- **两分钟验证**:`pnpm --filter @objectstack/rest exec vitest run src/clone-overrides-refusal.test.ts`,预期 19 条全部通过。\n- **需要你做的**:无,席位复核与合同复审后落地。\n\n## What changes\n\n- **The guard.** In the clone handler of `packages/rest/src/data-action-routes.ts`, when the body is a field map that carries `overrides` (the nested shape), any other top-level key is a stray. One or more strays answer `400` through the same nested-envelope writer #27659 uses (`sendEnvelopeError`, `error.code: 'VALIDATION_ERROR'`), before `cloneData` is called. The message names each stray key, names both accepted shapes (`{ \"overrides\": {...} }` or a bare field map), and tells a caller whose record has a real field named `overrides` to nest it: `{ \"overrides\": { \"overrides\": ... } }`. That is the triage ruling; no new shape is added.\n- **Order.** The stray check runs before the #27489 non-object check, so `{\"overrides\":\"x\",\"status\":\"draft\"}` is refused for its stray key first; both are `400 VALIDATION_ERROR` before `cloneData`.\n- **Unchanged.** The nested shape alone, a bare field map with no `overrides` key, `{}`, a bare `null` body and no body clone exactly as before. The SDK's `data.clone` sends only the nested shape.\n- **Changeset.** `@objectstack/rest` patch, BREAKING banner, the ADR-0087 disposition `not-required (no-migration-prescription)` and the remedy, modelled on #27659's.\n\n## Tests\n\n`packages/rest/src/clone-overrides-refusal.test.ts` (the #27659 harness, real `HonoHttpServer`) gains a `[#27669]` block:\n\n- Refusal: one stray key, two stray keys, and an empty `overrides` with a stray key. Each asserts `400`, `VALIDATION_ERROR`, every stray key named, both shapes named, the nested-`overrides` prescription, and that `cloneData` was never called.\n- Preservation: `{\"overrides\":{\"overrides\":\"x\",\"name\":\"Copy\"}}` answers `201` and `cloneData` receives `{ overrides: 'x', name: 'Copy' }`.\n- The existing 15 #27489 cases are untouched and green.\n\n## Verification\n\n<details><summary>Pin on main, then the fix, then an ablation</summary>\n\n- Pin first: the `[#27669]` block was committed alone on top of `main` `b13a1ed3` (commit `b276331d`). `vitest run src/clone-overrides-refusal.test.ts`: 3 failed, 16 passed, each `expected 201 to be 400`.\n- With the fix (`e2d1eb18`): 19 passed (19).\n- Ablation through `node scripts/ablation-replace.mjs`, anchor `if (strays.length > 0) {` replaced by `if (strays.length < 0) {`: anchor 1 → 0, blob `327a925b243e` → `71a31169d8a4`; result 3 failed, 16 passed. Restored: blob after restore `327a925b243e` == HEAD, `git diff HEAD` empty. The test imports `./rest-server` from `src/`, so no `dist/` leg applies.\n</details>\n\n<details><summary>Package tests and typecheck: @objectstack/rest green at the final head</summary>\n\n- At `9d859e3a` (after one merge of `origin/main`, install and closure rebuild): `pnpm --filter @objectstack/rest test` exit 0, Test Files 348 passed (348), Tests 6754 passed and 332 skipped.\n- `pnpm --filter @objectstack/rest typecheck` at `e2d1eb18`: exit 0, `check:test-typecheck` OK with 0 files / 0 errors in the debt ledger.\n</details>\n\n<details><summary>Derived gate families: 59 derived, 58 exit 0, 1 NOT MEASURED; pnpm lint exit 0</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 59 commands at `e2d1eb18`, each run with its exit code captured before any pipe. 58 exited 0 (`check-plugin-teardown-shape --self-test` after fetching its pinned commit into the shallow clone).\n- `pnpm check:dual-build-cjs-loads` exited 3, PREREQUISITE NOT MET (it needs every package's `dist/`): NOT MEASURED locally; CI's `Build Core` job runs it.\n- `--ran` reconciliation: 59 derived famil(ies) accounted for.\n- `pnpm lint`: exit 0.\n- The merge of `origin/main` changed none of this PR's three files' other regions; `data-action-routes.ts` auto-merged.\n</details>\n\n<details><summary>Dogfood battery (owed by the narrowing arm): green at the final head</summary>\n\n- At `9d859e3a`: `pnpm turbo run build --filter='@objectstack/dogfood^...'` then `pnpm --filter @objectstack/dogfood test`, exit 0. Test Files 357 passed, 3 skipped (360). Tests 2875 passed, 20 skipped (2895). Not run under `os-verify-lock` (one worktree on this box).\n- An earlier full run at `e2d1eb18` (before the merge) had 4 failures, none on the clone door: three were the stale hook-abort pins tracked as #27806 (fixed on `main` by #27878), and one was `platform-app-object-entry-views.test.ts` naming `sys_exchange_rate`. All four pass at `9d859e3a`.\n</details>\n\n## Reviewer notes\n\n- Contract review is owed (narrowing) and is arranged by the seat.\n- Serial note: PR #27795 and the #27728/#27729 work edit other regions of the same file; this diff stays inside the clone handler.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4czA6HpNWK4YvhLTw3x)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czA6HpNWK4YvhLTw3x\n"
+}
