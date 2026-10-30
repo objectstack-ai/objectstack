@@ -1436,7 +1436,8 @@ export function mailboxEvents(rows) {
  * HALF WRITTEN — two of them after they had already reached `main`.
  *
  * ⛔ The head placeholder is git's null oid, deliberately and not decoratively:
- * it is a hex code span, so `contractReviewHeadMatch` recognises the SHAPE and
+ * it is a hex code span on the `Head-sha:` line, so `contractReviewHeadMatch`
+ * recognises the SHAPE and
  * the template is provably round-trippable — and it can prefix NO real head, so
  * a record pasted with the placeholder left in is read as a review of some other
  * head and C6 refuses it. Fail-closed in the one direction that matters.
@@ -1488,7 +1489,9 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
  * function's output back through `locateReviewOfRecord`, `readServedTier` and
  * `contractReviewHeadMatch`, which is what makes "copy it" a safe instruction.
  *
- * ⛔ The head sha is a code span of its OWN. The live corpus wrote the whole
+ * ⛔ The head sha is a code span of its OWN, on the `Head-sha:` line, and that
+ * line is the ONLY place a reader takes the head from (#27979): a sha in the
+ * heading or in the prose names nothing. The live corpus wrote the whole
  * `Head-sha: …` pair inside one span, and `H51_SHA_SPAN` matches a span that is
  * hex and nothing else — so that spelling names no head, and a record written it
  * is read as a review of nothing. The key stays outside the span here.
@@ -1504,8 +1507,9 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
  * `scopeHits` fills the floor (`reviewScopeHits`); left out, it is the
  * placeholder. ⛔ Only at `CONTRACT_REVIEW_TIER`: the declaration face has no
  * hits, its whole review is the lane seat's own, and so it has no scope to state.
- * Plain text, ⛔ never a code span: a span is where `contractReviewHeadMatch`
- * looks for the head, and a path must never be a candidate for it.
+ * Plain text, ⛔ never a code span: a hex-shaped span is what
+ * `contractReviewHeadMatch` reads as a head on the `Head-sha:` line, and a path
+ * must never be mistakable for one anywhere in the record.
  *
  * ⭐ Item ④, the design judgment, is a FOURTH section of this ONE record — the full review the
  * owner's order makes mandatory on a published schema, a skill or an ADR rides the record every
@@ -1716,8 +1720,10 @@ export function contractReviewTemplateLines(values = {}) {
     `                    the review owed by the \`Clause-②: yes\` line alone ⇒ ${TIER_DEFAULT_NAME} (--face declaration).`,
     faceLine,
     '                    An at-tier/total stamp control may precede it — 75/75, then the constant.',
-    '  · Head-sha        the head you reviewed, 7 to 40 hex in a span of ITS OWN; a span holding',
-    '                    the key as well is not a sha, and the record then names no head.',
+    '  · Head-sha        the head you reviewed, 7 to 40 hex in a span of ITS OWN, on THIS line: it is',
+    '                    the only place the head is read, so a sha in the heading or in the prose names',
+    '                    nothing; a span holding the key as well is not a sha, and the record then names',
+    '                    no head.',
     '  · Local-runs      `none` — the read-only shape held (the diff, the card and the head\'s check-runs;',
     '                    nothing built, run or re-run locally); or `probe — REASON`, naming the ONE local run',
     '                    the rule was broken for. A record without the line predates it and is not re-judged;',
@@ -1951,9 +1957,14 @@ export function contractReviewBriefLines(values = {}) {
  * ## The recognition shape, and why it is H51's and not a new one
  *
  * `check-half-states.mjs` H51 already reads "a contract-review verdict on THIS
- * head" out of a thread, and measured its shape over four live dialects: a
- * level-2 heading whose line begins `## Contract review`, plus the head sha
- * written as a code span somewhere in the comment. Both facts are IMPORTED
+ * head" out of a thread: a level-2 heading whose line begins `## Contract
+ * review`, plus the head sha on the record's `Head-sha:` line — the ONE place
+ * a record names its head. ⛔ A sha in the heading, on the first body line, in
+ * an adoption sentence or anywhere in the prose names nothing: those were the
+ * four dialects the reader once scanned the whole body for, and the scan read
+ * an older head's delta record as a review of the newer head its prose named
+ * (`contractReviewHeadMatch`'s docblock has the instance and the counts the
+ * retirement rests on). Both facts are IMPORTED
  * from it (`CONTRACT_REVIEW_HEADING_MARKER`, `contractReviewHeadMatch`) rather
  * than restated, and the newest such comment is chosen by the same
  * `latestMarkedComment` H47 resolves with. The filter is
@@ -2058,8 +2069,8 @@ export function locateReviewOfRecord(pair, carriedHead = null) {
 // BELOW its floor means cases stopped running; the remedy is to find what
 // stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the locator: the newest `## Contract review` on this head, on EITHER thread (#17302)': 18,
-  '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling names no head': 7,
+  'the locator: the newest `## Contract review` on this head, on EITHER thread (#17302)': 19,
+  '#18141 · #27979: the head sha sits in a span of ITS OWN on the `Head-sha:` line — the key-in-span spelling and a span in the prose name no head': 10,
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 29,
@@ -2124,10 +2135,13 @@ export async function selfTest() {
   };
   const says = (s, frag) => typeof s === 'string' && s.includes(frag);
 
-  // The reference record, in the shape measured on every 2026-09-09 specimen:
-  // the `## Contract review` heading, the head as a code span, the authorship
-  // lines and the `Served-tier:` line — whose token is the constant's NAME,
-  // ⛔ never its value and never a spelled model id (#18060).
+  // The reference record, in the shape the template prints and 700 of the 702
+  // records of the week to 2026-10-30 carry: the `## Contract review` heading,
+  // the head on its own `Head-sha:` line as a code span of its own, the
+  // authorship lines and the `Served-tier:` line — whose token is the constant's
+  // NAME, ⛔ never its value and never a spelled model id (#18060). The heading
+  // tail keeps the verdict word the 2026-09-09 specimens wrote there; the head
+  // they wrote there is a retired dialect (#27979) and names nothing now.
   const HEAD_9AF9 = '9af92aa3'; // the head the 2026-09-01 review judged, as the board abbreviated it.
   const RECORD_SESSION = 'session_01489YWhZEoHT9oXshiyywQy';
   const RECORD = (
@@ -2142,7 +2156,7 @@ export async function selfTest() {
   ) => ({
     id,
     created_at: at,
-    body: [`## Contract review (clause ②) — **PASS** · head \`${sha}\``, '', ...lines, '', '### ① Derived judgments', '- none', '### ② semver', '- patch', '### ③ Boundary flags', '- none'].join('\n'),
+    body: ['## Contract review (clause ②) — **PASS**', '', `Head-sha: \`${sha}\``, ...lines, '', '### ① Derived judgments', '- none', '### ② semver', '- patch', '### ③ Boundary flags', '- none'].join('\n'),
   });
   const RECORD_ON_9AF9 = RECORD(HEAD_9AF9);
   // A pair as the queue guard hands one over: both threads READ (arrays), the
@@ -2159,8 +2173,18 @@ export async function selfTest() {
   const absent = locateReviewOfRecord(pairOf({ prComments: [], cardComments: [{ id: 1, body: 'Claim: x' }] }));
   t('⭐ NO record on either thread is ABSENT, and states what was read — both threads, with their counts', absent.state === 'absent' && absent.read.pr === 0 && absent.read.card === 1, JSON.stringify(absent));
   t('⛔ a record naming an OLDER head is not a record on this head — 「head 后移或无结论才重挂」 read forwards', locateReviewOfRecord(pairOf({ prComments: [RECORD('0ldhead00')] })).state === 'absent');
-  const ADOPTION = { id: 3302, created_at: '2026-09-01T08:52:00Z', body: `**Director seat adoption record** — the verdict below is adopted verbatim.\n\n---\n\n## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #13864 @ \`${HEAD_9AF9}\`\n\n- **Reviewed-by:** isolated subagent, adopted by \`${RECORD_SESSION}\`\n- **Implemented-by:** branch \`claude/issue-13657-x\`` };
-  t('a director ADOPTION record — heading on a later line — reads FOUND: H51\'s fourth dialect, line-anchored', locateReviewOfRecord(pairOf({ prComments: [ADOPTION] })).state === 'found');
+  const ADOPTION = { id: 3302, created_at: '2026-09-01T08:52:00Z', body: `**Director seat adoption record** — the verdict on \`${HEAD_9AF9}\` below is adopted verbatim.\n\n---\n\n## Contract review\n\nHead-sha: \`${HEAD_9AF9}\`\n\n- **Reviewed-by:** isolated subagent, adopted by \`${RECORD_SESSION}\`\n- **Implemented-by:** branch \`claude/issue-13657-x\`` };
+  t('a director ADOPTION record — heading on a later line, its `Head-sha:` line below — reads FOUND: the marker is line-anchored', locateReviewOfRecord(pairOf({ prComments: [ADOPTION] })).state === 'found');
+  // ⛔ #27979: the dialects the whole-body scan existed for, retired by count (0, 0, 1 and 0 records in the week to
+  // 2026-10-30 against 700 line-form ones): the head in the heading (two spellings), on the first body line, in the
+  // adoption sentence alone. Each is a complete, signed review that names its head somewhere other than the line.
+  const LEGACY = [
+    `## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #13864 @ \`${HEAD_9AF9}\`\n\n- **Reviewed-by:** \`${RECORD_SESSION}\``,
+    `## Contract review (clause ②) — **PASS** · head \`${HEAD_9AF9}\`\n\n- **Reviewed-by:** \`${RECORD_SESSION}\``,
+    `## Contract review\n\nHead: \`${HEAD_9AF9}\`\n- **Reviewed-by:** \`${RECORD_SESSION}\``,
+    `**Director seat adoption record** — the verdict on \`${HEAD_9AF9}\` below is adopted verbatim.\n\n---\n\n## Contract review\n\n- **Reviewed-by:** \`${RECORD_SESSION}\``,
+  ].map((body, i) => ({ id: 3310 + i, created_at: '2026-09-01T08:52:00Z', body }));
+  t('⛔ the RETIRED dialects — the head in the heading (two spellings), on the first body line, in the adoption sentence — read ABSENT: a record names its head on the `Head-sha:` line or not at all', LEGACY.every((row) => locateReviewOfRecord(pairOf({ prComments: [row] })).state === 'absent'));
   t('a blockquoted heading still reads — H51 tolerates the `>` a seat writes without meaning it', locateReviewOfRecord(pairOf({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '> ## ') }] })).state === 'found');
   t('⛔ a `###` sub-heading is not the marker', locateReviewOfRecord(pairOf({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '### ') }] })).state === 'absent');
   t('⛔ the heading mentioned inside a paragraph is not the marker', locateReviewOfRecord(pairOf({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, 'see the ## ') }] })).state === 'absent');
@@ -2180,12 +2204,15 @@ export async function selfTest() {
   t('a head sha too short to match is UNREADABLE, not absent — and the gap names the head', shortHead.state === 'unreadable' && shortHead.gaps.some((g) => g.includes('head sha')));
   t('`reviewed-by` is ONE regex, built by the one key-line convention — never a second spelling', REVIEWED_BY_LINE.source === keyLineRegex('Reviewed-by').source && REVIEWED_BY_LINE.test('Reviewed-by: `session_x`'));
 
-  // -- #18141: the head sha's span holds the sha ALONE -----------------------
+  // -- #18141 · #27979: the head sha's span holds the sha ALONE, on the line --
   //
-  // The accept set is exactly one spelling: the head in a code span of its OWN.
-  // The live corpus once wrote `Head-sha: …` inside ONE span, which names no
-  // head, so a complete review written that way reads as no record at all.
-  battery('#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling names no head');
+  // The accept set is exactly one spelling: the head in a code span of its OWN,
+  // on the `Head-sha:` line. The live corpus once wrote `Head-sha: …` inside ONE
+  // span, which names no head, so a complete review written that way reads as
+  // no record at all — and since #27979 a span elsewhere in the prose rescues
+  // nothing either: the whole-body scan that once did so read an older head's
+  // delta record as the review of the newer head its prose named.
+  battery('#18141 · #27979: the head sha sits in a span of ITS OWN on the `Head-sha:` line — the key-in-span spelling and a span in the prose name no head');
   // ⛔ Derived by collapsing the TEMPLATE's own line, never retyped: the key is
   // the key `--template` prints, so a template that renamed it reds here.
   const OWN_SPAN = contractReviewRecordLines({ headSha: HEAD_9AF9, implementedBy: 'claude/issue-13657-x', reviewedBy: RECORD_SESSION }).join('\n');
@@ -2196,7 +2223,16 @@ export async function selfTest() {
   t('⛔ …and the SAME record with the key folded INTO the span names no head — the defect isolated to the fold', contractReviewHeadMatch(IN_SPAN, HEAD_9AF9) === null);
   t('⛔ so it is not a review of record: the accept set is still exactly one spelling', locateReviewOfRecord(pairOf({ prComments: [KEYED_ROW] })).state === 'absent');
   const RESCUED = { id: 3402, created_at: '2026-09-01T08:51:00Z', body: `${IN_SPAN}\n\nCross-file staleness, searched at \`${HEAD_9AF9}\`.` };
-  t('⭐ the refused line BESIDE a bare sha span elsewhere in the prose reads FOUND — the spelling is the defect, not that comment', locateReviewOfRecord(pairOf({ prComments: [RESCUED] })).state === 'found');
+  t('⛔ #27979: the refused line BESIDE a bare sha span elsewhere in the prose stays ABSENT — a span in the prose rescues no record; the repair is to rewrite the line', locateReviewOfRecord(pairOf({ prComments: [RESCUED] })).state === 'absent');
+  // ⭐ The measured instance (PR #27964, record 6516042954): a DELTA record on head A whose prose names head B three
+  // times. Under the whole-body scan it read as a review of B through the owed-review list AND the queue guard.
+  const DELTA_A = '8216bec475d46fe55888dd1bd07bf1b00bf6459f';
+  const DELTA_B = 'b3d92fee1573d4f20f93de76b5344320e75bac4d';
+  const DELTA = { id: 6516042954, created_at: '2026-10-30T05:53:38Z', body: ['## Contract review', '', `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``, `Head-sha: \`${DELTA_A}\``, 'Local-runs: none', '', `This is a DELTA record. The PR has since moved to \`${DELTA_B.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${DELTA_A.slice(0, 8)}\` alone and says nothing about the later head. The runs were cancelled by the push of \`${DELTA_B.slice(0, 8)}\`; landing waits on \`${DELTA_B}\` and that head's record.`, '', 'Implemented-by: `claude/issue-27842-disabled-actions-beside-item`', `Reviewed-by: \`${RECORD_SESSION}\``, '', '**VERDICT: PASS**'].join('\n') };
+  const deltaOn = (headSha, where) => locateReviewOfRecord(pairOf({ headSha, ...(where === 'card' ? { cardComments: [DELTA] } : { prComments: [DELTA] }) }));
+  t('⛔ #27979: a delta record on head A whose prose names head B is ABSENT for B — on the PR thread and on the card alike', deltaOn(DELTA_B, 'PR').state === 'absent' && deltaOn(DELTA_B, 'card').state === 'absent');
+  t('⭐ #27979: …and FOUND for A, naming the full sha its `Head-sha:` line carries', (() => { const r = deltaOn(DELTA_A, 'PR'); return r.state === 'found' && r.sha === DELTA_A && r.id === 6516042954; })());
+  t('⛔ #27979: the FIRST `Head-sha:` line decides — a second one lower down (a quoted record) is prose to the reader', locateReviewOfRecord(pairOf({ headSha: DELTA_B, prComments: [{ ...DELTA, body: `${DELTA.body}\n\n> Head-sha: \`${DELTA_B}\`` }] })).state === 'absent' && contractReviewHeadMatch(`Head-sha: \`${DELTA_B}\`\nHead-sha: \`${DELTA_A}\``, DELTA_B) === DELTA_B);
   t('⭐ a correct record beside a refused one is FOUND, in either arrival order', locateReviewOfRecord(pairOf({ prComments: [KEYED_ROW, NEWER_RECORD] })).state === 'found' && locateReviewOfRecord(pairOf({ prComments: [RECORD(HEAD_9AF9, undefined, '2026-09-01T08:45:00Z', 3404), KEYED_ROW] })).state === 'found');
   t('…and the locator chooses the CORRECT one — a refused spelling is never chosen over it, and never chosen at all', locateReviewOfRecord(pairOf({ prComments: [KEYED_ROW, NEWER_RECORD] })).id === 3403 && locateReviewOfRecord(pairOf({ prComments: [RECORD(HEAD_9AF9, undefined, '2026-09-01T08:45:00Z', 3404), KEYED_ROW] })).id === 3404);
   t('the template and the reader name ONE spelling — and the printed template still round-trips', contractReviewHeadMatch(contractReviewTemplateLines({ headSha: HEAD_9AF9 }).join('\n'), HEAD_9AF9) === HEAD_9AF9);
