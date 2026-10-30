@@ -362,14 +362,16 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
       )}
 
       {rows !== null && rows.length > 0 && (
-        <Table>
+        <Table className="max-sm:[&_td]:px-2 max-sm:[&_th]:px-2">
           <TableHeader>
             <TableRow>
               <TableHead>{t('packagedAutomation.colAction', { defaultValue: 'Action' })}</TableHead>
-              <TableHead className="w-[200px]">
+              {/* Fixed column widths from `sm` up only, as the flows table
+                  above: on a phone the columns share the width. */}
+              <TableHead className="sm:w-[200px]">
                 {t('packagedAutomation.colObject', { defaultValue: 'Object' })}
               </TableHead>
-              <TableHead className="w-[220px]">
+              <TableHead className="sm:w-[220px]">
                 {t('packagedAutomation.colActivation', { defaultValue: 'Activation' })}
               </TableHead>
             </TableRow>
@@ -382,7 +384,7 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
                 <TableRow key={key} data-testid={`packaged-action-${row.objectName}-${row.name}`}>
                   <TableCell className="align-top">
                     <div className="font-medium">{row.label}</div>
-                    <code className="font-mono text-xs text-muted-foreground">{row.name}</code>
+                    <code className="font-mono text-xs text-muted-foreground break-all">{row.name}</code>
                     {refusal && (
                       // VERBATIM server refusal, next to the control that
                       // caused it. `role="alert"` so it is announced.
@@ -401,10 +403,10 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
                         {objectLabel({ name: row.objectName, label: row.objectLabel })}
                       </div>
                     )}
-                    <code className="font-mono text-xs text-muted-foreground">{row.objectName}</code>
+                    <code className="font-mono text-xs text-muted-foreground break-all">{row.objectName}</code>
                   </TableCell>
                   <TableCell className="align-top">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Switch
                         checked={row.enabled}
                         disabled={busyKey === key}
