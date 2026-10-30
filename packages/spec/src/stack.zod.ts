@@ -230,6 +230,11 @@ function applyApiEndpointGates(
  *   `@objectstack/metadata`; a permission set's slot there is its name). A
  *   top-level set that a body declares is a copy of that body's set and is never
  *   registered from the top level, so the top level does not judge it.
+ *   The residual rule has one exception: a residual PICKLIST is kept as
+ *   metadata only, never registered with the engine. When a residual object's
+ *   field names it, the boot lists that object and does not serve it. When no
+ *   object field the engine registers names it, the boot refuses the stack,
+ *   and `os validate` / `os build` refuse it first.
  */
 function applyPermissionSetOwnerBindingGate(
   config: { manifest?: { id?: unknown } | undefined; permissions?: unknown; packages?: unknown },

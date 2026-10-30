@@ -20,6 +20,7 @@ import {
   judgePicklistReferences,
   PICKLIST_REFERENCE_UNKNOWN,
   PICKLIST_REFERENCE_UNVERIFIED,
+  PICKLIST_RESIDUAL_UNREFERENCED,
 } from './picklist-references.js';
 
 const manifest = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -327,5 +328,97 @@ describe('judgePicklistReferences — a `picklistExtensions[].extend` in a `pack
       packages: [{ manifest: { ...manifest('com.example.core'), picklists: [industry] } }],
       picklistExtensions: [extension('industy')],
     })).toEqual({ refusals: [], notices: [] });
+  });
+});
+
+/**
+ * [ADR-0130 D4] A composed stack's top-level picklist that no package body
+ * declares and no object field the boot registers names: the boot refuses the
+ * stack (`INVALID_METADATA`), so this door refuses it too, as
+ * `picklist-residual-unreferenced`, in the boot's words. The boot's own text is
+ * held equal in `picklist-references.boot-parity.test.ts`.
+ */
+describe('judgePicklistReferences — a composed stack\'s residual picklist that nothing names', () => {
+  const STACK_ID = 'com.example.release';
+  const status = { name: 'status_list', label: 'Status', options: [{ label: 'Open', value: 'open' }] };
+  const unused = { name: 'unused_list', label: 'Unused', options: [{ label: 'A', value: 'a' }] };
+  const statusField = { status: { type: 'select', label: 'Status', picklist: 'status_list' } };
+  const caseObj = (fields: Record<string, unknown> = { subject: { type: 'text', label: 'Subject' } }) =>
+    ({ name: 'pk_case', label: 'Case', fields });
+  const noteObj = (fields: Record<string, unknown> = { title: { type: 'text', label: 'Title' } }) =>
+    ({ name: 'pk_note', label: 'Note', fields });
+  /** Two bodies, a manifest naming neither, and `top` on the top level. */
+  const composed = (top: Record<string, unknown>, coreExtra: Record<string, unknown> = {}) => ({
+    manifest: manifest(STACK_ID),
+    ...top,
+    packages: [
+      { manifest: { ...manifest('com.example.core'), objects: [caseObj()], ...coreExtra } },
+      { manifest: { ...manifest('com.example.app'), objects: [account('industry')], picklists: [industry] } },
+    ],
+  });
+  const residualRefusals = (parsed: Record<string, unknown>) =>
+    judgePicklistReferences(parsed).refusals.filter((r) => r.rule === PICKLIST_RESIDUAL_UNREFERENCED);
+
+  it('refuses one, naming the list, the stack and the boot\'s prescription, located at its top-level index', () => {
+    const { refusals, notices } = judgePicklistReferences(composed({ picklists: [industry, unused] }));
+    expect(notices).toEqual([]);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      severity: 'error',
+      rule: PICKLIST_RESIDUAL_UNREFERENCED,
+      where: 'picklist "unused_list"',
+      path: 'picklists[1]',
+    });
+    expect(refusals[0].message).toContain(`Picklist 'unused_list' is declared on the top level of stack '${STACK_ID}'`);
+    expect(refusals[0].message).toContain('no package body declares it and no object field the engine registers names it');
+    expect(refusals[0].hint).toContain('Declare it inside the `packages[]` entry of the package whose objects use it');
+    expect(refusals[0].hint).toContain('name it from a field of the object meant to use it');
+    expect(refusals[0].hint).toContain('remove it from the top level');
+  });
+
+  it('refuses each such list as its own finding', () => {
+    expect(residualRefusals(composed({ picklists: [unused, { ...unused, name: 'spare_list' }] })).map((r) => r.where))
+      .toEqual(['picklist "unused_list"', 'picklist "spare_list"']);
+  });
+
+  it('refuses one that only a top-level `objectExtensions` entry names — no door registers it in a composed stack', () => {
+    expect(residualRefusals(composed({ picklists: [status], objectExtensions: [{ extend: 'pk_case', fields: statusField }] })))
+      .toHaveLength(1);
+  });
+
+  it('refuses one that only a top-level copy of a body-declared object names, its fields diverging from the body\'s', () => {
+    expect(residualRefusals(composed({ picklists: [status], objects: [caseObj(statusField)] }))).toHaveLength(1);
+  });
+
+  it('refuses one that only a top-level `plugins[]` entry\'s object names', () => {
+    expect(residualRefusals(composed({ picklists: [status], plugins: [{ name: 'p', objects: [noteObj(statusField)] }] })))
+      .toHaveLength(1);
+  });
+
+  it('refuses one that only a body\'s `picklistExtensions` entry extends', () => {
+    expect(residualRefusals(composed({ picklists: [status] }, {
+      picklistExtensions: [{ extend: 'status_list', options: [{ label: 'Closed', value: 'closed' }] }],
+    }))).toHaveLength(1);
+  });
+
+  it('CONTROL: one a residual object\'s field names is not this refusal (the boot lists that object and does not serve it)', () => {
+    expect(judgePicklistReferences(composed({ picklists: [status], objects: [noteObj(statusField)] })))
+      .toEqual({ refusals: [], notices: [] });
+  });
+
+  it('CONTROL: one a body object\'s field names is not this refusal — that field is `picklist-reference-unknown`, as before', () => {
+    const { refusals } = judgePicklistReferences(composed({ picklists: [status] }, { objects: [caseObj(statusField)] }));
+    expect(refusals.map((r) => r.rule)).toEqual([PICKLIST_REFERENCE_UNKNOWN]);
+  });
+
+  it('CONTROL: a body-declared picklist, repeated on the top level or not, is not residual', () => {
+    for (const top of [{ picklists: [industry] }, {}]) {
+      expect(judgePicklistReferences(composed(top))).toEqual({ refusals: [], notices: [] });
+    }
+  });
+
+  it('CONTROL: a stack without `packages[]` has no residual — its unnamed picklist is not refused', () => {
+    expect(judgePicklistReferences({ manifest: manifest('com.example.pk'), picklists: [industry, unused], objects: [account('industry')] }))
+      .toEqual({ refusals: [], notices: [] });
   });
 });
