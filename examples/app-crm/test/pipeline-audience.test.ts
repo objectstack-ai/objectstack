@@ -17,7 +17,13 @@
 import { describe, expect, it } from 'vitest';
 import stack from '../objectstack.config.js';
 
-type NavEntry = { id?: string; type?: string; dashboardName?: string; visible?: unknown; children?: NavEntry[] };
+type NavEntry = {
+  id?: string;
+  type?: string;
+  dashboardName?: string;
+  visible?: { dialect?: string; source?: string };
+  children?: NavEntry[];
+};
 
 function findNav(entries: NavEntry[] | undefined, id: string): NavEntry | undefined {
   for (const entry of entries ?? []) {
@@ -33,15 +39,19 @@ const READ_PREDICATE = /^current_user\.can\('([a-z0-9_]+)', 'read'\)$/;
 const app = (stack.apps ?? []).find((a) => a.name === 'crm_app');
 const navEntry = findNav(app?.navigation as NavEntry[] | undefined, 'nav_pipeline_dashboard');
 const dashboard = (stack.dashboards ?? []).find((d) => d.name === 'pipeline_dashboard');
+// The stack parse normalises an authored CEL string to `{ dialect, source }`.
+const predicate = navEntry?.visible;
 
 describe('Pipeline nav entry audience (#27735)', () => {
   it('carries a read predicate on one object', () => {
     expect(navEntry).toMatchObject({ type: 'dashboard', dashboardName: 'pipeline_dashboard' });
-    expect(navEntry!.visible).toMatch(READ_PREDICATE);
+    expect(predicate?.dialect).toBe('cel');
+    expect(predicate?.source).toMatch(READ_PREDICATE);
   });
 
-  it("names the object of the dataset every pipeline_dashboard widget reads", () => {
-    const named = String(navEntry?.visible).match(READ_PREDICATE)?.[1];
+  it('names the object of the dataset every pipeline_dashboard widget reads', () => {
+    const named = predicate?.source?.match(READ_PREDICATE)?.[1];
+    expect(named).toBeDefined();
     const widgets = (dashboard?.widgets ?? []) as Array<{ dataset?: string }>;
     expect(widgets.length).toBeGreaterThan(0);
     const objects = new Set(
