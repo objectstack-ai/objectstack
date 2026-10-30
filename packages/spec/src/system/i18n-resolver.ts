@@ -1286,6 +1286,72 @@ function translateFormTitle(
 }
 
 /**
+ * A served form view's translated thank-you panel (`FormViewSchema
+ * .submitBehavior`, at `config.submitBehavior`), read from
+ * `objects.<object>._views.<viewKey>.submitBehavior.{title,message}` — the
+ * same `_views` node {@link translateFormTitle} reads the form's heading
+ * from, one level down, the way the authored copy sits one level down.
+ *
+ * Returns `behavior` itself (the same reference) when nothing applies, so the
+ * caller can tell "unchanged" by identity:
+ *
+ *  - only a `kind: 'thank-you'` member is translated — the other three kinds
+ *    author no copy, and a `redirect`'s `url` is never display text;
+ *  - only AUTHORED copy is translated — a non-empty string. A panel without a
+ *    `title` or `message` gains none, so the console's default wording stays
+ *    in charge of it;
+ *  - an explicit override beats the catalog (ADR-0029 D9.2a), judged per
+ *    string against the packaged view's `config.submitBehavior` by
+ *    {@link valueOverridesPackagedBase}; a packaged view with no
+ *    `submitBehavior` makes every served string an authored one;
+ *  - a missing key keeps the authored string.
+ */
+function translateFormSubmitBehavior(
+  behavior: unknown,
+  bundle: TranslationBundle,
+  objectName: string,
+  viewKey: string,
+  opts: ResolveOptions | undefined,
+  packagedConfig: Record<string, unknown> | undefined,
+): unknown {
+  const served = asRecord(behavior);
+  if (!served || served.kind !== 'thank-you') return behavior;
+  const packaged = packagedConfig === undefined ? undefined : asRecord(packagedConfig.submitBehavior) ?? {};
+  const text = (attr: 'title' | 'message'): string | undefined => {
+    const value = served[attr];
+    if (typeof value !== 'string' || value.length === 0) return undefined;
+    if (valueOverridesPackagedBase(packaged, attr, value)) return undefined;
+    return lookupSubmitBehaviorText(bundle, objectName, viewKey, attr, opts);
+  };
+  const title = text('title');
+  const message = text('message');
+  if (title === undefined && message === undefined) return behavior;
+  return {
+    ...served,
+    ...(title !== undefined ? { title } : {}),
+    ...(message !== undefined ? { message } : {}),
+  };
+}
+
+/**
+ * One string off a view's `_views.<viewKey>.submitBehavior` node, across the
+ * locale chain — `undefined` when no locale carries it.
+ */
+function lookupSubmitBehaviorText(
+  bundle: TranslationBundle,
+  objectName: string,
+  viewKey: string,
+  attr: 'title' | 'message',
+  opts: ResolveOptions | undefined,
+): string | undefined {
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._views?.[viewKey]?.submitBehavior?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Apply the active locale to a view metadata document by overwriting `label`
  * and `description` with translated values when available, and overlaying the
  * selection-bar copy of the view's `config.bulkActionDefs[]`. The original
@@ -1373,6 +1439,18 @@ function translateFormTitle(
  * the bundle — served it in the authoring language beside translated section
  * headings and field labels. {@link translateFormTitle} applies it, on the
  * same locale chain and the same override rule as every other string here.
+ *
+ * ## …and its thank-you panel
+ *
+ * The confirmation a form shows after a submit is its `submitBehavior`'s
+ * `title` and `message` when the `kind` is `'thank-you'`, served at
+ * `config.submitBehavior` and addressed at
+ * `objects.<object>._views.<viewKey>.submitBehavior` — nested the way the
+ * authored copy is nested, so the panel's heading never shares a key with the
+ * form's own `title`. Before this the panel had no key, and a public form
+ * read in another language confirmed the submit in the authoring language
+ * under a translated heading. {@link translateFormSubmitBehavior} applies it,
+ * by the same rules.
  */
 export function translateView<T extends ViewLike>(
   view: T,
@@ -1416,12 +1494,26 @@ export function translateView<T extends ViewLike>(
       opts,
       packagedConfig,
     );
-    if (defs !== config.bulkActionDefs || sections !== config.sections || title !== config.title) {
+    const submitBehavior = translateFormSubmitBehavior(
+      config.submitBehavior,
+      bundle,
+      objectName,
+      viewTranslationKey(view, objectName),
+      opts,
+      packagedConfig,
+    );
+    if (
+      defs !== config.bulkActionDefs
+      || sections !== config.sections
+      || title !== config.title
+      || submitBehavior !== config.submitBehavior
+    ) {
       config = {
         ...config,
         ...(defs !== config.bulkActionDefs ? { bulkActionDefs: defs } : {}),
         ...(sections !== config.sections ? { sections } : {}),
         ...(title !== config.title ? { title } : {}),
+        ...(submitBehavior !== config.submitBehavior ? { submitBehavior } : {}),
       };
     }
   }
