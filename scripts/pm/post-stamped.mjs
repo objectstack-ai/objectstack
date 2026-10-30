@@ -947,6 +947,7 @@ import {
   ISSUE_BODY_LIMIT,
   PROXY_FLAG,
   claimSeatNumber,
+  contractReviewHeadSha,
   h56EstimatedStamp,
   h56StampedReadings,
   hasDecisionFacetMarker,
@@ -2059,23 +2060,45 @@ export function keyedLineRefusalText(rows) {
 
 /** What the record's owner accepts, printed BY the refusal so the fix is one line away. */
 export const RECORD_KEY_SPELLINGS = Object.freeze({
+  'Head-sha': '`Head-sha: ` then the reviewed head as 7 to 40 hex in a code span of its OWN, at the START of a line BELOW the `## Contract review` heading — not blockquoted, not bulleted, not inside a fence, not before the heading; the first such line is the head the record names, and a record written before the line existed may omit it',
   'Local-runs': '`Local-runs: none` at the START of a line, or `Local-runs: probe — REASON` naming the ONE local run the read-only rule was broken for and why; a record written before the line existed may omit it',
 });
 
+/** PRESENCE only, case-blind: a `Head-sha` key anywhere in the body, however decorated or placed. Consulted solely to
+ *  tell "the author wrote the key and the reader cannot read it" (refused) from "no key at all" (not re-judged). */
+const HEAD_SHA_KEY_ANYWHERE = /head-sha[ \t`*]*:/i;
+
+/** The first line carrying a `Head-sha` key, however spelled — a LOCATOR for the writer's eye, ⛔ never the judgement. */
+function headShaKeyLine(text) {
+  const hit = text.split(/\r?\n/).find((line) => HEAD_SHA_KEY_ANYWHERE.test(line));
+  return hit === undefined ? '(no single line carries the key)' : offendingSpan(hit.trim(), 160);
+}
+
 /**
- * The keyed-line problems in a `## Contract review` record about to be written, judged by the reader that OWNS the
- * line — ⛔ never by a rule spelled here. One key today, `Local-runs:`, and ONE direction: a line that is PRESENT and
- * cannot be graded is refused; an absent line is not re-judged, because the landed records carry none and this act
- * must not re-open a verdict over a line nobody had been asked to write. Scoped by the record's own heading marker,
- * on `--comment` alone — a record IS a comment.
- * @returns {{ key: string, why: string, line: string }[]} — empty when the body is not a record, or when the line reads.
+ * The keyed-line problems in a `## Contract review` record about to be written, judged by the readers that OWN each
+ * line — ⛔ never by a rule spelled here. Two keys, ONE direction each: a line that is PRESENT and cannot be read is
+ * refused; an absent line is not re-judged, because the landed records carry none and this act must not re-open a
+ * verdict over a line nobody had been asked to write. Scoped by the record's own heading marker, on `--comment`
+ * alone — a record IS a comment.
+ *   Head-sha     `contractReviewHeadSha` (`check-half-states.mjs`) is the ONE reader every guard reaches the record's head
+ *                through: the first plain `Head-sha:` line below the heading, outside any blockquote, bullet or fence. A
+ *                body that carries the key somewhere and reads `null` there would be filed by every reader as a review of
+ *                NO head — absent on the owed list, refused at the queue — so it is refused here, before the write. The
+ *                template's null-oid placeholder reads as a head (it is 40 hex) and is not this row's: C6 refuses it.
+ *   Local-runs   `readLocalRuns` / `localRunsStand` (`record-recognisers.mjs`): `none` and `probe — REASON` are the
+ *                closed set.
+ * @returns {{ key: string, why: string, line: string }[]} — empty when the body is not a record, or when every line reads.
  */
 export function recordKeyedLineRefusals(body) {
   const text = String(body ?? '');
   if (!CONTRACT_REVIEW_HEADING_MARKER.test(text)) return [];
+  const rows = [];
+  if (HEAD_SHA_KEY_ANYWHERE.test(text) && contractReviewHeadSha(text) === null)
+    rows.push({ key: 'Head-sha', line: headShaKeyLine(text), why: '`contractReviewHeadSha` reads NO head here — a `Head-sha` key is present, but no line below the `## Contract review` heading carries it plainly with a hex span of its own (a blockquoted, bulleted, fenced or pre-heading line, the key folded into the span, a bare hex value, a lowercase key and a sub-floor span all read as nothing). Every reader would file this record as a review of NO head.' });
   const runs = readLocalRuns(text);
-  if (localRunsStand(runs)) return [];
-  return [{ key: 'Local-runs', line: runs.line, why: '`readLocalRuns` reads the line and cannot grade its value — `none` and `probe — REASON` are the closed set, and a probe with no reason names no deviation.' }];
+  if (!localRunsStand(runs))
+    rows.push({ key: 'Local-runs', line: runs.line, why: '`readLocalRuns` reads the line and cannot grade its value — `none` and `probe — REASON` are the closed set, and a probe with no reason names no deviation.' });
+  return rows;
 }
 
 /** The refusal a caller reads, from `recordKeyedLineRefusals`' rows. */
@@ -2083,9 +2106,9 @@ export function recordLineRefusalText(rows) {
   return (
     `post-stamped: REFUSED — ${rows.length} keyed line(s) in this \`## Contract review\` record cannot be read by the checker that owns them. Nothing was written.\n` +
     rows.map((r, i) => `  ${i + 1}. [${r.key}] ${r.why}\n      line:  ${r.line}\n      write: ${RECORD_KEY_SPELLINGS[r.key]}`).join('\n') +
-    '\n\n  `readLocalRuns` (`record-recognisers.mjs`) is imported HERE, so this IS the reading the record would get later —\n' +
-    '  on your own record, before the write. A record without the line is not re-judged; only a line that is present and\n' +
-    '  unreadable is refused. ⛔ No flag turns it off.'
+    '\n\n  `contractReviewHeadSha` (`check-half-states.mjs`) and `readLocalRuns` (`record-recognisers.mjs`) are imported HERE,\n' +
+    '  so this IS the reading the record would get later — on your own record, before the write. A record without the\n' +
+    '  line is not re-judged; only a line that is present and unreadable is refused. ⛔ No flag turns it off.'
   );
 }
 
@@ -4064,7 +4087,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
-  'the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged': 9,
+  'the record line: a `## Contract review` record\'s `Head-sha:` and `Local-runs:` lines, judged when present — an absent line is not re-judged': 17,
   'the vacant body: a VACANT seat post\'s ledger holds pointers, never obligations': 27,
   'the decision facets: a decision analysis carries its marker, and a delta, a record or a quotation is not one': 22,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 13,
@@ -5274,7 +5297,7 @@ export function selfTest() {
   }
 
   // ── the record line ──────────────────────────────────────────────────────
-  battery('the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged');
+  battery('the record line: a `## Contract review` record\'s `Head-sha:` and `Local-runs:` lines, judged when present — an absent line is not re-judged');
   {
     const RECORD = (...lines) => ['## Contract review', '', `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``, 'Head-sha: `0123456789abcdef0123456789abcdef01234567`', ...lines, '', '**VERDICT: PASS**'].join('\n');
     const rkeys = (body) => recordKeyedLineRefusals(body).map((r) => r.key).join();
@@ -5286,7 +5309,19 @@ export function selfTest() {
     t('the refusal prints the spelling that reads, names the owner, and says absence is not re-judged', (() => { const text = recordLineRefusalText(recordKeyedLineRefusals(RECORD('Local-runs: probe'))); return text.includes(RECORD_KEY_SPELLINGS['Local-runs']) && text.includes('readLocalRuns') && text.includes('not re-judged') && text.includes('Nothing was written'); })());
     t('⛔ NOT a record: a claim or a report carrying a `Local-runs:` line is untouched — the reader runs on the record\'s heading only', rkeys('Claim: x\nLocal-runs: probe') === '' && rkeys('os-dev-report\n\nLocal-runs: probe') === '');
     t('⛔ a `###` sub-heading is not the record marker, exactly as the locator reads it', rkeys('### Contract review\nLocal-runs: probe') === '');
-    t('structural: the CLI runs this on `--comment` only, and the reader is imported from the record\'s own file, ⛔ never restated', /const record = options\.mode === 'comment' \? recordKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && /import \{[^}]*\breadLocalRuns\b[^}]*\} from '\.\/record-recognisers\.mjs';/u.test(stampSource) && new RegExp('function\\s+(readLocalRuns|localRunsStand)\\b').test(stampSource) === false);
+    // The `Head-sha:` line — read by the one reader every guard reaches the head through, refused here when it is present and
+    // reads null. The shapes are the ones the line-form reader's review probed as a sha the author cited rather than reviewed.
+    const SHA_WITH = (headLines, ...lines) => ['## Contract review', '', `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``, ...headLines, ...lines, '', '**VERDICT: PASS**'].join('\n');
+    const SHA_HEAD = '0123456789abcdef0123456789abcdef01234567';
+    t('⛔ a `Head-sha:` line that is ONLY blockquoted is refused — the reader takes no quoted line, so this record would name no head', rkeys(SHA_WITH([`> Head-sha: \`${SHA_HEAD}\``])) === 'Head-sha');
+    t('⛔ …and ONLY bulleted, ONLY fenced, or ONLY before the heading — each reads null and is refused', rkeys(SHA_WITH([`- Head-sha: \`${SHA_HEAD}\``])) === 'Head-sha' && rkeys(SHA_WITH(['```', `Head-sha: \`${SHA_HEAD}\``, '```'])) === 'Head-sha' && rkeys(`Head-sha: \`${SHA_HEAD}\`\n\n${SHA_WITH([])}`) === 'Head-sha');
+    t('⛔ the key folded INTO the span, a bare hex value and a lowercase key are refused — each names no head to every reader', rkeys(SHA_WITH([`\`Head-sha: ${SHA_HEAD}\``])) === 'Head-sha' && rkeys(SHA_WITH([`Head-sha: ${SHA_HEAD}`])) === 'Head-sha' && rkeys(SHA_WITH([`head-sha: \`${SHA_HEAD}\``])) === 'Head-sha');
+    t('⭐ a quoted line ABOVE the record\'s own passes — the reader skips the quotation and reads the line below it', rkeys(SHA_WITH([`> Head-sha: \`${'f'.repeat(40)}\``, `Head-sha: \`${SHA_HEAD}\``])) === '');
+    t('⛔ ABSENT is NOT re-judged for this key either: a record with no `Head-sha` key at all passes untouched — the retired-dialect records carry none', rkeys(SHA_WITH([])) === '');
+    t('both lines unreadable ⇒ both rows, `Head-sha` first', rkeys(SHA_WITH([`> Head-sha: \`${SHA_HEAD}\``], 'Local-runs: probe')) === 'Head-sha,Local-runs');
+    t('the `Head-sha` refusal prints the spelling that reads, names the owner, and quotes the offending line', (() => { const rows = recordKeyedLineRefusals(SHA_WITH([`> Head-sha: \`${SHA_HEAD}\``])); const text = recordLineRefusalText(rows); return text.includes(RECORD_KEY_SPELLINGS['Head-sha']) && text.includes('contractReviewHeadSha') && rows[0].line.includes('> Head-sha'); })());
+    t('⛔ NOT a record: a claim or a report carrying a quoted `Head-sha:` line is untouched — the reader runs on the record\'s heading only', rkeys(`Claim: x\n> Head-sha: \`${SHA_HEAD}\``) === '' && rkeys(`os-dev-report\n\n> Head-sha: \`${SHA_HEAD}\``) === '');
+    t('structural: the CLI runs this on `--comment` only, and BOTH readers are imported from the files that own them, ⛔ never restated', /const record = options\.mode === 'comment' \? recordKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && /import \{[^}]*\breadLocalRuns\b[^}]*\} from '\.\/record-recognisers\.mjs';/u.test(stampSource) && /import \{[^}]*\bcontractReviewHeadSha\b[^}]*\} from '\.\/check-half-states\.mjs';/u.test(stampSource) && new RegExp('function\\s+(readLocalRuns|localRunsStand|contractReviewHeadSha)\\b').test(stampSource) === false);
   }
 
   // ── the vacant seat body (#23396, ruling 6162084315 letter A) ──────────────

@@ -12641,9 +12641,18 @@ export const H51_SHA_SPAN = /`([0-9a-fA-F]{7,40})`/g;
  * The `Head-sha:` key line — the ONE place a contract-review record names the
  * head it reviewed.
  *
- * The key half is `record-recognisers.mjs`'s `keyLineRegex` convention, spelled
- * here because that file imports this one: optional blockquote, bullet, bold
- * and backticks around the key, then the colon. The VALUE is a hex code span of
+ * The key half is `record-recognisers.mjs`'s `keyLineRegex` convention WITHOUT
+ * its two positional tolerances, spelled here because that file imports this
+ * one: bold and backticks around the key are tolerated, then the colon. ⛔ A
+ * leading blockquote or list bullet is NOT — `keyLineRegex` admits both for
+ * `Served-tier:`, `Reviewed-by:` and `Local-runs:`, whose values describe the
+ * record itself, but this line decides WHICH HEAD a PASS clears, and a quoted
+ * or bulleted `Head-sha:` line is one the author CITED rather than wrote (a
+ * review quoting the seat's hand-off, a record quoting an earlier record), so
+ * a reader that took it read a quoted sha as reviewed. `contractReviewHeadSha`
+ * adds the two positional rules a single-line regex cannot carry: the line
+ * sits BELOW the record's own `## Contract review` heading and outside any
+ * fenced code block. The VALUE is a hex code span of
  * its OWN — the shape `--template` prints — and it is the FIRST thing after the
  * colon (spaces and bold may precede it, ⛔ nothing else); what follows the span
  * on that line is prose and decides nothing. A key folded into the span with
@@ -12652,24 +12661,66 @@ export const H51_SHA_SPAN = /`([0-9a-fA-F]{7,40})`/g;
  * decoration and the value then opens with hex rather than a backtick, so the
  * record names no head — the accept set stays exactly one spelling. A bare hex
  * value with no span, a lowercase key and a span below the floor name no head
- * either; the repair for every one of them is on the WRITE side.
+ * either; the repair for every one of them is on the WRITE side, where
+ * `post-stamped.mjs` refuses a record carrying a `Head-sha` key this reader
+ * cannot read BEFORE the write.
  */
 export const CONTRACT_REVIEW_HEAD_SHA_LINE = new RegExp(
-  `^[ \\t]*(?:>[ \\t]*)?(?:[-*][ \\t]+)?(?:\\*\\*)?\`?Head-sha\`?(?:\\*\\*)?[ \\t]*:(?:[ \\t]|\\*\\*)*${H51_SHA_SPAN.source}`,
+  `^[ \\t]*(?:\\*\\*)?\`?Head-sha\`?(?:\\*\\*)?[ \\t]*:(?:[ \\t]|\\*\\*)*${H51_SHA_SPAN.source}`,
 );
 
 /**
- * The head a contract-review record names — the span on its first `Head-sha:`
- * line, as written (case kept), or `null` when no line reads.
+ * A fenced-code boundary, as CommonMark opens and closes one: three or more
+ * backticks or tildes at the line start (up to three spaces of indent).
+ * One toggle for both fence characters — the reader needs "inside a fence or
+ * not", never which fence; an unclosed fence runs to the end of the body, as
+ * it renders.
+ */
+const FENCE_LINE = /^[ ]{0,3}(?:`{3,}|~{3,})/;
+
+/**
+ * The head a contract-review record names — the span on the first `Head-sha:`
+ * line BELOW its `## Contract review` heading, as written (case kept), or
+ * `null` when no such line reads.
  *
- * First line wins, as `readServedTier` reads its key: a record is one comment
- * and names one head, and a later `Head-sha:` line (a quoted record, say) is
- * prose to this reader. Not judged against any head here — that is
- * `contractReviewHeadMatch`'s half — so a caller can also ask which head a
- * record is ABOUT, which the sentence a patrol prints needs.
+ * Three positional rules, each measured in the review of the line-form reader
+ * (2026-10-30) as a way a sha the author never reviewed became the record's
+ * head: a `Head-sha:` line placed BEFORE the heading, a blockquoted or
+ * bulleted one, and one inside a fenced code block — each naming another head
+ * ABOVE the record's own line — read as the head, so the record was found at
+ * the cited head and absent at the real one. None is prose to a first-line
+ * reader, and all four shapes are what a quotation looks like. So: lines
+ * before the first heading-marker line are skipped (the heading is read with
+ * `CONTRACT_REVIEW_HEADING_MARKER`, blockquoted heading included, exactly as
+ * the locator finds the record); a fenced line is skipped, fence boundaries
+ * included; and `CONTRACT_REVIEW_HEAD_SHA_LINE` itself refuses the blockquote
+ * and the bullet. Among the lines that remain, the FIRST wins, as
+ * `readServedTier` reads its key: a record is one comment and names one head,
+ * and a later `Head-sha:` line (a quoted record, say) is prose to this reader.
+ * Measured on the 709 records with a line-initial heading posted to this
+ * repository in the week to 2026-10-30: 707 carry the line plain and below
+ * the heading, 2 carry no `Head-sha` key at all (the two retired-dialect
+ * records), and 0 read differently under these rules than under the
+ * first-line-anywhere reader they replace.
+ *
+ * Not judged against any head here — that is `contractReviewHeadMatch`'s half
+ * — so a caller can also ask which head a record is ABOUT, which the sentence
+ * a patrol prints needs, and which `post-stamped.mjs` asks before it writes a
+ * record: a body carrying a `Head-sha` key that reads `null` here is refused.
  */
 export function contractReviewHeadSha(body) {
+  let fenced = false;
+  let belowHeading = false;
   for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (FENCE_LINE.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    if (!belowHeading) {
+      belowHeading = CONTRACT_REVIEW_HEADING_MARKER.test(line);
+      continue;
+    }
     const m = CONTRACT_REVIEW_HEAD_SHA_LINE.exec(line);
     if (m) return m[1];
   }
@@ -33452,8 +33503,22 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const DELTA51 = RECORD51(OLDHEAD51, `\nThe PR has since moved to \`${HEAD51.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${OLDHEAD51.slice(0, 8)}\` alone. Runs cancelled by the push of \`${HEAD51.slice(0, 8)}\`; landing waits on \`${HEAD51}\`.\n`);
   t('⛔ record reader: a delta record on head A whose PROSE names head B is NO review of B', latestContractReviewOnHead([cm51(1, DELTA51, T51)], HEAD51), null);
   t('⭐ record reader: …and IS the review of A — the `Head-sha:` line alone decides', latestContractReviewOnHead([cm51(1, DELTA51, T51)], OLDHEAD51)?.sha, OLDHEAD51);
-  t('record reader: `contractReviewHeadSha` reads the line\'s span — the first line wins, decoration and a trailing span tolerated', [contractReviewHeadSha(DELTA51), contractReviewHeadSha(`- **Head-sha:** \`${HEAD51}\` (moved to \`${OLDHEAD51}\`)\nHead-sha: \`${OLDHEAD51}\``), contractReviewHeadSha(`> Head-sha: \`${HEAD51}\``)].join(), [OLDHEAD51, HEAD51, HEAD51].join());
-  t('⛔ record reader: the key folded INTO the span, a bare hex value, a lowercase key and a sub-floor span name no head', [contractReviewHeadSha(`\`Head-sha: ${HEAD51}\``), contractReviewHeadSha(`Head-sha: ${HEAD51}`), contractReviewHeadSha(`head-sha: \`${HEAD51}\``), contractReviewHeadSha('Head-sha: `ba3d95`')].join('|'), '|||');
+  const UNDER51 = (...lines) => ['## Contract review', ...lines].join('\n');
+  t('record reader: `contractReviewHeadSha` reads the line\'s span — the first line BELOW the heading wins; bold or backticks on the key, a trailing span and a blockquoted heading are tolerated', [contractReviewHeadSha(DELTA51), contractReviewHeadSha(UNDER51(`**Head-sha:** \`${HEAD51}\` (moved to \`${OLDHEAD51}\`)`, `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51(`\`Head-sha\`: \`${HEAD51}\``)), contractReviewHeadSha(`> ## Contract review\nHead-sha: \`${HEAD51}\``)].join(), [OLDHEAD51, HEAD51, HEAD51, HEAD51].join());
+  t('⛔ record reader: the key folded INTO the span, a bare hex value, a lowercase key and a sub-floor span name no head', [contractReviewHeadSha(UNDER51(`\`Head-sha: ${HEAD51}\``)), contractReviewHeadSha(UNDER51(`Head-sha: ${HEAD51}`)), contractReviewHeadSha(UNDER51(`head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('Head-sha: `ba3d95`'))].join('|'), '|||');
+  // ⛔ The shapes the review of the line-form reader probed (2026-10-30): a `Head-sha:` line naming ANOTHER head above the
+  // record's own — placed before the heading, blockquoted, bulleted or fenced. Each is a citation, not the record's line,
+  // so the record reads ABSENT at the cited head and FOUND at its own; the first-line-anywhere reader read all four as cited.
+  const CITED51 = {
+    preHeading: `Head-sha: \`${HEAD51}\`\n\n${RECORD51(OLDHEAD51)}`,
+    quoted: UNDER51('', `> Head-sha: \`${HEAD51}\``, `Head-sha: \`${OLDHEAD51}\``, '**VERDICT: PASS**'),
+    bulleted: UNDER51('', `- Head-sha: \`${HEAD51}\``, `Head-sha: \`${OLDHEAD51}\``, '**VERDICT: PASS**'),
+    fenced: UNDER51('', '```', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``, '**VERDICT: PASS**'),
+  };
+  t('⛔ record reader: a `Head-sha:` line before the heading, blockquoted, bulleted or fenced — naming another head ABOVE the record\'s own — is NO review of that head', Object.values(CITED51).map((body) => latestContractReviewOnHead([cm51(1, body, T51)], HEAD51)).join('|'), '|||');
+  t('⭐ record reader: …and each IS the review of the head its own line names — the cited line is prose to the reader', Object.values(CITED51).map((body) => latestContractReviewOnHead([cm51(1, body, T51)], OLDHEAD51)?.sha).join(), [OLDHEAD51, OLDHEAD51, OLDHEAD51, OLDHEAD51].join());
+  t('⛔ record reader: a quoted, bulleted or fenced line ALONE names no head, nor does a line with NO heading above it, nor one inside an unclosed fence', [contractReviewHeadSha(UNDER51(`> Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51(`- **Head-sha:** \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``, '```')), contractReviewHeadSha(`Head-sha: \`${HEAD51}\``), contractReviewHeadSha(UNDER51('```', `Head-sha: \`${HEAD51}\``))].join('|'), '||||');
+  t('record reader: a tilde fence is a fence too, and CRLF line endings read', [contractReviewHeadSha(UNDER51('~~~', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(`## Contract review\r\nHead-sha: \`${HEAD51}\`\r\n`)].join(), [OLDHEAD51, HEAD51].join());
   t('⛔ record reader: the RETIRED dialects — head in the heading (two spellings), on the first body line, in an adoption sentence — name no head', [DIALECT_A, DIALECT_B, DIALECT_C, DIALECT_D].map((d) => latestContractReviewOnHead([cm51(1, d(HEAD51), T51)], HEAD51)).join('|'), '|||');
 
   // -- H54 — a `[Decision]`-titled card sitting in the DISPATCH pool (#16688) -
