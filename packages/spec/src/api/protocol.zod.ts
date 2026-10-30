@@ -618,7 +618,7 @@ export type MetadataAuthoringClient = z.input<typeof MetadataAuthoringClientSche
  * dispatch doors consult — the data engine's projection of the ledger, read
  * per call through the kernel's service table (`IObjectQLEngine
  * .getDisabledActions`) — so the read and the refusal cannot disagree. Four
- * measured choices, each the one `registration` made:
+ * measured choices, the first three the ones `registration` made:
  *
  * - **Beside `item`, never inside it.** `item.actions` stays what was
  *   declared, a switched-off action included: the Setup page lists from it to
