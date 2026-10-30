@@ -230,8 +230,9 @@ export function injectedSystemColumnDefs(def: unknown): Record<string, Readonly<
  * consumers on two sides of the package boundary need the SAME identity
  * verdict: the #4326 round-trip strip in `@objectstack/metadata-core`, and
  * {@link resolveInjectedColumnProvenance} below. It is also the convergence
- * target for the hand-rolled `equalsShippedDef` copies the #7865 ruling lists
- * (plugin-security / plugin-sharing), when next touched.
+ * target for the hand-rolled `equalsShippedDef` copies the #7865 ruling lists.
+ * plugin-sharing's is gone (it reads {@link isOwnerAnchorUnprovable} now), so
+ * plugin-security's is the one left, to converge when next touched.
  */
 export function isInjectedColumnDefinition(
   value: unknown,
@@ -439,7 +440,8 @@ export function externalColumnMapTargets(def: unknown, field: string): boolean {
  *
  * Fail direction: `true` narrows (no owner predicate, no row by ownership),
  * `false` keeps ordinary owner scoping, which on a column the remote lacks
- * also matches no row. Both are closed; neither widens to every row.
+ * matches no row or raises (Postgres and MySQL raise on the unknown column,
+ * SQLite matches no row); neither widens to every row.
  */
 export function isOwnerAnchorUnprovable(def: unknown): boolean {
   if (externalColumnMapTargets(def, SystemFieldName.OWNER_ID)) return false;
