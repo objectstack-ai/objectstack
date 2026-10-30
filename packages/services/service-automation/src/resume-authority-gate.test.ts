@@ -32,6 +32,7 @@ import { AutomationEngine } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
 import { registerMapNode } from './builtin/map-node.js';
+import { MAP_ITEM_PENDING_REFUSAL_CODE } from './run-resume.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -432,14 +433,17 @@ describe('resume authorization gate (#3801)', () => {
       expect(downstream).toEqual(['after']);                   // item 1 really ran through
     });
 
-    it('leaves a map over ungated items resumable', async () => {
+    it('refuses the MAP PARENT over an ungated item too — the item is the door (#27877)', async () => {
+      // Ungated, the authority check lets it through, and continuing the map
+      // would advance past the parked item. The refusal and the item door are
+      // pinned in `map-parent-resume-refusal.test.ts`.
       registerBatch(engine, 'open_pause');
       const paused = await launch(engine);
 
-      const resumed = await engine.resume(paused.runId!, {});
+      const refused = await engine.resume(paused.runId!, {});
 
-      expect(resumed.code).toBeUndefined();
-      expect(resumed.success).toBe(true);
+      expect(refused.code).toBe(MAP_ITEM_PENDING_REFUSAL_CODE);
+      expect(mapState(engine, paused.runId!)).toEqual({ started: 1, results: [] });
     });
 
     // ── the signal may not write the engine's own variables ────────────
@@ -458,6 +462,12 @@ describe('resume authorization gate (#3801)', () => {
     ])('refuses a signal that forges the map item handoff via `%s`', async (_field, signal) => {
       registerBatch(engine, 'open_pause'); // ungated items — the gate lets the parent through
       const paused = await launch(engine);
+      // …once its item is no longer parked: with the item live the gate refuses
+      // the parent before the signal is read (#27877). A cancelled item leaves
+      // the parent's `map:` link with nothing behind it, which is the shape
+      // that still reaches the handoff guard.
+      const item1 = engine.listSuspendedRuns().find(r => r.flowName === 'one_item')!;
+      expect(await engine.cancelRun(item1.runId)).toBe(true);
 
       const refused = await engine.resume(paused.runId!, signal as any);
 
