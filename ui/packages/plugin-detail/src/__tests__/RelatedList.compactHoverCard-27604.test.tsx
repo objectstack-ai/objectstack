@@ -83,7 +83,7 @@ describe('compact related row — the record hover card (objectstack#27604)', ()
     const { source } = renderCompact();
     await waitFor(() => expect(nameOf('Call Ada')).toBeTruthy());
     const row = nameOf('Call Ada').closest('[data-related-card-row]')!;
-    const before = row.innerHTML.replace(/ data-state="(open|closed)"/g, '');
+    const before = row.innerHTML.replace(/ data-(state|radix-[a-z-]+)="[^"]*"/g, '');
     expect(source.findOne).not.toHaveBeenCalled();
 
     fireEvent.pointerOver(nameOf('Call Ada'), { pointerType: 'mouse' });
@@ -95,7 +95,7 @@ describe('compact related row — the record hover card (objectstack#27604)', ()
     expect(source.findOne).toHaveBeenCalledTimes(1);
     // The row keeps its layout: the card floats outside it.
     expect(row.contains(card())).toBe(false);
-    expect(row.innerHTML.replace(/ data-state="(open|closed)"/g, '')).toBe(before);
+    expect(row.innerHTML.replace(/ data-(state|radix-[a-z-]+)="[^"]*"/g, '')).toBe(before);
   });
 
   it('Space on the focused name shows the card without opening the row; Esc hides it', async () => {

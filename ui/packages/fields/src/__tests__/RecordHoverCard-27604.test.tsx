@@ -163,9 +163,11 @@ function unhover(el: Element) {
   fireEvent.pointerOut(el, { pointerType: 'mouse' });
 }
 
-/** The read the schema leaves the cell to make settles before the hover. */
-async function settled(source: ReturnType<typeof makeSource>) {
-  await waitFor(() => expect(source.getObjectSchema).toHaveBeenCalled());
+/**
+ * Let the cells' definition reads settle before the hover. The definition
+ * cache is module-wide, so a later test may find its object already read.
+ */
+async function settled() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -179,8 +181,8 @@ async function openCardOver(id: string) {
 
 describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   it('a lead: the declared highlights minus the name, six at most, in the target\'s own renderers', async () => {
-    const { source } = renderRefs([{ objectName: 'lead', id: 'lead-a', name: 'Lead lead-a' }]);
-    await settled(source);
+    renderRefs([{ objectName: 'lead', id: 'lead-a', name: 'Lead lead-a' }]);
+    await settled();
     await openCardOver('lead-a');
 
     expect(shownFields()).toEqual(['company', 'status', 'rating', 'email', 'annual_revenue', 'phone']);
@@ -195,7 +197,7 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
 
   it('a contact (no status field): exactly the declared four, nothing invented, one read with $expand', async () => {
     const { source } = renderRefs([{ objectName: 'contact', id: 'contact-a', name: 'Grace Hopper' }]);
-    await settled(source);
+    await settled();
     await openCardOver('contact-a');
 
     expect(shownFields()).toEqual(['account', 'title', 'email', 'phone']);
@@ -213,8 +215,8 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   });
 
   it('a product: its declared highlights in order', async () => {
-    const { source } = renderRefs([{ objectName: 'product', id: 'product-a', name: 'Widget' }]);
-    await settled(source);
+    renderRefs([{ objectName: 'product', id: 'product-a', name: 'Widget' }]);
+    await settled();
     await openCardOver('product-a');
 
     expect(shownFields()).toEqual(['product_code', 'family', 'price']);
@@ -223,8 +225,8 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   });
 
   it('an object that declares no highlightFields: the name and the object label only', async () => {
-    const { source } = renderRefs([{ objectName: 'note', id: 'note-a', name: 'Kickoff notes' }]);
-    await settled(source);
+    renderRefs([{ objectName: 'note', id: 'note-a', name: 'Kickoff notes' }]);
+    await settled();
     await openCardOver('note-a');
 
     expect(card()!.querySelector('[data-record-hover-card-title]')).toHaveTextContent('Kickoff notes');
@@ -236,7 +238,7 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   it('an unreadable record: the reference\'s name and the object label, nothing else', async () => {
     const source = makeSource({ findOne: vi.fn(async () => Promise.reject(new Error('404'))) });
     renderRefs([{ objectName: 'lead', id: 'lead-gone', name: 'Old lead' }], source);
-    await settled(source);
+    await settled();
     await openCardOver('lead-gone');
 
     expect(card()!.querySelector('[data-record-hover-card-title]')).toHaveTextContent('Old lead');
@@ -247,7 +249,7 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   it('one request per shown card, none on row render, cached per record', async () => {
     const refs = Array.from({ length: 200 }, (_, i) => ({ objectName: 'lead', id: `lead-r${i}`, name: `Lead ${i}` }));
     const { source } = renderRefs(refs);
-    await settled(source);
+    await settled();
     // 200 rows drawn: not one record read.
     expect(source.findOne).not.toHaveBeenCalled();
 
@@ -267,8 +269,8 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   });
 
   it('shows after the hover delay, not at once', async () => {
-    const { source } = renderRefs([{ objectName: 'lead', id: 'lead-delay', name: 'Lead delay' }]);
-    await settled(source);
+    renderRefs([{ objectName: 'lead', id: 'lead-delay', name: 'Lead delay' }]);
+    await settled();
     hover(linkOf('lead-delay'));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -278,8 +280,8 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   });
 
   it('keyboard: focus alone shows nothing, Space shows the card, Esc hides it', async () => {
-    const { source } = renderRefs([{ objectName: 'lead', id: 'lead-kb', name: 'Lead kb' }]);
-    await settled(source);
+    renderRefs([{ objectName: 'lead', id: 'lead-kb', name: 'Lead kb' }]);
+    await settled();
     const link = linkOf('lead-kb');
     act(() => link.focus());
     await act(async () => {
@@ -300,11 +302,11 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   });
 
   it('one card at a time', async () => {
-    const { source } = renderRefs([
+    renderRefs([
       { objectName: 'lead', id: 'lead-one', name: 'Lead one' },
       { objectName: 'product', id: 'product-two', name: 'Widget two' },
     ]);
-    await settled(source);
+    await settled();
     fireEvent.keyDown(linkOf('lead-one'), { key: ' ' });
     await waitFor(() => expect(cards()).toHaveLength(1));
     fireEvent.keyDown(linkOf('product-two'), { key: ' ' });
@@ -313,10 +315,12 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   });
 
   it('the card never changes the host\'s layout: it floats outside the host\'s DOM', async () => {
-    const { source } = renderRefs([{ objectName: 'lead', id: 'lead-layout', name: 'Lead layout' }]);
-    await settled(source);
+    renderRefs([{ objectName: 'lead', id: 'lead-layout', name: 'Lead layout' }]);
+    await settled();
     const hostEl = document.querySelector('[data-testid="host"]') as HTMLElement;
-    const markup = () => hostEl.innerHTML.replace(/ data-state="(open|closed)"/g, '');
+    // Radix marks the trigger with attributes while the card is open; the
+    // host's elements, classes and text stay as they were.
+    const markup = () => hostEl.innerHTML.replace(/ data-(state|radix-[a-z-]+)="[^"]*"/g, '');
     const before = markup();
 
     await openCardOver('lead-layout');
@@ -327,8 +331,8 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
   });
 
   it('the title opens the record the way the reference does, and nothing under the card hears the click', async () => {
-    const { source, host, onRowClick } = renderRefs([{ objectName: 'lead', id: 'lead-open', name: 'Lead open' }]);
-    await settled(source);
+    const { host, onRowClick } = renderRefs([{ objectName: 'lead', id: 'lead-open', name: 'Lead open' }]);
+    await settled();
     await openCardOver('lead-open');
 
     const title = card()!.querySelector('[data-record-hover-card-title]') as HTMLAnchorElement;
