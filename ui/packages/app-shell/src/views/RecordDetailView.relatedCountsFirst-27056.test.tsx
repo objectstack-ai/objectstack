@@ -7,7 +7,7 @@
  */
 
 /**
- * objectstack#27056 — the record page's related column loads counts first,
+ * objectstack#27056 — the record page's related panels load counts first,
  * then the first rows of only the cards in view, and never blocks the details.
  *
  * The REAL page, at a desktop width (the column tiers), over a data source
@@ -15,7 +15,7 @@
  * related lists. Measured:
  *
  *  - the details draw from the record read alone, while every related read is
- *    still out, and the related column shows one placeholder per card;
+ *    still out, and the right column shows one placeholder per card;
  *  - the six counts go out as ONE request set, before any of them answers;
  *  - once they answer, rows are read for the two counted cards in view only,
  *    three rows each — never for a card counted at 0 (in view too), never for
@@ -218,7 +218,7 @@ describe('RecordDetailView — the related column loads counts first (objectstac
     expect(container.textContent).toContain('Acme');
     expect(container.textContent).toContain('Retail');
     expect(column(container, 'details')?.textContent).toContain(RECORD_ID);
-    const related = column(container, 'related')!;
+    const related = column(container, 'right')!;
     expect(related.querySelectorAll('[data-related-card-pending]')).toHaveLength(CHILDREN.length);
     expect(related.querySelector('[data-related-card-row]')).toBeNull();
   });
@@ -251,7 +251,7 @@ describe('RecordDetailView — the related column loads counts first (objectstac
       for (const r of reads.filter((read) => !read.answered)) r.answer();
     });
     await idle();
-    const related = column(container, 'related')!;
+    const related = column(container, 'right')!;
     expect(related.querySelector(`[data-related-card-id="${C1}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(3);
     expect(related.querySelector(`[data-related-card-id="${C3}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(2);
     expect(related.querySelector('[data-related-card-pending]')).toBeNull();

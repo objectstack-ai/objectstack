@@ -619,17 +619,23 @@ describe('the timeline, comments, attachments and user list wait for their panel
     expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
   });
 
-  // The synthesized page has no discussion footer any more (#27055): its one
-  // timeline stream is a tab in the tabbed tier, so it reads like any other tab.
-  it('the synthesized page opened on its Details tab reads neither the feed nor the user list', async () => {
+  // The synthesized page has no discussion footer any more (#27055), and no
+  // tab strip at any width since objectstack#27524: its one stream is the 动态
+  // panel, the first panel of the right column — on screen at open in every
+  // tier, so the feed is read at open, like an authored page opened on its
+  // Activity tab. A page with tabs still waits for its tab (above).
+  it('the synthesized page reads the feed and the user list at open: its 动态 panel is on screen', async () => {
     const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver });
     const table = waveTable(held);
-    expect(screen.getByRole('tab', { name: /^Timeline/ }), table).toBeTruthy();
-    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) expect(held.filter(isRead), table).toEqual([]);
+    expect(screen.queryByRole('tab', { name: /^Timeline/ }), table).toBeNull();
+    expect(document.querySelector('[data-record-timeline-panel]'), table).not.toBeNull();
+    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
+      expect(held.filter(isRead).map((h) => h.wave), table).toEqual([1]);
+    }
   });
 
-  it('CONTROL: the synthesized page opened on its Timeline tab reads the feed and the user list at open', async () => {
-    const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver, search: '?tab=timeline' });
+  it('CONTROL: the synthesized page opened on its 动态 tab (?related=timeline) reads the feed and the user list at open', async () => {
+    const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver, search: '?related=timeline' });
     const table = waveTable(held);
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
       expect(held.filter(isRead).map((h) => h.wave), table).toEqual([1]);
@@ -637,7 +643,7 @@ describe('the timeline, comments, attachments and user list wait for their panel
   });
 });
 
-// ── objectui#13010 part 5: the audit read waits for the Timeline tab (#27055 merged History into it) ──
+// ── objectui#13010 part 5: the audit read goes out with its stream (#27055 merged History into it; #27524 made the stream a panel) ──
 
 /** Registered, so the view merges field changes into the timeline of a `trackHistory` object. */
 const auditLogDef = {
@@ -662,7 +668,7 @@ const isAuditUserLookup = (h: Held) => isPanelRead('sys_user')(h) && h.path.incl
 const openHistory = (options: OpenOptions = {}) =>
   openRecordPage({ page: SYNTH, object: historyObject, extraObjects: [auditLogDef], observer: FoldObserver, ...options });
 
-describe('the Timeline tab reads the audit log when it is shown (objectui#13010 part 5)', () => {
+describe('the 动态 stream reads the audit log when it is shown (objectui#13010 part 5)', () => {
   beforeEach(() => {
     offscreen.length = 0;
   });
@@ -671,36 +677,39 @@ describe('the Timeline tab reads the audit log when it is shown (objectui#13010 
   // object. Before this part: `sys_audit_log top=50` in wave 1 beside the
   // record read and its `sys_user` name lookup in wave 2, with the History tab
   // closed. After it: neither until the tab opens. Since #27055 the audit rows
-  // are the field changes of the one Timeline stream, so that tab gates them.
-  it('a trackHistory record opened on its Details tab reads neither the audit log nor its user names', async () => {
+  // are the field changes of the one stream, so the stream gates them; since
+  // objectstack#27524 that stream is the 动态 panel, on screen at open, so
+  // they are read at open — once, and not again when its tab opens.
+  it('a trackHistory record reads the audit log at open and its user names next: the 动态 panel shows the change', async () => {
     const { held } = await openHistory();
     const table = waveTable(held);
     expect(held.filter(isRecordRead).map((h) => h.wave), table).toEqual([1]);
-    // The tab is offered, so the silence is not a missing tab.
-    expect(screen.getByRole('tab', { name: /^Timeline/ }), table).toBeTruthy();
-    expect(screen.queryByRole('tab', { name: /^History/ }), table).toBeNull();
-    expect(held.filter(isAuditRead), table).toEqual([]);
-    expect(held.filter(isAuditUserLookup), table).toEqual([]);
-    expect(screen.queryByText('Grace'), table).toBeNull();
+    expect(screen.queryByRole('tab', { name: /^(Timeline|History)/ }), table).toBeNull();
+    expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
+    expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);
+    const panel = document.querySelector('[data-record-timeline-panel]') as HTMLElement;
+    expect(panel.textContent, table).toMatch(/negotiation/);
   });
 
-  it('opening the Timeline tab reads the audit log and its user names once each, and draws the rows', async () => {
+  it('opening the 动态 tab from its panel reads nothing again, and draws the rows with their actor', async () => {
     const { held, state } = await openHistory();
-    const openedWith = held.length;
-    await openTab('Timeline');
+    const audit = () => held.filter(isAuditRead);
+    expect(audit(), waveTable(held)).toHaveLength(1);
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-record-timeline-panel-open]') as HTMLElement);
+    });
     await runWaves(held, state);
     const table = waveTable(held);
-    const audit = held.filter(isAuditRead);
-    expect(audit, table).toHaveLength(1);
-    expect(audit[0].seq, table).toBeGreaterThanOrEqual(openedWith);
-    expect(topOf(audit[0]), table).toBe(50);
+    expect(document.querySelector('[data-related-enlarged="timeline"]'), table).not.toBeNull();
+    expect(audit(), table).toHaveLength(1);
+    expect(topOf(audit()[0]), table).toBe(50);
     expect(held.filter(isAuditUserLookup), table).toHaveLength(1);
     expect(screen.getByText('Grace')).toBeTruthy();
     expect(screen.getByText(/negotiation/)).toBeTruthy();
   });
 
-  it('CONTROL: a trackHistory record opened with ?tab=timeline reads the audit log at open and draws the rows', async () => {
-    const { held } = await openHistory({ search: '?tab=timeline' });
+  it('CONTROL: a trackHistory record opened with ?related=timeline reads the audit log at open and draws the rows', async () => {
+    const { held } = await openHistory({ search: '?related=timeline' });
     const table = waveTable(held);
     expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
     expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);

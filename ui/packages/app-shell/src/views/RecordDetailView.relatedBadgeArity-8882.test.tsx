@@ -9,6 +9,8 @@
 /**
  * objectui#8882 — the related-list tab BADGE compiles the parent-relationship
  * condition to match the relationship field's ARITY, exactly as the ROWS do.
+ * Since objectstack#27524 the badge is the related panel's count in the
+ * record page's right column, and the rows are the panel's first rows.
  *
  * `RelatedList` has compiled that condition by arity since objectui#7299: a
  * `multiple: true` relationship stores an ARRAY of parent ids, so the question
@@ -69,7 +71,7 @@ vi.mock('sonner', () => ({
 }));
 
 // Orthogonal chrome — stubbed so the only asynchrony in this file is the
-// related list's own fetch and the tab strip's count probe.
+// related panel's own row fetch and its count probe.
 vi.mock('./ActionConfirmDialog', () => ({ ActionConfirmDialog: () => null }));
 vi.mock('./ActionParamDialog', () => ({ ActionParamDialog: () => null }));
 vi.mock('./ActionResultDialog', () => ({ ActionResultDialog: () => null }));
@@ -268,7 +270,7 @@ function renderPage(objects: any[], dataSource: any) {
     getItemsByType: () => [],
   } as any;
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}?tab=related`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}`]}>
       <MetadataCtx.Provider value={metadata}>
         <RecordDetailView
           dataSource={dataSource}
@@ -285,8 +287,9 @@ function renderPage(objects: any[], dataSource: any) {
 
 /**
  * The child object is queried TWICE and the two reads are the two halves of
- * this card: the ROW query (windowed, `$top` = page size, no `$count`) and the
- * tab strip's BADGE probe (`$top: 1`, `$count: true`).
+ * this card: the ROW query (windowed, `$top` = the panel's rows, no `$count`)
+ * and the panel's COUNT probe (`$top: 1`, `$count: true`), asked up front by
+ * the right column (objectstack#27056).
  */
 const isRowQuery = (p: any) => !p?.$count && typeof p?.$top === 'number';
 const isBadgeProbe = (p: any) => p?.$count === true;
@@ -318,12 +321,10 @@ async function renderAndCollect(child: any, rows: Record<string, any>[]) {
   };
 }
 
-/** The digits rendered inside the Related tab's count badge, or `null`. */
-async function relatedTabBadge(): Promise<string | null> {
-  const tab = await screen.findByRole('tab', { name: /Related/i });
-  // The badge is the only span in the trigger carrying an accessible name
-  // (the label span has none) — see `page:tabs` in components/layout.
-  return tab.querySelector('span[aria-label]')?.textContent?.trim() ?? null;
+/** The digits the related panel's header counts, or `null`. */
+async function relatedPanelCount(): Promise<string | null> {
+  const card = await screen.findByRole('region', { name: 'Check Item' });
+  return card.querySelector('[data-related-card-count]')?.textContent?.trim() ?? null;
 }
 
 /** How many child rows the related list actually drew. */
@@ -336,6 +337,9 @@ beforeEach(() => {
   // The count store is module-scoped and shared by every consumer in the
   // process, so a warm entry from a previous case would badge this one.
   RelatedCountStore._reset();
+  // No viewport: every related panel is in view, so it reads its first rows
+  // (`useSeenOnce`) once its count is in.
+  vi.stubGlobal('IntersectionObserver', undefined);
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -423,10 +427,10 @@ describe('related-list tab badge — parent scope compiled by ARITY (objectui#88
     // rows and badges none, which is a different bug wearing this one's face.
     expect(drawn).toBeGreaterThan(0);
     await waitFor(async () => {
-      expect(await relatedTabBadge()).toBe(String(drawn));
+      expect(await relatedPanelCount()).toBe(String(drawn));
     });
-    expect(await relatedTabBadge()).not.toBe('0');
-    expect(await relatedTabBadge()).not.toBeNull();
+    expect(await relatedPanelCount()).not.toBe('0');
+    expect(await relatedPanelCount()).not.toBeNull();
   });
 
   it('LIVE CONTROL — a single-value relationship is correct today and stays correct', async () => {
@@ -441,7 +445,7 @@ describe('related-list tab badge — parent scope compiled by ARITY (objectui#88
     const drawn = renderedRowNames(SINGLE_ROWS).length;
     expect(drawn).toBeGreaterThan(0);
     await waitFor(async () => {
-      expect(await relatedTabBadge()).toBe(String(drawn));
+      expect(await relatedPanelCount()).toBe(String(drawn));
     });
     // The other parent's row is excluded on both sides, arity or no arity.
     expect(screen.queryByText('Other Parent Only')).toBeNull();
