@@ -1,0 +1,555 @@
+{
+  "run": "related tab, cold vs warm, crm_account",
+  "viewport": "1440x900",
+  "phases": [
+    {
+      "name": "open-cold",
+      "start": 18807
+    },
+    {
+      "name": "cold-related-tab",
+      "start": 26872
+    },
+    {
+      "name": "close",
+      "start": 33379
+    },
+    {
+      "name": "open-warm",
+      "start": 38726
+    },
+    {
+      "name": "warm-related-tab",
+      "start": 46788
+    },
+    {
+      "name": "warm-timeline-tab",
+      "start": 53046
+    },
+    {
+      "name": "close2",
+      "start": 59626
+    },
+    {
+      "name": "done",
+      "start": 63846
+    }
+  ],
+  "requests": [
+    {
+      "t": 170,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/apps/com.example.crm/crm_account"
+    },
+    {
+      "t": 196,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/runtime/config"
+    },
+    {
+      "t": 6549,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/localization"
+    },
+    {
+      "t": 6720,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/get-session"
+    },
+    {
+      "t": 6720,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/get-session"
+    },
+    {
+      "t": 6721,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/dev/metadata-events"
+    },
+    {
+      "t": 6800,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/discovery"
+    },
+    {
+      "t": 6803,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/i18n/translations/en-US"
+    },
+    {
+      "t": 6803,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/organization/get-active-member"
+    },
+    {
+      "t": 6804,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/organization/list"
+    },
+    {
+      "t": 6845,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/config"
+    },
+    {
+      "t": 6849,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/app"
+    },
+    {
+      "t": 6856,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/app"
+    },
+    {
+      "t": 6861,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference?top=403&filter=%5B%22and%22%2C%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D%2C%5B%22or%22%2C%5B%22key%22%2C%22in%22%2C%5B%22ui.flow.palette.recents%22%2C%22ui.recent%22%2C%22ui.favorites%22%5D%5D%2C%5B%22key%22%2C%22startswith%22%2C%22ui.record.%22%5D%2C%5B%22key%22%2C%22startswith%22%2C%22ui.list.%22%5D%5D%5D"
+    },
+    {
+      "t": 6912,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/permissions"
+    },
+    {
+      "t": 6914,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/permissions"
+    },
+    {
+      "t": 6914,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/view"
+    },
+    {
+      "t": 6945,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object?package=com.example.crm"
+    },
+    {
+      "t": 6989,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_organization"
+    },
+    {
+      "t": 6989,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_user"
+    },
+    {
+      "t": 6990,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_business_unit"
+    },
+    {
+      "t": 7662,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/packages"
+    },
+    {
+      "t": 7662,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/localization"
+    },
+    {
+      "t": 7662,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/me/apps"
+    },
+    {
+      "t": 7663,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/me/apps"
+    },
+    {
+      "t": 7663,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_account"
+    },
+    {
+      "t": 7663,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?top=0"
+    },
+    {
+      "t": 7942,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/page"
+    },
+    {
+      "t": 8094,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/dashboard"
+    },
+    {
+      "t": 8095,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/requests?status=pending&approverId=urDM5gHP6qnxNknqoBMsBO44DahSisUK%2Cadmin%40objectos.ai%2Cposition%3Aplatform_admin%2Cposition%3Aorg_owner%2Cposition%3Aeveryone&limit=5"
+    },
+    {
+      "t": 8095,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_inbox_message?top=20&sort=-created_at&filter=%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D"
+    },
+    {
+      "t": 8095,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_user/urDM5gHP6qnxNknqoBMsBO44DahSisUK"
+    },
+    {
+      "t": 8098,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/ai/agents"
+    },
+    {
+      "t": 8099,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/settings"
+    },
+    {
+      "t": 8100,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/i18n/locales"
+    },
+    {
+      "t": 8164,
+      "phase": "load",
+      "method": "PATCH",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference/Nx8NPtOnmMbldcx6",
+      "postData": "{\"value\":[{\"id\":\"object:crm_account\",\"type\":\"object\",\"name\":\"crm_account\",\"href\":\"/apps/com.example.crm/crm_account\",\"visitedAt\":\"2026-10-30T11:37:11.939Z\"},{\"id\":\"record:crm_account:2tYQgXNSV1AkjmqO\",\"type\":\"record\",\"label\":\"Acme Corp\",\"href\":\"/apps/com.example.crm/crm_account/record/2tYQgXNSV1AkjmqO\",\"visitedAt\":\"2026-10-30T11:36:00.280Z\"},{\"id\":\"record:crm_contact:1E2hM-ETKI7mM7Is\",\"type\":\"record\",\"label\":\"Grace\",\"href\":\"/apps/com.example.crm/crm_contact/record/1E2hM-ETKI7mM7Is\",\"visitedAt\":\"2026-10-30T11:35:37.205Z\"},{\"id\":\"object:crm_contact\",\"type\":\"object\",\"name\":\"crm_contact\",\"href\":\"/apps/com.example.crm/crm_contact\",\"visitedAt\":\"2026-10-30T11:30:07.897Z\"},{\"id\":\"record:crm_account:Mx_eB4--D_huVof9\",\"type\":\"record\",\"label\":\"Globex Ltd\",\"href\":\"/apps/com.example.crm/crm_account/record/Mx_eB4--D_huVof9\",\"visitedAt\":\"2026-10-30T11:27:45.600Z\"},{\"id\":\"record:crm_contact:BHXBEI-wgX1wGhIj\",\"type\":\"record\",\"label\":\"Linus\",\"href\":\"/apps/com.example.crm/crm_contact/record/BHXBEI-wgX1wGhIj\",\"visitedAt\":\"2026-10-30T11:25:10.666Z\"}]}"
+    },
+    {
+      "t": 8377,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?top=50&select=id%2Cname%2Cindustry%2Cannual_revenue%2Cwebsite"
+    },
+    {
+      "t": 8429,
+      "phase": "load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/settings/localization"
+    },
+    {
+      "t": 8598,
+      "phase": "load",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"update\",\"recordIds\":[\"2tYQgXNSV1AkjmqO\",\"Mx_eB4--D_huVof9\",\"qJFxLWxiPOMd-joD\"]}"
+    },
+    {
+      "t": 8599,
+      "phase": "load",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"delete\",\"recordIds\":[\"2tYQgXNSV1AkjmqO\",\"Mx_eB4--D_huVof9\",\"qJFxLWxiPOMd-joD\"]}"
+    },
+    {
+      "t": 19388,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object"
+    },
+    {
+      "t": 19423,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/requests?object=crm_account&recordId=2tYQgXNSV1AkjmqO"
+    },
+    {
+      "t": 19423,
+      "phase": "open-cold",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"update\",\"recordId\":\"2tYQgXNSV1AkjmqO\"}"
+    },
+    {
+      "t": 19423,
+      "phase": "open-cold",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"delete\",\"recordId\":\"2tYQgXNSV1AkjmqO\"}"
+    },
+    {
+      "t": 19428,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id&top=1&filter=%5B%22id%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 19520,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_activity"
+    },
+    {
+      "t": 19520,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_contact"
+    },
+    {
+      "t": 19520,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_lead"
+    },
+    {
+      "t": 19521,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_opportunity"
+    },
+    {
+      "t": 19523,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account/2tYQgXNSV1AkjmqO/field-access"
+    },
+    {
+      "t": 19577,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/records/crm_account/2tYQgXNSV1AkjmqO/lock"
+    },
+    {
+      "t": 19842,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 19843,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 19849,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_lead?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 19851,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_opportunity?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 20210,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 20215,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 20215,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_lead?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 20215,
+      "phase": "open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_opportunity?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 20341,
+      "phase": "open-cold",
+      "method": "PATCH",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference/Nx8NPtOnmMbldcx6",
+      "postData": "{\"value\":[{\"id\":\"record:crm_account:2tYQgXNSV1AkjmqO\",\"type\":\"record\",\"label\":\"Acme Corp\",\"href\":\"/apps/com.example.crm/crm_account/record/2tYQgXNSV1AkjmqO\",\"visitedAt\":\"2026-10-30T11:37:24.409Z\"},{\"id\":\"object:crm_account\",\"type\":\"object\",\"name\":\"crm_account\",\"href\":\"/apps/com.example.crm/crm_account\",\"visitedAt\":\"2026-10-30T11:37:11.939Z\"},{\"id\":\"record:crm_contact:1E2hM-ETKI7mM7Is\",\"type\":\"record\",\"label\":\"Grace\",\"href\":\"/apps/com.example.crm/crm_contact/record/1E2hM-ETKI7mM7Is\",\"visitedAt\":\"2026-10-30T11:35:37.205Z\"},{\"id\":\"object:crm_contact\",\"type\":\"object\",\"name\":\"crm_contact\",\"href\":\"/apps/com.example.crm/crm_contact\",\"visitedAt\":\"2026-10-30T11:30:07.897Z\"},{\"id\":\"record:crm_account:Mx_eB4--D_huVof9\",\"type\":\"record\",\"label\":\"Globex Ltd\",\"href\":\"/apps/com.example.crm/crm_account/record/Mx_eB4--D_huVof9\",\"visitedAt\":\"2026-10-30T11:27:45.600Z\"},{\"id\":\"record:crm_contact:BHXBEI-wgX1wGhIj\",\"type\":\"record\",\"label\":\"Linus\",\"href\":\"/apps/com.example.crm/crm_contact/record/BHXBEI-wgX1wGhIj\",\"visitedAt\":\"2026-10-30T11:25:10.666Z\"}]}"
+    },
+    {
+      "t": 27140,
+      "phase": "cold-related-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id%2Ccontact%2Copportunity&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 27140,
+      "phase": "cold-related-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 27140,
+      "phase": "cold-related-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_lead?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id%2Cconverted_opportunity&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 27140,
+      "phase": "cold-related-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_opportunity?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id%2Crenewal_of&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 27607,
+      "phase": "cold-related-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?top=1&filter=%5B%22id%22%2C%22in%22%2C%5B%222tYQgXNSV1AkjmqO%22%5D%5D"
+    },
+    {
+      "t": 39239,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/requests?object=crm_account&recordId=Mx_eB4--D_huVof9"
+    },
+    {
+      "t": 39239,
+      "phase": "open-warm",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"update\",\"recordId\":\"Mx_eB4--D_huVof9\"}"
+    },
+    {
+      "t": 39239,
+      "phase": "open-warm",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"delete\",\"recordId\":\"Mx_eB4--D_huVof9\"}"
+    },
+    {
+      "t": 39249,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id&top=1&filter=%5B%22id%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 39383,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account/Mx_eB4--D_huVof9/field-access"
+    },
+    {
+      "t": 39447,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id%2Ccontact%2Copportunity&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 39447,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 39447,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_lead?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id%2Cconverted_opportunity&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 39447,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_opportunity?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id%2Crenewal_of&top=5&skip=0&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 39565,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22qJFxLWxiPOMd-joD%22%5D"
+    },
+    {
+      "t": 39566,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22qJFxLWxiPOMd-joD%22%5D"
+    },
+    {
+      "t": 39569,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_lead?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22qJFxLWxiPOMd-joD%22%5D"
+    },
+    {
+      "t": 39569,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_opportunity?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22qJFxLWxiPOMd-joD%22%5D"
+    },
+    {
+      "t": 40053,
+      "phase": "open-warm",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?top=1&filter=%5B%22id%22%2C%22in%22%2C%5B%22Mx_eB4--D_huVof9%22%5D%5D"
+    },
+    {
+      "t": 40541,
+      "phase": "open-warm",
+      "method": "PATCH",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference/Nx8NPtOnmMbldcx6",
+      "postData": "{\"value\":[{\"id\":\"record:crm_account:Mx_eB4--D_huVof9\",\"type\":\"record\",\"label\":\"Globex Ltd\",\"href\":\"/apps/com.example.crm/crm_account/record/Mx_eB4--D_huVof9\",\"visitedAt\":\"2026-10-30T11:37:44.131Z\"},{\"id\":\"record:crm_account:2tYQgXNSV1AkjmqO\",\"type\":\"record\",\"label\":\"Acme Corp\",\"href\":\"/apps/com.example.crm/crm_account/record/2tYQgXNSV1AkjmqO\",\"visitedAt\":\"2026-10-30T11:37:24.409Z\"},{\"id\":\"object:crm_account\",\"type\":\"object\",\"name\":\"crm_account\",\"href\":\"/apps/com.example.crm/crm_account\",\"visitedAt\":\"2026-10-30T11:37:11.939Z\"},{\"id\":\"record:crm_contact:1E2hM-ETKI7mM7Is\",\"type\":\"record\",\"label\":\"Grace\",\"href\":\"/apps/com.example.crm/crm_contact/record/1E2hM-ETKI7mM7Is\",\"visitedAt\":\"2026-10-30T11:35:37.205Z\"},{\"id\":\"object:crm_contact\",\"type\":\"object\",\"name\":\"crm_contact\",\"href\":\"/apps/com.example.crm/crm_contact\",\"visitedAt\":\"2026-10-30T11:30:07.897Z\"},{\"id\":\"record:crm_contact:BHXBEI-wgX1wGhIj\",\"type\":\"record\",\"label\":\"Linus\",\"href\":\"/apps/com.example.crm/crm_contact/record/BHXBEI-wgX1wGhIj\",\"visitedAt\":\"2026-10-30T11:25:10.666Z\"}]}"
+    },
+    {
+      "t": 53567,
+      "phase": "warm-timeline-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_user?top=50&select=id%2Cname%2Cemail%2Cimage"
+    },
+    {
+      "t": 53567,
+      "phase": "warm-timeline-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_comment?sort=created_at&filter=%5B%22thread_id%22%2C%22%3D%22%2C%22crm_account%3AMx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 53567,
+      "phase": "warm-timeline-tab",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_activity?populate=actor_id&top=200&sort=timestamp&filter=%5B%22and%22%2C%5B%22object_name%22%2C%22%3D%22%2C%22crm_account%22%5D%2C%5B%22record_id%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D%5D"
+    }
+  ],
+  "console": [
+    {
+      "phase": "open-cold",
+      "text": "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    }
+  ],
+  "coldRelatedText": "Record Detail\n\nRecord detail overlay for Record Detail.\n\nAcme Corp\nAccount\nEdit\nAccount Owner\nDev Admin\nIndustry\nTechnology\nAnnual Revenue\n5,000,000.00\nWebsite\nhttps://acme.example\nDetails\nRelated\n8\nTimeline\nActivities\n2\nNew\nSubject\n\t\nActivity Type\n\t\nStatus\n\t\nDue Date\n\t\nContact\n\t\nOpportunity\n\tActions\n\nQuarterly Business Review — Acme Corp\n\t\nMeeting\n\t\nPlanned\n\t\n11/13/2026 12:00 am\n\t\nAda\n\t\n—\n\t\n\n\nDiscovery Call — Bletchley Systems\n\t\nCall\n\t\nCompleted\n\t\n10/27/2026 12:00 am\n\t\nAda\n\t\nAcme — Q3 Platform Renewal\n\t\nView All\nContacts\n1\nNew\nFull Name\n\t\nFirst Name\n\t\nLast Name\n\t\nEmail\n\t\nCreated At\n\t\nLast Modified At\n\tActions\n\nAda Lovelace\n\t\nAda\n\t\nLovelace\n\t\nada@acme.example\n\t\n10/30/2026 11:16 am\n\t\n10/30/2026 11:16 am\n\t\nView All\nLeads\n1\nNew\nLead Name\n\t\nTitle\n\t\nStatus\n\t\nLead Source\n\t\nEmail\n\t\nPhone\n\tActions\n\nMarie Curie\n\t\nDirector of Research\n\t\nNew\n\t\nWebsite\n\t\nmarie@radium.example\n\t\n+1-555-0101\n\t\nView All\nOpportunities\n4\nNew\nOpportunity Name\n\t\nStage\n\t\nDeal Value\n\t\nWin Probability (%)\n\t\nExpected Revenue\n\t\nExpected Close\n\tActions\n\nAcme — Year-Ago Renewal\n\t\nClosed Won\n\t\n75,000.00\n\t\n100%\n\t\n75,000\n\t\nOct 15, 2025\n\t\n\n\nAcme — Q3 Platform Renewal\n\t\nProposal\n\t\n120,000.00\n\t\n70%\n\t\n84,000\n\t\nNov 29\n\t\n\n\nAcme — Support Tier Upgrade\n\t\nClosed Won\n\t\n90,000.00\n\t\n100%\n\t\n90,000\n\t\nOct 16\n\t\n\n\nAcme — Add-on Module\n\t\nQualification\n\t\n60,000.00\n\t\n35%\n\t\n21,000\n\t\nNov 19\n\t\nView All\nCreated\n21m ago\nUpdated\n21m ago\nOwner\nDev Admin\n2tYQgXNSV1AkjmqO",
+  "warmRelatedText": "Record Detail\n\nRecord detail overlay for Record Detail.\n\nGlobex Ltd\nAccount\nEdit\nAccount Owner\nDev Admin\nIndustry\nFinance\nAnnual Revenue\n12,000,000.00\nWebsite\nhttps://globex.example\nDetails\nRelated\n6\nTimeline\nActivities\n1\nNew\nSubject\n\t\nActivity Type\n\t\nStatus\n\t\nDue Date\n\t\nContact\n\t\nOpportunity\n\tActions\n\nProduct Demo — Globex New CRM\n\t\nMeeting\n\t\nPlanned\n\t\n11/4/2026 12:00 am\n\t\nLinus\n\t\nGlobex — New CRM Rollout\n\t\nView All\nContacts\n1\nNew\nFull Name\n\t\nFirst Name\n\t\nLast Name\n\t\nEmail\n\t\nCreated At\n\t\nLast Modified At\n\tActions\n\nLinus Torvalds\n\t\nLinus\n\t\nTorvalds\n\t\nlinus@globex.example\n\t\n10/30/2026 11:16 am\n\t\n10/30/2026 11:16 am\n\t\nView All\nOpportunities\n4\nNew\nOpportunity Name\n\t\nStage\n\t\nDeal Value\n\t\nWin Probability (%)\n\t\nExpected Revenue\n\t\nExpected Close\n\tActions\n\nGlobex — Analytics Pack\n\t\nClosed Won\n\t\n110,000.00\n\t\n100%\n\t\n110,000\n\t\nOct 9\n\t\n\n\nGlobex — Initial Seats\n\t\nClosed Won\n\t\n145,000.00\n\t\n100%\n\t\n145,000\n\t\nJul 12\n\t\n\n\nGlobex — Year-Ago Implementation\n\t\nClosed Won\n\t\n210,000.00\n\t\n100%\n\t\n210,000\n\t\nSep 25, 2025\n\t\n\n\nGlobex — New CRM Rollout\n\t\nQualification\n\t\n450,000.00\n\t\n40%\n\t\n180,000\n\t\nDec 29\n\t\nView All\nNo related records found\nLeads\nNew\nCreated\n21m ago\nUpdated\n21m ago\nOwner\nDev Admin\nMx_eB4--D_huVof9"
+}

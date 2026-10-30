@@ -1,0 +1,485 @@
+{
+  "run": "cross-object one session",
+  "viewport": "1440x900",
+  "phases": [
+    {
+      "name": "contact-list-load",
+      "start": 155
+    },
+    {
+      "name": "contact-open-cold",
+      "start": 18400
+    },
+    {
+      "name": "contact-close",
+      "start": 27485
+    },
+    {
+      "name": "nav-to-accounts",
+      "start": 32697
+    },
+    {
+      "name": "account-open-first-in-session",
+      "start": 41872
+    },
+    {
+      "name": "account-close",
+      "start": 51112
+    },
+    {
+      "name": "done",
+      "start": 56299
+    }
+  ],
+  "requests": [
+    {
+      "t": 166,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/apps/com.example.crm/crm_contact"
+    },
+    {
+      "t": 192,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/runtime/config"
+    },
+    {
+      "t": 6357,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/localization"
+    },
+    {
+      "t": 6500,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/get-session"
+    },
+    {
+      "t": 6501,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/get-session"
+    },
+    {
+      "t": 6508,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/dev/metadata-events"
+    },
+    {
+      "t": 6561,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/discovery"
+    },
+    {
+      "t": 6561,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/i18n/translations/en-US"
+    },
+    {
+      "t": 6561,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/organization/get-active-member"
+    },
+    {
+      "t": 6561,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/organization/list"
+    },
+    {
+      "t": 6597,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/config"
+    },
+    {
+      "t": 6600,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/app"
+    },
+    {
+      "t": 6605,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/app"
+    },
+    {
+      "t": 6606,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference?top=403&filter=%5B%22and%22%2C%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D%2C%5B%22or%22%2C%5B%22key%22%2C%22in%22%2C%5B%22ui.flow.palette.recents%22%2C%22ui.recent%22%2C%22ui.favorites%22%5D%5D%2C%5B%22key%22%2C%22startswith%22%2C%22ui.record.%22%5D%2C%5B%22key%22%2C%22startswith%22%2C%22ui.list.%22%5D%5D%5D"
+    },
+    {
+      "t": 6658,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/permissions"
+    },
+    {
+      "t": 6658,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/permissions"
+    },
+    {
+      "t": 6658,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/view"
+    },
+    {
+      "t": 6692,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object?package=com.example.crm"
+    },
+    {
+      "t": 6721,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_organization"
+    },
+    {
+      "t": 6721,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_user"
+    },
+    {
+      "t": 6721,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_business_unit"
+    },
+    {
+      "t": 7315,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/packages"
+    },
+    {
+      "t": 7315,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/auth/me/localization"
+    },
+    {
+      "t": 7316,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/me/apps"
+    },
+    {
+      "t": 7319,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/me/apps"
+    },
+    {
+      "t": 7319,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_contact"
+    },
+    {
+      "t": 7322,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?top=0"
+    },
+    {
+      "t": 7418,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/page"
+    },
+    {
+      "t": 7485,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/dashboard"
+    },
+    {
+      "t": 7485,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/requests?status=pending&approverId=urDM5gHP6qnxNknqoBMsBO44DahSisUK%2Cadmin%40objectos.ai%2Cposition%3Aplatform_admin%2Cposition%3Aorg_owner%2Cposition%3Aeveryone&limit=5"
+    },
+    {
+      "t": 7487,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_inbox_message?top=20&sort=-created_at&filter=%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D"
+    },
+    {
+      "t": 7487,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/sys_user/urDM5gHP6qnxNknqoBMsBO44DahSisUK"
+    },
+    {
+      "t": 7489,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/ai/agents"
+    },
+    {
+      "t": 7489,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/settings"
+    },
+    {
+      "t": 7491,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/i18n/locales"
+    },
+    {
+      "t": 7957,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?populate=account&top=50&select=id%2Cfirst_name%2Clast_name%2Cfull_name%2Cemail%2Caccount"
+    },
+    {
+      "t": 7959,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/settings/localization"
+    },
+    {
+      "t": 8137,
+      "phase": "contact-list-load",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_contact\",\"operation\":\"update\",\"recordIds\":[\"1E2hM-ETKI7mM7Is\",\"BHXBEI-wgX1wGhIj\",\"kL0mBLQM-j3BcrJo\"]}"
+    },
+    {
+      "t": 8141,
+      "phase": "contact-list-load",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_contact\",\"operation\":\"delete\",\"recordIds\":[\"1E2hM-ETKI7mM7Is\",\"BHXBEI-wgX1wGhIj\",\"kL0mBLQM-j3BcrJo\"]}"
+    },
+    {
+      "t": 8141,
+      "phase": "contact-list-load",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_account"
+    },
+    {
+      "t": 19011,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object"
+    },
+    {
+      "t": 19033,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/requests?object=crm_contact&recordId=1E2hM-ETKI7mM7Is"
+    },
+    {
+      "t": 19034,
+      "phase": "contact-open-cold",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_contact\",\"operation\":\"update\",\"recordId\":\"1E2hM-ETKI7mM7Is\"}"
+    },
+    {
+      "t": 19034,
+      "phase": "contact-open-cold",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_contact\",\"operation\":\"delete\",\"recordId\":\"1E2hM-ETKI7mM7Is\"}"
+    },
+    {
+      "t": 19038,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id%2Caccount&top=1&filter=%5B%22id%22%2C%22%3D%22%2C%221E2hM-ETKI7mM7Is%22%5D"
+    },
+    {
+      "t": 19124,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_activity"
+    },
+    {
+      "t": 19126,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact/1E2hM-ETKI7mM7Is/field-access"
+    },
+    {
+      "t": 19189,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/records/crm_contact/1E2hM-ETKI7mM7Is/lock"
+    },
+    {
+      "t": 19578,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?top=1&select=id&filter=%5B%22contact%22%2C%22%3D%22%2C%22BHXBEI-wgX1wGhIj%22%5D"
+    },
+    {
+      "t": 19589,
+      "phase": "contact-open-cold",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?top=1&filter=%5B%22contact%22%2C%22%3D%22%2C%221E2hM-ETKI7mM7Is%22%5D"
+    },
+    {
+      "t": 19905,
+      "phase": "contact-open-cold",
+      "method": "PATCH",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference/Nx8NPtOnmMbldcx6",
+      "postData": "{\"value\":[{\"id\":\"record:crm_contact:1E2hM-ETKI7mM7Is\",\"type\":\"record\",\"label\":\"Grace\",\"href\":\"/apps/com.example.crm/crm_contact/record/1E2hM-ETKI7mM7Is\",\"visitedAt\":\"2026-10-30T11:35:37.205Z\"},{\"id\":\"object:crm_contact\",\"type\":\"object\",\"name\":\"crm_contact\",\"href\":\"/apps/com.example.crm/crm_contact\",\"visitedAt\":\"2026-10-30T11:30:07.897Z\"},{\"id\":\"record:crm_account:2tYQgXNSV1AkjmqO\",\"type\":\"record\",\"label\":\"Acme Corp\",\"href\":\"/apps/com.example.crm/crm_account/record/2tYQgXNSV1AkjmqO\",\"visitedAt\":\"2026-10-30T11:28:07.947Z\"},{\"id\":\"record:crm_account:Mx_eB4--D_huVof9\",\"type\":\"record\",\"label\":\"Globex Ltd\",\"href\":\"/apps/com.example.crm/crm_account/record/Mx_eB4--D_huVof9\",\"visitedAt\":\"2026-10-30T11:27:45.600Z\"},{\"id\":\"object:crm_account\",\"type\":\"object\",\"name\":\"crm_account\",\"href\":\"/apps/com.example.crm/crm_account\",\"visitedAt\":\"2026-10-30T11:27:08.900Z\"},{\"id\":\"record:crm_contact:BHXBEI-wgX1wGhIj\",\"type\":\"record\",\"label\":\"Linus\",\"href\":\"/apps/com.example.crm/crm_contact/record/BHXBEI-wgX1wGhIj\",\"visitedAt\":\"2026-10-30T11:25:10.666Z\"}]}"
+    },
+    {
+      "t": 33242,
+      "phase": "nav-to-accounts",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?top=0"
+    },
+    {
+      "t": 33304,
+      "phase": "nav-to-accounts",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?top=50&select=id%2Cname%2Cindustry%2Cannual_revenue%2Cwebsite"
+    },
+    {
+      "t": 33481,
+      "phase": "nav-to-accounts",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"update\",\"recordIds\":[\"2tYQgXNSV1AkjmqO\",\"Mx_eB4--D_huVof9\",\"qJFxLWxiPOMd-joD\"]}"
+    },
+    {
+      "t": 33482,
+      "phase": "nav-to-accounts",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"delete\",\"recordIds\":[\"2tYQgXNSV1AkjmqO\",\"Mx_eB4--D_huVof9\",\"qJFxLWxiPOMd-joD\"]}"
+    },
+    {
+      "t": 33489,
+      "phase": "nav-to-accounts",
+      "method": "PATCH",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference/Nx8NPtOnmMbldcx6",
+      "postData": "{\"value\":[{\"id\":\"object:crm_account\",\"type\":\"object\",\"name\":\"crm_account\",\"href\":\"/apps/com.example.crm/crm_account\",\"visitedAt\":\"2026-10-30T11:35:50.727Z\"},{\"id\":\"record:crm_contact:1E2hM-ETKI7mM7Is\",\"type\":\"record\",\"label\":\"Grace\",\"href\":\"/apps/com.example.crm/crm_contact/record/1E2hM-ETKI7mM7Is\",\"visitedAt\":\"2026-10-30T11:35:37.205Z\"},{\"id\":\"object:crm_contact\",\"type\":\"object\",\"name\":\"crm_contact\",\"href\":\"/apps/com.example.crm/crm_contact\",\"visitedAt\":\"2026-10-30T11:30:07.897Z\"},{\"id\":\"record:crm_account:2tYQgXNSV1AkjmqO\",\"type\":\"record\",\"label\":\"Acme Corp\",\"href\":\"/apps/com.example.crm/crm_account/record/2tYQgXNSV1AkjmqO\",\"visitedAt\":\"2026-10-30T11:28:07.947Z\"},{\"id\":\"record:crm_account:Mx_eB4--D_huVof9\",\"type\":\"record\",\"label\":\"Globex Ltd\",\"href\":\"/apps/com.example.crm/crm_account/record/Mx_eB4--D_huVof9\",\"visitedAt\":\"2026-10-30T11:27:45.600Z\"},{\"id\":\"record:crm_contact:BHXBEI-wgX1wGhIj\",\"type\":\"record\",\"label\":\"Linus\",\"href\":\"/apps/com.example.crm/crm_contact/record/BHXBEI-wgX1wGhIj\",\"visitedAt\":\"2026-10-30T11:25:10.666Z\"}]}"
+    },
+    {
+      "t": 42282,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/approvals/requests?object=crm_account&recordId=2tYQgXNSV1AkjmqO"
+    },
+    {
+      "t": 42282,
+      "phase": "account-open-first-in-session",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"update\",\"recordId\":\"2tYQgXNSV1AkjmqO\"}"
+    },
+    {
+      "t": 42282,
+      "phase": "account-open-first-in-session",
+      "method": "POST",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_account\",\"operation\":\"delete\",\"recordId\":\"2tYQgXNSV1AkjmqO\"}"
+    },
+    {
+      "t": 42292,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account?populate=organization_id%2Ccreated_by%2Cupdated_by%2Cowner_id%2Cowning_business_unit_id&top=1&filter=%5B%22id%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 42379,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_lead"
+    },
+    {
+      "t": 42380,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_opportunity"
+    },
+    {
+      "t": 42382,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_account/2tYQgXNSV1AkjmqO/field-access"
+    },
+    {
+      "t": 42479,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 42483,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 42483,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_lead?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 42484,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_opportunity?top=1&select=id&filter=%5B%22account%22%2C%22%3D%22%2C%22Mx_eB4--D_huVof9%22%5D"
+    },
+    {
+      "t": 42696,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_activity?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 42700,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 42702,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_lead?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 42712,
+      "phase": "account-open-first-in-session",
+      "method": "GET",
+      "url": "http://localhost:38618/api/v1/data/crm_opportunity?top=1&filter=%5B%22account%22%2C%22%3D%22%2C%222tYQgXNSV1AkjmqO%22%5D"
+    },
+    {
+      "t": 42981,
+      "phase": "account-open-first-in-session",
+      "method": "PATCH",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference/Nx8NPtOnmMbldcx6",
+      "postData": "{\"value\":[{\"id\":\"record:crm_account:2tYQgXNSV1AkjmqO\",\"type\":\"record\",\"label\":\"Acme Corp\",\"href\":\"/apps/com.example.crm/crm_account/record/2tYQgXNSV1AkjmqO\",\"visitedAt\":\"2026-10-30T11:36:00.280Z\"},{\"id\":\"object:crm_account\",\"type\":\"object\",\"name\":\"crm_account\",\"href\":\"/apps/com.example.crm/crm_account\",\"visitedAt\":\"2026-10-30T11:35:50.727Z\"},{\"id\":\"record:crm_contact:1E2hM-ETKI7mM7Is\",\"type\":\"record\",\"label\":\"Grace\",\"href\":\"/apps/com.example.crm/crm_contact/record/1E2hM-ETKI7mM7Is\",\"visitedAt\":\"2026-10-30T11:35:37.205Z\"},{\"id\":\"object:crm_contact\",\"type\":\"object\",\"name\":\"crm_contact\",\"href\":\"/apps/com.example.crm/crm_contact\",\"visitedAt\":\"2026-10-30T11:30:07.897Z\"},{\"id\":\"record:crm_account:Mx_eB4--D_huVof9\",\"type\":\"record\",\"label\":\"Globex Ltd\",\"href\":\"/apps/com.example.crm/crm_account/record/Mx_eB4--D_huVof9\",\"visitedAt\":\"2026-10-30T11:27:45.600Z\"},{\"id\":\"record:crm_contact:BHXBEI-wgX1wGhIj\",\"type\":\"record\",\"label\":\"Linus\",\"href\":\"/apps/com.example.crm/crm_contact/record/BHXBEI-wgX1wGhIj\",\"visitedAt\":\"2026-10-30T11:25:10.666Z\"}]}"
+    }
+  ],
+  "console": [
+    {
+      "phase": "contact-open-cold",
+      "text": "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    }
+  ]
+}

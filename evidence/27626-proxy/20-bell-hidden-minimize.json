@@ -1,0 +1,536 @@
+{
+  "startedAt": "2026-10-30T11:31:36.462Z",
+  "phases": [
+    {
+      "name": "list-load",
+      "start": 1721,
+      "rowsAt": 19598
+    },
+    {
+      "name": "idle-visible",
+      "start": 19648,
+      "end": 24649
+    },
+    {
+      "name": "idle-hidden",
+      "start": 25754,
+      "end": 165893
+    },
+    {
+      "name": "back-visible",
+      "start": 166398,
+      "end": 186404
+    }
+  ],
+  "requests": [
+    {
+      "t": 1750,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Document",
+      "url": "http://localhost:38618/apps/com.example.crm/crm_contact"
+    },
+    {
+      "t": 1854,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/runtime/config"
+    },
+    {
+      "t": 1857,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Manifest",
+      "url": "http://localhost:38618/manifest.json"
+    },
+    {
+      "t": 16943,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/me/localization"
+    },
+    {
+      "t": 17058,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Other",
+      "url": "http://localhost:38618/favicon.svg"
+    },
+    {
+      "t": 17058,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Manifest",
+      "url": "blob:http://localhost:38618/f61a733e-4791-4054-88b7-d28b46c58c65"
+    },
+    {
+      "t": 17099,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/get-session"
+    },
+    {
+      "t": 17101,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/get-session"
+    },
+    {
+      "t": 17107,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "EventSource",
+      "url": "http://localhost:38618/api/v1/dev/metadata-events"
+    },
+    {
+      "t": 17185,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/discovery"
+    },
+    {
+      "t": 17199,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/i18n/translations/en-US"
+    },
+    {
+      "t": 17203,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/organization/get-active-member"
+    },
+    {
+      "t": 17203,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/organization/list"
+    },
+    {
+      "t": 17253,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/config"
+    },
+    {
+      "t": 17267,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/app"
+    },
+    {
+      "t": 17291,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/app"
+    },
+    {
+      "t": 17295,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/sys_user_preference?top=403&filter=%5B%22and%22%2C%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D%2C%5B%22or%22%2C%5B%22key%22%2C%22in%22%2C%5B%22ui.flow.palette.recents%22%2C%22ui.recent%22%2C%22ui.favorites%22%5D%5D%2C%5B%22key%22%2C%22startswith%22%2C%22ui.record.%22%5D%2C%5B%22key%22%2C%22startswith%22%2C%22ui.list.%22%5D%5D%5D"
+    },
+    {
+      "t": 17375,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/view"
+    },
+    {
+      "t": 17387,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/me/permissions"
+    },
+    {
+      "t": 17387,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/me/permissions"
+    },
+    {
+      "t": 17428,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/object?package=com.example.crm"
+    },
+    {
+      "t": 17462,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_organization"
+    },
+    {
+      "t": 17467,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_user"
+    },
+    {
+      "t": 17467,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/object/sys_business_unit"
+    },
+    {
+      "t": 18363,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/packages"
+    },
+    {
+      "t": 18367,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/auth/me/localization"
+    },
+    {
+      "t": 18368,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/me/apps"
+    },
+    {
+      "t": 18371,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/me/apps"
+    },
+    {
+      "t": 18372,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_contact"
+    },
+    {
+      "t": 18372,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?top=0"
+    },
+    {
+      "t": 18664,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/page"
+    },
+    {
+      "t": 18753,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/dashboard"
+    },
+    {
+      "t": 18754,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/approvals/requests?status=pending&approverId=urDM5gHP6qnxNknqoBMsBO44DahSisUK%2Cadmin%40objectos.ai%2Cposition%3Aplatform_admin%2Cposition%3Aorg_owner%2Cposition%3Aeveryone&limit=5"
+    },
+    {
+      "t": 18755,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/sys_inbox_message?top=20&sort=-created_at&filter=%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D"
+    },
+    {
+      "t": 18755,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/sys_user/urDM5gHP6qnxNknqoBMsBO44DahSisUK"
+    },
+    {
+      "t": 18755,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/ai/agents"
+    },
+    {
+      "t": 18757,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/settings"
+    },
+    {
+      "t": 18758,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/i18n/locales"
+    },
+    {
+      "t": 19039,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/crm_contact?populate=account&top=50&select=id%2Cfirst_name%2Clast_name%2Cfull_name%2Cemail%2Caccount"
+    },
+    {
+      "t": 19146,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/settings/localization"
+    },
+    {
+      "t": 19591,
+      "phase": "list-load",
+      "method": "POST",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_contact\",\"operation\":\"update\",\"recordIds\":[\"1E2hM-ETKI7mM7Is\",\"BHXBEI-wgX1wGhIj\",\"kL0mBLQM-j3BcrJo\"]}"
+    },
+    {
+      "t": 19591,
+      "phase": "list-load",
+      "method": "POST",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/security/explain",
+      "postData": "{\"object\":\"crm_contact\",\"operation\":\"delete\",\"recordIds\":[\"1E2hM-ETKI7mM7Is\",\"BHXBEI-wgX1wGhIj\",\"kL0mBLQM-j3BcrJo\"]}"
+    },
+    {
+      "t": 19592,
+      "phase": "list-load",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/meta/object/crm_account"
+    },
+    {
+      "t": 78775,
+      "phase": "idle-hidden",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/sys_inbox_message?top=20&sort=-created_at&filter=%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D"
+    },
+    {
+      "t": 78775,
+      "phase": "idle-hidden",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/approvals/requests?status=pending&approverId=urDM5gHP6qnxNknqoBMsBO44DahSisUK%2Cadmin%40objectos.ai%2Cposition%3Aplatform_admin%2Cposition%3Aorg_owner%2Cposition%3Aeveryone&limit=5"
+    },
+    {
+      "t": 139777,
+      "phase": "idle-hidden",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/sys_inbox_message?top=20&sort=-created_at&filter=%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D"
+    },
+    {
+      "t": 139777,
+      "phase": "idle-hidden",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/approvals/requests?status=pending&approverId=urDM5gHP6qnxNknqoBMsBO44DahSisUK%2Cadmin%40objectos.ai%2Cposition%3Aplatform_admin%2Cposition%3Aorg_owner%2Cposition%3Aeveryone&limit=5"
+    },
+    {
+      "t": 165907,
+      "phase": "idle-hidden",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/data/sys_inbox_message?top=20&sort=-created_at&filter=%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO44DahSisUK%22%5D"
+    },
+    {
+      "t": 165908,
+      "phase": "idle-hidden",
+      "method": "GET",
+      "type": "Fetch",
+      "url": "http://localhost:38618/api/v1/approvals/requests?status=pending&approverId=urDM5gHP6qnxNknqoBMsBO44DahSisUK%2Cadmin%40objectos.ai%2Cposition%3Aplatform_admin%2Cposition%3Aorg_owner%2Cposition%3Aeveryone&limit=5"
+    }
+  ],
+  "websockets": [
+    {
+      "t": 2428,
+      "phase": "list-load",
+      "url": "ws://localhost:38618/?token=GGSbeU23Qggx"
+    }
+  ],
+  "visibility": [
+    {
+      "t": 19608,
+      "state": "visible"
+    },
+    {
+      "t": 24649,
+      "state": "visible"
+    },
+    {
+      "t": 25754,
+      "state": "hidden"
+    },
+    {
+      "t": 35761,
+      "state": "hidden"
+    },
+    {
+      "t": 45770,
+      "state": "hidden"
+    },
+    {
+      "t": 55781,
+      "state": "hidden"
+    },
+    {
+      "t": 65788,
+      "state": "hidden"
+    },
+    {
+      "t": 75799,
+      "state": "hidden"
+    },
+    {
+      "t": 85811,
+      "state": "hidden"
+    },
+    {
+      "t": 95817,
+      "state": "hidden"
+    },
+    {
+      "t": 105831,
+      "state": "hidden"
+    },
+    {
+      "t": 115842,
+      "state": "hidden"
+    },
+    {
+      "t": 125848,
+      "state": "hidden"
+    },
+    {
+      "t": 135862,
+      "state": "hidden"
+    },
+    {
+      "t": 145870,
+      "state": "hidden"
+    },
+    {
+      "t": 155875,
+      "state": "hidden"
+    },
+    {
+      "t": 165890,
+      "state": "hidden"
+    },
+    {
+      "t": 166398,
+      "state": "visible"
+    }
+  ],
+  "consoleErrors": [],
+  "visibilityEvents": "[[23026,\"hidden\"],[164179,\"visible\"]]",
+  "summary": {
+    "list-load": {
+      "total": 43,
+      "inbox": [
+        18755
+      ],
+      "approvals": [
+        18754
+      ],
+      "other": [
+        "GET /apps/com.example.crm/crm_contact @1750",
+        "GET /api/v1/runtime/config @1854",
+        "GET /manifest.json @1857",
+        "GET /api/v1/auth/me/localization @16943",
+        "GET /favicon.svg @17058",
+        "GET blob:/f61a733e-4791-4054-88b7-d28b46c58c65 @17058",
+        "GET /api/v1/auth/get-session @17099",
+        "GET /api/v1/auth/get-session @17101",
+        "GET /api/v1/dev/metadata-events @17107",
+        "GET /api/v1/discovery @17185",
+        "GET /api/v1/i18n/translations/en-US @17199",
+        "GET /api/v1/auth/organization/get-active-member @17203",
+        "GET /api/v1/auth/organization/list @17203",
+        "GET /api/v1/auth/config @17253",
+        "GET /api/v1/meta/app @17267",
+        "GET /api/v1/meta/app @17291",
+        "GET /api/v1/data/sys_user_preference?top=403&filter=%5B%22and%22%2C%5B%22user_id%22%2C%22%3D%22%2C%22urDM5gHP6qnxNknqoBMsBO4 @17295",
+        "GET /api/v1/meta/view @17375",
+        "GET /api/v1/auth/me/permissions @17387",
+        "GET /api/v1/auth/me/permissions @17387",
+        "GET /api/v1/meta/object?package=com.example.crm @17428",
+        "GET /api/v1/meta/object/sys_organization @17462",
+        "GET /api/v1/meta/object/sys_user @17467",
+        "GET /api/v1/meta/object/sys_business_unit @17467",
+        "GET /api/v1/packages @18363",
+        "GET /api/v1/auth/me/localization @18367",
+        "GET /api/v1/me/apps @18368",
+        "GET /api/v1/me/apps @18371",
+        "GET /api/v1/meta/object/crm_contact @18372",
+        "GET /api/v1/data/crm_contact?top=0 @18372",
+        "GET /api/v1/meta/page @18664",
+        "GET /api/v1/meta/dashboard @18753",
+        "GET /api/v1/data/sys_user/urDM5gHP6qnxNknqoBMsBO44DahSisUK @18755",
+        "GET /api/v1/ai/agents @18755",
+        "GET /api/settings @18757",
+        "GET /api/v1/i18n/locales @18758",
+        "GET /api/v1/data/crm_contact?populate=account&top=50&select=id%2Cfirst_name%2Clast_name%2Cfull_name%2Cemail%2Caccount @19039",
+        "GET /api/settings/localization @19146",
+        "POST /api/v1/security/explain @19591",
+        "POST /api/v1/security/explain @19591",
+        "GET /api/v1/meta/object/crm_account @19592"
+      ]
+    },
+    "idle-visible": {
+      "total": 0,
+      "inbox": [],
+      "approvals": [],
+      "other": []
+    },
+    "idle-hidden": {
+      "total": 6,
+      "inbox": [
+        78775,
+        139777,
+        165907
+      ],
+      "approvals": [
+        78775,
+        139777,
+        165908
+      ],
+      "other": []
+    },
+    "back-visible": {
+      "total": 0,
+      "inbox": [],
+      "approvals": [],
+      "other": []
+    }
+  },
+  "method": "minimize"
+}
