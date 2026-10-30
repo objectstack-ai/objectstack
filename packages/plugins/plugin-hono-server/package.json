@@ -26,7 +26,7 @@
     "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/plugins/plugin-hono-server --project tsconfig.test.json"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.3",
     "@objectstack/core": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",

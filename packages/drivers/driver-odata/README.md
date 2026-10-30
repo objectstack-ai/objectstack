@@ -24,7 +24,7 @@ export const plugins = [
     name: 'erp',                                   // the datasource it serves
     serviceRoot: 'https://erp.example.com/odata/v4/sales/',
     auth: { scheme: 'bearer' },                    // or { scheme: 'basic', username: 'svc_reader' }
-    secrets: datasourceSecretBinder,               // the host's datasource secret store
+    // no `secrets`: credentialsRef resolves through the host's `datasource-secret-resolver` service
   }),
 ];
 
@@ -68,6 +68,7 @@ export default defineStack({
 | `serviceRoot` | — | The service root URL (http or https, no credentials, no query). |
 | `version` | `4.0` | The protocol version. Only the v4 dialect ships. |
 | `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. Leave it `none` when the datasource borrows a connector instance's credential (below). |
+| `secrets` | (none) | An object with `resolve(credentialsRef)` that the secret is resolved through. When absent, the kernel service `datasource-secret-resolver` is read at the first request; `os serve` registers it over its own `sys_secret` store. A host composing its own kernel passes the binder it gives `DatasourceAdminServicePlugin`, or registers that service. |
 | `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
 | `requestTimeoutMs` | `30000` | Per-request timeout. |
 
