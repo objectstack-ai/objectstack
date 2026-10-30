@@ -107,7 +107,7 @@ describe('ListView — the load failure is a DataErrorState (#7143)', () => {
   });
 
   it('UNCHANGED: the retry button is still rendered inside the panel', async () => {
-    const { container } = failing(forbidden());
+    const { container } = failing(Object.assign(new Error('Internal error'), { httpStatus: 500 }));
     const box = await panel(container, 'list-error-state');
     const retry = box.querySelector('[data-testid="list-error-retry"]');
     expect(retry).not.toBeNull();
