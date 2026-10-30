@@ -199,8 +199,9 @@ that one instance instead of failing the run:
 > **Amendment note (2026-10-30, #28038 — after #27992 / PR #28014, #27237, and #28016 / PR
 > #28037).** The first and third bullets above are kept as written; they now hold only for an
 > instance **on the backoff**. Some degraded instances are **held** instead: a configuration
-> fault first met on a backoff retry (#27992 — the instance is held with the configuration
-> reason, `packages/services/service-automation/src/plugin.ts#failDegradedConnectorInstance`),
+> fault met by an instance that is already degraded, on its backoff retry or on a
+> `metadata:reloaded` reconcile (#27992 — the instance is held with the configuration reason,
+> `packages/services/service-automation/src/plugin.ts#failDegradedConnectorInstance`),
 > and a credential its upstream refused when the value is stored in `sys_connector_credential`
 > or written into the declaration (#27237,
 > `packages/services/service-automation/src/plugin.ts#holdConnectorForRejectedCredential`). A
@@ -209,13 +210,15 @@ that one instance instead of failing the run:
 > reconcile while its signature is unchanged
 > (`packages/services/service-automation/src/plugin.ts#reconcileDeclaredConnectors`). Only an
 > edit of its declaration, setting its stored credential again (the row's revision is part of
-> the signature), or a restart re-attempts it. Its husk carries the hold
+> the signature), or a restart re-attempts it. Clearing the stored credential re-attempts it
+> too, since the reference's fingerprint changes: the instance then degrades for the missing
+> reference and goes back on the backoff. Its husk carries the hold
 > (`packages/services/service-automation/src/engine.ts#getConnectorDegradedHold`), and a
 > `connector_action` dispatch to it names what unblocks it instead of promising a retry
 > (#28016, `packages/services/service-automation/src/builtin/connector-nodes.ts#registerConnectorNodes`,
 > `packages/services/service-automation/src/plugin-extension-api.ts#describeHold`): "Dispatch is
 > unavailable until its declaration is edited (or the server restarts); the platform does not
-> retry it.", or "… until credential '<ref>' is set again (or the server restarts); …". An
+> retry it.", or "… until credential '`<ref>`' is set again (or the server restarts); …". An
 > instance on the backoff (an unreachable upstream, or a refused credential read from an
 > environment variable or the host's resolver) keeps "Dispatch is unavailable until that is
 > resolved; the platform retries automatically."
