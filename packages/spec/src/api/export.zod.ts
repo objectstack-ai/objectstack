@@ -494,7 +494,9 @@ export const IMPORT_JOB_MAX_ROWS = 50_000;
  * that had at least one row and created, updated or skipped none of them ends
  * `failed`, as does a job aborted on a fatal error. A job with no rows, a job
  * whose every row was skipped and a job whose rows only partly failed end
- * `succeeded`. A dry run follows the same rule, and a cancel wins over both.
+ * `succeeded`. A dry run follows the same rule. A cancel wins over that
+ * counting rule, so over both of its outcomes, but not over a fatal abort: an
+ * error thrown after the job was cancelled still ends it `failed`.
  */
 export const ImportJobStatus = z.enum([
   'pending',    // Row persisted, worker not yet started
