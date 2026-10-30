@@ -1206,11 +1206,19 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * the sweep would have kept" and "the objects this selects" are the same set
    * (pinned in `__tests__/external-datasource-service.test.ts`).
    *
-   * A name nothing is bound to selects nothing and answers an empty, vacuously
-   * `ok` report — the sweep-then-filter answer for an unknown name, kept rather
-   * than upgraded to a throw: whether an unknown datasource is an error is a
-   * separate question from this one, and this method must not decide it in
-   * passing.
+   * A saved datasource nothing is bound to selects nothing and answers an
+   * empty, vacuously `ok` report.
+   *
+   * [#27696] A name that resolves no saved datasource is not that datasource:
+   * it THROWS the 404 {@link datasourceNotFoundError} before anything is
+   * listed or validated, the check {@link testConnection} makes (#27510), so
+   * `POST …/external/validate` answers it as `GET /datasources/:name` and its
+   * federation siblings do. It answered the empty `ok` report above, and a
+   * caller could not tell "nothing here is federated" from "no such
+   * datasource". Only existence is asked, not the federation guard
+   * ({@link assertFederationSource}): a managed datasource, and the primary
+   * one (not looked up, as it may have no stored record), keep their empty
+   * report.
    *
    * NOT on `IExternalDatasourceService` (spec): the route composition this
    * serves was authorized as a service-side helper, while adding a
@@ -1220,6 +1228,9 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * scoped spelling, rather than silently falling back to the fan-out.
    */
   async validateDatasource(datasource: string): Promise<SchemaValidationReport> {
+    if (datasource !== DEFAULT_DATASOURCE_NAME && !(await this.config.getDatasource(datasource))) {
+      throw datasourceNotFoundError(datasource);
+    }
     const objects = await this.config.listObjects();
     return this.validateEach(
       objects.filter((o) => this.isFederated(o) && (o.datasource ?? 'default') === datasource),
