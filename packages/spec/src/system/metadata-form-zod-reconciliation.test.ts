@@ -365,6 +365,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // #27944 — the param dialog's submit label lands spec-first the same way:
+  // `planned` in the liveness ledger, drawn by no renderer until the console's
+  // param dialog reads it. The console change that flips the ledger row
+  // deletes this row and offers the key in `action.form.ts`.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'submitText',
+    why: "planned, not yet rendered — the param dialog's submit button label is validated at parse (an I18nLabel, never blank, only beside a non-empty `params`) and translated by `translateAction`, but the console's param dialog still draws its default \"Confirm\" until it reads the key. A form control offered today would let an author set a button label nothing shows",
+  },
   {
     kind: 'omit',
     type: 'view',
