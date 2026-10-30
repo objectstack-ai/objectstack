@@ -32,6 +32,7 @@ vi.mock('recharts', async () => {
 });
 
 import AdvancedChartImpl from './AdvancedChartImpl';
+import { ChartContainer, ChartTooltipContent } from './ChartContainerImpl';
 
 const DESKTOP_WIDTH = window.innerWidth;
 
@@ -218,3 +219,23 @@ describe('a lone bar series painted per category (row 15 control)', () => {
   });
 });
 
+
+describe('the tooltip header names a month bucket the way the axis does (objectstack#27520 row 15)', () => {
+  const header = (label: string) => {
+    const { container } = render(
+      <ChartContainer config={{ amount: { label: 'Amount' } }}>
+        <ChartTooltipContent active label={label} payload={[{ value: 5, name: 'amount', dataKey: 'amount', payload: {} }]} />
+      </ChartContainer>,
+    );
+    return container.querySelector('.font-medium')?.textContent;
+  };
+
+  it('reads `Oct 2025` for the bucket key `2025-10`', () => {
+    expect(header('2025-10')).toBe('Oct 2025');
+  });
+
+  it('CONTROL: any other category reads as written', () => {
+    expect(header('2025-Q4')).toBe('2025-Q4');
+    expect(header('In Progress')).toBe('In Progress');
+  });
+});

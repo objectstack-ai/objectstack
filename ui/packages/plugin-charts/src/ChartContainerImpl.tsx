@@ -11,6 +11,7 @@
 import * as React from "react"
 import { ResponsiveContainer, Tooltip, Legend } from "recharts"
 import { useDisplayLocale } from "@object-ui/i18n"
+import { formatMonthBucketLabel } from "@object-ui/core"
 
 // Utility function to merge class names (inline to avoid external dependency)
 const cn = (...classes: (string | undefined)[]) => classes.filter(Boolean).join(' ')
@@ -348,7 +349,12 @@ function ChartTooltipContent({
       return null
     }
 
-    return <div className={cn("font-medium", labelClassName)}>{value}</div>
+    // A month bucket key (`2025-10`) reads as the axis beside it does,
+    // `Oct 2025`; the row keeps its key (objectstack#27520).
+    const shown =
+      typeof value === "string" ? formatMonthBucketLabel(value, displayLocale) ?? value : value
+
+    return <div className={cn("font-medium", labelClassName)}>{shown}</div>
   }, [
     label,
     labelFormatter,
@@ -357,6 +363,7 @@ function ChartTooltipContent({
     labelClassName,
     config,
     labelKey,
+    displayLocale,
   ])
 
   if (!active || !payload?.length) {
