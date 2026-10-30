@@ -802,6 +802,15 @@ export interface FlowUserGrants {
    * reads it drops out: the run sees less, never more.
    */
   email?: string;
+  /**
+   * The user's posture rung, derived from the grants above by the resolver a
+   * request's envelope is built through (`resolveUserAuthzGrants`' own field,
+   * under its own name). Run setup seeds it beside the positions and
+   * permission sets ({@link SeededRunContext.posture}). A resolver that omits
+   * it leaves the run without one, so every reader of the rung answers as for
+   * a principal below it: the run sees less, never more.
+   */
+  posture?: SeededRunContext['posture'];
 }
 
 /**
@@ -5655,7 +5664,8 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Seed a `runAs:'user'` run context's authorization facts — `positions`,
-     * `permissions`, the peer list `org_user_ids` and the user's `email` — for
+     * `permissions` with the posture rung derived from them, the peer list
+     * `org_user_ids` and the user's `email` — for
      * its `userId`, through the wired grants resolver: the one resolver the
      * request path seeds a request's envelope through
      * (`resolveUserAuthzGrants`, bridged by the automation plugin). Mutates
