@@ -10,7 +10,10 @@
  * the requests both polled feeds actually send, under fake timers and a
  * `document.hidden` driver (the `sharedInboxFeed.cadence-7249` technique):
  *
- *  - under the cut-off, the hidden cadence is today's 60 s;
+ *  - under the cut-off, the hidden cadence is `HIDDEN_POLL_MS`, 3 minutes —
+ *    clearly slower than the 1-minute foreground (objectstack#28084);
+ *  - a tab hidden while visible sends its already-armed foreground tick, then
+ *    reads at the hidden spacing: at most 4 reads per feed before the cut-off;
  *  - past it, nothing goes out, however long the tab stays hidden;
  *  - the return sends exactly one read per feed, then the foreground cadence;
  *  - a visible spell restarts the clock — "continuously hidden" is the rule;
@@ -63,11 +66,12 @@ import { HIDDEN_POLL_STOP_MS } from '../hiddenTabPollStop';
 
 /**
  * The declared cadences, restated as the pins' units — both the 60 s fallback
- * of a push channel since objectstack#27626 (they were 10 s and 30 s).
+ * of a push channel since objectstack#27626 (they were 10 s and 30 s), and the
+ * hidden cadence, three times slower since objectstack#28084.
  */
 const INBOX_POLL_MS = 60_000;
 const APPROVALS_POLL_MS = 60_000;
-const HIDDEN_POLL_MS = 60_000;
+const HIDDEN_POLL_MS = 180_000;
 
 const approvalsReads = () =>
   (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter((c) =>
@@ -125,14 +129,14 @@ afterEach(() => {
 });
 
 describe('objectui#12439 — a forgotten tab stops polling', () => {
-  it('keeps the 60 s hidden cadence under the cut-off, then sends nothing at all', async () => {
+  it('keeps the hidden cadence under the cut-off, then sends nothing at all', async () => {
     setHidden(true);
     mountBothFeeds();
     await settle();
     expect(reads()).toEqual({ approvals: 1, inbox: 1 });
 
-    // Under the cut-off: today's hidden cadence, unchanged — the mount read
-    // plus one per HIDDEN_POLL_MS tick that comes due before HIDDEN_POLL_STOP_MS.
+    // Under the cut-off: the hidden cadence — the mount read plus one per
+    // HIDDEN_POLL_MS tick that comes due before HIDDEN_POLL_STOP_MS.
     await advance(HIDDEN_POLL_STOP_MS - 1);
     const ticksBeforeStop = Math.ceil(HIDDEN_POLL_STOP_MS / HIDDEN_POLL_MS) - 1;
     expect(reads()).toEqual({ approvals: 1 + ticksBeforeStop, inbox: 1 + ticksBeforeStop });
@@ -164,6 +168,52 @@ describe('objectui#12439 — a forgotten tab stops polling', () => {
       approvals: suspended.approvals + 1 + window / APPROVALS_POLL_MS,
       inbox: suspended.inbox + 1 + window / INBOX_POLL_MS,
     });
+  });
+
+  it('a tab hidden while visible reads at most 4 times per feed in its 10 hidden minutes (objectstack#28084)', async () => {
+    mountBothFeeds();
+    await settle();
+    expect(reads()).toEqual({ approvals: 1, inbox: 1 });
+
+    // Hide half-way to the first foreground tick: the tick armed while the tab
+    // was visible keeps its foreground due time.
+    const hiddenAt = APPROVALS_POLL_MS / 2;
+    await advance(hiddenAt);
+    await switchTab(true);
+    const atHide = reads();
+    const sinceHide = () => ({
+      approvals: reads().approvals - atHide.approvals,
+      inbox: reads().inbox - atHide.inbox,
+    });
+    expect(sinceHide()).toEqual({ approvals: 0, inbox: 0 });
+
+    // The already-armed foreground tick fires once, after the hide.
+    await advance(APPROVALS_POLL_MS - hiddenAt);
+    expect(sinceHide()).toEqual({ approvals: 1, inbox: 1 });
+
+    // Then the hidden spacing: nothing until a full HIDDEN_POLL_MS has passed.
+    let expected = 1;
+    let hiddenFor = APPROVALS_POLL_MS - hiddenAt;
+    while (hiddenFor + HIDDEN_POLL_MS < HIDDEN_POLL_STOP_MS) {
+      await advance(HIDDEN_POLL_MS - 1);
+      expect(sinceHide()).toEqual({ approvals: expected, inbox: expected });
+      await advance(1);
+      expected += 1;
+      hiddenFor += HIDDEN_POLL_MS;
+      expect(sinceHide()).toEqual({ approvals: expected, inbox: expected });
+    }
+    // At most 4 reads per feed in the first 10 hidden minutes — at the
+    // foreground rate it would have been 10.
+    expect(expected).toBe(4);
+
+    // Nothing after the 10th hidden minute, and nothing left armed.
+    await advance(6 * HIDDEN_POLL_STOP_MS);
+    expect(sinceHide()).toEqual({ approvals: 4, inbox: 4 });
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Coming back: exactly one read per feed.
+    await switchTab(false);
+    expect(sinceHide()).toEqual({ approvals: 5, inbox: 5 });
   });
 
   it('restarts the clock on each hide — a visible spell resets it', async () => {
