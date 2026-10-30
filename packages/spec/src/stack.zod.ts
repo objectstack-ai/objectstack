@@ -4098,6 +4098,8 @@ const LOOKUP_AUTOFILL_STRING_SOURCES: ReadonlySet<string> = new Set([
 const LOOKUP_AUTOFILL_AMOUNT_TYPES: ReadonlySet<string> = new Set(['number', 'currency']);
 /** The relationship types, whose value is a record id of their `reference`. */
 const LOOKUP_AUTOFILL_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+/** The option types that hold a list without declaring `multiple`. */
+const LOOKUP_AUTOFILL_INHERENTLY_MULTI_TYPES: ReadonlySet<string> = new Set(['multiselect', 'checkboxes', 'tags']);
 /** A `formula` source's value type, from its `returnType`. */
 const LOOKUP_AUTOFILL_FORMULA_VALUE_TYPE: Readonly<Record<string, string>> = {
   number: 'number', currency: 'currency', text: 'text', boolean: 'boolean', date: 'date',
@@ -4124,22 +4126,22 @@ function lookupAutofillTypeMismatch(
   // and a formula with no `returnType` declares none: not known here, so not
   // judged — an unresolved type is not a wrong one.
   if (typeof targetType !== 'string' || typeof sourceType !== 'string' || sourceType === 'summary') return undefined;
-  const sourceSpelling = source.type === 'formula' ? `a \`formula\` returning \`${sourceType}\`` : `a \`${sourceType}\` field`;
-  if ((target.multiple === true) !== (source.multiple === true)) {
-    return `${sourceSpelling}${source.multiple === true ? ' (`multiple: true`)' : ''} cannot fill a `
-      + `\`${targetType}\` target${target.multiple === true ? ' (`multiple: true`)' : ''}: one holds a list, the other one value`;
+  const isList = (def: Record<string, unknown>, type: string): boolean =>
+    def.multiple === true || LOOKUP_AUTOFILL_INHERENTLY_MULTI_TYPES.has(type);
+  const pairing = `\`${String(source.type)}\`${source.type === 'formula' ? ` returning \`${sourceType}\`` : ''} → \`${targetType}\``;
+  if (isList(target, targetType) !== isList(source, sourceType)) {
+    return `one holds a list and the other a single value (${pairing})`;
   }
   if (LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(targetType) || LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(sourceType)) {
     if (LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(targetType) && LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(sourceType)
       && target.reference === source.reference) return undefined;
-    return `${sourceSpelling}${typeof source.reference === 'string' ? ` over '${source.reference}'` : ''} cannot fill a `
-      + `\`${targetType}\` target${typeof target.reference === 'string' ? ` over '${target.reference}'` : ''}: `
-      + 'a record id fills only a relationship over the same object';
+    const over = (def: Record<string, unknown>): string => (typeof def.reference === 'string' ? ` over '${def.reference}'` : '');
+    return `a record id fills only a relationship over the same object (${pairing.replace(' → ', `${over(source)} → `)}${over(target)})`;
   }
   if (targetType === sourceType) return undefined;
   if (LOOKUP_AUTOFILL_TEXT_TARGETS.has(targetType) && LOOKUP_AUTOFILL_STRING_SOURCES.has(sourceType)) return undefined;
   if (LOOKUP_AUTOFILL_AMOUNT_TYPES.has(targetType) && LOOKUP_AUTOFILL_AMOUNT_TYPES.has(sourceType)) return undefined;
-  return `${sourceSpelling} cannot fill a \`${targetType}\` target: the target cannot hold its value`;
+  return `the target cannot hold the source's value (${pairing})`;
 }
 
 /**
@@ -4205,8 +4207,8 @@ function collectLookupAutofillErrors(config: ObjectStackDefinition): string[] {
         const mismatch = lookupAutofillTypeMismatch(target, source);
         if (mismatch !== undefined) {
           errors.push(
-            `${where}: '${field.reference}.${pair.source}' is ${mismatch} ('${objectName}.${String(pair.target)}'). `
-              + 'Pair the target with a source of the same type.',
+            `${where}: '${field.reference}.${pair.source}' cannot fill '${objectName}.${String(pair.target)}' — `
+              + `${mismatch}. Pair the target with a source whose value it holds.`,
           );
         }
       });
