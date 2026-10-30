@@ -27,18 +27,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Action",
         help: "Action type (snake_case)",
         options: {
-          create: "create",
-          read: "read",
-          update: "update",
-          delete: "delete",
-          login: "login",
-          logout: "logout",
-          login_failed: "login_failed",
-          account_locked: "account_locked",
-          config_change: "config_change",
-          import: "import",
-          platform_admin_standing_change: "platform_admin_standing_change",
-          action_invocation: "action_invocation"
+          create: "Create",
+          read: "Read",
+          update: "Update",
+          delete: "Delete",
+          login: "Login",
+          logout: "Logout",
+          login_failed: "Login Failed",
+          account_locked: "Account Locked",
+          config_change: "Config Change",
+          import: "Import",
+          platform_admin_standing_change: "Platform Admin Standing Change",
+          action_invocation: "Action Invocation"
         }
       },
       user_id: {

@@ -15,7 +15,7 @@ import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
-import { ComponentRegistry, compareSortValues, evalRowPredicate, formatDate, hasDeclaredPredicate, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
+import { ComponentRegistry, compareSortValues, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
 import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope } from '@object-ui/react';
@@ -754,7 +754,7 @@ const DataTableRowActionsMenu: React.FC<{
   const customActions = useMemo(
     () =>
       Array.isArray(schema.rowActionDefs) && schema.onRowActionDef
-        ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions))
+        ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d))
         : [],
     [schema.rowActionDefs, schema.onRowActionDef, mayInvoke],
   );

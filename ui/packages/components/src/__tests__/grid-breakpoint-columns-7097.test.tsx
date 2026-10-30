@@ -168,9 +168,13 @@ describe('ui:grid emits a column class for every breakpoint in the vocabulary (#
     expect(classOf({ type: 'grid', columns: { xs: 1, xl: 5 }, gap: 4 })).toBe(
       'grid grid-cols-1 xl:grid-cols-5 gap-4',
     );
-    // A bare number keeps its mobile-first ramp (baseCols collapses to 1).
+    // A bare number keeps its mobile-first ramp (a phone draws two of four
+    // tiles across, objectstack#27355; two and three across collapse to 1).
     expect(classOf({ type: 'grid', columns: 4, gap: 4 })).toBe(
-      'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4',
+      'grid grid-cols-2 md:grid-cols-4 gap-4',
+    );
+    expect(classOf({ type: 'grid', columns: 3, gap: 4 })).toBe(
+      'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4',
     );
   });
 

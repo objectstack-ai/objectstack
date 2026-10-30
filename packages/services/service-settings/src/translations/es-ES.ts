@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PlatformTranslationData } from '@objectstack/spec/system';
+import { countryOptionLabels } from '../manifests/company.manifest.js';
 
 /**
  * Español (es-ES) — built-in settings manifest translations.
@@ -10,7 +11,7 @@ export const esES: PlatformTranslationData = {
     sourceLabels: {
       env: 'Entorno',
       global: 'Global',
-      tenant: 'Inquilino',
+      tenant: 'Organización',
       user: 'Usuario',
       default: 'Predeterminado',
     },
@@ -130,7 +131,7 @@ export const esES: PlatformTranslationData = {
         social: {
           title: 'Inicio de sesión social',
           description:
-            'Configura el proveedor de inicio de sesión de Google integrado. Las variables de entorno del despliegue siguen teniendo prioridad.',
+            'Configura el proveedor de inicio de sesión de Google integrado. Las credenciales definidas en la configuración del servidor siguen teniendo prioridad.',
         },
       },
       keys: {
@@ -150,7 +151,7 @@ export const esES: PlatformTranslationData = {
         },
         audience_posture: {
           label: 'Audiencia de autorregistro',
-          help: '«Solo por invitación» cierra el autorregistro: los usuarios solo se crean mediante un acto del operador (invitación, creación/importación por un administrador, SCIM o SSO empresarial). «Dominios de correo» lo abre solo a los dominios de la lista inferior; «Abierto» admite a cualquiera. «Dominios de correo» y «Abierto» requieren el conjunto de permisos de autorregistro inferior. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, o emailAndPassword.requireEmailVerification: false en la configuración del stack); un false guardado en esta consola se rechaza bajo «Abierto».',
+          help: '«Solo por invitación» cierra el autorregistro: los usuarios solo se crean mediante un acto del operador (invitación, creación/importación por un administrador, SCIM o SSO empresarial). «Dominios de correo» lo abre solo a los dominios de la lista inferior; «Abierto» admite a cualquiera. «Dominios de correo» y «Abierto» requieren el conjunto de permisos de autorregistro inferior. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que la configuración del servidor la desactive; desactivarla en esta consola se rechaza bajo «Abierto».',
           options: {
             invite_only: 'Solo por invitación — sin autorregistro (predeterminado)',
             email_domain: 'Solo dominios de correo permitidos',
@@ -163,7 +164,7 @@ export const esES: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'Conjunto de permisos de autorregistro',
-          help: 'Nombre del conjunto de permisos que recibe cada usuario autorregistrado (declarar member_default explícitamente es válido; admin_full_access se rechaza).',
+          help: 'Nombre del conjunto de permisos que recibe cada usuario autorregistrado. El conjunto estándar de miembro es válido; el conjunto de administrador completo se rechaza. Obligatorio cuando la audiencia permite el autorregistro.',
         },
         password_min_length: { label: 'Longitud mínima de contraseña' },
         password_max_length: { label: 'Longitud máxima de contraseña', help: 'Un límite superior protege frente a la denegación de servicio por el hasheo de contraseñas muy largas.' },
@@ -227,7 +228,7 @@ export const esES: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: 'Rangos de IP permitidos',
-          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos, y también cualquier solicitud cuya dirección de cliente el servidor no pueda determinar. Vacío = sin restricción. Se evalúa la dirección del extremo de la conexión; detrás de un proxy inverso, declare server.trustProxy en el stack para que se evalúe en su lugar la dirección de cliente reenviada.',
+          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos, y también cualquier solicitud cuya dirección de cliente el servidor no pueda determinar. Vacío = sin restricción. Se evalúa la dirección de origen de la conexión; detrás de un proxy inverso, la configuración del servidor debe confiar en ese proxy para que se evalúe en su lugar la dirección original del cliente.',
         },
         api_key_default_expiry_days: {
           label: 'Duración predeterminada de la clave (días)',
@@ -235,11 +236,11 @@ export const esES: PlatformTranslationData = {
         },
         api_key_max_expiry_days: {
           label: 'Duración máxima de la clave (días)',
-          help: 'La fecha de caducidad más lejana que puede pedir una clave nueva, contada desde su creación. Una más lejana se rechaza (API_KEY_EXPIRY_TOO_LONG); exactamente este número de días se acepta.',
+          help: 'La fecha de caducidad más lejana que puede pedir una clave nueva, contada desde su creación. Una más lejana se rechaza; exactamente este número de días se acepta.',
         },
         api_key_inactivity_days: {
           label: 'Caducidad por inactividad (días)',
-          help: 'Una clave sin uso registrado durante este número de días se rechaza (API_KEY_INACTIVE). No se revoca; cree una clave nueva. Una clave nunca usada cuenta desde su creación, o desde el inicio de la política de abajo si es anterior. 0 desactiva la caducidad por inactividad.',
+          help: 'Una clave sin uso registrado durante este número de días se rechaza. No se revoca; cree una clave nueva. Una clave nunca usada cuenta desde su creación, o desde el inicio de la política de abajo si es anterior. 0 desactiva la caducidad por inactividad.',
         },
         api_key_policy_started_at: {
           label: 'Inicio de la política de claves',
@@ -247,15 +248,15 @@ export const esES: PlatformTranslationData = {
         },
         google_enabled: {
           label: 'Habilitar inicio de sesión con Google',
-          help: 'Ofrece el inicio de sesión con Google cuando se resuelven tanto un ID de cliente como un secreto de cliente: los guardados abajo, o GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en el servidor, que tienen prioridad sobre los valores guardados. Hasta que ambos se resuelvan, la página de inicio de sesión no muestra el botón de Google, aunque esta opción esté activada. Desactivada, retira el inicio de sesión con Google aunque el servidor defina ambos. Crea el cliente OAuth en Google Cloud Console.',
+          help: 'Ofrece el inicio de sesión con Google cuando están disponibles tanto un ID de cliente como un secreto de cliente: los guardados abajo, o los definidos en la configuración del servidor, que tienen prioridad sobre los valores guardados. Hasta que ambos estén disponibles, la página de inicio de sesión no muestra el botón de Google, aunque esta opción esté activada. Desactivada, retira el inicio de sesión con Google aunque el servidor defina ambos. Crea el cliente OAuth en Google Cloud Console.',
         },
         google_client_id: {
           label: 'ID de cliente de Google',
-          help: 'ID de cliente de OAuth desde Google Cloud Console. También se puede definir GOOGLE_CLIENT_ID en el servidor.',
+          help: 'ID de cliente de OAuth desde Google Cloud Console. También se puede definir en la configuración del servidor.',
         },
         google_client_secret: {
           label: 'Secreto de cliente de Google',
-          help: 'Se almacena cifrado en reposo. También se puede definir GOOGLE_CLIENT_SECRET en el servidor.',
+          help: 'Se almacena cifrado en reposo. También se puede definir en la configuración del servidor.',
         },
       },
     },
@@ -313,7 +314,11 @@ export const esES: PlatformTranslationData = {
         city: { label: 'Ciudad' },
         state: { label: 'Provincia / Estado' },
         postal_code: { label: 'Código postal' },
-        country: { label: 'País', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN).' },
+        country: {
+          label: 'País',
+          help: 'País de la dirección registrada. Escribe el nombre de un país y elígelo de la lista.',
+          options: countryOptionLabels('es-ES'),
+        },
         phone: { label: 'Teléfono', help: 'Teléfono principal de la empresa (se recomienda E.164, p. ej. +1 415 555 0100).' },
         website: { label: 'Sitio web', help: 'Ejemplo: https://example.com' },
         primary_contact_name: { label: 'Nombre del contacto principal' },
@@ -331,7 +336,11 @@ export const esES: PlatformTranslationData = {
       keys: {
         timezone: { label: 'Zona horaria predeterminada', help: 'Determina qué significa «hoy» en las fórmulas, cómo agrupan las fechas los informes y cómo se muestran las fechas y horas. Acepta cualquier nombre de zona horaria IANA (p. ej. Europe/Madrid). Es la zona horaria vigente para la organización: el campo Zona horaria del registro de la organización no la cambia.' },
         locale: { label: 'Idioma predeterminado', help: 'Configuración regional BCP-47 para los catálogos de mensajes y el formato de números/fechas.' },
-        default_country: { label: 'País predeterminado', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN). Se usa para los valores por defecto de dirección y teléfono.' },
+        default_country: {
+          label: 'País predeterminado',
+          help: 'Se usa para los valores por defecto de dirección y teléfono. Escribe el nombre de un país y elígelo de la lista.',
+          options: countryOptionLabels('es-ES'),
+        },
         currency: { label: 'Moneda predeterminada', help: 'Código ISO 4217 aplicado cuando un campo de moneda no indica la suya.' },
         fiscal_year_start: { label: 'Inicio del año fiscal', help: 'Primer mes del año fiscal: determina «este trimestre / año fiscal» en los informes.' },
       },
@@ -355,7 +364,7 @@ export const esES: PlatformTranslationData = {
       },
       banners: {
         beta_notice: { title: 'Atención',
-          text: 'Las funciones beta pueden cambiar sin previo aviso. Fíjalas con variables de entorno (p. ej., `OS_FEATURE_FLAGS_AI_ENABLED=true`) para bloquearlas en todo el despliegue.' },
+          text: 'Las funciones beta pueden cambiar sin previo aviso. Una función definida en la configuración del servidor queda fijada, activada o desactivada, en todo el despliegue y no se puede cambiar aquí.' },
       },
     },
 
@@ -408,7 +417,7 @@ export const esES: PlatformTranslationData = {
         provider: { title: 'Proveedor',
           description: 'Elige el backend de LLM. El modo Memory repite la entrada: útil para pruebas, nunca para producción.' },
         gateway: { title: 'Vercel AI Gateway',
-          description: 'Enrutador multiproveedor. La especificación del modelo sigue `provider/model`, p. ej. `openai/gpt-4o`.' },
+          description: 'Enrutador multiproveedor. El modelo se escribe provider/model, p. ej. openai/gpt-4o.' },
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
@@ -443,27 +452,27 @@ export const esES: PlatformTranslationData = {
           },
         },
         gateway_model: { label: 'Modelo de Gateway',
-          help: 'Se reenvía como AI_GATEWAY_MODEL. Ejemplo: openai/gpt-4o' },
+          help: 'Se usa en lugar del modelo definido en la configuración del servidor. Ejemplo: openai/gpt-4o' },
         gateway_api_key: { label: 'Clave de API de Gateway',
           help: 'Opcional: solo se requiere si el gateway exige autenticación.' },
         openai_api_key: { label: 'Clave de API de OpenAI',
-          help: 'Se reenvía como OPENAI_API_KEY. Se almacena cifrada en reposo.' },
+          help: 'Se usa en lugar de la clave definida en la configuración del servidor. Se almacena cifrada en reposo.' },
         openai_model: { label: 'Modelo',
           help: 'ID de modelo predeterminado. Las anulaciones por agente tienen prioridad.' },
         openai_base_url: { label: 'Base URL',
           help: 'Anulación para Azure OpenAI o gateways autoalojados. Déjalo en blanco para api.openai.com.' },
         anthropic_api_key: { label: 'Clave de API de Anthropic',
-          help: 'Se reenvía como ANTHROPIC_API_KEY. Se almacena cifrada en reposo.' },
+          help: 'Se usa en lugar de la clave definida en la configuración del servidor. Se almacena cifrada en reposo.' },
         anthropic_model: { label: 'Modelo' },
         google_api_key: { label: 'Clave de API de Google',
-          help: 'Se reenvía como GOOGLE_GENERATIVE_AI_API_KEY. Se almacena cifrada en reposo.' },
+          help: 'Se usa en lugar de la clave definida en la configuración del servidor. Se almacena cifrada en reposo.' },
         google_model: { label: 'Modelo' },
         deepseek_api_key: { label: 'Clave de API de DeepSeek', help: 'sk-…, emitida en platform.deepseek.com.' },
         deepseek_model: { label: 'Modelo', help: 'Ejemplos: deepseek-chat (V3), deepseek-reasoner (razonamiento R1).' },
         dashscope_api_key: { label: 'Clave de API de DashScope', help: 'sk-…, emitida en dashscope.console.aliyun.com.' },
         dashscope_model: { label: 'Modelo' },
         cloudflare_account_id: { label: 'ID de cuenta de Cloudflare', help: 'El ID hexadecimal de 32 caracteres de la URL de tu panel de Cloudflare.' },
-        cloudflare_gateway_id: { label: 'ID de gateway', help: 'Nombre del gateway configurado en Cloudflare → AI Gateway. Por defecto `default`.' },
+        cloudflare_gateway_id: { label: 'ID de gateway', help: 'Nombre del gateway configurado en Cloudflare → AI Gateway. Por defecto, «default».' },
         cloudflare_api_key: { label: 'Token de Cloudflare AI Gateway', help: 'Emitido en AI Gateway → pestaña «API tokens» (cfut_… o sk_…).' },
         cloudflare_model: { label: 'Modelo' },
         siliconflow_api_key: { label: 'Clave de API de SiliconFlow' },
@@ -478,7 +487,7 @@ export const esES: PlatformTranslationData = {
           help: 'Límite estricto de tokens generados por respuesta.' },
         request_timeout_ms: { label: 'Tiempo de espera de la solicitud (ms)' },
         trace_enabled: { label: 'Registrar trazas',
-          help: 'Persiste las trazas de prompt/respuesta en sys_ai_trace para depuración y reproducción.' },
+          help: 'Guarda un registro de cada solicitud a la IA y de su respuesta, para poder revisar y reproducir una conversación cuando algo falla.' },
         log_prompts: { label: 'Registrar prompts completos',
           help: 'Incluye los prompts renderizados (no solo metadatos) en las filas de traza.' },
         embedder_provider: {
@@ -505,7 +514,7 @@ export const esES: PlatformTranslationData = {
         embedder_dimensions: { label: 'Dimensiones',
           help: 'Anula la dimensionalidad de salida (solo modelos Matryoshka). Déjalo en blanco para usar el valor predeterminado del modelo.' },
         embedder_batch_size: { label: 'Tamaño de lote',
-          help: 'Fragmentos por llamada a embed(). Redúcelo si alcanzas los límites de tasa o tamaño del proveedor.' },
+          help: 'Fragmentos que se envían al proveedor de embeddings en cada solicitud. Redúcelo si alcanzas los límites de tasa o tamaño del proveedor.' },
       },
       actions: {
         test: { label: 'Probar conexión' },
@@ -529,7 +538,7 @@ export const esES: PlatformTranslationData = {
         ragflow: { title: 'RAGFlow',
           description: 'Despliegue externo de RAGFlow. Consulta https://ragflow.io para instrucciones de autoalojamiento.' },
         indexing: { title: 'Valores predeterminados de indexación',
-          description: 'Los valores por fuente en KnowledgeSource.adapterConfig tienen prioridad.' },
+          description: 'Un valor definido en la propia fuente de conocimiento prevalece sobre estos valores predeterminados.' },
         permissions: { title: 'Permisos' },
       },
       keys: {
@@ -548,13 +557,13 @@ export const esES: PlatformTranslationData = {
         ragflow_base_url: { label: 'Base URL', help: 'Ejemplo: http://localhost:9380' },
         ragflow_api_key: { label: 'Clave de API' },
         ragflow_default_dataset: { label: 'ID de dataset predeterminado',
-          help: 'Se usa cuando una KnowledgeSource no especifica su propio dataset de RAGFlow.' },
+          help: 'Se usa cuando una fuente de conocimiento no indica su propio dataset de RAGFlow.' },
         chunk_target: { label: 'Tamaño objetivo de fragmento (caracteres)',
           help: 'Límite flexible del tamaño de fragmento antes de que actúe la división consciente de tokens.' },
         chunk_overlap: { label: 'Solapamiento de fragmentos (caracteres)',
           help: 'Caracteres conservados del fragmento anterior para que el contexto sobreviva al límite.' },
         over_fetch: { label: 'Multiplicador de sobre-obtención',
-          help: 'Se obtienen topK × overFetch candidatos internos para que el filtrado de metadatos en JS siga teniendo filas.' },
+          help: 'La búsqueda obtiene este múltiplo del número de resultados pedido, para que queden suficientes tras filtrarlos por los datos del documento.' },
         enforce_rls: { label: 'Aplicar RLS en la búsqueda',
           help: 'Vuelve a comprobar cada resultado contra los permisos a nivel de registro del solicitante.' },
       },
@@ -566,6 +575,36 @@ export const esES: PlatformTranslationData = {
           text: 'Cambiar de adaptador NO migra los índices existentes.' },
         enforce_rls_warning: { title: 'Mantenlo activado en producción',
           text: 'Desactivarlo omite la salvaguarda exclusiva de la plataforma.' },
+      },
+    },
+
+    lifecycle: {
+      title: 'Ciclo de vida de los datos',
+      description: 'Cuánto tiempo se conservan los datos del sistema: sustituye las ventanas de retención, limita el número de filas por tabla y recibe una alerta cuando una tabla crece de forma inesperada. La plataforma los aplica en su barrido de limpieza periódico.',
+      keys: {
+        enabled: {
+          label: 'Aplicar las políticas de ciclo de vida',
+          help: 'Interruptor general del barrido periódico. Desactivado, las políticas de retención, TTL y rotación declaradas dejan de aplicarse (los datos vuelven a crecer sin límite).',
+        },
+        retention_overrides: {
+          label: 'Sustituciones de retención',
+          help: 'Sustituciones de la ventana por objeto: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. Las duraciones usan h/d/w/y. '
+            + 'Se define por organización, de modo que una organización regulada puede conservar años y una de desarrollo, días. '
+            + 'Una sustitución más corta que el mínimo que necesita una función de la plataforma (por ejemplo, la ventana de detección de duplicados de la cola de trabajos) '
+            + 'se ignora y se registra como error, y se sigue aplicando la ventana predeterminada.',
+        },
+        quotas: {
+          label: 'Cuotas de filas',
+          help: 'Número máximo de filas por objeto: { "<object>": 1000000 }. Superarlo genera una alerta de gobernanza: las cuotas nunca eliminan más allá de la política declarada.',
+        },
+        quota_defaults: {
+          label: 'Cuotas predeterminadas por clase',
+          help: 'Cuotas de respaldo por clase de ciclo de vida: { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+        },
+        growth_alert_rows: {
+          label: 'Umbral de alerta de crecimiento (filas por barrido)',
+          help: 'Avisa cuando una tabla con ciclo de vida declarado crece más de este número de filas entre dos barridos. 0 desactiva las alertas de crecimiento.',
+        },
       },
     },
   },

@@ -14,6 +14,10 @@
  *   an entry's own menu (a portal) does not, and the app bar's trigger
  *   toggles it once.
  * - "Keep sidebar open" ends the fold for this browser and survives a reload.
+ * - One Esc folds it wherever the pointer or focus is inside it: the hidden
+ *   tooltip an entry opens does not take the key (objectstack#28078).
+ * - "Keep sidebar open" on a narrow window and the wide-window choice are kept
+ *   apart, across a resize and a reload (objectstack#28079).
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -98,7 +102,7 @@ vi.mock('../ContextSelectors', () => ({
 import { SidebarProvider, useSidebar } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 import { useResponsiveSidebar } from '../../hooks/useResponsiveSidebar';
-import { RAIL_OVERLAY_FRAME_KEEPS_GAP, RAIL_OVERLAY_PANEL } from '../consoleSidebarRail';
+import { RAIL_OVERLAY_FRAME_KEEPS_GAP, RAIL_OVERLAY_PANEL, primeConsoleSidebarOpen } from '../consoleSidebarRail';
 
 /**
  * Size the test window: happy-dom's own viewport, so `innerWidth`, the
@@ -180,6 +184,26 @@ const frame = () => screen.getByTestId('console-sidebar-frame');
 const background = () => panel().querySelector<HTMLElement>('[data-sidebar="sidebar"]')!;
 const keepOpen = () => screen.queryByTestId('sidebar-keep-open');
 const tokens = (el: Element) => el.className.split(/\s+/).filter(Boolean);
+
+/** A page load: the console layout primes the provider before it mounts. */
+function reload(width: number) {
+  cleanup();
+  setViewportWidth(width);
+  primeConsoleSidebarOpen();
+  return renderShell(width);
+}
+
+function resizeTo(width: number) {
+  act(() => {
+    setViewportWidth(width);
+  });
+}
+
+const appBarTrigger = () => within(screen.getByTestId('app-bar')).getByRole('button', { name: 'Toggle sidebar' });
+
+/** An entry's tooltip: open but hidden while the sidebar is expanded. */
+const hiddenTooltip = () =>
+  Array.from(document.querySelectorAll('[role="tooltip"]')).find((el) => el.closest('[hidden]'));
 
 function expandRail() {
   fireEvent.click(background());
@@ -297,6 +321,89 @@ describe('the narrow-window icon rail (objectstack#27593)', () => {
 
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expectRail();
+  });
+
+  describe('one Esc folds it wherever the pointer or focus is inside it (objectstack#28078)', () => {
+    it('with focus on an entry, whose hidden tooltip is open', () => {
+      renderShell(1280);
+      expandRail();
+      const entry = within(panel()).getByRole('link', { name: 'Contacts' });
+      act(() => entry.focus());
+      expect(hiddenTooltip(), 'the entry opened its hidden tooltip').toBeDefined();
+      fireEvent.keyDown(entry, { key: 'Escape' });
+      expectRail();
+    });
+
+    it('with the pointer on an entry', async () => {
+      renderShell(1280);
+      expandRail();
+      fireEvent.pointerMove(within(panel()).getByRole('link', { name: 'Accounts' }), { pointerType: 'mouse' });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+      expect(hiddenTooltip(), 'the entry opened its hidden tooltip').toBeDefined();
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      expectRail();
+    });
+
+    it('with focus on "Keep sidebar open"', () => {
+      renderShell(1280);
+      expandRail();
+      const toggle = keepOpen()!;
+      act(() => toggle.focus());
+      expect(hiddenTooltip(), 'the toggle opened its hidden tooltip').toBeDefined();
+      fireEvent.keyDown(toggle, { key: 'Escape' });
+      expectRail();
+    });
+
+    it('an entry’s open menu still takes the Esc first', () => {
+      renderShell(1280);
+      expandRail();
+      const entry = within(panel()).getByRole('link', { name: 'Accounts' });
+      act(() => entry.focus());
+      fireEvent.keyDown(within(panel()).getByRole('button', { name: 'More actions for Accounts' }), { key: 'Enter' });
+      const item = screen.getAllByRole('menuitem')[0];
+      fireEvent.keyDown(item, { key: 'Escape' });
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
+    });
+  });
+
+  describe('"Keep sidebar open" leaves the wide-window choice alone (objectstack#28079)', () => {
+    it('a collapsed wide-window sidebar comes back collapsed, after a reload too', () => {
+      renderShell(1440);
+      fireEvent.click(appBarTrigger());
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'collapsed');
+
+      resizeTo(1280);
+      expandRail();
+      fireEvent.click(keepOpen()!);
+      expect(keepOpen()).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(keepOpen()!);
+      expectRail();
+
+      resizeTo(1440);
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'collapsed');
+      reload(1440);
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'collapsed');
+    });
+
+    it('an expanded wide-window sidebar comes back expanded, after a reload too', () => {
+      renderShell(1440);
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
+
+      resizeTo(1280);
+      expandRail();
+      fireEvent.click(keepOpen()!);
+      // Kept open on the narrow window, the reader collapses it there…
+      fireEvent.click(appBarTrigger());
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'collapsed');
+      // …and turns "keep open" off again.
+      fireEvent.click(keepOpen()!);
+      expectRail();
+
+      resizeTo(1440);
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
+      reload(1440);
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
+    });
   });
 
   it('"Keep sidebar open" ends the fold for this browser, survives a reload, and gives it back', () => {

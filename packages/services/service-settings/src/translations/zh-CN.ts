@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PlatformTranslationData } from '@objectstack/spec/system';
+import { countryOptionLabels } from '../manifests/company.manifest.js';
 
 /**
  * 简体中文 (zh-CN) — built-in settings manifest translations.
@@ -10,7 +11,7 @@ export const zhCN: PlatformTranslationData = {
     sourceLabels: {
       env: '环境变量',
       global: '全局',
-      tenant: '租户',
+      tenant: '组织',
       user: '用户',
       default: '默认',
     },
@@ -141,7 +142,11 @@ export const zhCN: PlatformTranslationData = {
         city: { label: '城市' },
         state: { label: '省/州' },
         postal_code: { label: '邮政编码' },
-        country: { label: '国家/地区', help: 'ISO 3166-1 二位代码(如 US、GB、CN)。' },
+        country: {
+          label: '国家/地区',
+          help: '注册地址所在的国家/地区。输入国家/地区名称并从列表中选择。',
+          options: countryOptionLabels('zh-CN'),
+        },
         phone: { label: '电话', help: '建议 E.164 格式,如 +86 21 5555 0100。' },
         website: { label: '网站', help: '示例:https://example.com' },
         primary_contact_name: { label: '主要联系人' },
@@ -190,7 +195,11 @@ export const zhCN: PlatformTranslationData = {
             'es-ES': '西班牙语(西班牙)',
           },
         },
-        default_country: { label: '默认国家/地区', help: 'ISO 3166-1 二位代码(如 US、GB、CN)。' },
+        default_country: {
+          label: '默认国家/地区',
+          help: '用作地址和电话的默认值。输入国家/地区名称并从列表中选择。',
+          options: countryOptionLabels('zh-CN'),
+        },
         currency: {
           label: '默认货币',
           help: '当货币字段未指定币种时套用的 ISO 4217 代码。',
@@ -269,7 +278,7 @@ export const zhCN: PlatformTranslationData = {
         },
         social: {
           title: '社交登录',
-          description: '配置内置的 Google 登录提供商。部署环境变量仍优先生效。',
+          description: '配置内置的 Google 登录提供商。服务器配置中设置的凭据仍优先生效。',
         },
       },
       keys: {
@@ -289,7 +298,7 @@ export const zhCN: PlatformTranslationData = {
         },
         audience_posture: {
           label: '自助注册受众',
-          help: '「仅限邀请」关闭自助注册:用户只能通过运营侧行为进入——邀请、管理员创建/导入、SCIM 开通或企业 SSO。「邮箱域名」仅向下方允许列表中的域名开放;「开放」允许任何人自助注册。「邮箱域名」与「开放」都要求配置下方的自助注册权限集。「邮箱域名」始终强制开启邮箱验证。「开放」也会强制开启,除非部署方关闭它(OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false,或在 stack 配置中设置 emailAndPassword.requireEmailVerification: false);在此控制台保存的 false 在「开放」下会被拒绝。',
+          help: '「仅限邀请」关闭自助注册:用户只能通过运营侧行为进入——邀请、管理员创建/导入、SCIM 开通或企业 SSO。「邮箱域名」仅向下方允许列表中的域名开放;「开放」允许任何人自助注册。「邮箱域名」与「开放」都要求配置下方的自助注册权限集。「邮箱域名」始终强制开启邮箱验证。「开放」也会强制开启,除非服务器配置关闭它;在此控制台关闭它在「开放」下会被拒绝。',
           options: {
             invite_only: '仅限邀请——不开放自助注册(默认)',
             email_domain: '仅允许列表中的邮箱域名',
@@ -302,7 +311,7 @@ export const zhCN: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: '自助注册权限集',
-          help: '每个自助注册用户获得的权限集名称(可显式声明 member_default;admin_full_access 会被拒绝)。',
+          help: '每个自助注册用户获得的权限集名称。可以使用标准成员权限集;完整管理员权限集会被拒绝。受众允许自助注册时必填。',
         },
         password_min_length: { label: '密码最小长度' },
         password_max_length: { label: '密码最大长度', help: '防止超长密码哈希导致的拒绝服务。' },
@@ -366,7 +375,7 @@ export const zhCN: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: '允许的 IP 段',
-          help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝,服务器无法确定客户端地址的请求同样会被拒绝。留空表示不限制。判定的是连接的对端地址;部署在反向代理之后时,请在 stack 中声明 server.trustProxy,以改为判定转发的客户端地址。',
+          help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝,服务器无法确定客户端地址的请求同样会被拒绝。留空表示不限制。判定的是连接的来源地址;部署在反向代理之后时,需要在服务器配置中信任该代理,才会改为判定原始客户端地址。',
         },
         api_key_default_expiry_days: {
           label: '默认密钥有效期(天)',
@@ -374,11 +383,11 @@ export const zhCN: PlatformTranslationData = {
         },
         api_key_max_expiry_days: {
           label: '密钥最长有效期(天)',
-          help: '新密钥可以申请的最远到期日期,从创建时算起。更长的会被拒绝(API_KEY_EXPIRY_TOO_LONG);恰好这么多天可以接受。',
+          help: '新密钥可以申请的最远到期日期,从创建时算起。更长的会被拒绝;恰好这么多天可以接受。',
         },
         api_key_inactivity_days: {
           label: '不活动失效(天)',
-          help: '这么多天内没有使用记录的密钥会被拒绝(API_KEY_INACTIVE)。它不会被吊销;请新建密钥。从未使用的密钥从创建时算起,若早于下方的策略开始时间则从策略开始时间算起。0 表示关闭不活动失效。',
+          help: '这么多天内没有使用记录的密钥会被拒绝。它不会被吊销;请新建密钥。从未使用的密钥从创建时算起,若早于下方的策略开始时间则从策略开始时间算起。0 表示关闭不活动失效。',
         },
         api_key_policy_started_at: {
           label: '密钥策略开始时间',
@@ -386,15 +395,15 @@ export const zhCN: PlatformTranslationData = {
         },
         google_enabled: {
           label: '启用 Google 登录',
-          help: '客户端 ID 与客户端密钥都能解析时才提供 Google 登录:来自下方保存的值,或服务器上的 GOOGLE_CLIENT_ID 与 GOOGLE_CLIENT_SECRET(优先于保存的值)。两者都能解析之前,即使此开关已开启,登录页也不显示 Google 按钮。关闭后,即使服务器设置了两者,也会撤下 Google 登录。请在 Google Cloud Console 中创建 OAuth 客户端。',
+          help: '客户端 ID 与客户端密钥都可用时才提供 Google 登录:来自下方保存的值,或服务器配置中的设置(优先于保存的值)。两者都可用之前,即使此开关已开启,登录页也不显示 Google 按钮。关闭后,即使服务器设置了两者,也会撤下 Google 登录。请在 Google Cloud Console 中创建 OAuth 客户端。',
         },
         google_client_id: {
           label: 'Google 客户端 ID',
-          help: '来自 Google Cloud Console 的 OAuth 客户端 ID。也可在服务器上设置 GOOGLE_CLIENT_ID。',
+          help: '来自 Google Cloud Console 的 OAuth 客户端 ID。也可在服务器配置中设置。',
         },
         google_client_secret: {
           label: 'Google 客户端密钥',
-          help: '加密存储。也可在服务器上设置 GOOGLE_CLIENT_SECRET。',
+          help: '加密存储。也可在服务器配置中设置。',
         },
       },
     },
@@ -417,7 +426,7 @@ export const zhCN: PlatformTranslationData = {
       },
       banners: {
         beta_notice: { title: '注意',
-          text: 'Beta 功能可能随时变更,恕不另行通知。可通过环境变量固定(例如 `OS_FEATURE_FLAGS_AI_ENABLED=true`),对整个部署生效。' },
+          text: 'Beta 功能可能随时变更,恕不另行通知。在服务器配置中设置的功能会对整个部署锁定开启或关闭,无法在此更改。' },
       },
     },
 
@@ -465,7 +474,7 @@ export const zhCN: PlatformTranslationData = {
       description: '平台 AI 与知识库服务使用的 LLM 提供商、模型、凭据与向量化配置。',
       groups: {
         provider: { title: '提供商', description: '选择 LLM 后端。Memory 模式仅原样回显输入,仅用于测试,严禁用于生产。' },
-        gateway: { title: 'Vercel AI Gateway', description: '多提供商路由器。模型规格遵循 `provider/model` 格式,例如 `openai/gpt-4o`。' },
+        gateway: { title: 'Vercel AI Gateway', description: '多提供商路由器。模型写作 provider/model,例如 openai/gpt-4o。' },
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
@@ -495,21 +504,21 @@ export const zhCN: PlatformTranslationData = {
             openrouter: 'OpenRouter(OpenAI 兼容)',
           },
         },
-        gateway_model: { label: 'Gateway 模型', help: '作为 AI_GATEWAY_MODEL 转发。示例:openai/gpt-4o' },
+        gateway_model: { label: 'Gateway 模型', help: '代替服务器配置中设定的模型。示例:openai/gpt-4o' },
         gateway_api_key: { label: 'Gateway API Key', help: '可选 —— 仅当 Gateway 强制鉴权时需要。' },
-        openai_api_key: { label: 'OpenAI API Key', help: '作为 OPENAI_API_KEY 转发,加密存储。' },
+        openai_api_key: { label: 'OpenAI API Key', help: '代替服务器配置中设定的密钥,加密存储。' },
         openai_model: { label: '模型', help: '默认模型 ID。Agent 级覆盖优先生效。' },
         openai_base_url: { label: 'Base URL', help: '用于 Azure OpenAI 或自建网关。留空走 api.openai.com。' },
-        anthropic_api_key: { label: 'Anthropic API Key', help: '作为 ANTHROPIC_API_KEY 转发,加密存储。' },
+        anthropic_api_key: { label: 'Anthropic API Key', help: '代替服务器配置中设定的密钥,加密存储。' },
         anthropic_model: { label: '模型' },
-        google_api_key: { label: 'Google API Key', help: '作为 GOOGLE_GENERATIVE_AI_API_KEY 转发,加密存储。' },
+        google_api_key: { label: 'Google API Key', help: '代替服务器配置中设定的密钥,加密存储。' },
         google_model: { label: '模型' },
         deepseek_api_key: { label: 'DeepSeek API Key', help: 'sk-…,在 platform.deepseek.com 签发。' },
-        deepseek_model: { label: '模型', help: '示例:deepseek-chat(V3)、deepseek-reasoner(R1 推理)。' },
+        deepseek_model: { label: '模型', help: '示例:deepseek-chat (V3)、deepseek-reasoner (R1 推理)。' },
         dashscope_api_key: { label: 'DashScope API Key', help: 'sk-…,在 dashscope.console.aliyun.com 签发。' },
         dashscope_model: { label: '模型' },
         cloudflare_account_id: { label: 'Cloudflare Account ID', help: '来自 Cloudflare 控制台 URL 的 32 位十六进制 ID。' },
-        cloudflare_gateway_id: { label: 'Gateway ID', help: '在 Cloudflare → AI Gateway 中配置的网关名称,默认为 `default`。' },
+        cloudflare_gateway_id: { label: 'Gateway ID', help: '在 Cloudflare → AI Gateway 中配置的网关名称,默认为「default」。' },
         cloudflare_api_key: { label: 'Cloudflare AI Gateway Token', help: '在 AI Gateway →「API tokens」标签页签发(cfut_… 或 sk_…)。' },
         cloudflare_model: { label: '模型' },
         siliconflow_api_key: { label: 'SiliconFlow API Key' },
@@ -521,7 +530,7 @@ export const zhCN: PlatformTranslationData = {
         temperature: { label: '温度', help: '0 = 确定性,2 = 高度发散。' },
         max_tokens: { label: '最大输出 tokens', help: '单次响应生成的硬上限。' },
         request_timeout_ms: { label: '请求超时(毫秒)' },
-        trace_enabled: { label: '记录 Trace', help: '将 prompt/response 落入 sys_ai_trace,便于调试与回放。' },
+        trace_enabled: { label: '记录 Trace', help: '记录每次 AI 请求及其响应,出现问题时可以查看并回放对话。' },
         log_prompts: { label: '记录完整 Prompt', help: '在 trace 行中包含完整 prompt 而非仅元数据。' },
         embedder_provider: {
           label: '提供商',
@@ -542,7 +551,7 @@ export const zhCN: PlatformTranslationData = {
         embedder_model: { label: '模型', help: '示例 — OpenAI: text-embedding-3-small · 阿里通义: text-embedding-v3 · 智谱: embedding-3 · 硅基流动: BAAI/bge-m3 · Ollama: bge-m3' },
         embedder_base_url: { label: 'Base URL', help: '端点根路径(不含 /embeddings)。预设会自动填充,可覆盖为代理或自建网关。' },
         embedder_dimensions: { label: '维度', help: '覆盖输出维度(仅 Matryoshka 模型支持)。留空使用模型默认值。' },
-        embedder_batch_size: { label: '批量大小', help: '单次 embed() 调用的 chunk 数。命中速率/大小限制时调小。' },
+        embedder_batch_size: { label: '批量大小', help: '每次请求发送给嵌入服务商的 chunk 数。命中速率/大小限制时调小。' },
       },
       actions: {
         test: { label: '测试连接' },
@@ -561,7 +570,7 @@ export const zhCN: PlatformTranslationData = {
         adapter: { title: '后端', description: '选择文档分块及其向量的存储位置。' },
         turso: { title: 'Turso / libSQL', description: '支持托管 Turso、本地文件、内存三种模式。' },
         ragflow: { title: 'RAGFlow', description: '外部 RAGFlow 部署。自部署文档见 https://ragflow.io 。' },
-        indexing: { title: '索引默认值', description: 'KnowledgeSource.adapterConfig 上的逐源覆盖优先生效。' },
+        indexing: { title: '索引默认值', description: '在知识源上单独设定的值优先于这些默认值。' },
         permissions: { title: '权限' },
       },
       keys: {
@@ -577,11 +586,11 @@ export const zhCN: PlatformTranslationData = {
         turso_auth_token: { label: 'Auth Token', help: '仅托管 Turso URL 需要。' },
         ragflow_base_url: { label: 'Base URL', help: '示例:http://localhost:9380' },
         ragflow_api_key: { label: 'API Key' },
-        ragflow_default_dataset: { label: '默认 Dataset ID', help: 'KnowledgeSource 未指定时使用。' },
+        ragflow_default_dataset: { label: '默认 Dataset ID', help: '知识源未指定自己的 RAGFlow 数据集时使用。' },
         chunk_target: { label: '目标 chunk 大小(字符)', help: '在按 token 切分之前的软上限。' },
         chunk_overlap: { label: 'Chunk 重叠(字符)', help: '保留上一个 chunk 末尾的字符,以保证跨界上下文。' },
-        over_fetch: { label: '过取倍数', help: '内部按 topK × overFetch 拉取候选,以便 JS 端元数据过滤仍有行可返回。' },
-        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中通过 IDataEngine 再次校验调用方的行级权限。' },
+        over_fetch: { label: '过取倍数', help: '检索时按请求结果数的这一倍数取回候选,以便按文档信息过滤后仍有足够结果可返回。' },
+        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中再次校验调用方的行级权限。' },
       },
       actions: {
         test: { label: '测试连接' },
@@ -589,6 +598,35 @@ export const zhCN: PlatformTranslationData = {
       banners: {
         adapter_switch_warning: { title: '已有索引不会迁移', text: '切换适配器不会迁移已有索引。' },
         enforce_rls_warning: { title: '生产环境请保持开启', text: '关闭将跳过平台对向量存储数据外泄的独有防护。' },
+      },
+    },
+
+    lifecycle: {
+      title: '数据生命周期',
+      description: '系统数据保留多久：覆盖保留期、为每张表设定行数上限，并在表意外增长时发出告警。平台在周期性清理时应用这些设置。',
+      keys: {
+        enabled: {
+          label: '执行生命周期策略',
+          help: '周期性清理的总开关。关闭后，已声明的保留期、TTL 与轮转策略不再执行（数据重新无限增长）。',
+        },
+        retention_overrides: {
+          label: '保留期覆盖',
+          help: '按对象覆盖保留窗口：{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }。时长单位为 h/d/w/y。'
+            + '按组织设置，因此受监管的组织可以保留数年，开发用的组织只保留数天。'
+            + '短于某项平台功能所需最短窗口（例如作业队列的重复检测窗口）的覆盖会被忽略并记为错误，继续沿用默认窗口。',
+        },
+        quotas: {
+          label: '行数配额',
+          help: '按对象的最大行数：{ "<object>": 1000000 }。超出时触发治理告警——配额绝不会删除已声明策略之外的数据。',
+        },
+        quota_defaults: {
+          label: '按类别的默认配额',
+          help: '按生命周期类别的兜底配额：{ "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }。',
+        },
+        growth_alert_rows: {
+          label: '增长告警阈值（每次清理的行数）',
+          help: '声明了生命周期的表在两次清理之间增长超过此行数时发出告警。0 表示关闭增长告警。',
+        },
       },
     },
   },

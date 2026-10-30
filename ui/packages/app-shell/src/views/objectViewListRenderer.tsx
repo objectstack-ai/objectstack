@@ -69,7 +69,6 @@ export function useObjectViewListRenderer({
     actions,
     handleRowClick,
     handleListRowsChange,
-    navOverlay,
     recordOpen,
     openAsPage,
     urlFilters,
@@ -103,11 +102,10 @@ export function useObjectViewListRenderer({
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
     /** objectstack#26679 — the rows the list shows, for the drawer's root `↑` `↓`. */
     handleListRowsChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListRowsChange'];
-    navOverlay: ReturnType<typeof useObjectViewRecordNavigation>['navOverlay'];
     /** objectstack#26681 — the Display menu's Open records section. */
     recordOpen: NonNullable<ListViewProps['recordOpen']>;
     /** objectstack#26681 — the name cell's ↗ (`./objectViewOpenAsPage.tsx`), or `null` for none. */
-    openAsPage: { objectName: string; label: string } | null;
+    openAsPage: { objectName: string; label: string; open: (recordId: string | number) => void } | null;
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
@@ -153,6 +151,13 @@ export function useObjectViewListRenderer({
     const heldListFilter = useRef<unknown>(undefined);
 
     // Render multi-view content via ListView plugin (for kanban, calendar, etc.)
+    // The record actions, read when a handler runs: `useObjectActions` hands
+    // back a new object on every render of the page, and a `?recordId=` change
+    // must not re-render the list (objectstack#27545).
+    const actionsRef = useRef(actions);
+    actionsRef.current = actions;
+    const createRecord = useCallback(() => actionsRef.current.create(), []);
+
     const renderListView = useCallback(({ schema: listSchema, dataSource: ds, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
         // Combine local refreshKey with the plugin ObjectView's refreshKey for full propagation
         const combinedRefreshKey = refreshKey + (pluginRefreshKey || 0);
@@ -835,7 +840,7 @@ export function useObjectViewListRenderer({
                 // objectui#13089 — the view's Add button is the header New:
                 // `onEdit(null)`, which the host routes to the record-form
                 // overlay or an `editMode: 'page'` object's create route.
-                onAddRecord={listAddRecordOpensCreate ? actions.create : undefined}
+                onAddRecord={listAddRecordOpensCreate ? createRecord : undefined}
                 onDelete={(record: any) => {
                     if (record?.id != null) {
                         // useObjectActions.deleteRecord wraps execute() which
@@ -843,7 +848,7 @@ export function useObjectViewListRenderer({
                         // and triggers onRefresh on success.
                         // Pass the row so the confirmation names the
                         // record (objectui#11695).
-                        actions.deleteRecord(String(record.id), record);
+                        actionsRef.current.deleteRecord(String(record.id), record);
                     }
                 }}
                 onBulkDelete={(records: any[]) => {
@@ -852,7 +857,7 @@ export function useObjectViewListRenderer({
                     // `deleteRecords` confirms once for the whole batch, with the
                     // shared copy that counts it (objectui#11695), and the
                     // batch-aware delete handler handles refresh + toast.
-                    actions.deleteRecords(valid);
+                    actionsRef.current.deleteRecords(valid);
                 }}
                 onRowClick={(record: any, event?: any) => {
                     handleRowClick(record, event);
@@ -905,7 +910,7 @@ export function useObjectViewListRenderer({
                     ? (row: Record<string, unknown>) => {
                         const id = row?.id ?? row?._id;
                         return (typeof id === 'string' && id !== '') || typeof id === 'number'
-                            ? <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} />
+                            ? <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} onOpen={openAsPage.open} />
                             : null;
                     }
                     : undefined}
@@ -914,7 +919,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange]);
 
     return { renderListView };
 }

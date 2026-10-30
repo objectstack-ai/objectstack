@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PlatformTranslationData } from '@objectstack/spec/system';
+import { countryOptionLabels } from '../manifests/company.manifest.js';
 
 /**
  * English (en) — built-in settings manifest translations.
@@ -14,7 +15,7 @@ export const en: PlatformTranslationData = {
     sourceLabels: {
       env: 'Env',
       global: 'Global',
-      tenant: 'Tenant',
+      tenant: 'Organization',
       user: 'User',
       default: 'Default',
     },
@@ -108,7 +109,11 @@ export const en: PlatformTranslationData = {
         city: { label: 'City' },
         state: { label: 'State / Province' },
         postal_code: { label: 'Postal code' },
-        country: { label: 'Country', help: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN).' },
+        country: {
+          label: 'Country',
+          help: 'Country of the registered address. Type a country name and pick it from the list.',
+          options: countryOptionLabels('en'),
+        },
         phone: { label: 'Phone', help: 'E.164 recommended, e.g. +1 415 555 0100.' },
         website: { label: 'Website', help: 'Example: https://example.com' },
         primary_contact_name: { label: 'Primary contact name' },
@@ -126,7 +131,11 @@ export const en: PlatformTranslationData = {
       keys: {
         timezone: { label: 'Default timezone', help: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris). This is the timezone in effect for the organization: the Timezone field on the Organization record does not change it.' },
         locale: { label: 'Default language', help: 'BCP-47 locale for message catalogs and number/date formatting.' },
-        default_country: { label: 'Default country', help: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN).' },
+        default_country: {
+          label: 'Default country',
+          help: 'Used for address and phone defaults. Type a country name and pick it from the list.',
+          options: countryOptionLabels('en'),
+        },
         currency: { label: 'Default currency' },
         fiscal_year_start: { label: 'Fiscal year start' },
       },
@@ -159,14 +168,14 @@ export const en: PlatformTranslationData = {
         social: {
           title: 'Social sign-in',
           description:
-            'Configure the built-in Google sign-in provider. Deployment env vars still win.',
+            'Configure the built-in Google sign-in provider. Credentials set in the server configuration still win.',
         },
       },
       keys: {
         email_password_enabled: { label: 'Enable email/password login' },
         signup_enabled: {
           label: 'Allow email sign-up',
-          help: 'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under invite_only, only an address holding a pending invitation; under email_domain, the allowlisted domains and invited addresses; under open, anyone. Off closes the form under every audience, invitations included.',
+          help: 'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under Invitation only, only an address holding a pending invitation; under Allowlisted email domains, the allowlisted domains and invited addresses; under Open, anyone. Off closes the form under every audience, invitations included.',
         },
         require_email_verification: { label: 'Require email verification' },
         membership_policy: {
@@ -179,7 +188,7 @@ export const en: PlatformTranslationData = {
         },
         audience_posture: {
           label: 'Self-registration audience',
-          help: 'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Both email_domain and open require the self-registration permission set below. email_domain always forces email verification on. open forces it on unless the deployment turns it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false saved in this console is refused under open.',
+          help: 'Invitation only closes self-registration: people become users only when an administrator invites, creates or imports them, or through directory provisioning (SCIM) or enterprise single sign-on. Allowlisted email domains opens it to the domains listed below. Open admits anyone. Both Allowlisted email domains and Open need the self-registration permission set below. Allowlisted email domains always requires email verification. Open requires it unless the server configuration turns it off; turning it off in this console is refused under Open.',
           options: {
             invite_only: 'Invitation only — no self-registration (default)',
             email_domain: 'Allowlisted email domains only',
@@ -192,7 +201,7 @@ export const en: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'Self-registration permission set',
-          help: 'Name of the permission set granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
+          help: 'Name of the permission set each self-registered user receives. The standard member set is fine; the full administrator set is refused. Required whenever the audience allows self-registration.',
         },
         password_min_length: { label: 'Minimum password length' },
         password_max_length: { label: 'Maximum password length', help: 'Guards against denial-of-service via very long password hashing.' },
@@ -200,15 +209,15 @@ export const en: PlatformTranslationData = {
         session_refresh_days: { label: 'Refresh threshold (days)', help: 'An active session is extended when it is older than this.' },
         google_enabled: {
           label: 'Enable Google login',
-          help: 'Offers Google sign-in once a client ID and a client secret both resolve: saved below, or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server, which win over saved values. Until both resolve, the login page shows no Google button, even while this is on. Off withdraws Google sign-in even when the server sets both. Create the OAuth client in Google Cloud Console.',
+          help: 'Offers Google sign-in once a client ID and a client secret are both available: saved below, or set in the server configuration, which wins over saved values. Until both are available, the login page shows no Google button, even while this is on. Off withdraws Google sign-in even when the server sets both. Create the OAuth client in Google Cloud Console.',
         },
         google_client_id: {
           label: 'Google client ID',
-          help: 'OAuth client ID from Google Cloud Console. GOOGLE_CLIENT_ID can also be set on the server.',
+          help: 'OAuth client ID from Google Cloud Console. It can also be set in the server configuration.',
         },
         google_client_secret: {
           label: 'Google client secret',
-          help: 'Stored encrypted at rest. GOOGLE_CLIENT_SECRET can also be set on the server.',
+          help: 'Stored encrypted at rest. It can also be set in the server configuration.',
         },
       },
     },
@@ -231,7 +240,7 @@ export const en: PlatformTranslationData = {
       },
       banners: {
         beta_notice: { title: 'Heads up',
-          text: 'Beta features may change without notice. Pin via env vars (e.g. `OS_FEATURE_FLAGS_AI_ENABLED=true`) to lock for the whole deployment.' },
+          text: 'Beta features may change without notice. A feature set in the server configuration is locked on or off for the whole deployment and cannot be changed here.' },
       },
     },
 
@@ -284,7 +293,7 @@ export const en: PlatformTranslationData = {
         provider: { title: 'Provider',
           description: 'Choose the LLM backend. Memory mode echoes input — useful for tests but never for production.' },
         gateway: { title: 'Vercel AI Gateway',
-          description: 'Multi-provider router. The model spec follows `provider/model`, e.g. `openai/gpt-4o`.' },
+          description: 'Multi-provider router. The model is written provider/model, e.g. openai/gpt-4o.' },
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
@@ -308,20 +317,20 @@ export const en: PlatformTranslationData = {
           },
         },
         gateway_model: { label: 'Gateway model',
-          help: 'Forwarded as AI_GATEWAY_MODEL. Example: openai/gpt-4o' },
+          help: 'Used instead of the model set in the server configuration. Example: openai/gpt-4o' },
         gateway_api_key: { label: 'Gateway API key',
           help: 'Optional — required only if the gateway enforces auth.' },
         openai_api_key: { label: 'OpenAI API key',
-          help: 'Forwarded as OPENAI_API_KEY. Stored encrypted at rest.' },
+          help: 'Used instead of the key set in the server configuration. Stored encrypted at rest.' },
         openai_model: { label: 'Model',
           help: 'Default model id. Per-agent overrides take precedence.' },
         openai_base_url: { label: 'Base URL',
           help: 'Override for Azure OpenAI or self-hosted gateways. Leave blank for api.openai.com.' },
         anthropic_api_key: { label: 'Anthropic API key',
-          help: 'Forwarded as ANTHROPIC_API_KEY. Stored encrypted at rest.' },
+          help: 'Used instead of the key set in the server configuration. Stored encrypted at rest.' },
         anthropic_model: { label: 'Model' },
         google_api_key: { label: 'Google API key',
-          help: 'Forwarded as GOOGLE_GENERATIVE_AI_API_KEY. Stored encrypted at rest.' },
+          help: 'Used instead of the key set in the server configuration. Stored encrypted at rest.' },
         google_model: { label: 'Model' },
         temperature: { label: 'Temperature',
           help: '0 = deterministic, 2 = highly creative.' },
@@ -329,7 +338,7 @@ export const en: PlatformTranslationData = {
           help: 'Hard cap on tokens generated per response.' },
         request_timeout_ms: { label: 'Request timeout (ms)' },
         trace_enabled: { label: 'Record traces',
-          help: 'Persist prompt/response traces to sys_ai_trace for debugging and replay.' },
+          help: 'Keep a record of each AI request and its response, so a conversation can be inspected and replayed when something goes wrong.' },
         log_prompts: { label: 'Log full prompts',
           help: 'Include rendered prompts (not just metadata) in trace rows.' },
         embedder_provider: {
@@ -356,7 +365,7 @@ export const en: PlatformTranslationData = {
         embedder_dimensions: { label: 'Dimensions',
           help: 'Override output dimensionality (Matryoshka models only). Leave blank to use the model default.' },
         embedder_batch_size: { label: 'Batch size',
-          help: 'Chunks per embed() call. Reduce if hitting provider rate / size limits.' },
+          help: 'Chunks sent to the embedding provider in one request. Reduce if hitting provider rate / size limits.' },
       },
       actions: {
         test: { label: 'Test connection' },
@@ -380,7 +389,7 @@ export const en: PlatformTranslationData = {
         ragflow: { title: 'RAGFlow',
           description: 'External RAGFlow deployment. See https://ragflow.io for self-host instructions.' },
         indexing: { title: 'Indexing defaults',
-          description: 'Per-source values on KnowledgeSource.adapterConfig take precedence.' },
+          description: 'A value set on a knowledge source itself wins over these defaults.' },
         permissions: { title: 'Permissions' },
       },
       keys: {
@@ -399,13 +408,13 @@ export const en: PlatformTranslationData = {
         ragflow_base_url: { label: 'Base URL', help: 'Example: http://localhost:9380' },
         ragflow_api_key: { label: 'API key' },
         ragflow_default_dataset: { label: 'Default dataset id',
-          help: 'Used when a KnowledgeSource does not specify its own RAGFlow dataset.' },
+          help: 'Used when a knowledge source does not name its own RAGFlow dataset.' },
         chunk_target: { label: 'Target chunk size (chars)',
           help: 'Soft cap on chunk size before token-aware splitting kicks in.' },
         chunk_overlap: { label: 'Chunk overlap (chars)',
           help: 'Characters retained from the previous chunk so context survives the boundary.' },
         over_fetch: { label: 'Over-fetch multiplier',
-          help: 'Internal topK × overFetch candidates fetched so JS-side metadata filtering still has rows.' },
+          help: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.' },
         enforce_rls: { label: 'Enforce RLS on search',
           help: 'Re-check every hit against the caller\'s record-level permissions.' },
       },

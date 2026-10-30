@@ -95,7 +95,14 @@ export const SysNotification = ObjectSchema.create({
       group: 'Event',
     }),
 
-    severity: Field.select(['info', 'warning', 'critical'], {
+    // Option labels are what the list, the detail and a group header read
+    // (#27855); the stored values stay the lowercase codes the emitters write.
+    severity: Field.select({
+      options: [
+        { label: 'Info', value: 'info' },
+        { label: 'Warning', value: 'warning' },
+        { label: 'Critical', value: 'critical' },
+      ],
       label: 'Severity',
       required: false,
       defaultValue: 'info',
@@ -144,6 +151,10 @@ export const SysNotification = ObjectSchema.create({
       label: 'Source Object',
       required: false,
       maxLength: 100,
+      // Drawn as the object's label rather than its api name (#27855), the
+      // `object-ref` face the sharing rules use; the stored value is still the
+      // object name, and nothing writes this field but NotificationService.
+      widget: 'object-ref',
       description: 'Object name of the related record (e.g. lead, opportunity)',
       group: 'Source',
     }),

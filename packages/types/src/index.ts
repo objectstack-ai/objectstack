@@ -119,6 +119,10 @@ export * from './share-link-resolve-answer.js';
 // with. Producer and consumer are two services neither of which may import
 // the other; both already depend on this package, so the seam adds no edge.
 export * from './connector-credential-source.js';
+// [#27966] The one sentence a refused switched-off packaged item reads as,
+// action or flow. Its producers (objectql, service-automation) cannot import
+// each other; both already depend on this package.
+export * from './packaged-item-turned-off.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

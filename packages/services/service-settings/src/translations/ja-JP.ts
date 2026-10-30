@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PlatformTranslationData } from '@objectstack/spec/system';
+import { countryOptionLabels } from '../manifests/company.manifest.js';
 
 /**
  * 日本語 (ja-JP) — built-in settings manifest translations.
@@ -10,7 +11,7 @@ export const jaJP: PlatformTranslationData = {
     sourceLabels: {
       env: '環境変数',
       global: 'グローバル',
-      tenant: 'テナント',
+      tenant: '組織',
       user: 'ユーザー',
       default: 'デフォルト',
     },
@@ -130,7 +131,7 @@ export const jaJP: PlatformTranslationData = {
         social: {
           title: 'ソーシャルサインイン',
           description:
-            '組み込みの Google サインインプロバイダーを設定します。デプロイの環境変数が優先されます。',
+            '組み込みの Google サインインプロバイダーを設定します。サーバー設定で指定した認証情報が優先されます。',
         },
       },
       keys: {
@@ -150,7 +151,7 @@ export const jaJP: PlatformTranslationData = {
         },
         audience_posture: {
           label: 'セルフ登録の対象',
-          help: '「招待のみ」はセルフ登録を閉じます。ユーザーは運用側の行為(招待、管理者による作成/インポート、SCIM、エンタープライズ SSO)によってのみ作成されます。「メールドメイン」は下の許可リストのドメインにのみ開放し、「オープン」は誰でも登録できます。「メールドメイン」と「オープン」では下のセルフ登録権限セットの指定が必要です。「メールドメイン」ではメール確認が常に強制されます。「オープン」でも強制されますが、デプロイ側で無効にできます(OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false、またはスタック設定の emailAndPassword.requireEmailVerification: false)。このコンソールで保存した false は「オープン」では拒否されます。',
+          help: '「招待のみ」はセルフ登録を閉じます。ユーザーは運用側の行為(招待、管理者による作成/インポート、SCIM、エンタープライズ SSO)によってのみ作成されます。「メールドメイン」は下の許可リストのドメインにのみ開放し、「オープン」は誰でも登録できます。「メールドメイン」と「オープン」では下のセルフ登録権限セットの指定が必要です。「メールドメイン」ではメール確認が常に強制されます。「オープン」でも強制されますが、サーバー設定で無効にできます。このコンソールで無効にすることは「オープン」では拒否されます。',
           options: {
             invite_only: '招待のみ — セルフ登録なし(既定)',
             email_domain: '許可リストのメールドメインのみ',
@@ -163,7 +164,7 @@ export const jaJP: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'セルフ登録の権限セット',
-          help: '各セルフ登録ユーザーに付与される権限セット名(member_default の明示宣言は可。admin_full_access は拒否されます)。',
+          help: '各セルフ登録ユーザーに付与される権限セット名。標準のメンバー権限セットは使用できます。完全な管理者権限セットは拒否されます。セルフ登録を許可する対象では必須です。',
         },
         password_min_length: { label: 'パスワードの最小文字数' },
         password_max_length: { label: 'パスワードの最大文字数', help: '非常に長いパスワードのハッシュ化によるサービス拒否を防ぎます。' },
@@ -227,7 +228,7 @@ export const jaJP: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: '許可 IP レンジ',
-          help: 'CIDR レンジまたは正確な IP(1行に1つ、またはカンマ区切り)。例:203.0.113.0/24。設定すると、この範囲外からのサインインを拒否し、サーバーがクライアントアドレスを特定できないリクエストも拒否します。空欄で制限なし。判定には接続元(ピア)のアドレスを使います。リバースプロキシの背後に配置する場合は、スタックで server.trustProxy を宣言すると、転送されたクライアントアドレスが判定に使われます。',
+          help: 'CIDR レンジまたは正確な IP(1行に1つ、またはカンマ区切り)。例:203.0.113.0/24。設定すると、この範囲外からのサインインを拒否し、サーバーがクライアントアドレスを特定できないリクエストも拒否します。空欄で制限なし。判定には接続元のアドレスを使います。リバースプロキシの背後に配置する場合は、サーバー設定でそのプロキシを信頼すると、元のクライアントアドレスが判定に使われます。',
         },
         api_key_default_expiry_days: {
           label: 'キーの既定の有効期間(日)',
@@ -235,11 +236,11 @@ export const jaJP: PlatformTranslationData = {
         },
         api_key_max_expiry_days: {
           label: 'キーの最大有効期間(日)',
-          help: '新しいキーが指定できる最も遠い有効期限(作成時から数えます)。これより長いものは拒否されます(API_KEY_EXPIRY_TOO_LONG)。ちょうどこの日数は受け付けます。',
+          help: '新しいキーが指定できる最も遠い有効期限(作成時から数えます)。これより長いものは拒否されます。ちょうどこの日数は受け付けます。',
         },
         api_key_inactivity_days: {
           label: '非アクティブによる失効(日)',
-          help: 'この日数のあいだ使用記録のないキーは拒否されます(API_KEY_INACTIVE)。失効(revoke)はされません。新しいキーを作成してください。一度も使われていないキーは作成時から、それが下のポリシー開始時刻より古い場合はポリシー開始時刻から数えます。0 で非アクティブ失効をオフにします。',
+          help: 'この日数のあいだ使用記録のないキーは拒否されます。失効(revoke)はされません。新しいキーを作成してください。一度も使われていないキーは作成時から、それが下のポリシー開始時刻より古い場合はポリシー開始時刻から数えます。0 で非アクティブ失効をオフにします。',
         },
         api_key_policy_started_at: {
           label: 'キーポリシーの開始時刻',
@@ -247,15 +248,15 @@ export const jaJP: PlatformTranslationData = {
         },
         google_enabled: {
           label: 'Google ログインを有効化',
-          help: 'クライアント ID とクライアントシークレットの両方が解決されると Google サインインを提供します。値は下に保存したもの、またはサーバーの GOOGLE_CLIENT_ID と GOOGLE_CLIENT_SECRET(保存した値より優先)から解決されます。両方が解決されるまでは、オンでもログインページに Google ボタンは表示されません。オフにすると、サーバーが両方を設定していても Google サインインを取り下げます。OAuth クライアントは Google Cloud Console で作成してください。',
+          help: 'クライアント ID とクライアントシークレットの両方が利用できると Google サインインを提供します。値は下に保存したもの、またはサーバー設定(保存した値より優先)から取得されます。両方が利用できるまでは、オンでもログインページに Google ボタンは表示されません。オフにすると、サーバーが両方を設定していても Google サインインを取り下げます。OAuth クライアントは Google Cloud Console で作成してください。',
         },
         google_client_id: {
           label: 'Google クライアント ID',
-          help: 'Google Cloud Console の OAuth クライアント ID。サーバー側で GOOGLE_CLIENT_ID を設定することもできます。',
+          help: 'Google Cloud Console の OAuth クライアント ID。サーバー設定で指定することもできます。',
         },
         google_client_secret: {
           label: 'Google クライアントシークレット',
-          help: '保存時に暗号化されます。サーバー側で GOOGLE_CLIENT_SECRET を設定することもできます。',
+          help: '保存時に暗号化されます。サーバー設定で指定することもできます。',
         },
       },
     },
@@ -313,7 +314,11 @@ export const jaJP: PlatformTranslationData = {
         city: { label: '市区町村' },
         state: { label: '都道府県 / 州' },
         postal_code: { label: '郵便番号' },
-        country: { label: '国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。' },
+        country: {
+          label: '国',
+          help: '登記住所の国。国名を入力してリストから選択します。',
+          options: countryOptionLabels('ja-JP'),
+        },
         phone: { label: '電話', help: '主要な業務用電話（E.164 推奨。例:+1 415 555 0100）。' },
         website: { label: 'ウェブサイト', help: '例:https://example.com' },
         primary_contact_name: { label: '主担当者名' },
@@ -331,7 +336,11 @@ export const jaJP: PlatformTranslationData = {
       keys: {
         timezone: { label: '既定のタイムゾーン', help: '数式での「今日」がどの日か、レポートでの日付のまとめ方、日付と時刻の表示方法を決めます。任意の IANA タイムゾーン名（例:Asia/Tokyo）を指定できます。これが組織で実際に使われるタイムゾーンです。組織レコードの「タイムゾーン」フィールドではこれは変わりません。' },
         locale: { label: '既定の言語', help: 'メッセージカタログと数値/日付フォーマットに使う BCP-47 ロケール。' },
-        default_country: { label: '既定の国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。住所と電話の既定に使用します。' },
+        default_country: {
+          label: '既定の国',
+          help: '住所と電話の既定に使用します。国名を入力してリストから選択します。',
+          options: countryOptionLabels('ja-JP'),
+        },
         currency: { label: '既定の通貨', help: '通貨フィールドが独自の通貨を指定しない場合に適用される ISO 4217 コード。' },
         fiscal_year_start: { label: '会計年度の開始月', help: '会計年度の最初の月 — レポートの「今四半期 / 会計年度」を決定します。' },
       },
@@ -355,7 +364,7 @@ export const jaJP: PlatformTranslationData = {
       },
       banners: {
         beta_notice: { title: 'ご注意ください',
-          text: 'ベータ機能は予告なく変更される場合があります。デプロイ全体で固定するには環境変数 (例: `OS_FEATURE_FLAGS_AI_ENABLED=true`) を使用してください。' },
+          text: 'ベータ機能は予告なく変更される場合があります。サーバー設定で指定した機能はデプロイ全体でオンまたはオフに固定され、ここでは変更できません。' },
       },
     },
 
@@ -406,7 +415,7 @@ export const jaJP: PlatformTranslationData = {
         provider: { title: 'プロバイダー',
           description: 'LLM バックエンドを選択します。Memory モードは入力をそのまま返します。テスト用であり、本番では使用しないでください。' },
         gateway: { title: 'Vercel AI Gateway',
-          description: 'マルチプロバイダールーター。モデル指定は `provider/model` 形式に従います（例: `openai/gpt-4o`）。' },
+          description: 'マルチプロバイダールーター。モデルは provider/model の形式で指定します（例: openai/gpt-4o）。' },
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
@@ -441,27 +450,27 @@ export const jaJP: PlatformTranslationData = {
           },
         },
         gateway_model: { label: 'Gateway モデル',
-          help: 'AI_GATEWAY_MODEL として転送されます。例: openai/gpt-4o' },
+          help: 'サーバー設定で指定したモデルの代わりに使われます。例: openai/gpt-4o' },
         gateway_api_key: { label: 'Gateway API キー',
           help: '任意 — Gateway が認証を要求する場合のみ必要です。' },
         openai_api_key: { label: 'OpenAI API キー',
-          help: 'OPENAI_API_KEY として転送されます。保存時に暗号化されます。' },
+          help: 'サーバー設定で指定したキーの代わりに使われます。保存時に暗号化されます。' },
         openai_model: { label: 'モデル',
           help: 'デフォルトのモデル ID。エージェント単位の上書きが優先されます。' },
         openai_base_url: { label: 'Base URL',
           help: 'Azure OpenAI や自己ホスト型ゲートウェイ用の上書き。api.openai.com の場合は空欄にします。' },
         anthropic_api_key: { label: 'Anthropic API キー',
-          help: 'ANTHROPIC_API_KEY として転送されます。保存時に暗号化されます。' },
+          help: 'サーバー設定で指定したキーの代わりに使われます。保存時に暗号化されます。' },
         anthropic_model: { label: 'モデル' },
         google_api_key: { label: 'Google API キー',
-          help: 'GOOGLE_GENERATIVE_AI_API_KEY として転送されます。保存時に暗号化されます。' },
+          help: 'サーバー設定で指定したキーの代わりに使われます。保存時に暗号化されます。' },
         google_model: { label: 'モデル' },
         deepseek_api_key: { label: 'DeepSeek API キー', help: 'sk-…。platform.deepseek.com で発行。' },
         deepseek_model: { label: 'モデル', help: '例:deepseek-chat（V3）、deepseek-reasoner（R1 推論）。' },
         dashscope_api_key: { label: 'DashScope API キー', help: 'sk-…。dashscope.console.aliyun.com で発行。' },
         dashscope_model: { label: 'モデル' },
         cloudflare_account_id: { label: 'Cloudflare アカウント ID', help: 'Cloudflare ダッシュボード URL に含まれる 32 桁の 16 進数 ID。' },
-        cloudflare_gateway_id: { label: 'Gateway ID', help: 'Cloudflare → AI Gateway で設定したゲートウェイ名。既定は `default`。' },
+        cloudflare_gateway_id: { label: 'Gateway ID', help: 'Cloudflare → AI Gateway で設定したゲートウェイ名。既定は「default」。' },
         cloudflare_api_key: { label: 'Cloudflare AI Gateway トークン', help: 'AI Gateway →「API tokens」タブで発行（cfut_… または sk_…）。' },
         cloudflare_model: { label: 'モデル' },
         siliconflow_api_key: { label: 'SiliconFlow API キー' },
@@ -476,7 +485,7 @@ export const jaJP: PlatformTranslationData = {
           help: 'レスポンスごとに生成されるトークンの上限。' },
         request_timeout_ms: { label: 'リクエストタイムアウト (ms)' },
         trace_enabled: { label: 'トレースを記録',
-          help: 'デバッグと再生のため prompt/response トレースを sys_ai_trace に保存します。' },
+          help: 'AI へのリクエストとその応答を記録し、問題が起きたときに会話を確認・再生できるようにします。' },
         log_prompts: { label: '完全なプロンプトを記録',
           help: 'メタデータだけでなくレンダリングされたプロンプトをトレース行に含めます。' },
         embedder_provider: {
@@ -503,7 +512,7 @@ export const jaJP: PlatformTranslationData = {
         embedder_dimensions: { label: '次元数',
           help: '出力次元数を上書きします（Matryoshka モデルのみ）。空欄の場合はモデルのデフォルトを使用します。' },
         embedder_batch_size: { label: 'バッチサイズ',
-          help: 'embed() 呼び出しごとのチャンク数。プロバイダーのレート/サイズ制限に達する場合は減らします。' },
+          help: '埋め込みプロバイダーに 1 回のリクエストで送るチャンク数。プロバイダーのレート/サイズ制限に達する場合は減らします。' },
       },
       actions: {
         test: { label: '接続テスト' },
@@ -527,7 +536,7 @@ export const jaJP: PlatformTranslationData = {
         ragflow: { title: 'RAGFlow',
           description: '外部 RAGFlow デプロイ。セルフホストの手順は https://ragflow.io を参照してください。' },
         indexing: { title: 'インデックスのデフォルト値',
-          description: 'KnowledgeSource.adapterConfig のソース単位の値が優先されます。' },
+          description: 'ナレッジソース自体に設定した値が、これらの既定値より優先されます。' },
         permissions: { title: '権限' },
       },
       keys: {
@@ -546,13 +555,13 @@ export const jaJP: PlatformTranslationData = {
         ragflow_base_url: { label: 'Base URL', help: '例: http://localhost:9380' },
         ragflow_api_key: { label: 'API キー' },
         ragflow_default_dataset: { label: 'デフォルトデータセット ID',
-          help: 'KnowledgeSource が独自の RAGFlow データセットを指定しない場合に使用されます。' },
+          help: 'ナレッジソースが独自の RAGFlow データセットを指定しない場合に使用されます。' },
         chunk_target: { label: '目標チャンクサイズ（文字数）',
           help: 'トークン単位の分割が行われる前のチャンクサイズのソフト上限。' },
         chunk_overlap: { label: 'チャンクの重なり（文字数）',
           help: '境界を越えてコンテキストを維持するため、前のチャンクから保持する文字数。' },
         over_fetch: { label: 'オーバーフェッチ倍率',
-          help: 'JS 側のメタデータフィルタリングでも行が残るよう、内部で topK × overFetch 件の候補を取得します。' },
+          help: '検索では要求された件数のこの倍数の結果を取得し、ドキュメント情報で絞り込んだ後も十分な件数が残るようにします。' },
         enforce_rls: { label: '検索時に RLS を強制',
           help: '各ヒットを呼び出し元のレコードレベル権限に対して再確認します。' },
       },
@@ -564,6 +573,35 @@ export const jaJP: PlatformTranslationData = {
           text: 'アダプターを切替えても既存のインデックスは移行されません。' },
         enforce_rls_warning: { title: '本番環境では有効のままにしてください',
           text: '無効化するとプラットフォーム固有のセーフガードがスキップされます。' },
+      },
+    },
+
+    lifecycle: {
+      title: 'データライフサイクル',
+      description: 'システムデータを保持する期間：保持期間の上書き、テーブルごとの行数上限、テーブルが想定外に増えたときのアラート。プラットフォームは定期クリーンアップの実行時にこれらを適用します。',
+      keys: {
+        enabled: {
+          label: 'ライフサイクルポリシーを適用',
+          help: '定期クリーンアップのマスタースイッチ。オフにすると、宣言済みの保持期間・TTL・ローテーションのポリシーが適用されなくなります（データは再び無制限に増えます）。',
+        },
+        retention_overrides: {
+          label: '保持期間の上書き',
+          help: 'オブジェクトごとの保持ウィンドウの上書き：{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }。期間は h/d/w/y で指定します。'
+            + '組織ごとに設定するため、規制対象の組織は数年、開発用の組織は数日だけ保持できます。'
+            + 'プラットフォーム機能が必要とする最小期間（例：ジョブキューの重複検出ウィンドウ）より短い上書きは無視されてエラーとして記録され、既定のウィンドウが引き続き適用されます。',
+        },
+        quotas: {
+          label: '行数クォータ',
+          help: 'オブジェクトごとの最大行数：{ "<object>": 1000000 }。超過するとガバナンスアラートが発生します。クォータが宣言済みのポリシーを超えて削除することはありません。',
+        },
+        quota_defaults: {
+          label: 'クラス別の既定クォータ',
+          help: 'ライフサイクルクラスごとのフォールバッククォータ：{ "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }。',
+        },
+        growth_alert_rows: {
+          label: '増加アラートのしきい値（クリーンアップ 1 回あたりの行数）',
+          help: 'ライフサイクルを宣言したテーブルが 2 回のクリーンアップの間にこの行数を超えて増えたときにアラートを出します。0 で増加アラートを無効にします。',
+        },
       },
     },
   },

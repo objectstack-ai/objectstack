@@ -28,8 +28,8 @@
  * @module views/RecordFormPage
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { ArrowLeft, Building2, Database } from 'lucide-react';
@@ -38,6 +38,7 @@ import { getRecordDisplayName } from '@object-ui/core';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
+import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '../providers/writeWarningToast.js';
 import {
   ExpressionProvider,
   createExpressionEvaluator,
@@ -71,7 +72,6 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
     recordId: string;
   }>();
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams] = useSearchParams();
   const dataSource = useAdapter();
   const { objects, loading: metadataLoading } = useMetadata();
@@ -121,22 +121,25 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   /**
    * Navigate back to the most relevant location.
-   * Back when a page of this console is behind this one (react-router keys
-   * the entry it started on `'default'`, as `FormPage`'s cancel reads it), so
-   * users return to the exact list/view they came from. ⛔ Not
+   * Back only when this console pushed an entry behind this one, so users
+   * return to the exact list/view they came from. react-router numbers the
+   * entries it writes in `history.state.idx`: 0 on the entry the document
+   * loaded on, one more per push, unchanged by a replace. ⛔ Not
+   * `location.key !== 'default'`: a replace on load (the app-name address
+   * moved to the package-id one) mints a key with nothing behind it, so Save
+   * went Back out of the app (objectstack-ai/objectstack#28036). ⛔ Nor
    * `window.history.length`: it counts the tab's entries from before the
-   * console loaded, so a pasted URL went Back out of the app and lost the save
-   * toast (objectstack-ai/objectstack#27454). Otherwise the record detail
-   * (edit) or list (create), inside the app.
+   * console loaded (objectstack-ai/objectstack#27454). Otherwise the record
+   * detail (edit) or list (create), inside the app.
    */
-  const hasInAppHistory = location.key !== 'default';
   const goBack = useCallback(() => {
-    if (hasInAppHistory) {
+    const entryIndex = (window.history.state as { idx?: unknown } | null)?.idx;
+    if (typeof entryIndex === 'number' && entryIndex > 0) {
       navigate(-1);
     } else {
       navigate(recordDetailUrl, { replace: true });
     }
-  }, [navigate, recordDetailUrl, hasInAppHistory]);
+  }, [navigate, recordDetailUrl]);
 
   // Two names, not one (objectui#11733): the title and the toasts speak of ONE
   // record, so they keep the singular; the breadcrumb link opens the object's
@@ -172,7 +175,28 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   // (`Record #<id>`, or the empty fallback for an id-less row) is not a name,
   // so a record with nothing nameable keeps the object-label toast. The two
   // named keys are in all ten packs, so they pass bare like every key above.
+  //
+  // objectstack-ai/objectstack#27999 — and it is the save's ONE toast: while
+  // this page is open, the write-warning channel parks the answer warnings of
+  // the write the page makes (this record's update, or a create of this
+  // object) on the claim below instead of toasting them, and this toast
+  // carries them.
+  const answerWarningClaim = useRef<AnswerWarningClaim | null>(null);
+  useEffect(() => {
+    if (!dataSource || !objectName) return;
+    if (mode === 'edit' && !recordId) return;
+    const claim = claimAnswerWarnings(dataSource, mode === 'edit'
+      ? { operation: 'update', resource: objectName, id: recordId }
+      : { operation: 'create', resource: objectName });
+    answerWarningClaim.current = claim;
+    return () => {
+      if (answerWarningClaim.current === claim) answerWarningClaim.current = null;
+      claim.release();
+    };
+  }, [dataSource, mode, objectName, recordId]);
+
   const handleSuccess = useCallback((saved?: any) => {
+    const warnings = answerWarningClaim.current?.take(saved) ?? [];
     const resolved = saved && typeof saved === 'object'
       ? getRecordDisplayName(objectDef, saved, { fallback: '' })
       : '';
@@ -181,13 +205,13 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
       ? resolved
       : undefined;
     if (mode === 'create') {
-      toast.success(title
+      toastRecordSave(toast, title
         ? t('form.createdNamed', { object: label, title })
-        : t('form.createSuccess', { object: label }));
+        : t('form.createSuccess', { object: label }), warnings);
     } else {
-      toast.success(title
+      toastRecordSave(toast, title
         ? t('form.updatedNamed', { object: label, title })
-        : t('form.updateSuccess', { object: label }));
+        : t('form.updateSuccess', { object: label }), warnings);
     }
     goBack();
   }, [mode, t, label, objectDef, goBack]);

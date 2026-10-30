@@ -5,6 +5,8 @@
  * narrower than `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` and unfolds when it widens
  * (objectstack#27593). The wide window's open state survives the fold, a
  * reader's "keep open" turns the fold off, and the phone drawer is left alone.
+ * Only an open or close on a wide window is kept as the wide-window choice
+ * (objectstack#28079).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -14,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useResponsiveSidebar } from '../useResponsiveSidebar';
 import {
   CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE,
-  readStashedWideOpen,
+  readWideWindowOpen,
 } from '../../layout/consoleSidebarRail';
 import { writeWorkspacePreference } from '../../utils/workspacePreference';
 
@@ -100,11 +102,11 @@ describe('useResponsiveSidebar (objectstack#27593)', () => {
 
     resizeTo(1280);
     expect(openState()).toBe('false');
-    expect(readStashedWideOpen()).toBe(true);
+    expect(readWideWindowOpen()).toBe(true);
 
     resizeTo(1440);
     expect(openState()).toBe('true');
-    expect(readStashedWideOpen()).toBeUndefined();
+    expect(readWideWindowOpen()).toBe(true);
   });
 
   it('hands back a collapsed wide state as collapsed', () => {
@@ -127,22 +129,22 @@ describe('useResponsiveSidebar (objectstack#27593)', () => {
     expect(openState()).toBe('false');
     cleanup();
 
-    // The primitive's cookie recorded the fold; the stash carries the wide state.
+    // The primitive's cookie recorded the fold; the wide-window choice is kept apart.
     renderAt(1440);
     expect(openState()).toBe('true');
-    expect(readStashedWideOpen()).toBeUndefined();
+    expect(readWideWindowOpen()).toBe(true);
   });
 
   it('"keep open" turns the fold off: a narrow window keeps the sidebar open', () => {
     writeWorkspacePreference(CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE, 'user', 'on');
     renderAt(1280);
     expect(openState()).toBe('true');
-    expect(readStashedWideOpen()).toBeUndefined();
+    expect(readWideWindowOpen()).toBeUndefined();
   });
 
   it('leaves the open state alone below the phone breakpoint, where the drawer takes over', () => {
     renderAt(700);
     expect(openState()).toBe('true');
-    expect(readStashedWideOpen()).toBeUndefined();
+    expect(readWideWindowOpen()).toBeUndefined();
   });
 });

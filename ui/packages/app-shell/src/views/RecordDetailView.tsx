@@ -33,7 +33,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordPageDrawerHost, useRecordPane } from './recordDrawerStack.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 
@@ -1063,6 +1063,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // calling the hook a second time, so the hook order is unchanged in shape.
   // Same structural note PR #7229 recorded for `ListView`'s memo.
   const perms = usePermissions();
+  // The record pane this view is drawn in, if any (objectstack#27545): its
+  // 「Open as full page」 is the header `⋯`'s last item.
+  const recordPane = useRecordPane();
 
   // What the page-record read below SENDS, held as primitives (objectui#11699).
   //
@@ -3379,11 +3382,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [authFetch, currentUser.id, dataSource, feedRecordKey, feedItemsByRecord, reactionStore, reactionRemoveGranted, t],
   );
 
+  // Reset loading on navigation; the page-record effect above owns data
+  // fetching. Embedded, a step to the next record is no navigation: the pane
+  // keeps the record it shows until the next one arrives, never a blank
+  // skeleton between the two (objectstack#27545). A different object still
+  // resets.
+  const loadingResetRecordId = embedded ? null : recordId;
   useEffect(() => {
-    // Reset loading on navigation; the page-record effect above owns data fetching
     setIsLoading(true);
     queueMicrotask(() => setIsLoading(false));
-  }, [objectName, recordId]);
+  }, [objectName, loadingResetRecordId]);
 
   // Build the synthesized-page inputs — the object-derived parts that
   // `buildDefaultPageSchema` folds into the default record page when no
@@ -3643,7 +3651,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           <EmptyDescription>
             {t('empty.recordNotFoundDescription', {
               defaultValue:
-                'The record you are looking for does not exist or may have been deleted.',
+                'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
             })}
           </EmptyDescription>
         </Empty>
@@ -3894,6 +3902,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }
       },
     } as any);
+    // objectstack#27545 — in a record pane, the way to this record's full page,
+    // the last of the `⋯`'s host entries (the destructive band stays below it,
+    // objectui#12529). The bar's `⤢` maximizes in place; it no longer routes.
+    if (embedded && recordPane) {
+      items.push({
+        name: 'sys_open_full_page',
+        label: t('detail.openAsFullPage', { defaultValue: 'Open as full page' }),
+        icon: 'arrow-up-right',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 115,
+        component: 'action:menu',
+        onClick: () => recordPane.openAsPage(),
+      } as any);
+    }
     if (affordances.delete) {
       items.push({
         name: 'sys_delete',

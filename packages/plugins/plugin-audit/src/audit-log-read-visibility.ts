@@ -81,14 +81,44 @@
  * exemption is the shared mechanism's (`ParentRecordGate.exemptCapability`),
  * declared here and nowhere else: the activity stream's gate declares none.
  *
+ * ## Deployment-level rows (#26750, ruling A)
+ *
+ * The ledger has no organization column (ADR-0131 D7): the organization a row
+ * is about is the attribution field `tenant_id`, and a row about a
+ * deployment-level action (a global settings change, the platform-admin
+ * standing roster, a record of an object with no organization column) carries
+ * it NULL. Those rows are served to the platform administrator alone, in every
+ * tenancy posture, `single` included: every other non-system reader — an
+ * organization administrator, a member whose sets grant the ledger, a holder
+ * of {@link LEDGER_AUDIT_CAPABILITY} — is served only the rows about an
+ * organization ({@link ledgerRowAboutAnOrganizationWhere}, ANDed into its
+ * read). Under an organization wall the shipped row policy `sys_audit_log_org`
+ * already excluded them for the shipped sets; this rule holds the same line
+ * under `single`, where no wall is enforced and that policy is stripped, and
+ * for a set that authors its own ledger row policy or the superuser read bypass
+ * on the ledger, whose holder is no platform administrator.
+ *
+ * Which organization's rows a reader is served stays the row policy's answer
+ * (`tenant_id == current_user.organization_id` under a wall); ⛔ this rule
+ * derives no organization scope of its own (ADR-0131 D8).
+ *
+ * The platform administrator is the carried ADR-0095 D2/D3 posture rung
+ * (`PLATFORM_OPERATOR_POSTURE`, `@objectstack/metadata-core`), never a held
+ * capability or a position name: the rung is derived from the unscoped
+ * `admin_full_access` grant, the evidence the superuser read bypass trusts, and
+ * that bypass skips the security plugin's row policies but not this
+ * middleware. A context that carries no rung is not the platform
+ * administrator here (fail closed).
+ *
  * System-context reads (the platform-admin standing boot reading its last
  * roster, the writers' own reads) and context-less programmatic calls are not
  * narrowed, as for every gate in this package: every real transport carries a
  * context.
  */
 
+import { PLATFORM_OPERATOR_POSTURE } from '@objectstack/metadata-core';
 import { SystemObjectName } from '@objectstack/spec/system';
-import type { CommentAccessLogger } from './comment-access-hooks.js';
+import type { CommentAccessLogger, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
 import { LEDGER_RECORD_WRITE_ACTIONS } from './audit-log-field-redaction.js';
 import { READ_AUDIT_ACTION } from './read-audit.js';
 import {
@@ -154,6 +184,26 @@ export function ledgerRowAboutNoRecordWhere(): Record<string, unknown> {
 export const LEDGER_AUDIT_CAPABILITY = 'view_all_audit_log';
 
 /**
+ * [#26750, ruling A] The ledger rows about an organization, as a WHERE on the
+ * ledger's own attribution column: `tenant_id` present and not empty. Every
+ * reader but the platform administrator reads through it (module header,
+ * "Deployment-level rows"). A fresh tree per call. `$ne: null` is its own
+ * clause, so the empty-string test is never asked of a null.
+ */
+export function ledgerRowAboutAnOrganizationWhere(): Record<string, unknown> {
+  return { $and: [{ tenant_id: { $ne: null } }, { tenant_id: { $ne: '' } }] };
+}
+
+/**
+ * [#26750, ruling A] Whether this caller is served the deployment-level ledger
+ * rows: only the platform administrator, read as the carried posture rung
+ * (module header, "Deployment-level rows"). Absent or any other rung: no.
+ */
+export function readsDeploymentLevelLedgerRows(context: CommentReadMiddlewareCtx['context']): boolean {
+  return context?.posture === PLATFORM_OPERATOR_POSTURE;
+}
+
+/**
  * The parent the ledger's auth-event sink names (`auth-event-audit.ts`: a
  * `login` / `logout` row is about the session). It is in the audit writer's
  * `AUDIT_EXCLUDED_OBJECTS` — the CRUD mirror writes no row about a session —
@@ -201,6 +251,10 @@ export function installAuditLogReadVisibility(
       // turned into the deny-all sentinel here.
       const filter = await computeParentRecordFilter(engine, ctx, logger, LEDGER_GATE, getAdmission);
       if (filter) andIntoWhere(ctx, filter);
+      // [#26750, ruling A] After the gate, which plans its parents off the
+      // read's own `where`: the deployment-level rows, for the platform
+      // administrator alone — the audit capability's holder included.
+      if (!readsDeploymentLevelLedgerRows(ctx.context)) andIntoWhere(ctx, ledgerRowAboutAnOrganizationWhere());
       return next();
     },
     { object: LEDGER_OBJECT },

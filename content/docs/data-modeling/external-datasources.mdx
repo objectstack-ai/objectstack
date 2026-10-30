@@ -186,6 +186,17 @@ connect, so queries against its objects keep failing until the server is
 restarted. Do not set it in production.
 </Callout>
 
+<Callout type="info">
+**A package installed into a running runtime** (`os package install`, which calls
+`POST /api/v1/marketplace/install-local`) gets the same treatment at install time
+and at every restart: its declared datasources are registered as `origin: code`,
+read-only, and auto-connected by the same gates. There is no boot left to refuse,
+so a datasource that cannot be connected is installed with its failed `status`
+instead, and reads of its bound objects answer `503 ERR_DATASOURCE_UNAVAILABLE`.
+The install answer lists each datasource's verdict under `datasources`. A package
+declaring a datasource name the runtime already holds is refused `409`.
+</Callout>
+
 ### Seeing the state of a datasource
 
 Every connect attempt's verdict is retained, so a datasource that is down no
