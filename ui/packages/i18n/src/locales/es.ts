@@ -1771,7 +1771,7 @@ const es = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Necesita acceso a Studio para abrir Studio.",
+      accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Conjuntos de permisos.",
     },
     saveAdvisoryTitle: "Guardado: la comprobación de creación generó {{count}} recomendación(es)",
     saveAdvisoryTitle_one: "Guardado: la comprobación de creación generó {{count}} recomendación",
@@ -4473,10 +4473,10 @@ const es = {
       detailChangedKeys: 'También cambió:',
       detailNewKeys: 'Incluye:',
       generatedGroup: 'Generado por la plataforma ({{n}})',
-      confirmNote: 'Publicar libera atómicamente los {{count}} borradores pendientes de este paquete.',
-      confirmNote_one: 'Publicar libera atómicamente {{count}} borrador pendiente de este paquete.',
-      confirmNote_many: 'Publicar libera atómicamente los {{count}} de borradores pendientes de este paquete.',
-      confirmNote_other: 'Publicar libera atómicamente los {{count}} borradores pendientes de este paquete.',
+      confirmNote: 'Publicar libera juntos los {{count}} borradores pendientes de este paquete: o se publican todos, o ninguno.',
+      confirmNote_one: 'Publicar libera {{count}} borrador pendiente de este paquete: se publica, o no cambia nada.',
+      confirmNote_many: 'Publicar libera juntos los {{count}} de borradores pendientes de este paquete: o se publican todos, o ninguno.',
+      confirmNote_other: 'Publicar libera juntos los {{count}} borradores pendientes de este paquete: o se publican todos, o ninguno.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'Publicar libera los {{count}} borradores pendientes uno por uno: el que falle sigue pendiente y los demás se publican igualmente.',

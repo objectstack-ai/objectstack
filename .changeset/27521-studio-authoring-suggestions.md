@@ -16,4 +16,4 @@ Metadata-protocol: none
 - **Add field**: a Create that cannot run yet stays focusable and says what is missing.
 - **Read-only inspectors**: disabled text areas take the muted disabled look.
 - **Publish**: the "one atomic release" wording is plain ("together: all of them go live, or none do"), and a publish that put an app or object live says members need a permission set, with an "Open Access" action.
-- **Studio access refusal** names who grants access (an administrator, in Setup → Permission Sets), in `en` and `zh` and in the Console's own fallback sentence.
+- **Studio access refusal** names who grants access (an administrator, in Setup → Permission Sets), in every language pack and in the Console's own fallback sentence. The publish confirm note's all-or-nothing wording is translated in every pack too.

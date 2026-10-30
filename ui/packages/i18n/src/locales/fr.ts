@@ -1767,7 +1767,7 @@ const fr = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio.",
+      accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Ensembles d'autorisations.",
     },
     saveAdvisoryTitle: "Enregistré — le contrôle de création a signalé {{count}} recommandation(s)",
     saveAdvisoryTitle_one: "Enregistré — le contrôle de création a signalé {{count}} recommandation",
@@ -4469,10 +4469,10 @@ const fr = {
       detailChangedKeys: 'Également modifié :',
       detailNewKeys: 'Inclut :',
       generatedGroup: 'Généré par la plateforme ({{n}})',
-      confirmNote: 'La publication libère atomiquement les {{count}} brouillons en attente de ce paquet.',
-      confirmNote_one: 'La publication libère atomiquement {{count}} brouillon en attente de ce paquet.',
-      confirmNote_many: 'La publication libère atomiquement les {{count}} de brouillons en attente de ce paquet.',
-      confirmNote_other: 'La publication libère atomiquement les {{count}} brouillons en attente de ce paquet.',
+      confirmNote: 'La publication libère ensemble les {{count}} brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
+      confirmNote_one: 'La publication libère {{count}} brouillon en attente de ce paquet : il est mis en ligne, ou rien ne change.',
+      confirmNote_many: 'La publication libère ensemble les {{count}} de brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
+      confirmNote_other: 'La publication libère ensemble les {{count}} brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'La publication libère les {{count}} brouillons en attente un par un : celui qui échoue reste en attente, les autres sont publiés quand même.',
