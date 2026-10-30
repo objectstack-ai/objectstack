@@ -75,7 +75,7 @@ describe('expression-invalid on a flow edge condition carries a key path (#26858
     for (const i of onEdge) expect(i.path).toBeUndefined();
   });
 
-  it('a finding off the edge condition gains no path', () => {
+  it('a finding off the edge condition gains no edge path (#27828: a node condition carries its node\'s)', () => {
     const issues = validateStackExpressions({
       flows: [
         flow([{ id: 'e1', source: 'start', target: 'end' }], {
@@ -87,7 +87,7 @@ describe('expression-invalid on a flow edge condition carries a key path (#26858
       ],
     });
     expect(issues.length).toBeGreaterThan(0);
-    for (const i of issues) expect(i.path).toBeUndefined();
+    for (const i of issues) expect(i.path).toBe('flows[0].nodes[0].config.condition');
   });
 
   it('reaches the publish gate: the refusal is located at the edge condition, message unchanged', () => {

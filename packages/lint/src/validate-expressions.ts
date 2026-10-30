@@ -165,7 +165,10 @@ export interface ExprIssue {
    * [#26858] The judged slot's key path in the stack, in the spelling the other
    * rules' findings carry (`flows[0].edges[1].condition`), beside the human
    * `where`. Set only where the slot has one: a top-level flow edge's
-   * `condition`, and (#27643) an object validation rule's `condition` / `when`
+   * `condition`, (#27828) a top-level flow node's judged config value
+   * (`flows[0].nodes[1].config.fields.status`, a sibling block's
+   * `flows[0].nodes[2].connectorConfig.input.customerId`), and (#27643) an
+   * object validation rule's `condition` / `when`
    * (`objects[0].validations[1].condition`), a nested branch's included
    * (`objects[0].validations[1].then.condition`). Absent, the finding is
    * located by `where` alone.
@@ -2722,7 +2725,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // that guarantee stops, through the file's one home for it.
       for (const node of recordsOf(graph.nodes)) {
         const cfg = (node.config ?? {}) as AnyRec;
+        // [#27828] Each site below names the key it judged beside its `where`;
+        // after the walk, this node's findings carry that key path (see the
+        // stamp at the end of this body).
+        const nodeFirst = issues.length;
+        const nodeSlotKeys = new Map<string, string>();
         const nodeCondWhere = `${at} · node '${node.id}' (${node.type}) condition`;
+        nodeSlotKeys.set(nodeCondWhere, 'config.condition');
         if (!checkStructuralCondition(nodeCondWhere, cfg.condition).refused) {
           const from = issues.length;
           check(nodeCondWhere, cfg.condition, objectName);
@@ -2762,15 +2771,21 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
             || (configRefusal.code === 'node-config-refused-by-contract' && configRefusal.path === 'functionName')
           )));
         for (const configRefusal of configRefusals) {
+          const configWhere = `${at} · node '${node.id}' (${nodeType}) config.${configRefusal.path}`;
+          nodeSlotKeys.set(configWhere, `config.${configRefusal.path}`);
           issues.push({
-            where: `${at} · node '${node.id}' (${nodeType}) config.${configRefusal.path}`,
+            where: configWhere,
             message: configRefusal.message,
             source: configRefusal.source,
             severity: 'error',
           });
         }
-        for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
-          const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
+        // [#27968] Handed the node, the ledger reaches a slot rooted in a
+        // sibling block too — a `connector_action` node's
+        // `connectorConfig.input` — and names the block it is in.
+        for (const found of resolveFlowNodeExpressions(nodeType, cfg, node)) {
+          const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at ${found.block}.${found.path}`;
+          nodeSlotKeys.set(slotWhere, `${found.block}.${found.path}`);
           // [#15137] `value` slots are checkable too, by their own rule — see
           // `checkDeclaredValue`. Not shadowing-checked: the shadow diagnostic is
           // about a bare identifier resolving to a variable instead of a field,
@@ -2828,9 +2843,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // (`flowNodeValueTemplateRefusals`), walking the ledger's `value` slots
         // and the two legacy `assignment` shapes, so build and registration
         // give one verdict, and each refusal names the token's CEL spelling.
-        for (const templateRefusal of flowNodeValueTemplateRefusals(nodeType, cfg)) {
+        for (const templateRefusal of flowNodeValueTemplateRefusals(nodeType, cfg, node)) {
+          const templateWhere = `${at} · node '${node.id}' (${nodeType}) ${templateRefusal.label} at ${templateRefusal.block}.${templateRefusal.path}`;
+          nodeSlotKeys.set(templateWhere, `${templateRefusal.block}.${templateRefusal.path}`);
           issues.push({
-            where: `${at} · node '${node.id}' (${nodeType}) ${templateRefusal.label} at config.${templateRefusal.path}`,
+            where: templateWhere,
             message: templateRefusal.message,
             source: templateRefusal.source,
             severity: 'error',
@@ -2847,6 +2864,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // throw at the node mid-run.
         for (const slot of flowNodeTextSlotSources(nodeType, cfg)) {
           const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${slot.label} at config.${slot.path}`;
+          nodeSlotKeys.set(slotWhere, `config.${slot.path}`);
           const tokenRefusal = textSlotTemplateRefusal(slot.source);
           if (tokenRefusal !== undefined) {
             issues.push({ where: slotWhere, message: tokenRefusal, source: slot.source, severity: 'error' });
@@ -2876,6 +2894,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           const action = typeof cfg.actionType === 'string' ? cfg.actionType.trim() : '';
           const retired = ['actionType', 'template', 'recipients', 'variables', 'script']
             .filter((k) => cfg[k] != null);
+          // The first retired key the author wrote, or the `function` to write.
+          nodeSlotKeys.set(`${at} · node '${node.id}' (script) callable`, `config.${retired[0] ?? 'function'}`);
           if (retired.length > 0) {
             issues.push({
               where: `${at} · node '${node.id}' (script) callable`,
@@ -2909,6 +2929,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                 `\`defineStack({ functions })\`).`,
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
+          }
+        }
+        // [#27828] A top-level node's findings also carry the judged slot's key
+        // path, the #26858 edge shape (`flows[0].nodes[1].config.fields.status`),
+        // indexed over the list the author wrote (the coerced one drops `null`
+        // members and would renumber). A nested region's node keeps `where`, as
+        // its edges do.
+        const nodeIndex = flowIndex >= 0 && graph.path.length === 0 && Array.isArray(flow.nodes)
+          ? flow.nodes.indexOf(node)
+          : -1;
+        if (nodeIndex >= 0) {
+          for (let k = nodeFirst; k < issues.length; k++) {
+            const key = nodeSlotKeys.get(issues[k]!.where);
+            if (key !== undefined) issues[k] = { ...issues[k]!, path: `flows[${flowIndex}].nodes[${nodeIndex}].${key}` };
           }
         }
       }

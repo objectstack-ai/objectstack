@@ -10,6 +10,11 @@
  * Hosts merge `settingsBuiltinTranslations` into the i18next resource tree
  * under whatever namespace makes sense (the console wires it as `system`),
  * making keys resolvable as `<ns>.settings.<namespace>.{title,description,...}`.
+ *
+ * Besides the manifests bundled here, the locale files carry the copy for
+ * `lifecycle` (Data Lifecycle), the manifest `@objectstack/objectql` registers
+ * into the same hub: that package ships no translation bundle of its own.
+ * `settings-translation-coverage.test.ts` holds both to the same coverage.
  */
 
 import type { PlatformTranslationBundle } from '@objectstack/spec/system';

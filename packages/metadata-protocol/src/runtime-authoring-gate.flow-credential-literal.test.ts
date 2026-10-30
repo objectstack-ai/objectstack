@@ -24,7 +24,9 @@ const SENTINELS = ['door-header-sentinel', 'door-url-sentinel', 'door-input-sent
 /**
  * One flow, three served positions. `literal: false` is the same flow with templates:
  * a `{{ var }}` hole at the http `url` and header — text slots, where a single-brace
- * token is refused at this door since #19939 — and a `{var}` token at the connector input.
+ * token is refused at this door since #19939 — and, at the connector input, a CEL value
+ * envelope computing the `auth` map: the input is a value slot since #27968, where a
+ * `{…}` token is refused.
  */
 const credentialFlow = (literal: boolean) => ({
   name: literal ? 'door_cred_lit' : 'door_cred_dark',
@@ -55,7 +57,11 @@ const credentialFlow = (literal: boolean) => ({
       connectorConfig: {
         connectorId: 'rest',
         actionId: 'request',
-        input: { method: 'GET', path: '/p', auth: { clientSecret: literal ? SENTINELS[2] : '{api_token}' } },
+        input: {
+          method: 'GET',
+          path: '/p',
+          auth: literal ? { clientSecret: SENTINELS[2] } : { dialect: 'cel', source: "{'clientSecret': api_token}" },
+        },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
