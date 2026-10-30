@@ -317,6 +317,32 @@ export {
 } from './external-driver-errors.js';
 export type { ExternalWriteOperation } from './external-driver-errors.js';
 export { needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';
+// [#27744] The conformance kit a plugin driver outside this repository runs in
+// its own CI: the floor's contract against the spec's driver conformance tables.
+export {
+  createPluginDriverConformance,
+  runPluginDriverConformance,
+  definePluginDriverConformanceSuite,
+  pluginDriverConformanceFixtures,
+  PLUGIN_DRIVER_CONFORMANCE_FIXTURE_NAMES,
+  PluginDriverConformanceFailure,
+} from './plugin-driver-conformance.js';
+export type {
+  PluginDriverConformance,
+  PluginDriverConformanceCase,
+  PluginDriverConformanceField,
+  PluginDriverConformanceFixture,
+  PluginDriverConformanceFixtureName,
+  PluginDriverConformanceGroup,
+  PluginDriverConformanceOptions,
+  PluginDriverConformanceOutcome,
+  PluginDriverConformanceReport,
+  PluginDriverConformanceTarget,
+  PluginDriverConformanceTestApi,
+  PluginDriverConformanceTier,
+  PluginDriverConformanceWriteProbe,
+  PluginDriverPushdown,
+} from './plugin-driver-conformance.js';
 export type { InsertManyRowOutcome } from './engine.js';
 // [#5696] Thrown by `transaction(cb, base, { require: true })` when the
 // datasource cannot give a real transaction. Exported so a caller that fails

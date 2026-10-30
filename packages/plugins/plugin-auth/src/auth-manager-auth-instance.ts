@@ -107,6 +107,7 @@ export interface AuthInstanceHost {
   implicitLinkRequiresLocalEmailVerified: AuthManager['implicitLinkRequiresLocalEmailVerified'];
   isAuthGateActive: AuthManager['isAuthGateActive'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
+  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   isSsoWired: AuthManager['isSsoWired'];
@@ -716,6 +717,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
           enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
           externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
+          isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
           recordSignInOutcome: (...a) => this.recordSignInOutcome(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),

@@ -1217,6 +1217,104 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return () => { updateActionContext({ selectedRecords: [] }); };
   }, [selectedRows, updateActionContext]);
 
+  // Determine selection mode (support both new and legacy formats)
+  // Auto-enable 'multiple' selection when bulk actions are defined OR when
+  // a bulk-delete affordance is implicitly available (canDelete + onBulkDelete
+  // wired by the consumer). This gives every list a multi-select + delete UX
+  // out of the box without forcing each view JSON to declare bulkActions.
+  // [objectstack#3720] Bulk delete is the most destructive affordance on the list, so it
+  // rides the same object-level `delete` verdict as the row kebab (bucket lock
+  // ∧ userActions ∧ the server's effective operation set). An author-declared
+  // `bulkActions: ['delete']` / `bulkActionDefs[].operation === 'delete'` is a
+  // WIRING declaration, not a permission grant — so the built-in delete is
+  // filtered out of both when the verdict is off. Custom action ids and
+  // `custom` operations are untouched: they route through the action runner
+  // and carry their own gates. (An `update` operation is the edit verdict's —
+  // see `bulkActionDefs` below.)
+  const declaredBulkActions = schema.batchActions ?? schema.bulkActions;
+  const explicitBulkActions = objectCanDelete
+    ? declaredBulkActions
+    : declaredBulkActions?.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
+  // `bulkActions` carries a bare action NAME, which the runner cannot execute
+  // on its own — resolve each against `objectDef.actions` so it dispatches as a
+  // real def. See `resolveBulkActions` (objectui#3002). The
+  // canonical `'delete'` is held back: it routes to `onBulkDelete` (which owns
+  // confirm + refresh), not the runner, even if the object declares an action
+  // that happens to be named `delete`.
+  const legacyBulkNames = (explicitBulkActions ?? []).filter(
+    (a: unknown) => String(a).toLowerCase() !== 'delete',
+  );
+  const { defs: resolvedBulkDefs, unresolved: unresolvedBulkActions } = resolveBulkActions({
+    bulkActions: legacyBulkNames,
+    bulkActionDefs: Array.isArray(schema.bulkActionDefs) ? schema.bulkActionDefs : [],
+    objectActions: (objectSchema as any)?.actions,
+    localizeLabel: (actionName, fallback) =>
+      resolveActionLabel(schema.objectName, actionName, fallback),
+  });
+  // [objectui#12082] …and a bulk FIELD UPDATE (`operation: 'update'`) is the
+  // same object's edit verdict, the map's `rowEdit` row the row kebab's Edit
+  // reads (`rowEditVerdict` above): a def that writes a patch to every selected
+  // record must not outlive the caller's update grant, the effective operation
+  // set or the object's policy any more than the bulk delete outlives its
+  // delete verdict. A withheld def takes its dialog with it, and so the
+  // executor's per-row update, its undo and its retry, which re-run that write.
+  // `custom` defs are untouched, as above.
+  const bulkActionDefs: BulkActionDef[] = resolvedBulkDefs.filter(
+    (def: BulkActionDef) =>
+      (objectCanDelete || def?.operation !== 'delete')
+      && (rowEditVerdict.allowed || def?.operation !== 'update'),
+  );
+  // Names still dispatched by string: the unresolved ones, plus `'delete'`
+  // when the author asked for it — or the implicit bulk-delete affordance.
+  const keptDeleteAction = (explicitBulkActions ?? []).filter(
+    (a: unknown) => String(a).toLowerCase() === 'delete',
+  );
+  const effectiveBulkActions: string[] =
+    explicitBulkActions && explicitBulkActions.length > 0
+      ? [...unresolvedBulkActions, ...keptDeleteAction]
+      : canDelete && onBulkDelete && bulkActionDefs.length === 0
+        ? ['delete']
+        : [];
+  const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
+  let selectionMode: 'none' | 'single' | 'multiple' | boolean = false;
+  if (schema.selection !== undefined) {
+    // "presence enables; an explicit off wins" — the ONE rule both
+    // object-armed keys on this block obey (objectui#9837, ruling A-prime, batch
+    // #162 item 2), `paginationEnabled` below being the other half.
+    //
+    // Writing the object is how an author asks for selection; `type: 'none'`
+    // is this key's own explicit off and beats the presence. Before the ruling
+    // the read was `schema.selection?.type`, so an object with no `type` fell
+    // through to the legacy arms and the object itself meant NOTHING — the
+    // exact opposite of what the neighbouring `pagination` key taught, with no
+    // error and no diagnostic either way.
+    const authoredType = schema.selection?.type;
+    selectionMode =
+      authoredType === 'none' ? false : (authoredType ?? DEFAULT_SELECTION_TYPE);
+  } else if (schema.selectable !== undefined) {
+    // Legacy support — read only when `selection` is absent.
+    selectionMode = schema.selectable;
+  } else if (hasBulkActions) {
+    // Auto-enable multi-select when bulk actions exist
+    selectionMode = 'multiple';
+  }
+  // `selection.type: 'single'` caps the selection at one row (the data-table
+  // enforces replace-on-select, #2941), so the cross-page "select all N
+  // matching" escalation must never be offered.
+  const singleSelection = selectionMode === 'single';
+
+  // Publish whether these rows can be selected at all beside the selection
+  // itself, so a control outside the grid that needs a selected row can tell
+  // "nothing selected yet" from "nothing selectable here" (objectstack#27831:
+  // the list header leaves out a single-record action no selection can ever
+  // lift). Declared ahead of the early returns below, so it is published
+  // while the grid is still loading as well.
+  const rowsSelectable = !!selectionMode;
+  React.useEffect(() => {
+    updateActionContext({ selectionAvailable: rowsSelectable });
+    return () => { updateActionContext({ selectionAvailable: undefined }); };
+  }, [rowsSelectable, updateActionContext]);
+
   // --- Row color support ---
   const getRowClassName = useRowColor(schema.rowColor);
 
@@ -1761,92 +1859,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const effectiveFrozenColumns = hasUserPinnedColumns
     ? userLeftPinnedCount
     : (schema.frozenColumns ?? 1);
-
-  // Determine selection mode (support both new and legacy formats)
-  // Auto-enable 'multiple' selection when bulk actions are defined OR when
-  // a bulk-delete affordance is implicitly available (canDelete + onBulkDelete
-  // wired by the consumer). This gives every list a multi-select + delete UX
-  // out of the box without forcing each view JSON to declare bulkActions.
-  // [objectstack#3720] Bulk delete is the most destructive affordance on the list, so it
-  // rides the same object-level `delete` verdict as the row kebab (bucket lock
-  // ∧ userActions ∧ the server's effective operation set). An author-declared
-  // `bulkActions: ['delete']` / `bulkActionDefs[].operation === 'delete'` is a
-  // WIRING declaration, not a permission grant — so the built-in delete is
-  // filtered out of both when the verdict is off. Custom action ids and
-  // `custom` operations are untouched: they route through the action runner
-  // and carry their own gates. (An `update` operation is the edit verdict's —
-  // see `bulkActionDefs` below.)
-  const declaredBulkActions = schema.batchActions ?? schema.bulkActions;
-  const explicitBulkActions = objectCanDelete
-    ? declaredBulkActions
-    : declaredBulkActions?.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
-  // `bulkActions` carries a bare action NAME, which the runner cannot execute
-  // on its own — resolve each against `objectDef.actions` so it dispatches as a
-  // real def. See `resolveBulkActions` (objectui#3002). The
-  // canonical `'delete'` is held back: it routes to `onBulkDelete` (which owns
-  // confirm + refresh), not the runner, even if the object declares an action
-  // that happens to be named `delete`.
-  const legacyBulkNames = (explicitBulkActions ?? []).filter(
-    (a: unknown) => String(a).toLowerCase() !== 'delete',
-  );
-  const { defs: resolvedBulkDefs, unresolved: unresolvedBulkActions } = resolveBulkActions({
-    bulkActions: legacyBulkNames,
-    bulkActionDefs: Array.isArray(schema.bulkActionDefs) ? schema.bulkActionDefs : [],
-    objectActions: (objectSchema as any)?.actions,
-    localizeLabel: (actionName, fallback) =>
-      resolveActionLabel(schema.objectName, actionName, fallback),
-  });
-  // [objectui#12082] …and a bulk FIELD UPDATE (`operation: 'update'`) is the
-  // same object's edit verdict, the map's `rowEdit` row the row kebab's Edit
-  // reads (`rowEditVerdict` above): a def that writes a patch to every selected
-  // record must not outlive the caller's update grant, the effective operation
-  // set or the object's policy any more than the bulk delete outlives its
-  // delete verdict. A withheld def takes its dialog with it, and so the
-  // executor's per-row update, its undo and its retry, which re-run that write.
-  // `custom` defs are untouched, as above.
-  const bulkActionDefs: BulkActionDef[] = resolvedBulkDefs.filter(
-    (def: BulkActionDef) =>
-      (objectCanDelete || def?.operation !== 'delete')
-      && (rowEditVerdict.allowed || def?.operation !== 'update'),
-  );
-  // Names still dispatched by string: the unresolved ones, plus `'delete'`
-  // when the author asked for it — or the implicit bulk-delete affordance.
-  const keptDeleteAction = (explicitBulkActions ?? []).filter(
-    (a: unknown) => String(a).toLowerCase() === 'delete',
-  );
-  const effectiveBulkActions: string[] =
-    explicitBulkActions && explicitBulkActions.length > 0
-      ? [...unresolvedBulkActions, ...keptDeleteAction]
-      : canDelete && onBulkDelete && bulkActionDefs.length === 0
-        ? ['delete']
-        : [];
-  const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
-  let selectionMode: 'none' | 'single' | 'multiple' | boolean = false;
-  if (schema.selection !== undefined) {
-    // "presence enables; an explicit off wins" — the ONE rule both
-    // object-armed keys on this block obey (objectui#9837, ruling A-prime, batch
-    // #162 item 2), `paginationEnabled` below being the other half.
-    //
-    // Writing the object is how an author asks for selection; `type: 'none'`
-    // is this key's own explicit off and beats the presence. Before the ruling
-    // the read was `schema.selection?.type`, so an object with no `type` fell
-    // through to the legacy arms and the object itself meant NOTHING — the
-    // exact opposite of what the neighbouring `pagination` key taught, with no
-    // error and no diagnostic either way.
-    const authoredType = schema.selection?.type;
-    selectionMode =
-      authoredType === 'none' ? false : (authoredType ?? DEFAULT_SELECTION_TYPE);
-  } else if (schema.selectable !== undefined) {
-    // Legacy support — read only when `selection` is absent.
-    selectionMode = schema.selectable;
-  } else if (hasBulkActions) {
-    // Auto-enable multi-select when bulk actions exist
-    selectionMode = 'multiple';
-  }
-  // `selection.type: 'single'` caps the selection at one row (the data-table
-  // enforces replace-on-select, #2941), so the cross-page "select all N
-  // matching" escalation must never be offered.
-  const singleSelection = selectionMode === 'single';
 
   // The floor. With no query to replay there is no honest "all N matching", so
   // the escalation is not offered — the same answer as a match set that does not
