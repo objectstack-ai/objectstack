@@ -221,9 +221,9 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **filename** | `string` | ✅ | Original filename |
-| **mimeType** | `string` | ✅ | File MIME type |
-| **size** | `number` | ✅ | File size in bytes |
+| **filename** | `string` | ✅ | Original filename (non-empty) |
+| **mimeType** | `string` | ✅ | File MIME type (non-empty) |
+| **size** | `integer` | ✅ | File size in bytes: a non-negative whole number (0 is an empty file) |
 | **scope** | `Enum<'user' \| 'tenant' \| 'private' \| 'temp' \| 'attachments'>` | optional (default: `"user"`) | Storage scope the new file is filed under (default user; attachments for the record attachments surface). Not an access setting: the upload doors refuse public, and a file is served without sign-in only when its stored file record carries acl 'public_read' (ADR-0104). The upload request carries no acl; every upload is stored private. |
 | **bucket** | `string` | optional | Specific bucket override (admin only) |
 

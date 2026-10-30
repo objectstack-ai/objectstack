@@ -46,9 +46,10 @@
  *
  * ## A forgotten tab goes quiet (objectui#12439)
  *
- * A backgrounded tab polls at `HIDDEN_POLL_MS`, but only for a while: once it
- * has been hidden continuously for `HIDDEN_POLL_STOP_MS` (10 minutes), every
- * feed here stops arming its timer, and a tick that comes due after that point
+ * A backgrounded tab polls at `HIDDEN_POLL_MS` (every 3 minutes, slower than
+ * the foreground's 1 minute), but only for a while: once it has been hidden
+ * continuously for `HIDDEN_POLL_STOP_MS` (10 minutes), every feed here stops
+ * arming its timer, and a tick that comes due after that point
  * sends nothing. The reason is the backend, not the browser: wherever the
  * server scales to zero, a poll inside its idle window keeps it awake, and a
  * 60 s poll is always inside it — one tab left open on a console page kept two
@@ -122,18 +123,23 @@ const APPROVALS_POLL_MS = 60_000;
  */
 const INBOX_POLL_MS = 60_000;
 /**
- * Cadence while the tab is backgrounded. The bell's own poller carried this
- * (60s hidden against 10s foregrounded) plus an immediate refetch when the
- * user comes back, and consolidating the poll into the store had to bring
- * both along — a shared feed that polled a hidden tab at its foreground rate
- * would have been a regression riding in on a de-duplication fix (#4225).
+ * Cadence while the tab is backgrounded: 3 minutes, against the foreground's
+ * 1 minute. A hidden tab polls clearly slower than a visible one — the rule
+ * since the bell's own poller (#4225), which consolidating the poll into the
+ * store kept, and which objectstack#28084 restored once the foreground itself
+ * moved to 60 s (objectstack#27626). Coming back to the tab refetches each feed
+ * at once, so the slower cadence costs nothing the user can see.
+ *
+ * The scheduler reads the tab's visibility when it ARMS a timer, so the
+ * foreground tick already armed at the moment of hiding still fires once; the
+ * hidden ticks follow it at this spacing.
  *
  * It holds only for the first `HIDDEN_POLL_STOP_MS` of a continuous hide
  * (`hiddenTabPollStop.ts`, objectui#12439): after that the feeds stop arming
  * their timers altogether, so a forgotten tab stops keeping a scale-to-zero
- * backend awake. The immediate refetch on return is what makes that cheap.
+ * backend awake.
  */
-const HIDDEN_POLL_MS = 60_000;
+const HIDDEN_POLL_MS = 180_000;
 /**
  * Ceiling for the failure backoff, likewise lifted from the bell's poller and
  * now applied to every feed: a feed whose read keeps failing must not keep
