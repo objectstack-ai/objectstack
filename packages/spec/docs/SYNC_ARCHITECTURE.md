@@ -219,6 +219,10 @@ Complete, production-grade integration with external systems. Includes authentic
 > same per-row verdicts. Every binding failure (a plugin-registered connector, an
 > `ok: false` answer, a non-array at `recordsPath`, an `update` / `upsert` with no
 > `upsertKey`, an unmapped `watermark.field`) is refused before anything is written.
+> The input the call would send, the watermark parameter included, is judged against
+> the read action's declared `inputSchema` first, as a `connector_action` flow node's
+> is: a missing required parameter or a wrong type is refused with `VALIDATION_ERROR`
+> naming it, and the action is not called.
 >
 > - **Watermark — read from the target.** Nothing stores it: the starting point sent as
 >   `query[watermark.param]` is the highest value already stored in the target field a

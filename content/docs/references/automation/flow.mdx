@@ -150,7 +150,7 @@ const result = FlowSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **connectorId** | `string` | ✅ | Registered connector name |
 | **actionId** | `string` | ✅ | Action key declared by the connector |
-| **input** | `Record<string, any>` | optional | Mapped inputs for the action. The flow definition, this map included, is served to every member who can read flows, so never put a credential here: the connector authenticates through its own `auth.credentialRef`. |
+| **input** | `Record<string, any>` | optional | Mapped inputs for the action. Each value is a literal, handed to the action as written, or a CEL value envelope `{ dialect: 'cel', source }` evaluated in the run's scope before dispatch; a `{…}` template token in a string is refused when the flow is registered or validated. The flow definition, this map included, is served to every member who can read flows, so never put a credential here: the connector authenticates through its own `auth.credentialRef`. |
 
 ### Nested Shape: `FlowNode.inputSchema[string]`
 
