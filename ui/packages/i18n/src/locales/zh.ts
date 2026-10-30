@@ -2891,6 +2891,7 @@ const zh = {
         submitting: '正在更新…',
         mismatch: '两次输入的新密码不一致。',
         sameAsTemporary: '请设置一个与临时密码不同的新密码。',
+        wrongPassword: '你输入的密码不正确，请检查后重试。',
         failed: '无法修改密码。',
       },
       mfa: {

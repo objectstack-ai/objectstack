@@ -2871,6 +2871,7 @@ const fr = {
         submitting: "Mise à jour…",
         mismatch: "Les nouveaux mots de passe ne correspondent pas.",
         sameAsTemporary: "Choisissez un nouveau mot de passe différent de votre mot de passe temporaire.",
+        wrongPassword: "Le mot de passe saisi est incorrect. Vérifiez-le et réessayez.",
         failed: "Impossible de changer le mot de passe.",
       },
       mfa: {

@@ -2870,6 +2870,7 @@ const pt = {
         submitting: "Atualizando…",
         mismatch: "As novas senhas não coincidem.",
         sameAsTemporary: "Escolha uma nova senha diferente da sua senha temporária.",
+        wrongPassword: "A senha que você digitou está incorreta. Verifique-a e tente novamente.",
         failed: "Não foi possível alterar a senha.",
       },
       mfa: {
