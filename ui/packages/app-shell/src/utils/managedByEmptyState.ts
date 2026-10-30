@@ -24,6 +24,7 @@
 import {
   ExpressionEvaluator,
   hasDeclaredPredicate,
+  isActionSwitchedOff,
   resolveEffectiveCrudAffordances,
   toPredicateInput,
   type UserActionsOverride,
@@ -79,6 +80,7 @@ export function listToolbarDrawsAction(
     };
     if (!actionRendersAt(action, 'list_toolbar')) return false;
     if (!mayInvoke(action.requiredPermissions)) return false;
+    if (isActionSwitchedOff(action)) return false;
     if (!hasDeclaredPredicate(action.visible)) return true;
     try {
       return new ExpressionEvaluator({ ...predicateScope }).evaluateCondition(

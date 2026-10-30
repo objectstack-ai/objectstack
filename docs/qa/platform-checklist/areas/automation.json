@@ -1808,7 +1808,7 @@
       "title": "Disabling a packaged flow writes a durable sys_metadata_activation row that survives a cold restart with the trigger left unbound; re-enable UPDATES the row and restores firing",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1842,9 +1842,9 @@
           "evidence": "the row read (the four ledger columns, and the key set showing no tenant column) + the toggle response"
         },
         {
-          "clause": "the FLOW_DISABLED refusal message names the LEDGER: triggering the disabled flow answers 409 FLOW_DISABLED whose message carries the sys_metadata_activation / activation-ledger phrasing and the two remedies (re-enable, or clone under a new name)",
+          "clause": "the FLOW_DISABLED refusal message says the flow was switched off by the deployment's packaged-automation switch, in plain words: triggering the disabled flow answers 409 FLOW_DISABLED whose message is the switched-off packaged flow sentence — the flow is turned off for this deployment, an administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name — and names no system table and no ADR (the engine's info log line carries those)",
           "oracle": "api",
-          "verify": "the step-5 error message contains 'packaged-metadata activation ledger (sys_metadata_activation' (engine.ts describeDisabledFlow). ⛔ The CODE alone is NOT the oracle: ADR-0126 §7.2 deliberately REUSES FLOW_DISABLED for the ledger dimension (no new ADR-0112 entry), and a status-disabled flow answers the same 409 FLOW_DISABLED with the old bare \"Flow '<name>' is disabled\" — the ledger-vs-status distinction rides the MESSAGE, so a verdict keyed on code alone cannot tell this item's dimension from the authoring one",
+          "verify": "the step-5 error message is exactly \"This flow is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name.\" (engine.ts describeDisabledFlow, built by describeTurnedOffPackagedItem in @objectstack/types — the one sentence the switched-off action refusal also reads as) and contains neither 'sys_metadata_activation' nor an ADR number. ⛔ The CODE alone is NOT the oracle: ADR-0126 §7.2 deliberately REUSES FLOW_DISABLED for the ledger dimension (no new ADR-0112 entry), and a status-disabled flow answers the same 409 FLOW_DISABLED with the old bare \"Flow '<name>' is disabled\" — the ledger-vs-status distinction rides the MESSAGE, so a verdict keyed on code alone cannot tell this item's dimension from the authoring one",
           "evidence": "the full 409 body with the message quoted"
         },
         {
@@ -1870,7 +1870,7 @@
         "a toggle answering 2xx with NO sys_metadata_activation row written is a FAIL on this boot — the engine has a legitimate ledger-less degraded mode, but it WARNS 'IN PROCESS ONLY … will NOT survive a restart' (engine.ts) and the showcase composition attaches the ledger, so silence plus no row means the durable write was skipped where it was promised",
         "a restart that re-arms the flow (enabled or bound true, or a run row from the post-restart create) is a FAIL against the whole point of ADR-0126 §7.2 — it is the retired flowEnabled map's behaviour reappearing",
         "a re-enable that DELETES the row is a FAIL of the row contract even though firing resumes — absence-means-active makes deletion look equivalent right up until something needs the recorded choice",
-        "a ledger-disabled flow's trigger answered 409 FLOW_DISABLED with the status dimension's bare sentence (\"Flow 'showcase_urgent_task_alert' is disabled\", with no 'packaged-metadata activation ledger (sys_metadata_activation' phrasing) is a FAIL: the refusal then reports the administrator's ledger choice as an authoring status, and the code alone cannot tell the two apart, because ADR-0126 §7.2 shares it between them by design"
+        "a ledger-disabled flow's trigger answered 409 FLOW_DISABLED with the status dimension's bare sentence (\"Flow 'showcase_urgent_task_alert' is disabled\", with no 'turned off for this deployment' sentence and no Setup › Packaged automation remedy is a FAIL: the refusal then reports the administrator's ledger choice as an authoring status, and the code alone cannot tell the two apart, because ADR-0126 §7.2 shares it between them by design"
       ],
       "traps": [
         "first-boot-cold-start",
@@ -1878,7 +1878,7 @@
       ],
       "source": [
         "docs/adr/0126-packaged-metadata-customization-model.md §4 (the generic ledger + row shape), §7.2 (the durable row replaces the process-local flowEnabled map; FLOW_DISABLED code reused, distinction rides the message)",
-        "packages/services/service-automation/src/engine.ts#toggleFlow (toggleFlow — durable row FIRST), (describeDisabledFlow — the ledger message), (hydrateFlowActivations), (registerFlow does not re-arm a ledger-disabled flow — restart survival's other half), (flowLedgerDisabled projection)",
+        "packages/services/service-automation/src/engine.ts#toggleFlow (toggleFlow — durable row FIRST), (describeDisabledFlow — the ledger message, built by packages/types/src/packaged-item-turned-off.ts and logged at info with the ledger table and ADR-0126 §7.2), (hydrateFlowActivations), (registerFlow does not re-arm a ledger-disabled flow — restart survival's other half), (flowLedgerDisabled projection)",
         "packages/services/service-automation/src/plugin.ts (hydrate AFTER the boot flow pull — the ordering that makes the unbind stick)",
         "packages/core/src/utils/metadata-activation-store.ts#setActive (setActive read-then-update, keyed on exactly the index's two columns; organization_id never in the write payload), (no delete on the engine slice)",
         "packages/core/src/utils/metadata-activation-store.ts#list — list() is the whole read path, scoped by metadata_type and by nothing else. ⚠️ The org-row skip this line used to cite is RETIRED, not merely unexercised: the module header records that the NULL-organization filter and the org-row skip both went with the column (#15024)",
@@ -1931,6 +1931,12 @@
           "date": "2026-10-27",
           "change": "steps[1], steps[7] and steps[9] name the task's required title. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26481, priority:P0, at 756220c4; wave anchor #25807, slice A): the task POST needs `title` as well as `project`, and showcase_task has no `name` field (a body using it answers 400 INVALID_FIELD). Re-read at base e4ba846f (task.object.ts: title Field.text required). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-30",
+          "change": "acceptance[1] and negative[3] respelled for #27966: the ledger-disabled FLOW_DISABLED message is now written for the caller (the flow is turned off for this deployment, an administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name) and names no system table and no ADR; the engine writes the code, the flow, sys_metadata_activation and ADR-0126 §7.2 to an info log line. It is the same builder the switched-off action sentence reads from (#27842). The verdict is unchanged: the message still distinguishes the ledger dimension from the status one, and the code is still FLOW_DISABLED.",
+          "ref": "#27966"
         }
       ]
     },

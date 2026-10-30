@@ -65,6 +65,11 @@ function packagedFlow(name: string, startConfig: Record<string, unknown> = {}, e
     return { ...flowBody(name, startConfig, extra), _packageId: 'crm' };
 }
 
+/** [#27966] What a caller reads for a flow switched off in the activation ledger. */
+const LEDGER_SENTENCE =
+    'This flow is turned off for this deployment. An administrator can turn it on again under '
+    + 'Setup › Packaged automation, or copy it there under a new name.';
+
 /** A recording trigger, so binding state is asserted for real rather than inferred. */
 function recordingTrigger(type: string) {
     const bound = new Map<string, (ctx: AutomationContext) => Promise<void>>();
@@ -169,9 +174,10 @@ describe('ADR-0126 §7.2 — a ledger-disabled flow refuses at the execute() sea
             // ADR-0126 §7.2 reuses the code deliberately — ⛔ no new ADR-0112
             // ledger entry — so the CODE must be the existing one...
             expect(refused.code).toBe('FLOW_DISABLED');
-            // ...and the distinction has to ride the MESSAGE.
-            expect(refused.error).toContain('sys_metadata_activation');
-            expect(refused.error).toContain('ADR-0126');
+            // ...and the distinction has to ride the MESSAGE. [#27966] It is
+            // the one switched-off packaged item sentence, written for the
+            // caller: no table and no ADR (those go to the log line).
+            expect(refused.error).toBe(LEDGER_SENTENCE);
             // The trigger is unbound too, so it does not even fire (§7.2).
             expect(triggers[triggerKey].isBound('f')).toBe(false);
 
@@ -221,6 +227,65 @@ describe('ADR-0126 §7.2 — a ledger-disabled flow refuses at the execute() sea
         expect(String(viaParent.error)).toContain('child');
     });
 
+    it('[#27966] the ledger refusal reads as plain words for the caller, and the log line keeps the ledger and the ADR', async () => {
+        const logger = createTestLogger();
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
+        engine.setFlowActivationStore(new InMemoryFlowActivationStore());
+        engine.registerFlow('f', packagedFlow('f'));
+        await engine.toggleFlow('f', false);
+
+        const refused = await engine.execute('f');
+
+        expect(refused.code).toBe('FLOW_DISABLED');
+        // What happened, who can undo it and where, and what can be done
+        // meanwhile: flow clone is chartered (ADR-0126 §7.2), so the copy is
+        // offered, unlike the action sentence.
+        expect(refused.error).toBe(
+            'This flow is turned off for this deployment. An administrator can turn it on again under '
+            + 'Setup › Packaged automation, or copy it there under a new name.',
+        );
+        expect(refused.error).not.toContain('sys_metadata_activation');
+        expect(refused.error).not.toMatch(/ADR-\d+/);
+
+        // The machine half: one info line per refusal, naming the code, the
+        // flow, the ledger table and the ADR section.
+        const lines = logger.info.mock.calls.filter((c: any[]) => String(c[0]).startsWith('FLOW_DISABLED:'));
+        expect(lines).toHaveLength(1);
+        expect(String(lines[0][0])).toContain("'f'");
+        expect(String(lines[0][0])).toContain('sys_metadata_activation');
+        expect(String(lines[0][0])).toContain('ADR-0126 §7.2');
+        expect(lines[0][1]).toEqual({ flow: 'f', refusal: 'FLOW_DISABLED' });
+    });
+
+    it('[#27966] the subflow door: a parent calling a switched-off child fails with the child named and the same sentence', async () => {
+        const { engine } = engineWithLedger();
+        registerSubflowNode(engine, { logger: createTestLogger(), getService: () => undefined } as any);
+        engine.registerFlow('child', packagedFlow('child'));
+        engine.registerFlow('parent', {
+            ...packagedFlow('parent'),
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start', config: {} },
+                { id: 'call', type: 'subflow', label: 'Call', config: { flowName: 'child' } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        });
+        const store = new InMemoryFlowActivationStore();
+        await store.setActive({ name: 'child', packageId: 'crm', active: false });
+        engine.setFlowActivationStore(store);
+        await engine.hydrateFlowActivations();
+
+        const viaParent = await engine.execute('parent');
+
+        expect(viaParent.success).toBe(false);
+        // The sentence drops the flow's name; the subflow node's own prefix
+        // still names which child refused.
+        expect(String(viaParent.error)).toBe(`Node 'call' failed: subflow 'child' failed: ${LEDGER_SENTENCE}`);
+    });
+
     it('a STATUS-disabled flow keeps its original message — the two disable reasons stay distinguishable', async () => {
         const { engine } = engineWithLedger();
         engine.registerFlow('obsolete_flow', { ...packagedFlow('obsolete_flow'), status: 'obsolete' });
@@ -230,8 +295,9 @@ describe('ADR-0126 §7.2 — a ledger-disabled flow refuses at the execute() sea
         expect(refused.code).toBe('FLOW_DISABLED');
         expect(refused.error).toBe("Flow 'obsolete_flow' is disabled");
         // The point of the distinction: an operator reading this must not be
-        // sent to the activation ledger for an authoring-state problem.
-        expect(refused.error).not.toContain('sys_metadata_activation');
+        // sent to the activation switch for an authoring-state problem.
+        // [#27966] The switch is now named by its Setup page, not its table.
+        expect(refused.error).not.toContain('Packaged automation');
     });
 
     it('a ledger-disabled flow stays disabled across re-registration (publish / hot reload / boot pull)', async () => {

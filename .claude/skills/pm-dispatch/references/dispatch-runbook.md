@@ -82,7 +82,7 @@
 - 裁决执行中新生的问题另立卡并回链已裁卡,⛔ 不给已裁卡重挂 `needs-user-decision`。
 - 机械两旗 report-only,归半状态巡查;接线是另一张卡的事,⛔ 不随协议文本改脚本。
 - 旗一:open 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`。
-- 旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关闭。
+- 旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关单(PR 则已合并;关而未合并不算)。
 - 交付了一半的阻塞是判断不是 grep,归四件之③,⛔ 不进机械旗。
 - 发布窗口判据:已上膛 = 开着的 head `changeset-release/main` PR,`is:pr is:open head:changeset-release`。
 - 点亮对照 `git ls-remote origin changeset-release/main` 必中;⛔ title 永不是判据。

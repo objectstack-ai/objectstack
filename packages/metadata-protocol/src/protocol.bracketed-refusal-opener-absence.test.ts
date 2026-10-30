@@ -100,6 +100,10 @@ const PRODUCERS: Readonly<Record<string, number>> = {
   'protocol-unmintable-meta-type.ts': 1,
   'protocol-loud-degradations.ts': 1,
   'protocol-overlay-index.ts': 1,
+  // [#25467 cut 35] The package uninstall verb and the unmanaged-import
+  // rollback, moved out of `protocol.ts` whole on the same terms.
+  'protocol-package-uninstall.ts': 2,
+  'protocol-unmanaged-import.ts': 1,
   'sys-metadata-repository.ts': 5,
   'runtime-authoring-gate.ts': 1,
 };

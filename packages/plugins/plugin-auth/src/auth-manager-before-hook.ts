@@ -71,6 +71,7 @@ import {
 } from './last-local-credential.js';
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
+import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -98,6 +99,7 @@ export interface BeforeHookHost {
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   resolveActor: AuthManager['resolveActor'];
   resolvePasswordChangeUserId: AuthManager['resolvePasswordChangeUserId'];
+  roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
 }
 
@@ -658,6 +660,15 @@ export async function globalBeforeHook(
       message: CLOUD_MANAGED_REFUSAL_MESSAGES.invitation,
       code: CLOUD_MANAGED_REFUSAL_CODE,
     });
+  }
+
+  // ── #27862: read the member's org-admin grants before a role change ──
+  // The after hook compares them with what the change left held and names
+  // the set it granted (see `role-change-granted-set.ts`). A read only: it
+  // gates nothing, and a read that fails stashes nothing.
+  if (ctx?.path === UPDATE_MEMBER_ROLE_PATH) {
+    const roleChangeDeps = this.roleChangeGrantDeps();
+    if (roleChangeDeps) await snapshotRoleChangeGrants(ctx, roleChangeDeps);
   }
 
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
