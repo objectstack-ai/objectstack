@@ -1253,6 +1253,20 @@ export const ShowcaseTranslationBundle = {
           project_picker: { label: '项目', placeholder: '选择项目…' },
         },
       },
+      // `ui/pages/new-project-wizard.page.ts` — the create wizard's form, its
+      // heading and the thank-you panel it swaps in after the create.
+      showcase_new_project_wizard: {
+        components: {
+          new_project_form: {
+            title: '创建项目',
+            description: '三步向导：先填基本信息，再看健康状况，最后是预算与排期。',
+            submitBehavior: {
+              title: '项目已创建',
+              message: '新项目已就绪——可在「项目」中找到它，或重新打开此向导再创建一个。',
+            },
+          },
+        },
+      },
       // Nested per-component copy. These ids sit inside a container's
       // `properties.children`, which `translatePage` resolves (#12961) but
       // `os i18n extract` could not see until #13109 matched the extractor's
