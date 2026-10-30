@@ -100,6 +100,7 @@ import {
 import type { Surface } from './navSurface.js';
 import { issueRefusal, plainRefusal } from './metadataError.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
+import { fieldNamesHeldByTypeBlock, ListViewTypeSection, listViewTypeBlockSchema } from './ListViewTypeSection.js';
 import {
   addedArrayElements,
   agentDraftMarkOf,
@@ -570,9 +571,10 @@ function sortEntriesOf(value: unknown): SortEntry[] {
 
 /**
  * The field names a list body already references: its columns, its filter and
- * sort rules, and a kanban card's fields, title and group-by field
- * (objectui#13152). Read by the panel's field pickers so a reference the view
- * holds keeps drawing (see `ObjectListViewInspector`).
+ * sort rules, a kanban card's fields, title and group-by field
+ * (objectui#13152), and the field settings of the block its type keeps its
+ * own settings in (objectstack#27895). Read by the panel's field pickers so a
+ * reference the view holds keeps drawing (see `ObjectListViewInspector`).
  */
 function fieldNamesHeldBy(body: Row): string[] {
   const held = new Set<string>();
@@ -587,6 +589,7 @@ function fieldNamesHeldBy(body: Row): string[] {
     add(body.kanban.titleField);
     add(body.kanban.groupByField);
   }
+  if (typeof body.type === 'string') fieldNamesHeldByTypeBlock(body[body.type]).forEach(add);
   return [...held];
 }
 
@@ -902,7 +905,9 @@ function KanbanCardSection({
  * the designer's `filter-builder` widget, which writes the spec's
  * `ViewFilterRule[]`) and Sort (the runtime `SortBuilder`, in a popover the
  * width the builder needs, written as the spec's `{ field, order }[]`). On a
- * kanban view, the kanban card section comes first (`KanbanCardSection`).
+ * kanban view, the kanban card section comes first (`KanbanCardSection`); on
+ * a calendar, gallery, timeline, gantt, map or tree view, the section of that
+ * type's own settings (`ListViewTypeSection`, objectstack#27895).
  */
 export function ObjectListViewInspector({
   listView,
@@ -1058,12 +1063,16 @@ export function ObjectListViewInspector({
     open: markOf('navigation', 'mode'),
     groupBy: markOf('kanban', 'groupByField'),
   };
+  // objectstack#27895 — the section of the view type's own settings, where it has one.
+  const typeBlockSchema = listViewTypeBlockSchema(body.type);
+  const typeBlockMark = typeBlockSchema ? markOf(String(body.type)) : null;
   const columnsMark = markOf('columns');
   const addedColumns = addedNames(columnsMark, columns, publishedBody?.columns);
   const filterMark = markOf('filter');
   const sortMark = markOf('sort');
   const drawnMarks = [
     ...(body.type === 'kanban' ? [kanbanMarks.fields, kanbanMarks.title, kanbanMarks.open, kanbanMarks.groupBy] : []),
+    typeBlockMark,
     columnsMark,
     filterMark,
     sortMark,
@@ -1192,6 +1201,18 @@ export function ObjectListViewInspector({
                 locale={locale}
                 selected={hostHeld && listViewCardIdOf(selection) !== null}
                 marks={kanbanMarks}
+              />
+            )}
+            {typeBlockSchema && (
+              <ListViewTypeSection
+                type={String(body.type)}
+                schema={typeBlockSchema}
+                body={body}
+                writeBody={writeBody}
+                fieldCatalog={fieldCatalog}
+                readOnly={readOnly}
+                locale={locale}
+                marked={!!typeBlockMark}
               />
             )}
             <div className="space-y-1.5" data-testid="list-view-columns">

@@ -1407,6 +1407,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.timeline': 'Timeline',
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
+  'engine.inspector.view.type.tree': 'Tree',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -4080,6 +4081,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kanbanCard.mode.none': "Don't open",
   'engine.studio.inspector.listView.kanbanCard.groupBy': 'Group by field',
   'engine.studio.inspector.listView.kanbanCard.pickField': 'Pick a field',
+  // objectstack#27895 — the section of a view type's own settings (calendar, gallery, timeline, …).
+  'engine.studio.inspector.listView.typeSettings': '{type} settings',
+  'engine.studio.inspector.listView.typeSettings.intro': 'The settings this type of view has. A setting that names a field is picked from the object’s fields.',
   'engine.studio.inspector.designersMissing':
     'No metadata designers are registered in this session, so there is nothing to edit here.',
   'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',
