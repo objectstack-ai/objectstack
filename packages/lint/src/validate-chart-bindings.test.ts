@@ -128,6 +128,49 @@ describe('validateChartBindings — report charts', () => {
     expect(findings[0].path).toBe('reports[0].chart.xAxis');
   });
 
+  // #27974 — the split dimension is resolved exactly like `xAxis`, so a
+  // misspelled one is refused at publish rather than silently plotting one series.
+  it('errors on a seriesBy naming an undeclared dimension, and passes a declared one', () => {
+    const report = (seriesBy: string) => ({
+      ...baseStack(),
+      reports: [
+        {
+          name: 'r',
+          dataset: 'task_metrics',
+          values: ['task_count'],
+          chart: { type: 'bar', xAxis: 'status', yAxis: 'task_count', seriesBy },
+        },
+      ],
+    });
+    expect(validateChartBindings(report('priority')), 'control: a declared dimension').toEqual([]);
+    const findings = validateChartBindings(report('priorty'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].rule).toBe(CHART_DIMENSION_UNKNOWN);
+    expect(findings[0].path).toBe('reports[0].chart.seriesBy');
+    expect(findings[0].hint).toContain('Did you mean "priority"?');
+  });
+
+  // With `seriesBy` set the derived series are the split dimension's VALUES,
+  // so an override's `name` names a value — not a measure, and not judged.
+  it('does not judge `series[].name` against the measures when `seriesBy` splits the chart', () => {
+    const chart = (extra: Record<string, unknown>) => ({
+      ...baseStack(),
+      reports: [
+        {
+          name: 'r',
+          dataset: 'task_metrics',
+          values: ['task_count'],
+          chart: { type: 'bar', xAxis: 'status', yAxis: 'task_count', series: [{ name: 'high', label: 'High' }], ...extra },
+        },
+      ],
+    });
+    // Control: without the split, `high` is no declared measure and warns.
+    const unsplit = validateChartBindings(chart({}));
+    expect(unsplit.map((f) => [f.rule, f.path])).toEqual([[CHART_MEASURE_UNKNOWN, 'reports[0].chart.series[0].name']]);
+    expect(validateChartBindings(chart({ seriesBy: 'priority' }))).toEqual([]);
+  });
+
   // #15734 — this fixture WARNED until the set moved, and this pin held the
   // warning in place. At the pinned `@object-ui` revision the embedded chart
   // runs its OWN query out of the axis pair — `useDatasetRows(dataset,
