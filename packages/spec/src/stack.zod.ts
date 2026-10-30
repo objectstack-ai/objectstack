@@ -41,6 +41,7 @@ import { controlledByParentMasterRefusal } from './data/controlled-by-parent-mas
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
 import { InlineGridColumnSchema } from './data/field.zod';
+import { AUDIT_FIELD_DEFS } from './data/injected-system-column-provenance';
 import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
 
@@ -4087,6 +4088,133 @@ function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): strin
   return errors;
 }
 
+/** Target types that hold any single string, so any string-valued source fits them. */
+const LOOKUP_AUTOFILL_TEXT_TARGETS: ReadonlySet<string> = new Set(['text', 'textarea', 'markdown', 'richtext', 'html']);
+/** Source types whose value is one plain string. */
+const LOOKUP_AUTOFILL_STRING_SOURCES: ReadonlySet<string> = new Set([
+  'text', 'textarea', 'markdown', 'richtext', 'html', 'email', 'url', 'phone', 'autonumber',
+]);
+/** The two amount types, which hold each other's value. */
+const LOOKUP_AUTOFILL_AMOUNT_TYPES: ReadonlySet<string> = new Set(['number', 'currency']);
+/** The relationship types, whose value is a record id of their `reference`. */
+const LOOKUP_AUTOFILL_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+/** A `formula` source's value type, from its `returnType`. */
+const LOOKUP_AUTOFILL_FORMULA_VALUE_TYPE: Readonly<Record<string, string>> = {
+  number: 'number', currency: 'currency', text: 'text', boolean: 'boolean', date: 'date',
+};
+
+/**
+ * Why a `source` field's value cannot go into a `target` field, or `undefined`
+ * when it can (or when the source's value type is not known here). The rule is
+ * the stored value's shape, not the label: the same type and multiplicity, a
+ * string-valued source into a plain text target, `number` and `currency` into
+ * each other, and a relationship only into a relationship over the same
+ * object.
+ */
+function lookupAutofillTypeMismatch(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): string | undefined {
+  const targetType = target.type;
+  let sourceType = source.type;
+  if (sourceType === 'formula') {
+    sourceType = typeof source.returnType === 'string' ? LOOKUP_AUTOFILL_FORMULA_VALUE_TYPE[source.returnType] : undefined;
+  }
+  // A `summary`'s value type follows its operation and its rolled-up field,
+  // and a formula with no `returnType` declares none: not known here, so not
+  // judged — an unresolved type is not a wrong one.
+  if (typeof targetType !== 'string' || typeof sourceType !== 'string' || sourceType === 'summary') return undefined;
+  const sourceSpelling = source.type === 'formula' ? `a \`formula\` returning \`${sourceType}\`` : `a \`${sourceType}\` field`;
+  if ((target.multiple === true) !== (source.multiple === true)) {
+    return `${sourceSpelling}${source.multiple === true ? ' (`multiple: true`)' : ''} cannot fill a `
+      + `\`${targetType}\` target${target.multiple === true ? ' (`multiple: true`)' : ''}: one holds a list, the other one value`;
+  }
+  if (LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(targetType) || LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(sourceType)) {
+    if (LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(targetType) && LOOKUP_AUTOFILL_RELATIONSHIP_TYPES.has(sourceType)
+      && target.reference === source.reference) return undefined;
+    return `${sourceSpelling}${typeof source.reference === 'string' ? ` over '${source.reference}'` : ''} cannot fill a `
+      + `\`${targetType}\` target${typeof target.reference === 'string' ? ` over '${target.reference}'` : ''}: `
+      + 'a record id fills only a relationship over the same object';
+  }
+  if (targetType === sourceType) return undefined;
+  if (LOOKUP_AUTOFILL_TEXT_TARGETS.has(targetType) && LOOKUP_AUTOFILL_STRING_SOURCES.has(sourceType)) return undefined;
+  if (LOOKUP_AUTOFILL_AMOUNT_TYPES.has(targetType) && LOOKUP_AUTOFILL_AMOUNT_TYPES.has(sourceType)) return undefined;
+  return `${sourceSpelling} cannot fill a \`${targetType}\` target: the target cannot hold its value`;
+}
+
+/**
+ * [#27945] Each `lookupAutofill` pair's `source` names a field of the object
+ * the lookup references, which the picked record carries, and whose value the
+ * pair's target can hold. A source the referenced object does not declare
+ * arrives as nothing, an `internal` one is omitted from every read, and a value
+ * of the wrong shape is refused by the save the pick fed — so each would parse
+ * and fill nothing, or fill something the save then refuses (ADR-0049 declared
+ * = enforced).
+ *
+ * Judged here because only the stack holds the referenced object; the target
+ * half (a writable field of the declaring object, named once) is the object
+ * parse's own (`refuseDishonestLookupAutofill` in `data/object.zod.ts`), which
+ * has already passed by the time this pass runs. The type rule is
+ * {@link lookupAutofillTypeMismatch}.
+ *
+ * Resolution is against the stack's own `objects`, merged with its
+ * `objectExtensions` by name: a referenced object this stack does not declare
+ * is not judged — an unresolved source is not a wrong one, the stance of
+ * {@link collectHydratedInlineColumnErrors}. An undeclared source that is one
+ * of the audit-provenance columns the platform injects (`created_at`, …) is
+ * not judged either: every record carries it without a declaration.
+ */
+function collectLookupAutofillErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const fieldsByObject = new Map<string, Record<string, unknown>>();
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
+  }
+  for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
+    if (!isRecord(ext) || typeof ext.extend !== 'string' || !isRecord(ext.fields)) continue;
+    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...ext.fields });
+  }
+
+  for (const [objectName, fields] of fieldsByObject) {
+    for (const [fieldName, field] of Object.entries(fields)) {
+      if (!isRecord(field) || !Array.isArray(field.lookupAutofill) || typeof field.reference !== 'string') continue;
+      const referenced = fieldsByObject.get(field.reference);
+      if (!referenced) continue;
+      field.lookupAutofill.forEach((pair: unknown, i: number) => {
+        if (!isRecord(pair) || typeof pair.source !== 'string') return;
+        const where = `Object '${objectName}' field '${fieldName}' lookupAutofill[${i}].source`;
+        const source = hasOwnKey(referenced, pair.source) ? referenced[pair.source] : undefined;
+        if (!isRecord(source)) {
+          if (hasOwnKey(AUDIT_FIELD_DEFS, pair.source)) return;
+          errors.push(
+            `${where}: '${pair.source}' is not a field of '${field.reference}', the object this lookup references, `
+              + `so a pick has no value to copy. Name a field '${field.reference}' declares.`,
+          );
+          return;
+        }
+        if (source.internal === true) {
+          errors.push(
+            `${where}: '${field.reference}.${pair.source}' is \`internal\`, so no read returns it and a pick has no `
+              + 'value to copy. Name a field the record carries.',
+          );
+          return;
+        }
+        const target = typeof pair.target === 'string' && hasOwnKey(fields, pair.target) ? fields[pair.target] : undefined;
+        if (!isRecord(target)) return;
+        const mismatch = lookupAutofillTypeMismatch(target, source);
+        if (mismatch !== undefined) {
+          errors.push(
+            `${where}: '${field.reference}.${pair.source}' is ${mismatch} ('${objectName}.${String(pair.target)}'). `
+              + 'Pair the target with a source of the same type.',
+          );
+        }
+      });
+    }
+  }
+  return errors;
+}
+
 /**
  * [#24190] The child object a `record:line_items` block lists, resolved the
  * way objectui resolves it before `LineItemsPanel` hydrates its columns from
@@ -4842,6 +4970,10 @@ function validateCrossReferences(
   // (#20901) — every carrier (#20928 added the master-detail page block's,
   // #24190 the line-items block's), the column schema's own verdict.
   errors.push(...collectHydratedInlineColumnErrors(config));
+
+  // Validate each lookup-pick autofill source against the referenced object
+  // (#27945) — the half the object's own parse cannot see.
+  errors.push(...collectLookupAutofillErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
   errors.push(...collectSeedDataObjectErrors(config, artifactScope));
