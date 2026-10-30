@@ -6,9 +6,11 @@
  *
  * Legs: the key is a MEMBER on both doors an author reaches (the bare block
  * and a list view's `kanban` block), its order survives the parse, absence
- * writes nothing, and the three shapes that can never name a real lane are
- * refused at the key: an empty list, a repeated value, and a display label in
- * place of the stored value.
+ * writes nothing, and the two shapes that can never name a real lane are
+ * refused at the key: an empty list, and a display label in place of the
+ * stored value. Membership in `groupByField`'s options and a repeated value
+ * are judged against the object by `@objectstack/lint`
+ * (`validate-list-view-field-refs`), which pins them.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -50,22 +52,11 @@ describe('KanbanConfigSchema.lanes', () => {
     expect('lanes' in parsed).toBe(false);
   });
 
-  it('refuses an empty list at the key, naming the omission that means every option', () => {
+  it('refuses an empty list at the key (omitting the key is what draws every option)', () => {
     const result = KanbanConfigSchema.safeParse({ ...BOARD, lanes: [] });
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path[0] === 'lanes');
     expect(issue?.code).toBe('too_small');
-    expect(issue?.message).toContain('omit the key');
-  });
-
-  it('refuses a repeated value at its second entry', () => {
-    const result = KanbanConfigSchema.safeParse({ ...BOARD, lanes: ['waiting', 'in_progress', 'waiting'] });
-    expect(result.success).toBe(false);
-    const issues = result.error!.issues;
-    expect(issues).toHaveLength(1);
-    expect(issues[0].code).toBe('custom');
-    expect(issues[0].path).toEqual(['lanes', 2]);
-    expect(issues[0].message).toContain('"waiting"');
   });
 
   it('refuses a display label in place of the stored option value', () => {

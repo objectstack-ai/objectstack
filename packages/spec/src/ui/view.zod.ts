@@ -2047,28 +2047,6 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * `kanban.lanes` names each lane once. A repeated value would draw two lanes
- * with one id, and a card with that value belongs to both, so the issue points
- * at the second spelling and names the first.
- */
-function checkKanbanLanesUnique(lanes: string[], ctx: z.RefinementCtx): void {
-  const firstAt = new Map<string, number>();
-  lanes.forEach((lane, index) => {
-    const first = firstAt.get(lane);
-    if (first === undefined) {
-      firstAt.set(lane, index);
-      return;
-    }
-    ctx.addIssue({
-      code: 'custom',
-      path: [index],
-      message: `\`kanban.lanes\` lists ${JSON.stringify(lane)} twice (entries ${first} and ${index}). `
-        + 'Each lane is drawn once and a card belongs to exactly one lane, so list each value once.',
-    });
-  });
-}
-
-/**
  * Kanban Settings
  */
 export const KanbanConfigSchema = lazySchema(() => strictObject({
@@ -2105,9 +2083,12 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    * Each entry has the grammar of a select option's stored `value`
    * (`SelectOptionSchema.value`), so a display label (`'In Progress'`) is
    * refused here rather than drawing a lane no record can fall into. Whether
-   * each entry is an option of `groupByField` is a question about the bound
-   * object, which this schema cannot see; it is judged where `groupByField`
-   * itself is judged against the object.
+   * each entry is an option of `groupByField`, and whether one is listed
+   * twice, is judged where `groupByField` itself is judged against the bound
+   * object (`validate-list-view-field-refs` in `@objectstack/lint`, which
+   * `os validate` and the publish gate run): membership needs the object, and
+   * keeping the duplicate check beside it leaves this key with no refinement
+   * the published JSON Schema cannot state (`dropped-refinements.baseline.json`).
    *
    * ⛔ No spec-side default: absence keeps every board stored before this key
    * exactly as it was, one lane per option.
@@ -2117,14 +2098,13 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    */
   lanes: z.array(SystemIdentifierSchema)
     .min(1, { message: '`kanban.lanes` lists at least one lane. To draw one lane per option, omit the key.' })
-    .superRefine(checkKanbanLanesUnique)
     .optional()
     .describe(
       'The lanes the board draws, in this order: stored option values of the groupByField field '
       + '(the option `value`, not its label). Omit to draw one lane per option in the options\' own '
       + 'order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` '
       + 'lane, as a record whose value matches no lane does. To keep records off the board, filter '
-      + 'the view. Each value may be listed once.',
+      + 'the view. List each value once.',
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
   /**

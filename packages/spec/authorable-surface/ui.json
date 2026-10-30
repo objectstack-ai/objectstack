@@ -693,6 +693,7 @@
     "ui/JoinedReportBlock:values",
     "ui/KanbanConfig:columns",
     "ui/KanbanConfig:groupByField",
+    "ui/KanbanConfig:lanes",
     "ui/KanbanConfig:summarizeField",
     "ui/KanbanConfig:titleField",
     "ui/ListChartConfig:chartType",
