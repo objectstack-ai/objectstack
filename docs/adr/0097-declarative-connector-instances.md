@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` baseline dispatch + `engine.registerConnector()`), [ADR-0022](./0022-connectors-vs-messaging-channels.md) (Connector = transport/integration mechanism), [ADR-0023](./0023-openapi-to-connector-generator.md) (OpenAPI → Connector generator), [ADR-0024](./0024-mcp-connectors.md) (MCP servers as connectors)
 **Tracking**: framework#2977 (supersedes the interim descriptor-only contract from framework#2612)
 **Consumers**: `@objectstack/spec` (`stack.zod.ts`, `integration/connector.zod.ts`), `@objectstack/service-automation` (boot audit → provider binding), `@objectstack/connector-openapi`, `@objectstack/connector-mcp`, `@objectstack/connector-rest`, the Studio flow palette, AI authoring (stack generation)
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line". PR #26798 (2026-10-27, #26709 item 3(b)) — a credential the MCP server rejects (HTTP `401` / `403`) is a fatal configuration fault, not upstream-unavailable; see the note under "Upstream availability". #27237 (2026-10-28, ruling A on #27230 and the ruling on #27237) — an unresolved `credentialRef` and a rejected credential degrade the instance instead of failing the boot (a refused stored credential holds its instance until it is set again or a restart; an environment or vault one is retried on the backoff), and the open tier reads a `sys_connector_credential` store between the environment and the host's resolver, except under a walled tenancy posture; see the notes under §6 and under "Upstream availability".
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line". PR #26798 (2026-10-27, #26709 item 3(b)) — a credential the MCP server rejects (HTTP `401` / `403`) is a fatal configuration fault, not upstream-unavailable; see the note under "Upstream availability". #27237 (2026-10-28, ruling A on #27230 and the ruling on #27237) — an unresolved `credentialRef` and a rejected credential degrade the instance instead of failing the boot (a refused stored credential holds its instance until it is set again or a restart; an environment or vault one is retried on the backoff), and the open tier reads a `sys_connector_credential` store between the environment and the host's resolver, except under a walled tenancy posture; see the notes under §6 and under "Upstream availability". #28038 (2026-10-30, after #27992 / PR #28014 and #28016 / PR #28037) — a held degraded instance (a configuration fault met on a retry, or a refused stored or declared credential) is not retried, and its dispatch refusal names the edit or the credential that unblocks it; "the platform retries automatically" stays for an instance on the backoff; see the note under "Upstream availability".
 
 ---
 
@@ -195,6 +195,30 @@ that one instance instead of failing the run:
   (`metadata:reloaded`). Recovery replaces the husk atomically via
   `registerConnector`; an instance deleted while degraded is dropped, husk and
   pending retry included.
+
+> **Amendment note (2026-10-30, #28038 — after #27992 / PR #28014, #27237, and #28016 / PR
+> #28037).** The first and third bullets above are kept as written; they now hold only for an
+> instance **on the backoff**. Some degraded instances are **held** instead: a configuration
+> fault first met on a backoff retry (#27992 — the instance is held with the configuration
+> reason, `packages/services/service-automation/src/plugin.ts#failDegradedConnectorInstance`),
+> and a credential its upstream refused when the value is stored in `sys_connector_credential`
+> or written into the declaration (#27237,
+> `packages/services/service-automation/src/plugin.ts#holdConnectorForRejectedCredential`). A
+> held instance is not retried: the backoff timer skips it
+> (`packages/services/service-automation/src/plugin.ts#scheduleDeclarativeRetry`), and so does a
+> reconcile while its signature is unchanged
+> (`packages/services/service-automation/src/plugin.ts#reconcileDeclaredConnectors`). Only an
+> edit of its declaration, setting its stored credential again (the row's revision is part of
+> the signature), or a restart re-attempts it. Its husk carries the hold
+> (`packages/services/service-automation/src/engine.ts#getConnectorDegradedHold`), and a
+> `connector_action` dispatch to it names what unblocks it instead of promising a retry
+> (#28016, `packages/services/service-automation/src/builtin/connector-nodes.ts#registerConnectorNodes`,
+> `packages/services/service-automation/src/plugin-extension-api.ts#describeHold`): "Dispatch is
+> unavailable until its declaration is edited (or the server restarts); the platform does not
+> retry it.", or "… until credential '<ref>' is set again (or the server restarts); …". An
+> instance on the backoff (an unreachable upstream, or a refused credential read from an
+> environment variable or the host's resolver) keeps "Dispatch is unavailable until that is
+> resolved; the platform retries automatically."
 
 The `mcp` provider classifies connect / `tools/list` failures as unavailable;
 transport-shape validation stays a plain (fatal) throw. Lazy connect-on-first-
