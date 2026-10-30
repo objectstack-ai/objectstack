@@ -2864,9 +2864,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             // The row is the target: the button's ::after stretches over the
             // whole header, so a click on its free space opens the list too,
             // and the row stays one control. The controls sit above it.
+            // `transform: none` keeps the console's pressed-button scale off
+            // it: a transform makes the button the containing block of its own
+            // ::after, which shrinks to the button mid-press, so the release
+            // lands on the header and the click never reaches the button.
             <button
               type="button"
               className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              style={{ transform: 'none' }}
               title={viewAll}
               data-related-panel-open=""
               onClick={() => open()}

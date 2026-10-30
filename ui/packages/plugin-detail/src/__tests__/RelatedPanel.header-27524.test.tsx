@@ -105,6 +105,13 @@ describe('the related panel header (objectstack#27524, Target 1)', () => {
     const controls = head().querySelector('[data-related-panel-controls]') as HTMLElement;
     expect(controls.className).toMatch(/\brelative\b/);
     expect(controls.className).toContain('z-10');
+    // No transform on the button, ever: the console scales a pressed button
+    // (`button:active { transform: scale(0.96) }`), and a transformed button
+    // is the containing block of its own ::after, which then shrinks to the
+    // button mid-press, so a press on the row's free space released on the
+    // header and opened nothing (proxy preview review, PR #27920). jsdom has
+    // no :active or layout, so the pin is the inline override itself.
+    expect(open.style.transform).toBe('none');
   });
 
   it('⠿ ＋ ⋯ sit at the right end, shown on hover or focus; their clicks do not open the list', async () => {
