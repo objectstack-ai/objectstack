@@ -51,6 +51,7 @@ import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { splitPackageSuffix } from './middleTruncate.js';
 import { useDependencyMissingText } from './dependencyMissing.js';
+import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import { packagesHref } from '../../views/metadata-admin/packageSource.js';
 
 /**
@@ -348,7 +349,13 @@ export function MarketplacePage() {
   // a "Your organization" section and installable inline (no public listing).
   const [orgItems, setOrgItems] = useState<OrgPackageSummary[]>([]);
   const [orgInstalling, setOrgInstalling] = useState<string | null>(null);
-  const [orgMsg, setOrgMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // `credentials` is set on an install the running kernel loaded: the
+  // package's connector credentials step reads it (ruling A on objectstack#27230).
+  const [orgMsg, setOrgMsg] = useState<{
+    ok: boolean;
+    text: string;
+    credentials?: { packageId: string; note?: string };
+  } | null>(null);
   const [orgDeploy, setOrgDeploy] = useState<OrgDeployState | null>(null);
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
 
@@ -487,6 +494,7 @@ export function MarketplacePage() {
           text: result.hotLoaded
             ? t('marketplace.org.installed', { defaultValue: `Installed ${pkg.display_name}`, name: pkg.display_name })
             : t('marketplace.install.localLoadsAtRestart', { version: result.version, name: pkg.display_name }),
+          ...(result.hotLoaded ? { credentials: { packageId: result.manifestId, note: result.credentialNote } } : {}),
         });
         await load();
         // On `hotLoaded` the runtime registered the package before it answered,
@@ -621,6 +629,9 @@ export function MarketplacePage() {
             {t('marketplace.install.checkAgain')}
           </Button>
         ) : null}
+        {/* Once served, the package's connectors exist in this runtime: the
+            credentials they still need, from its credential listing. */}
+        {orgDeploy.phase === 'served' ? <ConnectorCredentialsStep packageId={orgDeploy.manifestId} /> : null}
       </div>
     </div>
   );
@@ -721,6 +732,13 @@ export function MarketplacePage() {
           {orgMsg && (
             <div className={`whitespace-pre-wrap rounded-md border p-3 text-sm ${orgMsg.ok ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>
               {orgMsg.text}
+              {orgMsg.ok && orgMsg.credentials ? (
+                <ConnectorCredentialsStep
+                  packageId={orgMsg.credentials.packageId}
+                  fallbackNote={orgMsg.credentials.note}
+                  className="mt-2"
+                />
+              ) : null}
             </div>
           )}
           <div className={CARD_GRID}>

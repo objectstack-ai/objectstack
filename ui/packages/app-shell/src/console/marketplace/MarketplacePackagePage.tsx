@@ -87,6 +87,7 @@ import { useMetadata } from '../../providers/MetadataProvider.js';
 import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../utils/index.js';
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../components/SuggestedBindingsPanel.js';
+import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
 
@@ -253,10 +254,14 @@ export function MarketplacePackagePage() {
   // `unmanaged` is set when the answer was an unmanaged copy (ADR-0131 D6):
   // it carries the locks the copy dropped, and nothing is registered under the
   // package's id, so there are no install-time suggestions to surface.
+  // `credentials` is set on a managed install the running kernel loaded: its
+  // connectors exist now, so the credential step reads which of their
+  // credentials still need an administrator (ruling A on objectstack#27230).
   const [localResult, setLocalResult] = useState<{
     ok: boolean;
     message: string;
     unmanaged?: { strippedLocks: LocalInstallStrippedLock[] };
+    credentials?: { packageId: string; note?: string };
   } | null>(null);
   // ADR-0131 D6 — the install modes the package's latest manifest declares,
   // read from the manifest install-local judges, and the operator's pick among
@@ -630,7 +635,11 @@ export function MarketplacePackagePage() {
       }
       setLocalResult(ignoredCopy
         ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) }
-        : { ok: true, message: t('marketplace.install.localSuccess', { version: result.version, name }) });
+        : {
+            ok: true,
+            message: t('marketplace.install.localSuccess', { version: result.version, name }),
+            credentials: { packageId: result.manifestId, note: result.credentialNote },
+          });
       emitMetadataRefresh();
     } catch (e: any) {
       // A refusal shows the envelope's own message. The install-mode refusals
@@ -1006,6 +1015,15 @@ export function MarketplacePackagePage() {
             for an unmanaged copy: nothing is registered under the package. */}
         {localResult.ok && suggestFor && !localResult.unmanaged ? (
           <SuggestedBindingsPanel packageId={suggestFor} strings={suggestionStrings} className="mt-2" />
+        ) : null}
+        {/* The package's connector credentials that still need an
+            administrator: set each one here, or skip it for Setup. */}
+        {localResult.ok && localResult.credentials ? (
+          <ConnectorCredentialsStep
+            packageId={localResult.credentials.packageId}
+            fallbackNote={localResult.credentials.note}
+            className="mt-2"
+          />
         ) : null}
       </div>
       <button
@@ -1624,6 +1642,15 @@ export function MarketplacePackagePage() {
             && getRuntimeConfig().defaultEnvironmentId
             && getRuntimeConfig().defaultEnvironmentId === selectedEnv && (
             <SuggestedBindingsPanel packageId={pkg.manifest_id} strings={suggestionStrings} />
+          )}
+
+          {/* The package's connector credentials, read from this runtime's
+              credential listing: so only for an install into this runtime,
+              and only once served, when its connectors exist here. */}
+          {deploy?.phase === 'served'
+            && getRuntimeConfig().defaultEnvironmentId
+            && getRuntimeConfig().defaultEnvironmentId === selectedEnv && (
+            <ConnectorCredentialsStep packageId={pkg.manifest_id} />
           )}
 
           <DialogFooter>
