@@ -2772,6 +2772,10 @@ export class AnalyticsService implements IAnalyticsService {
             // that names a real field (`amount`) groups by it, here as there.
             this.assertMeasureFields(q, cube, Object.keys(compiled.cube.measures));
             this.assertDimensionFields(q, cube, Object.keys(compiled.cube.dimensions));
+            // [#28257] …and the structured-JSON dimension door (#20807): a
+            // grouped dimension over a `json` column is refused there, where
+            // the evaluator grouped by each row's object value.
+            this.assertDimensionsGroupScalarColumns(q, cube);
             // [#21044] …and the aggregate × field-type table: a minted
             // `region_sum` over a text field is refused there, and here it
             // would sum no number at all and read `0`.
@@ -2780,6 +2784,12 @@ export class AnalyticsService implements IAnalyticsService {
             // must not serve the sum across currencies that the published
             // dataset refuses.
             this.assertRecordCurrencyGrouped(q, cube);
+            // [#28257] …and the `where` field gate (#5669), last in
+            // `ensureCube`: a filter member whose field the object does not
+            // have (a `runtimeFilter` typo) is refused `INVALID_FIELD` / 400
+            // with `param: 'where'`, where the evaluator matched no row and
+            // served `[]` — or, under an `$or`, served the other arm's rows.
+            this.assertWhereFields(q, cube, Object.keys(compiled.cube.dimensions));
             // [#21156] `query()` asks the caller-member gate after `ensureCube`.
             this.assertCallerMeasuresResolvable(q, compiled.cube, compiled.cube, compiled.durations, context);
             // [#21120] The body-column refusal rides this preview path too —
