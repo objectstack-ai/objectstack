@@ -280,6 +280,11 @@ jobs:
               - '.nvmrc'
               - '.github/actions/setup-workspace/**'
               - '.github/actions/setup-pnpm/**'
+              # setup-pnpm materialises the pnpm the root manifest's
+              # `packageManager` field pins (#27717), so a diff confined to
+              # that field changes the pnpm Build Docs installs with. `core:`
+              # already carries this row for its own jobs.
+              - 'package.json'
             core:
               - 'packages/**'
               - 'examples/**'
@@ -533,6 +538,11 @@ jobs:
               # PR, nor in the queue, where these outputs read the same diff.
               - '.nvmrc'
               - '.github/actions/setup-pnpm/**'
+              # The root manifest, because setup-pnpm reads its `packageManager`
+              # field to pick the pnpm every ui job runs (#27717). A diff
+              # confined to a pnpm bump matched no list here, so the ui jobs
+              # skipped on the PR and in the queue alike.
+              - 'package.json'
             # The seven packages objectui installs from this tree (the set its
             # `.objectstack-pin` used to pack). A change here compiles and builds
             # the Console in the same PR — the check the retired Spec Shape Gate

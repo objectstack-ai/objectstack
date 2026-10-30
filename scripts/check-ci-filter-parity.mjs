@@ -190,8 +190,10 @@
  * script a PACKAGE's own manifest runs (`pnpm --filter <pkg> <script>`) is
  * not followed (today's one such step, the spec's `analyze`, runs a file
  * inside `packages/spec`, which `packages/**` covers); a local composite
- * action a step `uses:` is not followed (today's one, setup-pnpm, names no
- * repository script, and every job in every workflow runs it); `pnpm
+ * action a step `uses:` is not followed (today's one is setup-workspace: its
+ * own `run:` steps name no repository script, and neither do those of the
+ * setup-pnpm it calls in turn; its files and the `.nvmrc` and root
+ * `packageManager` it reads are `core:` rows of their own, #27673); `pnpm
  * install`'s lifecycle (`prepare` -> `scripts/setup-git-hooks.mjs`) is not a
  * guard (every job installs, the unfiltered lint.yml jobs included, so a
  * change to it already runs at PR time); a script spelled in an extension
