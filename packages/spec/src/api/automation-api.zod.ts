@@ -408,6 +408,7 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       'RUN_NOT_FOUND',
       'STORE_UNAVAILABLE',
       'RESUME_IN_PROGRESS',
+      'RESUME_CHILD_PENDING',
       'INVALID_SCREEN_INPUT',
       'FLOW_DISABLED',
       'FLOW_NO_START_NODE',

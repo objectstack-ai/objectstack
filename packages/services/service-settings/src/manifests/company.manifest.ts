@@ -1,6 +1,46 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { ISO_3166_ALPHA2_CODES } from '@objectstack/spec/shared';
 import type { SettingsManifest } from '@objectstack/spec/system';
+
+/**
+ * The country of `locale` named for an administrator, as `Name (CODE)`, keyed
+ * by its ISO 3166-1 alpha-2 code — one entry per member of the
+ * `iso_3166_alpha2` value domain, so the picker offers exactly the codes the
+ * write door accepts and never a second, hand-kept list.
+ *
+ * The names come from CLDR through `Intl.DisplayNames`. That is a NAMING
+ * source only: the shared value-domain module records why it is no membership
+ * test (`ZZ` and `UK` get names too), and membership stays with
+ * `ISO_3166_ALPHA2_CODES`. A runtime with no region names for `locale` falls
+ * back to the bare code, never to a missing option.
+ */
+export function countryOptionLabels(locale: string): Record<string, string> {
+  let names: Intl.DisplayNames | undefined;
+  try {
+    names = new Intl.DisplayNames([locale], { type: 'region', fallback: 'none' });
+  } catch {
+    names = undefined;
+  }
+  const labels: Record<string, string> = {};
+  for (const code of ISO_3166_ALPHA2_CODES) {
+    const name = names?.of(code);
+    labels[code] = name && name !== code ? `${name} (${code})` : code;
+  }
+  return labels;
+}
+
+/**
+ * The `options` of a country picker: every ISO 3166-1 alpha-2 code with its
+ * English name, ordered by that name. Shared by Company's `country` and
+ * Localization's `default_country`; each locale pack names the same codes
+ * through {@link countryOptionLabels}.
+ */
+export const COUNTRY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = Object.entries(
+  countryOptionLabels('en'),
+)
+  .map(([value, label]) => ({ value, label }))
+  .sort((a, b) => a.label.localeCompare(b.label, 'en'));
 
 /**
  * Company — the workspace's legal organization identity.
@@ -53,13 +93,17 @@ export const companySettingsManifest: SettingsManifest = {
     { type: 'text', key: 'state', label: 'State / Province', required: false, maxLength: 120 },
     { type: 'text', key: 'postal_code', label: 'Postal code', required: false, maxLength: 32 },
     {
-      type: 'text', key: 'country', label: 'Country', required: false,
-      description: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN).',
+      // A picker that shows country names and stores the code (#27867). The
+      // value domain stays the enforcement boundary, so the accepted set is
+      // unchanged; `options` lists every member of it, named.
+      type: 'select', key: 'country', label: 'Country', required: false,
+      description: 'Country of the registered address. Type a country name and pick it from the list.',
       // Fourth case of the hole #5712 closed on timezone/currency (#6579): the
       // pattern constrains SHAPE only, and `ZZ` is a shape-valid code assigned
       // to nobody. The domain constrains membership; both still apply.
       pattern: '^[A-Za-z]{2}$', minLength: 2, maxLength: 2,
       valueDomain: 'iso_3166_alpha2',
+      options: [...COUNTRY_OPTIONS],
     },
 
     // ── Contact ───────────────────────────────────────────────────────────

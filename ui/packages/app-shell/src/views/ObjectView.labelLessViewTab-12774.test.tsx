@@ -27,11 +27,11 @@
  * entry for the view (`_views.<key>.label`) still names a view only the client
  * derived; a served view's label is still drawn as served (objectui#11295).
  *
- * Harness: `ObjectView.servedViewLabel-11295`'s, with the REAL `ViewTabBar`,
+ * Harness: `ObjectView.servedViewLabel-11295`'s, with the REAL view switcher of the page title,
  * the real `useObjectLabel` under a real `I18nProvider`, and a real
- * `MetadataCtx` carrying the `/meta/view` and `/meta/object` answers. Each tab
- * is read through its own frame (`data-view-tab-frame`), since the page header
- * draws the plural label too.
+ * `MetadataCtx` carrying the `/meta/view` and `/meta/object` answers. Each view
+ * is read through its own row of the switcher's dropdown, since the page title
+ * draws a label too.
  *
  * Directions, written before the run: the label-less cells RED before the
  * change (the tab drew the qualified name or the bare key), GREEN after; the
@@ -40,7 +40,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen, waitFor } from '@testing-library/react';
+import { render, cleanup, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
@@ -83,15 +83,12 @@ vi.mock('sonner', () => ({
   }),
 }));
 
-// The list body is not the subject: stubbed, so only the tab bar draws text.
-// The stand-in draws the page's `toolbarLeading` node, where the tab strip
-// rides since objectui#12440 (the list's own toolbar row).
+// The list body is not the subject: stubbed, so only the page title's view
+// switcher draws view names (objectstack#27594; it replaced the tab strip).
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
-  ListView: (props: { toolbarLeading?: React.ReactNode }) => <>{props.toolbarLeading ?? null}</>,
+  ListView: () => null,
 }));
-
-// `ViewTabBar` stays REAL — it is what draws the label under test.
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ObjectView: (props: any) =>
@@ -224,10 +221,15 @@ async function renderIn(language: 'en' | 'zh-CN', source: 'viewItem' | 'containe
   await waitFor(() => expect(tabText('other')).toBe(AUTHORED));
 }
 
-/** The text one view's tab frame draws. */
+/** The text one view's row draws in the title switcher's All section, the dropdown opened first. */
 function tabText(viewId: string): string | null {
-  const frame = document.querySelector(`[data-view-tab-frame="${viewId}"]`);
-  return frame ? (frame.textContent ?? '').trim() : null;
+  if (!screen.queryByTestId('list-view-switcher-menu')) {
+    const trigger = screen.queryByTestId('list-view-switcher');
+    if (!trigger) return null;
+    fireEvent.click(trigger);
+  }
+  const row = document.querySelector(`[data-section="all"][data-testid="view-switcher-row-${viewId}"]`);
+  return row ? (row.textContent ?? '').trim() : null;
 }
 
 beforeEach(() => {

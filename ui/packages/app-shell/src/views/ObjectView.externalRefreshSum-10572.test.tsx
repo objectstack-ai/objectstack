@@ -93,10 +93,11 @@ import { ExpressionProvider } from '../providers/ExpressionProvider';
 const OBJECT_NAME = 'duly_task';
 
 /**
- * The view under test is always `all`. `ListView` wraps the host's tab strip
- * in its own `list-toolbar-leading` node, which is the node whose identity (a)
- * reads (the view description's own row was, until objectui#12528 moved the
- * description onto the active tab).
+ * The view under test is always `all`. `ListView`'s own toolbar Filter control
+ * (`toolbar-filter-trigger`) is the node whose identity (a) reads (the host's
+ * tab strip in `list-toolbar-leading` was, until objectstack#27594 moved view
+ * switching to the page title; the view description's own row was, until
+ * objectui#12528).
  */
 function objectsWith(allView: Record<string, unknown>) {
   return [

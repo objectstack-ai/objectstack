@@ -55,8 +55,11 @@ export const SysWebhook = ObjectSchema.create({
   userActions: { create: true, edit: true, delete: true, import: false },
   // [ADR-0131 D2] A row is an organization's own subscription; a declared
   // webhook is read from the metadata registry (`declared-webhooks.ts`) and
-  // writes no row. The description says so to every Setup/Studio reader.
-  description: 'Outbound HTTP webhook subscription authored by an organization in the Studio editor or through the API. A webhook declared in code via defineStack({ webhooks }) / defineWebhook() is read from the metadata registry and writes no row here. Both are dispatched by the webhook auto-enqueuer onto the shared HTTP outbox.',
+  // writes no row. The description says so to every Setup/Studio reader, in
+  // an administrator's words: a webhook declared in code (`defineStack({
+  // webhooks })` / `defineWebhook()`) is the one "built into an app", and the
+  // "delivery queue" is the auto-enqueuer's shared HTTP outbox.
+  description: 'An outbound HTTP webhook your organization creates here or through the API. Webhooks that come built into an app are not listed here. Both kinds are sent through the same delivery queue.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{label}',

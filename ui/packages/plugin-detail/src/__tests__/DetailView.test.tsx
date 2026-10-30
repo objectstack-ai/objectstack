@@ -574,7 +574,7 @@ describe('DetailView', () => {
 
     const { findByText } = render(<DetailView schema={schema} dataSource={mockDataSource} />);
     expect(await findByText('Record not found')).toBeInTheDocument();
-    expect(await findByText(/does not exist or may have been deleted/)).toBeInTheDocument();
+    expect(await findByText(/does not exist, may have been deleted, or you may not have access to it/)).toBeInTheDocument();
   });
 
   it('should show "Go back" button in "Record not found" state when showBack is true', async () => {

@@ -58,13 +58,14 @@ function makeDispatcher(resumeResult: AutomationResult) {
 const ROWS = [...RESUME_REFUSAL_ROWS].map(([code, row]) => [code, row.status] as const);
 
 describe('#21724 — the resume-refusal rows', () => {
-    it('the table is the six engine refusals the contract publishes', () => {
+    it('the table is the seven engine refusals the contract publishes', () => {
         // A floor, so an emptied or truncated table cannot pass the per-row
         // pins below vacuously.
         expect(ROWS.map(([code]) => code).sort()).toEqual([
             'INVALID_SCREEN_INPUT',
             'INVALID_SIGNAL',
             'PERMISSION_DENIED',
+            'RESUME_CHILD_PENDING',
             'RESUME_IN_PROGRESS',
             'RUN_NOT_FOUND',
             'STORE_UNAVAILABLE',

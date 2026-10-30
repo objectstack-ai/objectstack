@@ -41,7 +41,6 @@ import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectViewListUrlState.js';
-import type { useObjectViewTabBar } from './objectViewTabBar.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 export function useObjectViewListRenderer({
@@ -76,8 +75,7 @@ export function useObjectViewListRenderer({
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
-    viewTabRow,
-    viewTabBar,
+    handleListTotalChange,
 }: {
     objectName: string | undefined;
     inSetup: ReturnType<typeof isSetupAppSegment>;
@@ -113,8 +111,8 @@ export function useObjectViewListRenderer({
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
-    viewTabRow: ReturnType<typeof useObjectViewTabBar>['viewTabRow'];
-    viewTabBar: ReturnType<typeof useObjectViewTabBar>['viewTabBar'];
+    /** objectstack#27594 — the records the active view matched, for the title's count. */
+    handleListTotalChange: (total: number) => void;
 }) {
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
@@ -244,13 +242,10 @@ export function useObjectViewListRenderer({
          */
         if (viewDef.type === 'chart') {
             const chartConfig = viewDef.chart || {};
-            // objectui#13114 — this branch returns before `ListView`, the
-            // carrier of the view tabs on every other face, so it draws them
-            // itself (`viewTabRow`) above the chart: without them a chart view
-            // is a dead end with no way back to the grid.
-            const withViewTabs = (chartFace: ReactNode) => (
+            // The way back to the other views is the page title's view
+            // switcher (objectstack#27594), above every face, a chart included.
+            const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
-                    {viewTabRow}
                     {chartFace}
                 </div>
             );
@@ -264,7 +259,7 @@ export function useObjectViewListRenderer({
             if (chartConfig.dataset) {
                 const dims: string[] = Array.isArray(chartConfig.dimensions) ? chartConfig.dimensions : [];
                 const vals: string[] = Array.isArray(chartConfig.values) ? chartConfig.values : [];
-                return withViewTabs(
+                return chartPage(
                     <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">{t('chart.loading')}</div>}>
                         <ObjectChart
                             dataSource={ds}
@@ -296,7 +291,7 @@ export function useObjectViewListRenderer({
             // no category, which `ObjectChart` refuses on screen (objectui#8168,
             // `chart-missing-category-axis`) instead of aggregating on a name
             // nobody wrote. ⛔ Do not restore a floor here.
-            return withViewTabs(
+            return chartPage(
                 <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">{t('chart.loading')}</div>}>
                     <ObjectChart
                         dataSource={ds}
@@ -423,8 +418,8 @@ export function useObjectViewListRenderer({
             // `ListView` through the key alone. Both counters only grow, so
             // their sum moves whenever either does.
             refreshTrigger: combinedRefreshKey,
-            // The active view's display label (same string the ViewTabBar
-            // shows) — ListView appends it to export download filenames.
+            // The active view's display label (same string the title's view
+            // switcher shows) — ListView appends it to export download filenames.
             label: viewDef.label ?? listSchema.label,
             /**
              * The active view's own description — the sentence the author wrote
@@ -693,8 +688,9 @@ export function useObjectViewListRenderer({
             // list = "views" mode. `dropdown` (value-chip) userFilters ARE
             // allowed here — they're the Airtable quick-filter pills. Only the
             // `tabs` preset style stays page-only (it would collide with the
-            // ViewTabBar above, which owns the tab-bar role — use `listViews`
-            // for named presets). `quickFilters` stays suppressed entirely.
+            // title's view switcher, which owns view switching — use
+            // `listViews` for named presets). `quickFilters` stays suppressed
+            // entirely.
             quickFilters: undefined,
             userFilters: (() => {
                 const uf = (viewDef.userFilters ?? listSchema.userFilters) as
@@ -862,6 +858,7 @@ export function useObjectViewListRenderer({
                     handleRowClick(record, event);
                 }}
                 onRowsChange={handleListRowsChange}
+                onTotalChange={handleListTotalChange}
                 onSortChange={(sort: any) => {
                     // objectui#12418 — this user's sort, not the view's.
                     persistListSort(sort);
@@ -894,9 +891,6 @@ export function useObjectViewListRenderer({
                 onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
                 initialFilters={listSeed?.filters}
                 initialSearchTerm={listSeed?.search}
-                // objectui#12440 — the saved-view tabs, on the list's own
-                // toolbar row (see `viewTabBar`). `undefined` below `sm`.
-                toolbarLeading={viewTabBar ?? undefined}
                 // objectui#12606 — Setup's list opens without row numbers in
                 // the leading cell. A host prop, not a view key: a console
                 // posture, never metadata.
@@ -920,7 +914,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange]);
 
     return { renderListView };
 }

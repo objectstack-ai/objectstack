@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { ArrowLeft, Building2, Database } from 'lucide-react';
@@ -72,7 +72,6 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
     recordId: string;
   }>();
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams] = useSearchParams();
   const dataSource = useAdapter();
   const { objects, loading: metadataLoading } = useMetadata();
@@ -122,22 +121,25 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   /**
    * Navigate back to the most relevant location.
-   * Back when a page of this console is behind this one (react-router keys
-   * the entry it started on `'default'`, as `FormPage`'s cancel reads it), so
-   * users return to the exact list/view they came from. ⛔ Not
+   * Back only when this console pushed an entry behind this one, so users
+   * return to the exact list/view they came from. react-router numbers the
+   * entries it writes in `history.state.idx`: 0 on the entry the document
+   * loaded on, one more per push, unchanged by a replace. ⛔ Not
+   * `location.key !== 'default'`: a replace on load (the app-name address
+   * moved to the package-id one) mints a key with nothing behind it, so Save
+   * went Back out of the app (objectstack-ai/objectstack#28036). ⛔ Nor
    * `window.history.length`: it counts the tab's entries from before the
-   * console loaded, so a pasted URL went Back out of the app and lost the save
-   * toast (objectstack-ai/objectstack#27454). Otherwise the record detail
-   * (edit) or list (create), inside the app.
+   * console loaded (objectstack-ai/objectstack#27454). Otherwise the record
+   * detail (edit) or list (create), inside the app.
    */
-  const hasInAppHistory = location.key !== 'default';
   const goBack = useCallback(() => {
-    if (hasInAppHistory) {
+    const entryIndex = (window.history.state as { idx?: unknown } | null)?.idx;
+    if (typeof entryIndex === 'number' && entryIndex > 0) {
       navigate(-1);
     } else {
       navigate(recordDetailUrl, { replace: true });
     }
-  }, [navigate, recordDetailUrl, hasInAppHistory]);
+  }, [navigate, recordDetailUrl]);
 
   // Two names, not one (objectui#11733): the title and the toasts speak of ONE
   // record, so they keep the singular; the breadcrumb link opens the object's
