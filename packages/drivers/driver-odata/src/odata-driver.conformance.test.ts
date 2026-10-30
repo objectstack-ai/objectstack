@@ -29,6 +29,11 @@
  *   loudly").
  * - VALUE_ROUNDTRIP: the driver's own `create` then `find`: what was written is
  *   what is read back, type included.
+ *
+ * Every suite runs twice more over an OData v2 service (`version: '2.0'` on
+ * both sides), which declares v2's own types where v4 has others
+ * (`Edm.DateTime` for `Edm.DateTimeOffset` and `Edm.Date`, `Edm.Time` for
+ * `Edm.TimeOfDay`) and refuses any v4 spelling the driver might send.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -62,7 +67,13 @@ import {
 } from '@objectstack/spec/data';
 import { parseODataDriverConfig } from './config.js';
 import { ODataDriver } from './odata-driver.js';
-import { CONFORMANCE_ROOT, odataService, type ServiceProperty } from './__fixtures__/odata-service.js';
+import {
+  CONFORMANCE_ROOT,
+  odataService,
+  type EdmType,
+  type ODataVersion,
+  type ServiceProperty,
+} from './__fixtures__/odata-service.js';
 
 type Row = Record<string, unknown>;
 const SYSTEM = { context: { isSystem: true } };
@@ -70,6 +81,17 @@ const DATASOURCE = 'conformance';
 const OBJECT = 'conformance_row';
 const ENTITY_SET = 'Rows';
 const COLLATIONS = ['ordinal', 'case-insensitive'] as const;
+const VERSIONS: ODataVersion[] = ['4.0', '2.0'];
+/** The type a v2 service declares where v4 has a type v2 does not (v2's CSDL has no Date, TimeOfDay). */
+const V2_TYPE: Partial<Record<EdmType, EdmType>> = {
+  'Edm.DateTimeOffset': 'Edm.DateTime',
+  'Edm.Date': 'Edm.DateTime',
+  'Edm.TimeOfDay': 'Edm.Time',
+};
+const forVersion = (properties: ServiceProperty[], version: ODataVersion) =>
+  version === '2.0' ? properties.map((p) => ({ ...p, type: V2_TYPE[p.type] ?? p.type })) : properties;
+/** The suite name: the v4 names as they were, the v2 runs marked. */
+const named = (name: string, version: ODataVersion) => (version === '2.0' ? `${name} — OData v2` : name);
 
 const sortedIds = (rows: Row[]) => rows.map((r) => String(r.id)).sort();
 
@@ -80,15 +102,20 @@ async function boot(opts: {
   fields: Record<string, unknown>;
   collation?: (typeof COLLATIONS)[number];
   serverPageSize?: number;
+  version: ODataVersion;
 }) {
   const service = odataService({
     entitySet: ENTITY_SET,
-    properties: opts.properties,
+    properties: forVersion(opts.properties, opts.version),
+    version: opts.version,
     rows: opts.rows.map((r) => ({ ...r }) as Row),
     ...(opts.collation ? { collation: opts.collation } : {}),
     ...(opts.serverPageSize ? { serverPageSize: opts.serverPageSize } : {}),
   });
-  const driver = new ODataDriver(parseODataDriverConfig({ name: DATASOURCE, serviceRoot: CONFORMANCE_ROOT }), { fetch: service.fetch });
+  const driver = new ODataDriver(
+    parseODataDriverConfig({ name: DATASOURCE, serviceRoot: CONFORMANCE_ROOT, version: opts.version }),
+    { fetch: service.fetch },
+  );
   const engine = new ObjectQL();
   engine.registerDriver(driver);
   engine.registerDatasourceDef({ name: DATASOURCE, driver: DATASOURCE, schemaMode: 'external', external: { allowWrites: true } });
@@ -106,247 +133,262 @@ async function boot(opts: {
 const text = { type: 'text' } as const;
 const STRING = (name: string, nullable = true): ServiceProperty => ({ name, type: 'Edm.String', nullable });
 
-describe.each(COLLATIONS)('driver-odata conformance over a %s service', (collation) => {
-  describe('FILTER_LOGIC_CASES', () => {
-    const columns = ['a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'];
-    const setup = () => boot({
-      collation,
-      properties: [STRING('id', false), ...columns.map((c) => STRING(c))],
-      rows: FILTER_LOGIC_ROWS,
-      fields: Object.fromEntries(columns.map((c) => [c, text])),
-    });
-    for (const c of FILTER_LOGIC_CASES) {
-      it(c.name, async () => {
-        const { engine } = await setup();
-        expect(sortedIds(await engine.find(OBJECT, { where: c.filter, ...SYSTEM } as never)), c.note).toEqual([...c.expected]);
+for (const version of VERSIONS) {
+  describe.each(COLLATIONS)(named('driver-odata conformance over a %s service', version), (collation) => {
+    describe('FILTER_LOGIC_CASES', () => {
+      const columns = ['a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'];
+      const setup = () => boot({
+        version,
+        collation,
+        properties: [STRING('id', false), ...columns.map((c) => STRING(c))],
+        rows: FILTER_LOGIC_ROWS,
+        fields: Object.fromEntries(columns.map((c) => [c, text])),
       });
-    }
-  });
-
-  describe('FILTER_TEXT_CASES', () => {
-    const setup = () => boot({
-      collation,
-      properties: [STRING('id', false), STRING('name'), { name: 'score', type: 'Edm.Int32' }],
-      rows: FILTER_TEXT_ROWS,
-      fields: { name: text, score: { type: 'number' } },
-    });
-    const isRejection = (c: FilterTextCase): c is FilterTextRejectionCase => c.expectRejection === true;
-    for (const c of FILTER_TEXT_CASES) {
-      if (isRejection(c)) {
-        it(`${c.name} — refused in the ADR-0112 envelope`, async () => {
-          const { floored } = await setup();
-          const err = await floored.find(OBJECT, { where: c.filter }).then(() => undefined, (e: unknown) => e);
-          expect(err, c.note ?? 'expected a refusal').toMatchObject({ code: c.code, status: 400 });
-          for (const mention of c.mustMention) expect((err as Error).message).toContain(mention);
-        });
-      } else {
+      for (const c of FILTER_LOGIC_CASES) {
         it(c.name, async () => {
-          const { floored } = await setup();
-          expect(sortedIds(await floored.find(OBJECT, { where: c.filter })), c.note).toEqual([...c.expected]);
+          const { engine } = await setup();
+          expect(sortedIds(await engine.find(OBJECT, { where: c.filter, ...SYSTEM } as never)), c.note).toEqual([...c.expected]);
         });
       }
-    }
-  });
-
-  describe('FILTER_COMPARAND_TYPE_CASES', () => {
-    const setup = () => boot({
-      collation,
-      properties: [
-        STRING('id', false), { name: 'qty', type: 'Edm.Int32' }, STRING('label'),
-        { name: 'active', type: 'Edm.Boolean' }, STRING('note'),
-      ],
-      rows: FILTER_COMPARAND_TYPE_ROWS,
-      fields: { qty: { type: 'number' }, label: text, active: { type: 'boolean' }, note: text },
     });
-    for (const c of FILTER_COMPARAND_TYPE_CASES) {
-      it(`${c.name} (${c.verdict})`, async () => {
-        const { engine } = await setup();
-        const read = engine.find(OBJECT, { where: c.filter(), ...SYSTEM } as never);
-        if (c.verdict === 'matches') expect(sortedIds(await read), c.note).toEqual([...c.expected]);
-        else if (c.verdict === 'compiles') await expect(read, c.note).resolves.toBeInstanceOf(Array);
-        else {
-          const err = await read.then(() => undefined, (e: unknown) => e);
-          expect(err, c.note).toMatchObject({ code: c.code, status: 400 });
-          for (const mention of c.mustMention) expect((err as Error).message).toContain(mention);
+
+    describe('FILTER_TEXT_CASES', () => {
+      const setup = () => boot({
+        version,
+        collation,
+        properties: [STRING('id', false), STRING('name'), { name: 'score', type: 'Edm.Int32' }],
+        rows: FILTER_TEXT_ROWS,
+        fields: { name: text, score: { type: 'number' } },
+      });
+      const isRejection = (c: FilterTextCase): c is FilterTextRejectionCase => c.expectRejection === true;
+      for (const c of FILTER_TEXT_CASES) {
+        if (isRejection(c)) {
+          it(`${c.name} — refused in the ADR-0112 envelope`, async () => {
+            const { floored } = await setup();
+            const err = await floored.find(OBJECT, { where: c.filter }).then(() => undefined, (e: unknown) => e);
+            expect(err, c.note ?? 'expected a refusal').toMatchObject({ code: c.code, status: 400 });
+            for (const mention of c.mustMention) expect((err as Error).message).toContain(mention);
+          });
+        } else {
+          it(c.name, async () => {
+            const { floored } = await setup();
+            expect(sortedIds(await floored.find(OBJECT, { where: c.filter })), c.note).toEqual([...c.expected]);
+          });
         }
-      });
-    }
-  });
-
-  // Not a shared case-set: the shared filter rows negate text, which the driver never pushes
-  // down. A negation on a number is pushed down, under `not`, to a service whose parser reads
-  // OData's precedence (`not` binds tighter than `eq`) and refuses a non-Boolean operand.
-  describe('negation pushed down on a non-text property', () => {
-    const setup = () => boot({
-      collation,
-      properties: [
-        STRING('id', false), { name: 'n', type: 'Edm.Int32' }, { name: 'm', type: 'Edm.Int32', nullable: false },
-      ],
-      rows: [{ id: 'r1', n: 1, m: 1 }, { id: 'r2', n: 2, m: 2 }, { id: 'r3', n: null, m: 3 }],
-      fields: { n: { type: 'number' }, m: { type: 'number' } },
-    });
-    const cases: Array<[string, object, string[], string]> = [
-      ['$nin of one value, nullable', { n: { $nin: [1] } }, ['r2', 'r3'], 'not (n eq 1) or n eq null'],
-      ['$nin of two values, nullable', { n: { $nin: [1, 2] } }, ['r3'], 'not (n eq 1 or n eq 2) or n eq null'],
-      ['$nin of one value, not nullable', { m: { $nin: [1] } }, ['r2', 'r3'], 'not (m eq 1)'],
-      ['$ne, nullable', { n: { $ne: 1 } }, ['r2', 'r3'], 'n ne 1 or n eq null'],
-    ];
-    for (const [name, where, expected, filter] of cases) {
-      it(name, async () => {
-        const { engine, service } = await setup();
-        expect(sortedIds(await engine.find(OBJECT, { where, ...SYSTEM } as never))).toEqual(expected);
-        expect(service.filters.join('\n')).toContain(filter);
-      });
-    }
-    it('the service refuses `not` over a non-Boolean operand, as a precedence-reading parser does', async () => {
-      const { service } = await setup();
-      const answer = await service.fetch(`${CONFORMANCE_ROOT}Rows?$filter=${encodeURIComponent('not n eq 1')}`, { method: 'GET' });
-      expect(answer.status).toBe(400);
-    });
-  });
-
-  describe('TEMPORAL_CASES', () => {
-    const setup = () => boot({
-      collation,
-      properties: [
-        STRING('id', false), { name: 'at', type: 'Edm.DateTimeOffset' }, { name: 'on', type: 'Edm.Date' }, STRING('why'),
-      ],
-      rows: TEMPORAL_ROWS.map((r) => ({ id: r.id, at: r.at, on: r.on, why: r.why })),
-      fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: text },
-    });
-    for (const c of TEMPORAL_CASES) {
-      it(c.name, async () => {
-        const { engine } = await setup();
-        expect(sortedIds(await engine.find(OBJECT, { where: c.filter, ...SYSTEM } as never)), c.note).toEqual([...c.expected].sort());
-      });
-    }
-  });
-
-  describe('TEMPORAL_TIME_CASES', () => {
-    const setup = () => boot({
-      collation,
-      properties: [STRING('id', false), { name: 'at', type: 'Edm.TimeOfDay' }, STRING('why')],
-      rows: TEMPORAL_TIME_ROWS.map((r) => ({ id: r.id, at: r.at, why: r.why })),
-      fields: { at: { type: 'time' }, why: text },
-    });
-    for (const c of TEMPORAL_TIME_CASES) {
-      it(c.name, async () => {
-        const { engine } = await setup();
-        expect(sortedIds(await engine.find(OBJECT, { where: c.filter, ...SYSTEM } as never)), c.note).toEqual([...c.expected].sort());
-      });
-    }
-  });
-
-  describe('PAGINATION cases', () => {
-    // A service page of 5 rows, so a walk crosses `@odata.nextLink`.
-    const setup = () => boot({
-      collation,
-      serverPageSize: 5,
-      properties: [STRING('id', false), STRING('status'), { name: 'rank', type: 'Edm.Int32' }, STRING('name')],
-      rows: PAGINATION_ROWS,
-      fields: { status: text, rank: { type: 'number' }, name: text },
-    });
-    const walk = async (engine: ObjectQL, orderBy: unknown, pageSize: number) => {
-      const visited: Row[] = [];
-      for (let offset = 0; offset < PAGINATION_ROWS.length; offset += pageSize) {
-        visited.push(...await engine.find(OBJECT, { ...(orderBy ? { orderBy } : {}), limit: pageSize, offset, ...SYSTEM } as never));
       }
-      return visited;
-    };
+    });
 
-    for (const c of PAGINATION_CASES) {
-      it(`${c.name}: every row exactly once, in the requested order`, async () => {
-        const { engine } = await setup();
-        const visited = await walk(engine, c.orderBy, c.pageSize);
-        expect(sortedIds(visited)).toEqual([...PAGINATION_ALL_IDS].sort());
-        const whole = await engine.find(OBJECT, { orderBy: c.orderBy, ...SYSTEM } as never);
-        const keys = (row: Row) => c.orderBy.map(({ field }) => row[field]);
-        expect(visited.map(keys)).toEqual(whole.map(keys));
+    describe('FILTER_COMPARAND_TYPE_CASES', () => {
+      const setup = () => boot({
+        version,
+        collation,
+        properties: [
+          STRING('id', false), { name: 'qty', type: 'Edm.Int32' }, STRING('label'),
+          { name: 'active', type: 'Edm.Boolean' }, STRING('note'),
+        ],
+        rows: FILTER_COMPARAND_TYPE_ROWS,
+        fields: { qty: { type: 'number' }, label: text, active: { type: 'boolean' }, note: text },
       });
-    }
-    for (const c of PAGINATION_UNORDERED_CASES) {
-      it(`unordered — ${c.name}: every row exactly once`, async () => {
-        const { engine } = await setup();
-        const visited = await walk(engine, undefined, c.pageSize);
-        expect(visited).toHaveLength(PAGINATION_ALL_IDS.length);
-        expect(sortedIds(visited)).toEqual([...PAGINATION_ALL_IDS].sort());
+      for (const c of FILTER_COMPARAND_TYPE_CASES) {
+        it(`${c.name} (${c.verdict})`, async () => {
+          const { engine } = await setup();
+          const read = engine.find(OBJECT, { where: c.filter(), ...SYSTEM } as never);
+          if (c.verdict === 'matches') expect(sortedIds(await read), c.note).toEqual([...c.expected]);
+          else if (c.verdict === 'compiles') await expect(read, c.note).resolves.toBeInstanceOf(Array);
+          else {
+            const err = await read.then(() => undefined, (e: unknown) => e);
+            expect(err, c.note).toMatchObject({ code: c.code, status: 400 });
+            for (const mention of c.mustMention) expect((err as Error).message).toContain(mention);
+          }
+        });
+      }
+    });
+
+    // Not a shared case-set: the shared filter rows negate text, which the driver never pushes
+    // down. A negation on a number is pushed down, under `not`, to a service whose parser reads
+    // OData's precedence (`not` binds tighter than `eq`) and refuses a non-Boolean operand.
+    describe('negation pushed down on a non-text property', () => {
+      const setup = () => boot({
+        version,
+        collation,
+        properties: [
+          STRING('id', false), { name: 'n', type: 'Edm.Int32' }, { name: 'm', type: 'Edm.Int32', nullable: false },
+        ],
+        rows: [{ id: 'r1', n: 1, m: 1 }, { id: 'r2', n: 2, m: 2 }, { id: 'r3', n: null, m: 3 }],
+        fields: { n: { type: 'number' }, m: { type: 'number' } },
       });
-    }
-    for (const c of PAGINATION_ZERO_LIMIT_CASES) {
-      it(`zero limit — ${c.name}`, async () => {
+      const cases: Array<[string, object, string[], string]> = [
+        ['$nin of one value, nullable', { n: { $nin: [1] } }, ['r2', 'r3'], 'not (n eq 1) or n eq null'],
+        ['$nin of two values, nullable', { n: { $nin: [1, 2] } }, ['r3'], 'not (n eq 1 or n eq 2) or n eq null'],
+        ['$nin of one value, not nullable', { m: { $nin: [1] } }, ['r2', 'r3'], 'not (m eq 1)'],
+        ['$ne, nullable', { n: { $ne: 1 } }, ['r2', 'r3'], 'n ne 1 or n eq null'],
+      ];
+      for (const [name, where, expected, filter] of cases) {
+        it(name, async () => {
+          const { engine, service } = await setup();
+          expect(sortedIds(await engine.find(OBJECT, { where, ...SYSTEM } as never))).toEqual(expected);
+          expect(service.filters.join('\n')).toContain(filter);
+        });
+      }
+      it('the service refuses `not` over a non-Boolean operand, as a precedence-reading parser does', async () => {
+        const { service } = await setup();
+        const answer = await service.fetch(`${CONFORMANCE_ROOT}Rows?$filter=${encodeURIComponent('not n eq 1')}`, { method: 'GET' });
+        expect(answer.status).toBe(400);
+      });
+    });
+
+    describe('TEMPORAL_CASES', () => {
+      const setup = () => boot({
+        version,
+        collation,
+        properties: [
+          STRING('id', false), { name: 'at', type: 'Edm.DateTimeOffset' }, { name: 'on', type: 'Edm.Date' }, STRING('why'),
+        ],
+        rows: TEMPORAL_ROWS.map((r) => ({ id: r.id, at: r.at, on: r.on, why: r.why })),
+        fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: text },
+      });
+      for (const c of TEMPORAL_CASES) {
+        it(c.name, async () => {
+          const { engine } = await setup();
+          expect(sortedIds(await engine.find(OBJECT, { where: c.filter, ...SYSTEM } as never)), c.note).toEqual([...c.expected].sort());
+        });
+      }
+    });
+
+    describe('TEMPORAL_TIME_CASES', () => {
+      const setup = () => boot({
+        version,
+        collation,
+        properties: [STRING('id', false), { name: 'at', type: 'Edm.TimeOfDay' }, STRING('why')],
+        rows: TEMPORAL_TIME_ROWS.map((r) => ({ id: r.id, at: r.at, why: r.why })),
+        fields: { at: { type: 'time' }, why: text },
+      });
+      for (const c of TEMPORAL_TIME_CASES) {
+        it(c.name, async () => {
+          const { engine } = await setup();
+          expect(sortedIds(await engine.find(OBJECT, { where: c.filter, ...SYSTEM } as never)), c.note).toEqual([...c.expected].sort());
+        });
+      }
+    });
+
+    describe('PAGINATION cases', () => {
+      // A service page of 5 rows, so a walk crosses `@odata.nextLink`.
+      const setup = () => boot({
+        version,
+        collation,
+        serverPageSize: 5,
+        properties: [STRING('id', false), STRING('status'), { name: 'rank', type: 'Edm.Int32' }, STRING('name')],
+        rows: PAGINATION_ROWS,
+        fields: { status: text, rank: { type: 'number' }, name: text },
+      });
+      const walk = async (engine: ObjectQL, orderBy: unknown, pageSize: number) => {
+        const visited: Row[] = [];
+        for (let offset = 0; offset < PAGINATION_ROWS.length; offset += pageSize) {
+          visited.push(...await engine.find(OBJECT, { ...(orderBy ? { orderBy } : {}), limit: pageSize, offset, ...SYSTEM } as never));
+        }
+        return visited;
+      };
+
+      for (const c of PAGINATION_CASES) {
+        it(`${c.name}: every row exactly once, in the requested order`, async () => {
+          const { engine } = await setup();
+          const visited = await walk(engine, c.orderBy, c.pageSize);
+          expect(sortedIds(visited)).toEqual([...PAGINATION_ALL_IDS].sort());
+          const whole = await engine.find(OBJECT, { orderBy: c.orderBy, ...SYSTEM } as never);
+          const keys = (row: Row) => c.orderBy.map(({ field }) => row[field]);
+          expect(visited.map(keys)).toEqual(whole.map(keys));
+        });
+      }
+      for (const c of PAGINATION_UNORDERED_CASES) {
+        it(`unordered — ${c.name}: every row exactly once`, async () => {
+          const { engine } = await setup();
+          const visited = await walk(engine, undefined, c.pageSize);
+          expect(visited).toHaveLength(PAGINATION_ALL_IDS.length);
+          expect(sortedIds(visited)).toEqual([...PAGINATION_ALL_IDS].sort());
+        });
+      }
+      for (const c of PAGINATION_ZERO_LIMIT_CASES) {
+        it(`zero limit — ${c.name}`, async () => {
+          const { engine } = await setup();
+          expect(await engine.find(OBJECT, { ...c.query, ...SYSTEM } as never)).toHaveLength(c.expectedRowCount);
+        });
+      }
+    });
+  });
+
+  describe(named('driver-odata conformance — AGGREGATION_CASES (the engine aggregates the floored rows)', version), () => {
+    const setup = () => boot({
+      version,
+      properties: [
+        STRING('id', false), STRING('region'), STRING('stage'), { name: 'score', type: 'Edm.Int32' },
+        { name: 'amount', type: 'Edm.Int32' }, { name: 'flag', type: 'Edm.Boolean' },
+      ],
+      rows: AGGREGATION_ROWS,
+      fields: { region: text, stage: text, score: { type: 'number' }, amount: { type: 'number' }, flag: { type: 'boolean' } },
+    });
+    const byGroup = (a: { group: string | null }, b: { group: string | null }) => String(a.group).localeCompare(String(b.group));
+
+    for (const c of AGGREGATION_CASES) {
+      it(c.name, async () => {
         const { engine } = await setup();
-        expect(await engine.find(OBJECT, { ...c.query, ...SYSTEM } as never)).toHaveLength(c.expectedRowCount);
+        const rows: Row[] = await engine.aggregate(OBJECT, {
+          aggregations: [{ function: c.function, ...(c.field ? { field: c.field } : {}), alias: 'n' }],
+          ...(c.groupBy ? { groupBy: [c.groupByAlias ? { field: c.groupBy, alias: c.groupByAlias } : c.groupBy] } : {}),
+          ...SYSTEM,
+        } as never);
+        const groupKey = c.groupByAlias ?? c.groupBy;
+        const actual = rows.map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: r.n })).sort(byGroup);
+        expect(actual, c.note ?? c.name).toEqual(c.expected.map((e) => ({ group: e.group, value: e.value })).sort(byGroup));
       });
     }
   });
-});
 
-describe('driver-odata conformance — AGGREGATION_CASES (the engine aggregates the floored rows)', () => {
-  const setup = () => boot({
-    properties: [
-      STRING('id', false), STRING('region'), STRING('stage'), { name: 'score', type: 'Edm.Int32' },
-      { name: 'amount', type: 'Edm.Int32' }, { name: 'flag', type: 'Edm.Boolean' },
-    ],
-    rows: AGGREGATION_ROWS,
-    fields: { region: text, stage: text, score: { type: 'number' }, amount: { type: 'number' }, flag: { type: 'boolean' } },
-  });
-  const byGroup = (a: { group: string | null }, b: { group: string | null }) => String(a.group).localeCompare(String(b.group));
-
-  for (const c of AGGREGATION_CASES) {
-    it(c.name, async () => {
-      const { engine } = await setup();
-      const rows: Row[] = await engine.aggregate(OBJECT, {
-        aggregations: [{ function: c.function, ...(c.field ? { field: c.field } : {}), alias: 'n' }],
-        ...(c.groupBy ? { groupBy: [c.groupByAlias ? { field: c.groupBy, alias: c.groupByAlias } : c.groupBy] } : {}),
-        ...SYSTEM,
-      } as never);
-      const groupKey = c.groupByAlias ?? c.groupBy;
-      const actual = rows.map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: r.n })).sort(byGroup);
-      expect(actual, c.note ?? c.name).toEqual(c.expected.map((e) => ({ group: e.group, value: e.value })).sort(byGroup));
+  describe(named('driver-odata conformance — READABLE_IDS_CASES (refused loudly: $filter has no semi-join)', version), () => {
+    const setup = () => boot({
+      version,
+      properties: [STRING('id', false), STRING('object_name'), STRING('record_id'), STRING('label'), STRING('organization_id')],
+      rows: READABLE_IDS_CHILD_ROWS,
+      fields: { object_name: text, record_id: text, label: text, organization_id: text },
     });
-  }
-});
-
-describe('driver-odata conformance — READABLE_IDS_CASES (refused loudly: $filter has no semi-join)', () => {
-  const setup = () => boot({
-    properties: [STRING('id', false), STRING('object_name'), STRING('record_id'), STRING('label'), STRING('organization_id')],
-    rows: READABLE_IDS_CHILD_ROWS,
-    fields: { object_name: text, record_id: text, label: text, organization_id: text },
-  });
-  for (const c of READABLE_IDS_CASES) {
-    if (c.verdict === 'matches' && !c.holdsComposedLeaf) {
-      // The engine's denial answer carries no leaf: an ordinary `where`, answered.
-      it(`${c.name} — answered`, async () => {
-        const { floored } = await setup();
-        expect(sortedIds(await floored.find(OBJECT, { where: c.where() })), c.note).toEqual([...c.expected]);
+    for (const c of READABLE_IDS_CASES) {
+      if (c.verdict === 'matches' && !c.holdsComposedLeaf) {
+        // The engine's denial answer carries no leaf: an ordinary `where`, answered.
+        it(`${c.name} — answered`, async () => {
+          const { floored } = await setup();
+          expect(sortedIds(await floored.find(OBJECT, { where: c.where() })), c.note).toEqual([...c.expected]);
+        });
+        continue;
+      }
+      it(`${c.name} — refused by the driver and behind the floor, nothing sent`, async () => {
+        const { driver, floored, service } = await setup();
+        await expect(driver.find(OBJECT, { where: c.where() }), c.note).rejects.toMatchObject(READABLE_IDS_REFUSAL);
+        await expect(driver.count(OBJECT, { where: c.where() }), c.note).rejects.toMatchObject(READABLE_IDS_REFUSAL);
+        await expect(floored.find(OBJECT, { where: c.where() }), c.note).rejects.toMatchObject(READABLE_IDS_REFUSAL);
+        expect(service.filters).toEqual([]);
       });
-      continue;
     }
-    it(`${c.name} — refused by the driver and behind the floor, nothing sent`, async () => {
-      const { driver, floored, service } = await setup();
-      await expect(driver.find(OBJECT, { where: c.where() }), c.note).rejects.toMatchObject(READABLE_IDS_REFUSAL);
-      await expect(driver.count(OBJECT, { where: c.where() }), c.note).rejects.toMatchObject(READABLE_IDS_REFUSAL);
-      await expect(floored.find(OBJECT, { where: c.where() }), c.note).rejects.toMatchObject(READABLE_IDS_REFUSAL);
-      expect(service.filters).toEqual([]);
-    });
-  }
-});
+  });
 
-describe('driver-odata conformance — VALUE_ROUNDTRIP_CASES (create, then read back)', () => {
-  // The driver alone: the case-set's field shape is the driver-level one, not an engine object's.
-  const columns = Object.keys(VALUE_ROUNDTRIP_FIELDS);
-  for (const c of VALUE_ROUNDTRIP_CASES) {
-    it(`${c.name} (${c.column})`, async () => {
-      const service = odataService({
-        entitySet: ENTITY_SET,
-        properties: [STRING('id', false), ...columns.map((name) => STRING(name))],
-        rows: [],
+  describe(named('driver-odata conformance — VALUE_ROUNDTRIP_CASES (create, then read back)', version), () => {
+    // The driver alone: the case-set's field shape is the driver-level one, not an engine object's.
+    const columns = Object.keys(VALUE_ROUNDTRIP_FIELDS);
+    for (const c of VALUE_ROUNDTRIP_CASES) {
+      it(`${c.name} (${c.column})`, async () => {
+        const service = odataService({
+          entitySet: ENTITY_SET,
+          properties: [STRING('id', false), ...columns.map((name) => STRING(name))],
+          rows: [],
+          version,
+        });
+        const driver = new ODataDriver(
+          parseODataDriverConfig({ name: DATASOURCE, serviceRoot: CONFORMANCE_ROOT, version }),
+          { fetch: service.fetch },
+        );
+        driver.registerExternalObject({ name: OBJECT, external: { remoteName: ENTITY_SET }, fields: VALUE_ROUNDTRIP_FIELDS });
+        await driver.create(OBJECT, { id: `rt_${c.name}`, label: c.name, [c.column]: c.wrote });
+        const [row] = await driver.find(OBJECT, { where: { id: `rt_${c.name}` } });
+        expect(valueRoundTripDivergence(c, row?.[c.column]), c.note).toBeNull();
       });
-      const driver = new ODataDriver(parseODataDriverConfig({ name: DATASOURCE, serviceRoot: CONFORMANCE_ROOT }), { fetch: service.fetch });
-      driver.registerExternalObject({ name: OBJECT, external: { remoteName: ENTITY_SET }, fields: VALUE_ROUNDTRIP_FIELDS });
-      await driver.create(OBJECT, { id: `rt_${c.name}`, label: c.name, [c.column]: c.wrote });
-      const [row] = await driver.find(OBJECT, { where: { id: `rt_${c.name}` } });
-      expect(valueRoundTripDivergence(c, row?.[c.column]), c.note).toBeNull();
-    });
-  }
-});
+    }
+  });
+}
