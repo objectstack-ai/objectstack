@@ -102,7 +102,7 @@ Add a new field to an existing object
 | **summaryOperations** | `{ object: string; field?: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
-| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
+| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string; homeAmount?: object }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
 | **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
 | **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
 | **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
@@ -533,7 +533,7 @@ Add a new field to an existing object
 | **summaryOperations** | `{ object: string; field?: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
-| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
+| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string; homeAmount?: object }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
 | **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
 | **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
 | **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |

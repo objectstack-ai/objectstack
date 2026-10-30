@@ -31,6 +31,15 @@ const result = CurrencyConfigSchema.parse(data);
 | **currencyMode** | `Enum<'dynamic' \| 'fixed' \| 'record'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1). |
 | **defaultCurrency** | `string` | optional | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own. |
 | **currencyField** | `string` | optional | `record` mode only, and required there: the name of the field on the same object that holds each record's currency — a `text` field declaring `valueDomain: 'iso_4217_currency'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty. |
+| **homeAmount** | `{ field: string; rateDate: string; rateField: string }` | optional | `record` mode only, optional: where the engine stores this amount converted into the organization's home currency (the `localization.currency` setting) at write, at the rate of the record's document date, and the rate it used. `field` names a `dynamic`-mode `currency` field, `rateDate` a `date` / `datetime` field and `rateField` a `number` field, all on the same object; all three are required, and the home and rate fields declare `readonly: true` because only the engine writes them. Consolidated totals aggregate the home field. Refused under `dynamic` and `fixed`. |
+
+### Nested Shape: `CurrencyConfig.homeAmount`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The field on the same object that stores the amount converted into the home currency: a stored `currency` field in `dynamic` mode (it displays in `localization.currency`, so metadata never names the home currency), declaring `readonly: true` — only the engine writes it. Conventionally `AMOUNT_home`. |
+| **rateDate** | `string` | ✅ | The field on the same object holding the record's document date, whose value picks the exchange rate: a `date` or `datetime` field. Required, with no default — the engine never guesses the date (not `created_at`). |
+| **rateField** | `string` | ✅ | The field on the same object that stores the exchange rate the conversion used: a `number` field declaring `readonly: true` — only the engine writes it. Required: the home amount is stored with the rate used. Conventionally `AMOUNT_rate`. |
 
 
 ---
@@ -90,7 +99,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **summaryOperations** | `{ object: string; field?: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
-| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
+| **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string; homeAmount?: object }` | optional | Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode. |
 | **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
 | **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
 | **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
@@ -240,6 +249,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **currencyMode** | `Enum<'dynamic' \| 'fixed' \| 'record'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1). |
 | **defaultCurrency** | `string` | optional | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own. |
 | **currencyField** | `string` | optional | `record` mode only, and required there: the name of the field on the same object that holds each record's currency — a `text` field declaring `valueDomain: 'iso_4217_currency'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty. |
+| **homeAmount** | `{ field: string; rateDate: string; rateField: string }` | optional | `record` mode only, optional: where the engine stores this amount converted into the organization's home currency (the `localization.currency` setting) at write, at the rate of the record's document date, and the rate it used. `field` names a `dynamic`-mode `currency` field, `rateDate` a `date` / `datetime` field and `rateField` a `number` field, all on the same object; all three are required, and the home and rate fields declare `readonly: true` because only the engine writes them. Consolidated totals aggregate the home field. Refused under `dynamic` and `fixed`. |
 
 ### Nested Shape: `Field.conditionalFormatting[number]`
 
