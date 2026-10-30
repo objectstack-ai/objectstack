@@ -225,7 +225,7 @@ describe('keys', () => {
 });
 
 describe('introspection', () => {
-  it('lists entity sets as tables, with EDM types, the key and single-valued navigations as lookup candidates', async () => {
+  it('lists entity sets as tables, with EDM types, the key, and single-valued navigations with their referential constraints as lookup candidates', async () => {
     const { driver } = driverFor([]);
     const schema = await driver.introspectSchema();
     expect(schema.dialect).toBe('odata-4.0');
@@ -234,8 +234,17 @@ describe('introspection', () => {
     expect(people.columns.find((c) => c.name === 'UserName')).toEqual({ name: 'UserName', type: 'Edm.String', nullable: false, primaryKey: true });
     expect(people.columns.find((c) => c.name === 'Emails')?.type).toBe('Collection(Edm.String)');
     expect(people.navigationProperties).toEqual([
-      { name: 'BestFriend', targetEntityType: 'Microsoft.OData.SampleService.Models.TripPin.Person', targetEntitySet: 'People', nullable: true },
-      { name: 'Photo', targetEntityType: 'Microsoft.OData.SampleService.Models.TripPin.Photo', targetEntitySet: 'Photos', nullable: true },
+      { name: 'BestFriend', targetEntityType: 'Microsoft.OData.SampleService.Models.TripPin.Person', targetEntitySet: 'People', nullable: true, referentialConstraints: [] },
+      { name: 'Photo', targetEntityType: 'Microsoft.OData.SampleService.Models.TripPin.Photo', targetEntitySet: 'Photos', nullable: true, referentialConstraints: [] },
+    ]);
+    expect(schema.tables.Flights!.navigationProperties).toEqual([
+      {
+        name: 'Airline',
+        targetEntityType: 'Microsoft.OData.SampleService.Models.TripPin.Airline',
+        targetEntitySet: 'Airlines',
+        nullable: false,
+        referentialConstraints: [{ property: 'AirlineCode', referencedProperty: 'AirlineCode' }],
+      },
     ]);
     expect(schema.tables.Flights!.columns.filter((c) => c.primaryKey).map((c) => c.name)).toEqual(['PlanItemId']);
   });

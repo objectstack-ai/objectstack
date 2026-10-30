@@ -25,6 +25,8 @@ import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
 import { resolveTursoUrl } from './turso-driver-config.js';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE, type IConnectorCredentialSource } from '@objectstack/types';
+import { borrowConnectorCredential, borrowedConnectorOf } from './datasource-connector-credential.js';
 
 /**
  * Minimal metadata-service surface used for datasource persistence + the
@@ -312,6 +314,8 @@ export class DatasourceAdminServicePlugin implements Plugin {
   private config?: DatasourceAdminServiceConfig;
   /** Shared "definition → live driver" path (ADR-0062 D1); also exposed as the `'datasource-connection'` service. */
   private connection?: DatasourceConnectionService;
+  /** [ADR-0015 D7] The connector credential source, resolved per use — see `init()`. */
+  private connectorCredentials?: () => IConnectorCredentialSource | undefined;
   /**
    * [#13805] The record each live runtime pool was last built from, by
    * datasource name. Cluster convergence reads it twice: compared against the
@@ -390,6 +394,15 @@ export class DatasourceAdminServicePlugin implements Plugin {
     const factory = (): IDatasourceDriverFactory | undefined =>
       this.options.driverFactory ?? safeGetService<IDatasourceDriverFactory>(ctx, 'datasource-driver-factory');
 
+    // [ADR-0015 D7] The automation service's connector credential source, the
+    // one lender an `external.connector` datasource borrows from. Resolved
+    // per use like the services above: the automation plugin registers it in
+    // its own `init()`, and a host without that plugin has none — every door
+    // below then refuses such a datasource and names the plugin.
+    const connectorCredentials = (): IConnectorCredentialSource | undefined =>
+      safeGetService<IConnectorCredentialSource>(ctx, CONNECTOR_CREDENTIAL_SOURCE_SERVICE);
+    this.connectorCredentials = connectorCredentials;
+
     // The single "definition → live driver" path (ADR-0062 D1). Built here so
     // the admin pool registration (runtime origin) and the app-plugin
     // auto-connect (code origin) share one connect + lifecycle + policy path.
@@ -398,6 +411,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
       factory,
       engine: () => engineOf() as ConnectionEngineLike | undefined,
       secrets: { resolve: (ref) => this.options.secrets?.resolve?.(ref) ?? Promise.resolve(undefined) },
+      connectorCredentials,
       policy: this.options.connectPolicy,
       logger: this.options.logger,
     });
@@ -439,6 +453,13 @@ export class DatasourceAdminServicePlugin implements Plugin {
 
     const config: DatasourceAdminServiceConfig = {
       probe: (input) => this.probe(factory(), input),
+
+      // [ADR-0015 D7] The borrow the connect path makes, asked at save: a
+      // handle is lent or refused, and a lent one is dropped unused.
+      connectorRefusal: async (connector) => {
+        const borrow = await borrowConnectorCredential(connectorCredentials(), connector);
+        return borrow.ok ? undefined : borrow.reason;
+      },
 
       // [#21923] Every record this door serves carries the origin its
       // PROVENANCE gives — `servedOrigin` — whatever the record says.
@@ -914,6 +935,15 @@ export class DatasourceAdminServicePlugin implements Plugin {
     const fileRefusal = await absentDatabaseFileRefusal(input);
     if (fileRefusal) return { ok: false, error: fileRefusal };
 
+    // [ADR-0015 D7] A draft that borrows a connector instance's credential is
+    // probed with it, exactly as it would connect.
+    const connector = borrowedConnectorOf(input.external);
+    let credential: Awaited<ReturnType<typeof borrowConnectorCredential>> | undefined;
+    if (connector !== undefined) {
+      credential = await borrowConnectorCredential(this.connectorCredentials?.(), connector);
+      if (!credential.ok) return { ok: false, error: credential.reason };
+    }
+
     let driver: any;
     try {
       driver = await factory.create({
@@ -921,6 +951,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
         config: input.config,
         secret: input.secret,
         external: input.external,
+        ...(credential?.ok ? { credential: credential.handle } : {}),
       });
     } catch (err) {
       return { ok: false, error: `Failed to build driver: ${errMsg(err)}` };

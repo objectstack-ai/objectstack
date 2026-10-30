@@ -37,6 +37,7 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*",
     "fast-xml-parser": "^5.10.1",
     "zod": "^4.6.6"
   },

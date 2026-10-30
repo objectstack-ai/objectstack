@@ -1716,7 +1716,7 @@
       "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `bundled` is the one packaging strategy (the retired `manifest-deps` is refused at the manifest, a native addon is refused by name), and the compiled manifest the artifact carries is readable back",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -1772,9 +1772,9 @@
           "evidence": "the three refusals with their exit codes and the listings taken after them"
         },
         {
-          "clause": "the artifact carries a COMPILED manifest — the authored manifest plus `main: \"dist/index.mjs\"` and an `integrity` map of archive-relative path → sha256 SRI digest, with the manifest itself and SIGNATURE excluded from the map — and os plugin publish reads that manifest back out of the artifact BEFORE any network call, refusing 'Artifact manifest is missing id or version.' when it cannot",
+          "clause": "the artifact carries a COMPILED manifest — the authored manifest plus `main: \"dist/index.mjs\"` and an `integrity` map of archive-relative path → sha256 SRI digest, with the manifest itself and SIGNATURE excluded from the map — and os plugin publish reads that manifest back out of the artifact BEFORE any network call and parses it through ManifestSchema (readCompiledPluginManifest, the parse os plugin install and the boot loader share), refusing one the schema refuses with 'The artifact's objectstack.plugin.json is not a valid plugin manifest, so nothing was published:' and one line per schema issue (a missing version reads `version: …`; a pre-retirement `manifest-deps` artifact reads the retirement prescription) when it cannot",
           "oracle": "build",
-          "verify": "read the objectstack.plugin.json entry out of each archive and diff it against the authored file; then run publish against a good artifact (expect it to reach the auth refusal, proving the manifest was read) and against one whose manifest lacks a version (expect the artifact-manifest refusal, before any auth). ⚠️ The publish leg is scored on WHICH refusal arrives, not on success",
+          "verify": "read the objectstack.plugin.json entry out of each archive and diff it against the authored file; then run publish against a good artifact (expect it to reach the auth refusal, proving the manifest was read) and against one whose manifest lacks a version (expect the schema refusal naming `version`, before any auth). ⚠️ The publish leg is scored on WHICH refusal arrives, not on success",
           "evidence": "the compiled manifest of each artifact, and the two publish outputs distinguished by their refusal"
         },
         {
@@ -1798,7 +1798,7 @@
       "source": [
         "packages/cli/src/commands/plugin/build.ts#formatZodErrors — manifest read + named refusal; ManifestSchema.safeParse + formatZodErrors; the explicit id/version guard; packaging default and the Loaded line; entry resolution; the bundled-only esbuild call (only `@objectstack/*` external); findNativeAddons and the native-addon refusal ahead of the integrity map; computeIntegrity + the compiled manifest; the artifact write and its printed block",
         "packages/cli/src/utils/osplugin.ts#MANIFEST_FILENAME — MANIFEST_FILENAME = 'objectstack.plugin.json'; OSPLUGIN_EXT; computeIntegrity (manifest and SIGNATURE excluded, keys sorted); the ustar writer with mtime pinned to 0; readOspluginManifest",
-        "packages/cli/src/commands/plugin/publish.ts#version — artifact discovery; readOspluginManifest before any network call; the id/version refusal; the unsigned-artifact notice; the auth refusal",
+        "packages/cli/src/commands/plugin/publish.ts#version — artifact discovery; the compiled manifest parsed through readCompiledPluginManifest (ManifestSchema) before any network call and the schema refusal; the empty `--manifest-id` refusal; the unsigned-artifact notice; the auth refusal",
         "packages/cli/src/commands/plugin/install.ts#PluginInstall — the install-time re-verification the integrity negative points at (verifyIntegrity over the unpacked entries, `integrity_mismatch`; a compiled manifest ManifestSchema refuses, a malformed integrity map included, is `manifest_invalid` one step earlier through readCompiledPluginManifest; nothing installed) and the install-time tier warning; not scored here",
         "packages/core/src/security/plugin-artifact-integrity.ts#verifyIntegrity — the one integrity verifier, shared by the publish preflight and the install-time check; not scored here",
         "packages/runtime/src/installed-plugin-loader.ts#dispatchPluginRuntime — the boot-time tier dispatch point the trust-tier negative points at (`node` only; `sandbox` / `worker` refused by name; an undeclared tier refused); not scored here",
@@ -1844,6 +1844,12 @@
           "date": "2026-10-30",
           "change": "one source row re-pointed, no clause changed: os plugin install no longer has an `integrity_malformed` refusal. The compiled manifest is parsed through ManifestSchema first (readCompiledPluginManifest, the parse install and the boot loader share), so a malformed integrity map is refused as `manifest_invalid` before the integrity step; `integrity_mismatch` is unchanged. Re-verified against install.ts and compiled-plugin-manifest.ts at this PR's head, no qa-run record",
           "ref": "#27686"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-30",
+          "change": "the compiled-manifest clause's publish half (clause and verify) and the publish.ts source row re-pointed: os plugin publish no longer hand-parses the compiled manifest. It parses it through ManifestSchema with readCompiledPluginManifest (the helper os plugin install and the boot loader share), so a manifest that lacks a version is refused as 'not a valid plugin manifest' with the schema's issue line (`version: …`), not 'Artifact manifest is missing id or version.' — that sentence is now reachable only from an empty `--manifest-id`. The uploaded plugin_manifest stays the artifact's own manifest, unchanged",
+          "ref": "#27810"
         }
       ]
     },
