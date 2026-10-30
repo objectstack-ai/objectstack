@@ -101,14 +101,15 @@ describe('aliyun-acs3-hmac-sha256 — canonicalisation beyond the example', () =
             body,
         }, VENDOR_KEY_ID, VENDOR_SECRET, at);
         const lines = computed.canonicalRequest.split('\n');
+        const hashedPayload = lines[lines.length - 1];
         expect(lines[0]).toBe('POST');
         expect(lines).toContain('content-type:application/json');
         expect(lines).toContain('x-acs-action:DescribeRegions');
         expect(lines).not.toContain('accept:application/json');
-        expect(lines.at(-1)).toMatch(/^[0-9a-f]{64}$/);
-        expect(lines.at(-1)).not.toBe(EMPTY_SHA256);
-        expect(computed.headers['x-acs-content-sha256']).toBe(lines.at(-1));
-        expect(lines.at(-2)).toBe('content-type;host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version');
+        expect(hashedPayload).toMatch(/^[0-9a-f]{64}$/);
+        expect(hashedPayload).not.toBe(EMPTY_SHA256);
+        expect(computed.headers['x-acs-content-sha256']).toBe(hashedPayload);
+        expect(lines[lines.length - 2]).toBe('content-type;host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version');
     });
 
     it('sorts the query and answers the URL in the canonical encoding the signature covers', () => {

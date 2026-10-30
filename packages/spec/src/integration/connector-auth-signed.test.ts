@@ -27,7 +27,7 @@ const entry = (auth: unknown, over: Record<string, unknown> = {}) => ({
 const aliyun = {
   type: 'signed',
   scheme: 'aliyun-acs3-hmac-sha256',
-  keyId: 'LTAI-example-key-id',
+  keyId: 'YourAccessKeyId',
   credentialRef: 'ALIYUN_ACCESS_KEY_SECRET',
 };
 

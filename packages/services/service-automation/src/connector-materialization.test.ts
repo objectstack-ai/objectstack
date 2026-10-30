@@ -1102,7 +1102,7 @@ describe('ADR-0143 D2.3 — a `signed` instance is handed a request signer, neve
     const signed: ConnectorInstanceAuth = {
         type: 'signed',
         scheme: 'aliyun-acs3-hmac-sha256',
-        keyId: 'LTAI-example',
+        keyId: 'YourAccessKeyId',
         credentialRef: 'ALIYUN_SECRET',
     };
 
@@ -1144,7 +1144,7 @@ describe('ADR-0143 D2.3 — a `signed` instance is handed a request signer, neve
         // its signature from the instant and nonce it chose.
         const request = { method: 'GET', url: 'https://ecs.cn-shanghai.aliyuncs.com/?RegionId=cn-shanghai', headers: {} };
         const signature = await ctx.requestSigner!.sign(request);
-        const expected = computeAliyunAcs3Signature(request, 'LTAI-example', SIGNING_KEY, {
+        const expected = computeAliyunAcs3Signature(request, 'YourAccessKeyId', SIGNING_KEY, {
             date: signature.headers['x-acs-date']!,
             nonce: signature.headers['x-acs-signature-nonce']!,
         });

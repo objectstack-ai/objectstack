@@ -348,7 +348,7 @@ describe('[ADR-0143 D2.3] createConnectorCredentialSource — a `signed` instanc
         const reads = { n: 0 };
         const lender = createConnectorCredentialSource({
             readDeclared: async () => [sap({
-                auth: { type: 'signed', scheme: 'aliyun-acs3-hmac-sha256', keyId: 'LTAI-example', credentialRef: REF },
+                auth: { type: 'signed', scheme: 'aliyun-acs3-hmac-sha256', keyId: 'YourAccessKeyId', credentialRef: REF },
             })],
             chain: async () => { reads.n += 1; return { env: () => DUMMY_VALUE }; },
             vaultWired: () => false,
