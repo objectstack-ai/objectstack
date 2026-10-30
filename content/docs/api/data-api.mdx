@@ -232,12 +232,21 @@ Create a new record.
 **Body**: `{ name: "Acme Corp", industry: "Technology" }`  
 **Response**: `{ object: "account", id: "1", record: { ... } }`
 
+A `sys_comment` create that @mentions users the server will not notify (they
+cannot read the comment or its record) also answers `withheldMentions`: those
+users' ids, with no reason, on this request's answer only. The comment is saved
+with every mention, and nothing about the withheld users is stored on it. With
+nobody withheld, the key is absent.
+
 ### `PATCH /data/:object/:id`
 
 Update an existing record (partial update).
 
 **Body**: `{ industry: "Healthcare" }`  
 **Response**: `{ object: "account", id: "1", record: { ... } }`
+
+A `sys_comment` update answers `withheldMentions` the same way, for the mentions
+the update added. A mention the comment already carried is not judged again.
 
 ### `DELETE /data/:object/:id`
 
