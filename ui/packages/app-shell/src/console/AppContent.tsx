@@ -16,8 +16,7 @@ import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@ob
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
-import { getRecordDisplayName } from '@object-ui/core';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -881,28 +880,15 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
 
   // objectstack-ai/objectstack#26172 — a record save names the record it wrote
   // (`ux-conventions.write-feedback`): `Task "Quarterly review" created`. The
-  // name is the saved record's display name from the ONE ADR-0079 resolver,
-  // read through the object being saved. The resolver's floor (`Record #<id>`,
-  // or the empty fallback for an id-less row) is not a name, so a record with
-  // nothing nameable keeps the object-label toast it always had.
-  const recordSaveMessage = useCallback((saved: any): string => {
-    const label = formObjectDef ? objectLabel(formObjectDef as any) : t('common.record', { defaultValue: 'Record' });
-    const resolved = saved && typeof saved === 'object'
-      ? getRecordDisplayName(formObjectDef, saved, { fallback: '' })
-      : '';
-    const id = saved?.id ?? saved?._id;
-    const title = resolved && !(id !== null && id !== undefined && resolved === `Record #${id}`)
-      ? resolved
-      : undefined;
-    if (editingRecord) {
-      return title
-        ? t('form.updatedNamed', { object: label, title, defaultValue: `${label} "${title}" updated` })
-        : t('form.updateSuccess', { object: label, defaultValue: `${label} updated successfully` });
-    }
-    return title
-      ? t('form.createdNamed', { object: label, title, defaultValue: `${label} "${title}" created` })
-      : t('form.createSuccess', { object: label, defaultValue: `${label} created successfully` });
-  }, [editingRecord, formObjectDef, objectLabel, t]);
+  // message is the ONE builder every record save surface shares
+  // (`recordSaveMessage` in `@object-ui/i18n`), read through the object being
+  // saved.
+  const recordSaveMessage = useCallback((saved: any): string => buildRecordSaveMessage(t, {
+    label: formObjectDef ? objectLabel(formObjectDef as any) : t('common.record'),
+    objectDef: formObjectDef,
+    saved,
+    mode: editingRecord ? 'edit' : 'create',
+  }), [editingRecord, formObjectDef, objectLabel, t]);
 
   // objectstack-ai/objectstack#27999 — the open record form reports its own
   // write's advisory warnings: while the overlay is open, the write-warning

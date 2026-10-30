@@ -82,6 +82,9 @@ export type { TranslateFn } from './translateFn.js';
 // Convention-based object/field label i18n
 export { useObjectLabel, useSafeFieldLabel } from './useObjectLabel.js';
 
+// The record-named save message every record save surface toasts.
+export { recordSaveMessage, type RecordSaveMessageInput } from './recordSaveMessage.js';
+
 // Locale packs — ⛔ ONE catalogue is statically re-exported here, not ten
 // (objectui#7479).
 //
