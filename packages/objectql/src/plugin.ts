@@ -12,7 +12,7 @@ import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScop
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
 import { unclaimedTopLevel, type UnclaimedTopLevel } from '@objectstack/metadata';
-import { applyConversionsToStoredItem, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
+import { ASSEMBLED_VIEW_ITEMS_KEY, applyConversionsToStoredItem, expandViewContainer, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
 import { judgePermissionSetOwnerBinding } from '@objectstack/spec/security';
 // [ADR-0017] The one object derivation of a view container and the one
 // divergent-`name` judge, called by the residual's view registration as by a
@@ -3042,6 +3042,10 @@ export class ObjectQLPlugin implements Plugin {
    *    is refused by the one owner-binding judge (ADR-0086 D3,
    *    `judgePermissionSetOwnerBinding`), in the envelope the body seam's
    *    refusal of the same set carries.
+   *  - Any other `view` entry takes the body seam's two lines: one with no
+   *    `name` is filed under its slot, and one that is not container-shaped
+   *    (`isViewContainerShaped`) is refused 422 `INVALID_METADATA` in the seam's
+   *    words, which this copies (the seam lives in `engine.ts`).
    *  - Every other item is one `registerItem` under its name.
    *
    * No body declares one of these names — that is what makes it residual — so
@@ -3087,7 +3091,25 @@ export class ObjectQLPlugin implements Plugin {
           });
         }
       }
-      ql.registry.registerItem(type, stamp(item), 'name' as any, ownerId);
+      // The body seam's two `views:` lines, in its words: a non-container entry
+      // with no `name` is filed under the slot the residual rule gave it, and an
+      // entry that is not container-shaped (`viewKind`/`config`/flattened
+      // overlay keys) is refused — `views:` carries containers only (#5320).
+      const name = (item.name as string | undefined) || (type === 'view' ? deriveViewContainerObject(item) : undefined);
+      const toRegister = item.name === name ? item : { ...item, name };
+      if (type === 'view' && !isViewContainerShaped(toRegister)) {
+        throw Object.assign(new Error(
+          `Invalid \`views:\` entry '${name}' from manifest '${ownerId}': the stack `
+          + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
+          + 'config belong to a single VIEW, not to the container — wrap it: '
+          + '`defineView({ list: { type, data, columns, … } })`, or name it — '
+          + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
+          + `(package export, environment artifact) carries non-container view artifacts under `
+          + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
+          + 'writes that channel.',
+        ), { code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
+      }
+      ql.registry.registerItem(type, stamp(toRegister), 'name' as any, ownerId);
     }
   }
 

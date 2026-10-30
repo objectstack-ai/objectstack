@@ -482,6 +482,24 @@ describe('ADR-0130 D4 — the manifest service registers every other residual ty
       .rejects.toThrow(expected!.message);
   });
 
+  it('a residual view entry with no `name` is filed under its slot, as the body seam files it', async () => {
+    const entry = { object: 'acme_note', label: 'Notes' };
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), { views: [entry] })]));
+    expect(ownerOf(engineOf(kernel), 'view', 'acme_note')).toEqual([RELEASE_ID, '1.0.0']);
+    expect((entry as { name?: string }).name).toBeUndefined();
+  });
+
+  it.each([
+    ['a flattened overlay with no `name`', { object: 'acme_note', type: 'grid', columns: ['title'] }, 'acme_note'],
+    ['a ViewItem', { name: 'acme_note_item', object: 'acme_note', viewKind: 'list', config: { type: 'grid' } }, 'acme_note_item'],
+  ])('a residual `views:` entry that is not a container (%s) is refused 422, in the body seam\'s words', async (_label, entry, name) => {
+    const refusal = await boot(registering('app', [residualStack(noteObj(), { views: [entry] })])).then(() => undefined, (e: unknown) => e);
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
+    expect((refusal as Error).message).toContain(
+      `Invalid \`views:\` entry '${name}' from manifest '${RELEASE_ID}': the stack \`views:\` collection carries view CONTAINERS only.`,
+    );
+  });
+
   it('a residual queue and assignment rule register when the ownership-queue service is composed', async () => {
     const queues = { queues: [itemOf('queue')], assignmentRules: [itemOf('assignment_rule')] };
     const queueService: Plugin = {
