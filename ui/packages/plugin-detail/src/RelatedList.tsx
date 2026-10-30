@@ -2893,8 +2893,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               {t('detail.relatedCardNew', { defaultValue: 'New' })}
             </Badge>
           )}
+          {/* Drawn on hover or focus, and while the ⋯ menu is open: its
+              content is portaled, so neither holds there. */}
           <span
-            className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/panel-head:opacity-100 group-focus-within/panel-head:opacity-100 [@media(hover:none)]:opacity-100"
+            className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/panel-head:opacity-100 group-focus-within/panel-head:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100"
             data-related-panel-controls=""
           >
             {cardChrome && <RelatedPanelHandle chrome={cardChrome} title={title} />}

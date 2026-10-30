@@ -125,6 +125,11 @@ describe('the related panel header (objectstack#27524, Target 1)', () => {
     await user.click(head().querySelector('[data-related-card-menu]')!);
     const items = await screen.findAllByRole('menuitem');
     expect(items.map((item) => item.textContent)).toEqual(['Hide']);
+    // The menu's content is portaled: the controls stay drawn while it is open.
+    expect(head().querySelector('[data-related-card-menu]')?.getAttribute('data-state')).toBe('open');
+    expect((head().querySelector('[data-related-panel-controls]') as HTMLElement).className).toContain(
+      'has-[[data-state=open]]:opacity-100',
+    );
     await user.click(items[0]);
     expect(chrome.onHide).toHaveBeenCalledTimes(1);
     expect(chrome.onEnlarge).not.toHaveBeenCalled();
