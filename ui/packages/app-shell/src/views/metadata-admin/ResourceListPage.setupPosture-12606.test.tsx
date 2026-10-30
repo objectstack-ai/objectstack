@@ -93,7 +93,8 @@ const FILTERED_TILE = t('engine.list.filtered', 'en-US');
 describe('the metadata-type page under the Setup route (objectui#12606)', () => {
   it('renders no breadcrumb and no stat tiles, and says the count in the header’s description', async () => {
     const { container } = mount('setup');
-    await screen.findByRole('link', { name: 'everyone' });
+    // Under Setup a row's link is its label (objectstack#27356).
+    await screen.findByRole('link', { name: 'Everyone' });
 
     const header = screen.getByTestId('metadata-list-setup-header');
     expect(header.getAttribute('data-posture')).toBe('setup');
