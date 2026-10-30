@@ -1489,7 +1489,7 @@ const en = {
     loading: 'Loading…',
     copyToClipboard: 'Copy to clipboard',
     copied: 'Copied!',
-    deleteConfirmation: 'Are you sure you want to delete this record?',
+    deleteConfirmation: 'Are you sure you want to delete this record? This cannot be undone.',
     deleted: 'Record deleted',
     editRecord: 'Edit record',
     viewAll: 'View All',
@@ -3975,9 +3975,13 @@ const en = {
   },
   objectActions: {
     deleteSuccess: '{{label}} deleted successfully',
+    // The delete toast when the deleted record has a display name (ADR-0079),
+    // the counterpart of `form.createdNamed`; a nameless record keeps
+    // `deleteSuccess` above.
+    deletedNamed: '{{label}} "{{name}}" deleted',
     deleteFailed: 'Failed to delete {{label}}',
     noRecordId: 'No record ID provided',
-    deleteConfirm: 'Are you sure you want to delete this record?',
+    deleteConfirm: 'Are you sure you want to delete this record? This cannot be undone.',
     deleteConfirmTitle: 'Delete {{label}} "{{name}}"?',
     bulkDeleteConfirmTitle: 'Delete {{count}} {{label}} records?',
     bulkDeleteConfirmTitle_one: 'Delete {{count}} {{label}} record?',
