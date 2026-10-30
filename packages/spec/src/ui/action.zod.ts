@@ -1611,12 +1611,10 @@ const actionObject = () => strictObject({
    * activation switch refuses to flip it, and nothing checks this declaration
    * server-side.
    *
-   * Landing, as of 2026-10-29: ADR-0066 records the decision; the server half
-   * is the ruling's step 2 (#27506). Until it lands the door still refuses
-   * `type: 'api'` (`isHeadlessInvokableAction` admits `script`, `flow` and the
-   * declarative update only) and the console fetches `target` directly. Once
-   * the server half (#27649) lands, card #27694 removes this paragraph's door
-   * clause; its console clause goes when step 3 (#27611) lands.
+   * Landing, as of 2026-10-29: ADR-0066 records the decision; the server half,
+   * the ruling's step 2 (#27506), is on `main` (#27649). Until step 3 (#27611)
+   * lands the console fetches `target` directly; card #27694 removes this
+   * paragraph when it does.
    */
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on every call the platform action door (`POST /actions/:object/:action` and MCP `run_action`) dispatches, and mirrored as a UI hide. ADR-0066 D4, as amended 2026-10-29, brings a `type: api` action whose declared `target` is a same-origin platform path (exactly one leading `/`, followed by neither `/` nor a backslash, with a path after it) under that door; its `target` endpoint stays directly reachable, so it MUST still enforce this capability itself, the door\'s gate being the added check. A `type: api` action with an off-origin `target` is browser-only and not gated server-side.'),
 
