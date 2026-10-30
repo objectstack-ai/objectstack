@@ -749,7 +749,9 @@ export const SysUser = ObjectSchema.create({
       // has no feature gate, and on a deployment with 2FA off (the default)
       // it read a dead "No" on every row. The state is shown on the user's
       // own record page, in the Security tab, behind the `twoFactor` gate.
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'created_at'],
+      // `banned` and `role` sit beside the email so a banned user or an
+      // admin is spotted from the list, without opening each record.
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'banned', 'role', 'source', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
