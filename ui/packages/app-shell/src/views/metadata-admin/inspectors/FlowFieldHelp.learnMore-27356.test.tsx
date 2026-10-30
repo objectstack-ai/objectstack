@@ -47,7 +47,7 @@ describe('objectList column descriptions are help, not placeholders (#27356 row 
       <FlowObjectListField
         label="Approvers"
         columns={approvers.columns!}
-        value={[{ type: 'position', value: 'sales_director' }]}
+        value={[{ type: 'manager' }]}
         onCommit={vi.fn()}
         addLabel="Add"
         removeLabel="Remove"
