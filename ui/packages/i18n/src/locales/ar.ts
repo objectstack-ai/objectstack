@@ -1258,6 +1258,8 @@ const ar = {
     removeFromFavorites: "إزالة من المفضلة",
     previousRecord: "السجل السابق",
     nextRecord: "السجل التالي",
+    maximize: "تكبير",
+    restoreSize: "استعادة الحجم",
     recordOf: "{{current}} من {{total}}",
     recordNotFound: "لم يتم العثور على السجل",
     recordNotFoundDescription: "السجل الذي تبحث عنه غير موجود أو ربما تم حذفه.",

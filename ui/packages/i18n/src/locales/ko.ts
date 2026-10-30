@@ -1132,6 +1132,8 @@ const ko = {
     removeFromFavorites: "즐겨찾기에서 제거",
     previousRecord: "이전 레코드",
     nextRecord: "다음 레코드",
+    maximize: "최대화",
+    restoreSize: "원래 크기로",
     recordOf: "{{current}} / {{total}}",
     recordNotFound: "레코드를 찾을 수 없음",
     recordNotFoundDescription: "찾으시는 레코드가 존재하지 않거나 삭제되었을 수 있습니다.",
