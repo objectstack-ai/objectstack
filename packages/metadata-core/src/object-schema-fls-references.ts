@@ -598,7 +598,7 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     name: keep, label: keep, type: keep, description: keep, format: keep, required: keep,
     storage: keep, searchable: keep, multiple: keep, unique: keep, maxLength: keep,
     minLength: keep, valueDomain: keep, rows: keep, precision: keep, scale: keep, min: keep,
-    max: keep, useGrouping: keep, accept: keep, maxSize: keep, picklist: keep, reference: keep,
+    max: keep, useGrouping: keep, percentDisplay: keep, accept: keep, maxSize: keep, picklist: keep, reference: keep,
     deleteBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
     relatedListTitle: keep, lookupPageSize: keep, allowCreate: keep, returnType: keep,
     language: keep, step: keep, currencyConfig: keep, dimensions: keep, trackHistory: keep,
