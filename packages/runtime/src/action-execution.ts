@@ -939,10 +939,12 @@ export function disabledActionRefusal(
 
     // The SENTENCE is the engine's (`describeDisabledAction`), so both doors
     // state one refusal instead of two that agree today; the fallback covers an
-    // engine that answers the boolean but not the prose.
+    // engine that answers the boolean but not the prose. [#27842] Both are
+    // written for the person who clicked: no table, no ADR (the engine logs
+    // those when it is asked for the sentence; the code rides the envelope).
     const message = typeof ql.describeDisabledAction === 'function'
         ? String(ql.describeDisabledAction(name))
-        : `Action '${name}' is disabled for this installation (ADR-0126 §8).`;
+        : 'This action is turned off for this deployment.';
     return { code: ACTION_DISABLED_CODE, status: ACTION_DISABLED_STATUS, message };
 }
 

@@ -5851,7 +5851,7 @@ export class ObjectQL implements IObjectQLEngine {
   // [ADR-0126 §8] Packaged-action activation
   // ========================================
   //
-  // Five thin members over {@link ActionActivationProjection}. They are on the
+  // Seven thin members over {@link ActionActivationProjection}. They are on the
   // engine — rather than reached as a free-standing service — because the
   // dispatch doors already hold `ql` and nothing else they hold is
   // per-environment, unconditional and alive at boot at the same time.
@@ -5901,10 +5901,35 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#27842] `IObjectQLEngine.getDisabledActions` — what the metadata read
+   * serves beside an object as `disabledActions`: the names the projection
+   * the doors consult switches off, or `undefined` while no ledger is
+   * attached, so the read serves no key rather than claiming that nothing is
+   * off. {@link listDisabledActions} answers `[]` for both cases, and keeps
+   * that answer.
+   */
+  getDisabledActions(): string[] | undefined {
+    return this.actionActivation.durable ? this.actionActivation.disabledNames() : undefined;
+  }
+
+  /**
    * The `ACTION_DISABLED` refusal SENTENCE, produced by the projection so both
    * dispatch doors state one refusal rather than two that agree today.
+   *
+   * [#27842] The sentence is written for the person who clicked, so it names
+   * no table and no ADR. Those, with the code and the action's name, go to
+   * the log line written here: both doors ask for the sentence exactly when
+   * they refuse (`disabledActionRefusal` in `@objectstack/runtime`), so this
+   * is the one place every refusal passes that holds the host's logger. It is
+   * `info`, not `warn`: the refusal is handed to the caller, and nothing is
+   * degraded (AGENTS.md "Degradation log levels").
    */
   describeDisabledAction(actionName: string): string {
+    this.logger.info(
+      `ACTION_DISABLED: packaged action '${actionName}' refused — it is switched off in the activation ledger ` +
+        '(sys_metadata_activation, ADR-0126 §8 item 2).',
+      { action: actionName, code: 'ACTION_DISABLED' },
+    );
     return this.actionActivation.describeDisabled(actionName);
   }
 
