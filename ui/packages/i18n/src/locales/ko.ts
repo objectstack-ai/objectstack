@@ -2686,9 +2686,11 @@ const ko = {
       signInText: "로그인",
       socialButton: "{provider} 계정으로 가입",
       orText: "또는 이메일로 계속",
+      captchaRetry: "다시 시도",
       errors: {
         userExists: "해당 이메일로 이미 계정이 존재합니다. 로그인해 보세요.",
         selfRegistrationClosed: "이 시스템에서는 직접 가입을 받지 않습니다. 관리자에게 초대를 요청하세요.",
+        captchaFailed: "보안 확인이 완료되지 않았습니다. 다시 시도하세요.",
         emailDomainNotAllowed: "이 이메일의 도메인으로는 여기에서 가입할 수 없습니다. 조직 이메일을 사용하거나 관리자에게 초대를 요청하세요.",
         invitationSentTo: "이 초대는 {{email}}(으)로 전송되었습니다. 초대를 수락하려면 해당 주소로 가입하세요.",
         invitationAddressOnly: "이 초대는 초대를 받은 주소로만 수락할 수 있습니다. 해당 주소로 가입하세요.",

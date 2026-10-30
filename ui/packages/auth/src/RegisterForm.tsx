@@ -9,6 +9,7 @@
 import React, { useState } from 'react';
 import { useAuth } from './useAuth.js';
 import { SocialSignInButtons } from './SocialSignInButtons.js';
+import { TurnstileWidget } from './TurnstileWidget.js';
 import type { AuthLinkComponentProps } from './types.js';
 import {
   AUTH_FIELD_LABEL_CLASS,
@@ -47,7 +48,22 @@ export interface RegisterFormLabels {
    * `{provider}` is replaced with the provider's display name.
    */
   socialButton?: string;
+  /**
+   * Shown when the Turnstile challenge failed, expired or could not load, and
+   * when the server refused the sign-up's token (`MISSING_RESPONSE`,
+   * `VERIFICATION_FAILED`). Only rendered with `turnstileSiteKey`.
+   */
+  captchaFailed?: string;
+  /** The button that draws a fresh Turnstile challenge. */
+  captchaRetry?: string;
 }
+
+/**
+ * better-auth's `captcha` plugin refusal codes for a sign-up whose token was
+ * missing or rejected. They read as the form's own retry message, never as
+ * the plugin's English text.
+ */
+const CAPTCHA_REFUSAL_CODES = ['MISSING_RESPONSE', 'VERIFICATION_FAILED'] as const;
 
 export interface RegisterFormProps {
   /** Callback on successful registration AND auto sign-in. Not called when the
@@ -89,6 +105,13 @@ export interface RegisterFormProps {
   errorMessages?: Record<string, string>;
   /** Hide the icon disc above the form title. Defaults to false. */
   hideIcon?: boolean;
+  /**
+   * The public Turnstile site key — pass `features.turnstileSiteKey` from the
+   * server's auth config. Set, the form renders the challenge, keeps submit
+   * disabled until it is solved, and sends its token with the sign-up.
+   * Unset, the form is unchanged.
+   */
+  turnstileSiteKey?: string;
 }
 
 /** The confirm field's own error line, named by its `aria-describedby`. */
@@ -142,6 +165,7 @@ export function RegisterForm({
   linkComponent: LinkComp = DefaultLink,
   labels = {},
   errorMessages,
+  turnstileSiteKey,
 }: RegisterFormProps) {
   const { signUp, isLoading } = useAuth();
   const [name, setName] = useState('');
@@ -152,6 +176,11 @@ export function RegisterForm({
   // #25885 — the mismatch belongs to the confirm field, under it, not to the
   // top banner above the first field; the banner keeps the server's refusals.
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  // The Turnstile token (single-use) and the counter that discards it after
+  // every server answer. Only read with `turnstileSiteKey`.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const captchaRequired = Boolean(turnstileSiteKey);
 
   const l = {
     nameLabel: labels.nameLabel ?? 'Name',
@@ -168,6 +197,8 @@ export function RegisterForm({
     submittingButton: labels.submittingButton ?? 'Creating account…',
     hasAccountText: labels.hasAccountText ?? 'Already have an account?',
     signInText: labels.signInText ?? 'Sign in',
+    captchaFailed: labels.captchaFailed ?? 'The security check did not complete. Please try it again.',
+    captchaRetry: labels.captchaRetry ?? 'Retry',
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -188,8 +219,18 @@ export function RegisterForm({
     // Autofill and copy-paste routinely smuggle in leading/trailing whitespace
     // that the server rejects as "Invalid email" (#3238) — trim before use.
     const trimmedEmail = email.trim();
+    if (captchaRequired && !captchaToken) {
+      setError(l.captchaFailed);
+      return;
+    }
     try {
-      const result = await signUp(name, trimmedEmail, password, verificationCallbackURL);
+      const result = await signUp(
+        name,
+        trimmedEmail,
+        password,
+        verificationCallbackURL,
+        captchaRequired ? captchaToken ?? undefined : undefined,
+      );
       if (result?.requiresVerification) {
         onVerificationRequired?.(trimmedEmail);
         return;
@@ -198,8 +239,12 @@ export function RegisterForm({
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
       const code = (authError as Error & { code?: string }).code;
-      setError((code && errorMessages?.[code]) || authError.message);
+      const captchaRefusal = captchaRequired && (CAPTCHA_REFUSAL_CODES as readonly string[]).includes(code ?? '');
+      setError((code && errorMessages?.[code]) || (captchaRefusal ? l.captchaFailed : authError.message));
       onError?.(authError);
+    } finally {
+      // The token is spent whatever the server answered: draw a fresh one.
+      if (captchaRequired) setCaptchaResetKey((n) => n + 1);
     }
   };
 
@@ -314,9 +359,18 @@ export function RegisterForm({
             )}
           </div>
 
+          {turnstileSiteKey && (
+            <TurnstileWidget
+              siteKey={turnstileSiteKey}
+              onToken={setCaptchaToken}
+              resetKey={captchaResetKey}
+              labels={{ failed: l.captchaFailed, retry: l.captchaRetry }}
+            />
+          )}
+
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || (captchaRequired && !captchaToken)}
             className={AUTH_PRIMARY_BUTTON_CLASS}
           >
             {isLoading && <AuthSpinner />}

@@ -2742,9 +2742,11 @@ const pt = {
       signInText: "Entrar",
       socialButton: "Cadastre-se com {provider}",
       orText: "ou continue com e-mail",
+      captchaRetry: "Tentar novamente",
       errors: {
         userExists: "Já existe uma conta com esse e-mail. Tente fazer login.",
         selfRegistrationClosed: "O cadastro por conta própria não está aberto neste sistema. Peça um convite a um administrador.",
+        captchaFailed: "A verificação de segurança não foi concluída. Tente novamente.",
         emailDomainNotAllowed: "O domínio deste e-mail não tem permissão para se cadastrar aqui. Use o e-mail da sua organização ou peça um convite a um administrador.",
         invitationSentTo: "Este convite foi enviado para {{email}}. Cadastre-se com esse endereço para aceitá-lo.",
         invitationAddressOnly: "Este convite só pode ser aceito com o endereço para o qual foi enviado. Cadastre-se com esse endereço.",

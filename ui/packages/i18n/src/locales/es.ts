@@ -2747,9 +2747,11 @@ const es = {
       signInText: "Iniciar sesión",
       socialButton: "Registrarse con {provider}",
       orText: "o continúe con correo electrónico",
+      captchaRetry: "Reintentar",
       errors: {
         userExists: "Ya existe una cuenta con ese correo. Intente iniciar sesión.",
         selfRegistrationClosed: "El registro por cuenta propia no está abierto en este sistema. Solicite una invitación a un administrador.",
+        captchaFailed: "La comprobación de seguridad no se completó. Vuelva a intentarlo.",
         emailDomainNotAllowed: "El dominio de este correo no está autorizado para registrarse aquí. Use el correo de su organización o solicite una invitación a un administrador.",
         invitationSentTo: "Esta invitación se envió a {{email}}. Regístrate con esa dirección para aceptarla.",
         invitationAddressOnly: "Esta invitación solo puede aceptarse con la dirección a la que se envió. Regístrate con esa dirección.",

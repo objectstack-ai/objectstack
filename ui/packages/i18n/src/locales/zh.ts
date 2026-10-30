@@ -2749,9 +2749,11 @@ const zh = {
       signInText: '登录',
       socialButton: '使用 {provider} 注册',
       orText: '或使用邮箱继续',
+      captchaRetry: '重试',
       errors: {
         userExists: '该邮箱已被注册，请直接登录或更换邮箱。',
         selfRegistrationClosed: '本系统未开放自助注册，请联系管理员获取邀请。',
+        captchaFailed: '安全验证未完成，请重试。',
         emailDomainNotAllowed: '该邮箱的域名不允许在此注册，请使用组织邮箱，或联系管理员获取邀请。',
         invitationSentTo: '此邀请发送至 {{email}}，请使用该邮箱注册以接受邀请。',
         invitationAddressOnly: '此邀请只能由收到邀请的邮箱接受，请使用该邮箱注册。',
