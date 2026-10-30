@@ -4516,7 +4516,7 @@ async function selfTest() {
   battery('the nested `ui/` workspace rows, on the register (#25712)');
   const UI_ROWS = GOVERNED_SURFACES.filter((s) => s.id.startsWith('ui-'));
   const ROOT_ROWS = Object.freeze(GOVERNED_SURFACES.filter((s) => !s.id.startsWith('ui-')));
-  const UI_SPECIMENS = { 'ui-adr': 'ui/docs/adr/0001-master-detail-subform.md', 'ui-claude-tree': 'ui/.claude/hooks/guard-main-checkout.sh', 'ui-skills-catalog': 'ui/skills/objectui/SKILL.md', 'ui-agents-md': 'ui/AGENTS.md', 'ui-claude-md': 'ui/CLAUDE.md', 'ui-workflows': 'ui/.github/workflows/ci.yml' };
+  const UI_SPECIMENS = { 'ui-adr': 'ui/docs/adr/0001-master-detail-subform.md', 'ui-claude-tree': 'ui/.claude/skills/verify/SKILL.md', 'ui-skills-catalog': 'ui/skills/objectui/SKILL.md', 'ui-agents-md': 'ui/AGENTS.md', 'ui-claude-md': 'ui/CLAUDE.md', 'ui-workflows': 'ui/.github/workflows/ci.yml' };
   assert('the-ui-rows-are-six-well-formed-register-rows', UI_ROWS.length === 6 && UI_ROWS.every((r) => (r.prefix ? r.prefix.endsWith('/') && r.glob === `${r.prefix}**` && r.exact === undefined : r.glob === r.exact) && r.tier === GOVERNED_TIER_H && r.tierRepos === undefined && surfaceRepos(r).join() === 'objectstack') && new Set(GOVERNED_SURFACES.map((r) => r.id)).size === GOVERNED_SURFACES.length, JSON.stringify(UI_ROWS.map((r) => r.id)));
   assert('the-ui-rows-mirror-the-six-rows-objectui-governs-each-under-ui', UI_ROWS.map((r) => r.glob).join() === ROOT_ROWS.filter((s) => s.id !== 'north-star').map((s) => `ui/${s.glob}`).join(), UI_ROWS.map((r) => r.glob).join());
   for (const row of UI_ROWS) {
