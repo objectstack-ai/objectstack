@@ -35,8 +35,10 @@
  *   input's body under `last`, or another package's body under `preserve`
  *   beside an input that carries `packages` and its own top level) is refused
  *   as ambiguous when the two disagree, for the reason the runtime gives: the
- *   boot keeps the body's entry, a dev reload replaces it with the top-level
- *   one;
+ *   boot keeps the body's entry, a dev reload replaces it with the
+ *   artifact's top-level entries of the name, the first of which lends; and
+ *   two such inputs' top-level entries, beside bodies silent on the name,
+ *   are refused with a sentence of their own;
  * - a nested multi-package input (a `manifest: 'preserve'` artifact) is read
  *   through its package bodies, where its connectors and datasources live,
  *   and an entry it carries in both halves is read once;
@@ -171,7 +173,7 @@ describe('composeStacks judges external.connector against the connectors of ever
   const BESIDE_BODY = 'which the composed artifact declares both in a package body and at its top level, and they disagree';
   const BOOT_OR_RELOAD =
     "The boot does not register a top-level entry whose name a package body declares, so the body's entry " +
-    'lends, and a dev reload replaces it with the top-level one';
+    "lends, and a dev reload replaces it with the artifact's top-level entries of the name, the first of which lends";
   const expectComposedFinding = (refused: Envelope | undefined, fragment: string): void => {
     expectOneFinding(refused, fragment);
     expect(refused?.issues).toHaveLength(1);
@@ -325,11 +327,11 @@ describe('composeStacks judges external.connector against the connectors of ever
     // assembles its own top level into none, so that top level boots through
     // the residual rule (under the composed artifact's `manifest.id`, the last
     // input's), and the collector judges it in its own `package:${id}` slot.
-    const mixed = (connector: Record<string, unknown>) =>
+    const mixed = (connector: Record<string, unknown>, id = 'com.acme.bundle', inner = 'com.acme.inner') =>
       defineStack({
-        manifest: pluginManifest('com.acme.bundle'),
+        manifest: pluginManifest(id),
         connectors: [connector],
-        packages: [{ manifest: pluginManifest('com.acme.inner') }],
+        packages: [{ manifest: pluginManifest(inner) }],
       } as never);
     const strictPair = () =>
       defineStack({
@@ -354,16 +356,44 @@ describe('composeStacks judges external.connector against the connectors of ever
 
     it('CONTROL: its top-level instance composes beside a body whose same-named instance can lend too, in either order', () => {
       const other = instance({ auth: { type: 'bearer', credentialRef: 'sap_token_2' } });
-      expect(composeRefusal([strictPair(), mixed(other)], { manifest: 'preserve' })).toBeUndefined();
+      const credentialRefs = (artifact: Record<string, unknown>): unknown[] =>
+        (artifact.connectors as { auth: { credentialRef: unknown } }[]).map((c) => c.auth.credentialRef);
       const artifact = composeStacks([mixed(other), strictPair()] as never, { manifest: 'preserve' }) as Record<string, unknown>;
-      // No body owns the mixed input's top level, so the artifact keeps it,
-      // beside bodies of the inner package and the plain input only, and the
-      // residual rule reads it under the last input's manifest id.
+      // No body owns the mixed input's top level, so the artifact keeps the
+      // whole flattened list, in input order, beside bodies of the inner
+      // package and the plain input only, and the residual rule reads it
+      // under the last input's manifest id. A dev reload lends from the first
+      // entry of that list, which is why the order is pinned.
       expect((artifact.manifest as Record<string, unknown>).id).toBe('com.acme.orders');
       expect(
         (artifact.packages as { manifest: Record<string, unknown> }[]).map((pkg) => pkg.manifest.id),
       ).toEqual(['com.acme.inner', 'com.acme.orders']);
-      expect(artifact.connectors).toContainEqual(expect.objectContaining({ auth: other.auth }));
+      expect(credentialRefs(artifact)).toEqual(['sap_token_2', 'sap_token']);
+      const mixedLast = composeStacks([strictPair(), mixed(other)] as never, { manifest: 'preserve' }) as Record<
+        string,
+        unknown
+      >;
+      expect(credentialRefs(mixedLast)).toEqual(['sap_token', 'sap_token_2']);
+    });
+
+    it.each([
+      ['descriptor first', false],
+      ['instance first', true],
+    ])('refuses two such inputs whose top-level entries disagree, beside bodies silent on the name — %s', (_order, reversed) => {
+      const withDescriptor = mixed(descriptor, 'com.acme.bundle', 'com.acme.inner');
+      const withInstance = mixed(instance(), 'com.acme.kit', 'com.acme.toolkit');
+      const pair = reversed ? [withInstance, withDescriptor] : [withDescriptor, withInstance];
+      const refused = composeRefusal([...pair, looseBorrower()], { manifest: 'preserve' });
+      expectComposedFinding(
+        refused,
+        'which more than one input declares at the top level of a composed artifact that carries package bodies, and they disagree',
+      );
+      const finding = String(refused?.issues?.[0]);
+      expect(finding).toContain("'com.acme.kit' (stack #");
+      expect(finding).toContain("declares an instance that can lend, and 'com.acme.bundle' (stack #");
+      expect(finding).toContain(
+        "No door registers either as a package body's entry, and a dev reload lends from the first top-level entry of the name",
+      );
     });
   });
 

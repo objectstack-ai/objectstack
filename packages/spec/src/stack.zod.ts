@@ -4631,10 +4631,11 @@ function providedCollectionEntries(
  *   lender answers whichever registers first;
  * - a package body and a top-level entry beside it: the boot does not
  *   register the top-level entry, so the body's lends, and a dev reload
- *   replaces the body's entry with the top-level one
- *   ({@link ProvidedCollectionEntry.inBody});
+ *   replaces the body's entry with the artifact's top-level entries of the
+ *   name, the first of which lends ({@link ProvidedCollectionEntry.inBody});
  * - top-level entries of two inputs, beside bodies that do not declare the
- *   name: the runtime registers neither as a package body's own entry.
+ *   name: no door registers either as a package body's entry, and a dev
+ *   reload lends from the first top-level entry of the name.
  *
  * When the kept entries agree, the verdict is the same whichever one lends.
  */
@@ -4677,12 +4678,13 @@ function collectComposedDatasourceConnectorErrors(
           : inBodies > 0
             ? `which the composed artifact declares both in a package body and at its top level, ` +
               `${disagree} The boot does not register a top-level entry whose name a package body ` +
-              `declares, so the body's entry lends, and a dev reload replaces it with the top-level ` +
-              `one, so the datasource could boot or reload with no credential.`
+              `declares, so the body's entry lends, and a dev reload replaces it with the artifact's ` +
+              `top-level entries of the name, the first of which lends, so the entry the datasource ` +
+              `borrows depends on whether the artifact was booted or reloaded and on the order of its inputs.`
             : `which more than one input declares at the top level of a composed artifact that ` +
-              `carries package bodies, ${disagree} The runtime registers neither as a package ` +
-              `body's own entry, so the build cannot tell which one lends, and the datasource could ` +
-              `boot with no credential.`;
+              `carries package bodies, ${disagree} No door registers either as a package body's ` +
+              `entry, and a dev reload lends from the first top-level entry of the name, so the build ` +
+              `cannot tell which one lends, and the datasource could boot with no credential.`;
       ambiguities.set(
         name,
         `${where} Rename or remove the entry that cannot lend, so that one connector name means one instance.`,
