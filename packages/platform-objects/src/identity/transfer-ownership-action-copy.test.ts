@@ -28,6 +28,7 @@ interface CopyAction {
   label?: string;
   confirmText?: string;
   successMessage?: string;
+  outcomeMessages?: Record<string, string>;
   target?: string;
   bodyExtra?: Record<string, unknown>;
   recordIdParam?: string;
@@ -71,7 +72,7 @@ describe('sys_member.transfer_ownership — declared copy', () => {
   });
 
   it('promises neither a demotion nor a transfer', () => {
-    for (const text of [action.label, action.confirmText, action.successMessage]) {
+    for (const text of [action.label, action.confirmText, action.successMessage, ...Object.values(action.outcomeMessages ?? {})]) {
       expect(text).not.toMatch(/demot|transfer/i);
     }
     expect(action.confirmText).toContain('You stay an owner');
@@ -93,6 +94,11 @@ describe('sys_member.transfer_ownership — every locale bundle', () => {
   it('en is the declared copy', () => {
     const copy = bundled(enObjects, 'transfer_ownership');
     const action = declared('transfer_ownership');
-    expect(copy).toEqual({ label: action.label, confirmText: action.confirmText, successMessage: action.successMessage });
+    expect(copy).toEqual({
+      label: action.label,
+      confirmText: action.confirmText,
+      successMessage: action.successMessage,
+      outcomeMessages: action.outcomeMessages,
+    });
   });
 });
