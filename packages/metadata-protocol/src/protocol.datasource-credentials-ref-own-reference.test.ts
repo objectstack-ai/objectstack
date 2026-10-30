@@ -70,8 +70,9 @@ function makeStubEngine() {
             assertEngineFindOnePredicate(table, opts);
             return findRow(opts.where)?.row ?? null;
         },
-        async find(_table: string, opts: { where: Record<string, unknown> }) {
-            return Array.from(rows.values()).filter((r) => matches(r, opts.where));
+        async find(_table: string, opts: { where: Record<string, unknown>; limit?: number }) {
+            const hits = Array.from(rows.values()).filter((r) => matches(r, opts.where));
+            return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
         },
         async insert(table: string, data: Record<string, unknown>) {
             writes.push(`insert ${table}`);
