@@ -9244,7 +9244,8 @@ export class ObjectQL implements IObjectQLEngine {
    * `external.allowWrites` so the write gate ({@link assertWriteAllowed}) can
    * enforce external-datasource ownership, and `external.credentialsRef` so
    * {@link listDatasourceDefs} can hand a credentials sweep the handle a
-   * code-declared datasource holds. Safe to call repeatedly; last write wins.
+   * code-declared datasource holds. Safe to call repeatedly; last write wins,
+   * except an absent `driver` keeps the id stored before it.
    */
   registerDatasourceDef(def: DatasourceDef): void {
     if (!def?.name) return;
@@ -9311,10 +9312,15 @@ export class ObjectQL implements IObjectQLEngine {
    * Each entry is a fresh object with a COPIED `external` block. The index
    * stores the caller's `external` by reference, and a reader must not be able
    * to reach through this accessor and mutate the write gate's own input.
+   *
+   * [#27727] The stored `driver` id is answered too: it is what decides whether
+   * the datasource's driver is floored, so a sweep asking "which datasources
+   * name a plugin driver" can be written against the contract's read-back.
    */
   listDatasourceDefs(): DatasourceDef[] {
     return Array.from(this.datasourceDefs, ([name, def]) => ({
       name,
+      ...(def.driver !== undefined ? { driver: def.driver } : {}),
       ...(def.schemaMode !== undefined ? { schemaMode: def.schemaMode } : {}),
       ...(def.external ? { external: { ...def.external } } : {}),
     }));
