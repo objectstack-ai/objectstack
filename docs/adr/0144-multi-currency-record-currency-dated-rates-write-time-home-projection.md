@@ -383,7 +383,7 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     escalated whether the switch is refused while such rows exist or a backfill is owed; this record decided neither.
     *Note (2026-10-30):* settled: the maintainer ruled letter B
     ([`6492000994`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6492000994) on #8345): the
-    switch is allowed and owes an explicit backfill. PR #28128 implements it. The operator runs
+    switch is allowed and owes an explicit backfill, landed in PR #28128 (`a3d24c99`). The operator runs
     `os migrate record-currency-codes --object <object> --field <amount> --code <ISO 4217>`, which writes the given
     code into every row that holds an amount beside a blank code (dry run by default, `--apply` writes; the code is
     never derived, D8 rule 4), and the metadata save that makes the switch answers the existing 409
