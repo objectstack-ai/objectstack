@@ -1,69 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { ConnectorSchema } from '../integration/connector.zod';
 import {
-  ConnectorOAuth2Schema,
   ConnectorAPIKeySchema,
   ConnectorBasicAuthSchema,
   ConnectorBearerAuthSchema,
   ConnectorNoAuthSchema,
   ConnectorAuthConfigSchema,
 } from './connector-auth.zod';
-
-describe('ConnectorOAuth2Schema', () => {
-  const validOAuth2 = {
-    type: 'oauth2' as const,
-    authorizationUrl: 'https://auth.example.com/authorize',
-    tokenUrl: 'https://auth.example.com/token',
-    clientId: 'my-client-id',
-    clientSecret: 'my-client-secret',
-  };
-
-  it('should accept valid minimal oauth2 config', () => {
-    const result = ConnectorOAuth2Schema.parse(validOAuth2);
-    expect(result.type).toBe('oauth2');
-    expect(result.authorizationUrl).toBe('https://auth.example.com/authorize');
-  });
-
-  it('should accept oauth2 with all optional fields', () => {
-    const result = ConnectorOAuth2Schema.parse({
-      ...validOAuth2,
-      scopes: ['read', 'write'],
-      redirectUri: 'https://app.example.com/callback',
-      refreshToken: 'refresh-token-value',
-      tokenExpiry: 1700000000,
-    });
-    expect(result.scopes).toEqual(['read', 'write']);
-    expect(result.redirectUri).toBe('https://app.example.com/callback');
-    expect(result.refreshToken).toBe('refresh-token-value');
-    expect(result.tokenExpiry).toBe(1700000000);
-  });
-
-  it('should have optional fields as undefined when not provided', () => {
-    const result = ConnectorOAuth2Schema.parse(validOAuth2);
-    expect(result.scopes).toBeUndefined();
-    expect(result.redirectUri).toBeUndefined();
-    expect(result.refreshToken).toBeUndefined();
-    expect(result.tokenExpiry).toBeUndefined();
-  });
-
-  it('should reject invalid authorizationUrl', () => {
-    expect(() =>
-      ConnectorOAuth2Schema.parse({ ...validOAuth2, authorizationUrl: 'not-a-url' }),
-    ).toThrow();
-  });
-
-  it('should reject invalid tokenUrl', () => {
-    expect(() =>
-      ConnectorOAuth2Schema.parse({ ...validOAuth2, tokenUrl: 'not-a-url' }),
-    ).toThrow();
-  });
-
-  it('should reject missing required fields', () => {
-    expect(() => ConnectorOAuth2Schema.parse({ type: 'oauth2' })).toThrow();
-    expect(() =>
-      ConnectorOAuth2Schema.parse({ type: 'oauth2', authorizationUrl: 'https://a.com' }),
-    ).toThrow();
-  });
-});
 
 describe('ConnectorAPIKeySchema', () => {
   it('should accept valid api-key config with default headerName', () => {
@@ -151,17 +94,6 @@ describe('ConnectorNoAuthSchema', () => {
 });
 
 describe('ConnectorAuthConfigSchema', () => {
-  it('should accept oauth2 via discriminated union', () => {
-    const result = ConnectorAuthConfigSchema.parse({
-      type: 'oauth2',
-      authorizationUrl: 'https://auth.example.com/authorize',
-      tokenUrl: 'https://auth.example.com/token',
-      clientId: 'id',
-      clientSecret: 'secret',
-    });
-    expect(result.type).toBe('oauth2');
-  });
-
   it('should accept api-key via discriminated union', () => {
     const result = ConnectorAuthConfigSchema.parse({
       type: 'api-key',
@@ -198,5 +130,43 @@ describe('ConnectorAuthConfigSchema', () => {
 
   it('should reject missing type', () => {
     expect(() => ConnectorAuthConfigSchema.parse({ key: 'value' })).toThrow();
+  });
+});
+
+// ADR-0143 D7 — the runtime `oauth2` variant (`ConnectorOAuth2Schema`) is
+// retired, not redefined: it inlined a client secret and a refresh token and
+// no provider read it. Its one remaining reader is an author who still writes
+// it, and that author meets the prescription, at `type`, on both carriers.
+describe('ConnectorAuthConfigSchema — the retired `oauth2` variant (ADR-0143 D7)', () => {
+  const retired = {
+    type: 'oauth2',
+    authorizationUrl: 'https://auth.example.com/authorize',
+    tokenUrl: 'https://auth.example.com/token',
+    clientId: 'id',
+    clientSecret: 'secret',
+  };
+
+  it('refuses it at `type` with the prescription naming the instance auth that replaces it', () => {
+    const result = ConnectorAuthConfigSchema.safeParse(retired);
+    expect(result.success).toBe(false);
+    const [issue] = result.error!.issues;
+    expect([issue!.code, issue!.path.join('.')]).toEqual(['invalid_union', 'type']);
+    expect(issue!.message).toMatch(/oauth2.*was removed in @objectstack\/spec 18 \(ADR-0143 D7\)/s);
+    expect(issue!.message).toContain("auth: { type: 'oauth2'");
+    expect(issue!.message).toContain('credentialRef');
+  });
+
+  it('refuses it on the connector definition too, located at `authentication.type`', () => {
+    const result = ConnectorSchema.safeParse({ name: 'crm', label: 'CRM', type: 'saas', authentication: retired });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'authentication.type');
+    expect(issue?.code).toBe('invalid_union');
+    expect(issue?.message).toContain('ADR-0143 D7');
+  });
+
+  it("CONTROL: any other unknown variant keeps zod's own report, not the retirement text", () => {
+    const result = ConnectorAuthConfigSchema.safeParse({ type: 'custom' });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).not.toContain('ADR-0143');
   });
 });

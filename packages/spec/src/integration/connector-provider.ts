@@ -21,6 +21,90 @@ import type { ResolvedConnectorAuth } from '../shared/connector-auth.zod';
  * already avoid importing the engine, using a structural registry surface).
  */
 
+// ============================================================================
+// Per-dispatch credential handle (ADR-0143 D4, D7)
+//
+// A grant-bearing credential (`oauth2`, `app-credential`) is not resolved once
+// at materialization: its access token expires, is refreshed on expiry and
+// once on an upstream `401`, and a rotating refresh token must never be spent
+// twice. So a consumer does not receive a value — it receives a HANDLE it asks
+// on every request. ADR-0143 D7: "a provider receives a credential source
+// answered per dispatch, an interface rather than a schema", separate from the
+// `CredentialResolver` that keeps resolving `credentialRef`s.
+//
+// These types were first declared in `@objectstack/types`
+// (`connector-credential-source.ts`) for the datasource borrow path (ADR-0015
+// amendment D7), which re-exports them from here unchanged. They live in the
+// spec now because a connector package depends on `@objectstack/spec` only, and
+// `ConnectorProviderContext` below hands a provider the same handle.
+//
+// ⛔ A credential value crosses this seam only as the return of `get` /
+// `refresh`, into the request it authenticates; nothing here logs, stores or
+// echoes it.
+// ============================================================================
+
+/**
+ * The credential a consumer presents on one request — the resolved form of a
+ * connector instance's `auth`, never its reference. A grant-bearing kind's
+ * access token takes one of these forms too: `bearer` for an OAuth2 token, and
+ * the header or query parameter a vendor's app-credential exchange documents
+ * (`api-key` with `headerName` / `paramName`).
+ */
+export type BorrowedConnectorAuth =
+  | { type: 'bearer'; token: string }
+  | { type: 'api-key'; key: string; headerName: string; paramName?: string }
+  | { type: 'basic'; username: string; password: string };
+
+/** One answer of a {@link ConnectorCredentialHandle}. */
+export interface BorrowedConnectorCredential {
+  /** What to send. */
+  readonly auth: BorrowedConnectorAuth;
+  /**
+   * When the credential stops being valid, in epoch milliseconds. Absent for
+   * a credential with no known lifetime (the static kinds). A credential at
+   * or past `expiresAt` minus the skew margin is refreshed before it is sent.
+   */
+  readonly expiresAt?: number;
+}
+
+/** What a credential is asked in the name of. */
+export interface ConnectorCredentialRequest {
+  /**
+   * The organization of the request the credential is for (ADR-0143 Q1 = A,
+   * an organization-shared connection). Absent for a read that carries none
+   * — a boot-time drift check, a schedule — which ADR-0143 D4 answers from
+   * the instance's connection only when exactly one exists. A static
+   * credential is environment-level and answers the same either way.
+   */
+  readonly organizationId?: string;
+}
+
+/**
+ * A credential bound to one connector instance, asked on every request. The
+ * datasource borrow path receives one from `IConnectorCredentialSource.borrow`
+ * (`@objectstack/types`); a provider factory receives one as
+ * {@link ConnectorProviderContext.credentialHandle}.
+ */
+export interface ConnectorCredentialHandle {
+  /** The connector instance this handle answers for. */
+  readonly connector: string;
+  /**
+   * The credential to send now. Throws a refusal carrying `code` and
+   * `status` when none can be answered (the credential is not set, the
+   * store cannot be read, the instance was disabled, the grant was revoked):
+   * `503 SERVICE_UNAVAILABLE`, since each clears without a change to the
+   * consumer's own declaration.
+   */
+  get(request?: ConnectorCredentialRequest): Promise<BorrowedConnectorCredential>;
+  /**
+   * A credential obtained again, for the request that was refused with the
+   * one {@link get} answered (a `401`) or that would send an expired one.
+   * Concurrent calls on one handle share one refresh, so a rotating grant is
+   * never spent twice. Throws as {@link get} does.
+   */
+  refresh(request?: ConnectorCredentialRequest): Promise<BorrowedConnectorCredential>;
+}
+
 /**
  * A single materialized connector action handler. Receives the input the
  * `connector_action` node mapped from the flow, ignores the dispatch context
@@ -82,7 +166,26 @@ export interface ConnectorProviderContext {
   readonly icon?: string;
   readonly type: string;
   readonly providerConfig: Record<string, unknown>;
+  /**
+   * The entry's static credential, resolved once from its `credentialRef`
+   * (`none` / `bearer` / `api-key` / `basic`). `undefined` when the entry
+   * declares no auth, and for a grant-bearing kind, which arrives as
+   * {@link credentialHandle} instead.
+   */
   readonly auth?: ResolvedConnectorAuth;
+  /**
+   * The per-dispatch credential of a grant-bearing instance — `auth: { type:
+   * 'oauth2' }` or `{ type: 'app-credential' }` (ADR-0143 D4, D7). The host
+   * sets it for those kinds, and only for them; {@link auth} is then
+   * `undefined`. A factory asks it on every upstream request rather than
+   * closing over one value, refreshes once on a `401` and retries once, and
+   * treats a refusal from the handle as the dispatch's failure.
+   *
+   * `undefined` for the static kinds and on a host that predates this member;
+   * a factory handed a grant-bearing entry without it fails the instance with
+   * a clear message rather than calling the upstream unauthenticated.
+   */
+  readonly credentialHandle?: ConnectorCredentialHandle;
   /**
    * The entry's declared retry policy, **resolved** — the host parses it so the
    * schema's defaults (`maxAttempts: 3`, `[408, 429, 500, 502, 503, 504]`, …)
