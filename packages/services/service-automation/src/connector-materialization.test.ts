@@ -1044,3 +1044,50 @@ describe('ADR-0097 — the entry\'s resilience policy on ConnectorProviderContex
         await kernel.shutdown();
     });
 });
+
+// ADR-0143 D4 — the grant-bearing kinds resolve per dispatch, which this server
+// does not run yet (S1 replaces this hold). Until then such an instance is
+// held degraded with a named reason, and its factory is never invoked — so it
+// is never materialized without its credential and never called upstream
+// unauthenticated. A boot does not fail on it: it is not an authoring fault.
+describe('ADR-0143 D4 — a grant-bearing instance is held degraded, never materialized unauthenticated', () => {
+    const grantBearing: Array<[string, ConnectorInstanceAuth]> = [
+        ['oauth2', { type: 'oauth2', grant: 'client_credentials', tokenUrl: 'https://idp.example.com/token', clientId: 'c', credentialRef: 'SECRET' }],
+        ['app-credential', { type: 'app-credential', vendor: 'feishu', appId: 'cli_x', credentialRef: 'SECRET' }],
+    ];
+
+    it.each(grantBearing)('holds a `%s` instance degraded with the reason, without calling its factory', async (kind, auth) => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth })], {
+            providerFactory: factory,
+            credentialResolver: () => 'resolved-secret',
+        });
+        const engine = automationOf(kernel);
+        expect(calls).toHaveLength(0);
+        const desc = engine.getConnectorDescriptors().find((d) => d.name === 'vendor');
+        expect(desc?.state).toBe('degraded');
+        expect(desc?.actions).toEqual([]);
+        expect(engine.getConnectorDegradedReason('vendor')).toContain(`auth type '${kind}'`);
+        expect(engine.getConnectorDegradedReason('vendor')).toContain('never called without its credential');
+        expect(engine.resolveConnectorAction('vendor', 'ping')).toBeUndefined();
+        await kernel.shutdown();
+    });
+
+    it('CONTROL: the four static kinds still materialize, each handed its resolved credential', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [
+                providerConnector('k_none', { auth: { type: 'none' } }),
+                providerConnector('k_bearer', { auth: { type: 'bearer', credentialRef: 'TOKEN' } }),
+                providerConnector('k_key', { auth: { type: 'api-key', credentialRef: 'TOKEN' } }),
+                providerConnector('k_basic', { auth: { type: 'basic', username: 'u', credentialRef: 'TOKEN' } }),
+            ],
+            { providerFactory: factory, credentialResolver: () => 'resolved-secret' },
+        );
+        expect(Object.fromEntries(calls.map((c) => [c.name, c.auth?.type]))).toEqual({
+            k_none: 'none', k_bearer: 'bearer', k_key: 'api-key', k_basic: 'basic',
+        });
+        expect(automationOf(kernel).getConnectorDescriptors().filter((d) => d.state === 'degraded')).toEqual([]);
+        await kernel.shutdown();
+    });
+});

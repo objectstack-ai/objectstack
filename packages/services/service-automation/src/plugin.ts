@@ -399,14 +399,35 @@ function basicUsernameOf(auth: ConnectorInstanceAuth | undefined): string | unde
     return auth?.type === 'basic' ? auth.username : undefined;
 }
 
+/** The grant-bearing instance auth kinds (ADR-0143 D2.1, D2.2): resolved per dispatch, never once at materialization. */
+type GrantBearingInstanceAuth = Extract<ConnectorInstanceAuth, { type: 'oauth2' | 'app-credential' }>;
+
+/**
+ * ADR-0143 D4 — why a grant-bearing instance is not served by this server.
+ * The per-dispatch resolution these kinds need is not here yet, so the
+ * reconcile holds such an instance degraded with this reason rather than
+ * materializing it with no credential: it is never called upstream
+ * unauthenticated.
+ */
+function grantBearingNotServedReason(name: string, auth: GrantBearingInstanceAuth): string {
+    return `connector instance '${name}' declares auth type '${auth.type}', a grant-bearing kind whose token is obtained `
+        + 'and refreshed per dispatch (ADR-0143 D4). This server does not run that resolution yet, so the instance is '
+        + 'not served and is never called without its credential. Declare a static kind (bearer, api-key or basic) '
+        + 'to dispatch it now.';
+}
+
 /**
  * Build the static {@link ResolvedConnectorAuth} a provider factory applies
  * from a declarative instance's `auth` and the secret its `credentialRef`
  * resolved to (ADR-0097 §3). `secret` is present whenever `auth` names a
  * reference — an unresolved one never reaches here: the reconcile degrades
- * the instance first (#27237).
+ * the instance first (#27237). A grant-bearing kind never reaches here either:
+ * the reconcile holds it degraded ({@link grantBearingNotServedReason}).
  */
-function resolveInstanceAuth(auth: ConnectorInstanceAuth | undefined, secret: string | undefined): ResolvedConnectorAuth | undefined {
+function resolveInstanceAuth(
+    auth: Exclude<ConnectorInstanceAuth, GrantBearingInstanceAuth> | undefined,
+    secret: string | undefined,
+): ResolvedConnectorAuth | undefined {
     if (!auth) return undefined;
     if (auth.type === 'none') return { type: 'none' };
     const value = secret ?? '';
@@ -2242,6 +2263,22 @@ export class AutomationServicePlugin implements Plugin {
                         `rest → @objectstack/connector-rest) in the stack's plugins: array. Installed providers: ` +
                         `[${installed.join(', ') || 'none'}] (ADR-0097).`,
                 );
+                continue;
+            }
+
+            // ADR-0143 D4 — a grant-bearing kind (`oauth2`, `app-credential`)
+            // is held degraded with a named reason until per-dispatch
+            // resolution lands, never materialized without its credential.
+            if (entry.auth?.type === 'oauth2' || entry.auth?.type === 'app-credential') {
+                this.failDegradedConnectorInstance(engine, ctx, {
+                    name,
+                    entry,
+                    provider,
+                    signature,
+                    hasLive: existing !== undefined,
+                    reason: grantBearingNotServedReason(name, entry.auth),
+                    cause: undefined,
+                });
                 continue;
             }
 
