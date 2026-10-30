@@ -50,7 +50,7 @@ function mountCells(Cell: typeof PermissionRefCell, values: unknown[], dataSourc
       <Cell value={value} field={FIELD} />
     </div>
   ));
-  return render(dataSource ? <SchemaRendererProvider dataSource={dataSource}>{cells}</SchemaRendererProvider> : <>{cells}</>);
+  return render(dataSource ? <SchemaRendererProvider dataSource={dataSource as any}>{cells}</SchemaRendererProvider> : <>{cells}</>);
 }
 
 function cellText(i: number): HTMLElement {
