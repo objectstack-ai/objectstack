@@ -2158,6 +2158,7 @@ const ko = {
       title: "보고서",
       emptyTitle: "보고서 없음",
       emptyDescription: "이 앱에는 열 수 있는 보고서가 없습니다.",
+      otherApps: "다른 앱의 보고서:",
       viewsLabel: "보고서 보기",
       viewAll: "전체",
       viewRecent: "최근",

@@ -2211,6 +2211,7 @@ const pt = {
       title: "Relatórios",
       emptyTitle: "Nenhum relatório",
       emptyDescription: "Este aplicativo não tem relatórios que você possa abrir.",
+      otherApps: "Relatórios nos seus outros aplicativos:",
       viewsLabel: "Visualizações de relatórios",
       viewAll: "Todos os relatórios",
       viewRecent: "Recentes",

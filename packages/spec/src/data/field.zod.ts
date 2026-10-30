@@ -1501,6 +1501,29 @@ export const FieldSchema = lazySchema(() => {
   useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 
   /**
+   * Presentation hint: how a `percent` value is drawn wherever the field is
+   * shown read-only — list-grid cells and the record page alike. The Studio
+   * UI's percent face draws a progress bar beside the number for every value,
+   * which reads right for progress (a task 60% done) and wrong for a rate or a
+   * probability (an opportunity's 25% win probability is not 25% of the way
+   * anywhere). `Field.format` cannot carry this — it declares no vocabulary —
+   * and `Field.widget` is the form's input override, not the read-only face.
+   *
+   * Same posture as `useGrouping` above: a flat, optional, per-type display
+   * hint with no declared default and no parse-time type restriction.
+   *   - **absent** — the renderer's default face, the progress bar today;
+   *   - **`'bar'`** — the author pins the progress bar;
+   *   - **`'plain'`** — the percentage as text alone (a stored 0.25 reads
+   *     `25%`, at the field's `scale`), no bar.
+   * Display only: it changes no stored value, no validation and no width.
+   *
+   * Declared spec-first: the console's percent face does not read it yet (the
+   * renderer half is its own `domain:ui` card), so the liveness row is
+   * `planned` and the describe says so until that reader lands.
+   */
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged. Declared ahead of its renderer: the Studio UI does not read it yet, so every percent field still draws the bar until it does.'),
+
+  /**
    * Media Constraints (ADR-0104 D3 wave 2)
    *
    * Apply to the media family — `file`, `image`, `avatar`, `video`, `audio`.

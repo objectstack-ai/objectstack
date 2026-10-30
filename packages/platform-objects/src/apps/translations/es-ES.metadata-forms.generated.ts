@@ -2391,7 +2391,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       name: {
         label: "Nombre",
-        helpText: "Se deriva de la etiqueta al crear el conjunto; snake_case"
+        helpText: "Se rellena con las letras latinas y los dígitos de la etiqueta al crear el conjunto; si la etiqueta no tiene ninguno, escríbelo. snake_case"
       },
       description: {
         label: "Descripción",

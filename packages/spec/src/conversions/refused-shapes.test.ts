@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { FLOW_NODE_SIBLING_EXPRESSION_BLOCKS } from '../automation/flow-node-expression-paths.js';
 import { flowNodeValueTemplateRefusals } from '../automation/flow-value-slot-template.js';
 import { ObjectSchema } from '../data/object.zod.js';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry.js';
@@ -66,6 +67,7 @@ describe('the refused-shape list — registered against the migration chain', ()
       'cbp-master-relation-tiers-retired',
       'view-data-api-provider-retired',
       'flow-value-slot-template-dialect-refused',
+      'connector-action-input-value-slot-judged',
       'object-external-binding-managed-datasource-refused',
       'visibility-predicate-has-argument-refused',
       'object-duplicate-action-name-refused',
@@ -361,6 +363,94 @@ describe('#23269 — a stored flow whose CRUD filter operand is a {…} token is
       flowNodeValueTemplateRefusals(n.type, n.config).map((r) => `flows[0].nodes[${i + 1}].config.${r.path}`));
     expect(todos.map((t) => t.path)).toEqual(judged);
     expect(judged).toEqual(['flows[0].nodes[1].config.filter.id']);
+  });
+});
+
+// ── #28163 ────────────────────────────────────────────────────────────────
+
+const connectorNode = (id: string, input: unknown) => ({
+  id,
+  type: 'connector_action',
+  label: id,
+  connectorConfig: { connectorId: 'helpdesk', actionId: 'open_ticket', input },
+});
+
+describe('#28163 — a stored connector_action whose connectorConfig.input carries a {…} token is listed by flow and node', () => {
+  it('one TODO under the connector input entry, at connectorConfig.input.<key>; the row is not rewritten', () => {
+    const row = flowOf('fd_connector', [connectorNode('ticket', { text: '{record.name}', queue: 'support' })]);
+    const before = JSON.stringify(row);
+    const { item, todos } = storedTodos('flow', row);
+    expect(JSON.stringify(item)).toBe(before);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('connector-action-input-value-slot-judged');
+    expect(todo.path).toBe('flows[0].nodes[1].connectorConfig.input.text');
+    expect(todo.from).toBe(JSON.stringify('{record.name}'));
+    expect(todo.reason).toContain(
+      "Flow `fd_connector`, node 'ticket' (connector_action), connector_action input value at connectorConfig.input.text.",
+    );
+    expect(todo.reason).toContain('registerFlow refuses the flow: it is not registered at boot and never runs');
+    expect(todo.reason).toContain("{ dialect: 'cel', source: 'record.name' }");
+  });
+
+  it('reaches a value nested in the input map, and a node inside a structured region', () => {
+    const flow = flowOf('fd_connector_loop', [{
+      id: 'each', type: 'loop', label: 'Each',
+      config: {
+        collection: { dialect: 'cel', source: 'items' },
+        body: { nodes: [connectorNode('inner', { tags: ['ok', '{item.tag}'] })], edges: [] },
+      },
+    }]);
+    const todos: ConversionTodoNotice[] = [];
+    applyConversionsToFlow(flow, { includeRetired: true, onTodo: (t) => todos.push(t) });
+    expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
+      ['connector-action-input-value-slot-judged', 'flows[0].nodes[1].config.body.nodes[0].connectorConfig.input.tags[1]'],
+    ]);
+  });
+
+  it('judges the row the conversions produced: a loose config.input the chain lifts is listed at connectorConfig', () => {
+    const row = flowOf('fd_connector_loose', [{
+      id: 'loose', type: 'connector_action', label: 'Loose',
+      config: { connectorId: 'helpdesk', actionId: 'open_ticket', input: { text: '{record.name}' } },
+    }]);
+    const { todos } = storedTodos('flow', row);
+    expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
+      ['connector-action-input-value-slot-judged', 'flows[0].nodes[1].connectorConfig.input.text'],
+    ]);
+  });
+
+  it.each([
+    ['a CEL envelope', { text: { dialect: 'cel', source: 'record.name' } }],
+    ['a literal', { text: 'Ticket', queue: 'support' }],
+    ['no input', undefined],
+  ])('a connector_action already on protocol (%s) is not listed', (_label, input) => {
+    const flow = flowOf('fd_connector_ok', [connectorNode('ticket', input)]);
+    const todos: ConversionTodoNotice[] = [];
+    applyConversionsToFlow(flow, { includeRetired: true, onTodo: (t) => todos.push(t) });
+    expect(todos).toEqual([]);
+  });
+
+  it('agrees with the refusing door: each site is one the value-slot judge refuses when handed the node, and no other', () => {
+    const nodes: Array<Record<string, any>> = [
+      connectorNode('a', { text: '{record.name}', id: { dialect: 'cel', source: 'record.id' } }),
+      crudNode('b', 'get_record', { id: '{record.id}' }),
+      connectorNode('c', { note: 'plain' }),
+    ];
+    const { todos } = todosOf({ flows: [flowOf('fd_connector_mixed', nodes)] });
+    // The door's own call — `registerFlow` and `objectstack validate` hand the node.
+    const judged = nodes.flatMap((n, i) =>
+      flowNodeValueTemplateRefusals(n.type, n.config, n).map((r) => `flows[0].nodes[${i + 1}].${r.block}.${r.path}`));
+    // Report order is detector order, so the two are compared as sets.
+    expect(todos.map((t) => t.path).sort()).toEqual([...judged].sort());
+    expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
+      ['flow-value-slot-template-dialect-refused', 'flows[0].nodes[2].config.filter.id'],
+      ['connector-action-input-value-slot-judged', 'flows[0].nodes[1].connectorConfig.input.text'],
+    ]);
+  });
+
+  it('the two flow detectors cover every block the ledger roots a value slot in', () => {
+    // A new sibling block needs a detector here (and its D3 entry) before its refusals can be listed.
+    expect(['config', ...Object.keys(FLOW_NODE_SIBLING_EXPRESSION_BLOCKS)]).toEqual(['config', 'connectorConfig']);
   });
 });
 

@@ -2158,6 +2158,7 @@ const de = {
       title: "Berichte",
       emptyTitle: "Keine Berichte",
       emptyDescription: "Diese App hat keine Berichte, die Sie öffnen können.",
+      otherApps: "Berichte in Ihren anderen Apps:",
       viewsLabel: "Berichtsansichten",
       viewAll: "Alle Berichte",
       viewRecent: "Zuletzt geöffnet",

@@ -125,6 +125,46 @@ export interface WriteObservabilityOptions {
   onMentionsWithheld?: (userIds: readonly string[]) => void;
 
   /**
+   * The channel a hook uses to tell the person who made this write what the
+   * save set in motion (#28000) — "Sent to your manager for approval", "A
+   * renewal opportunity was created". One author-written message, info
+   * severity: it reports an outcome, never a problem, so it is not a
+   * validation finding and never rides `onValidationAdvisory`.
+   * `metadata-protocol`'s `createData` and `updateData` pass one and answer the
+   * message as `notice`, on the requester's own answer to that request and
+   * nowhere else.
+   *
+   * The ENGINE never calls it. A hook reaches it the way every member of this
+   * bag reaches a hook — on `ctx.input.options`, the caller's own bag, which a
+   * `before*` handler reads as passed and an `after*` handler reads after
+   * `buildDriverOptions` widened it (it never strips a key) — and calls it
+   * with the message (`ctx.input` is typed as a plain record, so the bag is
+   * cast to this interface, as the platform's own hooks do):
+   *
+   *   const opts = ctx.input.options as WriteObservabilityOptions | undefined;
+   *   opts?.onNotice?.('Sent to your manager for approval');
+   *
+   * Absent is normal: a write no person is waiting on (a seed, a flow node, a
+   * batch, an import) passes no listener, so a hook always calls it
+   * optionally. The sandboxed `body` face (including a `handler` the build
+   * lowers into a body) does not carry it: its `ctx.input.options` is the
+   * frozen `{ multi, where }` projection, never the caller's bag.
+   *
+   * One message per write: a later call REPLACES an earlier one, so the last
+   * call before the write answers wins, and a message that is not a non-empty
+   * string sets nothing. A write that is refused answers its error, never a
+   * notice, even if a `before*` hook set one first. A nested write a hook or a
+   * flow makes inside this one carries its own options, so its notice never
+   * reaches this listener. Nothing is stored.
+   *
+   * In-process only, like `onFieldsDropped`: a function cannot cross the RPC
+   * boundary. Because the hook calls the listener directly, nothing between
+   * them catches, so a listener must only record the message and never throw
+   * — `metadata-protocol`'s does exactly that.
+   */
+  onNotice?: (message: string) => void;
+
+  /**
    * Refuse the write instead of stripping (#5126). Default `false` — off.
    *
    * ## Semantics

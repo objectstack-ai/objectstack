@@ -375,6 +375,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'pressed',
     why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
   },
+  // #27973 — the same declared-not-enforced shape: `percentDisplay` is the spec
+  // half of a percent field's read-only face, `planned` in `liveness/field.json`
+  // until the console's percent face reads it.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'percentDisplay',
+    why: "planned, not yet rendered — a percent field's read-only face (`bar` or `plain`) parses, but the console's percent face draws the progress bar for every value until it reads the key, after the spec publishes. A form control offered today would let an author pick `plain` and still see the bar; the field form gains the row with the renderer half, as `useGrouping` did once it was enforced",
+  },
   {
     kind: 'omit',
     type: 'view',

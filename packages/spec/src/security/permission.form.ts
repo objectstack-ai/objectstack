@@ -34,8 +34,11 @@ export const permissionForm = defineForm({
         // Console's create form fills `name` from the label until `name` is
         // edited. `required` on a row is a form-layout flag: `PermissionSetSchema`
         // still accepts a set with no label, so no API accept set moves.
+        // The fill keeps only the label's Latin letters and digits, so a label
+        // written all in Chinese or Japanese fills nothing: the `name` help says
+        // both outcomes, or a zh-CN / ja-JP admin reads "filled" over an empty field.
         { field: 'label', required: true, colSpan: 1, helpText: 'Display label for admins' },
-        { field: 'name', required: true, colSpan: 1, helpText: 'Derived from the label when you create the set; snake_case' },
+        { field: 'name', required: true, colSpan: 1, helpText: "Filled in from the label's Latin letters and digits when you create the set; if the label has none, type it yourself. snake_case" },
         // #19331 — four declared keys had no control, so the only door to any of
         // them was the Source tab's free-text JSON. `description` is persisted on
         // sys_permission_set and shown in Setup; of the other three, `packageId`

@@ -2381,6 +2381,7 @@ const ar = {
       title: "التقارير",
       emptyTitle: "لا توجد تقارير",
       emptyDescription: "لا يحتوي هذا التطبيق على تقارير يمكنك فتحها.",
+      otherApps: "التقارير في تطبيقاتك الأخرى:",
       viewsLabel: "طرق عرض التقارير",
       viewAll: "كل التقارير",
       viewRecent: "الأخيرة",
