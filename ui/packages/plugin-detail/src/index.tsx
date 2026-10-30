@@ -230,6 +230,10 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
+// objectstack#27056 — for the app-shell record drawer's prefetch: it warms
+// the next record's related counts before the reader steps to it.
+export { prefetchRelatedCounts, relatedCountTargetsIn, relatedCountTargetOf } from './useRelatedCounts';
+export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts';
 // The tabbed tier's 关联 tab in the reader's arrangement (objectstack#27055).
 export { ArrangedRelatedTab } from './ArrangedRelatedTab';
 // objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
@@ -248,6 +252,7 @@ export {
   EMPTY_RELATED_ARRANGEMENT,
   RELATED_CARD_NEW_BADGE_MS,
   editRelatedArrangement,
+  RELATED_ARRANGEMENT_RECORD_VERSION,
   relatedArrangementFromRecord,
   relatedArrangementToRecord,
   relatedCardId,

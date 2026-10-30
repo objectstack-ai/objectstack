@@ -154,6 +154,105 @@ describe('GET/POST /security/explain (ADR-0090 D6)', () => {
   });
 });
 
+// ── [#27442] an explicit empty userId is refused, an omitted one is the caller ─
+
+describe('[#27442] GET/POST /security/explain with an empty userId', () => {
+  it('POST userId "" is refused 400 VALIDATION_FAILED and nothing is explained', async () => {
+    const explain = vi.fn().mockResolvedValue(DECISION);
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'read', userId: '' } } as any, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(res.body.allowed, 'no verdict is answered').toBeUndefined();
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('GET ?userId= names the key too, so it is refused the same way', async () => {
+    const explain = vi.fn().mockResolvedValue(DECISION);
+    const { get } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await get!.handler({ method: 'GET', params: {}, headers: {}, query: { object: 'task', userId: '' } } as any, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('an omitted userId still explains the caller, and a named user is still passed through', async () => {
+    const explain = vi.fn().mockResolvedValue(DECISION);
+    const { get, post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+
+    let res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'read' } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(explain).toHaveBeenLastCalledWith({ object: 'task', operation: 'read' }, CALLER);
+
+    res = mockRes();
+    await get!.handler({ method: 'GET', params: {}, headers: {}, query: { object: 'task' } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(explain).toHaveBeenLastCalledWith({ object: 'task', operation: 'read' }, CALLER);
+
+    res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'read', userId: 'u_target' } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(explain).toHaveBeenLastCalledWith({ object: 'task', operation: 'read', userId: 'u_target' }, CALLER);
+  });
+});
+
+// ── [#27719] an empty object is refused at the door, like an empty userId ────
+
+describe('[#27719] GET/POST /security/explain with an empty object', () => {
+  /** The engine's own answer to an empty object: a plain Error, which the route's catch-all reads as a 500. */
+  const engineLike = () => vi.fn(async (request: any) => {
+    if (!request.object) throw new Error('[Security] explain: request.object is required');
+    return DECISION;
+  });
+
+  it('POST object "" is refused 400 VALIDATION_FAILED in the route envelope, and the engine is never called', async () => {
+    const explain = engineLike();
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: '', operation: 'read' } } as any, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(res.body.allowed, 'no verdict is answered').toBeUndefined();
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('GET ?object= is refused the same way', async () => {
+    const explain = engineLike();
+    const { get } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await get!.handler({ method: 'GET', params: {}, headers: {}, query: { object: '', operation: 'read' } } as any, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('a named object is still explained with exactly the request it was sent', async () => {
+    const explain = engineLike();
+    const { get, post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+
+    let res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update' } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual(DECISION);
+    expect(explain).toHaveBeenLastCalledWith({ object: 'task', operation: 'update' }, CALLER);
+
+    res = mockRes();
+    await get!.handler({ method: 'GET', params: {}, headers: {}, query: { object: 'task' } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(explain).toHaveBeenLastCalledWith({ object: 'task', operation: 'read' }, CALLER);
+  });
+});
+
 // ── [#8326] batch form — recordIds on the same request shape ─────────────────
 
 /**

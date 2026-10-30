@@ -154,6 +154,35 @@ function unclaimedTopLevelObjects(
 }
 
 /**
+ * The CONNECTORS of a multi-package stack's residual, and the id they are owned
+ * by — the residual rule's answer read the way {@link unclaimedTopLevelObjects}
+ * reads it, for the one other residual type a boot-time reader takes from the
+ * registry alone.
+ *
+ * Why the engine needs them (ADR-0015 D7): the connector credential lender and
+ * the ADR-0097 reconcile read `registry.listItems('connector')`, never the
+ * metadata service. A residual connector instance registered by the metadata
+ * door only was therefore invisible to both at boot — the instance did not
+ * materialize, and a datasource's `external.connector` borrow of it was refused
+ * as undeclared until a dev reload carried the artifact in — while the composed
+ * check (`composeStacks`) accepts that borrow, because the instance is declared.
+ *
+ * @returns `undefined` when the stack has no residual connector.
+ */
+function unclaimedTopLevelConnectors(
+  stack: unknown,
+): { ownerId: string | undefined; ownerVersion: string | undefined; connectors: Record<string, unknown>[] } | undefined {
+  const residual = unclaimedTopLevel(stack);
+  if (!residual) return undefined;
+  const connectors = residual.items
+    .filter((entry) => entry.type === 'connector')
+    .map((entry) => entry.item as Record<string, unknown>);
+  return connectors.length > 0
+    ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, connectors }
+    : undefined;
+}
+
+/**
  * Options for ObjectQLPlugin.
  *
  * `environmentId` declares that this kernel serves ONE environment. It is a
@@ -771,8 +800,11 @@ export class ObjectQLPlugin implements Plugin {
         // no package body declares — as the residual rule answers it. See
         // {@link unclaimedTopLevelObjects}.
         const residual = unclaimedTopLevelObjects(artifact);
+        // …and its CONNECTORS, which the credential lender reads from the
+        // registry alone. See {@link unclaimedTopLevelConnectors}.
+        const residualConnectors = unclaimedTopLevelConnectors(artifact);
 
-        if (ordered.length === 0 && residual === undefined) {
+        if (ordered.length === 0 && residual === undefined && residualConnectors === undefined) {
           // An artifact that declared `packages: []` registers nothing. Said out
           // loud rather than returning quietly: "the install did nothing" is not
           // a state anyone should have to infer from an absence.
@@ -846,6 +878,22 @@ export class ObjectQLPlugin implements Plugin {
         // bodies (a composed stack keeps one member's manifest) that body's
         // record must not be replaced.
         if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
+        // [ADR-0015 D7] The residual's connectors, the same way and in the same
+        // place: after every body, under the residual rule's id, through the
+        // registry verb a body's own connectors take (`registerApp`'s metadata
+        // collections). No body declares one of these names — that is what
+        // makes it residual — so none of them shadows a body's entry.
+        // Stamped as a residual object is: the version first, on a shallow
+        // copy, leaving the artifact's own entry as the registry leaves it.
+        if (residualConnectors) {
+          const { ownerId, ownerVersion, connectors } = residualConnectors;
+          for (const connector of connectors) {
+            const stamped = ownerVersion === undefined
+              ? { ...connector }
+              : applyProtection({ ...connector } as any, { packageId: ownerId, packageVersion: ownerVersion });
+            ql.registry.registerItem('connector', stamped, 'name' as any, ownerId);
+          }
+        }
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either
@@ -1100,6 +1148,13 @@ export class ObjectQLPlugin implements Plugin {
         //      (`skipSchemaSync` / OS_SKIP_SCHEMA_SYNC) for deployments that
         //      manage DDL out-of-band, and serializes through
         //      `reloadSchemaSync` so overlapping reload events can't race DDL.
+        //   3. Every OTHER item the boot registered through the `manifest`
+        //      service kept its boot copy in the registry, which the list read
+        //      and its execution face lay over the metadata service: an edited
+        //      email template sent its old wording, an edited flow re-bound its
+        //      old body, while the by-name read served the edit. See
+        //      {@link refreshReloadedPackages}.
+        this.refreshReloadedPackages(ctx, payload);
         this.ingestReloadedObjects(ctx, payload);
         if (this.skipSchemaSync) {
             // DDL is managed out-of-band here, but the objects this reload just
@@ -1374,6 +1429,71 @@ export class ObjectQLPlugin implements Plugin {
     if (!owner) return 'own';
     const tenantAuthored = (body as { _provenance?: unknown } | null | undefined)?._provenance === 'org';
     return owner.packageId === packageId && !tenantAuthored ? 'own' : 'overlay';
+  }
+
+  /**
+   * Re-register each package body carried on a `metadata:reloaded` payload
+   * through `registerApp`, the body door the boot registered it through (the
+   * `manifest` service), so every collection that door decomposes into the
+   * SchemaRegistry (`METADATA_ARRAY_KEYS`: email templates, flows, views,
+   * dashboards, pages, actions, …) holds the reloaded item, not the boot copy.
+   *
+   * A REFRESH, never an install: only a package the registry already holds
+   * from code or the marketplace is re-registered, under the source it was
+   * installed with, and `installPackage` keeps its lifecycle (a disabled
+   * package stays disabled). A body the boot never registered — the artifact
+   * door alone serves it, so nothing in the registry is stale — is left to
+   * that door, as before. Ordering is `resolveArtifactPackageEntries`', the
+   * same call the `manifest` service makes on the same artifact.
+   *
+   * Items removed from the artifact stay registered until restart, the
+   * lifecycle {@link ingestReloadedObjects} keeps for objects. A body that
+   * fails to register is named and skipped: the reload goes on, and that
+   * package keeps serving what it served before.
+   */
+  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): void {
+    if (!this.ql) return;
+    const metadata = (payload as { metadata?: unknown } | undefined)?.metadata as Record<string, any> | undefined;
+    if (!metadata || typeof metadata !== 'object') return;
+    // The shape `AppPlugin` hands the `manifest` service: the manifest's
+    // fields with the collections spread over them.
+    const artifact = metadata.manifest && typeof metadata.manifest === 'object'
+      ? { ...metadata.manifest, ...metadata }
+      : metadata;
+    let entries: ReturnType<typeof resolveArtifactPackageEntries>;
+    try {
+      entries = resolveArtifactPackageEntries(
+        Array.isArray(artifact.packages) ? this.ql.convertPackageBodyForward(artifact) : artifact,
+      );
+    } catch (e: any) {
+      ctx.logger.warn('[ObjectQLPlugin] reload could not read the artifact\'s packages — registry entries keep their previous definitions', {
+        error: e?.message,
+      });
+      return;
+    }
+    const scope = {
+      packageIds: entries
+        .map((entry) => artifactPackageId(entry.manifest))
+        .filter((id): id is string => id !== undefined),
+    };
+    const refreshed: string[] = [];
+    for (const { manifest } of entries as Array<{ manifest: any }>) {
+      const id = artifactPackageId(manifest);
+      const installed = id === undefined ? undefined : this.ql.registry.getPackage(id);
+      if (!installed || (installed.source !== 'code' && installed.source !== 'marketplace')) continue;
+      try {
+        this.ql.registerApp(manifest, scope, installed.source);
+        refreshed.push(id!);
+      } catch (e: any) {
+        ctx.logger.warn('[ObjectQLPlugin] reload could not re-register a package — its registry entries keep their previous definitions', {
+          packageId: id,
+          error: e?.message,
+        });
+      }
+    }
+    if (refreshed.length > 0) {
+      ctx.logger.info('[ObjectQLPlugin] reload refreshed the registry entries of its packages', { packageIds: refreshed });
+    }
   }
 
   private ingestReloadedObjects(ctx: PluginContext, payload: unknown): void {

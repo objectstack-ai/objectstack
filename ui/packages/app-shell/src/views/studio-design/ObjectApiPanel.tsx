@@ -20,8 +20,9 @@
  * cross-cutting concern that belongs in a global Developer console, not on a
  * per-object tab. This panel derives its example body from the object's DRAFT
  * fields, so it stays in sync with unpublished schema edits: each value is one
- * the write path accepts for that field's type (objectui#11803), and the
- * copied cURL carries the `Authorization` header the call needs.
+ * the write path accepts for that field's type (objectui#11803), the body names
+ * no record the reader would have to look up unless a required field needs one,
+ * and the copied cURL carries the `Authorization` header the call needs.
  */
 
 import React from 'react';
@@ -39,6 +40,7 @@ import {
   SINGLE_OPTION_TYPES,
   STRING_VALUE_TYPES,
   isMultiValueField,
+  referenceTargetOf,
   type FieldType,
 } from '@objectstack/spec/data';
 import type { ValueDomain } from '@objectstack/spec/shared';
@@ -154,8 +156,12 @@ function exampleElementFor(type: string, def: FieldDef): unknown {
     return firstOptionCode(def) ?? TEXT_SAMPLE;
   }
   // A reference stores the related record's id; a media field the id of an
-  // uploaded file (`sys_file`), never an inline object or a URL.
-  if (REFERENCE_VALUE_TYPES.has(type)) return 'related_record_id';
+  // uploaded file (`sys_file`), never an inline object or a URL. The write path
+  // refuses an id that names no record of the target, so a reference sample
+  // cannot be a working value: it is a placeholder no reader takes for one,
+  // naming the object whose id goes there. Only a required reference reaches
+  // the body at all (`buildExampleBody`).
+  if (REFERENCE_VALUE_TYPES.has(type)) return referencePlaceholderFor(def);
   if (FILE_REFERENCE_TYPES.has(type)) return 'file_id';
   switch (type) {
     case 'location':
@@ -175,6 +181,12 @@ function exampleElementFor(type: string, def: FieldDef): unknown {
   }
 }
 
+/** The placeholder a required reference field shows, in the cURL token's `<...>` form. */
+function referencePlaceholderFor(def: FieldDef): string {
+  const target = referenceTargetOf(def);
+  return target ? `<id of a ${target} record>` : '<id of the related record>';
+}
+
 /** The example value for one field: an array of one element when the field is multi-valued. */
 function exampleValueFor(def: FieldDef): unknown {
   const type = String(def.type);
@@ -185,10 +197,17 @@ function exampleValueFor(def: FieldDef): unknown {
 /**
  * An example create body from the object's writable draft fields, in the order
  * an author needs them: every required field first, then optional fields up to
- * {@link EXAMPLE_FIELD_CAP} — the object's own fields before the ones the
- * platform adds (`system: true`, such as `owner_id`, which the platform fills
- * in when it is left out). Computed, read-only and hidden fields are skipped.
- * `omitted` names the optional fields left out, so the panel can say so.
+ * {@link EXAMPLE_FIELD_CAP}. Computed, read-only and hidden fields are skipped.
+ *
+ * Two kinds of optional field never join the body, so a copied call with no
+ * required reference is accepted as it stands:
+ * - a field the platform adds (`system: true`, such as `owner_id`), which the
+ *   platform fills in when it is left out;
+ * - a reference field, whose value must be the id of an existing record of its
+ *   target — no sample can be one, and the write path refuses an id that
+ *   names no record.
+ * `omitted` names every optional field left out, these included, so the panel
+ * can say so.
  */
 function buildExampleBody(fields: unknown): { body: Record<string, unknown>; omitted: string[] } {
   const writable = readFields(fields).entries.filter(({ def }) => {
@@ -196,16 +215,17 @@ function buildExampleBody(fields: unknown): { body: Record<string, unknown>; omi
     return def.readonly !== true && def.hidden !== true;
   });
   const required = writable.filter(({ def }) => def.required === true);
-  const optional = [
-    ...writable.filter(({ def }) => def.required !== true && def.system !== true),
-    ...writable.filter(({ def }) => def.required !== true && def.system === true),
-  ];
+  const optional = writable.filter(({ def }) => def.required !== true);
+  const neverShown = ({ def }: (typeof optional)[number]) =>
+    def.system === true || REFERENCE_VALUE_TYPES.has(String(def.type));
+  const showable = optional.filter((entry) => !neverShown(entry));
   const room = Math.max(0, EXAMPLE_FIELD_CAP - required.length);
-  const shown = [...required, ...optional.slice(0, room)];
+  const shown = [...required, ...showable.slice(0, room)];
   // `Object.fromEntries` defines own properties, so a field named `__proto__`
   // (a legal field name) is kept rather than swallowed by assignment.
   const body = Object.fromEntries(shown.map(({ name, def }) => [name, exampleValueFor(def)]));
-  return { body, omitted: optional.slice(room).map(({ name }) => name) };
+  const omitted = [...showable.slice(room), ...optional.filter(neverShown)];
+  return { body, omitted: omitted.map(({ name }) => name) };
 }
 
 export function ObjectApiPanel({
@@ -273,7 +293,7 @@ export function ObjectApiPanel({
         ))}
       </div>
 
-      {Object.keys(exampleBody).length > 0 && (
+      {(Object.keys(exampleBody).length > 0 || omitted.length > 0) && (
         <div className="rounded-lg border">
           <header className="border-b px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
             {t('engine.studio.api.body', locale)}

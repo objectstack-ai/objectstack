@@ -46,8 +46,9 @@ import {
   matchAppBySegment,
   resolveHostAppSegment,
   resolveKeyedI18nLabel,
-  resolveNotificationTarget,
 } from '../../utils/index.js';
+import { useInboxBell } from '../../hooks/useInboxBell.js';
+import { openInboxNotification } from '../../layout/openInboxNotification.js';
 import { resolveSetupAppPath } from '../ConsoleShell.js';
 import {
   Empty,
@@ -369,6 +370,11 @@ export function HomePage() {
     notificationsReadable,
     activity,
   } = useHomeInbox();
+  // Opening a notification from the My-work card marks it read through the
+  // bell's own write — `useInboxBell` is the one wiring of mark-read onto the
+  // shared inbox feed (the header bell and the `global:notifications` block
+  // mount it too), so the request Home sends is the request the bell sends.
+  const { markRead: markNotificationRead } = useInboxBell();
   // The drafts row of the My-work section — `null` with nothing to publish.
   const draftsRow = usePendingDraftsRow(t, language);
   // Home renders OUTSIDE the `/apps/:appName/*` router, so there is no
@@ -784,6 +790,11 @@ export function HomePage() {
             apps={launcherApps}
             favorites={favorites}
             settingsHref={setupApp ? setupPath : undefined}
+            settingsLabel={
+              setupApp
+                ? appLabel({ name: setupApp.name, label: resolveKeyedI18nLabel(setupApp.label, t) })
+                : undefined
+            }
             lastOpened={lastOpened}
             /* Deliberately NOT resolved through `hostAppSegment` (objectui#4074
                scope guard): the marketplace is an admin-only surface that lives
@@ -833,23 +844,20 @@ export function HomePage() {
                so it has to be hosted under an app before it is a route —
                navigating it verbatim is objectui#5179, where the console
                catch-all forwarded the unmatched path to `/` and the landing
-               resolver dropped the user on the default app's home with the
-               notification already marked read. `resolveNotificationTarget`
-               is shared with the top-bar bell so the two cannot answer this
-               differently. The fallback arm runs whenever a notification
-               carries no link at all, and opens the inbox. */
-            onOpenNotification={(n) => {
-              const target = resolveNotificationTarget(n.actionUrl, hostAppSegment);
-              if (!target) {
-                navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`);
-                return;
-              }
-              if (target.kind === 'external') {
-                window.open(target.url, '_blank', 'noopener,noreferrer');
-                return;
-              }
-              navigate(target.path);
-            }}
+               resolver dropped the user on the default app's home.
+               `openInboxNotification` is the top-bar bell's own open action,
+               so the two doors cannot answer differently: it marks the
+               notification read first (this row used to skip that, and a
+               notification opened from Home stayed unread on the server and
+               badged on the bell), then follows the resolved link — or, when
+               the notification carries no link at all, opens the inbox. */
+            onOpenNotification={(n) =>
+              openInboxNotification(n, hostAppSegment, {
+                markRead: markNotificationRead,
+                goTo: (path) => navigate(path),
+                openInbox: () => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`),
+              })
+            }
             t={t}
           />
 

@@ -4321,6 +4321,7 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     // Mint an api key bound to `user_9`, then invoke an action authenticated by it.
     const mint = await dispatcher.handleKeys('POST', { name: 'agent' }, {
       request: { headers: {} }, executionContext: { userId: 'user_9', positions: [], permissions: [] },
+      admission: { credential: 'session', authGate: undefined },
     } as any);
     const raw = mint.response.body.data.key;
 
@@ -4655,12 +4656,14 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     type: 'script',
     body: { language: 'js', source: 'return 1;' },
   };
+  // [#27681] Unflagged: since ruling 6513869839 a `sys_*` action is refused by
+  // its object only when it does not declare `ai.exposed` — the flagged case
+  // is pinned in `mcp-system-object-action-exposure.test.ts`.
   const standaloneOnSysObject = {
     name: 'rotate_all',
     objectName: 'sys_api_key',
     type: 'script',
     body: { language: 'js', source: 'return 1;' },
-    ai: { exposed: true },
   };
   // Same key as the embedded `complete_task` declaration — the embedded one wins.
   const standaloneShadowing = {
@@ -4714,7 +4717,7 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     expect(actions.find((a: any) => a.name === 'nightly_cleanup')).toMatchObject({ objectName: 'global' });
     const names = actions.map((a: any) => a.name);
     expect(names).not.toContain('raw_reindex'); // ai.exposed absent → hidden (#2849)
-    expect(names).not.toContain('rotate_all'); // sys_* owner → hidden fail-closed
+    expect(names).not.toContain('rotate_all'); // unflagged sys_* owner → hidden fail-closed
   });
 
   it('list_actions dedupes a standalone row that shadows an object-embedded declaration (embedded wins)', async () => {
@@ -4748,7 +4751,7 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     expect(executeAction).not.toHaveBeenCalled();
   });
 
-  it('run_action blocks a standalone row owned by a system object', async () => {
+  it('run_action blocks an unflagged standalone row owned by a system object', async () => {
     const { bridge, executeAction } = makeStandaloneBridge({ userId: 'u1', systemPermissions: [] }, [standaloneOnSysObject]);
     await expect(bridge.runAction('rotate_all', {})).rejects.toThrow(/system object/i);
     expect(executeAction).not.toHaveBeenCalled();

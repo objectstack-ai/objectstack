@@ -350,15 +350,15 @@ describe('[#10345] the sandbox unwrap is the branch, and it was never status-sha
 // ---------------------------------------------------------------------------
 
 describe('[#10345] the pinned defaults the fix must not disturb', () => {
-    it('a refusal that declares NO code still carries none — nothing is invented', () => {
-        // ADR-0112 D4 governs the semantic-CODE channel — the producer names
-        // the condition on the CODE axis, and the ADR rules no HTTP status for
-        // an undeclared throw. Narrowing or widening the
-        // vocabulary must never start ADDING codes to bodies that carried none.
+    it('a refusal that declares NO code answers the one ledgered HOOK_ABORTED, and declares nothing', () => {
+        // [#27597] This used to pin `code` absent ("nothing is invented"). The
+        // undeclared abort now answers one registered code naming the event —
+        // a hook aborted with free text — and still no `declaredCode`: the
+        // producer declared none, so nothing was demoted.
         const r = mapDataError(sandboxRefusal('month-end close is in progress'), 'crm_account');
         expect(r.status).toBe(400);
         expect(r.body.error).toBe('month-end close is in progress');
-        expect(r.body).not.toHaveProperty('code');
+        expect(r.body.code).toBe('HOOK_ABORTED');
         expect(r.body).not.toHaveProperty('declaredCode');
     });
 
@@ -426,9 +426,11 @@ describe('[#10345 / #9232] the unwrap door speaks the closed ADR-0112 vocabulary
     });
 
     it('CONTROL — a numeric errno and an empty string are not declarations', () => {
+        // [#27597] So the refusal is an undeclared abort: `HOOK_ABORTED`, never
+        // the errno or the empty string.
         for (const code of [1062, '']) {
             const r = mapDataError(sandboxRefusal('refused', { code, status: 409 }), 'crm_account');
-            expect(r.body.code, String(code)).toBeUndefined();
+            expect(r.body.code, String(code)).toBe('HOOK_ABORTED');
             expect(r.body.declaredCode, String(code)).toBeUndefined();
         }
     });

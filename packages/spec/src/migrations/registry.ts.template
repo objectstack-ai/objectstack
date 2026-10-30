@@ -1436,9 +1436,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'reader outside the spec package. No loop ever polled a connector endpoint or tripped a '
       + 'breaker; nothing read an authored `status` (the runtime publishes a computed `state`, and '
       + 'participation is `enabled`); and a webhook nested in a connector was never registered as a '
-      + '`webhook` item, so it was never materialized or delivered — the top-level `webhooks:` '
-      + 'collection is the delivered one. The three carrier keys are retiredKey tombstones on '
-      + '`ConnectorBaseSchema`, registered under both carrier defs; `status`, defaulted '
+      + '`webhook` item, so the webhook dispatcher never read it or delivered it — the top-level '
+      + '`webhooks:` collection is the delivered one. The three carrier keys are retiredKey '
+      + 'tombstones on `ConnectorBaseSchema`, registered under both carrier defs; `status`, defaulted '
       + '`\'inactive\'`, joins `connectionTimeoutMs` in the retired-default residue stage, because '
       + 'every 17.x parse emitted it into every connector. Seven defs leave whole — '
       + '`ConnectorHealth`, `HealthCheckConfig`, `CircuitBreakerConfig`, `ConnectorStatus`, '
@@ -2272,6 +2272,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'The D2 conversion `view-list-tabs-removed` strips the key from every list payload in '
       + '`stack.views[]` as a lossless delete, and is retired from the load path, so authors are '
       + 'refused at parse rather than rewritten.',
+  },
+  {
+    id: 'manifest-packaging-manifest-deps-retired',
+    order: 114,
+    text:
+      'It also retires a plugin manifest\'s `packaging: \'manifest-deps\'` (ADR-0025 v2 §3.3, ADR-0049 '
+      + 'enforce-or-remove): the strategy existed on the build side only — `os plugin build` kept the '
+      + '`package.json` dependencies out of the bundle for an install-time resolution nothing ever ran — so '
+      + '`bundled` is the one strategy and the default. The value is refused at parse with its prescription, '
+      + 'and the D2 conversion `manifest-packaging-manifest-deps-removed` strips it from the stack\'s manifest '
+      + 'and every `packages[].manifest`; an `objectstack.plugin.json` is edited by hand.',
   },
   {
     id: 'manifest-permissions-string-list-retired',

@@ -16,6 +16,7 @@ import {
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { collectSeedFiles, placeSeedFiles } from '../utils/bundle-seed-files.js';
+import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { isExtractionRefusal, lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
@@ -1082,6 +1083,22 @@ export default class Compile extends Command {
       }
       if (placed.packages !== finalBundle.packages) {
         finalBundle.packages = placed.packages;
+      }
+
+      // 4a-0. [#27259] Seed record VALUES, judged by the insert write's own
+      //     value verdict — the gate `os validate` runs at its step 3d-bis. A
+      //     value the seed load refuses fails the build here, with the load's
+      //     code and sentence, rather than a row at boot.
+      const seedValueIssues = judgeSeedRecordValues(finalBundle);
+      if (seedValueIssues.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'seed record values refused', issues: seedValueIssues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Seed record values the seed load refuses (${seedValueIssues.length} issue${seedValueIssues.length > 1 ? 's' : ''})`);
+        for (const issue of seedValueIssues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message} (${issue.code})`));
+        this.exit(1);
       }
 
       // 4a. [#25779] The files seed records name with `seedFile(path)`, read

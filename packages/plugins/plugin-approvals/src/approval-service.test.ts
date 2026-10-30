@@ -18,8 +18,19 @@ import { SysApprovalRequest } from './sys-approval-request.object.js';
 
 interface FakeRow { [k: string]: any }
 
+/**
+ * The accounts this suite routes `user` approver slots to. A `user` approver
+ * holds a slot only when an account carries its id or email (#27397), so the
+ * double's directory starts with them. Ids a test needs ABSENT — the reassign
+ * and escalation refusals' targets — are deliberately not on it.
+ */
+const ROUTED_USERS = [
+  'u1', 'u2', 'u3', 'u5', 'u9', 'alice', 'bob', 'carol', 'dave', 'u_backstop', 'u_old', 'u_holder', 'someone-else',
+  'l1', 'l2', 'f1', 'f2', 'a1', 'a2', 'lb',
+];
+
 function makeFakeEngine() {
-  const tables: Record<string, FakeRow[]> = {};
+  const tables: Record<string, FakeRow[]> = { sys_user: ROUTED_USERS.map((id) => ({ id })) };
   const ensure = (n: string) => (tables[n] ??= []);
   const hooks: Record<string, Array<{ handler: (ctx: any) => any | Promise<any>; object?: string | string[]; packageId?: string }>> = {};
 
@@ -200,6 +211,20 @@ function staffDirectory(engine: { _tables: Record<string, FakeRow[]> }, ...ids: 
   for (const id of ids) if (!users.some(u => u.id === id)) users.push({ id });
 }
 
+/**
+ * Put `rows` into the double's `sys_user`, each replacing any row with its id —
+ * the {@link ROUTED_USERS} roster included, so a test that names an account
+ * (a display name, an email, a manager) reads the row it wrote.
+ */
+function putAccounts(engine: { _tables: Record<string, FakeRow[]> }, ...rows: FakeRow[]): void {
+  const users = (engine._tables['sys_user'] ??= []);
+  for (const row of rows) {
+    const at = users.findIndex(u => u.id === row.id);
+    if (at >= 0) users.splice(at, 1);
+    users.push(row);
+  }
+}
+
 function nodeConfig(approvers: string[], extra: Record<string, any> = {}) {
   return {
     approvers: approvers.map(v => ({ type: 'user' as const, value: v })),
@@ -347,6 +372,7 @@ describe('ApprovalService (node era)', () => {
 
   it('field approver: fans a multi-select user field into one slot per user (#3447)', async () => {
     engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: ['u2', 'u3', 'u4'] }];
+    staffDirectory(engine, 'u4'); // a `field` id holds a slot only when an account carries it (#27752)
     const req = await svc.openNodeRequest(fieldInput({ record: { id: 'opp1' } }), CTX);
     expect(req.pending_approvers.sort()).toEqual(['u2', 'u3', 'u4']);
   });
@@ -361,6 +387,7 @@ describe('ApprovalService (node era)', () => {
     // No `opportunity` row — hard-deleted between submit and node entry. The
     // snapshot still carries a value, so the request opens against it (warn but
     // proceed) rather than wedging the flow.
+    staffDirectory(engine, 'u7');
     const req = await svc.openNodeRequest(
       fieldInput({ record: { id: 'opp1', approvers_dynamic: ['u7'] } }), CTX,
     );
@@ -400,6 +427,7 @@ describe('ApprovalService (node era)', () => {
 
   it('expression: trigger.* reads the submit-time snapshot, not the live row (#3447 P2)', async () => {
     engine._tables['opportunity'] = [{ id: 'opp1', reviewer: 'new_reviewer' }];
+    staffDirectory(engine, 'old_reviewer'); // an `expression` id holds a slot only when an account carries it (#27879)
     const req = await svc.openNodeRequest(
       exprInput('trigger.reviewer', { record: { id: 'opp1', reviewer: 'old_reviewer' } }), CTX,
     ) as any;
@@ -407,6 +435,7 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('expression: vars.* reads flow variables; a CSV string fans out (#3447 P2)', async () => {
+    staffDirectory(engine, 'u6'); // an `expression` id holds a slot only when an account carries it (#27879)
     const req = await svc.openNodeRequest(
       exprInput('vars.approval_lead.next_reviewers', {
         variables: { approval_lead: { next_reviewers: 'u5, u6' } },
@@ -416,6 +445,7 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('expression: an array result fans out into one slot per id (#3447 P2)', async () => {
+    staffDirectory(engine, 'u4'); // an `expression` id holds a slot only when an account carries it (#27879)
     const req = await svc.openNodeRequest(
       exprInput('vars.picked', { variables: { picked: ['u2', 'u3', 'u4'] } }), CTX,
     ) as any;
@@ -1320,7 +1350,7 @@ describe('ApprovalService (node era)', () => {
 
   it('listRequests enriches record_title and submitter_name', async () => {
     engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
-    engine._tables['sys_user'] = [{ id: 'u1', name: 'Ada Lovelace', email: 'ada@example.com' }];
+    putAccounts(engine, { id: 'u1', name: 'Ada Lovelace', email: 'ada@example.com' });
     await svc.openNodeRequest(openInput(['u9']), CTX); // submitter_id = u1 (CTX.userId)
     const rows = await svc.listRequests({ status: 'pending' }, SYS);
     expect(rows[0].record_title).toBe('Acme Renewal');
@@ -1499,17 +1529,17 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('enrichment maps user-id approvers to display names', async () => {
-    engine._tables['sys_user'] = [{ id: 'u9', name: 'Grace Hopper', email: 'grace@example.com' }];
+    putAccounts(engine, { id: 'u9', name: 'Grace Hopper', email: 'grace@example.com' });
     await svc.openNodeRequest(openInput(['u9']), CTX);
     const rows = await svc.listRequests({ status: 'pending' }, SYS);
     expect(rows[0].pending_approver_names).toEqual({ u9: 'Grace Hopper' });
   });
 
   it('listActions resolves actor display names', async () => {
-    engine._tables['sys_user'] = [
+    putAccounts(engine, 
       { id: 'u1', name: 'Ada Lovelace', email: 'ada@example.com' },
       { id: 'u9', name: 'Grace Hopper', email: 'grace@example.com' },
-    ];
+    );
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
     // Decided by u9 THEMSELF: `actor_id` records the person the context
     // vouches for (#21411), and a bare system context vouches for nobody.
@@ -1544,10 +1574,10 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('reassign: listActions resolves the hand-off parties to display names (#4365)', async () => {
-    engine._tables['sys_user'] = [
+    putAccounts(engine, 
       { id: 'u9', name: 'Grace Hopper', email: 'grace@example.com' },
       { id: 'u7', name: 'Ada Lovelace', email: 'ada@example.com' },
-    ];
+    );
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
     await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     const actions = await svc.listActions(req.id, SYS);
@@ -1634,7 +1664,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('refuses an email no account carries', async () => {
-      engine._tables['sys_user'] = [{ id: 'u7', email: 'ada@example.com' }];
+      putAccounts(engine, { id: 'u7', email: 'ada@example.com' });
       const id = await openOn(['u9']);
       await expectRefusedUnchanged(
         id, svc.reassign(id, { actorId: 'u9', to: 'grace@example.com' }, asUser('u9')),
@@ -1643,7 +1673,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('refuses a user who is provably a member of other organizations only, in the same words as a missing user', async () => {
-      engine._tables['sys_user'] = [{ id: 'u_other' }];
+      putAccounts(engine, { id: 'u_other' });
       engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u_other', organization_id: 't2' }];
       const id = await openOn(['u9']);
       const missing = await svc.reassign(id, { actorId: 'u9', to: 'u_missing' }, asUser('u9')).catch((e: Error) => e.message);
@@ -1690,7 +1720,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('moves the slot to a user id of a member here, and to one with no membership rows at all (no tenancy fact, as the sibling screens read it)', async () => {
-      engine._tables['sys_user'] = [{ id: 'u7' }, { id: 'u8' }];
+      putAccounts(engine, { id: 'u7' }, { id: 'u8' });
       engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u7', organization_id: 't1' }, { id: 'm2', user_id: 'u7', organization_id: 't2' }];
       const id = await openOn(['u9', 'u2']);
       const first = await svc.reassign(id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
@@ -1701,7 +1731,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('moves the slot to an email an account carries, in the spelling the account stores', async () => {
-      engine._tables['sys_user'] = [{ id: 'u7', email: 'ada@example.com' }];
+      putAccounts(engine, { id: 'u7', email: 'ada@example.com' });
       const id = await openOn(['u9']);
       const out = await svc.reassign(id, { actorId: 'u9', to: 'ada@example.com' }, asUser('u9'));
       expect(out.request.pending_approvers).toEqual(['ada@example.com']);
@@ -1844,6 +1874,7 @@ describe('ApprovalService (node era)', () => {
   it('remind: each concrete approver gets their own reminder, and none carries an action link (#24564)', async () => {
     const emitted: any[] = [];
     svc.attachMessaging({ async emit(input) { emitted.push(input); } });
+    putAccounts(engine, { id: 'u_ada', email: 'ada@example.com' });
     const reqId = (await svc.openNodeRequest(openInput(['u9', 'ada@example.com']), CTX)).id;
     const minted = (engine._tables['sys_approval_token'] ?? []).length;
     await svc.remind(reqId, { actorId: 'u1' }, CTX);
@@ -1919,6 +1950,7 @@ describe('ApprovalService (node era)', () => {
     .map(r => ({ request_id: r.request_id, approver: r.approver }));
 
   it('openNodeRequest mirrors every approver identity into the index', async () => {
+    putAccounts(engine, { id: 'u_ada', email: 'ada@example.com' });
     const req = await svc.openNodeRequest(openInput(['u9', 'ada@example.com', 'role:finance']), CTX);
     expect(indexRows()).toEqual([
       { request_id: req.id, approver: 'u9' },
@@ -2205,7 +2237,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('keeps the slate when escalateTo is a user whose only membership is another organization', async () => {
-      engine._tables['sys_user'] = [{ id: 'u_far' }];
+      putAccounts(engine, { id: 'u_far' });
       engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u_far', organization_id: 't2' }];
       const id = await overdueReassign('u_far');
       await expectKeptAndNotified(id, 'u_far', 'it names no user in this request\'s organization.');
@@ -2236,7 +2268,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('still reassigns to an account\'s user id, its email, and a position:<p> someone holds here', async () => {
-      engine._tables['sys_user'] = [{ id: 'boss', email: 'boss@example.com' }];
+      putAccounts(engine, { id: 'boss', email: 'boss@example.com' });
       engine._tables['sys_member'] = [{ id: 'm1', user_id: 'boss', organization_id: 't1' }];
       engine._tables['sys_user_position'] = [
         { id: 'up1', user_id: 'u5', position: 'finance', organization_id: 't1' },
@@ -2395,7 +2427,7 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('enrichment resolves an email submitter via sys_user.email', async () => {
-    engine._tables['sys_user'] = [{ id: 'u7', name: 'Grace Hopper', email: 'grace@example.com' }];
+    putAccounts(engine, { id: 'u7', name: 'Grace Hopper', email: 'grace@example.com' });
     await svc.openNodeRequest(openInput(['u9'], { submitterId: 'grace@example.com' }), CTX);
     const rows = await svc.listRequests({ status: 'pending' }, SYS);
     expect(rows[0].submitter_name).toBe('Grace Hopper');
@@ -3367,7 +3399,7 @@ describe('ApprovalService — out-of-office delegation (#1322)', () => {
   });
 
   it('type:manager — reroutes when the resolved manager is out of office', async () => {
-    engine._tables['sys_user'] = [{ id: 'carol', manager_id: 'alice' }];
+    putAccounts(engine, { id: 'carol', manager_id: 'alice' });
     seedDelegation([{ delegator_id: 'alice', delegate_id: 'bob' }]);
     const input = {
       ...openInput([]),
@@ -3929,13 +3961,277 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
   });
 
-  it('stays quiet for `user` — a literal id was never a lookup that could come back empty', async () => {
+  // #27397: a `user` id no account carries is the graph types' dead end in
+  // another spelling — the same warning, then NO slot (the bare id is a slot
+  // no one can take), so the node's onEmptyApprovers decides the slate.
+  it('`user`: an id no account carries warns as the graph types do, and adds no slot', async () => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
-    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown'), CTX);
+    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown') as any, CTX) as any;
+
+    expect(req.pending_approvers).not.toContain('u_unknown');
+    expect(req.pending_approvers).not.toContain('user:u_unknown');
+    const hit = warnings.find(([msg]) => String(msg).includes("approver 'user:u_unknown' expanded to nobody"));
+    expect(hit, 'no warning for user').toBeTruthy();
+    expect(hit[1]).toMatchObject({ type: 'user', value: 'u_unknown', organizationId: 't1' });
+  });
+
+  it('stays quiet for a `user` an account carries', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('user', 'u9') as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u9']);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+  });
+
+  it('a failed directory read keeps the `user` slot: it proves no one is missing', async () => {
+    const engine = makeFakeEngine();
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'sys_user') throw new Error('directory down');
+      return find(object, options);
+    };
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown') as any, CTX) as any;
 
     expect(req.pending_approvers).toEqual(['u_unknown']);
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+  });
+});
+
+// #27752: the two siblings of #27397's `user` treatment. A `field` approver
+// reads its ids off the record, and an out-of-office delegation reroutes an
+// approver to its delegate: either can name an id no account carries, which
+// was a phantom slot no one could take.
+describe('ApprovalService — a `field` id or an out-of-office delegate that names no account (#27752)', () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+
+  const fieldInput = (held: unknown, configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    record: { id: 'opp1', amount: 100, approver_ids: held },
+    config: {
+      approvers: [{ type: 'field' as const, value: 'approver_ids' }],
+      behavior: 'first_response' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+  const userInput = (value: string) => ({
+    ...openInput([]),
+    config: {
+      approvers: [{ type: 'user' as const, value }],
+      behavior: 'first_response' as const,
+      lockRecord: false,
+    },
+  });
+  const delegation = (delegator: string, delegate: string, id = `del_${delegator}`) => ({
+    id, delegator_id: delegator, delegate_id: delegate,
+    valid_from: '2025-01-01T00:00:00Z', valid_until: '2027-01-01T00:00:00Z',
+    reason: 'leave', organization_id: 't1',
+  });
+  const nobody = (warnings: any[]) => warnings.filter(([msg]) => String(msg).includes('expanded to nobody'));
+  const substitutes = (engine: any) => (engine._tables['sys_approval_action'] ?? [])
+    .filter((r: any) => r.action === 'ooo_substitute');
+  const sysUserDown = (engine: any) => {
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'sys_user') throw new Error('directory down');
+      return find(object, options);
+    };
+  };
+
+  it('`field`: an id no account carries warns as `user` does, and adds no slot', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(fieldInput(['u2', 'u_gone']) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u2']);
+    const hits = nobody(warnings);
+    expect(hits).toHaveLength(1);
+    expect(String(hits[0][0])).toContain("approver 'field:approver_ids' id 'u_gone' expanded to nobody");
+    expect(hits[0][1]).toMatchObject({ type: 'field', value: 'approver_ids', id: 'u_gone', organizationId: 't1' });
+  });
+
+  it('`field`: a slate it empties reaches the node\'s onEmptyApprovers', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(fieldInput('u_gone', {
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'user', value: 'u_backstop' }],
+    }) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_backstop']);
+  });
+
+  it('`field`: ids an account carries stay quiet', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(fieldInput('u2,u3') as any, CTX) as any;
+
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
+    expect(nobody(warnings)).toEqual([]);
+  });
+
+  it('`field`: a failed directory read keeps the slot', async () => {
+    const engine = makeFakeEngine();
+    sysUserDown(engine);
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(fieldInput(['u_gone']) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_gone']);
+    expect(nobody(warnings)).toEqual([]);
+  });
+
+  it('a delegate no account carries falls back to the original approver, with the warning and no substitution', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_approval_delegation'] = [delegation('u2', 'u_gone')];
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(userInput('u2') as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u2']);
+    const hits = nobody(warnings);
+    expect(hits).toHaveLength(1);
+    expect(String(hits[0][0])).toContain("out-of-office delegate 'u_gone' of 'u2' expanded to nobody");
+    expect(hits[0][1]).toMatchObject({ delegatorId: 'u2', delegateId: 'u_gone', organizationId: 't1' });
+    expect(substitutes(engine)).toEqual([]);
+  });
+
+  it('a dead delegate at the end of a chain falls back to the original approver, not a middle hop', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_approval_delegation'] = [delegation('u2', 'u3'), delegation('u3', 'u_gone')];
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(userInput('u2') as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u2']);
+    expect(substitutes(engine)).toEqual([]);
+  });
+
+  it('a dead delegate on a `field` id falls back to that id', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_approval_delegation'] = [delegation('u3', 'u_gone')];
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(fieldInput(['u2', 'u3']) as any, CTX) as any;
+
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
+  });
+
+  it('a live delegate still routes, with its substitution', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_approval_delegation'] = [delegation('u2', 'u9')];
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(userInput('u2') as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u9']);
+    expect(nobody(warnings)).toEqual([]);
+    expect(substitutes(engine)).toHaveLength(1);
+  });
+
+  it('a failed directory read keeps the delegate', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_approval_delegation'] = [delegation('u2', 'u_gone')];
+    sysUserDown(engine);
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(userInput('u2') as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_gone']);
+    expect(nobody(warnings)).toEqual([]);
+  });
+});
+
+// #27879: the third sibling of #27397 / #27752. An `expression` approver
+// resolved as users (`resolveAs: 'user'`, the default) treats each value its
+// CEL yields as a person, so an id no account carries was a phantom slot.
+describe('ApprovalService — an `expression` id that names no account (#27879)', () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+
+  const exprInput = (picked: unknown, configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    variables: { picked },
+    config: {
+      approvers: [{ type: 'expression' as const, value: 'vars.picked' }],
+      behavior: 'first_response' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+  const nobody = (warnings: any[]) => warnings.filter(([msg]) => String(msg).includes('expanded to nobody'));
+
+  it('an id no account carries warns as `user` does, and adds no slot', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u_gone']) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u2']);
+    const hits = nobody(warnings);
+    expect(hits).toHaveLength(1);
+    expect(String(hits[0][0])).toContain("approver 'expression' id 'u_gone' expanded to nobody");
+    expect(hits[0][1]).toMatchObject({ type: 'expression', value: 'vars.picked', id: 'u_gone', organizationId: 't1' });
+  });
+
+  it('a slate it empties reaches the node\'s onEmptyApprovers', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput('u_gone', {
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'user', value: 'u_backstop' }],
+    }) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_backstop']);
+  });
+
+  it('ids an account carries stay quiet', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput('u2,u3') as any, CTX) as any;
+
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
+    expect(nobody(warnings)).toEqual([]);
+  });
+
+  it('a failed directory read keeps the slot', async () => {
+    const engine = makeFakeEngine();
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'sys_user') throw new Error('directory down');
+      return find(object, options);
+    };
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput(['u_gone']) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_gone']);
+    expect(nobody(warnings)).toEqual([]);
+  });
+
+  it('a dead out-of-office delegate on an expression id falls back to that id', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_approval_delegation'] = [{
+      id: 'del_u3', delegator_id: 'u3', delegate_id: 'u_gone',
+      valid_from: '2025-01-01T00:00:00Z', valid_until: '2027-01-01T00:00:00Z',
+      reason: 'leave', organization_id: 't1',
+    }];
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u3']) as any, CTX) as any;
+
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
   });
 });
 
@@ -4150,11 +4446,11 @@ describe('ApprovalService — a person approver that resolves to nobody adds no 
     warnings.some(([msg]) => String(msg).includes(needle));
 
   const seedDirectory = (engine: any) => {
-    engine._tables['sys_user'] = [
+    putAccounts(engine, 
       { id: 'u_no_mgr', manager_id: null },
       { id: 'u_has_mgr', manager_id: 'u_boss' },
       { id: 'u_boss', manager_id: null },
-    ];
+    );
   };
 
   /** A node on a record owned by `owner`, with the given approvers / config. */
@@ -4816,8 +5112,8 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
 
   it('the email-keyed slot (a `user` approver authored as an email): listed, served with can_act, decided by the default actor, and kept in sight', async () => {
     const engine = makeFakeEngine();
-    await engine.insert('sys_user', { id: 'u_mail', email: 'mail.reviewer@example.com' });
-    await engine.insert('sys_user', { id: 'u_other', email: 'other@example.com' });
+    putAccounts(engine, { id: 'u_mail', email: 'mail.reviewer@example.com' });
+    putAccounts(engine, { id: 'u_other', email: 'other@example.com' });
     const svc = svcFor(engine);
     const MAIL = holding('u_mail', []);
     const OTHER = holding('u_other', []);
@@ -5052,7 +5348,7 @@ describe('ApprovalService — actor_id records the person, acted_as the slot (#2
 
   it('the three slot kinds, through the session door: position, email and user id', async () => {
     const engine = makeFakeEngine();
-    await engine.insert('sys_user', { id: 'u_mail', email: 'mail.reviewer@example.com' });
+    putAccounts(engine, { id: 'u_mail', email: 'mail.reviewer@example.com' });
     const svc = svcFor(engine);
 
     // Position — named, exactly the card's call.
@@ -5073,7 +5369,7 @@ describe('ApprovalService — actor_id records the person, acted_as the slot (#2
 
   it('the action link: a user-id token records that user, an email-bound token the one account carrying it — or nobody', async () => {
     const engine = makeFakeEngine();
-    await engine.insert('sys_user', { id: 'u_mail', email: 'mail.reviewer@example.com' });
+    putAccounts(engine, { id: 'u_mail', email: 'mail.reviewer@example.com' });
     const svc = svcFor(engine);
 
     const user = await open(svc, [{ type: 'user', value: 'u9' }]);
@@ -5085,9 +5381,13 @@ describe('ApprovalService — actor_id records the person, acted_as the slot (#2
     expect(out).toMatchObject({ ok: true, action: 'approve' });
     expect(recorded(actionsOf(engine, mail.id, 'approve')[0])).toEqual(['u_mail', 'mail.reviewer@example.com']);
 
-    // No account carries the email: the slot is still taken (the token admits
+    // No account carries the email any more — it did when the request opened
+    // (#27397: a `user` approver naming no account adds no slot), and is gone
+    // by the time the link is used: the slot is still taken (the token admits
     // it), and the person is unknown — `null`, ADR-0118's value, never the email.
+    putAccounts(engine, { id: 'u_outside', email: 'outside@example.com' });
     const stranger = await open(svc, [{ type: 'user', value: 'outside@example.com' }]);
+    engine._tables['sys_user'] = engine._tables['sys_user'].filter(u => u.id !== 'u_outside');
     await svc.redeemActionToken((await svc.issueActionTokens(stranger.id, 'outside@example.com')).approve);
     const [act] = actionsOf(engine, stranger.id, 'approve');
     expect(recorded(act)).toEqual([null, 'outside@example.com']);
@@ -5161,7 +5461,7 @@ describe('ApprovalService — actor_id records the person, acted_as the slot (#2
 
   it('the action log shows the person by name and the slot beside it — and a backfilled row the slot alone', async () => {
     const engine = makeFakeEngine();
-    await engine.insert('sys_user', { id: 'u_holder', name: 'Hana Holder', email: 'hana@example.com' });
+    putAccounts(engine, { id: 'u_holder', name: 'Hana Holder', email: 'hana@example.com' });
     const svc = svcFor(engine);
     const req = await open(svc, [...toPosition, { type: 'user', value: 'u9' }], 'unanimous');
     await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);

@@ -79,6 +79,22 @@ export function withServerOnlyErrors<T extends { path: string; message: string }
 }
 
 /**
+ * objectstack#27799 — a served verdict as the flat, severity-tagged list a
+ * canvas preview's Problems list reads (`MetadataPreviewProps.diagnostics`):
+ * the errors, then the warnings, each at the path the server wrote. A page
+ * that keeps the verdict and draws a flow hands it this, so the Problems list
+ * says what the publish will refuse, as the inspectors already do.
+ */
+export function verdictPreviewEntries(
+  diagnostics: ServerDiagnostics | undefined,
+): Array<{ path?: string; message: string; severity: 'error' | 'warning' }> {
+  return [
+    ...(diagnostics?.errors ?? []).map((e) => ({ path: e.path || undefined, message: e.message, severity: 'error' as const })),
+    ...(diagnostics?.warnings ?? []).map((w) => ({ path: w.path || undefined, message: w.message, severity: 'warning' as const })),
+  ];
+}
+
+/**
  * objectstack#26858 — the served verdict on the body on screen, for a field
  * that edits one path of it. The page holding the draft read provides it
  * (`ResourceEditPage`, the permission-set editor); a field asks for the errors
@@ -108,4 +124,56 @@ export function serverErrorsAt(
 /** {@link serverErrorsAt} against the verdict the enclosing page provides. */
 export function useServerErrorsAt(path: string | undefined): readonly ServerDiagnosticEntry[] {
   return serverErrorsAt(React.useContext(DraftVerdictContext), path);
+}
+
+/**
+ * objectstack#27482 — the body the provided verdict JUDGED: the served draft
+ * (or layered) body the `_diagnostics` were computed on. A verdict describes
+ * that body and no other, so it may hold a save only while the field still
+ * shows the text it judged. A page that provides no body holds nothing.
+ */
+export const DraftVerdictBodyContext = React.createContext<unknown>(undefined);
+
+/**
+ * The value at a dotted `_diagnostics` path (`rowLevelSecurity.0.using`) in a
+ * served body; `undefined` when any segment is missing. A numeric segment
+ * indexes an array, every other segment names an own key.
+ */
+export function valueAtPath(body: unknown, path: string): unknown {
+  let cur: unknown = body;
+  for (const seg of path.split('.')) {
+    if (Array.isArray(cur)) {
+      if (!/^\d+$/.test(seg)) return undefined;
+      cur = cur[Number(seg)];
+    } else if (cur && typeof cur === 'object' && Object.prototype.hasOwnProperty.call(cur, seg)) {
+      cur = (cur as Record<string, unknown>)[seg];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+/**
+ * The served errors at `path` that hold the save of a field showing `text`:
+ * those errors while the judged body's value at `path` is that same text;
+ * none once the author has edited it away (the verdict no longer describes
+ * what is on screen, and only the save fetches the next one), and none
+ * without a judged body. An absent value reads as empty text, the way the
+ * editors show it. ⛔ No rule is restated: the server's errors are taken whole.
+ */
+export function serverHoldAt(
+  diagnostics: ServerDiagnostics | undefined,
+  judged: unknown,
+  path: string | undefined,
+  text: string,
+): readonly ServerDiagnosticEntry[] {
+  const hits = serverErrorsAt(diagnostics, path);
+  if (hits.length === 0 || judged === undefined || !path) return NO_ERRORS;
+  return (valueAtPath(judged, path) ?? '') === text ? hits : NO_ERRORS;
+}
+
+/** {@link serverHoldAt} against the verdict and judged body the enclosing page provides. */
+export function useServerHoldAt(path: string | undefined, text: string): readonly ServerDiagnosticEntry[] {
+  return serverHoldAt(React.useContext(DraftVerdictContext), React.useContext(DraftVerdictBodyContext), path, text);
 }

@@ -56,7 +56,10 @@ export const ShowcaseExternalDatasource = defineDatasource({
 //   config: { host: 'localhost', port: 5432, database: 'analytics', username: 'readonly' },
 //   external: {
 //     allowWrites: false,
-//     credentialsRef: 'secret:warehouse/password',
+//     // The opaque handle the secret store minted (Setup → Datasources binds
+//     // the password and writes it here); the shipped binder resolves only
+//     // `sys_secret:` handles.
+//     credentialsRef: 'sys_secret:9f2c…',
 //     validation: { onMismatch: 'fail', checkOnBoot: true },
 //   },
 //   active: false,

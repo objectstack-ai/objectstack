@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { uiTurboConfigPath } from '../workspace-root.mjs';
+import { taskInputs } from './helpers/turbo-inputs';
 import { UI_TSC_BUILT_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -310,10 +310,11 @@ describe('this repository', () => {
   );
 
   it('turbo treats the gate as an input of the builds that run it', () => {
-    const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8'));
     // Otherwise editing the gate does not invalidate a single cached build, and
-    // the new rule is enforced only where nothing was cached.
-    expect(turbo.tasks.build.inputs).toContain('$TURBO_ROOT$/scripts/check-dist-completeness.mjs');
+    // the new rule is enforced only where nothing was cached. Read from the
+    // config turbo runs (`liveTurboConfig()`, the root `turbo.json` narrowed to
+    // this tree), so the entry is `$TURBO_ROOT$/ui/scripts/...` on disk.
+    expect(taskInputs('build')).toContain('$TURBO_ROOT$/scripts/check-dist-completeness.mjs');
   });
 
   it('has a root alias pointing at the script that exists', () => {

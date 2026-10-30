@@ -56,6 +56,7 @@ import {
   DataEmptyState, EmptyStateLink, resolveIcon,
   HorizontalOverflowBox,
   toast,
+  useRecordListFace, ActiveListRow, listRecordIdOf, RECORD_LIST_NARROW_COLUMN_COUNT,
 } from '@object-ui/components';
 import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -145,6 +146,32 @@ export function parseSchemaSort(sort: unknown): TableSortItem[] {
     }
   }
   return items;
+}
+
+/**
+ * Whether a column draws an avatar: by its own type, or by its field's
+ * declared type (a column's `type` is only the type its editor needs).
+ */
+function isAvatarColumn(column: { accessorKey?: string; type?: string }, fieldTypeOf: (key: string) => unknown): boolean {
+  return column.type === 'avatar' || (!!column.accessorKey && fieldTypeOf(column.accessorKey) === 'avatar');
+}
+
+/**
+ * The columns of a list a record pane has narrowed to its `columns` face
+ * (objectstack#27545): its first {@link RECORD_LIST_NARROW_COLUMN_COUNT} view
+ * columns that are not avatars, in the view's order, and its row actions.
+ */
+function narrowListColumns<C extends { accessorKey?: string; type?: string }>(
+  columns: readonly C[],
+  fieldTypeOf: (key: string) => unknown,
+): C[] {
+  let kept = 0;
+  return columns.filter((column) => {
+    if (column.accessorKey === '_actions') return true;
+    if (isAvatarColumn(column, fieldTypeOf) || kept >= RECORD_LIST_NARROW_COLUMN_COUNT) return false;
+    kept += 1;
+    return true;
+  });
 }
 
 /**
@@ -661,6 +688,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const metadata = useMetadata();
   const [objectSchema, setObjectSchema] = useState<any>(null);
   const [useCardView, setUseCardView] = useState(false);
+  // objectstack#27545 — the face a record pane beside this list narrowed it
+  // to: `full` under no pane.
+  const listFace = useRecordListFace();
   const [refreshKey, setRefreshKey] = useState(0);
   // Optimistic concurrency for the default inline-edit saves (objectui#12292).
   // Per record, the version this grid's last landed write returned — see
@@ -775,6 +805,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    */
   const objectFields: Record<string, any> | undefined =
     objectSchema?.fields ?? hostObjectFields ?? undefined;
+  /** A field's declared type, for the narrowed faces' avatar rule (objectstack#27545). */
+  const fieldTypeOf = (key: string): unknown => objectFields?.[key]?.type;
   /**
    * Are this grid's OBJECT field types still unknown (objectui#10657, which
    * folded objectui#10706)? True while an object definition is expected (an
@@ -1184,6 +1216,104 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     updateActionContext({ selectedRecords: selectedRows });
     return () => { updateActionContext({ selectedRecords: [] }); };
   }, [selectedRows, updateActionContext]);
+
+  // Determine selection mode (support both new and legacy formats)
+  // Auto-enable 'multiple' selection when bulk actions are defined OR when
+  // a bulk-delete affordance is implicitly available (canDelete + onBulkDelete
+  // wired by the consumer). This gives every list a multi-select + delete UX
+  // out of the box without forcing each view JSON to declare bulkActions.
+  // [objectstack#3720] Bulk delete is the most destructive affordance on the list, so it
+  // rides the same object-level `delete` verdict as the row kebab (bucket lock
+  // ∧ userActions ∧ the server's effective operation set). An author-declared
+  // `bulkActions: ['delete']` / `bulkActionDefs[].operation === 'delete'` is a
+  // WIRING declaration, not a permission grant — so the built-in delete is
+  // filtered out of both when the verdict is off. Custom action ids and
+  // `custom` operations are untouched: they route through the action runner
+  // and carry their own gates. (An `update` operation is the edit verdict's —
+  // see `bulkActionDefs` below.)
+  const declaredBulkActions = schema.batchActions ?? schema.bulkActions;
+  const explicitBulkActions = objectCanDelete
+    ? declaredBulkActions
+    : declaredBulkActions?.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
+  // `bulkActions` carries a bare action NAME, which the runner cannot execute
+  // on its own — resolve each against `objectDef.actions` so it dispatches as a
+  // real def. See `resolveBulkActions` (objectui#3002). The
+  // canonical `'delete'` is held back: it routes to `onBulkDelete` (which owns
+  // confirm + refresh), not the runner, even if the object declares an action
+  // that happens to be named `delete`.
+  const legacyBulkNames = (explicitBulkActions ?? []).filter(
+    (a: unknown) => String(a).toLowerCase() !== 'delete',
+  );
+  const { defs: resolvedBulkDefs, unresolved: unresolvedBulkActions } = resolveBulkActions({
+    bulkActions: legacyBulkNames,
+    bulkActionDefs: Array.isArray(schema.bulkActionDefs) ? schema.bulkActionDefs : [],
+    objectActions: (objectSchema as any)?.actions,
+    localizeLabel: (actionName, fallback) =>
+      resolveActionLabel(schema.objectName, actionName, fallback),
+  });
+  // [objectui#12082] …and a bulk FIELD UPDATE (`operation: 'update'`) is the
+  // same object's edit verdict, the map's `rowEdit` row the row kebab's Edit
+  // reads (`rowEditVerdict` above): a def that writes a patch to every selected
+  // record must not outlive the caller's update grant, the effective operation
+  // set or the object's policy any more than the bulk delete outlives its
+  // delete verdict. A withheld def takes its dialog with it, and so the
+  // executor's per-row update, its undo and its retry, which re-run that write.
+  // `custom` defs are untouched, as above.
+  const bulkActionDefs: BulkActionDef[] = resolvedBulkDefs.filter(
+    (def: BulkActionDef) =>
+      (objectCanDelete || def?.operation !== 'delete')
+      && (rowEditVerdict.allowed || def?.operation !== 'update'),
+  );
+  // Names still dispatched by string: the unresolved ones, plus `'delete'`
+  // when the author asked for it — or the implicit bulk-delete affordance.
+  const keptDeleteAction = (explicitBulkActions ?? []).filter(
+    (a: unknown) => String(a).toLowerCase() === 'delete',
+  );
+  const effectiveBulkActions: string[] =
+    explicitBulkActions && explicitBulkActions.length > 0
+      ? [...unresolvedBulkActions, ...keptDeleteAction]
+      : canDelete && onBulkDelete && bulkActionDefs.length === 0
+        ? ['delete']
+        : [];
+  const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
+  let selectionMode: 'none' | 'single' | 'multiple' | boolean = false;
+  if (schema.selection !== undefined) {
+    // "presence enables; an explicit off wins" — the ONE rule both
+    // object-armed keys on this block obey (objectui#9837, ruling A-prime, batch
+    // #162 item 2), `paginationEnabled` below being the other half.
+    //
+    // Writing the object is how an author asks for selection; `type: 'none'`
+    // is this key's own explicit off and beats the presence. Before the ruling
+    // the read was `schema.selection?.type`, so an object with no `type` fell
+    // through to the legacy arms and the object itself meant NOTHING — the
+    // exact opposite of what the neighbouring `pagination` key taught, with no
+    // error and no diagnostic either way.
+    const authoredType = schema.selection?.type;
+    selectionMode =
+      authoredType === 'none' ? false : (authoredType ?? DEFAULT_SELECTION_TYPE);
+  } else if (schema.selectable !== undefined) {
+    // Legacy support — read only when `selection` is absent.
+    selectionMode = schema.selectable;
+  } else if (hasBulkActions) {
+    // Auto-enable multi-select when bulk actions exist
+    selectionMode = 'multiple';
+  }
+  // `selection.type: 'single'` caps the selection at one row (the data-table
+  // enforces replace-on-select, #2941), so the cross-page "select all N
+  // matching" escalation must never be offered.
+  const singleSelection = selectionMode === 'single';
+
+  // Publish whether these rows can be selected at all beside the selection
+  // itself, so a control outside the grid that needs a selected row can tell
+  // "nothing selected yet" from "nothing selectable here" (objectstack#27831:
+  // the list header leaves out a single-record action no selection can ever
+  // lift). Declared ahead of the early returns below, so it is published
+  // while the grid is still loading as well.
+  const rowsSelectable = !!selectionMode;
+  React.useEffect(() => {
+    updateActionContext({ selectionAvailable: rowsSelectable });
+    return () => { updateActionContext({ selectionAvailable: undefined }); };
+  }, [rowsSelectable, updateActionContext]);
 
   // --- Row color support ---
   const getRowClassName = useRowColor(schema.rowColor);
@@ -1729,92 +1859,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const effectiveFrozenColumns = hasUserPinnedColumns
     ? userLeftPinnedCount
     : (schema.frozenColumns ?? 1);
-
-  // Determine selection mode (support both new and legacy formats)
-  // Auto-enable 'multiple' selection when bulk actions are defined OR when
-  // a bulk-delete affordance is implicitly available (canDelete + onBulkDelete
-  // wired by the consumer). This gives every list a multi-select + delete UX
-  // out of the box without forcing each view JSON to declare bulkActions.
-  // [objectstack#3720] Bulk delete is the most destructive affordance on the list, so it
-  // rides the same object-level `delete` verdict as the row kebab (bucket lock
-  // ∧ userActions ∧ the server's effective operation set). An author-declared
-  // `bulkActions: ['delete']` / `bulkActionDefs[].operation === 'delete'` is a
-  // WIRING declaration, not a permission grant — so the built-in delete is
-  // filtered out of both when the verdict is off. Custom action ids and
-  // `custom` operations are untouched: they route through the action runner
-  // and carry their own gates. (An `update` operation is the edit verdict's —
-  // see `bulkActionDefs` below.)
-  const declaredBulkActions = schema.batchActions ?? schema.bulkActions;
-  const explicitBulkActions = objectCanDelete
-    ? declaredBulkActions
-    : declaredBulkActions?.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
-  // `bulkActions` carries a bare action NAME, which the runner cannot execute
-  // on its own — resolve each against `objectDef.actions` so it dispatches as a
-  // real def. See `resolveBulkActions` (objectui#3002). The
-  // canonical `'delete'` is held back: it routes to `onBulkDelete` (which owns
-  // confirm + refresh), not the runner, even if the object declares an action
-  // that happens to be named `delete`.
-  const legacyBulkNames = (explicitBulkActions ?? []).filter(
-    (a: unknown) => String(a).toLowerCase() !== 'delete',
-  );
-  const { defs: resolvedBulkDefs, unresolved: unresolvedBulkActions } = resolveBulkActions({
-    bulkActions: legacyBulkNames,
-    bulkActionDefs: Array.isArray(schema.bulkActionDefs) ? schema.bulkActionDefs : [],
-    objectActions: (objectSchema as any)?.actions,
-    localizeLabel: (actionName, fallback) =>
-      resolveActionLabel(schema.objectName, actionName, fallback),
-  });
-  // [objectui#12082] …and a bulk FIELD UPDATE (`operation: 'update'`) is the
-  // same object's edit verdict, the map's `rowEdit` row the row kebab's Edit
-  // reads (`rowEditVerdict` above): a def that writes a patch to every selected
-  // record must not outlive the caller's update grant, the effective operation
-  // set or the object's policy any more than the bulk delete outlives its
-  // delete verdict. A withheld def takes its dialog with it, and so the
-  // executor's per-row update, its undo and its retry, which re-run that write.
-  // `custom` defs are untouched, as above.
-  const bulkActionDefs: BulkActionDef[] = resolvedBulkDefs.filter(
-    (def: BulkActionDef) =>
-      (objectCanDelete || def?.operation !== 'delete')
-      && (rowEditVerdict.allowed || def?.operation !== 'update'),
-  );
-  // Names still dispatched by string: the unresolved ones, plus `'delete'`
-  // when the author asked for it — or the implicit bulk-delete affordance.
-  const keptDeleteAction = (explicitBulkActions ?? []).filter(
-    (a: unknown) => String(a).toLowerCase() === 'delete',
-  );
-  const effectiveBulkActions: string[] =
-    explicitBulkActions && explicitBulkActions.length > 0
-      ? [...unresolvedBulkActions, ...keptDeleteAction]
-      : canDelete && onBulkDelete && bulkActionDefs.length === 0
-        ? ['delete']
-        : [];
-  const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
-  let selectionMode: 'none' | 'single' | 'multiple' | boolean = false;
-  if (schema.selection !== undefined) {
-    // "presence enables; an explicit off wins" — the ONE rule both
-    // object-armed keys on this block obey (objectui#9837, ruling A-prime, batch
-    // #162 item 2), `paginationEnabled` below being the other half.
-    //
-    // Writing the object is how an author asks for selection; `type: 'none'`
-    // is this key's own explicit off and beats the presence. Before the ruling
-    // the read was `schema.selection?.type`, so an object with no `type` fell
-    // through to the legacy arms and the object itself meant NOTHING — the
-    // exact opposite of what the neighbouring `pagination` key taught, with no
-    // error and no diagnostic either way.
-    const authoredType = schema.selection?.type;
-    selectionMode =
-      authoredType === 'none' ? false : (authoredType ?? DEFAULT_SELECTION_TYPE);
-  } else if (schema.selectable !== undefined) {
-    // Legacy support — read only when `selection` is absent.
-    selectionMode = schema.selectable;
-  } else if (hasBulkActions) {
-    // Auto-enable multi-select when bulk actions exist
-    selectionMode = 'multiple';
-  }
-  // `selection.type: 'single'` caps the selection at one row (the data-table
-  // enforces replace-on-select, #2941), so the cross-page "select all N
-  // matching" escalation must never be offered.
-  const singleSelection = selectionMode === 'single';
 
   // The floor. With no query to replay there is no honest "all N matching", so
   // the escalation is not offered — the same answer as a match set that does not
@@ -2490,7 +2534,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // and the whole block failed to render.
     caption: resolveInlineI18nLabel(schema.label, displayLocale)
       || resolveInlineI18nLabel(schema.title, displayLocale),
-    columns: tableColumns,
+    columns: listFace === 'columns' ? narrowListColumns(tableColumns, fieldTypeOf) : tableColumns,
     data,
     pagination: paginationEnabled,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
@@ -3039,8 +3083,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // views: the plain list below, and a grouped list on a phone (the grouped
   // `gridContent`), which draws each group's band followed by its rows as
   // these same cards rather than keeping the desktop table.
-  const buildMobileCardRenderer = () => {
-    const displayColumns = generateColumns().filter((c) => c.accessorKey !== '_actions');
+  const buildMobileCardRenderer = ({ compact = false }: { compact?: boolean } = {}) => {
+    const displayColumns = generateColumns().filter((c) => c.accessorKey !== '_actions' && !(compact && isAvatarColumn(c, fieldTypeOf)));
 
     // Build a lookup of column metadata for smart rendering
     const colMap = new Map<string, ObjectGridColumnDraft>();
@@ -3154,6 +3198,61 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const str = String(value);
       return { label: /^[a-z0-9]+(_[a-z0-9]+)+$/.test(str) ? humanizeLabel(str) : str };
     };
+
+    // objectstack#27545 — the card row of a list a record pane narrowed below
+    // its columns face: the name and two chips, the open record highlighted
+    // and kept in view as the pane steps.
+    if (compact) {
+      const chipColumns = bodyColumns.slice(0, 2);
+      return (row: any, idx: number) => {
+        const recordId = listRecordIdOf(row);
+        return (
+          <ActiveListRow<HTMLDivElement> key={recordId ?? idx} recordId={recordId}>
+            {(active, activeRef) => (
+              <div
+                ref={activeRef}
+                role="button"
+                tabIndex={0}
+                data-testid="grid-compact-card"
+                data-active-record={active ? '' : undefined}
+                aria-current={active ? 'true' : undefined}
+                className="cursor-pointer rounded-md border bg-card px-3 py-2 transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[active-record]:border-primary/40 data-[active-record]:bg-primary/10"
+                onClick={(e) => navigation.handleClick(row, e)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  e.preventDefault();
+                  navigation.handleClick(row);
+                }}
+              >
+                {titleKey !== undefined && (
+                  <div data-testid="grid-card-title" className="truncate text-sm font-medium">
+                    {isMaskedCardColumn(titleKey)
+                      ? (titleCol ? titleCol.cell?.(row[titleKey], row) : <MaskedCellRenderer value={row[titleKey]} />)
+                      : (coerceToSafeValue(row[titleKey]) ?? '—')}
+                    {rowAdornment ? <span className="ml-1.5 inline-flex align-middle">{rowAdornment(row)}</span> : null}
+                  </div>
+                )}
+                <div className="mt-1 flex min-w-0 flex-wrap gap-1 empty:hidden">
+                  {chipColumns.map((col: any) => {
+                    const val = row[col.accessorKey];
+                    if ((val == null || val === '') && !isMaskedCardColumn(col.accessorKey)) return null;
+                    return (
+                      <span
+                        key={col.accessorKey}
+                        data-testid="grid-compact-card-chip"
+                        className="inline-flex min-w-0 max-w-full items-center truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                      >
+                        {col.cell ? col.cell(val, row) : String(coerceToSafeValue(val) ?? '')}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </ActiveListRow>
+        );
+      };
+    }
 
     return (row: any, idx: number) => {
       // Collect secondary fields (skip the title column)
@@ -3337,8 +3436,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     };
   };
 
-  if (useCardView && data.length > 0 && !isGrouped) {
-    const renderMobileCard = buildMobileCardRenderer();
+  // A phone draws its own cards; a list a record pane narrowed draws card rows.
+  const cardFace = useCardView || listFace === 'cards';
+  if (cardFace && data.length > 0 && !isGrouped) {
+    const renderMobileCard = buildMobileCardRenderer({ compact: !useCardView });
 
     // objectui#13134 — the card list scrolls in a box of its own, as the
     // table does in its own body. Its host bounds it (`ListView`'s view area
@@ -3713,7 +3814,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // server-grouped group's pager), in one vertical scroller like the plain
   // card list's. A band keeps its toggle and count, `groupedPager` still
   // pages whole groups, and the desktop table's columns never reach a phone.
-  const gridContent = isGrouped && useCardView ? (
+  const gridContent = isGrouped && cardFace ? (
     <div className="flex flex-col flex-1 min-h-0">
       <div
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
@@ -3721,7 +3822,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         data-testid="grouped-grid-card-scroller"
       >
         {(() => {
-          const renderMobileCard = buildMobileCardRenderer();
+          const renderMobileCard = buildMobileCardRenderer({ compact: !useCardView });
           return groupBandsOf(pagedGroups).map((group) => (
             <div key={group.key} data-testid="grouped-grid-card-band">
               {group.band}

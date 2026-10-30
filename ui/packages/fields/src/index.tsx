@@ -32,6 +32,7 @@ import { formatAddress, type AddressValue } from './widgets/address-format.js';
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
+import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
 // only trigger one network call. Keyed by `${objectName}:${id}`. It holds the
@@ -567,6 +568,15 @@ export { resolveFieldCurrency };
  * history are documented there.
  */
 export { formatCurrency };
+
+/**
+ * `formatNumberFieldValue` lives in `./widgets/number-format.ts` and is
+ * re-exported here so a face outside this package that renders a `number`
+ * field's stored value (the record History tab's change list) makes the same
+ * call `NumberCellRenderer` and `NumberField`'s read-only branch make, rather
+ * than a formatter of its own.
+ */
+export { formatNumberFieldValue };
 
 /**
  * Format currency value in compact form for mobile display.
@@ -1428,6 +1438,9 @@ const SEMANTIC_COLOR_MAP: Record<string, string> = {
   normal: 'blue',
   low: 'gray',
   none: 'gray',
+  // Severity values (en): info is the quiet level, not an alarm colour
+  info: 'blue',
+  warning: 'yellow',
   // Status values (en)
   paid: 'green',
   completed: 'green',
@@ -2526,11 +2539,17 @@ function referencedRecordId(item: unknown): string | number | undefined {
 function ReferencedRecordLink({
   objectName,
   recordId,
+  objectSchema,
+  label,
   className,
   children,
 }: {
   objectName?: string;
   recordId?: string | number;
+  /** The referenced object's definition, for the link's hover card. */
+  objectSchema?: RecordHoverCardObjectDef | null;
+  /** The name the link shows, which its card shows until the record is read. */
+  label?: string;
   className?: string;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -2543,26 +2562,30 @@ function ReferencedRecordLink({
 
   if (!href) return <>{children}</>;
 
+  // Hovering the link (or Space on it) shows the referenced record's card
+  // (objectstack#27604): the same reference, a glance instead of a visit.
   return (
-    <a
-      href={href}
-      className={cn('text-primary underline-offset-4 hover:underline', className)}
-      onClick={(e) => {
-        // The rows this cell sits in carry their own click handlers — the
-        // detail row copies the field value, a related-list row opens ITS own
-        // record. Following the reference must not also fire those.
-        e.stopPropagation();
-        // Modifier and non-primary clicks belong to the browser (new tab, new
-        // window) — that is the point of rendering a real href.
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-        // No SPA handler: let the anchor navigate on its own.
-        if (!host?.openRecord) return;
-        e.preventDefault();
-        host.openRecord(objectName as string, recordId as string | number);
-      }}
-    >
-      {children}
-    </a>
+    <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema} label={label}>
+      <a
+        href={href}
+        className={cn('text-primary underline-offset-4 hover:underline', className)}
+        onClick={(e) => {
+          // The rows this cell sits in carry their own click handlers — the
+          // detail row copies the field value, a related-list row opens ITS own
+          // record. Following the reference must not also fire those.
+          e.stopPropagation();
+          // Modifier and non-primary clicks belong to the browser (new tab, new
+          // window) — that is the point of rendering a real href.
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          // No SPA handler: let the anchor navigate on its own.
+          if (!host?.openRecord) return;
+          e.preventDefault();
+          host.openRecord(objectName as string, recordId as string | number);
+        }}
+      >
+        {children}
+      </a>
+    </RecordHoverCard>
   );
 }
 
@@ -2680,7 +2703,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       } catch { /* not JSON — fall through to normal resolution */ }
       if (parsedDisplay) {
         return (
-          <ReferencedRecordLink objectName={referenceTo} recordId={parsedId}>
+          <ReferencedRecordLink objectName={referenceTo} recordId={parsedId} objectSchema={refSchema} label={parsedDisplay}>
             <TruncatedText text={parsedDisplay} />
           </ReferencedRecordLink>
         );
@@ -2696,7 +2719,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       resolveLookupRecordName(obj, refSchema, displayField, perms, referenceTo) || String(obj.id || obj._id || '');
     if (display) {
       return (
-        <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(obj)}>
+        <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(obj)} objectSchema={refSchema} label={display}>
           <TruncatedText text={display} />
         </ReferencedRecordLink>
       );
@@ -2794,6 +2817,8 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
               key={idx}
               objectName={referenceTo}
               recordId={referencedRecordId(item)}
+              objectSchema={refSchema}
+              label={unresolved ? undefined : label}
               className="text-inherit"
             >
               <span
@@ -2832,7 +2857,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       resolveLookupRecordName(value as Record<string, unknown>, refSchema, displayField, perms, referenceTo) ||
       String((value as any).id || (value as any)._id || '[Object]');
     return (
-      <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)}>
+      <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)} objectSchema={refSchema} label={label}>
         <TruncatedText text={label} />
       </ReferencedRecordLink>
     );
@@ -2848,7 +2873,12 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   // (objectui#13335): the label, no id, and no link to a page that would 404.
   if (restricted) return <RestrictedLookupReference label={restrictedLabel} />;
   return (
-    <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)}>
+    <ReferencedRecordLink
+      objectName={referenceTo}
+      recordId={referencedRecordId(value)}
+      objectSchema={refSchema}
+      label={unresolved ? undefined : text}
+    >
       {unresolved ? (
         <UnresolvedLookupReference value={text} />
       ) : (
@@ -3485,16 +3515,21 @@ const TEXTUAL_BASE_TYPES = new Set(['text', 'textarea', 'string', 'longtext', ''
 /**
  * Field `widget` hints whose READ face is a cell of its own (objectui#12613),
  * registered under the widget's own key below. The spec's `widget` names the
- * component a field is drawn with in place of its `type` default; for these two
- * the stored text is a machine reference — an object name, a recipient id —
- * and a host face registered under the key names what it references, as the
- * edit widget's readonly branch does, instead of printing the api name.
+ * component a field is drawn with in place of its `type` default; for these
+ * the stored text is a machine reference — an object name, a recipient id, a
+ * position or permission-set name — and the face registered under the key
+ * names what it references instead of printing the api name.
  *
  * Only a widget listed here promotes, and only over a textual base type, the
  * same bound the `format` hints keep: a widget with no read face of its own
- * (`filter-condition`, `position-ref`, …) still draws as its `type`.
+ * (`filter-condition`, …) still draws as its `type`.
  */
-const WIDGET_CELL_RENDERER_TYPES: ReadonlySet<string> = new Set(['object-ref', 'recipient-picker']);
+const WIDGET_CELL_RENDERER_TYPES: ReadonlySet<string> = new Set([
+  'object-ref',
+  'recipient-picker',
+  'position-ref',
+  'permission-ref',
+]);
 
 /**
  * Resolve the canonical cell-renderer key for a field. Accepts either a
@@ -4211,6 +4246,7 @@ export function getCellRenderer(fieldType: string): React.FC<CellRendererProps> 
   return standardMap[fieldType] || TextCellRenderer;
 }
 
+import { PositionRefCell, PermissionRefCell } from './widgets/RegistryRefCell.js';
 // Register standard renderers immediately
 registerFieldRenderer('lookup', LookupCellRenderer);
 registerFieldRenderer('master_detail', LookupCellRenderer);
@@ -4231,6 +4267,11 @@ registerFieldRenderer(RECORD_POINTER_CARD_TYPE, RecordPointerTextCellRenderer);
 // the host loads its faces lazily, off the eager closure.
 registerFieldRenderer('object-ref', TextCellRenderer);
 registerFieldRenderer('recipient-picker', TextCellRenderer);
+// The registry-name keys draw their label in this package: the reader is the
+// edit widget's own `listMetadataItems` catalog, one shared read per data
+// source and type, which `check:eager-closure` weighs with the rest of it.
+registerFieldRenderer('position-ref', PositionRefCell);
+registerFieldRenderer('permission-ref', PermissionRefCell);
 // `owner` was registered here to the same UserCellRenderer until objectui#4814
 // retired the spelling — see the TOMBSTONE below. `getCellRenderer('owner')`
 // now reports the prescription and falls to the text cell.
@@ -4271,6 +4312,7 @@ setFieldReadFaceResolver(resolveDeclaredFieldFace);
 // `mapFieldTypeToFormType` moved to './field-type-alias' (re-exported below) so
 // FieldEditWidget can resolve spec aliases without importing this barrel.
 export { mapFieldTypeToFormType } from './field-type-alias.js';
+export { resolveBooleanControl, type BooleanControl } from './widgets/booleanControl.js';
 import { mapFieldTypeToFormType } from './field-type-alias.js';
 // `isRetiredFieldType` is the gate the maintainer ruled onto THIS package's
 // surface (objectui#4914, ruling B) — "export a single `isRetiredFieldType(t)`
@@ -4754,6 +4796,10 @@ export type {
  * this package's own `resolveActionParam`. See the module.
  */
 export { fieldHelpText } from './fieldHelpText.js';
+// The hover card every record reference shows (objectstack#27604): lookup
+// links here, and the hosts that draw a reference of their own (the record
+// page's compact related rows).
+export { RecordHoverCard, type RecordHoverCardProps, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 /** Cache so each widget type creates one lazy component (and one chunk request). */
 const lazyFieldWidgets = new Map<string, React.ComponentType<any>>();

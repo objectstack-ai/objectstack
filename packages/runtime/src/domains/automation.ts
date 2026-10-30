@@ -2107,6 +2107,8 @@ async function flowWriteRefusal(
  * What is saved is the definition as the caller's door built it — never the
  * engine's parsed copy, whose materialized schema defaults would freeze on
  * disk (the save canonicalizes it the way it does every `/meta` flow write).
+ * It is saved under the caller's user id as `actor` [#27414], as the `/meta`
+ * door's save is.
  */
 async function registerAndSaveFlow(
     deps: DomainHandlerDeps,
@@ -2129,8 +2131,16 @@ async function registerAndSaveFlow(
         };
     }
     if (typeof store?.saveMetaItem === 'function') {
+        // [#27414, ADR-0073 D3] The save names who asked: the caller's user id
+        // as the save's `actor`, which the store records in
+        // `sys_metadata.created_by` / `updated_by` and the row's history. Read
+        // through the toggle door's `activationCaller`: the signed-in user's
+        // id off the execution context and nothing else, never off the body,
+        // so the flow doors cannot disagree about who a write names. A context
+        // with no user passes no actor, an unattributed write as before.
+        const { userId: actor } = activationCaller(context);
         try {
-            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition });
+            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition, ...(actor ? { actor } : {}) });
         } catch (e) {
             restoreFlowRegistration(automationService, name, held);
             return {
@@ -2602,6 +2612,7 @@ export const RESUME_REFUSAL_ROWS: ReadonlyMap<string, { status: number; fallback
     ['RUN_NOT_FOUND', { status: 404, fallback: 'No such suspended run' }],
     ['STORE_UNAVAILABLE', { status: 503, fallback: 'Suspended-run store unavailable' }],
     ['RESUME_IN_PROGRESS', { status: 409, fallback: 'Run is already being resumed' }],
+    ['RESUME_CHILD_PENDING', { status: 409, fallback: 'Resume the pending child run instead' }],
 ]);
 
 /**
@@ -2615,7 +2626,7 @@ export const RESUME_REFUSAL_ROWS: ReadonlyMap<string, { status: number; fallback
  * message on either door. This used to be inline in the REST arm. It moved here
  * unchanged, and the arm's wire answers are byte-identical.
  *
- * The six coded rows are REFUSALS the engine made BEFORE consuming the
+ * The seven coded rows are REFUSALS the engine made BEFORE consuming the
  * suspension, so the run is still parked and the caller can retry (the codes
  * and why each has its status are listed at the REST arm).
  *
@@ -3476,6 +3487,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         //                        existence is unknown; the same call is expected
         //                        to work once it recovers (#4420)
         //   RESUME_IN_PROGRESS → 409, a concurrent resume already has this run
+        //   RESUME_CHILD_PENDING → 409, the run waits on a `map` item whose
+        //                        child run is still suspended; the engine's
+        //                        message names that child run id to resume
+        //                        instead, and nothing moved (#27877)
         // A result with NO code and `success: false` consumed its pause and
         // ran: 400 `FLOW_FAILED` (#8684), whose details carry the engine's
         // own verdict since #15221 — `status: 'stranded'` + `repairable`

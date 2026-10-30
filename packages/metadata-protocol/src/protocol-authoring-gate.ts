@@ -48,6 +48,7 @@
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
+import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
@@ -74,9 +75,11 @@ export interface AuthoringGateHost {
     externalBindingSaveRefusal: ObjectStackProtocolImplementation['externalBindingSaveRefusal'];
     foldStoredCollection: ObjectStackProtocolImplementation['foldStoredCollection'];
     getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    objectNamespacePrefixViolation: ObjectStackProtocolImplementation['objectNamespacePrefixViolation'];
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
     orgWallEnforced: ObjectStackProtocolImplementation['orgWallEnforced'];
+    permissionSetNameCollisionRefusal: ObjectStackProtocolImplementation['permissionSetNameCollisionRefusal'];
     refuseRestoredBodyTheSaveDoorRefuses: ObjectStackProtocolImplementation['refuseRestoredBodyTheSaveDoorRefuses'];
     resolveSduiManifest: ObjectStackProtocolImplementation['resolveSduiManifest'];
     resolveWritePackageScope: ObjectStackProtocolImplementation['resolveWritePackageScope'];
@@ -112,13 +115,15 @@ export function restoredBodyWriter(
 
 /** The body of `ObjectStackProtocolImplementation#refuseRestoredBodyTheSaveDoorRefuses`; the method's docblock there is its contract. */
 export async function refuseRestoredBodyTheSaveDoorRefuses(
-    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'runAuthoringGate' | 'unknownDatasourceSaveRefusal'>,
+    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'unknownDatasourceSaveRefusal'>,
     type: string,
     name: string,
     body: unknown,
     binding: string | null,
     source: string,
 ): Promise<void> {
+    const nameCollision = await this.permissionSetNameCollisionRefusal(type, name, binding, 'restore');
+    if (nameCollision) throw nameCollision;
     const hookRefusal = runtimeHookWithoutBodyRefusal(type, body, name);
     if (hookRefusal) throw hookRefusal;
     const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(type, body, name, 'restored');
@@ -127,6 +132,12 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
     if (bindingRefusal) throw bindingRefusal;
     const datasourceRefusal = await this.unknownDatasourceSaveRefusal(type, body, name);
     if (datasourceRefusal) throw datasourceRefusal;
+    const repo = this.getOverlayRepo();
+    const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+        headAt: (...a) => repo.headAt(...a), type, name, item: body,
+        mode: 'publish', packageId: binding, source: undefined, door: 'restore',
+    });
+    if (credentialsRefRefusal) throw credentialsRefRefusal;
     const elevatedRefusal = await this.anonymousElevatedFlowRefusal(type, body, name);
     if (elevatedRefusal) throw elevatedRefusal;
     const channel = this.credentialChannelFor(type);
@@ -458,7 +469,7 @@ export async function judgeRuntimeAuthoringRules(
 
 /** The body of `ObjectStackProtocolImplementation#draftPublishVerdict`; the method's docblock there is its contract. */
 export async function draftPublishVerdict(
-    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo'>,
+    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespacePrefixViolation'>,
     draft: { type: string; name: string; body: unknown; packageId: string | null },
 ): Promise<RuntimeAuthoringIssue[]> {
     const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
@@ -487,5 +498,22 @@ export async function draftPublishVerdict(
             ? { restoredCredentialPaths: () => channel.heldPaths({ name: draft.name, state: 'draft', item: draft.body }) }
             : {}),
     });
-    return (verdict.error as { issues?: RuntimeAuthoringIssue[] } | null)?.issues ?? [];
+    const issues = (verdict.error as { issues?: RuntimeAuthoringIssue[] } | null)?.issues ?? [];
+    // [#27444 · ADR-0129 D2] The namespace-prefix rule is not a gate rule: the
+    // doors that make an object live under a package ask it on their own
+    // (the publish pre-flight, the per-item publish), so the draft verdict
+    // asks the same judge, on the package the draft is staged into — the one
+    // "Publish all" promotes it under — and answers its code and sentence.
+    const prefixViolation = singular === 'object'
+        ? this.objectNamespacePrefixViolation(draft.name, draft.packageId)
+        : null;
+    if (!prefixViolation) return issues;
+    return [{
+        rule: 'NAMESPACE_PREFIX',
+        path: 'name',
+        where: `object "${draft.name}"`,
+        message: prefixViolation,
+        hint: prefixViolation,
+        severity: 'error',
+    }, ...issues];
 }

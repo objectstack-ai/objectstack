@@ -30,12 +30,12 @@ export const CrmApp = App.create({
         { id: 'nav_opportunity', type: 'object', objectName: 'opportunity', label: 'Opportunities', icon: 'target' },
         // Open a specific named view instead of the object default:
         { id: 'nav_pipeline',    type: 'object', objectName: 'opportunity', viewName: 'pipeline_kanban', label: 'Sales Pipeline', icon: 'columns-3' },
-        // One-off parameterized slice — lands on the bare data surface
-        // (`/:objectName/data`, objectui ADR-0055) with removable URL filter
-        // chips, NOT anchored to a saved view. Don't author a view for these:
+        // One-off slice on the bare data surface (Run Modes, below):
         { id: 'nav_my_open',     type: 'object', objectName: 'opportunity', filters: { owner_id: '{current_user_id}', status: 'open' }, label: 'My Open Deals', icon: 'user-check' },
         { id: 'nav_dash',        type: 'dashboard', dashboardName: 'sales_dashboard', label: 'Sales Dashboard', icon: 'chart-bar' },
         { id: 'nav_report',      type: 'report',    reportName: 'opportunities_by_stage', label: 'Opps by Stage', icon: 'bar-chart-3' },
+        // No `reportName` = the app's report index; the console adds none itself:
+        { id: 'nav_reports',     type: 'report',    label: 'Reports', icon: 'library' },
       ],
     },
     {

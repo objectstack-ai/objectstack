@@ -393,7 +393,12 @@ describe('the falsifiable criterion — an incomplete union refuses, and NAMES t
       family: 'object-field',
       status: 'gap',
       reason: 'reading secret field(s) of `other` threw — Error: table is locked',
-      references: [{ handleId: 'sec_partial', family: 'object-field', holder: 'smtp.password#rec_1' }],
+      references: [{
+        handleId: 'sec_partial',
+        family: 'object-field',
+        holder: 'smtp.password#rec_1',
+        column: { object: 'smtp', field: 'password', record: 'rec_1', mintedPair: { namespace: 'smtp', key: 'password' } },
+      }],
     };
     const union: SecretReferenceUnion = buildSecretReferenceUnion({
       settings: { family: 'settings', status: 'enumerated', references: [] },

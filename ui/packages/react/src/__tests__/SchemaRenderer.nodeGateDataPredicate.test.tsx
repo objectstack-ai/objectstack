@@ -66,6 +66,17 @@
  * defined` and objectui#5454's reporter takes it. That leg, and the verdict
  * move it carries, is pinned in `SchemaRenderer.dataRootUnbound-9308.test.tsx`.
  *
+ * ## objectstack#27457 — the BARE spelling left this leg for the fault leg
+ *
+ * A bare string is CEL shorthand by the spec, so it is read on the CEL engine
+ * now, which refuses an unanswered key (`No such key`) instead of reading it
+ * as `undefined`. A bare `data.*` predicate the bound `data` cannot answer is
+ * therefore a FAULT — reported by objectui#5454's leg and withheld, exactly as
+ * its `{ dialect: 'cel' }` envelope twin always was — and never reaches this
+ * leg. The cases that pin THIS leg's line are written as the `${…}` template,
+ * the one spelling that still evaluates cleanly against the wrong object; the
+ * bare cases pin where the bare spelling went.
+ *
  * ## objectui#5756 — the KNOWN LIMIT below is now FIXED, not pinned as a gap
  *
  * The 2026-08-22 "no interpolation changes" ruling quoted above was **this
@@ -199,24 +210,29 @@ afterEach(() => {
 });
 
 describe('#5687 group 1 — the card\'s reproduction shape is reported', () => {
-  it('THE acceptance criterion: `properties: { visible: "data.status == \'draft\'" }` warns, and still hides on EVERY row', () => {
+  it('THE acceptance criterion, as CEL now: `properties: { visible: "data.status == \'draft\'" }` is a FAULT, reported, and hides on EVERY row (objectstack#27457)', () => {
     const warn = spyWarn();
     // The exact shape the card names. `properties.visible` is hoisted onto the
-    // node by the memo and lands on the `visible` leg of the chain.
+    // node by the memo and lands on the `visible` leg of the chain. A bare
+    // string is CEL shorthand, and CEL refuses a key the bound `data` does not
+    // hold (`No such key`) rather than reading it as `undefined` — so this is
+    // the objectui#5454 fault leg now, the leg its envelope twin always took,
+    // and the predicate is withheld (objectui#13299). The verdict the author
+    // sees is the same hidden block; the line that explains it is the fault one.
     mount({ properties: { visible: "data.status == 'draft'" } }, DRAFT);
-    // Verdict UNCHANGED — the ruling refuses a verdict change, and this is the
-    // constant-false the author would otherwise have shipped.
     expect(shown()).toBe(false);
-    const msg = reports(warn)[0];
+    const msg = unresolvableReports(warn)[0];
     expect(msg).toBeDefined();
     expect(msg).toContain(TYPE);
     expect(msg).toContain('visible');
     expect(msg).toContain("data.status == 'draft'");
-    // The read that could not be answered, named — not just "something is wrong".
-    expect(msg).toContain('data.status');
-    // The two sentences that make it actionable rather than merely noted.
-    expect(msg).toContain('CONSTANT');
-    expect(msg).toContain('record.status');
+    // Named as a CEL fault: the bare string was evaluated on the CEL engine
+    // and faulted there, not on the legacy grammar (which would have read
+    // `undefined` and evaluated cleanly).
+    expect(msg).toContain('Reason: CEL predicate failed to evaluate');
+    // …and this leg's adapter-only line does not ALSO fire: it is reached only
+    // by a predicate that evaluated cleanly, which this one did not.
+    expect(reports(warn)).toHaveLength(0);
   });
 
   it('… and hides on the OTHER row too, which is what "on every row" means', () => {
@@ -228,7 +244,7 @@ describe('#5687 group 1 — the card\'s reproduction shape is reported', () => {
     cleanup();
     mount({ properties: { visible: "data.status == 'draft'" } }, PUBLISHED);
     expect(shown()).toBe(false);
-    expect(reports(warn).length).toBeGreaterThan(0);
+    expect(unresolvableReports(warn).length).toBeGreaterThan(0);
   });
 
   it('the paired control: the same node with NO gate renders on both rows', () => {
@@ -290,28 +306,47 @@ describe('#5687 group 1 — the card\'s reproduction shape is reported', () => {
   });
 
   it('a node-level `visibleWhen` written the deprecated way reports on ITS key', () => {
+    // The `${…}` template is the spelling that still evaluates cleanly against
+    // the wrong object, so it is the one this leg reports; the bare string is
+    // CEL and reports on the fault leg, under the same key.
     const warn = spyWarn();
-    mount({ visibleWhen: "data.status == 'draft'" }, DRAFT);
+    mount({ visibleWhen: "${data.status == 'draft'}" }, DRAFT);
     expect(shown()).toBe(false);
     expect(reports(warn)[0]).toContain('visibleWhen');
+    cleanup();
+    mount({ visibleWhen: "data.status == 'draft'" }, DRAFT);
+    expect(shown()).toBe(false);
+    expect(unresolvableReports(warn)[0]).toContain('visibleWhen');
   });
 
   it('the NON-negated `hidden` leg reports too, and keeps its own inverted answer', () => {
     // `hidden` is not negated: a constant-`false` there means the node stays
     // SHOWN by a gate that was meant to hide it. Equally constant, equally
     // silent before this change — and the verdict is untouched here as well.
+    // Written as the `${…}` template, the spelling that still reads `undefined`
+    // instead of faulting (a bare string is CEL, objectstack#27457).
     const warn = spyWarn();
-    mount({ hidden: "data.status == 'draft'" }, DRAFT);
+    mount({ hidden: "${data.status == 'draft'}" }, DRAFT);
     expect(shown()).toBe(true);
     expect(reports(warn)[0]).toContain('hidden');
+  });
+
+  it('the bare `hidden` spelling is CEL: the unanswered read FAULTS, and a faulting `hidden` conceals (objectstack#27457)', () => {
+    const warn = spyWarn();
+    mount({ hidden: "data.status == 'draft'" }, DRAFT);
+    expect(shown()).toBe(false);
+    const msg = unresolvableReports(warn)[0];
+    expect(msg).toContain('hidden');
+    expect(msg).toContain('Reason: CEL predicate failed to evaluate');
+    expect(reports(warn)).toHaveLength(0);
   });
 
   it('deduped: one line per (node type, key, predicate), not one per render', () => {
     // Matches objectui#5454's posture exactly — same Set, same key shape.
     const warn = spyWarn();
-    mount({ properties: { visible: "data.status == 'draft'" } }, DRAFT);
+    mount({ visibleWhen: "${data.status == 'draft'}" }, DRAFT);
     cleanup();
-    mount({ properties: { visible: "data.status == 'draft'" } }, PUBLISHED);
+    mount({ visibleWhen: "${data.status == 'draft'}" }, PUBLISHED);
     expect(reports(warn)).toHaveLength(1);
   });
 });

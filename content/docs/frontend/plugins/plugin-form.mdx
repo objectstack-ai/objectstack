@@ -97,6 +97,10 @@ renderer were removed (ADR-0050): use `tabbed`, or an
 
 Which fields an edit save sends, and which fields and line-item actions a caller is offered, is the same in the SDK and the Console. It is documented under [What an edit save writes](/docs/ui/forms#what-an-edit-save-writes).
 
+## What a state-machine select offers
+
+A select governed by the object's blocking `state_machine` validation offers only the values the server accepts. On an edit form that is the stored value plus its declared next states; on a create form it is the machine's `initialStates`, plus the value the form opens with (a `default: true` option or a caller's pre-fill), which is never dropped. A machine that declares no `initialStates`, or a `warning`, inactive or update-only one, leaves a create form's options as they are. Every form layout, the master-detail header included, applies the same rule.
+
 ## Field Types
 
 The plugin supports these field types:

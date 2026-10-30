@@ -27,12 +27,15 @@ afterEach(cleanup);
 type Row = Record<string, unknown>;
 
 const quote: Row = { name: 'quote', label: 'Quote', fields: { name: { type: 'text', label: 'Name' } } };
-const lineItem: Row = { name: 'quote_line', label: 'Quote Line', fields: { quote: { type: 'master_detail', reference: 'quote', label: 'Quote' } } };
+// Body tables (objectstack#27478): an inline-edited master_detail child, and a
+// lookup marked relatedList: 'primary'. The plain lookup `task` is a side card.
+const lineItem: Row = { name: 'quote_line', label: 'Quote Line', fields: { quote: { type: 'master_detail', reference: 'quote', label: 'Quote', inlineEdit: 'grid' } } };
+const schedule: Row = { name: 'schedule', label: 'Schedule', fields: { quote_id: { type: 'lookup', reference: 'quote', label: 'Quote', relatedList: 'primary' } } };
 const task: Row = { name: 'task', label: 'Task', fields: { quote_id: { type: 'lookup', reference: 'quote', label: 'Quote' } } };
 
 const STORE: MetadataContextValue = {
   apps: [],
-  objects: [quote, lineItem, task],
+  objects: [quote, lineItem, schedule, task],
   dashboards: [],
   reports: [],
   pages: [],
@@ -59,15 +62,17 @@ const placementPicker = () =>
   within(screen.getByTestId('group-related-table')).getByRole('combobox');
 
 describe('ObjectGroupInspector — a group places a related table', () => {
-  it('offers the inbound relationships and writes the picked one as relatedList', async () => {
+  it('offers the inbound relationships that are body tables, and writes the picked one as relatedList', async () => {
     const draft = { ...quote, fieldGroups: [{ key: 'basics', label: 'Basics' }, { key: 'lines', label: 'Lines' }] };
     const onPatch = renderInspector(draft, 'lines');
     fireEvent.keyDown(placementPicker(), { key: 'ArrowDown' });
     const options = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
+    // objectstack#27478: the side card `task` is not offered — a group only
+    // positions a body table.
     expect(options).toEqual([
       t('engine.studio.designer.group.relatedListNone', 'en-US'),
       'Quote Line (quote_line)',
-      'Task (task)',
+      'Schedule (schedule)',
     ]);
     fireEvent.click(screen.getByRole('option', { name: 'Quote Line (quote_line)' }));
     expect(onPatch.mock.calls.at(-1)![0].fieldGroups).toEqual([
@@ -85,7 +90,20 @@ describe('ObjectGroupInspector — a group places a related table', () => {
     fireEvent.keyDown(placementPicker(), { key: 'ArrowDown' });
     const options = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
     expect(options).not.toContain('Quote Line (quote_line)');
-    expect(options).toContain('Task (task)');
+    expect(options).toContain('Schedule (schedule)');
+  });
+
+  it('shows a stored side-card value with a line saying why it draws nothing (objectstack#27478)', () => {
+    const draft = { ...quote, fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'task' }] };
+    renderInspector(draft, 'lines');
+    expect(screen.getByTestId('group-related-table-not-body')).toHaveTextContent('“task” is not a body table');
+    expect(placementPicker()).toHaveTextContent('task');
+  });
+
+  it('a stored body-table value draws no such line (control)', () => {
+    const draft = { ...quote, fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'quote_line' }] };
+    renderInspector(draft, 'lines');
+    expect(screen.queryByTestId('group-related-table-not-body')).toBeNull();
   });
 
   it('withholds the picker while the group still holds fields', () => {

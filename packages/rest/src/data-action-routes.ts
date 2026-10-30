@@ -80,7 +80,9 @@ import { sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
 // [#26594] The read path's ONE no-row answer, for a row that left the caller's
 // sight between the record read and the projection.
 import { recordNotFoundError } from '@objectstack/core';
-import { logError } from './log.js';
+// [#27501] The data door's answer for a name no object is behind.
+import { objectNotFoundError } from '@objectstack/core';
+import { logError, logWarn } from './log.js';
 import {
     DATA_EXPORT_PARAMS,
     IMPORT_JOB_OBJECT,
@@ -164,6 +166,41 @@ import {
  * this file's business.
  */
 export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
+
+/** [#27489] A JSON object: what the clone door reads as a field map. Arrays and `null` are not. */
+function isFieldMap(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** [#27489] The kind of a refused clone body or `overrides`, named without echoing the value. */
+function describeNonFieldMap(value: unknown): string {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'an array';
+    return `a ${typeof value}`;
+}
+
+/**
+ * The `error` of an async import job that ended `failed` because every row
+ * failed (maintainer ruling B, record 6509036166): the per-row reasons are the
+ * job's `results`, which this sentence points the reader at.
+ */
+const IMPORT_JOB_EVERY_ROW_FAILED =
+    'Every row of this import failed and nothing was imported; each row\'s reason is in the job\'s results.';
+
+/** [#27500] The formats `GET /data/:object/export` serves, csv first as the default. */
+const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
+type ExportFormatServed = typeof EXPORT_FORMATS[number];
+
+/**
+ * [#27500] The export's `?format=`: absent is csv, a served format is itself,
+ * anything else (the empty value included) is `undefined`, which the route
+ * refuses.
+ */
+function readExportFormat(raw: unknown): ExportFormatServed | undefined {
+    if (raw === undefined) return 'csv';
+    const value = String(raw).trim().toLowerCase();
+    return (EXPORT_FORMATS as readonly string[]).includes(value) ? value as ExportFormatServed : undefined;
+}
 
 /**
  * [#24183] One export row as a json object carrying exactly `fields`, in that
@@ -282,6 +319,47 @@ function importUndoFailure(id: string, action: ImportUndoFailure['action'], erro
 }
 
 /**
+ * [#27501, #27728] Refuse an import for an object nothing is behind, with the
+ * data door's own answer for that name: `objectNotFoundError`
+ * (`@objectstack/core`), the one factory the protocol's existence gate and the
+ * engine's verbs throw, classified by the same `handleRouteError` — 404
+ * `OBJECT_NOT_FOUND`, the same envelope `POST /data/OBJ` answers. Both import
+ * doors ask it, the synchronous one (`POST /data/OBJ/import`) and the job door
+ * (`POST /data/OBJ/import/jobs`), right after the exposure gate and before the
+ * body is parsed, so a refused request writes no row and no job.
+ *
+ * The object is read by name as the exposure gate reads it (the execution face
+ * where the protocol has one, else `getMetaItem`). [#27729] Whatever item that
+ * read serves counts, under whichever name it carries: the by-name read
+ * resolves a legacy `ns__short` object from its short name exactly as the data
+ * door's `registry.getObject` does, so this answer is the data door's for every
+ * name. A read the protocol refuses `OBJECT_PACKAGE_DISABLED` (its by-name
+ * read's answer for an object of a disabled package, and the data door's code
+ * for it too) propagates as thrown. Any other thrown read fails OPEN and logs,
+ * as the exposure gate's same read does (`loadObjectItem`, #3545): it is no
+ * answer about existence, and each row's data call still gives the data door's
+ * own. A protocol with no by-name read cannot answer, and is not asked.
+ */
+async function assertImportObjectExists(p: any, objectName: string, environmentId: string | undefined): Promise<void> {
+    const byName = typeof p.getMetaItemForExecution === 'function'
+        ? p.getMetaItemForExecution
+        : typeof p.getMetaItem === 'function' ? p.getMetaItem : undefined;
+    if (!byName) return;
+    let envelope: any;
+    try {
+        envelope = await byName.call(p, { type: 'object', name: objectName, ...(environmentId ? { environmentId } : {}) });
+    } catch (err) {
+        if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') throw err;
+        logWarn('[REST] import: object metadata read failed — not refused up front '
+            + '(each row\'s data call still answers for the object)', (err as Error)?.message ?? err);
+        return;
+    }
+    const item = envelope?.item;
+    if (item !== null && typeof item === 'object') return;
+    throw objectNotFoundError(objectName);
+}
+
+/**
  * Register object-specific action endpoints that don't fit the generic CRUD
  * shape — `RestServer#registerDataActionEndpoints`' body, called by that method
  * with the server as `this`. The method's own docblock, which the published
@@ -296,6 +374,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // object's `enable.clone` capability, default on). Optional JSON body
     // `{ overrides?: {...} }` (or a bare field map) is applied on top of
     // the copied values, e.g. to set a new name or clear a unique field.
+    // Any other `overrides` (or bare body), or `overrides` beside other
+    // top-level keys, is a 400.
     // Distinct path segment (`/clone`) keeps it clear of the greedy
     // `/data/:object/:id` matchers.
     this.routeManager.register({
@@ -307,7 +387,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const p = await this.resolveProtocol(environmentId, req);
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'create')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'create', context)) return;
                 const cloneData = (p as any).cloneData;
                 if (typeof cloneData !== 'function') {
                     res.status(501).json({ code: 'NOT_IMPLEMENTED', error: 'Clone not supported by this protocol' });
@@ -316,13 +396,44 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const body = req.body ?? {};
                 // Accept both `{ overrides: {...} }` and a bare field map so
                 // callers can POST overrides directly without nesting.
-                const overrides = (body && typeof body === 'object' && 'overrides' in body)
-                    ? body.overrides
-                    : body;
+                const nested = isFieldMap(body) && 'overrides' in body;
+                const overrides = nested ? body.overrides : body;
+                // [#27669] Refused, not dropped: `overrides` beside other
+                // top-level keys used to clone with `overrides` alone and
+                // answer `201`, the other keys silently ignored. A record
+                // with a real field named `overrides` sets it through the
+                // nested shape.
+                if (nested) {
+                    const strays = Object.keys(body).filter((key) => key !== 'overrides');
+                    if (strays.length > 0) {
+                        sendEnvelopeError(res, 400, 'VALIDATION_ERROR',
+                            `The clone body carries "overrides" beside other keys (${strays.map((key) => `"${key}"`).join(', ')}). `
+                            + 'Send either { "overrides": {...} } or a bare field map, not both. '
+                            + 'To set a field named "overrides", nest it: { "overrides": { "overrides": ... } }.');
+                        return;
+                    }
+                }
+                // [#27489] Refused, not dropped: a non-object `overrides`
+                // (`"x"`, `1`, `true`, `null`) used to be skipped and answer
+                // `201` with a plain copy, and an array passed the `typeof`
+                // test and reached `cloneData`, which merged it index-wise.
+                // Refused here, at the door, before `cloneData` is called. An
+                // absent body or member is still a plain copy; `null` is a
+                // value the caller wrote, so it is refused rather than read as
+                // absent.
+                if (overrides !== undefined && !isFieldMap(overrides)) {
+                    const got = describeNonFieldMap(overrides);
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR', nested
+                        ? `The clone body's "overrides" must be an object of field values, got ${got}. `
+                            + 'Omit it for a plain copy.'
+                        : `The clone body must be an object, { "overrides": {...} } or a bare field map, got ${got}. `
+                            + 'Send no body for a plain copy.');
+                    return;
+                }
                 const result = await cloneData.call(p, {
                     object: req.params.object,
                     id: req.params.id,
-                    ...(overrides && typeof overrides === 'object' ? { overrides } : {}),
+                    ...(overrides !== undefined ? { overrides } : {}),
                     ...(environmentId ? { environmentId } : {}),
                     ...(context ? { context } : {}),
                 });
@@ -360,7 +471,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const p = await this.resolveProtocol(environmentId, req);
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'get', context)) return;
                 // Closed and empty: the record is the path, and nothing else is read.
                 if (refuseUnknownQueryParams(req, res, RECORD_FIELD_ACCESS_PARAMS)) return;
                 const object = String(req.params.object);
@@ -426,7 +537,15 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     res.status(400).json({ code: 'INVALID_REQUEST', error: 'object is required' });
                     return;
                 }
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context)) return;
+
+                // [#27728] The object must exist before any row is read. The
+                // exposure gate above passes an unknown object through by design
+                // (#3770), and the data door's existence refusal used to fire only
+                // inside each row's write, so a misspelled name answered 200 with
+                // every row refused. Refused here, with the data door's answer.
+                await assertImportObjectExists(p, objectName, environmentId);
+
                 const body = req.body ?? {};
 
                 // [#24348] Who may take the object's declared controls off this
@@ -464,7 +583,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // mode is known, re-gate precisely: insert→create, update→update,
                 // upsert→create∧update. Catches e.g. an object that grants only
                 // `create` receiving an update-mode import.
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', { writeMode })) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context, { writeMode })) return;
 
                 // Delegate the per-row coercion + upsert loop to the shared
                 // runner (also used by the async import-job worker).
@@ -546,7 +665,15 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     res.status(400).json({ code: 'INVALID_REQUEST', error: 'object is required' });
                     return;
                 }
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context)) return;
+
+                // [#27501] The object must exist before a job does. The exposure
+                // gate above passes an unknown object through by design (#3770),
+                // and the data door's existence refusal only fires inside the
+                // per-row writes — AFTER the 201 and the persisted job, so the
+                // job read `succeeded` with every row refused. Refused here, up
+                // front, before the body is parsed and before any job row exists.
+                await assertImportObjectExists(p, objectName, environmentId);
 
                 // [#24348] The synchronous door's control opt-out gate, asked at
                 // the same point: before the body is parsed and before a job row
@@ -574,7 +701,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // [#3391] Import gate — stage 2 (precise), see the synchronous
                 // route: now that writeMode is resolved, re-gate precisely
                 // (insert→create, update→update, upsert→create∧update).
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', { writeMode: prepared.writeMode })) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context, { writeMode: prepared.writeMode })) return;
 
                 const jobId = newImportJobId();
                 const createdAt = new Date().toISOString();
@@ -672,7 +799,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         // the durable row 'cancelled', and a late 'succeeded' here
                         // would silently overwrite it (framework#2824). Counts stay
                         // truthful either way — they reflect what was written.
-                        let finalStatus = summary.cancelled ? 'cancelled' : 'succeeded';
+                        let finalStatus: 'cancelled' | 'succeeded' | 'failed' = summary.cancelled ? 'cancelled' : 'succeeded';
                         if (finalStatus === 'succeeded' && this.cancelledImportJobs.has(jobId)) finalStatus = 'cancelled';
                         if (finalStatus === 'succeeded') {
                             try {
@@ -680,8 +807,20 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                                 if (String(row?.status ?? '') === 'cancelled') finalStatus = 'cancelled';
                             } catch { /* keep succeeded */ }
                         }
+                        // A job that was not cancelled, had rows, and created,
+                        // updated or skipped none of them accomplished nothing: it
+                        // ends `failed`, not `succeeded` (maintainer ruling B,
+                        // record 6509036166). Decided after every cancel re-check
+                        // above, so a cancel still wins. `ok` is not the test: a
+                        // skipped row is not counted in it. A zero-row job, an
+                        // all-skipped job and a partly-failed job stay `succeeded`
+                        // on purpose; a dry run follows the same rule.
+                        const everyRowFailed = finalStatus === 'succeeded' && summary.total > 0
+                            && summary.created + summary.updated + summary.skipped === 0;
+                        if (everyRowFailed) finalStatus = 'failed';
                         await patch({
                             status: finalStatus,
+                            ...(everyRowFailed ? { error: IMPORT_JOB_EVERY_ROW_FAILED } : {}),
                             processed_rows: summary.processed,
                             created_count: summary.created,
                             updated_count: summary.updated,
@@ -945,7 +1084,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // GET /data/:object/export  — streaming export (M10.21 / C.21)
     //
     // Query params:
-    //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
+    //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.
+    //                        Any other value, empty included, is a 400.)
     //   fields=a,b,c        (every format. csv / xlsx write exactly these columns and
     //                        json rows carry exactly these keys, in list order; a key
     //                        the read did not return is absent from a json row.
@@ -1027,7 +1167,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 if (readTemplateMode({ template: req.query?.template }).kind === 'template') {
                     if (await this.enforceImportTemplateGates(req, res, p, environmentId, objectName, context)) return;
                 } else {
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'export')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'export', context)) return;
                     // [#3544] …then the USER-level one. The object may expose
                     // export while THIS caller's permission sets deny it.
                     if (await this.enforceExportPermission(req, res, environmentId, objectName, context)) return;
@@ -1071,9 +1211,22 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     await this.answerImportTemplate(req, res, p, environmentId, objectName, context, q);
                     return;
                 }
-                const fmtRaw = String(q.format ?? 'csv').toLowerCase();
-                const format: 'csv' | 'json' | 'xlsx' =
-                    fmtRaw === 'json' ? 'json' : fmtRaw === 'xlsx' ? 'xlsx' : 'csv';
+                // [#27500] Read, not coerced: a value outside the set this door
+                // serves used to fall through to csv, so `format=pdf`,
+                // `format=xml` and `format=` answered `200` with a csv file the
+                // caller never asked for. An ABSENT `format` is still csv; a
+                // present one must name a served format, the empty value
+                // included (as `limit=` above is refused rather than read as
+                // absent). Trimmed and case-insensitive, the reading the
+                // template mode above gives the same parameter. The set is the
+                // one this route serves, not the spec's wider `ExportFormat`.
+                const format = readExportFormat(q.format);
+                if (format === undefined) {
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR',
+                        `The "format" query parameter takes ${EXPORT_FORMATS.join(', ')}, got `
+                        + `${JSON.stringify(q.format)}. Omit it for csv.`);
+                    return;
+                }
                 // Header row toggle (csv / xlsx). Default on; `header=false` omits it.
                 const includeHeader = String(q.header ?? 'true').toLowerCase() !== 'false';
                 const HARD_CAP = 50_000;
@@ -1132,14 +1285,20 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     ? q.search.trim()
                     : undefined;
                 // ADR-0061 override for which fields the term scans. Only meaningful
-                // alongside `search`; ignored on its own, exactly as in findData.
+                // alongside `search`; ignored on its own.
+                //
+                // [#27484] A value naming no field (`searchFields=`, `=,`) is
+                // kept as the empty list rather than read as absent, so
+                // `findData`'s search-fields gate refuses it exactly as on the
+                // list door. Read as absent, the export scanned the object's
+                // default search fields: a file of rows the caller's narrowing
+                // excluded.
                 let searchFields: string[] | undefined;
-                if (typeof q.searchFields === 'string' && q.searchFields.length > 0) {
+                if (typeof q.searchFields === 'string') {
                     searchFields = q.searchFields.split(',').map((s: string) => s.trim()).filter(Boolean);
                 } else if (Array.isArray(q.searchFields)) {
                     searchFields = q.searchFields.filter((s: any) => typeof s === 'string' && s.length > 0);
                 }
-                if (searchFields && searchFields.length === 0) searchFields = undefined;
 
                 let orderby: any = undefined;
                 if (typeof q.orderby === 'string' && q.orderby.length > 0) {
@@ -1327,8 +1486,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 let exported = 0;
                 let firstChunk = true;
                 let skip = 0;
-                if (format === 'json') res.write('[');
-                const xlsx = format === 'xlsx' ? await createXlsxStream(res, styled) : null;
+                let xlsx: Awaited<ReturnType<typeof createXlsxStream>> | null = null;
 
                 while (exported < limit) {
                     const take = Math.min(chunkSize, limit - exported);
@@ -1369,6 +1527,21 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         : Array.isArray(result?.data) ? result.data
                             : Array.isArray(result?.rows) ? result.rows
                                 : Array.isArray(result) ? result : [];
+
+                    // [#27682] json's opening bracket follows the FIRST read, as
+                    // csv's first byte does: the first `res.write` commits the
+                    // response to a streaming 200, so writing it before
+                    // `findData` turned a refused query into a 200 carrying a
+                    // lone `[` instead of the 400 envelope. The loop always
+                    // runs at least once (`limit` is at least 1), so the
+                    // closing `]` below always has its opener.
+                    if (format === 'json' && firstChunk) res.write('[');
+                    // [#27755] The xlsx workbook writer opens after the first
+                    // read for the same reason: opening it commits the stream
+                    // too, so a refused query answered 200 instead of the 400
+                    // envelope. Opened before the zero-row break, so an empty
+                    // export is still a readable workbook.
+                    if (format === 'xlsx' && firstChunk) xlsx = await createXlsxStream(res, styled);
 
                     if (rows.length === 0) break;
 

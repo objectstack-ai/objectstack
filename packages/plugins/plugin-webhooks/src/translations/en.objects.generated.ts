@@ -18,7 +18,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhooks",
-    description: "Outbound HTTP webhook subscription. Declared in code via defineStack({ webhooks }) / defineWebhook() (materialized into rows on boot) or authored directly in the Studio editor; dispatched by the webhook auto-enqueuer onto the shared HTTP outbox.",
+    description: "An outbound HTTP webhook your organization creates here or through the API. Webhooks that come built into an app are not listed here. Both kinds are sent through the same delivery queue.",
     fields: {
       id: {
         label: "Webhook ID"
@@ -81,7 +81,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Managed By",
-        help: "Record provenance: platform = framework built-in / package = app/package-declared (boot-seeded from defineStack webhooks) / admin = created in Setup.",
+        help: "Record provenance: admin = created in Setup or through the API / package = a copy of a code-declared webhook that the retired 18.0 boot seeder wrote (nothing writes one now: a declared webhook is read from the metadata registry and is not a row) / platform = reserved.",
         options: {
           platform: "platform",
           package: "package",
@@ -90,7 +90,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Customized",
-        help: "Set when an admin edits a package-declared webhook; boot seeding will no longer overwrite the row (a deactivated noisy webhook survives redeploys). Meaningless on admin rows."
+        help: "Set when an admin edits a package row (a copy the retired 18.0 boot seeder wrote). The ownership ceremony reads it: an edited copy under a declared name is kept as a clone, a pristine one is deleted. Meaningless on admin rows."
       },
       created_at: {
         label: "Created At"

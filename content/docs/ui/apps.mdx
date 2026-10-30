@@ -170,6 +170,21 @@ Links to a report — a `report` metadata item, named by `reportName`:
 { id: 'nav_pipeline', type: 'report', label: 'Pipeline Report', reportName: 'sales_pipeline', icon: 'file-bar-chart' }
 ```
 
+Leave `reportName` out and the entry opens the app's **report index** instead
+(`/apps/<app>/reports`): one page listing the reports the app ships that the
+member may open, each linking to its own report. The console draws no index
+entry of its own, so an app that wants one declares it, once, wherever it
+belongs in the menu:
+
+```typescript
+{ id: 'nav_reports', type: 'report', icon: 'bar-chart-3' }
+```
+
+With no `label`, the entry shows the console's own name for the index
+("All reports"). The ⌘K palette finds every report the member may open from the
+reports the app ships, so an app does not need one entry per report to make
+them searchable.
+
 ### Action Navigation
 
 Runs an action instead of navigating to a surface. The reference lives in a
@@ -290,7 +305,8 @@ labelled view, else the object's or dashboard's label, else the target's machine
 name. A renamed object, view or dashboard therefore shows its new name on the next
 load with no navigation edit. Other entries fall back to their target's name
 (`pageName`, `reportName`, the `url`) and a group to its `id`, so give those a
-`label`. A `label` you write renders verbatim; never write an empty one, omit the
+`label`. A report index entry (a `report` entry with no `reportName`) shows the
+console's own name for the index. A `label` you write renders verbatim; never write an empty one, omit the
 key instead.
 
 ## Designing the navigation
@@ -797,10 +813,16 @@ The Setup app's anchors:
 | `group_people_org` | Users, organizations, business units, teams, invitations |
 | `group_access_control` | Positions, permission sets, sharing rules, API keys |
 | `group_approvals` | Approvals inbox, requests, history, delegations |
-| `group_configuration` | Settings, localization, authentication, email, storage, AI, feature flags, branding |
+| `group_configuration` | Settings, localization, exchange rates, authentication, email, storage, AI, feature flags, branding |
 | `group_diagnostics` | Sessions, notification events, audit log |
 | `group_integrations` | Webhooks, cloud connection |
 | `group_advanced` | OAuth applications |
+
+**Exchange Rates** (`sys_exchange_rate`, under Localization) holds an organization's dated rates, editable by
+its administrators. One row means 1 unit of the home currency (Localization → Default currency) = `rate` units
+of the row's currency, from its effective date until a later row for that currency. To record a month's rates,
+add one row per currency with the first day of the month as the effective date; a correction is an edit to that
+row, and every change lands in the audit log.
 
 Setup is for platform administration and needs `setup.access`. For
 project-specific administration pages, declare an app of your own.

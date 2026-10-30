@@ -27,6 +27,9 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 import { DEFAULT_DATASOURCE_NAME, type DatasourceConnectionState } from './datasource-connection-service.js';
+// [#27618] The package's one "no such datasource" refusal, shared with the
+// admin service so every by-name door answers an unknown name alike.
+import { datasourceNotFoundError } from './datasource-admin-service.js';
 import {
   suggestFieldTypeForSqlType,
   isCompatible,
@@ -320,14 +323,96 @@ function unattributedSchemaFilterError(args: {
   return err;
 }
 
-/** Normalise a remote table name into a snake_case object name. */
+/**
+ * Normalise a remote table name into a snake_case object name: the name
+ * itself when it already is one, else its snake_case spelling
+ * ({@link toFieldName}'s rule) — an OData entity set is PascalCase
+ * (`Products`, `OrderDetails` → `products`, `order_details`). [#27745] The
+ * leading capital used to be prefixed before the name was lower-cased, so
+ * `Products` drafted as `_products`.
+ */
 function toObjectName(remoteName: string): string {
   const { name } = parseQualified(remoteName);
-  return name
-    .replace(/[^a-zA-Z0-9_]/g, '_')
-    .replace(/^[^a-z_]/, (c) => `_${c.toLowerCase()}`)
-    .toLowerCase();
+  return toFieldName(name);
 }
+
+/** The field-name grammar `ObjectSchema` admits (a snake_case machine name). */
+const FIELD_NAME = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * A remote column's field name: the column's own name when it is already a
+ * field name (the SQL path, unchanged), else its snake_case spelling —
+ * `CustomerID` → `customer_id`, `FirstName` → `first_name`. An OData
+ * property is PascalCase by convention, and `ObjectSchema` refuses a field
+ * key that is not snake_case, so a draft that kept the remote spelling could
+ * not be saved. The remote name survives in `external.columnMap`.
+ */
+function toFieldName(column: string): string {
+  if (FIELD_NAME.test(column)) return column;
+  const snake = column
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+  if (!snake) return '_';
+  return /^[0-9]/.test(snake) ? `_${snake}` : snake;
+}
+
+/**
+ * The type vocabulary the matrix reads a driver's columns in, from the
+ * introspection's `dialect`. A driver reports its own dialect name; the OData
+ * driver adds its protocol version (`odata-4.0`), and every OData version
+ * names its primitives in the one EDM vocabulary the matrix's `odata` arm
+ * holds.
+ */
+function typeVocabulary(dialect: string | undefined): SqlDialect | undefined {
+  if (dialect === undefined) return undefined;
+  if (dialect === 'odata' || dialect.startsWith('odata-')) return 'odata';
+  return dialect as SqlDialect;
+}
+
+/**
+ * A single-valued navigation the introspection offers as a lookup candidate.
+ * The OData driver's `introspectSchema` lists them on each table beside its
+ * columns (`ODataIntrospectedTable.navigationProperties`); a SQL table has
+ * none. Read structurally, because `IntrospectedTable` declares no such key.
+ */
+interface NavigationCandidate {
+  name: string;
+  targetEntitySet?: string;
+  referentialConstraints: Array<{ property: string; referencedProperty: string }>;
+}
+
+function navigationCandidates(table: IntrospectedTable): NavigationCandidate[] {
+  const raw = (table as unknown as { navigationProperties?: unknown }).navigationProperties;
+  if (!Array.isArray(raw)) return [];
+  const out: NavigationCandidate[] = [];
+  for (const nav of raw) {
+    if (!nav || typeof nav !== 'object' || typeof (nav as { name?: unknown }).name !== 'string') continue;
+    const { name, targetEntitySet, referentialConstraints } = nav as {
+      name: string;
+      targetEntitySet?: unknown;
+      referentialConstraints?: unknown;
+    };
+    out.push({
+      name,
+      ...(typeof targetEntitySet === 'string' ? { targetEntitySet } : {}),
+      referentialConstraints: Array.isArray(referentialConstraints)
+        ? referentialConstraints.filter(
+            (rc): rc is { property: string; referencedProperty: string } =>
+              !!rc &&
+              typeof (rc as { property?: unknown }).property === 'string' &&
+              typeof (rc as { referencedProperty?: unknown }).referencedProperty === 'string',
+          )
+        : [],
+    });
+  }
+  return out;
+}
+
+/** A field of a generated draft: a scalar, or a lookup over a foreign-key column. */
+type DraftField = { type: FieldType; reference?: string };
 
 /**
  * The org-wide default every generated federated object declares.
@@ -518,8 +603,10 @@ function isFederationSource(ds: DatasourceLike | undefined): ds is DatasourceLik
 
 /**
  * [#24837] The refusal every federation door answers for a datasource that is
- * not a federation source by {@link isFederationSource}: a managed one (declared
- * or by default), or a name with no datasource definition.
+ * not a federation source by {@link isFederationSource}: a managed one, declared
+ * or by default. [#27618] A name with no datasource definition is not refused
+ * here: it does not exist, and is answered as every by-name door answers it
+ * ({@link datasourceNotFoundError}).
  *
  * Until this guard, only the primary datasource was refused
  * ({@link primaryDatasourceNotFederatedError}). Every other managed datasource,
@@ -532,14 +619,12 @@ function isFederationSource(ds: DatasourceLike | undefined): ds is DatasourceLik
  * Same status and codes as the primary datasource's refusal, by the same
  * reasoning: the code is the one the calling door serves.
  */
-function notAFederationSourceError(datasource: string, ds: DatasourceLike | undefined, door: FederationDoor): Error {
+function notAFederationSourceError(datasource: string, ds: DatasourceLike, door: FederationDoor): Error {
   const code = door === 'import' ? 'EXTERNAL_IMPORT_ERROR' : 'EXTERNAL_DATASOURCE_ERROR';
-  const lead = !ds
-    ? `Datasource '${datasource}' has no datasource definition, so nothing declares it a federation source`
-    : ds.schemaMode
-      ? `Datasource '${datasource}' is managed (schemaMode '${ds.schemaMode}'), not a federation source`
-      : `Datasource '${datasource}' is managed (it declares no schemaMode, and 'managed' is the default), ` +
-        `not a federation source`;
+  const lead = ds.schemaMode
+    ? `Datasource '${datasource}' is managed (schemaMode '${ds.schemaMode}'), not a federation source`
+    : `Datasource '${datasource}' is managed (it declares no schemaMode, and 'managed' is the default), ` +
+      `not a federation source`;
   const rule =
     `ADR-0015 reserves federation for a datasource whose schemaMode is not 'managed', ` +
     `because the platform owns a managed datasource's schema and its tables are the platform's own objects.`;
@@ -585,16 +670,21 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * tables, drafting one, importing one, refreshing the catalog. Each door
    * names its {@link FederationDoor} kind, which decides the refusal's code.
    *
-   * Two refusals, in this order, and nothing else:
+   * Three refusals, in this order, and nothing else:
    *
    *  - the platform's primary datasource, by name, with its own reason
    *    ({@link primaryDatasourceNotFederatedError}, #24772). No definition is
    *    read for it: no store configuration makes it a federation source.
+   *  - [#27618] a name with no datasource definition: it does not exist, so it
+   *    is the `404` every by-name door answers ({@link datasourceNotFoundError},
+   *    the words `GET /datasources/:name` uses), which both route families
+   *    relay as such. It was folded into the next refusal, a `400` that told
+   *    the caller to re-declare a datasource that is not there.
    *  - any other datasource that is not a federation source by
-   *    {@link isFederationSource}: managed, declared or by default, or with no
-   *    definition ({@link notAFederationSourceError}).
+   *    {@link isFederationSource}: managed, declared or by default
+   *    ({@link notAFederationSourceError}).
    *
-   * Both come before any introspection, so a refused datasource is never
+   * All come before any introspection, so a refused datasource is never
    * read: its tables are the platform's, and listing them is the very thing
    * refused.
    *
@@ -604,6 +694,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   private async assertFederationSource(datasource: string, door: FederationDoor): Promise<DatasourceLike> {
     if (datasource === DEFAULT_DATASOURCE_NAME) throw primaryDatasourceNotFederatedError(datasource, door);
     const ds = await this.config.getDatasource(datasource);
+    if (!ds) throw datasourceNotFoundError(datasource);
     if (!isFederationSource(ds)) throw notAFederationSourceError(datasource, ds, door);
     return ds;
   }
@@ -696,10 +787,24 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * rebuild does, and replaces the verdict either way. A datasource whose
    * failed rebuild kept its old pool serving has a live driver, so it is
    * probed as before.
+   *
+   * [#27510] A name that resolves no saved datasource is not a datasource that
+   * failed its probe, so it is the one outcome that THROWS: the 404
+   * {@link datasourceNotFoundError}, which the route answers exactly as
+   * `GET /datasources/:name` answers the same name. It answered `ok: false`
+   * with the engine's "has no registered driver" sentence, the answer a saved
+   * datasource that is down gets, so a caller could not tell the two apart.
+   * The name is resolved through `getDatasource`, the stored-record read the
+   * sibling `:name` doors make (both plugins wire it to
+   * `metadata.get('datasource', name)`). The primary datasource is not looked
+   * up: it may have no stored record, and its live driver answers for it.
    */
   async testConnection(
     datasource: string,
   ): Promise<{ ok: boolean; latencyMs?: number; tableCount?: number; error?: string }> {
+    if (datasource !== DEFAULT_DATASOURCE_NAME && !(await this.config.getDatasource(datasource))) {
+      throw datasourceNotFoundError(datasource);
+    }
     const started = Date.now();
     try {
       const driver = this.config.liveDriver?.(datasource);
@@ -744,6 +849,8 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     datasource: string,
     remoteName: string,
     opts: GenerateDraftOpts,
+    /** The name the object will be saved under, when the caller overrides the derived one. */
+    nameOverride?: string,
   ): Promise<ObjectDraft> {
     const schema = await this.config.introspect(datasource);
     const table = this.findTable(schema, remoteName);
@@ -752,7 +859,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
         `Remote table '${remoteName}' not found on datasource '${datasource}'.`,
       );
     }
-    const dialect = schema.dialect as SqlDialect | undefined;
+    const dialect = typeVocabulary(schema.dialect);
     // Derive the remote schema from the matched table's qualified name (the
     // caller may pass an unqualified `remoteName`).
     const matched = parseQualified(table.name);
@@ -763,18 +870,34 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     const exclude = opts.excludeColumns ? new Set(opts.excludeColumns) : new Set<string>();
     const pkOverride = opts.primaryKey ? new Set(opts.primaryKey) : undefined;
 
-    const fields: Record<string, { type: FieldType }> = {};
+    const fields: Record<string, DraftField> = {};
     // The remote key is collected here rather than onto the field, because
     // there is no authorable field key to put it on — see
     // REMOTE_PRIMARY_KEY_COMMENT for the ruling and the measurements.
     const primaryKeyFields: string[] = [];
     const review: ObjectDraft['review'] = [];
+    // remote column → local field, for every column whose field is named
+    // differently: the binding the driver reads and Gate 2 inverts.
+    const columnMap: Record<string, string> = {};
 
     for (const col of table.columns) {
       if (include && !include.has(col.name)) continue;
       if (exclude.has(col.name)) continue;
 
-      const fieldName = opts.rename?.[col.name] ?? col.name;
+      let fieldName = opts.rename?.[col.name] ?? toFieldName(col.name);
+      if (Object.prototype.hasOwnProperty.call(fields, fieldName)) {
+        // Two remote columns that spell one field name (`OrderId`, `order_id`):
+        // the later one is numbered, never merged into the earlier.
+        let n = 2;
+        while (Object.prototype.hasOwnProperty.call(fields, `${fieldName}_${n}`)) n += 1;
+        review.push({
+          column: col.name,
+          remoteType: col.type,
+          note: `its field name '${fieldName}' is taken by another column — named '${fieldName}_${n}', rename it`,
+        });
+        fieldName = `${fieldName}_${n}`;
+      }
+      if (fieldName !== col.name) columnMap[col.name] = fieldName;
       const suggested = suggestFieldTypeForSqlType(col.type, dialect);
       const fieldType: FieldType = suggested ?? 'text';
       if (!suggested) {
@@ -803,6 +926,19 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     const namespace = normaliseNamespace(await this.config.getNamespace?.(datasource));
     const shortName = toObjectName(resolvedRemoteName);
     const name = applyNamespacePrefix(shortName, namespace);
+
+    await this.draftLookups({
+      datasource,
+      schema,
+      table,
+      selfRemoteName: resolvedRemoteName,
+      selfName: nameOverride ?? name,
+      dialect,
+      fields,
+      columnMap,
+      review,
+    });
+
     const definition: Record<string, unknown> = {
       name,
       // Derived from the SHORT name on purpose: the prefix is an addressing
@@ -814,6 +950,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       external: {
         ...(remoteSchema ? { remoteSchema } : {}),
         remoteName: resolvedRemoteName,
+        ...(Object.keys(columnMap).length > 0 ? { columnMap } : {}),
       },
       fields,
       // ADR-0090 D1 / `security-owd-unset` — see GENERATED_SHARING_MODEL.
@@ -827,6 +964,111 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       source: renderObjectSource(definition, fields, review, namespace, primaryKeyFields),
       review,
     };
+  }
+
+  /**
+   * [#27745] The lookups of a draft: one per single-valued navigation the
+   * introspection offers ({@link navigationCandidates}) that a column can back
+   * and whose target is imported. Each turns the column holding the target's
+   * key into a `lookup` field referencing the target's object. Every other
+   * navigation is left out of the draft and named in its review, with the
+   * reason:
+   *
+   *  - it is bound to no entity set, or carries no `ReferentialConstraint`
+   *    (TripPin's `BestFriend`): no column holds the target's key, and the
+   *    driver never follows a navigation to read one;
+   *  - its constraint spans more than one property, its dependent property is
+   *    not a column of this draft, or the property it references is not the
+   *    target's single key (a lookup holds the target's `id`, and the driver's
+   *    `id` is the key only for a single-property key);
+   *  - the dependent column's type cannot back a lookup by the type matrix,
+   *    the verdict Gate 2 would reach on the saved object;
+   *  - the target is not imported. Imported means an object on THIS datasource
+   *    bound to the target entity set, or the object itself for a navigation
+   *    onto its own entity set. Import the target first: a draft taken after
+   *    it carries the lookup, while re-saving an object already imported with
+   *    the column as a scalar is a retype the save door's destructive-change
+   *    gate refuses.
+   *
+   * A left-out entry's `remoteType` is `navigation → <target entity set>`,
+   * which Studio's batch import reads to save targets first.
+   */
+  private async draftLookups(args: {
+    datasource: string;
+    schema: IntrospectedSchema;
+    table: IntrospectedTable;
+    selfRemoteName: string;
+    selfName: string;
+    dialect: SqlDialect | undefined;
+    fields: Record<string, DraftField>;
+    columnMap: Record<string, string>;
+    review: ObjectDraft['review'];
+  }): Promise<void> {
+    const { datasource, schema, table, selfRemoteName, selfName, dialect, fields, columnMap, review } = args;
+    const candidates = navigationCandidates(table);
+    if (candidates.length === 0) return;
+
+    const columns = new Map(table.columns.map((c) => [c.name, c]));
+    // Remote entity set → the object bound to it on this datasource, read once
+    // and only when a candidate gets that far.
+    let imported: Map<string, string> | undefined;
+    const importedObject = async (entitySet: string): Promise<string | undefined> => {
+      if (!imported) {
+        imported = new Map();
+        for (const o of await this.config.listObjects()) {
+          if ((o.datasource ?? DEFAULT_DATASOURCE_NAME) !== datasource) continue;
+          const bound = o.external?.remoteName ?? o.name;
+          if (!imported.has(bound)) imported.set(bound, o.name);
+        }
+      }
+      return imported.get(entitySet);
+    };
+
+    for (const nav of candidates) {
+      const target = nav.targetEntitySet;
+      const leftOut = (why: string) =>
+        review.push({
+          column: nav.name,
+          remoteType: `navigation → ${target ?? '(unbound)'}`,
+          note: `navigation left out of the draft: ${why}`,
+        });
+      if (!target) {
+        leftOut(`$metadata binds it to no entity set`);
+        continue;
+      }
+      if (nav.referentialConstraints.length !== 1) {
+        leftOut(
+          nav.referentialConstraints.length === 0
+            ? `no ReferentialConstraint names a property holding the key of '${target}'`
+            : `its ReferentialConstraint spans ${nav.referentialConstraints.length} properties (a composite reference)`,
+        );
+        continue;
+      }
+      const { property, referencedProperty } = nav.referentialConstraints[0]!;
+      const column = columns.get(property);
+      const field = columnMap[property] ?? property;
+      if (!column || !Object.prototype.hasOwnProperty.call(fields, field)) {
+        leftOut(`its foreign-key property '${property}' is not a column of this draft`);
+        continue;
+      }
+      const targetTable = this.findTable(schema, target);
+      const isTargetKey = targetTable ? primaryKeyReader(targetTable) : undefined;
+      const targetKeys = targetTable && isTargetKey ? targetTable.columns.filter(isTargetKey).map((c) => c.name) : [];
+      if (targetKeys.length !== 1 || targetKeys[0] !== referencedProperty) {
+        leftOut(`it references '${referencedProperty}', which is not the single key of '${target}'`);
+        continue;
+      }
+      if (isCompatible(column.type, 'lookup', dialect) !== true) {
+        leftOut(`its foreign-key property '${property}' is ${column.type}, which cannot back a lookup`);
+        continue;
+      }
+      const reference = target === selfRemoteName ? selfName : await importedObject(target);
+      if (!reference) {
+        leftOut(`'${target}' is not imported on datasource '${datasource}'; import it before this table to get the lookup`);
+        continue;
+      }
+      fields[field] = { type: 'lookup', reference };
+    }
   }
 
   async importObject(
@@ -865,7 +1107,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     }
 
     // Reuse the draft pipeline (type mapping, review notes, external binding).
-    const draft = await this.draftObject(datasource, remoteName, opts);
+    const draft = await this.draftObject(datasource, remoteName, opts, opts.name);
 
     // Apply the runtime-persona overrides on top of the draft definition.
     const name = opts.name ?? draft.name;
@@ -918,7 +1160,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
             sqlType: c.type,
             nullable: c.nullable,
             primaryKey: isPk(c),
-            suggestedFieldType: suggestFieldTypeForSqlType(c.type, schema.dialect as SqlDialect),
+            suggestedFieldType: suggestFieldTypeForSqlType(c.type, typeVocabulary(schema.dialect)),
           })),
         };
       }),
@@ -971,7 +1213,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     }
 
     const schema = await readSchema(datasource);
-    const dialect = schema.dialect as SqlDialect | undefined;
+    const dialect = typeVocabulary(schema.dialect);
     const remoteName = obj.external?.remoteName ?? obj.name;
     const table = this.findTable(schema, remoteName);
 
@@ -1183,11 +1425,19 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * the sweep would have kept" and "the objects this selects" are the same set
    * (pinned in `__tests__/external-datasource-service.test.ts`).
    *
-   * A name nothing is bound to selects nothing and answers an empty, vacuously
-   * `ok` report — the sweep-then-filter answer for an unknown name, kept rather
-   * than upgraded to a throw: whether an unknown datasource is an error is a
-   * separate question from this one, and this method must not decide it in
-   * passing.
+   * A saved datasource nothing is bound to selects nothing and answers an
+   * empty, vacuously `ok` report.
+   *
+   * [#27696] A name that resolves no saved datasource is not that datasource:
+   * it THROWS the 404 {@link datasourceNotFoundError} before anything is
+   * listed or validated, the check {@link testConnection} makes (#27510), so
+   * `POST …/external/validate` answers it as `GET /datasources/:name` and its
+   * federation siblings do. It answered the empty `ok` report above, and a
+   * caller could not tell "nothing here is federated" from "no such
+   * datasource". Only existence is asked, not the federation guard
+   * ({@link assertFederationSource}): a managed datasource, and the primary
+   * one (not looked up, as it may have no stored record), keep their empty
+   * report.
    *
    * NOT on `IExternalDatasourceService` (spec): the route composition this
    * serves was authorized as a service-side helper, while adding a
@@ -1197,11 +1447,19 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * scoped spelling, rather than silently falling back to the fan-out.
    */
   async validateDatasource(datasource: string): Promise<SchemaValidationReport> {
+    if (datasource !== DEFAULT_DATASOURCE_NAME && !(await this.config.getDatasource(datasource))) {
+      throw datasourceNotFoundError(datasource);
+    }
     const objects = await this.config.listObjects();
     return this.validateEach(
       objects.filter((o) => this.isFederated(o) && (o.datasource ?? 'default') === datasource),
     );
   }
+}
+
+/** A single-quoted TypeScript string literal for `value`. */
+function quoteTs(value: string): string {
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }
 
 /**
@@ -1240,19 +1498,38 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
  */
 function renderObjectSource(
   definition: Record<string, unknown>,
-  fields: Record<string, { type: FieldType }>,
+  fields: Record<string, DraftField>,
   review: ObjectDraft['review'],
   namespace?: string,
   primaryKeyFields: readonly string[] = [],
 ): string {
-  const reviewByColumn = new Map(review.map((r) => [r.column, r.note]));
-  const external = definition.external as { remoteSchema?: string; remoteName?: string };
+  const external = definition.external as {
+    remoteSchema?: string;
+    remoteName?: string;
+    columnMap?: Record<string, string>;
+  };
+  // A review entry names its REMOTE column; the field it lands on is that
+  // column's mapped name. An entry naming no field (a navigation left out of
+  // the draft) is rendered after the fields instead.
+  const fieldOf = (column: string): string => external.columnMap?.[column] ?? column;
+  const reviewByField = new Map<string, string>();
+  const unplaced: ObjectDraft['review'] = [];
+  for (const r of review) {
+    const field = fieldOf(r.column);
+    if (Object.prototype.hasOwnProperty.call(fields, field) && !reviewByField.has(field)) {
+      reviewByField.set(field, r.note);
+    } else {
+      unplaced.push(r);
+    }
+  }
 
   const fieldLines = Object.entries(fields).map(([fieldName, f]) => {
-    const note = reviewByColumn.get(fieldName);
+    const note = reviewByField.get(fieldName);
     const comment = note ? ` // REVIEW: ${note}` : '';
-    return `    ${fieldName}: { type: '${f.type}' },${comment}`;
+    const reference = f.reference ? `, reference: ${quoteTs(f.reference)}` : '';
+    return `    ${fieldName}: { type: '${f.type}'${reference} },${comment}`;
   });
+  const unplacedLines = unplaced.map((r) => `    // REVIEW: ${r.column} (${r.remoteType}): ${r.note}`);
 
   // The whole of ruling D's second half: information for the reader, zero
   // contract face. Rendered only when a key was actually reported — with no
@@ -1272,9 +1549,14 @@ function renderObjectSource(
         ]
       : [];
 
+  const columnMapEntries = Object.entries(external.columnMap ?? {});
+  const columnMapPart =
+    columnMapEntries.length > 0
+      ? `, columnMap: { ${columnMapEntries.map(([remote, field]) => `${quoteTs(remote)}: ${quoteTs(field)}`).join(', ')} }`
+      : '';
   const externalLine = external.remoteSchema
-    ? `  external: { remoteSchema: '${external.remoteSchema}', remoteName: '${external.remoteName}' },`
-    : `  external: { remoteName: '${external.remoteName}' },`;
+    ? `  external: { remoteSchema: '${external.remoteSchema}', remoteName: '${external.remoteName}'${columnMapPart} },`
+    : `  external: { remoteName: '${external.remoteName}'${columnMapPart} },`;
 
   // No namespace resolved → the name is bare. That is legal in a stack whose
   // manifest declares no `namespace` (`defineStack` skips the check), so the
@@ -1308,6 +1590,7 @@ function renderObjectSource(
     ...primaryKeyComment,
     `  fields: {`,
     ...fieldLines,
+    ...unplacedLines,
     `  },`,
     `  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1`,
     `  // requires this to be an authored decision rather than an accident — the`,

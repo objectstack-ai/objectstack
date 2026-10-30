@@ -1406,6 +1406,9 @@ describe('RestServer', () => {
   // POST /email/send — IEmailService bridge (M11.B1 / M10.7)
   // -----------------------------------------------------------------------
   describe('email send handler', () => {
+    // The door requires the send capability (email-routes.ts, bound 1); these
+    // cases measure what lies past it, so the caller holds it.
+    const EMAIL_SENDER = { userId: 'test-user', systemPermissions: ['manage_platform_settings'] };
     function getEmailRoute(rest: any) {
       const routes = rest.getRoutes();
       return routes.find(
@@ -1415,7 +1418,7 @@ describe('RestServer', () => {
 
     it('returns 501 when no email service provider is wired', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      (rest as any).resolveExecCtx = async () => EMAIL_SENDER;
   rest.registerRoutes();
       const route = getEmailRoute(rest);
       expect(route).toBeDefined();
@@ -1427,13 +1430,14 @@ describe('RestServer', () => {
 
     it('calls email service and returns the SendEmailResult on success', async () => {
       const send = vi.fn(async () => ({ id: 'em-1', status: 'sent', messageId: '<m1@x>' }));
-      const provider = async () => ({ send });
+      // A `from` is admitted only as the configured sender (bound 3).
+      const provider = async () => ({ send, getDefaultFrom: () => 'no@reply.com' });
       const rest = new RestServer(
         server as any, protocol as any, ANON_API as any,
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      (rest as any).resolveExecCtx = async () => EMAIL_SENDER;
   rest.registerRoutes();
       const route = getEmailRoute(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
@@ -1441,7 +1445,7 @@ describe('RestServer', () => {
         body: { to: 'a@b.com', from: 'no@reply.com', subject: 'Hi', text: 'x' },
       } as any, res as any);
       expect(send).toHaveBeenCalledWith(expect.objectContaining({
-        to: 'a@b.com', from: 'no@reply.com', subject: 'Hi',
+        to: 'a@b.com', from: 'no@reply.com', subject: 'Hi', sentBy: 'test-user',
       }));
       expect(res.json).toHaveBeenCalledWith({ id: 'em-1', status: 'sent', messageId: '<m1@x>' });
     });
@@ -1454,7 +1458,7 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
-      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      (rest as any).resolveExecCtx = async () => EMAIL_SENDER;
   rest.registerRoutes();
       const route = getEmailRoute(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
@@ -2585,16 +2589,19 @@ describe('mapDataError — schema/constraint envelopes', () => {
     // [commit cad8b42f0] No `code` because this producer DECLARED none — not because
     // the unwrap door withholds it. That door carries a declared code now; the
     // old "older bundled clients prepend any code to the message" rationale was
-    // retired with the measurement in `error-response.ts`. What stays pinned
-    // here is ADR-0112's half: nothing is invented for a half-declaration.
-    expect(r.body.code).toBeUndefined();
+    // retired with the measurement in `error-response.ts`.
+    // [#27597] The undeclared abort answers the ledgered `HOOK_ABORTED`
+    // (it carried no `code` before), and nothing is DECLARED for it.
+    expect(r.body.code).toBe('HOOK_ABORTED');
+    expect(r.body.declaredCode).toBeUndefined();
   });
 
   it('strips the sandbox debug wrapper from the raw message when innerMessage was lost', () => {
     const r = mapDataError(new Error("hook 'pm_ref_base' threw: Error: 删除被阻断,请先解除引用"), 'pm_base');
     expect(r.status).toBe(400);
     expect(r.body.error).toBe('删除被阻断,请先解除引用');
-    expect(r.body.code).toBeUndefined();
+    // [#27597] The same code the `innerMessage` door answers.
+    expect(r.body.code).toBe('HOOK_ABORTED');
   });
 
   // [#7543] REVERSED. This case used to assert the opposite — that a non-default
@@ -2644,10 +2651,13 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.object).toBe('ghost');
   });
 
-  it('emits the identical envelope whether the gate or the driver detected it', () => {
+  it('[#27702] the driver\'s missing table is not this verdict: the gate is its one source', () => {
+    // No unregistered name reaches a driver, so a missing table behind a
+    // name is a registered object's missing storage — a store fault.
     const fromGate = mapDataError(objectNotFound('ghost'), 'ghost');
     const fromDriver = mapDataError(sqliteError('no such table: ghost'), 'ghost');
-    expect(fromGate).toEqual(fromDriver);
+    expect(fromGate.status).toBe(404);
+    expect(fromDriver).toEqual({ status: 500, body: { error: 'Internal data error', code: 'DATABASE_ERROR' } });
   });
 
   it('names the object from the error itself when the caller passes none', () => {
@@ -4043,13 +4053,13 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
   // legitimately-empty registry stays silent — so a persistent outage, during
   // which the gate silently allows every op, is no longer invisible.
   describe('metadata-unavailable fail-open observability (#3545)', () => {
-    it('loadObjectItems fails OPEN (returns []) AND logs a THROWN metadata read', async () => {
+    it('loadObjectItem fails OPEN (no object) AND logs a THROWN metadata read', async () => {
       const { rest, protocol } = setup(undefined);
       protocol.getMetaItems = vi.fn().mockRejectedValue(new Error('metadata store down'));
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const items = await (rest as any).loadObjectItems(protocol, undefined);
-        expect(items).toEqual([]); // fail-open preserved: gate abstains
+        const item = await (rest as any).loadObjectItem(protocol, undefined, 'widget');
+        expect(item).toBeUndefined(); // fail-open preserved: gate abstains
         expect(warnSpy).toHaveBeenCalled();
         expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('api-exposure gate');
       } finally {
@@ -4057,13 +4067,13 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
       }
     });
 
-    it('loadObjectItems stays SILENT on a legitimately-empty registry (no false alarm)', async () => {
+    it('loadObjectItem stays SILENT on a legitimately-empty registry (no false alarm)', async () => {
       const { rest, protocol } = setup(undefined);
       protocol.getMetaItems = vi.fn().mockResolvedValue([]); // empty, not thrown
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const items = await (rest as any).loadObjectItems(protocol, undefined);
-        expect(items).toEqual([]);
+        const item = await (rest as any).loadObjectItem(protocol, undefined, 'widget');
+        expect(item).toBeUndefined();
         expect(warnSpy).not.toHaveBeenCalled(); // distinguishes real fault from empty
       } finally {
         warnSpy.mockRestore();

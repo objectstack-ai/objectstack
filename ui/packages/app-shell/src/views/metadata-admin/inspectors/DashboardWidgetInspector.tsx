@@ -48,6 +48,8 @@ import {
   datasetPickerOptions,
 } from './ReportDefaultInspector.js';
 import { useDatasetCatalog, useDatasetSemantics } from '../previews/useDatasetCatalog.js';
+import { packageDatasetsFirst } from './dataset-picker-options.js';
+import { DatasetCreateEntry, useStudioDatasetAuthoring } from '../../studio-design/datasetCreate.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { widgetMissingInputs } from '../../studio-design/metadataError.js';
 import { WIDGET_TYPE_IDS, WIDGET_TYPE_META } from '../previews/widget-types.js';
@@ -126,7 +128,11 @@ export function DashboardWidgetInspector({
   // Catalog — called unconditionally (stable hook order) BEFORE any early
   // return, so the dataset / dimensions / values pickers below bind to the
   // live schema instead of free-text the author has to recall.
-  const catalog = useDatasetCatalog();
+  // objectstack#27518 — in the Studio (its authoring context is present) the
+  // catalog is the draft-overlaid one, this package's datasets first, and the
+  // New dataset entry sits under the picker.
+  const datasetAuthoring = useStudioDatasetAuthoring();
+  const catalog = useDatasetCatalog(undefined, { previewDrafts: datasetAuthoring !== null });
   const semantics = useDatasetSemantics(datasetName || undefined, catalog);
 
   // objectui#11161 — the options read the author's text in the one form the
@@ -134,12 +140,14 @@ export function DashboardWidgetInspector({
   // siblings): a dataset's declared `description` rides as the combo's muted
   // `hint`, a member's `label` beside its name. The stored value is the name.
   const datasetComboOptions: InspectorComboOption[] = React.useMemo(() => {
-    const opts: InspectorComboOption[] = datasetPickerOptions(catalog.datasets);
+    const opts: InspectorComboOption[] = datasetPickerOptions(
+      packageDatasetsFirst(catalog.datasets, datasetAuthoring?.packageId),
+    );
     if (datasetName && !opts.some((o) => o.value === datasetName)) {
       opts.push({ value: datasetName, label: datasetName });
     }
     return opts;
-  }, [catalog.datasets, datasetName]);
+  }, [catalog.datasets, datasetName, datasetAuthoring?.packageId]);
   const measureOptions: ObjectFieldInfo[] = React.useMemo(
     () => datasetMeasureOptions(semantics.measures),
     [semantics.measures],
@@ -365,6 +373,15 @@ export function DashboardWidgetInspector({
           <p className="text-[10px] leading-snug text-muted-foreground">
             {t('engine.inspector.widget.datasetHint', locale)}
           </p>
+          {datasetAuthoring && !readOnly && (
+            <DatasetCreateEntry
+              authoring={datasetAuthoring}
+              catalog={catalog}
+              onCreated={(name) => patchWidget({ dataset: name } as Partial<DashboardWidgetSchema>)}
+              locale={locale}
+              testId="widget-new-dataset"
+            />
+          )}
         </Field>
         {datasetName && (
           <>

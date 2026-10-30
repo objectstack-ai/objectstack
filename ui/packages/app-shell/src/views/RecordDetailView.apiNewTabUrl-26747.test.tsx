@@ -237,7 +237,7 @@ describe('objectstack#26747 — record page: an api action with opensInNewTab + 
     expect(authFetchSpy).not.toHaveBeenCalled();
   });
 
-  it('CONTROL: the same api action without newTabUrl still sends its request to the target', async () => {
+  it('CONTROL: the same api action without newTabUrl still sends its request, through the action door', async () => {
     const { newTabUrl: _dropped, ...withoutNewTabUrl } = newTabAction('export_tab', 'Export');
     await mountRecordPage([withoutNewTabUrl]);
     const { open } = stubWindowOpen();
@@ -248,7 +248,9 @@ describe('objectstack#26747 — record page: an api action with opensInNewTab + 
 
     await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
     const [url, init] = authFetchSpy.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url.endsWith(TARGET)).toBe(true);
+    // A declared same-origin api action reaches its target through the door
+    // (objectstack#27611).
+    expect(url.endsWith(`/api/v1/actions/${OBJECT_NAME}/export_tab`)).toBe(true);
     expect(init.method).toBe('POST');
     expect(open).not.toHaveBeenCalledWith('about:blank', '_blank');
   });

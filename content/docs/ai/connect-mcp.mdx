@@ -118,7 +118,8 @@ Your own keys are listed (prefix only) and revoked under **Account → Developer
 → API Keys**. Platform admins get the tenant-wide list at **Setup → Access
 Control → API Keys**, which requires `manage_platform_settings`.
 
-Or mint one over REST:
+Or mint one over REST, from a signed-in session (the `-b cookies.txt` below). A
+request authenticated with an API key is refused `403 PERMISSION_DENIED`:
 
 ```bash
 curl -b cookies.txt -X POST https://your-deployment.example.com/api/v1/keys
@@ -242,11 +243,24 @@ can reach is the **default exposure policy (v1)**:
   are blocked fail-closed.
 - **Actions require the author's opt-in**: `ai: { exposed: true }` plus an
   `ai.description` of at least 40 characters, and the action must be callable
-  without a UI. In the open framework that means exactly two types — `script`
-  (with an inline body or a registered handler) and `flow` (with the automation
-  service registered). `url`, `modal`, `form`, and `api` have no headless
-  dispatch here. See [Actions as Tools](/docs/ai/actions-as-tools) and
-  [Actions](/docs/ui/actions).
+  without a UI. In the open framework that means three types — `script`
+  (with an inline body or a registered handler), `flow` (with the automation
+  service registered), and `api` whose `target` is a **same-origin path**
+  (starting with `/`): `run_action` dispatches it in-process through the
+  action door to that target, after the door's gates. `url`, `modal`, and
+  `form` have no headless dispatch here, and neither does an `api` action
+  whose `target` is on another origin — the browser calls that origin
+  directly, so it is not exposed. See [Actions as Tools](/docs/ai/actions-as-tools)
+  and [Actions](/docs/ui/actions).
+- **An action on a `sys_*` object follows the same opt-in**, decided action by
+  action: it is listed and runs only when the action itself declares
+  `ai.exposed: true`, and then every gate behind the flag still runs (its
+  `requiredPermissions`, the installation's action switch, its param contract,
+  `ai.requiresConfirmation`, and the target's own authorization). The object
+  being `sys_*` opens nothing, and no deployment switch opens an unflagged one.
+  The stored-metadata tables (`sys_metadata`, `sys_metadata_history`) stay
+  refused even when flagged. Each action `list_actions` returns carries
+  `aiExposed: true`, the server's attestation of that opt-in.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure
@@ -392,7 +406,7 @@ skill and a guided `/objectstack:connect` command.
 | stdio won't start / boot fails closed | `OS_MCP_STDIO_ENABLED=true` but `OS_MCP_STDIO_API_KEY` is missing, unknown, revoked, or expired — fail-closed by design (ADR-0101). Set a valid `osk_` key; there is no unscoped or `system` fallback |
 | `401` on every call | Anonymous or invalid credentials. Interactive clients: complete the browser login (the `WWW-Authenticate` header advertises the OAuth metadata). Headless: check the `osk_` key and header spelling |
 | `403 insufficient_scope` | The OAuth token lacks the scope for that tool family (e.g. writes without `data:write`) — reconnect and grant the scope |
-| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (only `script` with a body/handler and `flow` with an automation service are — `url`, `modal`, `form`, and `api` never appear), it targets a `sys_*` object, or the caller fails its `requiredPermissions` |
+| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions` |
 | Reads return few rows / writes denied | Working as designed — the caller's permissions and RLS apply. Verify with the same user in the Console |
 
 ## Related

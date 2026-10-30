@@ -1,0 +1,360 @@
+---
+title: "OData datasources — ERP records, live, with no driver of your own"
+navTitle: OData Datasources
+description: Declare a datasource over an OData v4 service such as SAP S/4HANA or Dynamics 365, bind objects to its entity sets, and read and write them live, with no code per entity set.
+---
+
+Many business systems already publish their records over **OData v4**: SAP S/4HANA,
+Microsoft Dynamics 365 and Dataverse, and any service that serves a CSDL 4.0
+`$metadata` document. For those you need no driver of your own. Mount
+`@objectstack/driver-odata` once per service, declare a datasource, and bind an object
+to each entity set you want. Every view, form, permission set, formula and hook then
+works on those records, and no row is stored on the platform side.
+
+The OData driver is a **plugin driver**, so everything [Virtual objects](/docs/data-modeling/virtual-objects)
+says about plugin drivers holds here too: the engine re-applies every query, a read
+matches at most 1000 rows, and the sharing model needs a deliberate choice. The one
+difference is that this driver is already written.
+[Which way in](/docs/data-modeling/virtual-objects#which-way-in-odata-a-plugin-driver-or-a-real-object)
+says when to choose it over a driver of your own or a synced copy.
+
+Everything on this page is what the driver's own tests assert, against an in-process
+OData service and behind the real engine
+(`packages/drivers/driver-odata/src/odata-driver.floor.test.ts` and
+`odata-driver.conformance.test.ts`). Read them when this page and the runtime seem to
+disagree.
+
+## Check the service first
+
+- **It speaks OData v4.** Open `<serviceRoot>$metadata`. The root element must say
+  `Version="4.0"`. Only the v4 dialect ships. A service that speaks only OData v2 needs a
+  v2 dialect, which this package does not include. Many older SAP Gateway services are
+  v2 only, so check each service you plan to bind.
+- **Each entity set you bind has a key.** The key becomes the record's `id`. An entity
+  type with no usable key is refused at the first request.
+- **You know how it authenticates.** The driver sends no credential, a bearer token, or
+  HTTP basic, or, borrowed from a connector instance, an API key too. It does not run an
+  OAuth2 flow ([Credentials](#3-credentials)).
+
+## 1. Mount the plugin
+
+The plugin builds the driver from its options and publishes it as the service
+`driver.<name>`. Mount it in the stack's `plugins`, one plugin per service:
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+import { createODataDriverPlugin } from '@objectstack/driver-odata';
+
+export default defineStack({
+  // …the datasource and objects of step 2…
+  plugins: [
+    createODataDriverPlugin({
+      name: 'erp',                                         // = the datasource name
+      serviceRoot: 'https://erp.example.com/odata/v4/sales/',
+      auth: { scheme: 'bearer' },                          // under os serve, no `secrets`: see Credentials
+    }),
+  ],
+});
+```
+
+| Option | Default | Meaning |
+| :--- | :--- | :--- |
+| `name` | `odata` | The datasource it serves. It is also the driver name and the `driver.<name>` service suffix. |
+| `serviceRoot` | (required) | The service root URL, http or https, with no credentials and no query string. |
+| `version` | `4.0` | The protocol version. `4.0` is the only value. |
+| `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. Leave it `none` when the datasource borrows a connector instance's credential ([Credentials](#3-credentials)). |
+| `secrets` | (none) | Where `credentialsRef` is resolved: an object with `resolve(credentialsRef)`. When absent, the host's `datasource-secret-resolver` service is used; `os serve` registers one. |
+| `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
+| `requestTimeoutMs` | `30000` | The timeout of each request. |
+
+The options are checked when the plugin is built. An unknown key, a `serviceRoot` with
+a user name or a query in it, or a version other than `4.0` refuses the boot with every
+problem named.
+
+## 2. Declare the datasource and bind objects
+
+{/* os:check */}
+```typescript
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: { id: 'com.example.sales', name: 'Sales', version: '1.0.0', type: 'app' },
+  datasources: [
+    {
+      name: 'erp',
+      label: 'ERP sales service (OData v4)',
+      driver: 'erp',                  // the plugin's name, i.e. the `driver.erp` service
+      schemaMode: 'external',
+      config: {},                     // the plugin's options configure the driver, not this
+      external: {
+        allowWrites: true,
+        credentialsRef: 'sys_secret:7c1e…',   // the bearer token, as a secret-store handle
+        validation: { onMismatch: 'warn', checkOnBoot: false },
+      },
+    },
+  ],
+  objects: [
+    {
+      name: 'sales_order',
+      label: 'Sales order',
+      datasource: 'erp',
+      sharingModel: 'public_read_write',     // see "Choose the sharing model" below
+      external: {
+        remoteName: 'SalesOrders',           // the entity set
+        writable: true,
+        // remote property → local field; a property not named keeps its own name
+        columnMap: {
+          SalesOrderID: 'order_number',
+          CustomerName: 'customer_name',
+          NetAmount: 'net_amount',
+          OverallStatus: 'status',
+          DeliveryNote: 'delivery_note',
+        },
+      },
+      fields: {
+        order_number: { type: 'text', label: 'Order' },
+        customer_name: { type: 'text', label: 'Customer' },
+        net_amount: { type: 'number', label: 'Net amount' },
+        status: { type: 'text', label: 'Status' },
+        delivery_note: { type: 'text', label: 'Delivery note' },
+      },
+    },
+  ],
+});
+```
+
+What each piece does on this driver:
+
+- **Three names stay equal:** the plugin's `name`, the datasource `name`, and the
+  datasource `driver`. The connect step finds `driver.erp` already registered and uses
+  it as it is. `config` is left empty, because the plugin's options already configured
+  the driver.
+- **`remoteName` names the entity set.** Without it the driver looks for an entity set
+  named like the object.
+- **This driver applies `external.columnMap` itself**, in both directions: rows arrive
+  under your field names, and filters, sorts and writes go out under the service's
+  property names. That is a property of this driver, not of plugin drivers in general.
+- **`id` is the entity key.** A single-property key is read as text (`'4711'`). A
+  composite key is the body of its key predicate (`'OrderID=1,ProductID=7'`), which is
+  also what `GET /data/<object>/<id>` takes.
+- **Or import the objects from `$metadata`.** Once the datasource is saved, Studio's
+  datasource page lists its entity sets on the **Tables** tab. **Import** saves one,
+  and **Import selected** saves several, referenced entity sets first. An MCP client
+  whose token carries `metadata:write` reaches the same import through
+  `list_remote_tables` and `import_object`. The draft maps each EDM type to a field
+  type, makes the key the `id`, and writes `columnMap` for every property whose name is
+  not a snake_case field name (`CategoryID` becomes `category_id`). EDM types with no
+  field type, such as `Edm.Duration` or a service's own enum, are listed for review. An
+  imported object is read-only unless the datasource allows writes and you tick
+  **Allow writes to this object**.
+- **Navigation properties are never followed**, so a related entity set is an object of
+  its own. The import turns a single-valued navigation into a `lookup` on its foreign-key
+  property when its `ReferentialConstraint` is one property pair onto the target's key
+  and the target is already imported on the same datasource. Every other navigation is
+  left out and named in the review, so import the target first. The lookup reads the
+  related record by key, like any other lookup. These rules are what
+  `packages/services/service-datasource/src/__tests__/external-object-draft-odata-metadata.test.ts`
+  asserts, over a recorded Northwind `$metadata`.
+- **The service document is read lazily.** `connect()` asks the service nothing, and
+  `$metadata` is read once, at the first request. A wrong `serviceRoot` or an unknown
+  entity set shows up on the first read of the object, not at boot.
+- **`checkOnBoot: false`** keeps the boot from depending on the service being up. The
+  driver's tests do not cover the boot-time drift check over an OData service, so test
+  it against your service before you turn it on.
+
+## 3. Credentials
+
+⛔ Never put a credential in the stack, in the plugin options, or in the `serviceRoot`
+URL. The datasource names exactly one of two channels:
+
+- **A secret of its own**, `external.credentialsRef`, resolved through the host's secret
+  store. This is the example in step 2.
+- **A connector instance's credential**, `external.connector`, when a connector already
+  authorizes the same service
+  ([Borrowing a connector instance's credential](#borrowing-a-connector-instances-credential)).
+
+### A secret of its own: `credentialsRef`
+
+The plugin resolves `external.credentialsRef` through the host's secret store:
+
+- **`bearer`** sends `Authorization: Bearer <secret>`.
+- **`basic`** takes `username` from the options and the password from the secret.
+- **`none`** sends nothing. A `credentialsRef` declared beside `none` is refused, so a
+  credential you meant to send is never left out by mistake.
+
+The plugin resolves the secret at the **first request**, not at boot, and again after a
+`401`. So a token rotated in the secret store is picked up by the next request that the
+old token fails. The driver does not obtain or refresh tokens itself. A service that
+issues short-lived OAuth2 access tokens needs something that keeps the stored secret
+current.
+
+Which store resolves it:
+
+- **Under `os serve`**, pass no `secrets`. The server publishes its own datasource secret
+  store as the kernel service `datasource-secret-resolver`, and the plugin reads it at the
+  first request. A `sys_secret:<id>` handle that the Add Datasource wizard minted
+  resolves, as on any federated datasource
+  ([Credentials](/docs/data-modeling/external-datasources#4-credentials)).
+- **A host that composes its own kernel** passes `secrets`: the same binder it gives
+  `DatasourceAdminServicePlugin`, or any object with `resolve(credentialsRef)` answering
+  the secret or `undefined`. It can instead register that `resolve` as the
+  `datasource-secret-resolver` service (`DATASOURCE_SECRET_RESOLVER_SERVICE` in
+  `@objectstack/types`), which every plugin driver reading a `credentialsRef` uses the
+  same way. A `secrets` option passed to the plugin always wins over the service.
+
+Resolution fails closed. Each of these refuses the request rather than send it without
+the credential: an auth scheme with no `credentialsRef`, a `credentialsRef` with neither
+`secrets` nor the service, and a handle that does not resolve. The caller is answered
+`503 ERR_DATASOURCE_UNAVAILABLE`, and the cause goes to the server log.
+
+### Borrowing a connector instance's credential
+
+When a [connector instance](/docs/automation/connectors#declaring-a-provider-bound-instance)
+already authorizes the ERP for your flows, the datasource can borrow its credential instead
+of holding a secret of its own (ADR-0015 amendment D7). One credential, set where the
+connector's is set, then serves the connector's actions and the datasource's records.
+Name the instance in `external.connector`, leave `credentialsRef` out, and create the
+plugin with `auth` left at `none`:
+
+```typescript
+connectors: [
+  {
+    name: 'erp_api', label: 'ERP API', type: 'api',
+    provider: 'rest', providerConfig: { baseUrl: 'https://erp.example.com' },
+    auth: { type: 'bearer', credentialRef: 'ERP_API_TOKEN' },
+  },
+],
+datasources: [
+  {
+    name: 'erp', driver: 'erp', schemaMode: 'external', config: {},
+    external: { connector: 'erp_api', allowWrites: true },   // no credentialsRef
+  },
+],
+plugins: [
+  createODataDriverPlugin({
+    name: 'erp',
+    serviceRoot: 'https://erp.example.com/odata/v4/sales/',   // no auth, no secrets
+  }),
+],
+```
+
+- **The instance's `auth` decides how the credential is sent:** `Authorization: Bearer`,
+  `Authorization: Basic`, or an API key in its `headerName` header (default `X-API-Key`)
+  or, with `paramName`, a query parameter.
+- **The plugin borrows at the first request**, from the `connector-credential-source`
+  service that `@objectstack/service-automation` registers, and keeps the handle. Every
+  request then presents the current credential: one past its expiry is obtained afresh
+  before it is sent, and one the service refuses with a `401` is obtained afresh once and
+  the request retried. A second `401` answers `503`, naming the instance in the server
+  log.
+- **It fails closed.** Each of these refuses the request with nothing sent, answered
+  `503 ERR_DATASOURCE_UNAVAILABLE` with the cause in the server log: no automation
+  service in the stack, an instance that cannot lend (not declared, disabled, no
+  `auth`), a credential that is not set yet, a `credentialsRef` beside the connector,
+  and an `auth` scheme other than `none` on the plugin, which would send a second
+  credential. An instance that cannot lend also fails the datasource's connect, so
+  Setup → Integrations → Datasources shows why
+  ([Borrowing a connector instance's credential](/docs/data-modeling/external-datasources#borrowing-a-connector-instances-credential)
+  has the rules the stack is validated against).
+
+## 4. What the service is asked
+
+Behind the floor, a list read is one `GET` on the entity set:
+
+```text
+GET <serviceRoot>SalesOrders?$filter=OverallStatus eq 'open'&$orderby=NetAmount desc,SalesOrderID&$top=1001
+Prefer: odata.maxpagesize=500
+```
+
+- **`$filter`** carries every part of the `where` the driver can translate: `$eq`,
+  `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin`, `$null`, `$contains`,
+  `$startsWith`, `$endsWith` and `$icontains` (ASCII comparands), under `$and` and `$or`.
+- **The rest is left to the engine**, which re-applies the whole query to the rows the
+  service returns: `$not`, `$like`, `$exists`, field references, and ordering or
+  negation on text. The driver only ever asks a **wider** question. It drops a member of
+  an `$and` it cannot translate, and drops a whole `$or` when one branch cannot be
+  translated, so the service never returns fewer rows than match. This is also why a
+  service that compares text case-insensitively still answers correctly.
+- **`$orderby`** carries the sort, then the entity key, so pages partition the result.
+- **Paging** follows `@odata.nextLink` until 1001 rows are read. A link to another
+  origin is refused, so the credential never goes to a host you did not configure.
+- **The page size and the total** are the engine's, applied to the rows read. A count
+  is computed the same way. The engine aggregates in memory.
+
+**The 1000-row cap applies.** A read that matches more than 1000 rows answers
+`422 EXTERNAL_ROW_CAP_EXCEEDED` rather than a partial set
+([the cap](/docs/data-modeling/virtual-objects#the-engine-re-applies-every-query)). Every
+`$filter` the driver can push down makes the service return only matching rows, so the cap
+counts matching rows, not the whole entity set. Give list views a filter the service
+can run. For an entity set users must browse whole, mirror it into a real object
+instead.
+
+## 5. Writes
+
+Writes are the same double opt-in as federation: `external.allowWrites` on the
+datasource and `external.writable` on the object
+([Writes](/docs/data-modeling/external-datasources#5-writes-double-opt-in)).
+
+| The platform does | The service is sent |
+| :--- | :--- |
+| `POST /data/sales_order` | `POST SalesOrders` |
+| `PATCH /data/sales_order/:id` | `PATCH SalesOrders(<key>)` |
+| `DELETE /data/sales_order/:id` | `DELETE SalesOrders(<key>)` |
+
+- **`If-Match`** carries the entity's `@odata.etag` when the driver's last read of that
+  record returned one, so a write over someone else's change is refused by the service.
+- **Only properties the entity type declares are sent.** The fields the engine stamps
+  itself (`updated_at`, `updated_by`) are not the service's and are left out.
+- **The service's refusal reaches the caller.** A `400`, `409`, `412` or `422`
+  from the service answers `422 EXTERNAL_WRITE_REFUSED` with the service's own message.
+  Let the ERP's validation be the rule, and do not retry around it.
+- **Refused by name:** `upsert`, the bulk writes, and transactions. Without `$batch`
+  there is no atomic multi-row write. A write that selects its rows by a filter is
+  refused too. Read the ids, then write each one.
+
+### Choose the sharing model
+
+A record from an OData service has no `owner_id` and no `created_by`, so the default
+sharing model admits no row for a member, and an owner-keyed write is refused. The rule
+and the ways out are the same as on any plugin driver
+([Choose the sharing model on purpose](/docs/data-modeling/virtual-objects#3-the-datasource-the-object-the-hook-the-views)):
+
+- **Read-only data:** leave `allowWrites` off and declare `sharingModel: 'public_read'`.
+  Who may read is the permission sets' decision.
+- **Editable data:** declare `sharingModel: 'public_read_write'`, and decide who may edit
+  in a `beforeUpdate` hook. A member's delete is still refused on this model.
+
+## When the service fails
+
+| What happened | The caller is answered |
+| :--- | :--- |
+| A read the service refuses for its own sake (`400`, `404`, `422`) | `400 INVALID_QUERY`, with a message naming the entity set, the status and the service's own text |
+| A write the service refuses | `422 EXTERNAL_WRITE_REFUSED`, with the service's message |
+| A `5xx`, a timeout, an unreachable service, a `401` after the retry, a `403` or a `429` | `503 ERR_DATASOURCE_UNAVAILABLE`; the cause goes to the server log |
+| A read that matches more than 1000 rows | `422 EXTERNAL_ROW_CAP_EXCEEDED` |
+
+An outage is never answered as an empty list. A read refusal's message is withheld, and
+goes to the server log, when the read carries a predicate the caller did not write, such
+as a sharing scope. The full mapping is in
+[Virtual objects](/docs/data-modeling/virtual-objects#1-the-driver).
+
+## What it does not do
+
+- **OData v2.** Only the v4 dialect ships.
+- **`$expand` and navigation properties.** Bind each related entity set as an object of
+  its own; an imported foreign key becomes a `lookup` onto it.
+- **Actions and functions** of the service. `execute` is refused.
+- **Transactions and `$batch`.** Each write is one request.
+- **More than 1000 matching rows** in one read (the cap above).
+- **A read scoped by a parent's access** (an object `controlled_by_parent`): it is
+  refused, because `$filter` has no form of that join.
+
+## See also
+
+- [Virtual objects](/docs/data-modeling/virtual-objects): which way in, the engine's
+  floor, the sharing-model callout, and writing a driver for a system with no OData.
+- [External datasources](/docs/data-modeling/external-datasources): the datasource and
+  `external` binding, federation over SQL, the write gates and credentials.
+- [Pulling a mapping](/docs/automation/jobs#pulling-a-mapping): a real object fed from a
+  remote API on a schedule.
+- `packages/drivers/driver-odata/README.md`: the package and its exports.

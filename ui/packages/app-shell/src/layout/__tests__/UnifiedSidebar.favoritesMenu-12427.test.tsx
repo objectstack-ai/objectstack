@@ -193,12 +193,9 @@ const favoritesSection = () =>
   (screen.queryByText('Favorites')?.closest('[data-sidebar="group"]') as HTMLElement | null | undefined) ?? null;
 const favoriteLabels = () => within(favoritesSection()!).getAllByRole('link').map((a) => a.textContent);
 /** The rows of the app's menu: every row outside the Favorites section. */
-// The navigation's rows: not the Favorites section's, and not the built-in
-// report index entry (objectui#13020), which is no navigation entry and
-// carries no ⋯ menu.
 const menuRows = () =>
   [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-item"]')].filter(
-    (row) => !favoritesSection()?.contains(row) && !row.querySelector('[data-testid="sidebar-report-index"]'),
+    (row) => !favoritesSection()?.contains(row),
   );
 
 async function openMenu(label: string, scope: HTMLElement = document.body): Promise<string[]> {

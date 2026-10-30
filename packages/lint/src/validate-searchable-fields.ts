@@ -68,6 +68,30 @@
  *    WITH NO ERROR on driver-sql. Since #6674 the spec resolution drops such
  *    an entry and both enforcement faces refuse it by name.
  *
+ * 4. CREDENTIALS, on EVERY surface — the object's own set included
+ *    (`searchable-field-unsearchable`): a `secret` or `password` entry names a
+ *    real, stored field, so checks 1 and 3 pass it — but since the engine's
+ *    ADR-0100 search withhold the expansion leaves every credential column out
+ *    of the field map it resolves over (`expandSearchOnAst`,
+ *    `@objectstack/objectql`, by `collectCredentialFields`), an author-declared
+ *    one included, and says nothing. The declared set is silently narrower
+ *    than written, and a declaration naming ONLY credential fields falls
+ *    through to the auto-default set — #4254's "asked narrower, answered
+ *    wider" again. Judged by the spec's own predicate
+ *    ({@link isCredentialFieldType}, `@objectstack/spec/data`), the one that
+ *    engine collector reads, so linter and engine cannot disagree about which
+ *    types are credentials. The withhold is exemption-free (a better-auth
+ *    `password` is withheld too), and so is this check.
+ *
+ *    `error`, the virtual entry's severity, deliberately and for the virtual
+ *    entry's reason: the entry can never match wherever it is declared, and a
+ *    narrowing the runtime makes in silence gets its word at build time. A
+ *    warning would leave `os validate` passing a declaration the runtime does
+ *    not honour, which is the gap this check exists to close. The remedy has
+ *    one form — drop the entry — since no mirror of a credential onto a
+ *    searchable column is a fix: that would publish the very value the
+ *    withhold protects.
+ *
  * The OBJECT's own `searchableFields` stays existence-only OTHERWISE, and the
  * dividing line is STORAGE, not search quality: the runtime's declared branch
  * filters by existence and scannability, never by type taste, so a json or
@@ -121,6 +145,7 @@
 
 import {
   resolveSearchFieldResolution,
+  isCredentialFieldType,
   isVirtualSearchField,
   SEARCH_AUTO_EXCLUDED_FIELDS,
   type SearchFieldMeta,
@@ -159,8 +184,9 @@ export interface SearchableFieldFinding {
  *
  * - `'canonical'` — the object's own `searchableFields`. The runtime honors
  *   any entry that exists and has a stored column to scan (existence- and
- *   scannability-filtered, never type-filtered), so existence and virtuality
- *   are checked and nothing else (#6674).
+ *   scannability-filtered, never type-filtered), apart from the credential
+ *   columns the engine withholds, so existence, virtuality and credentials
+ *   are checked and nothing else (#6674, module note check 4).
  * - `'narrowing'` — a list view's `searchableFields` (metadata or react
  *   surface). Clients echo it as the `$searchFields` override, which the
  *   #4254 ingress gate intersects with the object's allowed set — entries the
@@ -426,6 +452,32 @@ export function checkSearchableFieldList(
         hint:
           `Mirror the computed value onto a stored text field on "${objectName}" and declare that ` +
           `instead, or drop "${name}"`,
+      });
+      continue;
+    }
+
+    // ── Credential entries — EVERY surface, canonical included ──
+    //
+    // The engine's search expansion withholds every `secret` / `password`
+    // column from the set it scans (ADR-0100), a declared one included, without
+    // a word; this is that withhold's build-time voice (module note, check 4).
+    // Judged by the spec predicate the engine's collector reads. Ahead of the
+    // admissibility pass on purpose: on a view over an auto-default object
+    // that pass would otherwise explain the entry by its type alone, and the
+    // remedy it offers ("target a text-like field") is not this one.
+    const ctype = target.fields[name]?.type;
+    if (isCredentialFieldType(ctype)) {
+      findings.push({
+        severity: 'error',
+        rule: SEARCHABLE_FIELD_UNSEARCHABLE,
+        where,
+        path: `${path}[${i}]`,
+        message:
+          `${subject} entry "${name}" on object "${objectName}" is a '${ctype}' field, a ` +
+          `credential: 'search' never scans it`,
+        // One remedy line; what the engine does with the entry on each surface
+        // is the id's `os explain` entry.
+        hint: `Drop "${name}": credential fields are never searched`,
       });
       continue;
     }

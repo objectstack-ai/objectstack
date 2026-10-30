@@ -8,7 +8,8 @@
  * uniform 404 for every other id. The client maps those to the preview and to
  * `null`; every other answer is a failure and rejects, carrying the server's
  * `code` and the HTTP `status`, so a caller can tell "no such invitation" from
- * "the read did not happen".
+ * "the read did not happen". A 404 without the door's `RESOURCE_NOT_FOUND`
+ * body — a server without the route — is the second kind (#27509).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -56,13 +57,29 @@ describe('getInvitationPreview (#26473)', () => {
     });
   });
 
-  it('404: resolves null — the server does not know the id, which is an answer', async () => {
+  it('the door\'s 404: resolves null — the invitation is no longer valid, which is an answer', async () => {
     const { client } = clientAnswering(404, {
       success: false,
       error: { code: 'RESOURCE_NOT_FOUND', message: 'Invitation not found.' },
     });
 
     await expect(client.getInvitationPreview('inv_gone')).resolves.toBeNull();
+  });
+
+  it('a 404 without the door\'s body (a server without the route) rejects instead of resolving null (#27509)', async () => {
+    const fetchFn = vi.fn(async () => new Response(null, { status: 404, statusText: 'Not Found' }));
+    const client = createAuthClient({ baseURL: AUTH_URL, fetchFn });
+
+    await expect(client.getInvitationPreview('inv_1')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('a 404 carrying another code is not the door\'s answer either (#27509)', async () => {
+    const { client } = clientAnswering(404, {
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'Not found' },
+    });
+
+    await expect(client.getInvitationPreview('inv_1')).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
   });
 
   it('a failed read rejects with the server code and the status', async () => {

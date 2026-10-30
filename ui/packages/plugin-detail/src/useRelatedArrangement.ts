@@ -27,7 +27,7 @@ export interface UseRelatedArrangementOptions {
   onArrangementChange?: (next: RelatedArrangement) => void;
   /** Enlarge a card's list in place (the host's `?related=`). */
   onEnlarge?: (id: RelatedCardId) => void;
-  /** Hand each card a drag handle (desktop column tiers). */
+  /** Make each panel's ⠿ handle a drag source (desktop column tiers). */
   draggable?: boolean;
   /** The drag's start / end, for the stack that draws the drop line. */
   onDragStart?: (id: RelatedCardId) => void;
@@ -42,10 +42,11 @@ export interface RelatedArrangementControls {
 }
 
 /**
- * The reader's arrangement of a page's related cards, live (objectstack#27055,
- * Targets 7 and 10): the stored value laid over the default order, the edits
- * written back through the host, and each card's chrome (⋯ menu, collapse,
- * hide, enlarge, drag handle). One hook for the column tiers' card stack and
+ * The reader's arrangement of a page's related panels, live (objectstack#27055,
+ * Targets 7 and 10; objectstack#27524, Targets 1 and 10): the stored value
+ * laid over the default order, the edits written back through the host, and
+ * each panel's chrome (the ⠿ handle's drag and ⌥↑ / ⌥↓, the ⋯ menu's hide,
+ * the way to the whole list). One hook for the column tiers' panel stack and
  * the tabbed tier's 关联 tab, so both read and write the same arrangement.
  *
  * A relationship new since the reader's last drag is stamped as seen the
@@ -84,7 +85,6 @@ export function useRelatedArrangement({
   const chromeOf = (id: RelatedCardId, index: number): RelatedCardChrome => ({
     id,
     fresh: resolved.fresh.has(id),
-    onCollapse: () => edit({ kind: 'collapse', id, collapsed: true }),
     onMoveUp: index > 0 ? () => edit({ kind: 'move-up', id }) : undefined,
     onMoveDown: index < resolved.order.length - 1 ? () => edit({ kind: 'move-down', id }) : undefined,
     onHide: () => edit({ kind: 'hide', id }),
@@ -96,6 +96,11 @@ export function useRelatedArrangement({
             onDragStart: (event: React.DragEvent) => {
               event.dataTransfer.effectAllowed = 'move';
               event.dataTransfer.setData('text/plain', id);
+              // The handle is a few pixels; the reader drags the whole panel.
+              const panel = (event.currentTarget as HTMLElement).closest('[data-related-card-id]');
+              if (panel && typeof event.dataTransfer.setDragImage === 'function') {
+                event.dataTransfer.setDragImage(panel, 16, 16);
+              }
               onDragStart?.(id);
             },
             onDragEnd: () => onDragEnd?.(),

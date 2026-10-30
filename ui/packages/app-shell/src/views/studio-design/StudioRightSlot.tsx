@@ -16,6 +16,8 @@
  *    slot shows the copilot alone (the header reads as a title, not a switch).
  *  - While the properties show, the copilot folds to a 40 px strip at the
  *    slot's foot that leads back to the conversation.
+ *  - The copilot segment and the strip say how many items the copilot
+ *    proposed await the author's confirmation (「N 项待确认」, objectstack#25943).
  *  - Both bodies stay MOUNTED and are hidden by mode: a turn the copilot is
  *    streaming survives a look at the properties, and a pillar's portal target
  *    never disappears under an open editor.
@@ -29,7 +31,7 @@
 import * as React from 'react';
 import { ArrowRight, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { cn } from '@object-ui/components';
-import { t } from '../metadata-admin/i18n.js';
+import { t, tFormat } from '../metadata-admin/i18n.js';
 import { STUDIO_SLOT_WIDTH, type StudioSlotMode } from './studioRightSlotState.js';
 
 export interface StudioRightSlotProps {
@@ -42,8 +44,11 @@ export interface StudioRightSlotProps {
   hasProps: boolean;
   /** The agent catalog serves a copilot (reported by `copilot`). */
   copilotAvailable: boolean;
-  /** objectui#11666 — a plan the copilot proposed awaits the author's approval. */
-  planPending: boolean;
+  /**
+   * objectui#11666 / objectstack#25943 — how many items the copilot proposed
+   * await the author's confirmation; 0 when none.
+   */
+  planPendingCount: number;
   /** The copilot body (`StudioChatDock`). Always mounted, hidden by mode. */
   copilot: React.ReactNode;
   /** Callback ref for the properties portal target. */
@@ -62,7 +67,7 @@ export function StudioRightSlot({
   onModeChange,
   hasProps,
   copilotAvailable,
-  planPending,
+  planPendingCount,
   copilot,
   propsTargetRef,
   wideWidth,
@@ -73,13 +78,19 @@ export function StudioRightSlot({
   const shown = open && (hasProps || copilotAvailable);
   const showsProps = mode === 'props';
   const switchable = hasProps && copilotAvailable;
+  const planPending = planPendingCount > 0;
   const planMarkerId = React.useId();
+  const pendingText = planPending
+    ? tFormat('engine.studio.slot.pendingCount', locale, { count: planPendingCount })
+    : '';
   const planMarker = planPending ? (
     <span
       aria-hidden="true"
       data-testid="studio-slot-plan-pending"
-      className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
-    />
+      className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
+    >
+      {planPendingCount}
+    </span>
   ) : null;
   const segment = (value: StudioSlotMode) =>
     cn(
@@ -148,7 +159,7 @@ export function StudioRightSlot({
           )}
           {planPending && (
             <span id={planMarkerId} hidden>
-              {t('engine.studio.slot.planPending', locale)}
+              {pendingText}
             </span>
           )}
         </div>
@@ -178,7 +189,7 @@ export function StudioRightSlot({
               {planPending && (
                 <>
                   {' · '}
-                  <span data-testid="studio-slot-strip-plan-pending">{t('engine.studio.slot.planPending', locale)}</span>
+                  <span data-testid="studio-slot-strip-plan-pending">{pendingText}</span>
                 </>
               )}
             </span>

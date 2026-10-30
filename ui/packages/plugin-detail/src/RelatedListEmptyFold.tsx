@@ -40,11 +40,27 @@
  * it gains a record it answers "not empty" and returns to its place. A refetch
  * keeps the list's last answer while it is in flight (the block's `reportListEmpty`), so a
  * write elsewhere does not unfold and refold the whole stack around it.
+ *
+ * ## The panel line (objectstack#27524, Target 2)
+ *
+ * In the record page's related column the lists are panels
+ * (`RelatedListCompactContext`), and their empty members fold into one line
+ * of another form: 「还有 N 个空关联 · 名字 · … · 展开」. There the rule differs
+ * in two places: a panel folds whenever it is empty — whether or not another
+ * panel has records — because 展开 brings every folded panel back with its
+ * own ＋ and ⋯, so the line need not carry New; and 展开 is the reader's,
+ * for this record: the stack then folds nothing while it shows the record 展开
+ * was pressed on. A view that steps to another record in place (the pane's
+ * ↓ ↑) keeps its column element, so the record, not the element, scopes it:
+ * the next record folds again. A panel with an authoring notice still keeps
+ * its own place.
  */
 
 import * as React from 'react';
 import { Plus } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
+import { useRecordContext } from '@object-ui/react';
+import { RelatedListCompactContext } from './relatedListCompact';
 import { useDetailTranslation } from './useDetailTranslation';
 
 /** What one list of a stack tells the others. */
@@ -79,10 +95,11 @@ const NO_FOLD: EmptyFoldVerdict = { folded: [], host: null };
 /** The fold rule, over the stack's lists in document order; the file header states it in words. */
 function decideEmptyFold(
   ordered: ReadonlyArray<Pick<EmptyFoldMemberState, 'empty' | 'foldable'> & { id: string }>,
+  panels = false,
 ): EmptyFoldVerdict {
   if (ordered.length < 2) return NO_FOLD;
   if (ordered.some((m) => m.empty === null)) return NO_FOLD;
-  if (!ordered.some((m) => m.empty === false)) return NO_FOLD;
+  if (!panels && !ordered.some((m) => m.empty === false)) return NO_FOLD;
   const folded = ordered.filter((m) => m.empty === true && m.foldable).map((m) => m.id);
   if (folded.length === 0) return NO_FOLD;
   return { folded, host: ordered[ordered.length - 1].id };
@@ -90,6 +107,11 @@ function decideEmptyFold(
 
 class Stack {
   readonly members = new Map<string, FoldStackEntry>();
+  /**
+   * The record the reader pressed 展开 on, as `object:id`: while the stack
+   * shows it, nothing folds (panels only). Another record folds again.
+   */
+  expandedFor: string | null = null;
   private readonly listeners = new Set<() => void>();
   private version = 0;
   subscribe = (listener: () => void): (() => void) => {
@@ -154,6 +176,9 @@ export const RelatedListStackSlot: React.FC<RelatedListStackSlotProps> = ({
 }) => {
   const id = React.useId();
   const [root, setRoot] = React.useState<HTMLDivElement | null>(null);
+  const panels = React.useContext(RelatedListCompactContext);
+  const record = useRecordContext();
+  const recordKey = `${record?.objectName ?? ''}:${record?.recordId ?? ''}`;
 
   const onNewRef = React.useRef(onNew);
   React.useLayoutEffect(() => {
@@ -202,16 +227,66 @@ export const RelatedListStackSlot: React.FC<RelatedListStackSlotProps> = ({
   React.useSyncExternalStore(stack ? stack.subscribe : noSubscribe, stack ? stack.getVersion : noVersion, noVersion);
 
   const ordered = stack ? stack.ordered() : [];
-  const verdict = decideEmptyFold(ordered);
+  const verdict = panels && stack?.expandedFor === recordKey ? NO_FOLD : decideEmptyFold(ordered, panels);
   const folded = verdict.folded.includes(id);
   const line =
     verdict.host === id ? ordered.filter((m) => verdict.folded.includes(m.id)) : null;
+  const expand = () => {
+    if (!stack) return;
+    stack.expandedFor = recordKey;
+    stack.emit();
+  };
 
   return (
     <div ref={setRoot} className={className} {...rootProps}>
       <div hidden={folded || undefined}>{children}</div>
-      {line && line.length > 0 && <EmptyFoldLine entries={line} standalone={folded} />}
+      {line && line.length > 0 && (
+        panels ? (
+          <EmptyPanelsLine entries={line} standalone={folded} onExpand={expand} />
+        ) : (
+          <EmptyFoldLine entries={line} standalone={folded} />
+        )
+      )}
     </div>
+  );
+};
+
+/**
+ * The related column's line for its empty panels (objectstack#27524, Target
+ * 2): 「还有 N 个空关联 · 名字 · … · 展开」. 展开 draws them again, in their
+ * places, each with its own header controls.
+ */
+const EmptyPanelsLine: React.FC<{ entries: FoldStackEntry[]; standalone: boolean; onExpand: () => void }> = ({
+  entries,
+  standalone,
+  onExpand,
+}) => {
+  const { t } = useDetailTranslation();
+  return (
+    <p
+      data-testid="record-related-panels-empty-fold"
+      className={cn(
+        'flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-[10px] border border-border bg-card px-3 py-2 text-xs text-muted-foreground',
+        !standalone && 'mt-4',
+      )}
+    >
+      <span>{t('detail.relatedEmptyFold', { count: entries.length, defaultValue: '{{count}} more empty lists' })}</span>
+      {entries.map((entry) => (
+        <React.Fragment key={entry.id}>
+          <span aria-hidden>·</span>
+          <span data-related-empty-fold-name="">{entry.title}</span>
+        </React.Fragment>
+      ))}
+      <span aria-hidden>·</span>
+      <button
+        type="button"
+        className="rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={onExpand}
+        data-related-empty-fold-expand=""
+      >
+        {t('detail.relatedCardExpand', { defaultValue: 'Expand' })}
+      </button>
+    </p>
   );
 };
 

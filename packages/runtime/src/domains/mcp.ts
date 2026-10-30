@@ -12,10 +12,10 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
-import type { AIActionConfirmation } from '@objectstack/spec/contracts';
+import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
+import { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from '@objectstack/rest';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
-import { isSystemObjectName } from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -827,13 +827,18 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 deps, meta, await readServedObjects(), await readServedActions(),
             );
             for (const { action, objectName, obj } of declarations) {
-                if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
+                if (!objectName) continue;
+                // [#27681] Fail-closed on `sys_*` PER ACTION: the same predicate
+                // `run_action` asks, so an agent that lists sees exactly the
+                // system-object actions it may run (their author's `ai.exposed`).
+                if (actionExec.systemObjectActionExposureError(deps, action, objectName)) continue;
                 if (!actionExec.isHeadlessInvokableAction(deps, action, hasAutomation)) continue;
                 // The script arm — every action `invokeBusinessAction` sends to
-                // the handler registry, i.e. neither the declarative update nor
-                // a flow (its branch order, read the same way). The other two
-                // arms have their own dispatchers and keep their own predicates.
-                if (!actionExec.isDeclarativeUpdateAction(action) && action?.type !== 'flow'
+                // the handler registry, i.e. neither the declarative update, nor
+                // a flow, nor a same-origin `api` action (its branch order, read
+                // the same way; #27506 added the api forward). The other arms
+                // have their own dispatchers and keep their own predicates.
+                if (!actionExec.isDeclarativeUpdateAction(action) && action?.type !== 'flow' && action?.type !== 'api'
                     && !hasHandler(objectName, actionExec.resolveActionHandlerKeys(action))) continue;
                 // [#2849 / ADR-0011] MCP is an AI surface: only actions the
                 // author explicitly opted in via `ai.exposed` are listed.
@@ -878,7 +883,55 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
         }),
+        // ── Federation surface (McpFederationBridge, #27745) ───────
+        // The `external-datasource` service Studio's datasource page reaches
+        // through `…/external/tables` and `…/tables/:remote/import`, refused
+        // on the same two capabilities those routes gate on.
+        listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
+            (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
+        importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
+            (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
     };
+}
+
+/**
+ * [#27745] The `external-datasource` service for one federation tool call, or
+ * the refusal the REST twin answers: `403 PERMISSION_DENIED` without the
+ * capability the call's kind needs (asked first, as the route asks it, so a
+ * caller without it cannot learn which services the host wires), `503
+ * SERVICE_UNAVAILABLE` on a host with no federation service.
+ */
+async function federationService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    ec: any,
+    kind: 'read' | 'write',
+): Promise<IExternalDatasourceService> {
+    const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
+    const held: unknown[] = Array.isArray(ec?.systemPermissions) ? ec.systemPermissions : [];
+    if (!held.includes(required)) {
+        throw Object.assign(
+            new Error(
+                kind === 'write'
+                    ? `Creating metadata from an external datasource requires the \`${required}\` capability.`
+                    : `Introspecting an external datasource requires the \`${required}\` capability.`,
+            ),
+            { code: 'PERMISSION_DENIED', status: 403 },
+        );
+    }
+    let service: IExternalDatasourceService | undefined;
+    try {
+        service = await deps.resolveService(context, 'external-datasource', context.environmentId);
+    } catch {
+        service = undefined;
+    }
+    if (!service) {
+        throw Object.assign(new Error('The external-datasource service is not available.'), {
+            code: 'SERVICE_UNAVAILABLE',
+            status: 503,
+        });
+    }
+    return service;
 }
 
 /**
@@ -1122,9 +1175,8 @@ function resumeAdmissionRefusal(
     activationEngine: any,
 ): Error | undefined {
     const { action, objectName } = candidate;
-    if (isSystemObjectName(objectName)) {
-        return resumeDoorError(deps, `Action '${action?.name}' is on a system object and is not exposed via MCP`, 403);
-    }
+    const systemObject = actionExec.systemObjectActionExposureError(deps, action, objectName);
+    if (systemObject) return resumeDoorError(deps, systemObject, 403);
     const exposure = actionExec.actionAiExposureError(deps, action, objectName);
     if (exposure) return resumeDoorError(deps, exposure, 403);
     const permission = actionExec.actionPermissionError(deps, action, ec, objectName);

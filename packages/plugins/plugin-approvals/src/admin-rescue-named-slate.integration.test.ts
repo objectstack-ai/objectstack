@@ -291,6 +291,57 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
     );
   });
 
+  // A `user` approver whose value names no user expands to nobody, exactly as
+  // an unstaffed graph target does: the same per-slot warning, no slot of its
+  // own, and the node's onEmptyApprovers decides a slate this leaves empty —
+  // here the default admin_rescue. Before, the bare value went onto the slate
+  // as a slot no one could ever take, and nothing was logged.
+  describe('a `user` approver naming no user expands to nobody (#27397)', () => {
+    const PHANTOM = { type: 'user', value: 'usr_does_not_exist' };
+    const phantomLine = "approver 'user:usr_does_not_exist' expanded to nobody";
+
+    it('alone, it takes the default admin_rescue route with the graph types\' warning, and holds no slot', async () => {
+      const before = warnings.length;
+      const row = await open('phantom_user', [PHANTOM]);
+      expect([...row.pending_approvers].sort()).toEqual(['u_admin', 'u_owner']);
+      expect(row.pending_approvers).not.toContain('usr_does_not_exist');
+      expect(told(row.id)).toEqual(['u_admin', 'u_owner']);
+      const lines = warnings.slice(before);
+      expect(lines.filter((w) => w.includes(phantomLine))).toHaveLength(1);
+      expect(lines.filter((w) => w.includes("opening on this organization's administrators"))).toHaveLength(1);
+      expect((await snapshotOf(row.id)).__resolvedFrom['admin_rescue:abandoned']).toEqual([]);
+    });
+
+    it('beside a real user, only the phantom is dropped — and it is still named in the log', async () => {
+      const before = warnings.length;
+      const row = await open('phantom_mixed', [{ type: 'user', value: 'u_alice' }, PHANTOM]);
+      expect(row.pending_approvers).toEqual(['u_alice']);
+      expect(told(row.id)).toEqual(['u_alice']);
+      const lines = warnings.slice(before);
+      expect(lines.filter((w) => w.includes(phantomLine))).toHaveLength(1);
+      expect(lines.filter((w) => w.includes("opening on this organization's administrators"))).toEqual([]);
+    });
+
+    it('an email no account carries is dropped; one an account carries keeps its slot', async () => {
+      const row = await open('phantom_email', [
+        { type: 'user', value: 'u_alice@example.com' }, { type: 'user', value: 'nobody@example.com' },
+      ]);
+      expect(row.pending_approvers).toEqual(['u_alice@example.com']);
+    });
+
+    it('CONTROL: a person of another organization\'s directory, named outright, keeps the slot (ADR-0105 D9)', async () => {
+      const row = await open('other_org_user', [{ type: 'user', value: 'u_other_owner' }]);
+      expect(row.pending_approvers).toEqual(['u_other_owner']);
+    });
+
+    it('CONTROL: a real user keeps the slot and no expanded-to-nobody line is logged', async () => {
+      const before = warnings.length;
+      const row = await open('real_user', [{ type: 'user', value: 'u_alice' }]);
+      expect(row.pending_approvers).toEqual(['u_alice']);
+      expect(warnings.slice(before).filter((w) => w.includes('expanded to nobody'))).toEqual([]);
+    });
+  });
+
   // Last of the cases whose slate is `org_a`'s administrators: the delegation
   // it writes stays, and no case after it reads that slate.
   it('an administrator out of office is covered by their delegate, as any named approver is', async () => {

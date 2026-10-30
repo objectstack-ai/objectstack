@@ -57,9 +57,15 @@ const CONTEXT = { user: { role: 'admin' }, record: { status: 'active' } };
 const TEMPLATE_TRUE = '${user.role === "admin"}';
 const TEMPLATE_FALSE = '${user.role === "guest"}';
 
-describe('toPredicateInput — a bare expression is wrapped (unchanged)', () => {
-  it('wraps a bare expression as a `${…}` template', () => {
-    expect(toPredicateInput('data.age >= 18')).toBe('${data.age >= 18}');
+describe('toPredicateInput — a bare expression is CEL shorthand (objectstack#27457)', () => {
+  it('normalizes a bare expression into the `cel` envelope, as the spec\'s input schema does', () => {
+    // `@objectstack/spec`'s `ExpressionInputSchema` transforms a bare string
+    // into `{ dialect: 'cel', source }`; the console's normalizer emits the
+    // same value, so the predicate reaches the CEL engine the server uses.
+    // It used to be wrapped as `${data.age >= 18}`, the legacy JS spelling.
+    expect(toPredicateInput('data.age >= 18')).toEqual({ dialect: 'cel', source: 'data.age >= 18' });
+    expect(toPredicateInput("'org_owner' in current_user.positions"))
+      .toEqual({ dialect: 'cel', source: "'org_owner' in current_user.positions" });
   });
 
   it('wraps a bare `source` out of a non-cel envelope', () => {
@@ -79,7 +85,9 @@ describe('toPredicateInput — a bare expression is wrapped (unchanged)', () => 
     expect(toPredicateInput(null)).toBeUndefined();
     expect(toPredicateInput(undefined)).toBeUndefined();
     expect(toPredicateInput({ dialect: 'cel', source: '' })).toBeUndefined();
-    expect(toPredicateInput('   ')).toBe('${   }');
+    // A blank bare string is the blank `cel` envelope the evaluator diagnoses
+    // as "no gate" (ADR-0137 D4), the same value its envelope spelling keeps.
+    expect(toPredicateInput('   ')).toEqual({ dialect: 'cel', source: '   ' });
     // objectui#11358: a present value with no evaluable `source` is no longer
     // folded into `undefined` (absent). It is kept as a `cel` envelope with no
     // `source` — declared, and a fault to the evaluator — and normalizing that
@@ -101,8 +109,10 @@ describe('toPredicateInput — an already-`${…}` string is already normalized 
     // surface calls it on a value it did not produce, and `${…}` is one of the
     // shapes it produces, so a non-idempotent normalizer corrupts its own
     // output the moment two call sites are chained.
+    // A bare string normalizes to a `cel` envelope, which the envelope branch
+    // re-emits as an equal (fresh) envelope.
     const once = toPredicateInput('data.age >= 18');
-    expect(toPredicateInput(once)).toBe(once);
+    expect(toPredicateInput(once)).toEqual(once);
     expect(toPredicateInput(toPredicateInput(TEMPLATE_TRUE))).toBe(TEMPLATE_TRUE);
   });
 

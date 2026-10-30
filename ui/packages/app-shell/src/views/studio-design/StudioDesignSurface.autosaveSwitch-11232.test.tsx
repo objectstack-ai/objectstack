@@ -18,9 +18,11 @@
  * After a switch it sends nothing until the caller's dirty flag has fallen
  * (the new item's load installs its own buffer and clears it), and a save's
  * claim on its buffer reads moved once the item has changed. The previous
- * item's pending edit is dropped, which is what the Data pillar's switch has
- * always done, and what every pillar did whenever the new load landed inside
- * the debounce. The Data pillar is the control.
+ * item's pending edit is dropped by the hook, which is what every pillar did
+ * whenever the new load landed inside the debounce. The Data pillar is the
+ * control: its rail sends the pending edit to its own object with the hook's
+ * `flush` before it switches (objectstack#27511), so nothing of it reaches the
+ * object opened next either.
  *
  * objectui#11203 (folded in): a package switch keeps the Interfaces pillar
  * mounted, so the nav editor's dirty flag and open editing survived into the
@@ -431,13 +433,13 @@ describe('Interfaces page inspector — a save in flight across a page switch (o
 });
 
 describe('Data pillar — an object switch inside the debounce, the control (objectui#11232)', () => {
-  it('sends nothing to the newly opened object, as it always has', async () => {
+  it('sends nothing to the newly opened object; the pending edit goes to its own (objectstack#27511)', async () => {
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
         <DataPillar packageId={PKG} />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText(/^\d+ fields$/)).toHaveTextContent('2 fields'), SLOW);
+    await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('2 fields'), SLOW);
 
     await addFieldFromGrid();
     const release = holdLoad('object', 'acme_note');
@@ -445,10 +447,14 @@ describe('Data pillar — an object switch inside the debounce, the control (obj
     await pastDebounce();
 
     expect(savesOf('object', 'acme_note')).toEqual([]);
-    expect(server.saves).toEqual([]);
+    // objectstack#27511 — the switch sent the edit to Task before it opened Note.
+    expect(savesOf('object', 'acme_task').map((b) => readFields(b.fields).entries.map((e) => e.name))).toEqual([
+      ['title', 'status', 'new_field'],
+    ]);
+    server.saves.length = 0;
 
     await release();
-    await waitFor(() => expect(screen.getByText(/^\d+ fields$/)).toHaveTextContent('1 fields'), SLOW);
+    await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('1 field'), SLOW);
     await pastDebounce(1800);
     expect(server.saves).toEqual([]);
     // The control's own control: an edit on the opened object saves to it.
@@ -687,7 +693,7 @@ describe("the load window: nothing of the previous item is offered, shown or sav
         <DataPillar packageId={PKG} />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText(/^\d+ fields$/)).toHaveTextContent('2 fields'), SLOW);
+    await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('2 fields'), SLOW);
 
     const release = holdLoad('object', 'acme_note');
     fireEvent.click(screen.getByRole('button', { name: /Note/ }));
@@ -697,12 +703,12 @@ describe("the load window: nothing of the previous item is offered, shown or sav
     await pastDebounce();
     expect(savesRead()).toEqual([]);
     const shownDuringLoad = {
-      fieldCount: screen.queryByText(/^\d+ fields$/) !== null,
+      fieldCount: screen.queryByText(/^\d+ fields?( \(\+\d+ system\))?$/) !== null,
       addField: screen.queryByTestId(ADD_FIELD_OFFERED) !== null,
     };
 
     await release();
-    await waitFor(() => expect(screen.getByText(/^\d+ fields$/)).toHaveTextContent('1 fields'), SLOW);
+    await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('1 field'), SLOW);
     await pastDebounce(1800);
     expect(server.saves).toEqual([]);
 
@@ -759,11 +765,11 @@ describe('a package switch: Automations and Data open nothing of the previous pa
   it("Data: package A's open object is not kept; a field added saves package B's own object, in B", async () => {
     seedPackageB();
     render(surfaceTree('data'));
-    await waitFor(() => expect(screen.getByText(/^\d+ fields$/)).toHaveTextContent('2 fields'), SLOW);
+    await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('2 fields'), SLOW);
 
     await switchToBeta();
     await screen.findByRole('button', { name: /Beta item/ }, SLOW);
-    await waitFor(() => expect(screen.getByText(/^\d+ fields$/)).toBeInTheDocument(), SLOW);
+    await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toBeInTheDocument(), SLOW);
     await addFieldFromGrid();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     expect(server.saves.map((s) => [s.type, s.name, s.packageId, s.body.label, fieldNamesOf(s.body)])).toEqual([

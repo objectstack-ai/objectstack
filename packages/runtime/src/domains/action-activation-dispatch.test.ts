@@ -30,6 +30,9 @@ import type { AutomationResult } from '@objectstack/spec/contracts';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { invokeBusinessAction, disabledActionRefusal } from '../action-execution.js';
+// [#27842] The engine's own sentence producer, so the doubles below serve the
+// sentence the engine serves rather than a transcribed copy of it.
+import { ActionActivationProjection } from '@objectstack/objectql';
 
 const OBJECT = 'crm_lead';
 /**
@@ -78,10 +81,8 @@ function boot(opts: { disabled?: string[]; legacyEngine?: boolean; flowResult?: 
     };
     if (!opts.legacyEngine) {
         ql.isActionEnabled = (name: string) => !disabled.has(name);
-        ql.describeDisabledAction = (name: string) =>
-            `Action '${name}' is disabled — it is switched off for this installation in the packaged-metadata ` +
-            `activation ledger (sys_metadata_activation, ADR-0126 §8). Re-enable the packaged action to arm it again, ` +
-            `or author your own action instead.`;
+        const projection = new ActionActivationProjection();
+        ql.describeDisabledAction = (name: string) => projection.describeDisabled(name);
     }
 
     const metadata: any = {
@@ -129,16 +130,23 @@ describe('door 1 — REST `POST /actions/:object/:action`', () => {
         expect(executeAction).not.toHaveBeenCalled();
     });
 
-    it('the refusal names the ledger, the ADR and the remedy — ⛔ and never a clone', async () => {
+    it('the refusal is a plain sentence for the person who clicked: who can undo it and where — no table, no ADR, ⛔ never a clone', async () => {
         const { dispatcher } = boot({ disabled: [SCRIPT_ACTION.name] });
 
-        const message = messageOf(await dispatcher.handleActions(
-            `/${OBJECT}/${SCRIPT_ACTION.name}`, 'POST', {}, CTX(),
-        ));
+        const res = await dispatcher.handleActions(`/${OBJECT}/${SCRIPT_ACTION.name}`, 'POST', {}, CTX());
+        const message = messageOf(res);
 
-        expect(message).toContain('sys_metadata_activation');
-        expect(message).toContain('ADR-0126 §8');
-        expect(message).toContain('Re-enable the packaged action');
+        // [#27842] The machine half stays machine-readable on the envelope.
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe('ACTION_DISABLED');
+        // The words are the contract here (they are what the toast reads), so
+        // the first sentence is pinned, and the remedy beside it.
+        expect(message.startsWith('This action is turned off for this deployment.')).toBe(true);
+        expect(message).toContain('An administrator can turn it on again under Setup › Packaged automation');
+        // No system table, no ADR citation, no tracker number in what an end user reads.
+        expect(message).not.toContain('sys_metadata_activation');
+        expect(message).not.toMatch(/ADR-\d+/);
+        expect(message).not.toMatch(/#\d+/);
         // Action-clone is NOT chartered (§8 item 2) — the sentence must not
         // advertise machinery that does not exist.
         expect(message).not.toMatch(/clone/i);
@@ -237,7 +245,9 @@ describe('door 2 — the MCP `run_action` bridge', () => {
         // door serves — one refusal, two transports.
         expect((thrown as any).code).toBe('ACTION_DISABLED');
         expect((thrown as any).status).toBe(409);
-        expect(String(thrown.message)).toContain('sys_metadata_activation');
+        // [#27842] The same plain sentence the REST door serves, from the one producer.
+        expect(String(thrown.message)).toBe(new ActionActivationProjection().describeDisabled(SCRIPT_ACTION.name));
+        expect(String(thrown.message).startsWith('This action is turned off for this deployment.')).toBe(true);
         expect(h.executeAction).not.toHaveBeenCalled();
     });
 
@@ -272,5 +282,13 @@ describe('the shared guard itself', () => {
             status: 409,
             message: `bespoke sentence for ${SCRIPT_ACTION.name}`,
         });
+    });
+
+    it('[#27842] an engine that answers the switch but not the sentence still refuses in plain words', () => {
+        const refusal = disabledActionRefusal({} as any, { isActionEnabled: () => false }, SCRIPT_ACTION);
+
+        expect(refusal?.code).toBe('ACTION_DISABLED');
+        expect(refusal?.status).toBe(409);
+        expect(refusal?.message).toBe('This action is turned off for this deployment.');
     });
 });

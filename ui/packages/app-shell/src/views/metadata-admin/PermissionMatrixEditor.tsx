@@ -95,6 +95,7 @@ import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from 
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
 // objectstack#26858 — the served verdict the RLS clause editors read at their paths.
 import {
+  DraftVerdictBodyContext,
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
@@ -113,6 +114,7 @@ import {
   translateValidationMessage,
   useMetadataLocale,
 } from './i18n.js';
+import { MatrixScrollPane } from './MatrixScrollPane.js';
 import { PermissionAdvancedFacets } from './PermissionAdvancedFacets.js';
 import { CelPredicateField } from './CelPredicateField.js';
 import type { CelLintIssue } from './celAuthoring.js';
@@ -808,6 +810,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // draft's while the package door holds one (what its publish will refuse),
   // else the layered read's. Taken off each read, never computed here.
   const [servedVerdict, setServedVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // objectstack#27482 — the body that verdict judged, set beside it from the
+  // same read: an editor holds the save on a server error at its path only
+  // while it still shows the text judged here.
+  const [servedVerdictBody, setServedVerdictBody] = React.useState<unknown>(undefined);
   const verdictReadSeq = React.useRef(0);
   const [saving, setSaving] = React.useState(false);
   // objectui#11787 — when the package door's last draft save landed, for the
@@ -947,6 +953,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             draftDiagnostics: draftEnvelopeDiagnostics(pendingDraft),
             layered: lay,
           }),
+        );
+        // The same choice `editedItemDiagnostics` makes, for the body judged.
+        setServedVerdictBody(
+          pendingDraft && draftEnvelopeDiagnostics(pendingDraft) ? pendingDraftBody(pendingDraft) : lay?.effective,
         );
         // ARTIFACT tier input (objectui#4518) — the `code` layer, and its
         // `provenance` (objectui#4526), of the SAME envelope the display
@@ -1093,7 +1103,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
 
   // Count of blocking CEL parse errors in the RLS editor — gates Save
   // (objectui#2413): a malformed predicate silently mis-scopes rows, so we
-  // don't let it persist.
+  // don't let it persist. objectstack#27482 — it counts the served verdict's
+  // errors at a clause's path too, while that clause still shows the text
+  // the verdict judged (`CelPredicateField`'s `verdictPath`).
   const [celErrorCount, setCelErrorCount] = React.useState(0);
   // objectstack#25866 — blocking lint findings on the field rows' `when`
   // conditions, keyed `${object}.${field}`. Held like the RLS clauses: a
@@ -1487,8 +1499,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // verdict on its next read; the one held described the body before it.
         // Read off the save's path, so a later read (or a load) wins.
         const seq = ++verdictReadSeq.current;
-        void readDraftForSave(client, type, payload.name, packageId).then((read) => {
-          if (seq === verdictReadSeq.current) setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+        void readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(
+          client,
+          type,
+          payload.name,
+          packageId,
+        ).then((read) => {
+          if (seq !== verdictReadSeq.current) return;
+          setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+          setServedVerdictBody(pendingDraftBody(read.answer) ?? undefined);
         });
         // Let the surface count it.
         onDraftSaved?.();
@@ -1522,6 +1541,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         resetDraftBaseline(toDisplayDraft((lay?.effective ?? toSave) as PermissionSetDraft));
         verdictReadSeq.current += 1;
         setServedVerdict(editedItemDiagnostics({ hasDraft: false, draftDiagnostics: undefined, layered: lay }));
+        setServedVerdictBody(lay?.effective);
         setPostSaveRereadFailed(rereadFailed);
         // The write landed, so the server holds the set now whatever the
         // confirming read said (objectui#7611: its holders can be listed). Only
@@ -2206,7 +2226,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 t={t}
               />
               {objectInheritedLegendEl}
-              <div className="min-h-0 flex-1 overflow-auto">
+              <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
                 <StudioObjectMatrix
                   objects={filteredObjects}
                   draft={draft}
@@ -2226,7 +2246,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                   onFieldWhenLint={reportFieldWhenLint}
                   onOpenOwd={onOpenOwd}
                 />
-              </div>
+              </MatrixScrollPane>
               {writable && (
                 <p className="shrink-0 border-t px-6 py-2.5 text-xs text-muted-foreground">
                   {t('engine.studio.access.bulkHint')}
@@ -2238,18 +2258,20 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </div>
             <div hidden={facetTab === null} data-testid="perm-tabpanel-facets" className="min-h-0 flex-1 overflow-auto">
               <DraftVerdictContext.Provider value={servedVerdict}>
-                <PermissionAdvancedFacets
-                  draft={draft}
-                  setDraft={setDraft}
-                  writable={writable}
-                  allSetNames={allSetNames}
-                  loadObjectFields={loadObjectFields}
-                  onCelErrorsChange={setCelErrorCount}
-                  t={t}
-                  only={facetTab}
-                  packageBound={!!packageId}
-                  objectAccessDefault={objectAccessDefault}
-                />
+                <DraftVerdictBodyContext.Provider value={servedVerdictBody}>
+                  <PermissionAdvancedFacets
+                    draft={draft}
+                    setDraft={setDraft}
+                    writable={writable}
+                    allSetNames={allSetNames}
+                    loadObjectFields={loadObjectFields}
+                    onCelErrorsChange={setCelErrorCount}
+                    t={t}
+                    only={facetTab}
+                    packageBound={!!packageId}
+                    objectAccessDefault={objectAccessDefault}
+                  />
+                </DraftVerdictBodyContext.Provider>
               </DraftVerdictContext.Provider>
             </div>
           </div>
@@ -2397,7 +2419,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         {objectInheritedLegendEl}
 
         {/* Matrix */}
-        <div className="flex-1 overflow-auto">
+        <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
           <PermissionTable
             objects={filteredObjects}
             draft={draft}
@@ -2421,17 +2443,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               admin scope, structured editors instead of raw JSON. Collapsed by
               default so they don't crowd the object matrix. */}
           <DraftVerdictContext.Provider value={servedVerdict}>
-            <PermissionAdvancedFacets
-              draft={draft}
-              setDraft={setDraft}
-              writable={writable}
-              allSetNames={allSetNames}
-              loadObjectFields={loadObjectFields}
-              onCelErrorsChange={setCelErrorCount}
-              t={t}
-              packageBound={!!packageId}
-              objectAccessDefault={objectAccessDefault}
-            />
+            <DraftVerdictBodyContext.Provider value={servedVerdictBody}>
+              <PermissionAdvancedFacets
+                draft={draft}
+                setDraft={setDraft}
+                writable={writable}
+                allSetNames={allSetNames}
+                loadObjectFields={loadObjectFields}
+                onCelErrorsChange={setCelErrorCount}
+                t={t}
+                packageBound={!!packageId}
+                objectAccessDefault={objectAccessDefault}
+              />
+            </DraftVerdictBodyContext.Provider>
           </DraftVerdictContext.Provider>
           {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
               (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
@@ -2445,13 +2469,23 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
             </div>
           )}
-        </div>
+        </MatrixScrollPane>
       </div>
 
       {dialogsEl}
     </PageShell>
   );
 }
+
+/**
+ * objectstack#27866 — the matrix's Object column, header and rows alike: pinned
+ * to the left edge of the scroll pane over an opaque background, so on a phone
+ * a row's boxes keep their object in view. Once the pane has scrolled sideways
+ * (`MatrixScrollPane`'s `data-scrolled-x`) the column draws its right edge.
+ * A row tint is laid on as a background image, over the opaque colour.
+ */
+const STICKY_OBJECT_CELL =
+  'sticky left-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:hidden after:w-px after:bg-border group-data-[scrolled-x=true]/matrix:after:block';
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Subcomponent: PermissionTable                                      */
@@ -2512,8 +2546,8 @@ function PermissionTable({
     // objectstack#26885 the Export column (one more w-14).
     <table className="w-full min-w-[1304px] text-sm">
       <thead className="sticky top-0 bg-background border-b z-10">
-        <tr>
-          <th className="text-left px-4 py-2 font-medium w-72">{t('perm.col.object')}</th>
+        <tr className="h-9">
+          <th className={cn(STICKY_OBJECT_CELL, 'text-left px-4 py-2 font-medium w-36 sm:w-72 z-[1]')}>{t('perm.col.object')}</th>
           {objectActions.map((a) => (
             <th
               key={a.key as string}
@@ -2546,12 +2580,17 @@ function PermissionTable({
           const open = expanded.has(o.name);
           return (
             <React.Fragment key={o.name}>
-              <tr className="border-b hover:bg-muted/30">
-                <td className="px-2 py-1.5 align-middle">
+              <tr className="group/row border-b hover:bg-muted/30">
+                <td
+                  className={cn(
+                    STICKY_OBJECT_CELL,
+                    'px-2 py-1.5 align-middle z-[1] group-hover/row:bg-gradient-to-r group-hover/row:from-muted/30 group-hover/row:to-muted/30',
+                  )}
+                >
                   <button
                     type="button"
                     onClick={() => onToggleExpand(o.name)}
-                    className="inline-flex items-center gap-1.5 hover:text-foreground"
+                    className="inline-flex items-center gap-1.5 text-left hover:text-foreground"
                   >
                     {open ? (
                       <ChevronDown className="h-3.5 w-3.5" />
@@ -2559,8 +2598,9 @@ function PermissionTable({
                       <ChevronRight className="h-3.5 w-3.5" />
                     )}
                     <span className="font-medium">{o.label ?? o.name}</span>
+                    {/* A phone keeps the pinned column narrow: the label alone. */}
                     {o.label && (
-                      <span className="text-xs text-muted-foreground">({o.name})</span>
+                      <span className="hidden text-xs text-muted-foreground sm:inline">({o.name})</span>
                     )}
                   </button>
                   {o.accessDefault === 'private' && (
@@ -2808,7 +2848,7 @@ function StudioObjectMatrix({
     <table className="w-full min-w-[1304px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
       <thead className="sticky top-0 z-10">
         <tr className="h-9 border-y bg-sidebar text-xs font-medium text-muted-foreground">
-          <th className="pl-6 pr-3 text-left font-medium">{t('perm.col.object')}</th>
+          <th className={cn(STICKY_OBJECT_CELL, 'pl-6 pr-3 text-left font-medium z-[1] bg-sidebar')}>{t('perm.col.object')}</th>
           <th className="w-28 px-3 text-left font-medium">{t('engine.studio.access.colOwd')}</th>
           {objectActions.map((a, i) => (
             <th key={a.key as string} title={a.tip} className={cn('w-[52px] px-1 text-center font-medium', divider(i))}>
@@ -2931,7 +2971,13 @@ function StudioObjectRow({
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
         }}
       >
-        <td className="py-1 pl-6 pr-3 align-middle">
+        <td
+          className={cn(
+            STICKY_OBJECT_CELL,
+            'py-1 pl-6 pr-3 align-middle z-[1]',
+            active && 'bg-gradient-to-r from-primary/5 to-primary/5',
+          )}
+        >
           <button
             type="button"
             onClick={() => onToggleExpand(o.name)}
@@ -3064,6 +3110,13 @@ function StudioObjectRow({
  * background so the boxes scrolling under it do not show through.
  */
 const FIELD_NAME_CELL = 'sticky left-0 z-[1] bg-background pr-2';
+
+/**
+ * objectstack#27866 — the field sub-table's header cells: pinned to the top of
+ * the scroll pane just under the matrix's header row (`h-9`), over an opaque
+ * background, for as long as the sub-table is in view.
+ */
+const FIELD_HEAD_CELL = 'sticky top-9 z-[2] bg-background';
 
 /**
  * The inherited look, shared by object and field boxes: grey with a dashed
@@ -3234,6 +3287,15 @@ function FieldsSubTable({
     ? offered.filter((f) => f.name.toLowerCase().includes(q) || (f.label ?? '').toLowerCase().includes(q))
     : offered;
   const visibleNames = visible.map((f) => f.name);
+  // objectstack#27866 — two offered fields may share a label (an authored
+  // `owner` beside the platform's `owner_id`, both "Owner"); such a row draws
+  // its API name as the distinguishing text rather than as a muted aside.
+  const labelCounts = new Map<string, number>();
+  for (const f of offered) {
+    const l = (f.label ?? f.name).trim().toLowerCase();
+    labelCounts.set(l, (labelCounts.get(l) ?? 0) + 1);
+  }
+  const sharesLabel = (f: FieldSummary) => (labelCounts.get((f.label ?? f.name).trim().toLowerCase()) ?? 0) > 1;
   return (
     <div className="space-y-2">
       {/* Field toolbar (B4): filter + bulk over the visible field set. The
@@ -3300,14 +3362,17 @@ function FieldsSubTable({
         <div className="text-xs text-muted-foreground">{t('perm.field.filterEmpty')}</div>
       ) : (
         <table className="w-full text-xs">
-          <thead>
+          <thead data-testid={`perm-field-head-${objectName}`}>
             <tr className="text-muted-foreground">
               {/* objectstack#26846 — the name column stays in view while the
-                  matrix scrolls sideways (FIELD_NAME_CELL). */}
-              <th className={cn('text-left py-1 font-medium', FIELD_NAME_CELL)}>{t('perm.field.col.name')}</th>
-              <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.read')}>{t('perm.field.read')}</th>
-              <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
-              <th className="px-2 py-1 font-medium text-left" title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
+                  matrix scrolls sideways (FIELD_NAME_CELL).
+                  objectstack#27866 — the header pins under the matrix's own
+                  (FIELD_HEAD_CELL), so a long field list scrolled into view is
+                  labelled by its own columns, not by the object columns above. */}
+              <th className={cn('text-left py-1 font-medium', FIELD_NAME_CELL, FIELD_HEAD_CELL, 'z-[3]')}>{t('perm.field.col.name')}</th>
+              <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.read')}>{t('perm.field.read')}</th>
+              <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
+              <th className={cn('px-2 py-1 font-medium text-left', FIELD_HEAD_CELL)} title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
             </tr>
           </thead>
           <tbody>
@@ -3320,10 +3385,21 @@ function FieldsSubTable({
               return (
                 <React.Fragment key={f.name}>
                   <tr className="border-t border-muted">
-                    <td className={cn('py-1', FIELD_NAME_CELL)} data-testid={`perm-field-name-${objectName}-${f.name}`}>
+                    <td
+                      className={cn('py-1', FIELD_NAME_CELL)}
+                      data-testid={`perm-field-name-${objectName}-${f.name}`}
+                      data-shared-label={sharesLabel(f) || undefined}
+                    >
                       {f.label ?? f.name}
                       {f.label && (
-                        <span className="ml-1 text-muted-foreground">({f.name})</span>
+                        <span
+                          className={cn(
+                            'ml-1',
+                            sharesLabel(f) ? 'font-mono font-medium text-foreground' : 'text-muted-foreground',
+                          )}
+                        >
+                          ({f.name})
+                        </span>
                       )}
                     </td>
                     <td className="px-2 py-1 text-center">

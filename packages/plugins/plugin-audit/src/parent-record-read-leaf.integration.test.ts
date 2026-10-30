@@ -46,6 +46,13 @@
  * records through the real CRUD mirror (its `created` activity row and its
  * `create` ledger row), the ledger's rows about no record directly, as their
  * producers write them.
+ *
+ * [#26750] The ledger's rows about no record carry the Default Organization,
+ * as the settings service stamps a tenant-scope change: a row with no
+ * `tenant_id` is deployment-level, served to the platform administrator alone,
+ * and no reader here is. The clause the ledger ANDs after its gate for every
+ * other reader is taken off what the observer records, so the WHERE measured
+ * below is the gate's own; the holder's case pins that the clause is there.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -54,10 +61,10 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
-import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
+import { LEDGER_AUDIT_CAPABILITY, ledgerRowAboutAnOrganizationWhere } from './audit-log-read-visibility.js';
 import { PARENT_GATE_SCAN_LIMIT, parseParentRecord } from './parent-record-read-gate.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 const ACTIVITY = 'sys_activity';
 const LEDGER = 'sys_audit_log';
@@ -177,7 +184,21 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
   let kernel: ObjectKernel;
   let engine: ObjectQL;
   /** The WHERE each gated read reached the driver boundary with, by object. */
+  /**
+   * [#26750] A ledger read's WHERE split into the gate's own and the
+   * deployment-level clause the ledger ANDs after it (`andIntoWhere`'s shape).
+   */
+  const DEPLOYMENT_LEVEL_CLAUSE = JSON.stringify(ledgerRowAboutAnOrganizationWhere());
+  const splitDeploymentLevelClause = (where: any): { gate: unknown; bound: boolean } => {
+    if (JSON.stringify(where) === DEPLOYMENT_LEVEL_CLAUSE) return { gate: undefined, bound: true };
+    if (Array.isArray(where?.$and) && where.$and.length === 2 && JSON.stringify(where.$and[1]) === DEPLOYMENT_LEVEL_CLAUSE) {
+      return { gate: where.$and[0], bound: true };
+    }
+    return { gate: where, bound: false };
+  };
   const seenWhere: Record<string, unknown[]> = { [ACTIVITY]: [], [LEDGER]: [] };
+  /** [#26750] Per ledger read the observer saw: was the deployment-level clause ANDed after the gate? */
+  const ledgerOrganizationBound: boolean[] = [];
   const ids: Record<string, string> = {};
 
   /** Every row at rest, and the ground truth of who may read which, judged by the stand-in's own rules. */
@@ -191,6 +212,8 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     const holder = Array.isArray(reader?.systemPermissions) && reader.systemPermissions.includes(LEDGER_AUDIT_CAPABILITY);
     return atRest
       .filter((row) => {
+        // [#26750] No reader here is the platform administrator, so no deployment-level row is any reader's.
+        if (object === LEDGER && (row.tenant_id === null || row.tenant_id === '')) return false;
         if (object === LEDGER && holder) return true;
         if (object === LEDGER && (row.record_id === null || row.record_id === '') && !['create', 'update', 'delete', 'read'].includes(row.action)) {
           return typeof row.action === 'string' && row.action !== '';
@@ -234,7 +257,14 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     // Registered last, so it sees each gated read's WHERE as the gates left it.
     for (const object of [ACTIVITY, LEDGER]) {
       engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
-        if (READ_OPS.has(op.operation) && op.context && !op.context.isSystem) seenWhere[object].push(op.ast?.where);
+        if (!READ_OPS.has(op.operation) || !op.context || op.context.isSystem) return next();
+        if (object !== LEDGER) {
+          seenWhere[object].push(op.ast?.where);
+          return next();
+        }
+        const { gate, bound } = splitDeploymentLevelClause(op.ast?.where);
+        seenWhere[object].push(gate);
+        ledgerOrganizationBound.push(bound);
         return next();
       }, { object });
     }
@@ -255,7 +285,10 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     const now = new Date().toISOString();
     const outside: Row[] = [];
     for (let i = 0; i < ROWS_ABOUT_NO_RECORD; i++) {
-      outside.push({ action: 'config_change', object_name: 'sys_setting', record_id: null, actor: 'svc:fixture', created_at: now });
+      outside.push({
+        action: 'config_change', object_name: 'sys_setting', record_id: null, actor: 'svc:fixture',
+        tenant_id: DEFAULT_ORGANIZATION_ID, created_at: now,
+      });
     }
     await insertInBatches(engine, LEDGER, outside);
   }, 120_000);
@@ -333,7 +366,15 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     ]));
   });
 
-  it('[ADR-0139 D4] a read naming its parents is served the rows the same read spelled as an $or is, through one branch per named parent', async () => {
+  // One case per reader (#27547): the three readers in one case were ~24 full
+  // reads of the fixture, which crossed the 5 s default on a loaded Test Core
+  // shard. Each reader is its own case with the same assertions — never a
+  // raised timeout, a skipped reader or a smaller fixture (#27306).
+  it.each([
+    { label: 'MEMBER_A', reader: MEMBER_A },
+    { label: 'MEMBER_B', reader: MEMBER_B },
+    { label: 'ADMIN', reader: ADMIN },
+  ])('[ADR-0139 D4] a read naming its parents is served the rows the same read spelled as an $or is, through one branch per named parent — $label', async ({ reader }) => {
     const NAMED = [DOC, VAULT, GATED];
     const named = { object_name: { $in: NAMED } };
     // The same rows, in a spelling the gate does not read as naming its parents: it keeps every branch.
@@ -341,22 +382,20 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     const atRest: Row[] = await engine.find(ACTIVITY, { limit: 100_000, context: SYS });
     const parentOf = new Map(atRest.map((r) => [String(r.id), r.object_name]));
     const gateConjunct = (where: any) => where.$and[1];
-    for (const reader of [MEMBER_A, MEMBER_B, ADMIN]) {
-      seenWhere[ACTIVITY].length = 0;
-      const rows = await served(ACTIVITY, reader, { where: named });
-      const narrowed = gateConjunct(seenWhere[ACTIVITY][0]);
-      expect(rows).toEqual(await served(ACTIVITY, reader, { where: spelledOut }));
-      const full = gateConjunct(seenWhere[ACTIVITY][1]);
-      expect(rows).toEqual((await truth(ACTIVITY, reader)).filter((id) => NAMED.includes(parentOf.get(id))));
-      expect(await engine.count(ACTIVITY, { where: named }, { context: reader })).toBe(rows.length);
-      // A reader who reads some of the named parents and not others: the vault's rows are its alone.
-      expect(rows.some((id) => parentOf.get(id) === VAULT)).toBe(reader === ADMIN);
-      // One branch per named parent — the doc's and the vault's leaves, the gated parent's probe — of the full enumeration's.
-      expect(narrowed.$or.map((b: any) => b.object_name)).toEqual([DOC, VAULT, GATED]);
-      expect(narrowed.$or.filter((b: any) => Array.isArray(b.record_id.$in)).map((b: any) => b.object_name)).toEqual([GATED]);
-      expect(full.$or.length).toBeGreaterThan(NAMED.length);
-      expect(full.$or.map((b: any) => b.object_name)).toEqual(expect.arrayContaining(NAMED));
-    }
+    seenWhere[ACTIVITY].length = 0;
+    const rows = await served(ACTIVITY, reader, { where: named });
+    const narrowed = gateConjunct(seenWhere[ACTIVITY][0]);
+    expect(rows).toEqual(await served(ACTIVITY, reader, { where: spelledOut }));
+    const full = gateConjunct(seenWhere[ACTIVITY][1]);
+    expect(rows).toEqual((await truth(ACTIVITY, reader)).filter((id) => NAMED.includes(parentOf.get(id))));
+    expect(await engine.count(ACTIVITY, { where: named }, { context: reader })).toBe(rows.length);
+    // A reader who reads some of the named parents and not others: the vault's rows are its alone.
+    expect(rows.some((id) => parentOf.get(id) === VAULT)).toBe(reader === ADMIN);
+    // One branch per named parent — the doc's and the vault's leaves, the gated parent's probe — of the full enumeration's.
+    expect(narrowed.$or.map((b: any) => b.object_name)).toEqual([DOC, VAULT, GATED]);
+    expect(narrowed.$or.filter((b: any) => Array.isArray(b.record_id.$in)).map((b: any) => b.object_name)).toEqual([GATED]);
+    expect(full.$or.length).toBeGreaterThan(NAMED.length);
+    expect(full.$or.map((b: any) => b.object_name)).toEqual(expect.arrayContaining(NAMED));
   });
 
   it('D5.1, as amended: a delegated caller reads through the leaf — every row its delegator intersection admits, past the window, a true total', async () => {
@@ -429,10 +468,14 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
 
   it('ledger: the audit capability’s holder is not narrowed — the gate writes nothing for it', async () => {
     seenWhere[LEDGER].length = 0;
+    ledgerOrganizationBound.length = 0;
     const expected = await truth(LEDGER, HOLDER);
     expect(await served(LEDGER, HOLDER)).toEqual(expected);
     expect(await engine.count(LEDGER, {}, { context: HOLDER })).toBe(expected.length);
     expect(seenWhere[LEDGER].every((w) => w === undefined)).toBe(true);
+    // [#26750] ...while the deployment-level clause, which the holder is not exempt from, is.
+    expect(ledgerOrganizationBound.length).toBeGreaterThan(0);
+    expect(ledgerOrganizationBound.every(Boolean)).toBe(true);
     // ...and the activity stream's gate still narrows it.
     expect(await served(ACTIVITY, HOLDER)).toEqual(await truth(ACTIVITY, HOLDER));
   });

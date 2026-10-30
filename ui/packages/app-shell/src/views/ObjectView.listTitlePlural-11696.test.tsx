@@ -25,11 +25,16 @@
  * Direction, written before the run: the two plural cells RED with the title
  * put back to `objectLabel` (`Project` / `项目`), GREEN after; the no-plural
  * control GREEN on both sides.
+ *
+ * Since objectstack#27594 the list title is the view switcher, which reads the
+ * open view's label. A view with no `label` is called what a list of the
+ * object's records is called, its PLURAL (objectui#12774), so the lists here
+ * open a label-less view and the title still reads the plural.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen } from '@testing-library/react';
+import { render, cleanup, screen, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
@@ -95,9 +100,12 @@ const FIELDS = {
   name: { type: 'text', label: 'Name' },
 };
 
+/** One authored list view with no `label`, as a list whose view the author left unnamed. */
+const LISTVIEWS = { all: { type: 'grid', columns: ['name'] } };
+
 const OBJECTS = [
-  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS },
-  { name: 'showcase_note', label: 'Note', fields: FIELDS },
+  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS, listViews: LISTVIEWS },
+  { name: 'showcase_note', label: 'Note', fields: FIELDS, listViews: LISTVIEWS },
 ];
 
 /** The catalog as the console loads it: `zh-CN` translates both scalars. */
@@ -151,6 +159,9 @@ async function listTitle(lang: Lang, objectName: string): Promise<string> {
     </I18nProvider>,
   );
   const heading = await screen.findByRole('heading', { level: 1 }, { timeout: 5000 });
+  // The title is the view switcher; the list body is stubbed, so it reports
+  // no count and the heading holds the label alone.
+  expect(within(heading).getByTestId('list-view-switcher')).toBeInTheDocument();
   return heading.textContent ?? '';
 }
 

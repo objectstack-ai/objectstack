@@ -145,10 +145,9 @@ describe('the Data pillar’s object header actions (objectui#12511)', () => {
     const seen = await controlsPerTab();
     expect(seen.form).toEqual(seen.records);
     expect(seen.settings).toEqual(seen.records);
-    // objectui#12453 — plus the read-only link, which is not an object action.
-    expect(seen.records).toEqual([
-      `button||${TOGGLE_RAIL}|`,
-      `a|studio-readonly-link||${t('engine.studio.pkg.readonlyLink', 'en-US')}`,
-    ]);
+    // An object takes no environment overlay, so the read-only mark is plain
+    // text, not a control (#27356 row 13).
+    expect(seen.records).toEqual([`button||${TOGGLE_RAIL}|`]);
+    expect(screen.getByTestId('studio-readonly-link')).toHaveTextContent(t('engine.studio.pkg.readonly', 'en-US'));
   });
 });

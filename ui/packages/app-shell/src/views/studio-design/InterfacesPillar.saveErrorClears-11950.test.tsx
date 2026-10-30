@@ -82,6 +82,8 @@ function refusal(message: string): Error {
 }
 
 const mockClient = {
+  // The Studio's dataset pickers read the draft-overlaid catalog (objectstack#27518).
+  withPreviewDrafts: vi.fn((): unknown => mockClient),
   save: vi.fn(async (type: string, _name: string, _body: Record<string, unknown>) => {
     if (type === 'dashboard') {
       const step = script.shift() ?? 'accept';

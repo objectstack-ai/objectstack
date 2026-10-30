@@ -432,14 +432,20 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
 
     const hookEvents: string[] = [];
     const globalHookEvents: string[] = [];
+    const sysFileHookEvents: string[] = [];
     const middlewares: Array<{ object?: string }> = [];
     ctx.registerService('objectql', {
       registerHook: (event: string, _fn: unknown, opts: any) => {
         // File-reference ownership (ADR-0104 D3 wave 2) registers GLOBALLY —
-        // any object may declare a file-class field. Everything else is
-        // scoped to sys_attachment.
+        // any object may declare a file-class field. The create-side guard of
+        // sys_file's storage-owned columns is scoped to sys_file. Everything
+        // else is scoped to sys_attachment.
         if (opts?.object === undefined) {
           globalHookEvents.push(event);
+          return;
+        }
+        if (opts?.object === 'sys_file') {
+          sysFileHookEvents.push(event);
           return;
         }
         expect(opts?.object).toBe('sys_attachment');
@@ -474,14 +480,23 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     // context per phase (#5574). The id now comes from `ctx.previous`, so the
     // registration has no work left and is gone; a second `beforeDelete`
     // reappearing here means the stash mechanism came back with it.
+    //
+    // The second `beforeInsert`/`beforeUpdate` pair is the file half of the
+    // write gate (`installAttachmentFileReferenceGate`): the `file_id` a row
+    // names must be a file its caller may open.
     expect(hookEvents.sort()).toEqual([
       'afterDelete',
       'afterInsert',
       'afterUpdate',
       'beforeDelete',
       'beforeInsert',
+      'beforeInsert',
+      'beforeUpdate',
       'beforeUpdate',
     ]);
+    // The storage-owned columns' create-side guard
+    // (sys-file-storage-owned-columns.ts): one `beforeInsert`, nothing else.
+    expect(sysFileHookEvents).toEqual(['beforeInsert']);
     // Field-reference ownership: claim/copy on write, release on delete
     // (file-reference-lifecycle.ts). Registered without an object filter.
     expect(globalHookEvents.sort()).toEqual([

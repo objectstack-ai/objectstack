@@ -162,6 +162,10 @@ const CENSUS: ReadonlyArray<readonly [type: string, text: string, verdict: Verdi
   // cell's face: the coerced name, plain inline text.
   ['object-ref', 'Acme Corp', 'fit'],
   ['recipient-picker', 'Acme Corp', 'fit'],
+  // The registry-name read faces (objectstack#27861): no data source lists a
+  // registry here, so both draw the coerced name, plain inline text.
+  ['position-ref', 'Acme Corp', 'fit'],
+  ['permission-ref', 'Acme Corp', 'fit'],
   // ── refused: a pill inside a pill ──────────────────────────────────────
   ['select', 'Acme Corp', 'pill-in-pill'],
   ['status', 'Acme Corp', 'pill-in-pill'],
@@ -341,13 +345,14 @@ describe('objectui#8464 — the Badge-fit census: A is not free, and here is whi
     }
   });
 
-  it('THE FIT SIDE IS LOAD-BEARING — the 38 fitting kinds draw text and no artefact', async () => {
+  it('THE FIT SIDE IS LOAD-BEARING — the 40 fitting kinds draw text and no artefact', async () => {
     // Refusing EVERY type also satisfies every refusal assertion above; this is
     // the half that is red for it.
     const fitting = CENSUS.filter(([, , v]) => v === 'fit');
     // 36 → 38: `object-ref` and `recipient-picker` joined the fit side
-    // (objectui#12613).
-    expect(fitting.length, 'the fitting side is not empty').toBe(38);
+    // (objectui#12613); 38 → 40: `position-ref` and `permission-ref`
+    // (objectstack#27861).
+    expect(fitting.length, 'the fitting side is not empty').toBe(40);
 
     for (const [type] of fitting) {
       const { container } = renderChip(type);

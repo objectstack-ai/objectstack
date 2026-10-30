@@ -34,6 +34,33 @@
  * yet is created by the first edit, seeded with the columns the running app
  * shows an object that has no view (`defaultListColumnsFromObject`).
  *
+ * ## Adding a view
+ *
+ * "Add view" (objectstack#27836) opens the console's Create View dialog
+ * (`CreateViewDialog`): the type first, from the spec's list-view types, then
+ * the fields that type requires, picked by label, then a label and a key. The
+ * view is born complete, as the console's add-view door builds it
+ * (`buildNewViewSpec`, `viewEnvelope`), so the draft never holds a half-made
+ * view. It is saved to the package draft at once, under a name no view holds
+ * yet, and the panel and the canvas then show it until the author goes back to
+ * the view the nav entry opens, or opens another leaf. The new view is never
+ * the object's default, and the nav entry is not changed: the running app
+ * lists it in the object's view switcher.
+ *
+ * ## Switching views
+ *
+ * The panel's view picker (objectstack#27896) lists the object's list views
+ * by label: the merged `listViews` the shell's metadata holds (the published
+ * world, read as the panel reads the entry's view), and this package's pending
+ * drafts of the object's views, read through the same client with the drafts
+ * overlaid (`withPreviewDrafts`), so a view "Add view" made and nobody
+ * published is listed too. A pick shows that view here and on the canvas, in
+ * the same buffer, until the author picks another or opens another leaf; the
+ * nav entry's own view is the one the panel opens with, and the nav entry is
+ * not changed. The host sends a pending edit first, or asks before one is
+ * dropped (`onSwitchView`). An object with one list view shows no picker:
+ * there is nothing to switch to, and "Add view" makes the second.
+ *
  * ⛔ No new endpoint and no new client: the pillar's `MetadataClient` is the
  * only door. ⛔ Nothing here edits the object definition — fields belong to the
  * Data pillar. A read-only package shows the view and writes nothing: every
@@ -41,7 +68,8 @@
  */
 
 import * as React from 'react';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { ChevronDown, Loader2, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Badge,
   Button,
@@ -73,6 +101,9 @@ import { failed, loaded, type LoadState } from '../metadata-admin/loadState.js';
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import { defaultListColumnsFromObject } from '../ObjectView.js';
+import { CreateViewDialog, type CreateViewDialogProps } from '../CreateViewDialog.js';
+import { buildNewViewSpec } from '../newViewSpec.js';
+import { viewEnvelope } from '../runtime-metadata-persistence.js';
 import { findByName, useNavTargetLabel } from '../../hooks/useNavTargetLabel.js';
 import {
   listViewsOf,
@@ -81,8 +112,15 @@ import {
   type StudioCanvasNavEntry,
 } from './studio-canvas-preview.js';
 import type { Surface } from './navSurface.js';
-import { issueRefusal, plainRefusal } from './metadataError.js';
+import { issueRefusal, plainRefusal, type StudioHeld } from './metadataError.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
+import {
+  fieldNamesHeldByTypeBlock,
+  ListViewTypeSection,
+  listViewTypeBlockSchema,
+  listViewTypeHeldEdit,
+} from './ListViewTypeSection.js';
+import { ListViewChartSection } from './ListViewChartSection.js';
 import {
   addedArrayElements,
   agentDraftMarkOf,
@@ -201,6 +239,53 @@ function listViewBufferKey(viewId: string): string {
   return `listView:${viewId}`;
 }
 
+/**
+ * objectstack#27896 — one list view of the open object, as the panel's view
+ * picker lists it.
+ */
+export interface ListViewChoice {
+  target: ListViewTarget;
+  /** The item's own label, as authored; absent where it has none. */
+  label?: unknown;
+  /** A draft of the view is pending in this package (a view only drafted included). */
+  draft: boolean;
+}
+
+/**
+ * objectstack#27896 — the list views of `objectName` the view picker lists:
+ * each view of the merged `listViews` map (`published`), then each of this
+ * package's pending drafts of a list view of the object (`drafts`, the
+ * draft-overlaid list's `_draft` rows), a draft standing in for the
+ * published view of its name. The view the nav entry opens leads when neither
+ * holds it (a default view no edit has created yet), and the view the panel
+ * shows closes the list when neither holds it (one "Add view" has just saved,
+ * before the draft read answers).
+ */
+export function listViewChoicesOf(
+  objectName: string,
+  published: Record<string, unknown>,
+  drafts: readonly Row[],
+  entry: ListViewTarget | null,
+  shown: ListViewTarget | null,
+): ListViewChoice[] {
+  const byId = new Map<string, ListViewChoice>();
+  for (const [key, view] of Object.entries(published)) {
+    if (!isPlainObject(view)) continue;
+    const viewId = qualifiedViewId(objectName, key);
+    byId.set(viewId, { target: { objectName, viewId, isDefault: view.isDefault === true }, label: view.label, draft: false });
+  }
+  for (const row of drafts) {
+    if (row.object !== objectName || typeof row.name !== 'string' || !isListViewRow(row)) continue;
+    const viewId = qualifiedViewId(objectName, row.name);
+    const isDefault = row.isDefault === true || byId.get(viewId)?.target.isDefault === true;
+    byId.set(viewId, { target: { objectName, viewId, isDefault }, label: row.label ?? listBodyOf(row).label, draft: true });
+  }
+  const choices = [...byId.values()];
+  if (entry && !byId.has(entry.viewId)) choices.unshift({ target: entry, draft: false });
+  if (shown && shown.viewId !== entry?.viewId && !byId.has(shown.viewId)) choices.push({ target: shown, draft: true });
+  return choices;
+}
+
 /** What `useDraftAutoSave` hands a save: whether the buffer is still what it sent. */
 interface DraftSendClaim {
   unmoved: () => boolean;
@@ -219,6 +304,17 @@ export interface DraftOnlyObjects {
 export interface ObjectListViewDraft {
   /** The view the open leaf's panel edits; `null` on a leaf that is not an `object`. */
   target: ListViewTarget | null;
+  /**
+   * objectstack#27836 — the view the leaf's nav entry opens, while the panel
+   * shows another view instead (one "Add view" created, or one the view
+   * picker opened, objectstack#27896); `null` otherwise.
+   */
+  entryTarget: ListViewTarget | null;
+  /**
+   * objectstack#27896 — the object's list views, by label, as the view picker
+   * lists them (`listViewChoicesOf`); empty on a leaf that is not an `object`.
+   */
+  views: ListViewChoice[];
   /** The autosave's `target`: the buffer key of the view ({@link listViewBufferKey}), `''` with no target. */
   targetKey: string;
   /** The autosave's `loadedFor`: the target the buffer was loaded for. */
@@ -254,6 +350,20 @@ export interface ObjectListViewDraft {
   failure: { during: 'load' | 'save'; error: unknown } | null;
   /** Replace the view item with an edited one. */
   edit: (row: Row) => void;
+  /**
+   * objectstack#27836 — create a list view of the leaf's object in the
+   * package draft, from the Create View dialog's payload, and show it here.
+   * Resolves `null` once it is saved, else why it was not.
+   */
+  createView: (config: NewViewPayload) => Promise<ViewCreateRefusal | null>;
+  /** objectstack#27836 — show the view the nav entry opens again. */
+  showEntryView: () => void;
+  /**
+   * objectstack#27896 — show the view `viewId` of the open object; the view
+   * the nav entry opens shows as `showEntryView` shows it. Switches at once:
+   * a pending edit is the caller's to send first.
+   */
+  showView: (viewId: string) => void;
   /** Send the buffer to the package draft — the autosave's `save`. */
   save: (sent: DraftSendClaim) => Promise<void>;
   /** The version-conflict dialog of this buffer's guard; render it once. */
@@ -261,6 +371,12 @@ export interface ObjectListViewDraft {
   /** What the canvas shows (`StudioCanvasListViewContext`); `null` with nothing to show. */
   canvas: StudioCanvasListView | null;
 }
+
+/** What the Create View dialog hands its door (`CreateViewDialogProps['onCreate']`). */
+export type NewViewPayload = Parameters<CreateViewDialogProps['onCreate']>[0];
+
+/** Why "Add view" saved nothing: a view already holds the name, or the save failed. */
+export type ViewCreateRefusal = { taken: string } | { error: unknown };
 
 /**
  * The open leaf's list-view buffer, held by the Interfaces pillar so the
@@ -304,7 +420,50 @@ export function useObjectListViewDraft({
       .viewName;
   }, [objectName, navId, filtersKey, entryViewName, currentUserId, currentOrgId]);
   const objectDef = objectName ? findByName(metadata.objects, objectName) : undefined;
-  const target = objectName ? listViewTargetOf(objectName, landingViewName, listViewsOf(objectDef)) : null;
+  const publishedViews = listViewsOf(objectDef);
+  const entryTarget = objectName ? listViewTargetOf(objectName, landingViewName, publishedViews) : null;
+  // objectstack#27836, objectstack#27896 — a view "Add view" created or the
+  // view picker opened, stamped with the nav entry it was opened on, so it
+  // expires by construction when another opens.
+  const entryKey = objectName ? JSON.stringify([objectName, navId ?? null, filtersKey, entryViewName ?? null]) : '';
+  const [picked, setPicked] = React.useState<{ for: string; viewId: string } | null>(null);
+  const pickedViewId = picked && picked.for === entryKey ? picked.viewId : null;
+  // objectstack#27896 — this package's pending drafts of the object's views,
+  // read with the drafts overlaid: the published world is the merged map
+  // above. A failed or refused read (a caller the server serves no pending
+  // drafts) lists the published views alone; the panel never fails on it.
+  const [viewDrafts, setViewDrafts] = React.useState<{ for: string; rows: Row[] }>({ for: '', rows: [] });
+  const [viewsNonce, setViewsNonce] = React.useState(0);
+  const viewDraftsKey = objectName ? JSON.stringify([packageId, objectName]) : '';
+  React.useEffect(() => {
+    if (!objectName) return;
+    let cancelled = false;
+    const forKey = JSON.stringify([packageId, objectName]);
+    (async () => {
+      const rows = await client.withPreviewDrafts(true).list<Row>('view', { packageId });
+      return (rows ?? []).filter((r): r is Row => isPlainObject(r) && r._draft === true && r.object === objectName);
+    })().then(
+      (rows) => {
+        if (!cancelled) setViewDrafts({ for: forKey, rows });
+      },
+      () => {
+        if (!cancelled) setViewDrafts({ for: forKey, rows: [] });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, packageId, objectName, publishNonce, viewsNonce]);
+  const draftViewRows = viewDrafts.for === viewDraftsKey ? viewDrafts.rows : [];
+  const pickedIsDefault =
+    !!objectName &&
+    !!pickedViewId &&
+    listViewChoicesOf(objectName, publishedViews, draftViewRows, null, null).some(
+      (c) => c.target.viewId === pickedViewId && c.target.isDefault,
+    );
+  const target: ListViewTarget | null =
+    objectName && pickedViewId ? { objectName, viewId: pickedViewId, isDefault: pickedIsDefault } : entryTarget;
+  const views = objectName ? listViewChoicesOf(objectName, publishedViews, draftViewRows, entryTarget, target) : [];
   const viewId = target?.viewId ?? '';
   const targetKey = viewId ? listViewBufferKey(viewId) : '';
   const seedColumns = React.useMemo(() => defaultListColumnsFromObject(objectDef, 5), [objectDef]);
@@ -421,6 +580,37 @@ export function useObjectListViewDraft({
     setBuffer((b) => ({ ...b, row, dirty: true }));
   }, []);
 
+  const createView = React.useCallback(
+    async (config: NewViewPayload): Promise<ViewCreateRefusal | null> => {
+      if (!objectName) return { error: new Error('No object is open.') };
+      const env = viewEnvelope(objectName, buildNewViewSpec(config, { fallbackColumns: seedColumns }), {
+        name: config.name,
+        label: config.label,
+      });
+      try {
+        // A name a view already holds, published or drafted in any package,
+        // is refused and nothing is written: the draft door is a PUT by name.
+        const [published, drafts] = await Promise.all([client.list<Row>('view'), client.listDrafts({ type: 'view' })]);
+        if ([...(published ?? []), ...(drafts ?? [])].some((r) => r?.name === env.name)) return { taken: env.name };
+        // And the door refuses one drafted between that read and this save.
+        await client.save('view', env.name, env, { mode: 'draft', packageId, ifNoneMatch: '*', surface: 'studio' });
+      } catch (e) {
+        return { error: e };
+      }
+      onDraftSaved?.();
+      setPicked({ for: entryKey, viewId: env.name });
+      setViewsNonce((n) => n + 1);
+      return null;
+    },
+    [client, packageId, objectName, seedColumns, entryKey, onDraftSaved],
+  );
+  const showEntryView = React.useCallback(() => setPicked(null), []);
+  const entryViewId = entryTarget?.viewId;
+  const showView = React.useCallback(
+    (next: string) => setPicked(next === entryViewId ? null : { for: entryKey, viewId: next }),
+    [entryViewId, entryKey],
+  );
+
   const row = buffer.row;
   const notList = !!row && !isListViewRow(row);
   const save = React.useCallback(
@@ -465,6 +655,8 @@ export function useObjectListViewDraft({
 
   return {
     target,
+    entryTarget: pickedViewId ? entryTarget : null,
+    views,
     targetKey,
     loadedFor: buffer.for,
     row: current ? row : null,
@@ -477,6 +669,9 @@ export function useObjectListViewDraft({
     saving,
     failure,
     edit,
+    createView,
+    showEntryView,
+    showView,
     save,
     conflictDialog,
     canvas,
@@ -499,9 +694,10 @@ function sortEntriesOf(value: unknown): SortEntry[] {
 
 /**
  * The field names a list body already references: its columns, its filter and
- * sort rules, and a kanban card's fields, title and group-by field
- * (objectui#13152). Read by the panel's field pickers so a reference the view
- * holds keeps drawing (see `ObjectListViewInspector`).
+ * sort rules, a kanban card's fields, title and group-by field
+ * (objectui#13152), and the field settings of the block its type keeps its
+ * own settings in (objectstack#27895). Read by the panel's field pickers so a
+ * reference the view holds keeps drawing (see `ObjectListViewInspector`).
  */
 function fieldNamesHeldBy(body: Row): string[] {
   const held = new Set<string>();
@@ -516,6 +712,7 @@ function fieldNamesHeldBy(body: Row): string[] {
     add(body.kanban.titleField);
     add(body.kanban.groupByField);
   }
+  if (typeof body.type === 'string') fieldNamesHeldByTypeBlock(body[body.type]).forEach(add);
   return [...held];
 }
 
@@ -588,6 +785,18 @@ export function listViewIsKanban(listView: ObjectListViewDraft): boolean {
   return listBodyOf(row ?? newListViewItem(target, seedColumns)).type === 'kanban';
 }
 
+/**
+ * objectstack#27895 — the edit the pillar's list-view autosave holds, or
+ * `null`: an edited view whose type's block lacks a required setting
+ * (`listViewTypeHeldEdit`). An unedited view is never held: nothing would be
+ * sent.
+ */
+export function listViewHeldEdit(listView: ObjectListViewDraft, locale: string): StudioHeld<null> | null {
+  const { row, notList, dirty } = listView;
+  if (!dirty || !row || notList) return null;
+  return listViewTypeHeldEdit(listBodyOf(row), locale);
+}
+
 const noop = (): void => {};
 
 /**
@@ -618,6 +827,7 @@ interface KanbanCardMarks {
 }
 
 const SORT_ID = 'studio-list-view-sort';
+const VIEW_PICKER_ID = 'studio-list-view-picker';
 const FILTER_ID = 'studio-list-view-filter';
 const KANBAN_GROUP_ID = 'studio-list-view-kanban-group';
 const KANBAN_TITLE_ID = 'studio-list-view-kanban-title';
@@ -831,7 +1041,11 @@ function KanbanCardSection({
  * the designer's `filter-builder` widget, which writes the spec's
  * `ViewFilterRule[]`) and Sort (the runtime `SortBuilder`, in a popover the
  * width the builder needs, written as the spec's `{ field, order }[]`). On a
- * kanban view, the kanban card section comes first (`KanbanCardSection`).
+ * kanban view, the kanban card section comes first (`KanbanCardSection`); on
+ * a calendar, gallery, timeline, gantt, map or tree view, the section of that
+ * type's own settings (`ListViewTypeSection`, objectstack#27895); on a chart
+ * view, its dataset binding (`ListViewChartSection`, objectstack#27933). Above them,
+ * the object's other list views, one pick away (objectstack#27896).
  */
 export function ObjectListViewInspector({
   listView,
@@ -839,10 +1053,25 @@ export function ObjectListViewInspector({
   locale,
   selection,
   onSelectionChange,
+  onAddViewOpen,
+  onSwitchView,
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
   locale: string;
+  /**
+   * objectstack#27836 — called as "Add view" opens its dialog: the host sends
+   * the panel's pending edit now, since the view the panel shows changes once
+   * the new one is created.
+   */
+  onAddViewOpen?: () => void;
+  /**
+   * objectstack#27896 — the host's switch to another view of the object (the
+   * view picker's pick, "Back to …"): it sends the panel's pending edit
+   * first, or asks before one is dropped, then shows the view
+   * (`listView.showView`). Without it, the panel shows the view at once.
+   */
+  onSwitchView?: (viewId: string) => void;
   /**
    * objectui#12725 — the column selection, held by the host so a click on a
    * canvas header can make it. With `onSelectionChange` the panel's list
@@ -853,6 +1082,7 @@ export function ObjectListViewInspector({
 }): React.ReactElement | null {
   const { target, row, notList, seedColumns, failure, saving, hasDraft, edit, loadedFor, targetKey, draftChanges, published } =
     listView;
+  const { entryTarget, createView, showView, views } = listView;
   const objectName = target?.objectName;
   const fieldState = useObjectFields(objectName);
   // objectui#13152 — the fields every picker in this panel offers (the
@@ -876,6 +1106,23 @@ export function ObjectListViewInspector({
   // label-less entry that opens it: the published label, else its pending
   // draft's, through the app's bundle. No read of its own.
   const navTargetLabel = useNavTargetLabel();
+  const metadata = useMetadata();
+  const objectDef = objectName ? findByName(metadata.objects, objectName) : undefined;
+  const [addOpen, setAddOpen] = React.useState(false);
+  // objectstack#27836 — the dialog's required-field pickers read the fields
+  // this panel's own pickers offer, by label.
+  const dialogObject = React.useMemo<CreateViewDialogProps['objectDef']>(
+    () =>
+      objectName
+        ? {
+            name: objectName,
+            fields: Object.fromEntries(
+              fields.map((f) => [f.name, { name: f.name, label: f.label, type: f.type, hidden: f.hidden, options: f.options }]),
+            ),
+          }
+        : undefined,
+    [objectName, fields],
+  );
   if (!target) return null;
   const hostHeld = !!onSelectionChange;
   const selectColumn = (sel: ListViewColumnSelection | null) => {
@@ -889,12 +1136,36 @@ export function ObjectListViewInspector({
       ? issueRefusal(failure.error, locale)
       : plainRefusal(failure.error);
   const working = row ?? newListViewItem(target, seedColumns);
-  const title = listViewTitle(
-    target,
-    working,
-    navTargetLabel({ kind: 'object', objectName: target.objectName }) ?? target.objectName,
-    locale,
-  );
+  const objectText = navTargetLabel({ kind: 'object', objectName: target.objectName }) ?? target.objectName;
+  const title = listViewTitle(target, working, objectText, locale);
+  const addView = async (config: NewViewPayload): Promise<boolean> => {
+    const refusal = await createView(config);
+    if (!refusal) {
+      // The selection named a column of the view the panel showed before.
+      selectColumn(null);
+      return true;
+    }
+    // The dialog stays open with the author's input; this says why.
+    toast.error(
+      'taken' in refusal
+        ? tFormat('engine.studio.inspector.listView.addViewTaken', locale, { name: refusal.taken })
+        : issueRefusal(refusal.error, locale).message,
+    );
+    return false;
+  };
+  const switchView = (viewId: string) => {
+    if (viewId === target.viewId) return;
+    if (onSwitchView) {
+      onSwitchView(viewId);
+      return;
+    }
+    // The selection named a column of the view the panel showed before.
+    selectColumn(null);
+    showView(viewId);
+  };
+  const existingViewLabels = Object.values(listViewsOf(objectDef))
+    .map((v) => (isPlainObject(v) ? resolveI18nLabel(v.label as I18nLabel | undefined, locale) : ''))
+    .filter((l): l is string => !!l);
   const body = listBodyOf(working);
   const columns = Array.isArray(body.columns) ? (body.columns as unknown[]) : [];
   const allStrings = columns.length > 0 && columns.every((c) => typeof c === 'string');
@@ -908,7 +1179,11 @@ export function ObjectListViewInspector({
     ? failed(fieldState.error)
     : fieldState.loading
       ? { status: 'loading' }
-      : loaded(fields.map((f) => ({ name: f.name, label: f.label, type: f.type })));
+      : loaded(
+          // `options` ride along for the filter's picklist value picker
+          // (objectstack#27515); the other pickers read name, label and type.
+          fields.map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.options ? { options: f.options } : {}) })),
+        );
   const labelOf = (name: string) => fields.find((f) => f.name === name)?.label ?? name;
   const sort = sortEntriesOf(body.sort);
   const sortSummary = sort
@@ -944,12 +1219,18 @@ export function ObjectListViewInspector({
     open: markOf('navigation', 'mode'),
     groupBy: markOf('kanban', 'groupByField'),
   };
+  // objectstack#27895 — the section of the view type's own settings, where it has one.
+  const typeBlockSchema = listViewTypeBlockSchema(body.type);
+  const typeBlockMark = typeBlockSchema ? markOf(String(body.type)) : null;
+  const chartMark = body.type === 'chart' ? markOf('chart') : null;
   const columnsMark = markOf('columns');
   const addedColumns = addedNames(columnsMark, columns, publishedBody?.columns);
   const filterMark = markOf('filter');
   const sortMark = markOf('sort');
   const drawnMarks = [
     ...(body.type === 'kanban' ? [kanbanMarks.fields, kanbanMarks.title, kanbanMarks.open, kanbanMarks.groupBy] : []),
+    typeBlockMark,
+    chartMark,
     columnsMark,
     filterMark,
     sortMark,
@@ -997,6 +1278,74 @@ export function ObjectListViewInspector({
             {t('engine.studio.inspector.listView.intro', locale)}
           </p>
         )}
+        {/* objectstack#27896 — the object's list views, by label; one view has nothing to switch to. */}
+        {views.length > 1 && (
+          <div className="space-y-1.5" data-testid="list-view-switcher">
+            <Label htmlFor={VIEW_PICKER_ID} className="text-xs text-muted-foreground">
+              {t('engine.studio.inspector.listView.switchView', locale)}
+            </Label>
+            <Select value={target.viewId} onValueChange={switchView}>
+              <SelectTrigger id={VIEW_PICKER_ID} className="h-8 text-xs" data-testid="list-view-switcher-trigger">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {views.map((choice) => (
+                  <SelectItem key={choice.target.viewId} value={choice.target.viewId}>
+                    <span className="flex items-center gap-2">
+                      <span data-testid="list-view-switcher-label">
+                        {listViewTitle(choice.target, { label: choice.label }, objectText, locale)}
+                      </span>
+                      {choice.draft && (
+                        <span className="text-[10px] text-muted-foreground" data-testid="list-view-switcher-draft">
+                          {t('engine.studio.inspector.listView.switchViewDraft', locale)}
+                        </span>
+                      )}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {/* objectstack#27836 — another view of this object: its type first, then what that type requires. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            disabled={readOnly || fieldState.loading || !!fieldState.error}
+            onClick={() => {
+              onAddViewOpen?.();
+              setAddOpen(true);
+            }}
+            data-testid="list-view-add-view"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t('engine.studio.inspector.listView.addView', locale)}
+          </Button>
+          {entryTarget && (
+            <Button
+              variant="link"
+              size="sm"
+              className="h-7 px-0 text-xs"
+              onClick={() => switchView(entryTarget.viewId)}
+              data-testid="list-view-back-to-entry"
+            >
+              {tFormat('engine.studio.inspector.listView.backToEntry', locale, {
+                view: listViewTitle(entryTarget, {}, objectText, locale),
+              })}
+            </Button>
+          )}
+        </div>
+        {addOpen && (
+          <CreateViewDialog
+            open
+            onOpenChange={setAddOpen}
+            onCreate={addView}
+            objectDef={dialogObject}
+            existingLabels={existingViewLabels}
+          />
+        )}
         {refusal && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive" role="alert" data-testid="list-view-refusal">
             <p className="whitespace-pre-line">{refusal.message}</p>
@@ -1036,6 +1385,28 @@ export function ObjectListViewInspector({
                 locale={locale}
                 selected={hostHeld && listViewCardIdOf(selection) !== null}
                 marks={kanbanMarks}
+              />
+            )}
+            {typeBlockSchema && (
+              <ListViewTypeSection
+                type={String(body.type)}
+                schema={typeBlockSchema}
+                body={body}
+                writeBody={writeBody}
+                fieldCatalog={fieldCatalog}
+                readOnly={readOnly}
+                locale={locale}
+                marked={!!typeBlockMark}
+              />
+            )}
+            {body.type === 'chart' && objectName && (
+              <ListViewChartSection
+                objectName={objectName}
+                body={body}
+                writeBody={writeBody}
+                readOnly={readOnly}
+                locale={locale}
+                marked={!!chartMark}
               />
             )}
             <div className="space-y-1.5" data-testid="list-view-columns">

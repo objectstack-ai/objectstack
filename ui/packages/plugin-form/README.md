@@ -434,6 +434,24 @@ evaluator that resolves it — `resolveFieldRuleState`, reading
 `isServerOwnedValue`. Display and validation share that single verdict, so a
 field can never lose its asterisk while still refusing the submit.
 
+### What a state-machine select offers
+
+A select governed by a blocking `state_machine` validation (`severity: 'error'`,
+active, its `events` covering the write) offers only the values the server
+accepts, through the one field gate every layout draws through
+(`gateFormFields`):
+
+| Form | Offers |
+|---|---|
+| edit, record loaded | the stored value plus its declared next states (`stateMachineNextValues`) |
+| create, machine declares `initialStates` | those states (`stateMachineInitialValues`), plus the value the form opens with |
+| create, no `initialStates` | every option, as the server does not police that insert |
+
+The value a create form opens with (a `default: true` option, a `defaultValue`,
+or the caller's `initialValues` / `initialData`) stays offered even outside
+`initialStates`, so the form never silently drops a value it was handed; the
+server's refusal names it on save.
+
 ### Resolving `sections[].group` outside this package
 
 A form section declares its members exactly one way: it enumerates `fields`, or

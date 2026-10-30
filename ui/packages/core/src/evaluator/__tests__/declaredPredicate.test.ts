@@ -153,7 +153,9 @@ describe('hasDeclaredPredicate is DERIVED from the normalizer, not re-spelled', 
     // rule already applies on the VALUE side — `evaluateCondition`
     // (`if (!trimmed) return true`), `evaluateCelCondition` (`if (!source.trim())`)
     // and `evalRowPredicate` (`listConditional.ts`).
-    expect(toPredicateInput('   ')).toBe('${   }');
+    // A bare string is CEL shorthand, so its blank becomes the blank `cel`
+    // envelope (objectstack#27457); a dialect-less envelope keeps the wrap.
+    expect(toPredicateInput('   ')).toEqual({ dialect: 'cel', source: '   ' });
     expect(toPredicateInput({ dialect: 'cel', source: '   ' })).toEqual({ dialect: 'cel', source: '   ' });
     expect(toPredicateInput({ source: '   ' })).toBe('${   }');
     expect(toPredicateInput('')).toBeUndefined();

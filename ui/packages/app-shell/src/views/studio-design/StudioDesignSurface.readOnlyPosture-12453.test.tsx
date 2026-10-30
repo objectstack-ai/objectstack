@@ -3,10 +3,10 @@
 /**
  * objectui#12453 — a read-only package says so twice, the same in every
  * pillar: a lock and "Read-only" in the app chip, muted, its title the
- * package's read-only sentence; and one "Read-only · Customize with an
- * overlay" link at the right of the item header, landing on the package's
- * metadata directory (`/apps/setup/metadata?package=ID`, the route the Studio
- * home's read-only package card already uses).
+ * package's read-only sentence; and one read-only mark at the right of the
+ * item header. With no item open (these pillars list nothing here) the mark
+ * reads "Read-only" and links nowhere: it offers an overlay only for an open
+ * item whose type accepts one (#27356 row 13, `StudioReadOnlyLink.overlay-27356`).
  *
  * The count reads the text a sighted author sees: text inside an `sr-only`
  * element is left out, because those are the disabled controls' reasons,
@@ -60,7 +60,6 @@ import { t } from '../metadata-admin/i18n';
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 const PILLARS = ['data', 'automations', 'interfaces', 'access'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
-const LINK = t('engine.studio.pkg.readonlyLink', 'en');
 
 function servePackage(writable: boolean) {
   vi.stubGlobal(
@@ -112,7 +111,7 @@ afterEach(() => {
 });
 
 describe('Studio read-only posture: the app chip and the item header link (objectui#12453)', () => {
-  it.each(PILLARS)('%s: the chip carries a muted lock, the header one link to the package’s metadata', async (pillar) => {
+  it.each(PILLARS)('%s: the chip carries a muted lock, the header one read-only mark that links nowhere', async (pillar) => {
     servePackage(false);
     renderPillar(pillar);
 
@@ -125,8 +124,9 @@ describe('Studio read-only posture: the app chip and the item header link (objec
 
     const links = await screen.findAllByTestId('studio-readonly-link');
     expect(links).toHaveLength(1);
-    expect(links[0]).toHaveTextContent(LINK);
-    expect(links[0]).toHaveAttribute('href', `/apps/setup/metadata?package=${PACKAGE_ID}`);
+    expect(links[0]).toHaveTextContent(READ_ONLY);
+    expect(links[0].tagName).toBe('SPAN');
+    expect(links[0]).not.toHaveAttribute('href');
     expect(links[0]).toHaveAttribute('title');
 
     expect(visibleReadOnlyCount()).toBe(2);

@@ -122,6 +122,7 @@ export function ObjectActionsPanel({
   disabled,
   actionSchema,
   onBlockingIssuesChange,
+  onCelVerdictsChange,
   focus,
 }: {
   draft: Record<string, unknown>;
@@ -140,6 +141,12 @@ export function ObjectActionsPanel({
    * writes the actions, so the Data pillar holds this count and refuses.
    */
   onBlockingIssuesChange?: (count: number) => void;
+  /**
+   * objectstack#27629 — the same verdicts per action NAME (only actions in the
+   * draft, `0` included), so the Data pillar can keep each one with the draft
+   * once this panel unmounts and name the action it holds.
+   */
+  onCelVerdictsChange?: (verdicts: Readonly<Record<string, number>>) => void;
   /**
    * The live server JSONSchema for the `action` type (`/meta/types`). Handed to
    * ActionDefaultInspector as `serverSchema` so its "More fields" section can
@@ -239,21 +246,28 @@ export function ObjectActionsPanel({
     () => new Set(actions.map((a) => String(a.name ?? ''))),
     [actions],
   );
-  const blockingIssues = React.useMemo(() => {
-    let total = 0;
+  const liveCelErrors = React.useMemo(() => {
+    const live: Record<string, number> = {};
     for (const [name, count] of Object.entries(celErrors)) {
-      if (!liveActionNames.has(name)) continue; // pruned: the action is gone
-      total += count;
+      if (liveActionNames.has(name)) live[name] = count; // else pruned: the action is gone
     }
-    return total;
+    return live;
   }, [celErrors, liveActionNames]);
+  const blockingIssues = Object.values(liveCelErrors).reduce((total, count) => total + count, 0);
   const onBlockingIssuesChangeRef = React.useRef(onBlockingIssuesChange);
+  const onCelVerdictsChangeRef = React.useRef(onCelVerdictsChange);
   React.useEffect(() => {
     onBlockingIssuesChangeRef.current = onBlockingIssuesChange;
+    onCelVerdictsChangeRef.current = onCelVerdictsChange;
   });
   React.useEffect(() => {
     onBlockingIssuesChangeRef.current?.(blockingIssues);
   }, [blockingIssues]);
+  // Keyed on the verdicts' text, not on the memo's identity (ui/AGENTS.md #10).
+  const celVerdictsKey = JSON.stringify(liveCelErrors);
+  React.useEffect(() => {
+    onCelVerdictsChangeRef.current?.(JSON.parse(celVerdictsKey) as Record<string, number>);
+  }, [celVerdictsKey]);
 
   // objectui#11861 — the blank action, under New's "Advanced": what New wrote
   // before the presets, unchanged. Its name is unique among the held actions

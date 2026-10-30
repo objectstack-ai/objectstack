@@ -13,8 +13,8 @@ value must clear before it reaches the screen.
 | Field | Evaluation Type | Return Type | Example |
 |---|---|---|---|
 | `content` | Template (`${}`) | string | `"content": "Total: ${data.total}"` |
-| `visibleWhen` | Condition | boolean | `"visibleWhen": "data.permissions.canView"` (raw expression, no `${}`) |
-| `hidden` | Condition | boolean | `"hidden": "data.status === 'draft'"` |
+| `visibleWhen` | Condition | boolean | `"visibleWhen": "data.permissions.canView"` (bare string = CEL) |
+| `hidden` | Condition | boolean | `"hidden": "data.status == 'draft'"` |
 | `visible` | Condition | boolean | `"visible": "${data.isActive}"` |
 | `disabled` | Condition | boolean | `"disabled": "!data.hasPermission"` |
 | `title` / `label` / `value` / `description` | Template (`${}`) | Preserves original type | **Only on the component types the spec declares** — see "Rule: Bindable Text Keys" below. `"value": "${data.total}"` on a `statistic` renders the number. |
@@ -137,8 +137,7 @@ the same bag, and `SchemaRenderer` evaluates it and then **hoists every key onto
 the node** (`type` / `id` excepted) before the renderer runs — so it is read by
 every namespace, not just `element:*`. Measured on `origin/main` `f1c27f037`
 with a host scope carrying `data = { label: "Evaluated Title" }` (published
-through `PredicateScopeProvider`). The `dataSource` wiring this was first
-measured through is retired; the envelope readings below are unchanged by that:
+through `PredicateScopeProvider`):
 
 | node | rendered card header |
 |---|---|
@@ -159,8 +158,7 @@ one this skill teaches. The last row above is real and is the only spelling that
 carries an expression into a key a `ui:*` / `page:*` renderer reads, but whether
 `properties` is an official authoring channel for those namespaces is an open
 contract question, so it is recorded here rather than
-recommended. What is *not* open: a `${...}` on the node is never evaluated, and a
-key under `props` never reaches a `ui:*` / `page:*` renderer at all.
+recommended.
 
 ## Rule: No Schema Property Invention
 
@@ -273,6 +271,11 @@ component refuses a node-level `actionType` / `target` as mis-layered
   }
 }
 ```
+
+**Destructive actions:** `"variant": "danger"` draws the button red and asks its
+`confirmText` question through the destructive confirm button. `destructive` is
+the Button primitive's word (`variant="destructive"` in React); on an action
+block the spec refuses it at save, naming the rename.
 
 **❌ DO NOT** use function references or inline callbacks in JSON schemas, and
 **❌ DO NOT** author an `events` bag. `BaseSchema` declares no `events` member and no

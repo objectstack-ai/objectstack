@@ -609,21 +609,6 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     schema.mode === 'edit' && schema.recordId && initialData && typeof initialData === 'object'
       ? (initialData as Record<string, any>)
       : undefined;
-  // The ONE field-gate step every layout draws through (objectui#10612):
-  // field-level security plus the ADR-0092 D4 managed-object lock, which this
-  // arm's field generator used to stamp on its own — see `gateFormFields`.
-  const gateFields = useCallback(
-    (fields: FormField[]): FormField[] =>
-      gateFormFields(fields, {
-        perms,
-        objectName: schema.objectName,
-        mode: schema.mode,
-        objectSchema,
-        deniedDescription,
-        previousValues,
-      }) as FormField[],
-    [perms, schema.objectName, schema.mode, objectSchema, deniedDescription, previousValues],
-  );
   // objectui#11000 — why `gateFields` locked every field, when the lock is the
   // form-wide one: the affordance for the mode is closed. Rendered above the
   // fields by `ClosedAffordanceNotice`.
@@ -1195,6 +1180,24 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // (objectui#12359), so both readers spell it through `formOpeningValues`.
   const finalDefaultValues = formOpeningValues(schemaDefaults, initialData);
 
+  // The ONE field-gate step every layout draws through (objectui#10612):
+  // field-level security plus the ADR-0092 D4 managed-object lock, which this
+  // arm's field generator used to stamp on its own — see `gateFormFields`.
+  const gateFields = useCallback(
+    (fields: FormField[]): FormField[] =>
+      gateFormFields(fields, {
+        perms,
+        objectName: schema.objectName,
+        mode: schema.mode,
+        objectSchema,
+        deniedDescription,
+        previousValues,
+        // What the form opens with stays offered on a create (#27763).
+        openingValues: finalDefaultValues,
+      }) as FormField[],
+    [perms, schema.objectName, schema.mode, objectSchema, deniedDescription, previousValues, finalDefaultValues],
+  );
+
   // Handle form submission
   const handleSubmit = useCallback(async (formData: any, e?: any) => {
     // An upload is still in flight (objectui#10166). A `file`/`image` value is
@@ -1548,6 +1551,15 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // the retired `inline` / `grid` to `vertical` here is retired with them.
   const formLayout = schema.layout ?? 'vertical';
 
+  // Clear after a save ("save and add another"): `submitBehavior: { kind:
+  // 'continue' }`, or the legacy `resetOnSuccess` on a create form when no
+  // `submitBehavior` is declared. ONE rule, read by both the sectioned and the
+  // flat `form` node below — the sectioned node used to carry none, so a
+  // grouped form kept the saved record's values while the flat one cleared
+  // (objectstack#27602).
+  const resetOnSubmit = schema.submitBehavior?.kind === 'continue'
+    || (!schema.submitBehavior && schema.resetOnSuccess && schema.mode === 'create');
+
   // If sections are provided (explicitly, or derived from the object's
   // `fieldGroups`) for the simple form, render them as full-width, optionally
   // collapsible groups.
@@ -1743,6 +1755,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
               previousValues,
               showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
               showCancel: schema.showCancel !== false,
+              // The declared Reset button (objectstack#27247); see the flat path.
+              showReset: schema.showReset === true && schema.mode !== 'view',
+              resetOnSubmit,
               // While an upload is in flight the Save button says so, the same
               // answer ActionParamDialog gives its Confirm button. The notice
               // below carries the reason in a sentence (objectui#10166).
@@ -1901,9 +1916,13 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     cancelLabel: schema.cancelText,
     showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
     showCancel: schema.showCancel !== false,
-    resetOnSubmit: schema.showReset
-      || schema.submitBehavior?.kind === 'continue'
-      || (!schema.submitBehavior && schema.resetOnSuccess && schema.mode === 'create'),
+    // `showReset` is the declared Reset button — "Show the reset button" in
+    // the spec's block contract — drawn by the form's action bar and
+    // restoring the opening values without a save. It is NOT a clear after
+    // submit: it used to be OR-ed into `resetOnSubmit` below, so `true` drew
+    // no button and emptied the form after every save (objectstack#27247).
+    showReset: schema.showReset === true && schema.mode !== 'view',
+    resetOnSubmit,
     defaultValues: finalDefaultValues,
     previousValues,
     onSubmit: handleSubmit,

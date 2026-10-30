@@ -36,7 +36,7 @@ import { resolveTenantFieldName } from '@objectstack/objectql';
 import { owdForAudience } from '@objectstack/core';
 import { MEMBERSHIP_ROLE_EXTERNAL } from '@objectstack/spec/identity';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
-import { hasPhantomOwnerAnchor } from './federated-phantom-anchors.js';
+import { hasPhantomOwnerAnchor, isFederatedObject } from './federated-phantom-anchors.js';
 import {
   deleteRowsForDeletedRecords,
   sweepOrphanedRowsByRecordExistence,
@@ -402,6 +402,28 @@ export const PHANTOM_ANCHOR_WRITE_DENY_NOTICE =
   '[sharing] write refused: the owner column on this federated object is the platform ' +
   'injected anchor, not a remote column, so ownership can never match; ' +
   'declare the real remote owner column or change the sharing model';
+
+/**
+ * [#27662] The second silent cause of the same refusal: a federated object
+ * whose owner column is NOT the phantom anchor — the author mapped a remote
+ * column onto `owner_id` through `external.columnMap`, or declared `owner_id`
+ * outright — served by a driver that returns rows with no `owner_id` key at
+ * all. A plugin driver that does not apply `columnMap` is the measured case: it
+ * answers with the remote column's own name, so the pre-image has no owner, and
+ * every member write is refused exactly as on a phantom anchor (fail closed,
+ * correct). Since #27425 took the mapped class out of
+ * {@link hasPhantomOwnerAnchor}, {@link PHANTOM_ANCHOR_WRITE_DENY_NOTICE} no
+ * longer fires for it, and its wording ("injected anchor") would be wrong if it
+ * did — the metadata is right here, the driver is what drops the column.
+ *
+ * Keyed on the row, not on which of the two declarations the author used: an
+ * absent key is the one fact both share, and a present `null` (an ordinary
+ * owner-less row over a driver that DOES serve the column) stays silent.
+ */
+export const UNSERVED_OWNER_WRITE_DENY_NOTICE =
+  '[sharing] write refused: the driver returned no value for the owner column this ' +
+  'federated object maps (external.columnMap) or declares, so ownership can never match; ' +
+  'use a driver that serves the mapped owner column or change the sharing model';
 
 /**
  * [ADR-0111 D2] The narrow slice of `ISecurityService` the management gate
@@ -946,7 +968,8 @@ export class SharingService implements ISharingService {
       limit: 1,
       context: SYSTEM_CTX,
     });
-    const owner = Array.isArray(own) && own[0] ? (own[0] as any)[OWNER_FIELD] : undefined;
+    const row = Array.isArray(own) ? (own[0] as Record<string, unknown> | undefined) : undefined;
+    const owner = row ? row[OWNER_FIELD] : undefined;
     if (owner == null) {
       // [#8418] The refusal is unchanged — `return false` below is the same
       // `false` this line has always returned, and the diagnostic is emitted
@@ -955,8 +978,10 @@ export class SharingService implements ISharingService {
       // actually defeats the fast path, not the mere fact that the object is
       // federated: an author-declared remote `owner_id` that happens to be NULL
       // on this row reaches here too, and `hasPhantomOwnerAnchor` is what tells
-      // the two apart (provenance, never an `external` test).
-      this.notePhantomAnchorWriteDeny(object, context);
+      // the two apart (provenance, never an `external` test). [#27662] The row
+      // goes along so a mapped or declared owner column the driver did not
+      // serve is told apart from one it served as NULL.
+      this.notePhantomAnchorWriteDeny(object, context, row);
       return false;
     }
     // Middleware-stamped, not a field of the envelope — see buildReadFilter().
@@ -984,14 +1009,28 @@ export class SharingService implements ISharingService {
    * that can misreport the thing it exists to explain is worse than silence.
    * The latch is claimed BEFORE the log so a throwing logger cannot turn one
    * suppressed line into one throw per row (#6783's ordering, same reason).
+   *
+   * [#27662] A federated object whose owner column is real by declaration (a
+   * `columnMap` entry onto `owner_id`, or a declared field) gets
+   * {@link UNSERVED_OWNER_WRITE_DENY_NOTICE} instead, under the same latch,
+   * when the pre-image `row` came back with no `owner_id` key. No row at all
+   * (the record does not exist) says nothing about the driver and stays silent.
    */
-  private notePhantomAnchorWriteDeny(object: string, context: ExecutionContext): void {
+  private notePhantomAnchorWriteDeny(
+    object: string,
+    context: ExecutionContext,
+    row: Record<string, unknown> | undefined,
+  ): void {
     if (this.phantomAnchorNotified.has(object)) return;
     try {
       const schema = this.engine.getSchema?.(object);
-      if (!hasPhantomOwnerAnchor(schema)) return;
+      let notice: string;
+      if (hasPhantomOwnerAnchor(schema)) notice = PHANTOM_ANCHOR_WRITE_DENY_NOTICE;
+      else if (isFederatedObject(schema) && row !== undefined && row[OWNER_FIELD] === undefined) {
+        notice = UNSERVED_OWNER_WRITE_DENY_NOTICE;
+      } else return;
       this.phantomAnchorNotified.add(object);
-      this.logger?.warn?.(PHANTOM_ANCHOR_WRITE_DENY_NOTICE, {
+      this.logger?.warn?.(notice, {
         object,
         ownerField: OWNER_FIELD,
         userId: context?.userId ?? 'unknown',

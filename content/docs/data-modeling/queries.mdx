@@ -540,10 +540,12 @@ Only `query` and `fields` are implemented. The engine expands `search` into a dr
 **narrow** the scan within the server-resolved searchable set — the object's declared
 `searchableFields`, or a text-like auto-default when none are declared. Over the
 REST/protocol ingress a name outside that set is `400 INVALID_FIELD`, with distinct
-messages for a field that does not exist and a real field that is not searchable. The
-engine used to drop unknown names and fall back to the full searchable set — a parameter
-that exists to narrow a search, silently widening it. Internal callers reaching
-`engine.find()` directly are unaffected.
+messages for a field that does not exist and a real field that is not searchable. An
+override that names no field at all (`?$searchFields=`, `?$searchFields=,`, an empty
+array) is `400 VALIDATION_ERROR`, as `$select=` is; leave the parameter out to scan the
+default set. The engine used to drop unknown names and fall back to the full searchable
+set — a parameter that exists to narrow a search, silently widening it. Internal callers
+reaching `engine.find()` directly are unaffected.
 </Callout>
 
 ### Searching by a related record's title — mirror the value

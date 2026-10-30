@@ -230,8 +230,9 @@ export function injectedSystemColumnDefs(def: unknown): Record<string, Readonly<
  * consumers on two sides of the package boundary need the SAME identity
  * verdict: the #4326 round-trip strip in `@objectstack/metadata-core`, and
  * {@link resolveInjectedColumnProvenance} below. It is also the convergence
- * target for the hand-rolled `equalsShippedDef` copies the #7865 ruling lists
- * (plugin-security / plugin-sharing), when next touched.
+ * target for the hand-rolled `equalsShippedDef` copies the #7865 ruling lists.
+ * plugin-sharing's is gone (it reads {@link isOwnerAnchorUnprovable} now), so
+ * plugin-security's is the one left, to converge when next touched.
  */
 export function isInjectedColumnDefinition(
   value: unknown,
@@ -326,7 +327,15 @@ export function platformProvisionsStorage(def: unknown): boolean {
  *  - #7833 (engine): `isFederated` ⇒ `!platformProvisionsStorage(schema)`.
  *  - #7859 (plugin-security): `hasPhantomTenantAnchor(schema)` ⇒
  *    `resolveInjectedColumnProvenance(schema, 'organization_id') === 'injected-unprovisioned'`.
- *  - #7858 (plugin-sharing): the `owner_id` twin of #7859.
+ *  - #7858 (plugin-sharing): the `owner_id` twin of #7859, with one arm the
+ *    tenant guard has no counterpart for. Since #27425 the owner question is
+ *    "is an owner provable from declared metadata?", and an
+ *    `external.columnMap` entry targeting `owner_id` is a declaration too, so
+ *    `hasPhantomOwnerAnchor(schema)` ⇒ {@link isOwnerAnchorUnprovable} — the
+ *    provenance verdict plus that arm — not the bare verdict. Lint's
+ *    `hasUnprovableOwnerAnchor` reads the same function, and its
+ *    `security-external-owner-unmapped` wording reads
+ *    {@link externalColumnMapTargets}.
  *  - #8116 (lint): the author-time consumer this module moved to the spec for —
  *    expression / semantic-role validation reads the marker and warns.
  *
@@ -384,6 +393,59 @@ export function unprovisionedInjectedColumns(def: unknown): string[] {
   return Object.keys(injectedSystemColumnDefs(def)).filter(
     (name) => resolveInjectedColumnProvenance(def, name) === 'injected-unprovisioned',
   );
+}
+
+/**
+ * [#27425] Does this object's ADR-0015 `external.columnMap` (remote column →
+ * local field) map some remote column onto `field`? The author naming which
+ * remote column backs a local field — a declaration, read off the document
+ * like every input in this module. Whether a driver honours it is the driver's
+ * (the built-in SQL drivers apply the map; a plugin driver must return the
+ * field itself), so a consumer judging a WRITE path reads this as a fact about
+ * the document, never as proof the column is served.
+ *
+ * Tolerant of bare / un-parsed metadata records: anything that is not a plain
+ * `external` object carrying a plain `columnMap` object answers `false`.
+ */
+export function externalColumnMapTargets(def: unknown, field: string): boolean {
+  if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
+  const external = (def as { external?: unknown }).external;
+  if (!external || typeof external !== 'object' || Array.isArray(external)) return false;
+  const columnMap = (external as { columnMap?: unknown }).columnMap;
+  if (!columnMap || typeof columnMap !== 'object' || Array.isArray(columnMap)) return false;
+  return Object.values(columnMap as Record<string, unknown>).includes(field);
+}
+
+/**
+ * [#27425] Is NO owner provable for this object from its declared metadata —
+ * the one reader of "can record-level ownership scope this object at all?"
+ *
+ * `true` exactly when `owner_id` is the platform's injected anchor with no
+ * storage behind it (`resolveInjectedColumnProvenance(def, 'owner_id') ===
+ * 'injected-unprovisioned'`) AND no `external.columnMap` entry targets
+ * `owner_id` ({@link externalColumnMapTargets}). Either declaration — a
+ * declared `owner_id` field, or a map entry naming the remote column that
+ * carries it — is the author vouching for an owner; with neither, a predicate
+ * over `owner_id` can only be answered by a driver's accident. Record sharing
+ * then admits no row by ownership below `org` (plugin-sharing
+ * `hasPhantomOwnerAnchor`), and lint warns on owner-scoped models.
+ *
+ * Deliberately NOT folded into {@link resolveInjectedColumnProvenance}: a
+ * `columnMap` entry does not change WHO wrote the `owner_id` field — the
+ * registered definition is still the platform's — and a consumer judging the
+ * write gates (lint `security-external-owner-unmapped`) needs exactly that
+ * distinction, because on a plugin driver the map is not applied and the
+ * declared field is what holds. Provenance answers "who wrote the column";
+ * this answers "is an owner provable", and only the owner anchor asks it.
+ *
+ * Fail direction: `true` narrows (no owner predicate, no row by ownership),
+ * `false` keeps ordinary owner scoping, which on a column the remote lacks
+ * matches no row or raises (Postgres and MySQL raise on the unknown column,
+ * SQLite matches no row); neither widens to every row.
+ */
+export function isOwnerAnchorUnprovable(def: unknown): boolean {
+  if (externalColumnMapTargets(def, SystemFieldName.OWNER_ID)) return false;
+  return resolveInjectedColumnProvenance(def, SystemFieldName.OWNER_ID) === 'injected-unprovisioned';
 }
 
 /**

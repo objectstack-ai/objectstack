@@ -19,6 +19,7 @@ import { getIcon } from '../utils/getIcon.js';
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarHeader,
   SidebarGroup,
   SidebarGroupLabel,
@@ -27,6 +28,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuAction,
+  cn,
   useSidebar,
 } from '@object-ui/components';
 import {
@@ -36,7 +38,7 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
-  BarChart3,
+  Pin,
 } from 'lucide-react';
 import { NavigationRenderer, hasVisibleNavigationItems, type NavItemActionContext } from '@object-ui/layout';
 import type { NavigationArea, NavigationItem } from '@object-ui/types';
@@ -70,7 +72,11 @@ import {
 } from './ContextSelectors.js';
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
+import { useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
+import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
+import { favoriteAppSegment } from './listViewFavorites.js';
+import type { FavoriteItem } from '../hooks/useFavorites.js';
 
 /**
  * The class the Recent group's label carries so that, once the sidebar
@@ -137,6 +143,13 @@ interface UnifiedSidebarProps {
   activeAppName?: string;
   /** Callback when user switches apps */
   onAppChange?: (name: string) => void;
+  /**
+   * Below the fold width, draw the sidebar as the icon rail that expands over
+   * the content (objectstack#27593). The console layout sets it, and folds
+   * the sidebar with `useResponsiveSidebar`; off, the sidebar is drawn as the
+   * provider says at every width.
+   */
+  railOverlay?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -154,7 +167,7 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
+export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
@@ -171,6 +184,11 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
   // metadata cache at render time (objectui#9868). `nav:menu` wires the same
   // hook, so the two surfaces cannot name one entry two ways.
   const resolveNavTargetLabel = useNavTargetLabel();
+  // Below the fold width the sidebar is the icon rail and expands over the
+  // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
+  const rail = useConsoleSidebarRail({ enabled: railOverlay });
+  const railPanel = useConsoleSidebarRailPanel(rail);
+  const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
 
   // Swipe-from-left-edge gesture to open sidebar on mobile
   React.useEffect(() => {
@@ -203,7 +221,7 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
   // A recent entry's text is the item's own, resolved on this render
   // (objectui#11678); the entry stores identity only.
   const recentLabel = useRecentItemLabel();
-  const { favorites, removeFavorite } = useFavorites();
+  const { favorites, removeFavorite, reorderFavorites } = useFavorites();
 
   const { apps: metadataApps } = useMetadata();
   const apps = metadataApps || [];
@@ -471,32 +489,62 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
   // favorites entry removes it. Its Design entry reads the app the favorite's
   // own address names, which need not be this one (objectui#12520). A phone
   // keeps the control it had (no hover).
-  const contentFavorites = favorites.filter(f => f.type !== 'nav').slice(0, 8);
-  const contentFavoriteRows = contentFavorites.length > 0
-    ? contentFavorites.map(item => (
-        <SidebarMenuItem key={item.id}>
-          <SidebarMenuButton asChild tooltip={item.label}>
-            <Link to={item.href}>
+  //
+  // A starred list view (objectstack#27594) is a row of the app it was
+  // starred in, the app its address names, drawn with its object's icon. The
+  // rows are the user's to order: dragged, they keep the order on every device
+  // (the favorites store's `reorderFavorites`). A phone, which draws no drag,
+  // keeps them in that order.
+  const contentFavorites = favorites
+    .filter(f => f.type !== 'nav')
+    .filter(f => f.type !== 'view' || matchAppBySegment(apps.filter((a: any) => a.active !== false), favoriteAppSegment(f.href)) === activeApp)
+    .slice(0, 8);
+  const contentFavoriteRow = (item: FavoriteItem, drag?: FavoriteRowDragProps) => {
+    return (
+      <>
+        <SidebarMenuButton asChild tooltip={item.label}>
+          <Link to={item.href} {...(drag ?? {})}>
+            {item.type === 'view' ? (
+              // `createElement`: the looked-up icon is a value, which
+              // react-hooks/static-components refuses in tag position.
+              React.createElement(getIcon(item.icon), { className: 'h-4 w-4 shrink-0 text-muted-foreground' })
+            ) : (
               <span className="text-muted-foreground">
                 {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : item.type === 'page' ? '📄' : '📋'}
               </span>
-              <span className="truncate">{item.label}</span>
-            </Link>
-          </SidebarMenuButton>
-          <SidebarItemMenu
-            label={item.label}
-            href={item.href}
-            isFavorite
-            onToggleFavorite={() => removeFavorite(item.id)}
-            designPath={favoriteDesignPath(item, apps)}
+            )}
+            <span className="truncate">{item.label}</span>
+          </Link>
+        </SidebarMenuButton>
+        <SidebarItemMenu
+          label={item.label}
+          href={item.href}
+          isFavorite
+          onToggleFavorite={() => removeFavorite(item.id)}
+          designPath={favoriteDesignPath(item, apps)}
+        />
+      </>
+    );
+  };
+  const contentFavoriteRows = contentFavorites.length === 0
+    ? null
+    : isMobile
+      ? contentFavorites.map(item => <SidebarMenuItem key={item.id}>{contentFavoriteRow(item)}</SidebarMenuItem>)
+      : (
+          <SortableFavoriteRows
+            items={contentFavorites}
+            onReorder={reorderFavorites}
+            renderRow={contentFavoriteRow}
           />
-        </SidebarMenuItem>
-      ))
-    : null;
+        );
 
   return (
-    <>
-    <Sidebar collapsible="icon" className={CONSOLE_BELOW_TOP_BAR}>
+    <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
+    <Sidebar
+      collapsible="icon"
+      className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
+      {...railPanel.panelProps}
+    >
       {/* Mobile-only drawer header — the app's glyph and name (objectui#12201
           item 3). On a phone the top bar hides the app pill, so this is the
           one place that says which app the user is in. It replaces the old
@@ -592,32 +640,11 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
              templateContext={{ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null, contextValues }}
            />
 
-           {/* The app's report index (objectui#13020): every report the app
-               ships that the member may open, its navigation's or not, so no
-               report is left with only a typed URL. A static entry: the
-               sidebar reads no report list for it (objectui#12980), and the
-               index says so when there are none. Not in Studio, whose
-               navigation is its own design surface. */}
-           {!isStudioApp && (
-             <SidebarGroup>
-               <SidebarGroupContent>
-                 <SidebarMenu>
-                   <SidebarMenuItem>
-                     <SidebarMenuButton
-                       asChild
-                       isActive={location.pathname === `${basePath}/reports`}
-                       tooltip={t('sidebar.allReports', { defaultValue: 'All reports' })}
-                     >
-                       <Link to={`${basePath}/reports`} data-testid="sidebar-report-index">
-                         <BarChart3 className="h-4 w-4" />
-                         <span>{t('sidebar.allReports', { defaultValue: 'All reports' })}</span>
-                       </Link>
-                     </SidebarMenuButton>
-                   </SidebarMenuItem>
-                 </SidebarMenu>
-               </SidebarGroupContent>
-             </SidebarGroup>
-           )}
+           {/* The app's report index is an entry its navigation declares,
+               `{ type: 'report' }` with no `reportName` (objectstack#27525):
+               the renderer above draws it, and the sidebar injects no index
+               row of its own. An app whose navigation declares none shows
+               none. */}
 
            {/* Recent Items */}
            {recentItems.length > 0 && (
@@ -743,6 +770,26 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
          )}
         </div>
       </SidebarContent>
+      {/* "Keep sidebar open" turns the fold off for this browser; offered
+          where the fold applies, while the rail is expanded or kept open. */}
+      {rail.narrow && (rail.overlayOpen || rail.keepOpen) && (
+        <SidebarFooter className="border-t border-sidebar-border">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                data-testid="sidebar-keep-open"
+                aria-pressed={rail.keepOpen}
+                isActive={rail.keepOpen}
+                tooltip={keepOpenLabel}
+                onClick={() => rail.setKeepOpen(!rail.keepOpen)}
+              >
+                <Pin className="h-4 w-4" />
+                <span>{keepOpenLabel}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      )}
       {/* No footer trigger: the app bar's left slot holds the shell's one
           sidebar trigger at every width (objectui#12429). */}
     </Sidebar>
@@ -750,6 +797,6 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
         surfaces the full navigation tree, so a bottom strip of the
         first 5 leaves was pure duplication and ate ~52px of vertical
         space. Pattern follows Notion / Linear (drawer-only). */}
-    </>
+    </div>
   );
 }

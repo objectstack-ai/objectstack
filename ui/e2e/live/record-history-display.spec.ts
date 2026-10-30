@@ -1,22 +1,26 @@
 import { test, expect, type APIRequestContext } from '@playwright/test';
 
 /**
- * Live e2e for the record detail History tab's display pipeline
- * (app-shell auditHistoryDisplay → record:history → HistoryTimeline).
+ * Live e2e for the record page's field-change display pipeline
+ * (app-shell `sys_audit_log` read → `auditEntriesToFeedItems` →
+ * `RecordFieldChangesContext` → the timeline stream's Changes chip).
  *
- * Regression for the gantt QA report where the tab rendered raw audit
- * payloads: ISO datetimes ("2026-08-04T12:00:00.000Z"), raw lookup id
- * arrays, raw select values, and "Unknown user" for every entry.
+ * Regression for the gantt QA report where the record history rendered raw
+ * audit payloads: ISO datetimes ("2026-08-04T12:00:00.000Z"), raw lookup id
+ * arrays, raw select values, and "Unknown user" for every entry. Record page
+ * v3 (objectstack#27055) removed the History tab at every width: the same
+ * enriched audit entries are now the field_change lines of the ONE timeline
+ * stream, under its Changes (变更) chip.
  *
  * Targets `showcase_account`, the showcase's `enable.trackHistory` object —
- * the console gates the History tab on that flag. Its audited field mix: two
- * selects (`industry`, and `status` labelled "Lifecycle"), a date
- * (`signed_on`, "Customer Since") and the record owner, a user lookup
- * (`owner_id`). No history-tracked showcase object carries a boolean or a
- * datetime field, so booleans-as-words and datetime localization are not
- * exercised here; the unit suite `auditHistoryDisplay.test.ts` in app-shell
- * pins both ("localizes booleans through t with Yes/No fallback", "localizes
- * datetime values instead of raw ISO strings").
+ * the console reads `sys_audit_log` only for an object with that flag. Its
+ * audited field mix: two selects (`industry`, and `status` labelled
+ * "Lifecycle"), a date (`signed_on`, "Customer Since") and the record owner, a
+ * user lookup (`owner_id`). No history-tracked showcase object carries a
+ * boolean or a datetime field, so booleans-as-words and datetime localization
+ * are not exercised here; the unit suite `auditHistoryDisplay.test.ts` in
+ * app-shell pins both ("localizes booleans through t with Yes/No fallback",
+ * "localizes datetime values instead of raw ISO strings").
  */
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 const EMAIL = process.env.LIVE_EMAIL || 'admin@objectos.ai';
@@ -38,16 +42,33 @@ async function seededUsers(request: APIRequestContext): Promise<{ actor: SysUser
 
 /**
  * The synthesized record page lays itself out by the width of the view it
- * occupies (objectstack#26678): the tab strip this spec opens exists only
- * below the two-column floor (`RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` in
- * `@object-ui/plugin-detail`). A 1024 px window with the console sidebar
- * expanded is already two columns (objectstack#27241), so the spec pins a
- * viewport whose record view stays under that floor once the 256 px sidebar
- * takes its share — the page's tabbed tier.
+ * occupies (objectstack#26678): a column tier at `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH`
+ * (`@object-ui/plugin-detail`) and wider, the tab strip below it.
+ *
+ * A 1440 px window is a column tier whatever the console sidebar does: 1184 px
+ * of record view with the sidebar expanded (objectstack#27241's three-column
+ * window), more with it collapsed. ⛔ Not a window near 1000 px: whether that
+ * is the tabbed tier depends on the sidebar's state. Measured on the showcase
+ * at 1000×800 the sidebar came up as its icon rail and the page drew two
+ * columns with no tab strip at all, so a spec that waited for a tab there
+ * timed out.
+ *
+ * In a column tier the stream is NOT resident by default for this object. The
+ * reader's Timeline switch (the header's Panels control) defaults to off for
+ * an object that is not worked (`recordTimelineDefaultReason`: showcase_account
+ * declares no `stageField`, no lifecycle option `kind` and no `enable.files`),
+ * and a switched-off timeline folds into the Activity (动态) card at the related
+ * column's foot — closed, its blocks not mounted until the reader opens it
+ * (`FoldedTimelineCard`, objectstack#27052). Measured under the nightly harness
+ * (a built Console on a fresh database, so no stored switch): at 1440×900 the
+ * page drew three columns, the Panels control read Timeline unpressed, and the
+ * Activity card was folded, so a spec that waited for the Changes chip at open
+ * timed out. The spec opens that card the way a reader does, and asserts each
+ * step: the switch is off, the card starts closed, the click opens it.
  */
-test.use({ viewport: { width: 1000, height: 800 } });
+test.use({ viewport: { width: 1440, height: 900 } });
 
-test('History tab shows display values (localized dates, option labels, resolved lookups, real actor) instead of raw audit payloads', async ({ page, request }) => {
+test('the timeline stream\'s Changes chip shows display values (localized dates, option labels, resolved lookups, real actor) instead of raw audit payloads', async ({ page, request }) => {
   const { actor, other } = await seededUsers(request);
 
   // 1) Seed an account and drive three audited updates through the real API —
@@ -71,22 +92,35 @@ test('History tab shows display values (localized dates, option labels, resolved
     expect(res.ok()).toBeTruthy();
   }
 
-  // 2) Open the synthesized record page and its History tab.
+  // 2) Open the synthesized record page, open the folded Activity card that
+  //    holds the stream (see the viewport note above), and select the
+  //    stream's Changes chip — the field changes alone (the audit entries,
+  //    plus the activity stream's own `created` row).
   await page.goto(`/apps/showcase_app/showcase_account/record/${id}`);
-  const historyTab = page.getByRole('tab', { name: /^(History|历史)$/ });
-  await historyTab.waitFor({ state: 'visible', timeout: 15_000 });
-  await historyTab.click();
-
-  const panel = page.getByRole('tabpanel', { name: /History|历史/ });
-  // The three UPDATE entries render as diff lines; wait for the latest one.
-  await expect(panel.getByText('Owner', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
-  const text = (await panel.innerText()).replace(/\s+/g, ' ');
+  const timelineSwitch = page.locator('[data-panel-toggles] [data-panel-toggle="timeline"]');
+  // The page-open wait: the same 15 s budget the spec gives its first element.
+  await expect(timelineSwitch, 'the Timeline switch is off for an object that is not worked').toHaveAttribute('aria-pressed', 'false', { timeout: 15_000 });
+  const activityCard = page.getByRole('region', { name: /^(Activity|动态)$/ });
+  // The toggle is the card heading's button: once open, the stream inside the
+  // card has an "Activity" filter chip of its own.
+  const activityToggle = activityCard.getByRole('heading', { name: /^(Activity|动态)$/ }).getByRole('button');
+  await expect(activityToggle, 'the switched-off timeline is folded into a closed Activity card').toHaveAttribute('aria-expanded', 'false');
+  await activityToggle.click();
+  await expect(activityToggle).toHaveAttribute('aria-expanded', 'true');
+  const stream = activityCard.getByRole('region', { name: /^(Timeline|时间线)$/ });
+  const changesChip = stream.locator('[data-stream-filter="changes"]');
+  await changesChip.waitFor({ state: 'visible', timeout: 15_000 });
+  await changesChip.click();
+  await expect(changesChip).toHaveAttribute('aria-pressed', 'true');
+  // The three UPDATE entries render as change lines; wait for the latest one.
+  await expect(stream.locator('[data-stream-change]', { hasText: 'Owner' }).first()).toBeVisible({ timeout: 15_000 });
+  const text = (await stream.innerText()).replace(/\s+/g, ' ');
 
   // 3) Actor attribution: the audit user resolves to a display name —
-  //    never the raw id, never the unknown-user fallback.
+  //    never the raw id, never the unknown-user fallback (`detail.unknownUser`).
   expect(text).toContain(actor.name);
   expect(text).not.toContain(actor.id);
-  expect(text).not.toMatch(/Unknown user|未知用户/);
+  expect(text).not.toMatch(/\bUnknown\b|未知用户/);
 
   // 4) Select values render as option labels, not raw stored values.
   expect(text).toMatch(/Prospect/);

@@ -359,7 +359,14 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 98 once objectstack-ai/objectstack#27176 added
     // `preview.changes.draftedByMcpClient`, the changes drawer's line that names
     // the MCP client („{{client}}“) — one interpolated span, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(98);
+    // 100 once objectstack-ai/objectstack#27480 added
+    // `chatbot.plan.iterateOrNew.question` and `.extend`, the plan card's
+    // extend-or-new question and its choice that name the existing app
+    // („{{app}}“) — one interpolated span each, runtime data.
+    // 101 once objectstack-ai/objectstack#27823 added
+    // `objectActions.deletedNamed`, the delete toast that names the record
+    // („{{name}}“) — one interpolated span, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(101);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -427,7 +434,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // objectstack-ai/objectstack#26469 reworded `chatbot.build.draftPosture`,
     // one more matched pair. 98 / 98 / 0 after objectstack-ai/objectstack#27176
     // added `preview.changes.draftedByMcpClient`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 98, close: 98, rdq: 0 });
+    // 100 / 100 / 0 after objectstack-ai/objectstack#27480 added
+    // `chatbot.plan.iterateOrNew.question` and `.extend`, one matched pair each.
+    // 101 / 101 / 0 after objectstack-ai/objectstack#27823 added
+    // `objectActions.deletedNamed`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 101, close: 101, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

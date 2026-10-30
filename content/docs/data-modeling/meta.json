@@ -6,6 +6,7 @@
     "fields",
     "field-types",
     "field-type-decision-tree",
+    "currency",
     "relationships",
     "object-extensions",
     "validation",
@@ -16,6 +17,7 @@
     "seed-data",
     "import-mappings",
     "external-datasources",
+    "odata-datasources",
     "drivers",
     "virtual-objects",
     "analytics"

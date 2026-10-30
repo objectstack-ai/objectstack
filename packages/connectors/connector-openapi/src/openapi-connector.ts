@@ -53,6 +53,8 @@ export interface OpenApiDocument {
 }
 
 export interface OpenApiPathItem {
+    /** Parameters shared by every operation under this path (OpenAPI 3.x Path Item Object). */
+    parameters?: OpenApiParameter[];
     [method: string]: OpenApiOperation | unknown;
 }
 
@@ -212,7 +214,7 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
             key,
             label: op.summary ?? titleize(key),
             description: op.description,
-            inputSchema: buildInputSchema(op),
+            inputSchema: buildInputSchema(op, auth),
             outputSchema: buildOutputSchema(op),
         });
 
@@ -253,19 +255,44 @@ interface Op extends OpenApiOperation {
     path: string;
 }
 
-/** Flatten paths × methods into a deterministic list of operations. */
+/**
+ * Flatten paths × methods into a deterministic list of operations, each
+ * carrying its path item's shared `parameters` (see {@link mergeParameters}).
+ */
 function collectOperations(doc: OpenApiDocument): Op[] {
     const ops: Op[] = [];
     for (const [path, item] of Object.entries(doc.paths ?? {})) {
         if (!item || typeof item !== 'object') continue;
         const record = item as Record<string, unknown>;
+        const shared = Array.isArray(record.parameters) ? (record.parameters as OpenApiParameter[]) : [];
         for (const method of HTTP_METHODS) {
             const operation = record[method] as OpenApiOperation | undefined;
             if (!operation || typeof operation !== 'object') continue;
-            ops.push({ ...operation, method, path });
+            ops.push({ ...operation, parameters: mergeParameters(shared, operation.parameters), method, path });
         }
     }
     return ops;
+}
+
+/**
+ * The OpenAPI 3.x rule for a Path Item's `parameters`: they apply to every
+ * operation under the path, and an operation entry with the same `name` + `in`
+ * overrides the path-level one whole. A `$ref` entry has no `name` / `in` to
+ * match on, so it is kept as is — the caller de-references the document, and
+ * {@link buildInputSchema} skips an unresolved one exactly as it does an
+ * operation-level `$ref`.
+ */
+function mergeParameters(
+    shared: readonly OpenApiParameter[],
+    own: OpenApiParameter[] | undefined,
+): OpenApiParameter[] | undefined {
+    if (shared.length === 0) return own;
+    const ownList = Array.isArray(own) ? own : [];
+    // `in` is a closed vocabulary with no ':' in it, so `in:name` is unambiguous.
+    const key = (p: OpenApiParameter): string | undefined =>
+        p && typeof p === 'object' && !('$ref' in p) ? `${p.in}:${p.name}` : undefined;
+    const overridden = new Set(ownList.map(key));
+    return [...shared.filter((p) => key(p) === undefined || !overridden.has(key(p))), ...ownList];
 }
 
 /**
@@ -292,20 +319,37 @@ function toInfo(op: Op): OperationInfo {
 }
 
 /**
+ * Header parameters OAS 3.0.3 §4.7.12.1 says SHALL be ignored, compared
+ * lower-cased: the transport sets `Content-Type`, and `applyAuth` sets
+ * `Authorization`, so a value the input supplied could never take effect.
+ */
+const IGNORED_HEADER_PARAMETERS = new Set(['accept', 'content-type', 'authorization']);
+
+/**
  * Assemble the action inputSchema from an operation's parameters + requestBody.
  * Produces { type: 'object', properties: { path, query, header, body }, required }
  * where only non-empty sections are emitted.
+ *
+ * #27995 — the `connector_action` executor now refuses a call whose input
+ * breaks this schema, so it must not demand what the caller cannot supply:
+ * the ignored header parameters above, and the header or query parameter
+ * the connector's own `auth` fills (the credential never belongs in a
+ * flow's `connectorConfig.input`), are left out of it.
  */
-function buildInputSchema(op: OpenApiOperation): JsonSchema | undefined {
+function buildInputSchema(op: OpenApiOperation, auth: RestAuth): JsonSchema | undefined {
     const sections: Record<'path' | 'query' | 'header', { props: Record<string, JsonSchema>; required: string[] }> = {
         path: { props: {}, required: [] },
         query: { props: {}, required: [] },
         header: { props: {}, required: [] },
     };
+    const authHeader = auth.type === 'api-key' && !auth.paramName ? (auth.headerName ?? 'X-API-Key').toLowerCase() : undefined;
+    const authQuery = auth.type === 'api-key' ? auth.paramName : undefined;
 
     for (const p of op.parameters ?? []) {
         if (!p || typeof p !== 'object' || '$ref' in p) continue;
         if (p.in !== 'path' && p.in !== 'query' && p.in !== 'header') continue;
+        if (p.in === 'header' && (IGNORED_HEADER_PARAMETERS.has(p.name.toLowerCase()) || p.name.toLowerCase() === authHeader)) continue;
+        if (p.in === 'query' && authQuery !== undefined && p.name === authQuery) continue;
         const sec = sections[p.in];
         sec.props[p.name] = p.schema ?? (p.description ? { type: 'string', description: p.description } : { type: 'string' });
         if (p.required) sec.required.push(p.name);

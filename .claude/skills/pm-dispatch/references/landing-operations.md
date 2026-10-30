@@ -9,7 +9,7 @@
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
-- PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒请审;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
+- PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒;FAIL ⇒ 撤挂,补丁轮;⛔ 免复核不放行。
 - 落地后才见欠复核 ⇒ 按 `contract-review.md` 复审落地 head、发现立新卡,⛔ 不修已关 PR。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
 - diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head 复核。
@@ -61,7 +61,6 @@
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
 - ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`(裁决评论 6104822731),仍拒即授权漂移。
 - 确认 MERGED 同一动作里给 `Part of` 卡收口、`Fixes` 卡代关但标也须摘,⛔ 不拆到下轮巡检。
-- `Part of` 卡开着不摘 `pm:dispatched`,无在飞物的卡就永远算进 `label:pm:dispatched is:open`。
 - 摘标换回 `pm:queue` 或按剩余物定级,加一条写清交付了什么、剩下归谁的评论。
 - 同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关。
 - 每次合并后重拉一次车道盘点与预期状态对账,⛔ 不留给下轮巡检。
@@ -70,6 +69,7 @@
 - MERGED 不是终点:发版后义务见 `release-aftercare.md`。
 - PR 开出至 MERGED,每看一眼(唤醒/巡检/报告前)同读检查与 `mergeable_state`;`unknown` 即重读。
 - `dirty` ⇒ 当即合 `origin/main` 推新提交,⛔ 不等冲突通知;未见非 `dirty` ⛔ 不报无需你做。
+  这一移 head 的撤挂与重挂照 `contract-review.md` head 后移例外条。
 - MERGED 或关闭即退订,同刻把 `mode:cloud` 派的会话 `archive_session`。
 - 触发条件是卡终局且报告已收复核;⛔ 合并前不归档,误归档可 unarchive 但容器现场已失。
 - 暂停或交接时把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。

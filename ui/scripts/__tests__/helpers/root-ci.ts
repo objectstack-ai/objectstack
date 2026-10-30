@@ -22,6 +22,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 
 import { nestedPrefix, workspaceRoot } from '../../workspace-root.mjs';
 
@@ -154,4 +155,42 @@ export function globMatches(glob: string, file: string): boolean {
       .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
       .join('.*')}$`,
   ).test(file);
+}
+
+/** One step of a root workflow job, as parsed. */
+export interface CiStep {
+  readonly name?: string;
+  readonly run?: string;
+  readonly uses?: string;
+  readonly if?: string;
+}
+
+/** One root workflow job, as parsed: its condition and its steps. */
+export interface CiJob {
+  readonly if?: string;
+  readonly steps: CiStep[];
+}
+
+/**
+ * One job of the root `ci.yml`, parsed. Throws when the workflow defines no
+ * such job or it parses to implausibly few steps, so a renamed job or a parse
+ * that collapsed the list is a red pin, never a scan over nothing.
+ */
+export function rootCiJob(key: string): CiJob {
+  const workflow = parseYaml(rootCi()) as { jobs?: Record<string, CiJob> };
+  const job = workflow.jobs?.[key];
+  if (!job) throw new Error(`${rootCiPath} defines no \`${key}\` job`);
+  if (!Array.isArray(job.steps) || job.steps.length < 5) {
+    throw new Error(`${rootCiPath}: the \`${key}\` job parsed to implausibly few steps`);
+  }
+  return job;
+}
+
+/**
+ * The steps of a root `ci.yml` job whose whole `run:` is the given command, e.g.
+ * `uiRun('lint:root')`. Exact, so a step that merely mentions the alias inside
+ * a longer script (or a comment) does not count as running it.
+ */
+export function stepsRunning(job: CiJob, command: string): CiStep[] {
+  return job.steps.filter((step) => typeof step.run === 'string' && step.run.trim() === command);
 }

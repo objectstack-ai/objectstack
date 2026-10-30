@@ -28,7 +28,7 @@ import {
 import {
   type LinkingAuthContext,
 } from './implicit-account-linking.js';
-import { IdpLocaleSync } from './idp-locale-claim.js';
+import { IdpLocaleSync, type IdpLocaleClaim } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
 import {
   API_KEY_DEFAULT_EXPIRY_DAYS,
@@ -1690,6 +1690,7 @@ export class AuthManager {
       implicitLinkRequiresLocalEmailVerified: (...a) => this.implicitLinkRequiresLocalEmailVerified(...a),
       isAuthGateActive: (...a) => this.isAuthGateActive(...a),
       isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
+      isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
@@ -2168,6 +2169,21 @@ export class AuthManager {
     resolveAuth: () => this.linkingContext(),
     warn: (message, meta) => this.config.logger?.warn?.(message, meta),
   });
+
+  /**
+   * Apply an IdP's `locale` claim to a user, for a sign-in that does not run
+   * through the OIDC seams (a host's own session hand-off): the user's
+   * language preference (`sys_user.locale`) is written only while it is unset
+   * or still holds the value an IdP sign-in last wrote, so a language the user
+   * chose in the environment is kept. The same call the OIDC JIT path makes,
+   * with the same `idp-locale:` record; the claim is closed against the i18n
+   * service's locales, and an unsupported one clears only an IdP-written
+   * value. Never throws: a failure is reported at `warn` and the user keeps
+   * the preference they had. The rule and its record: `idp-locale-claim.ts`.
+   */
+  public applyIdpLocaleClaim(userId: string, claim: IdpLocaleClaim): Promise<void> {
+    return this.idpLocale.apply(userId, claim);
+  }
 
   /**
    * [ADR-0093 D7] The users created in each in-flight better-auth request,
@@ -2679,7 +2695,9 @@ export class AuthManager {
    * the contract gives the package that owns the transport (plugin-email
    * answers `false` for its `log` transport in every environment, and follows a
    * transport swapped from the mail settings at runtime). Read at call time,
-   * never cached at boot.
+   * never cached at boot. [#27843] invite-member's `outcome` asks it too
+   * (`invitation-delivery-outcome.ts`), so an invite answers `link_only` on
+   * exactly the deployments where sign-up would not mail either.
    *
    * ⛔ An implementation WITHOUT the member is NOT live: the contract says an
    * absent member is unknown, and the flow asking — a success answer that only
@@ -5443,20 +5461,37 @@ export class AuthManager {
    * native `password.verify` (passed in) rather than re-hashing. Returns the
    * current hash (for the after-hook to append) when the candidate is fresh, or
    * undefined when the feature is off / nothing to compare.
+   *
+   * While an administrator's forced change (`sys_user.must_change_password`)
+   * is outstanding, a candidate matching the CURRENT password is refused with
+   * `PASSWORD_REUSE` whatever `passwordHistoryCount` is, the default 0
+   * included: completing the change clears the flag, and it must not clear
+   * while the user keeps the password the administrator issued.
+   * `currentPassword` is the caller's claim of the current password on
+   * `/change-password` (`''` when the body carries none). The claim gate sits
+   * above BOTH reuse refusals, not only the forced change's: the history
+   * ring's `PASSWORD_REUSE` is also given only once the claim verifies against
+   * the current hash, so a wrong current password gets the endpoint's own
+   * `INVALID_PASSWORD` whatever the new password is. Omitted on a door that
+   * carries no claim (`/reset-password`, whose token is the authority). A
+   * failed read of the forced-change flag fails open (treated as not set) and
+   * is reported through `logDurabilityDegradation`.
    */
   private assertPasswordNotReused(
     userId: string,
     candidate: string,
     verify?: (data: { password: string; hash: string }) => Promise<boolean>,
+    currentPassword?: string,
   ): Promise<string | undefined> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'parseHashes'> = {
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation' | 'parseHashes'> = {
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
       parseHashes: (...a) => this.parseHashes(...a),
     };
-    return assertPasswordNotReused.call(host, userId, candidate, verify);
+    return assertPasswordNotReused.call(host, userId, candidate, verify, currentPassword);
   }
 
   /**

@@ -1015,6 +1015,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordCount': '{{count}} records',
   'list.recordCount_one': '{{count}} record',
   'list.recordCount_other': '{{count}} records',
+  'list.calendarRecordCount': '{{count}} records loaded for these dates',
+  'list.calendarRecordCount_one': '{{count}} record loaded for these dates',
+  'list.calendarRecordCount_other': '{{count}} records loaded for these dates',
   'list.noItems': 'No items found',
   'list.noItemsMessage': 'There are no records to display. Try adjusting your filters or adding new data.',
   // First-run (truly empty, no filter/search) vs filtered-to-empty. Showing
@@ -4089,6 +4092,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // tree branch spread an untyped block (`...treeCfg`), and one `any` member
   // made the whole union `any`. That spread is retired, so the annotation now
   // says what the inference used to.
+  // A primitive for the memo below: the host's handler is often an inline
+  // arrow, and only its presence is read there (objectstack#27057).
+  const hostRoutesRowClicks = !!onRowClick;
   const viewComponentSchema = React.useMemo((): any => {
     const densityRowHeight = density.mode === 'compact'
       ? 'compact'
@@ -4121,6 +4127,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // Hydrate child grid with previously persisted column state.
       ...(schema.columnState ? { columnState: schema.columnState } : {}),
     };
+    // objectstack#27057 — the calendar and the gantt give a row click to
+    // whoever hands them one and keep their own record drawer for when nobody
+    // does. So they carry this list's click router only when this list's HOST
+    // routes record clicks (`onRowClick`, which the console's object, data and
+    // interface pages all pass): the host then opens the record in the one
+    // record page. A list with no host handler routes nothing by itself for a
+    // view that authored no `navigation` (the absent key is the host's call,
+    // `useNavigationOverlay`), so handing them the router there would turn
+    // their drawer into a click that opens nothing.
+    const { onRowClick: _listRouter, ...basePropsWithoutRouter } = baseProps;
+    const routedByHost = hostRoutesRowClicks ? baseProps : basePropsWithoutRouter;
 
     switch (currentView) {
       // `default` deliberately shares the grid branch: an unrecognized
@@ -4328,7 +4345,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           : undefined;
         return {
           type: 'object-calendar',
-          ...baseProps,
+          ...routedByHost,
           ...(calendarBlock ? { calendar: calendarBlock } : {}),
           // objectui#12081 — the days the calendar draws come back here, and
           // this view's fetch windows on them (`calendarWindowed`). Handed only
@@ -4485,7 +4502,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             : undefined;
         return {
           type: 'object-gantt',
-          ...baseProps,
+          ...routedByHost,
           // objectui#10037 — the EFFECTIVE filter, not the authored one: the
           // chart queries for itself, so this key is the only way the
           // toolbar's Filter control and the `UserFilters` chips reach it.
@@ -4531,17 +4548,20 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           //     `onRowClick` UNCONDITIONALLY, so the authored config would
           //     arrive and then be outranked — declared, delivered, and STILL
           //     not enforced, which is this card's own defect relocated;
-          //   - calendar alone mirrors gantt's `navIsOverlay ? undefined :
-          //     onRowClick`, so it would genuinely CHANGE BEHAVIOUR: today its
-          //     `navConfig` is always the `{ mode: 'drawer' }` fallback and it
-          //     suppresses the host handler; fed an authored `page` it would
-          //     stop suppressing and defer to ListView's overlay instead.
+          //   - calendar, when this was written, suppressed the host handler in
+          //     drawer mode as gantt did, so it would have CHANGED BEHAVIOUR: fed
+          //     an authored `page` it would stop suppressing and defer to
+          //     ListView's overlay instead.
           //
           // That is two sources of truth for one question. `gantt` is the only
           // branch where forwarding settles the question rather than splitting
-          // it: its wrapper drops host props entirely (objectui#7210 /
-          // objectui#7222), so the schema path is the only live carrier and
-          // `onRowClick` is not there to outrank anything.
+          // it: the router reaches it only when this list's host routes clicks
+          // (`routedByHost`, objectstack#27057), and that host then decides how
+          // the record opens (the console's object page reads the view's
+          // `navigation` for it), so without one the schema path is the only
+          // live carrier and `onRowClick` is not there to outrank anything.
+          // Its wrapper forwards no other host prop (objectui#7210 /
+          // objectui#7222).
           //
           // Conditional, not `navigation: schema.navigation` — an ABSENT key,
           // not present-and-undefined, the same distinction the two non-axis
@@ -4685,7 +4705,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   const hasFilters = currentFilters.conditions && currentFilters.conditions.length > 0;
   // The count the toolbar shows: a record-mode amount's code condition is
@@ -6414,11 +6434,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 the empty state. `DataErrorState` grew three icon props for this
                 migration and no fourth — an `action` prop would be a second
                 spelling of an affordance it already has. */}
-            {loadErrorKind === 'api-disabled' ? null : (
-              // No Retry for an `enable`-block denial. The verdict is a pure
-              // function of the object's metadata, so every retry re-fetches
-              // the identical refusal — offering the button is the same wrong
+            {loadErrorKind === 'api-disabled' || loadErrorKind === 'forbidden' ? null : (
+              // No Retry for an `enable`-block denial or a permission refusal
+              // (403). Neither verdict is one a retry can change (the first is
+              // a pure function of the object's metadata, the second a grant
+              // only an administrator can give), so every retry re-fetches the
+              // identical refusal — offering the button is the same wrong
               // advice as "check your connection", just spelled as a control.
+              // A transient failure (network, 5xx) keeps it.
               <Button
                 variant="outline"
                 size="sm"
@@ -6747,7 +6770,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 whole result set is in memory, serverTotal is null and data.length
                 already IS the total. */}
             {/* One count family (objectui#11445): i18next picks the CLDR slot. */}
-            {t('list.recordCount', { count: serverTotal ?? data.length })}
+            {/* A windowed calendar's rows are the dates it draws, not the view
+                (objectstack#27355): its count says so rather than read as the
+                view's total. */}
+            {calendarWindowed
+              ? t('list.calendarRecordCount', { count: data.length })
+              : t('list.recordCount', { count: serverTotal ?? data.length })}
           </span>
           )}
           {/* The cap warning is about rows the user CANNOT REACH. A paged grid

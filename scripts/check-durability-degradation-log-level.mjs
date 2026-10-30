@@ -3023,8 +3023,229 @@ function unwrapExpression(expr) {
 }
 
 /**
+ * The one package whose wrapper hop crosses a FILE boundary (#25467).
+ *
+ * `protocol.ts` is being split one move-only cut at a time: a method's body
+ * moves, unedited, into a `protocol-*.ts` module as an exported function whose
+ * `this` is the `Pick` of a named host interface the module declares (each
+ * member typed AS the class member, `ObjectStackProtocolImplementation['x']`),
+ * and the method left behind is a stub that builds that host and returns
+ * `fn.call(host, …)`. The code that runs is the same; the census used to stop
+ * seeing it, in both directions:
+ *
+ *   - INTO the host. A moved body's `this.findEnvironmentRows()` named a
+ *     same-file wrapper while it lived in `protocol.ts`. In the module there
+ *     is no such declaration, so the hop resolved nowhere and the seam left
+ *     the census.
+ *   - THROUGH a stub. A `protocol.ts` try guarding `this.deletePackage()`
+ *     followed the method's body; once that body is a stub, the hop reaches
+ *     `deletePackage.call(host, …)`, whose callee reads as `call`, and stops.
+ *
+ * Measured on the cut-34 trial (deletePackage moved): read seams 93 -> 89,
+ * those four lines exactly. That is a detector losing sight of a seam, not a
+ * seam going away, and it made "move the body" a way out of the census. So the
+ * resolver below follows both shapes, and nothing else:
+ *
+ *   HOST CALL — `this.x(…)` in a `protocol-*.ts` module of this package, inside
+ *   a function whose `this` parameter is typed by an interface the SAME module
+ *   declares (bare, or through `Pick<Host, 'x' | …>` naming `x`), whose member
+ *   `x` is typed `ObjectStackProtocolImplementation['x']`, resolves to that
+ *   class's own method `x` in `protocol.ts`. It is ONE hop, exactly the hop the
+ *   same call made before the body moved — the depth bound is unchanged.
+ *
+ *   STUB — a method of that class whose LAST statement returns
+ *   `fn.call(ident, …)` (awaited or not), `fn` a named import from a
+ *   `./protocol-*.js` module of this package that declares `fn`, is read as
+ *   `fn`'s body. Not a hop: it is the same method's body, relocated, so it
+ *   costs no depth — counting it would make every move push its callers one
+ *   hop closer to the bound.
+ *
+ * Measured when this landed, with the resolver: `main` @ bc496bf7 reads
+ * 95, not 93 — the two new lines are `protocol-batch-data.ts`'s
+ * `runBatchDataLoop()` and `runUpdateManyLoop()` guarding
+ * `this.assertRecordExists()`, seams the census stopped seeing when cut 1
+ * moved those bodies; both read "no invented answer", so no verdict and no
+ * ledger row moved. The cut-34 trial tree reads 95 too
+ * (89 without the resolver), its four lost lines back.
+ *
+ * Both are resolutions of a name the census already follows, and the read
+ * underneath is still decided by `isReadCall` against the same vocabulary and
+ * the same bound: no new read name, no new scope root, no change to any rule's
+ * verdict criteria. Own-file resolution still wins — a module that declares
+ * `x` itself is answered from its own body, as before. Every refusal
+ * (another package, a module the pattern does not name, a `this` typed by
+ * anything but the module's own host interface, a member typed any other
+ * way, a host name with no class method) leaves the hop unresolved: the
+ * under-counting direction every other narrowness in this file takes.
+ */
+const HOST_SPLIT = Object.freeze({
+    dir: 'packages/metadata-protocol/src',
+    host: 'protocol.ts',
+    hostClass: 'ObjectStackProtocolImplementation',
+    module: /^protocol-[a-z0-9-]+\.ts$/,
+    specifier: /^\.\/(protocol-[a-z0-9-]+)\.js$/,
+});
+
+/**
+ * The cross-file half of the wrapper hop, over one set of sources.
+ *
+ * `load(relPath)` answers a file's text (or `undefined`); each file is parsed
+ * ONCE and its index handed out by identity, so the scan and the resolver walk
+ * the same tree — `indexFunctionBodies` settles colliding names by node
+ * identity, and a second parse of the same text would answer none of them.
+ *
+ * @returns `{ inSplit(rel), entry(rel) }` — `entry(rel).sf` is the tree to scan
+ *          and `entry(rel).bodies` its index, which carries the resolver to
+ *          `isReadCall` (`bodies.split`, `bodies.relPath`).
+ */
+function createHostSplit(load) {
+    const hostRel = `${HOST_SPLIT.dir}/${HOST_SPLIT.host}`;
+    const isModule = (rel) =>
+        rel.startsWith(`${HOST_SPLIT.dir}/`) &&
+        !rel.slice(HOST_SPLIT.dir.length + 1).includes('/') &&
+        HOST_SPLIT.module.test(rel.slice(HOST_SPLIT.dir.length + 1));
+    const inSplit = (rel) => rel === hostRel || isModule(rel);
+    const cache = new Map();
+
+    const entry = (rel) => {
+        if (cache.has(rel)) return cache.get(rel);
+        let made;
+        const text = inSplit(rel) ? load(rel) : undefined;
+        if (text !== undefined) {
+            const sf = parseSourceFile(rel, text, ts.ScriptKind.TS);
+            const bodies = indexFunctionBodies(sf);
+            bodies.split = api;
+            bodies.relPath = rel;
+            bodies.sourceFile = sf;
+            made = { sf, bodies };
+        }
+        cache.set(rel, made);
+        return made;
+    };
+
+    /** The host class's own methods, by name — `undefined` for a name declared twice. */
+    const hostMethods = () => {
+        const e = entry(hostRel);
+        if (!e) return undefined;
+        if (e.methods) return e.methods;
+        e.methods = new Map();
+        for (const stmt of e.sf.statements) {
+            if (!ts.isClassDeclaration(stmt) || stmt.name?.text !== HOST_SPLIT.hostClass) continue;
+            for (const m of stmt.members) {
+                if (!ts.isMethodDeclaration(m) || !m.body || !ts.isIdentifier(m.name)) continue;
+                const static_ = m.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword);
+                if (static_) continue;
+                e.methods.set(m.name.text, e.methods.has(m.name.text) ? undefined : m.body);
+            }
+        }
+        return e.methods;
+    };
+
+    /** The `./protocol-*.js` named imports of the host file: local name → module path. */
+    const hostImports = () => {
+        const e = entry(hostRel);
+        if (!e) return undefined;
+        if (e.imports) return e.imports;
+        e.imports = new Map();
+        for (const stmt of e.sf.statements) {
+            if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+            const m = HOST_SPLIT.specifier.exec(stmt.moduleSpecifier.text);
+            const named = stmt.importClause?.namedBindings;
+            if (!m || stmt.importClause?.isTypeOnly || !named || !ts.isNamedImports(named)) continue;
+            for (const el of named.elements) {
+                if (el.isTypeOnly) continue;
+                e.imports.set(el.name.text, {
+                    rel: `${HOST_SPLIT.dir}/${m[1]}.ts`,
+                    exported: (el.propertyName ?? el.name).text,
+                });
+            }
+        }
+        return e.imports;
+    };
+
+    /** Is `type` the class member `name`, spelled `ObjectStackProtocolImplementation['name']`? */
+    const typedAsHostMember = (type, name) =>
+        !!type &&
+        ts.isIndexedAccessTypeNode(type) &&
+        ts.isTypeReferenceNode(type.objectType) &&
+        ts.isIdentifier(type.objectType.typeName) &&
+        type.objectType.typeName.text === HOST_SPLIT.hostClass &&
+        ts.isLiteralTypeNode(type.indexType) &&
+        ts.isStringLiteral(type.indexType.literal) &&
+        type.indexType.literal.text === name;
+
+    /**
+     * HOST CALL: resolve `this.name(…)` in a module to the host class's method
+     * body, through the module's own host interface — or `undefined`.
+     */
+    const hostCall = (node, bodies) => {
+        if (!isModule(bodies.relPath)) return undefined;
+        const expr = node.expression;
+        if (!ts.isPropertyAccessExpression(expr) || expr.expression.kind !== ts.SyntaxKind.ThisKeyword) return undefined;
+        if (!ts.isIdentifier(expr.name)) return undefined;
+        const name = expr.name.text;
+        // The function whose `this` the call reads: arrows inherit it.
+        let fn = node.parent;
+        while (fn && (ts.isArrowFunction(fn) || !ts.isFunctionLike(fn))) fn = fn.parent;
+        const thisParam = fn?.parameters?.[0];
+        if (!thisParam || !ts.isIdentifier(thisParam.name) || thisParam.name.text !== 'this') return undefined;
+        let type = thisParam.type;
+        if (!type || !ts.isTypeReferenceNode(type) || !ts.isIdentifier(type.typeName)) return undefined;
+        if (type.typeName.text === 'Pick') {
+            const [target, keys] = type.typeArguments ?? [];
+            const picked = (k) => ts.isLiteralTypeNode(k) && ts.isStringLiteral(k.literal) && k.literal.text === name;
+            const listed = keys && (ts.isUnionTypeNode(keys) ? keys.types.some(picked) : picked(keys));
+            if (!listed || !target || !ts.isTypeReferenceNode(target) || !ts.isIdentifier(target.typeName)) return undefined;
+            type = target;
+        }
+        const hostType = type.typeName.text;
+        const iface = bodies.sourceFile?.statements.find(
+            (s) => ts.isInterfaceDeclaration(s) && s.name.text === hostType,
+        );
+        const member = iface?.members.find(
+            (m) => ts.isPropertySignature(m) && m.name && ts.isIdentifier(m.name) && m.name.text === name,
+        );
+        if (!member || !typedAsHostMember(member.type, name)) return undefined;
+        const body = hostMethods()?.get(name);
+        return body ? { body, bodies: entry(hostRel).bodies } : undefined;
+    };
+
+    /**
+     * STUB: a host method whose last statement returns `fn.call(ident, …)` for
+     * an imported module function `fn` is read as `fn`'s body — or `undefined`.
+     */
+    const stubTarget = (body, bodies) => {
+        if (bodies.relPath !== hostRel || !ts.isBlock(body)) return undefined;
+        const method = body.parent;
+        if (!ts.isMethodDeclaration(method) || !ts.isIdentifier(method.name)) return undefined;
+        if (hostMethods()?.get(method.name.text) !== body) return undefined;
+        const last = body.statements[body.statements.length - 1];
+        if (!last || !ts.isReturnStatement(last) || !last.expression) return undefined;
+        let call = last.expression;
+        if (ts.isAwaitExpression(call)) call = call.expression;
+        if (!ts.isCallExpression(call) || !ts.isPropertyAccessExpression(call.expression)) return undefined;
+        const callee = call.expression;
+        if (!ts.isIdentifier(callee.name) || callee.name.text !== 'call' || !ts.isIdentifier(callee.expression)) return undefined;
+        if (!call.arguments[0] || !ts.isIdentifier(call.arguments[0])) return undefined;
+        const imported = hostImports()?.get(callee.expression.text);
+        if (!imported || !isModule(imported.rel)) return undefined;
+        const mod = entry(imported.rel);
+        if (!mod) return undefined;
+        const decl = mod.sf.statements.find(
+            (s) => ts.isFunctionDeclaration(s) && s.name?.text === imported.exported && s.body &&
+                s.modifiers?.some((x) => x.kind === ts.SyntaxKind.ExportKeyword),
+        );
+        return decl ? { body: decl.body, bodies: mod.bodies } : undefined;
+    };
+
+    const api = { inSplit, entry, hostCall, stubTarget };
+    return api;
+}
+
+/**
  * Does this call perform a storage READ — directly, or through a same-file
- * wrapper? See `MAX_READ_WRAPPER_DEPTH` for why wrappers are followed.
+ * wrapper? See `MAX_READ_WRAPPER_DEPTH` for why wrappers are followed, and
+ * `HOST_SPLIT` for the one package where that hop crosses a file.
  *
  * `maxDepth` defaults to that constant and is a parameter for exactly two
  * callers: the self-test fixtures that pin the bound from above, and
@@ -3040,16 +3261,25 @@ function isReadCall(node, functionBodies, seen = new Set(), depth = 0, maxDepth 
     // same-file helper that happens to be called `find` is still followed. The
     // shape test subtracts a false positive; it must not subtract a real read.
     if (depth >= maxDepth || seen.has(name)) return false;
-    const body = functionBodies.get(name, node);
+    let body = functionBodies.get(name, node);
+    let bodies = functionBodies;
+    // #25467: own-file first; only an unresolved name may be a host call.
+    if (!body && functionBodies.split) {
+        const hop = functionBodies.split.hostCall(node, functionBodies);
+        if (hop) ({ body, bodies } = hop);
+    }
     if (!body) return false;
     // #12358: the hop's own shape check. Without it a callee NAME that merely
     // collides with a same-file declaration is followed into that body, and the
     // seam it manufactures is indistinguishable from a real one.
     if (contradictsWrapperResolution(node, body)) return false;
+    // #25467: a stub is its moved body, at no depth cost (see `HOST_SPLIT`).
+    const moved = bodies.split?.stubTarget(body, bodies);
+    if (moved) ({ body, bodies } = moved);
     seen.add(name);
     let found = false;
     walkSameTickInclusive(body, (child) => {
-        if (!found && ts.isCallExpression(child) && isReadCall(child, functionBodies, seen, depth + 1, maxDepth)) {
+        if (!found && ts.isCallExpression(child) && isReadCall(child, bodies, seen, depth + 1, maxDepth)) {
             found = true;
         }
     });
@@ -3252,7 +3482,11 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
     // #12360. Undefined everywhere in the audit path — see `isReadCall`.
     const maxReadWrapperDepth = options.maxReadWrapperDepth ?? MAX_READ_WRAPPER_DEPTH;
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-    const functionBodies = indexFunctionBodies(sf);
+    // #25467: a file of the split package is indexed by the resolver that
+    // parsed it (`HOST_SPLIT`), so its hops can cross into the host file.
+    const split = options.hostSplit?.inSplit(relPath) ? options.hostSplit.entry(relPath) : undefined;
+    if (split && split.sf !== sf) throw new Error(`analyzeReadSeams: ${relPath} was not parsed by its host split`);
+    const functionBodies = split ? split.bodies : indexFunctionBodies(sf);
     const logAliases = indexLogAliases(sf, functionBodies);
     const ctx = { functionBodies, discriminators, usedDiscriminators: new Set() };
 
@@ -3878,15 +4112,21 @@ function collectReadSeams(options = {}) {
     const usedDiscriminators = new Set();
 
     const read = new Set();
+    const hostSplit = createHostSplit((rel) => {
+        const abs = join(ROOT, rel);
+        return existsSync(abs) ? readFileSync(abs, 'utf8') : undefined;
+    });
     for (const root of READ_SEAM_SCAN_ROOTS) {
         for (const file of collectSourceFiles(join(ROOT, root))) {
-            read.add(relative(ROOT, file).split(sep).join('/'));
+            const rel = relative(ROOT, file).split(sep).join('/');
+            read.add(rel);
             const text = readFileSync(file, 'utf8');
             if (!text.includes('catch')) continue;
-            const sf = parseSourceFile(file, text, ts.ScriptKind.TS);
-            analyzeReadSeams(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
+            const sf = hostSplit.inSplit(rel) ? hostSplit.entry(rel).sf : parseSourceFile(file, text, ts.ScriptKind.TS);
+            analyzeReadSeams(sf, rel, findings, seams, {
                 usedDiscriminators,
                 maxReadWrapperDepth: options.maxReadWrapperDepth,
+                hostSplit,
             });
         }
     }
@@ -4664,6 +4904,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'passes: #13474 — a later same-named body that reads must not INVENT a seam at a call it does not enclose': 1,
         'flags: #13474 — three same-named bodies, resolved from inside the first (the live `lookup` shape)': 1,
         'flags: #13474 — a name declared ONCE still resolves from outside its scope (the fix must not narrow the census)': 1,
+        'flags: #25467 — a moved body\'s host call into a protocol.ts storage wrapper is still that read seam': 1,
+        'passes: #25467 — negative control: a moved body whose host call reaches no storage wrapper is no seam': 1,
+        'passes: #25467 — the same two files outside packages/metadata-protocol/src resolve nowhere': 1,
+        'passes: #25467 — a host member typed any way but AS the class member resolves nowhere': 1,
+        'passes: #25467 — a member the function\'s `Pick` does not name resolves nowhere': 1,
+        'flags: #25467 — a protocol.ts try around a stub follows the moved body, and the stub costs no hop': 1,
+        'BOUND (#25467): the host hop IS a hop — a third hop through the host is still refused': 1,
+        'BOUND (#25467): the same host ladder IS a seam one hop deeper — the pin above is not vacuous': 1,
         'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)': 1,
         'ledger (read seams): a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
@@ -4677,7 +4925,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
     selfTest: 70,
-    selfTestReadSeams: 59,
+    selfTestReadSeams: 67,
 });
 
 // The roster's TOTAL, checked from BOTH verdict sites. Each entry checks only
@@ -4685,7 +4933,7 @@ const SELF_TEST_BATTERY_FLOOR = Object.freeze({
 // `selfTestReadSeams`'s partition being deleted from the roster wholesale — the
 // deleted partition's own size pin is not evaluated by anyone once its entry
 // stops reaching it. This is the one assertion that survives that deletion.
-const SELF_TEST_BATTERY_TOTAL_FLOOR = 129;
+const SELF_TEST_BATTERY_TOTAL_FLOOR = 137;
 
 /**
  * The floor for ONE partition of the roster, run from that partition's own
@@ -5962,6 +6210,33 @@ function selfTest() {
 let readSeamsReachedVerdict = false;
 
 function selfTestReadSeams() {
+    // #25467: the host file and the module head the split fixtures share. The
+    // module's `deletePkg` is the stub's moved body; `getItem` is a host ladder
+    // three hops from the read, as in the #12360 BOUND pair.
+    const SPLIT_HOST = `
+        import { deletePkg } from './protocol-uninstall.js';
+        export class ObjectStackProtocolImplementation {
+            async findRows(t: string) { return await this.engine.find(t, {}); }
+            async tidy(t: string) { this.memo.delete(t); }
+            private async lookup(t: string) { return await this.driver.find(t, {}); }
+            private async findOverlay(t: string) { return await this.lookup(t); }
+            async getItem(t: string) { return await this.findOverlay(t); }
+            async deletePkg(id: string) {
+                const host: ThisParameterType<typeof deletePkg> = { findRows: (...a) => this.findRows(...a) };
+                return deletePkg.call(host, id);
+            }
+            /*ROLLBACK*/
+        }`;
+    const SPLIT_MODULE_HEAD = `
+        export interface UninstallHost {
+            findRows: ObjectStackProtocolImplementation['findRows'];
+            tidy: ObjectStackProtocolImplementation['tidy'];
+            getItem: ObjectStackProtocolImplementation['getItem'];
+        }
+        export async function deletePkg(this: Pick<UninstallHost, 'findRows'>, id: string) {
+            return await this.findRows(id);
+        }`;
+
     // The guard `DatabaseLoader` and `MetadataProtocol` both wrote after the
     // fixes, reproduced verbatim so the fixtures exercise the real shape.
     const GUARD = `
@@ -7052,6 +7327,130 @@ function selfTestReadSeams() {
             expectViolation: true,
             expectSeams: 1,
         },
+
+        // ── The hop across the protocol.ts split (#25467) ────────────────────
+        //
+        // Two-file fixtures (`files`), parsed through `createHostSplit` exactly
+        // as the scan parses the real package. The first and the stub case are
+        // the two shapes the cut-34 trial lost (93 -> 89); the rest are the
+        // narrowness, one refusal each, so a widened resolver fails by name.
+        {
+            name: 'flags: #25467 — a moved body\'s host call into a protocol.ts storage wrapper is still that read seam',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: SPLIT_HOST,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: SPLIT_MODULE_HEAD + `
+                    export async function listRows(this: Pick<UninstallHost, 'findRows'>, id: string) {
+                        try { return await this.findRows(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: #25467 — negative control: a moved body whose host call reaches no storage wrapper is no seam',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: SPLIT_HOST,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: SPLIT_MODULE_HEAD + `
+                    export async function tidyRows(this: Pick<UninstallHost, 'tidy'>, id: string) {
+                        try { return await this.tidy(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: #25467 — the same two files outside packages/metadata-protocol/src resolve nowhere',
+            files: {
+                'packages/objectql/src/protocol.ts': SPLIT_HOST,
+                'packages/objectql/src/protocol-uninstall.ts': SPLIT_MODULE_HEAD + `
+                    export async function listRows(this: Pick<UninstallHost, 'findRows'>, id: string) {
+                        try { return await this.findRows(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: #25467 — a host member typed any way but AS the class member resolves nowhere',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: SPLIT_HOST,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: `
+                    export interface UninstallHost {
+                        findRows: (t: string) => Promise<unknown[]>;
+                    }
+                    export async function listRows(this: Pick<UninstallHost, 'findRows'>, id: string) {
+                        try { return await this.findRows(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: #25467 — a member the function\'s `Pick` does not name resolves nowhere',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: SPLIT_HOST,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: SPLIT_MODULE_HEAD + `
+                    export async function listRows(this: Pick<UninstallHost, 'tidy'>, id: string) {
+                        try { return await (this as any).findRows(id); }
+                        catch { return []; }
+                    }
+                    export async function listMore(this: Pick<UninstallHost, 'tidy'>, id: string) {
+                        try { return await this.findRows(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // The stub direction, and the depth pin in one: `rollBack` ->
+            // `deletePkg` (a stub, read as its moved body) -> `findRows` ->
+            // `engine.find` is the chain the method had before its body moved.
+            // Were the stub charged a hop, `findRows` would sit at depth 3 and
+            // the seam would drop — which is the 93 -> 89 reading again.
+            name: 'flags: #25467 — a protocol.ts try around a stub follows the moved body, and the stub costs no hop',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: SPLIT_HOST.replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await this.deletePkg(id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: SPLIT_MODULE_HEAD,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'BOUND (#25467): the host hop IS a hop — a third hop through the host is still refused',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: SPLIT_HOST,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: SPLIT_MODULE_HEAD + `
+                    export async function listDeep(this: Pick<UninstallHost, 'getItem'>, id: string) {
+                        try { return await this.getItem(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'BOUND (#25467): the same host ladder IS a seam one hop deeper — the pin above is not vacuous',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: SPLIT_HOST,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: SPLIT_MODULE_HEAD + `
+                    export async function listDeep(this: Pick<UninstallHost, 'getItem'>, id: string) {
+                        try { return await this.getItem(id); }
+                        catch { return []; }
+                    }`,
+            },
+            maxReadWrapperDepth: MAX_READ_WRAPPER_DEPTH + 1,
+            expectViolation: true,
+            expectSeams: 1,
+        },
     ];
 
     // The ledger this entry's partition of the floor is evaluated against
@@ -7069,16 +7468,23 @@ function selfTestReadSeams() {
         // afterwards. There is no `battery()` opener — for a table-driven
         // self-test the ROW is the battery, so attribution is the loop variable.
         registerCase(c.name);
-        const sf = parseSourceFile('t.ts', c.code, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
         const usedDiscriminators = new Set();
-        // #12360: a fixture may pin the bound by asking for a DIFFERENT depth.
-        // Undefined for every other case, which is the shipped constant.
-        analyzeReadSeams(sf, 't.ts', findings, seams, {
-            usedDiscriminators,
-            maxReadWrapperDepth: c.maxReadWrapperDepth,
-        });
+        // #25467: a `files` fixture is several sources scanned as the real
+        // package is — every file, through one host split over the map.
+        const sources = c.files ?? { 't.ts': c.code };
+        const hostSplit = createHostSplit((rel) => sources[rel]);
+        for (const [rel, code] of Object.entries(sources)) {
+            const sf = hostSplit.inSplit(rel) ? hostSplit.entry(rel).sf : parseSourceFile(rel, code, ts.ScriptKind.TS);
+            // #12360: a fixture may pin the bound by asking for a DIFFERENT depth.
+            // Undefined for every other case, which is the shipped constant.
+            analyzeReadSeams(sf, rel, findings, seams, {
+                usedDiscriminators,
+                maxReadWrapperDepth: c.maxReadWrapperDepth,
+                hostSplit,
+            });
+        }
         const got = findings.length > 0;
         const countMismatch = c.expectCount !== undefined && findings.length !== c.expectCount;
         const seamMismatch = c.expectSeams !== undefined && seams.length !== c.expectSeams;

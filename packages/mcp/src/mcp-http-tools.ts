@@ -26,7 +26,11 @@
  *
  * SECURITY (zero-tolerance):
  *  - System objects (`sys_*`) are NOT exposed by default — fail-closed guard on
- *    every tool that takes an object name, independent of the bridge.
+ *    every tool that takes an object name, independent of the bridge. The
+ *    action tools yield PER ACTION: a `sys_*` action whose author declared
+ *    `ai.exposed: true` (the bridge attests it as `aiExposed`) is listed and
+ *    run like any other exposed action (#27681, ADR-0011) — no other key and
+ *    no deployment switch opens one.
  *  - The bridge is bound to the caller's principal; tools cannot widen it.
  *  - Errors are returned as tool errors (text), never thrown across the wire,
  *    and never include secrets.
@@ -55,6 +59,8 @@ import {
 import {
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
+  type ImportObjectResult,
+  type RemoteTable,
 } from '@objectstack/spec/contracts';
 import {
   validateExpression,
@@ -69,6 +75,11 @@ import {
 // the `packages/spec` campaign standardised on — already carried in
 // `api-surface/shared.json`, so reusing it adds nothing to any public surface.
 import { strictUnknownKeyError } from '@objectstack/spec/shared';
+// [#27411] The input schemas the save/build gate parses an expression slot
+// with. `validate_expression` parses with the SAME schema before it runs the
+// formula checks, so a blank source gets the gate's verdict and its published
+// sentence, never a second blank rule written here.
+import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
 import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
@@ -218,6 +229,15 @@ export interface McpActionSummary {
   requiresRecord?: boolean;
   /** True when the action is destructive / an author flagged it for confirmation. */
   requiresConfirmation?: boolean;
+  /**
+   * True when the action's author opted it into the AI surface
+   * (`ai: { exposed: true, description }`, ADR-0011), as the bridge read it off
+   * the declaration. With `allowSystemObjects` off, an action on a `sys_*`
+   * object is listed and run ONLY when this is `true` (#27681): the tool layer
+   * never sees the declaration, so a bridge that does not attest it keeps
+   * every system-object action hidden and refused, exactly as before.
+   */
+  aiExposed?: boolean;
   /** Declared input parameters. */
   params?: McpActionParamSummary[];
 }
@@ -271,8 +291,38 @@ export interface McpActionBridge {
   ): Promise<unknown>;
 }
 
+/**
+ * [#27745] The federation seam: list a federated datasource's remote tables
+ * (an OData datasource's entity sets) and import one as a live federated
+ * object — the same `IExternalDatasourceService` calls Studio's datasource
+ * page makes (`GET …/external/tables`, `POST …/tables/:remote/import`).
+ *
+ * The host binds both to the caller and refuses as the REST routes refuse:
+ * listing needs the federation READ capability, importing the WRITE one
+ * (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`,
+ * `@objectstack/rest`), thrown with the ADR-0112 `code` / `status`.
+ *
+ * OPTIONAL as a pair: a bridge without both registers neither tool. The
+ * runtime's bridge carries both and answers `503 SERVICE_UNAVAILABLE` per call
+ * on a host with no `external-datasource` service, as the REST twin does.
+ */
+export interface McpFederationBridge {
+  listRemoteTables(datasource: string, opts: { schema?: string }): Promise<RemoteTable[]>;
+  importObject(
+    datasource: string,
+    remoteName: string,
+    opts: { name?: string; writable?: boolean },
+  ): Promise<ImportObjectResult>;
+}
+
 export interface RegisterActionToolsOptions {
-  /** Expose actions on `sys_*` system objects too. Default false (fail-closed). */
+  /**
+   * Expose actions on `sys_*` system objects too. Default false (fail-closed):
+   * a `sys_*` action is then listed and run only when the bridge attests its
+   * author's AI opt-in ({@link McpActionSummary.aiExposed}). This option opens
+   * the TOOL layer's filter only; the runtime bridge still requires the
+   * per-action opt-in for every `sys_*` action (#27681).
+   */
   allowSystemObjects?: boolean;
   /**
    * OAuth 2.1 scopes granted to the caller's access token (#2698) — same
@@ -287,6 +337,24 @@ const DEFAULT_MAX_LIMIT = 50;
 /** A `sys_`-prefixed object is a system table — off-limits to external agents. */
 function isSystemObject(name: string): boolean {
   return /^sys_/i.test(name);
+}
+
+/**
+ * [#27681] Whether the action tools may list a summary with `allowSystemObjects`
+ * off: any action not on a `sys_*` object, and a `sys_*` one only when the
+ * bridge attests its author's `ai.exposed` opt-in. ONE predicate for
+ * `list_actions` and `run_action`, so the two cannot disagree about a system
+ * object's action.
+ */
+function isListableAction(action: McpActionSummary): boolean {
+  return !action.objectName || !isSystemObject(action.objectName) || action.aiExposed === true;
+}
+
+function systemObjectActionRefusal(actionName: string, objectName: string): string {
+  return (
+    `Action "${actionName}" on system object "${objectName}" is not exposed via MCP: a system object's action is ` +
+    'reachable only when its author exposed it to AI (ai.exposed) and list_actions lists it for you'
+  );
 }
 
 function textResult(value: unknown) {
@@ -481,12 +549,22 @@ function jsonText(value: unknown): string {
  * whose fields are flattened to top level; a `template` is a text template.
  * Exposing a single friendly `site` keeps the tool aligned with how an author
  * thinks about *where* the expression goes.
+ *
+ * `slot` is the spec input schema the save/build gate parses that site's slot
+ * with: an evaluated CEL slot (`EvaluatedExpressionInputSchema` — the formula
+ * `expression`, validation and flow-edge conditions) or a `{{ }}` template slot
+ * (`TemplateExpressionInputSchema`). The tool parses with it first, so whatever
+ * the gate refuses at the envelope level — today a source that is blank after
+ * trimming — the tool refuses too, with the gate's own issue.
  */
-const VALIDATE_SITE_MAP: Record<string, { role: FieldRole; scope: 'record' | 'flattened' }> = {
-  formula: { role: 'value', scope: 'record' },
-  validation: { role: 'predicate', scope: 'record' },
-  flow_condition: { role: 'predicate', scope: 'flattened' },
-  template: { role: 'template', scope: 'record' },
+const VALIDATE_SITE_MAP: Record<
+  string,
+  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType }
+> = {
+  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema },
+  validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema },
+  flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
+  template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
 
 // ── Tool arguments: an undeclared key is REFUSED, not stripped (#16913) ──────
@@ -618,13 +696,119 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  */
 export function wireBridgeTools(
   server: McpServer,
-  bridge: McpDataBridge & Partial<McpActionBridge>,
+  bridge: McpDataBridge & Partial<McpActionBridge> & Partial<McpFederationBridge>,
   options: RegisterObjectToolsOptions & RegisterActionToolsOptions = {},
 ): string[] {
   const registered = registerObjectTools(server, bridge, options);
   if (typeof bridge.listActions === 'function' && typeof bridge.runAction === 'function') {
     registered.push(...registerActionTools(server, bridge as McpActionBridge, options));
   }
+  if (typeof bridge.listRemoteTables === 'function' && typeof bridge.importObject === 'function') {
+    registered.push(...registerFederationTools(server, bridge as McpFederationBridge, options));
+  }
+  return registered;
+}
+
+/**
+ * [#27745] Register the federation pair, `list_remote_tables` and
+ * `import_object`, over {@link McpFederationBridge}.
+ *
+ * Gated as the AUTHORING family is ({@link grantsAuthoringTools}): an import
+ * lands object metadata, so both register only for a token whose scopes name
+ * `metadata:write`, and a key or a session gets neither. The listing rides
+ * with the import because it is the import's discovery step, and it reads a
+ * live remote schema, which the REST twin gates as an administrator read.
+ * Unlike the authoring family, the import does not land a draft: it saves a
+ * live, read-only (unless `writable`) federated object, exactly as Studio's
+ * "Import as Object" does — the description says so.
+ */
+export function registerFederationTools(
+  server: McpServer,
+  bridge: McpFederationBridge,
+  options: { grantedScopes?: readonly string[] } = {},
+): string[] {
+  const registered: string[] = [];
+  const note = (name: string): string => {
+    registered.push(name);
+    return name;
+  };
+  if (!grantsAuthoringTools(options.grantedScopes)) return registered;
+
+  server.registerTool(
+    note('list_remote_tables'),
+    {
+      description:
+        'List the remote tables of a federated datasource — for an OData datasource, the entity sets its ' +
+        '$metadata declares — with their column counts. Use import_object to turn one into an object. ' +
+        'Reads the live remote schema; requires the federation read capability.',
+      inputSchema: strictToolInput(
+        { surface: 'this list_remote_tables call', aliases: { name: 'datasource', datasourceName: 'datasource' } },
+        {
+          datasource: z.string().describe('The federated datasource name (schemaMode external or validate-only).'),
+          schema: z.string().optional().describe('Restrict the listing to one remote schema.'),
+        },
+      ),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    async (args: { datasource: string; schema?: string }) => {
+      try {
+        const tables = await bridge.listRemoteTables(args.datasource, args.schema ? { schema: args.schema } : {});
+        return textResult({ tables, totalCount: tables.length });
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    note('import_object'),
+    {
+      description:
+        'Import one remote table of a federated datasource (an OData entity set) as a live federated object, ' +
+        'the same import Studio\'s datasource page performs. The object is saved at once (not as a draft), is ' +
+        'read-only unless writable is true (which also needs the datasource to allow writes), and maps the ' +
+        'remote types to field types. A navigation becomes a lookup only when its target is already imported, ' +
+        'so import targets first; the result\'s review lists lossy columns and navigations left out. ' +
+        'Requires the federation write capability.',
+      inputSchema: strictToolInput(
+        {
+          surface: 'this import_object call',
+          aliases: {
+            datasourceName: 'datasource',
+            table: 'remoteName',
+            remoteTable: 'remoteName',
+            entitySet: 'remoteName',
+            objectName: 'name',
+          },
+        },
+        {
+          datasource: z.string().describe('The federated datasource name.'),
+          remoteName: z.string().describe('The remote table / entity set, as list_remote_tables names it.'),
+          name: z
+            .string()
+            .optional()
+            .describe('Override the derived object name (snake_case, package namespace prefix included).'),
+          writable: z
+            .boolean()
+            .optional()
+            .describe('Opt the object into writes. Default false: federated objects are read-only.'),
+        },
+      ),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async (args: { datasource: string; remoteName: string; name?: string; writable?: boolean }) => {
+      try {
+        const result = await bridge.importObject(args.datasource, args.remoteName, {
+          ...(args.name !== undefined ? { name: args.name } : {}),
+          ...(args.writable !== undefined ? { writable: args.writable } : {}),
+        });
+        return textResult({ object: result });
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+
   return registered;
 }
 
@@ -828,11 +1012,27 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot } = VALIDATE_SITE_MAP[site ?? 'formula'];
           const hint = { objectName, fields, fieldTypes, scope } as const;
-          const result = validateExpression(role, expression, hint);
+          // The gate's envelope verdict first: `validateExpression` treats a
+          // blank source as "not authored" and answers ok, while the save gate
+          // refuses it. Each issue is the spec schema's own (code and message),
+          // so the tool and the gate cannot drift apart on this rule.
+          const slotParse = slot.safeParse(expression);
+          const result = slotParse.success
+            ? validateExpression(role, expression, hint)
+            : {
+                ok: false,
+                errors: slotParse.error.issues.map((issue) => ({
+                  source: expression,
+                  message: issue.message,
+                  code: issue.code,
+                })),
+                warnings: [],
+              };
           const inScope = introspectScope(role, hint);
-          const inferredType = role === 'value' ? inferExpressionType(expression, hint) : undefined;
+          const inferredType =
+            slotParse.success && role === 'value' ? inferExpressionType(expression, hint) : undefined;
           return textResult({
             ok: result.ok,
             errors: result.errors,
@@ -1194,9 +1394,7 @@ export function registerActionTools(
     async () => {
       try {
         const actions = await bridge.listActions();
-        const visible = allowSystem
-          ? actions
-          : actions.filter((a) => !a.objectName || !isSystemObject(a.objectName));
+        const visible = allowSystem ? actions : actions.filter(isListableAction);
         return textResult({ actions: visible, totalCount: visible.length });
       } catch (err) {
         return errorResultWithCode(err);
@@ -1291,10 +1489,19 @@ export function registerActionTools(
       if (!actionName || typeof actionName !== 'string') {
         return errorResult('actionName is required');
       }
-      if (objectName && !allowSystem && isSystemObject(objectName)) {
-        return errorResult(`Object "${objectName}" is a system object and its actions are not exposed via MCP`);
-      }
       try {
+        // [#27681] A `sys_*` action runs only where `list_actions` would list
+        // it: the bridge's own listing is what attests the author's
+        // `ai.exposed` (see `isListableAction`). A name with no `objectName`
+        // is resolved by the bridge, whose runtime applies the same per-action
+        // rule to the object it resolves.
+        if (objectName && !allowSystem && isSystemObject(objectName)) {
+          const listed = await bridge.listActions();
+          const admitted = listed.some(
+            (a) => a.name === actionName && a.objectName === objectName && isListableAction(a),
+          );
+          if (!admitted) return errorResult(systemObjectActionRefusal(actionName, objectName));
+        }
         const result = await bridge.runAction(actionName, {
           objectName,
           recordId,

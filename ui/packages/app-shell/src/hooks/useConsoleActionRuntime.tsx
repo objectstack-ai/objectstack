@@ -52,6 +52,13 @@ import { EnvironmentEntitlementDialog, type EntitlementDialogState } from '../en
 import { entitlementDialogFromError, type EntitlementDialogSpec } from '../environment/entitlements.js';
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import { apiActionFailureMessage } from '../utils/flowResponse.js';
+import {
+  findDeclaredApiAction,
+  isSameOriginApiTarget,
+  readApiActionDoorSuccess,
+  sendApiActionThroughDoor,
+} from '../utils/apiActionDoor.js';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
@@ -412,7 +419,10 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       const target = action.target || action.name;
       const params = action.params || {};
 
-      // Absolute HTTP target — bypass dataSource and call the API directly
+      // Absolute HTTP target — bypass dataSource. A DECLARED action whose
+      // target is a path on this origin goes through the action door, so the
+      // gates its declaration carries hold for the click (objectstack#27611 —
+      // see utils/apiActionDoor); every other one calls the API directly
       // through the authenticated fetch wrapper. Same-origin targets get
       // Bearer + X-Tenant-ID + same-origin cookies; an off-origin target
       // (the metadata may name a third-party host) goes out through the bare
@@ -433,6 +443,51 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         // variables; whole-value tokens preserve type. See resolvePageVarTokens.
         const pageVars = (context?.pageVariables ?? undefined) as Record<string, any> | undefined;
         const resolvedParams = resolvePageVarTokens(rawParams, pageVars);
+
+        // A non-2xx answer, from the door or from the target. Plan/capacity
+        // gates (e.g. creating an environment the org's plan doesn't include)
+        // come back as coded 403s. Surface them as a friendly upgrade/limit
+        // DIALOG with a CTA — never a generic red error toast. Returning
+        // success:false WITHOUT an `error` suppresses the runner's error toast
+        // (ActionRunner.handlePostExecution); the dialog owns the messaging.
+        const refused = (res: { status: number }, body: unknown): ActionResult => {
+          const entitlementSpec = entitlementDialogFromError(body, t);
+          if (entitlementSpec) {
+            openEntitlementDialog(entitlementSpec);
+            return { success: false };
+          }
+          // A flow-backed endpoint's refused run reads its inner refusal, not
+          // the node chain (objectstack#27487).
+          return { success: false, error: apiActionFailureMessage(res, body, `HTTP ${res.status}`, language) };
+        };
+
+        // The action door (objectstack#27611). The server assembles the
+        // target's request from the declaration, so the click sends only the
+        // subject row's id and the params bag — the row stash and everything
+        // built below stay out of it.
+        const doorObject = action.objectName || objApiName;
+        if (isSameOriginApiTarget(targetStr) && doorObject && action.name) {
+          // Ask the store for the object type BEFORE the lookup, as the flow
+          // launch does: "this click names no declared action" is then an
+          // answer, not a race against a cold store.
+          await metadata.ensureType('object').catch(() => []);
+          if (findDeclaredApiAction(withKnownObjects(objects, metadata.objects), doorObject, action.name, targetStr)) {
+            const door = await sendApiActionThroughDoor({
+              fetch: authFetch,
+              baseUrl,
+              action,
+              objectName: doorObject,
+              recordId: rowRecord?.id,
+              params: resolvedParams,
+            });
+            if (!door.answered) return door.result;
+            if (!door.res.ok) return refused(door.res, door.json);
+            const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
+            if (!answer.ok) return { success: false, error: answer.error };
+            if (action.refreshAfter !== false) refresh();
+            return { success: true, data: answer.data, reload: action.refreshAfter !== false };
+          }
+        }
 
         // Interpolate `{field}` tokens in the target URL from the row record.
         let resolvedTarget = targetStr;
@@ -499,18 +554,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         if (!res.ok) {
           let body: any = null;
           try { body = await res.json(); } catch { /* response body not JSON */ }
-          // Plan/capacity gates (e.g. creating an environment the org's plan
-          // doesn't include) come back as coded 403s. Surface them as a friendly
-          // upgrade/limit DIALOG with a CTA — never a generic red error toast.
-          // Returning success:false WITHOUT an `error` suppresses the runner's
-          // error toast (ActionRunner.handlePostExecution); the dialog owns the
-          // messaging.
-          const entitlementSpec = entitlementDialogFromError(body, t);
-          if (entitlementSpec) {
-            openEntitlementDialog(entitlementSpec);
-            return { success: false };
-          }
-          return { success: false, error: errorDetail(body, `HTTP ${res.status}`) };
+          return refused(res, body);
         }
         const json = await res.json().catch(() => ({}));
         // A business rejection can arrive as HTTP 200 with `success: false`
@@ -630,7 +674,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [dataSource, objApiName, objects, metadata, authFetch, activeOrganization, refresh, openEntitlementDialog, t]);
+  }, [dataSource, objApiName, objects, metadata, authFetch, activeOrganization, refresh, openEntitlementDialog, t, language]);
 
   /**
    * Flow action handler — starts the flow through one of two doors

@@ -33,9 +33,15 @@ import {
     demotedDeclaredCode,
     declaredUserMessage,
     declaredRefusalMessage,
+    UNDECLARED_HOOK_REFUSAL_CODE,
 } from './thrown-http-error.js';
-import { isNativeErrorName } from './native-error-name.js';
+import { isScriptFaultMessage, sandboxBusinessMessage } from './sandbox-business-message.js';
 import { unevaluableHookConditionRefusal } from './hook-condition-refusal.js';
+
+// [#27672] Declared in `sandbox-business-message.ts` so the resolver can read
+// it too; exported from here as before, so the package's public names are
+// unchanged.
+export { sandboxBusinessMessage };
 
 /**
  * How many characters of a domain error's OWN message reach the client.
@@ -157,102 +163,6 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
 });
 
 /**
- * [#7543] Does an unwrapped sandbox message name a JS RUNTIME fault rather than
- * a business refusal the hook body deliberately reported?
- *
- * The two sandbox-unwrap branches below exist for ONE shape: a hook or action
- * body that runs `throw new Error('删除被阻断：仍有未结清的发票')`, i.e. an
- * author writing a business rule whose message IS the remedy. They answer 400
- * with that message verbatim and deliberately no `code` (see each branch).
- *
- * A body that instead CRASHES — `ctx.input.title.trim()` where `title` is the
- * number `12345` — also arrives as a thrown error, so it entered the same
- * branch and its raw `TypeError: not a function` went out as the client-facing
- * message of a 400 with no `code`. That is two contract breaks at once: an
- * internal runtime fault echoed verbatim, and a body outside the ledgered
- * envelope (a client keying on `code` gets nothing).
- *
- * The classification this restores is NOT new policy — it is the ruling
- * {@link UNCLASSIFIED_FAULT} already records one door down, which names this
- * exact case ("or a plain handler bug (`TypeError: x is not a function`) …
- * server faults that a caller cannot fix and a caller SHOULD retry"). The
- * sandbox unwraps simply sit ABOVE that branch and were intercepting the crash
- * before it could reach the answer the file had already settled on. Same
- * separation `quickjs-runner`'s own `sandboxFault` path draws (#4431/#3951):
- * the sandbox REFUSING is a fault, and so is the body FAULTING — only the
- * body's deliberate `throw` is an answer addressed to the caller.
- *
- * **Matched by constructor name, not by phrasing**, and since #17681 by the ONE
- * reader — {@link isNativeErrorName} in `@objectstack/types`, which owns the
- * name list, the `^` anchor and the deliberate absence of a bare `Error:`. This
- * file held the original copy; `@objectstack/objectql` and
- * `@objectstack/runtime` each kept their own because the rule lived HERE and
- * neither could reach it, and all three now read the one helper. ⛔ Do not
- * re-inline the pattern: a name learned at one door and not the others is the
- * same throw answered as a refusal at one boundary and a crash at the next.
- *
- * What stays local is the TRIM — `userFacingMessage` strips a leading `Error: `
- * upstream, so what arrives here may still be padded, and the helper
- * deliberately does not trim for its callers.
- *
- * **Deliberate, accepted cost:** a body that expresses a business rule as
- * `throw new RangeError('数量超出范围')` now gets the sanitised 500 instead of
- * its own words. That authoring style is not the documented one, and erring
- * toward "a native error name means a crash" is the fail-safe direction — the
- * opposite default is what shipped `TypeError: not a function` to a client.
- *
- * The words are not lost: 500 is outside `isExpectedDataStatus`, so
- * `handleRouteError` prints `[REST] Unhandled error` with the whole error, and
- * `sendThrownError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
- * it — the same operator path {@link UNCLASSIFIED_FAULT} relies on.
- */
-function isScriptFaultMessage(message: string): boolean {
-    return isNativeErrorName(message.trim());
-}
-
-/**
- * [#11588] The caller-addressed BUSINESS text a sandboxed hook/action body
- * threw, or `undefined` when this error is not a sandbox refusal.
- *
- * QuickJS bodies throw a `SandboxError` whose `.message` is the
- * `<kind> '<name>' threw: <msg>` debug wrapper and whose `.innerMessage` is the
- * text the author addressed to the end user (see
- * `runtime/src/sandbox/quickjs-runner.ts`). The wrapper "belongs in server
- * logs" — {@link classifyDataError}'s unwrap door exists precisely to keep it
- * off the wire. This is that door's read, named once so the door ABOVE it in
- * {@link resolveErrorResponse} can ask the same question instead of shipping
- * `error.message` raw.
- *
- * Both conditions are the door's, in the door's order:
- *
- *  - a non-empty string `.innerMessage`, which is what makes this a sandbox
- *    error at all;
- *  - NOT {@link isScriptFaultMessage}. A body that CRASHED arrives with the
- *    same shape, and its `TypeError: not a function` is an internal fault
- *    rather than a business message (#7543). This answers `undefined` there,
- *    so a crash is never mistaken for authored text.
- *
- * ⛔ It is deliberately a READ of a field the sandbox populated, never a
- * pattern-strip of the wrapper off `.message`. Stripping prose by regex would
- * also rewrite a plain error whose own text happens to contain `threw:`, and
- * the caller's message is the remedy on a 4xx (#5423) — the one thing this
- * boundary must not paraphrase. `rest-hook-refusal-message-parity.test.ts` §5
- * is the control that keeps it a read.
- *
- * Exported for the SECOND boundary that has to ask the same question:
- * `/analytics/dataset/query` builds its own `{ code, message }` envelope inline
- * in `rest-server.ts` and shares no branch with either door here. It reads this
- * rather than re-deriving the unwrap, so the analytics face and the `/data`
- * face cannot drift into two answers for one refusal — the door-disagreement
- * shape #7525/#8016 keeps producing when a boundary open-codes the read.
- */
-export function sandboxBusinessMessage(error: any): string | undefined {
-    if (typeof error?.innerMessage !== 'string' || !error.innerMessage) return undefined;
-    if (isScriptFaultMessage(error.innerMessage)) return undefined;
-    return error.innerMessage;
-}
-
-/**
  * [commit 1c7adc73d] The sentence a declared-code structured arm relays to the caller:
  * {@link sandboxBusinessMessage} first, `error.message` second.
  *
@@ -312,29 +222,6 @@ function armSentence(error: any): unknown {
     return sandboxBusinessMessage(error) ?? error?.message;
 }
 
-/**
- * [#5462] Does a driver's missing-relation message name the very object this
- * request asked for?
- *
- * Both halves must hold. `object` is the object the ROUTE named (`undefined` on
- * every metadata / UI / discovery route — they call `handleRouteError(res,
- * error)`), and the relation name is whatever the driver's phrasing carries:
- *
- *   SQLite    `SQLITE_ERROR: no such table: acct`      → `acct`
- *   SQLite    `no such table: main.acct`               → `acct` (schema stripped)
- *   Postgres  `relation "public.acct" does not exist`  → `acct`
- *   generic   `table not found`                        → nothing to attribute
- *
- * Prime Directive #6 is what makes the comparison sound rather than a guess:
- * the object `name` IS the table name, always, with no `tableName` mapping to
- * launder it. So "the missing table is not the object you asked for" really
- * does mean the failure is somewhere other than the caller's object — an
- * auxiliary table, a system table, or the metadata plane itself.
- *
- * A message that names NO relation is unattributable and therefore not a
- * match: the fail-loud direction is what this issue asked for, and there is no
- * producer of the bare `table not found` phrasing in this repo to regress.
- */
 /**
  * [#7525] The HTTP status a producer DECLARED for this error, or `undefined`
  * when it declared none — read over BOTH spellings the repo's producers use,
@@ -474,6 +361,37 @@ function thrownCodeFields(error: any, status: number): { code?: string; declared
 }
 
 /**
+ * [#27597] {@link thrownCodeFields} for a sandboxed body's business refusal
+ * ({@link sandboxBusinessMessage} answered): the producer's own code when it
+ * declared one — a registered code, a demoted `declaredCode` beside the
+ * status-derived member, or a hook's `refusals` catalogue entry, each exactly
+ * as before — else {@link UNDECLARED_HOOK_REFUSAL_CODE}.
+ *
+ * Before this, an undeclared abort answered with no `code` at all, the one
+ * refusal on the `/data` door a client could not branch on. Ruling
+ * `6431311681` (#26170, letter A) stands: a hook that declares `refusals`
+ * refuses by code only, and a throw its catalogue cannot answer is refused as
+ * a fault before it reaches here. This names only what a hook WITHOUT a
+ * catalogue answers when it throws free text.
+ *
+ * Read by every door that answers a sandbox refusal — the unwrap door and its
+ * wrapper fallback in {@link classifyDataError}, and `@objectstack/rest`'s
+ * declared-status passthrough — so one abort carries one code whichever route
+ * caught it.
+ *
+ * [#27672] The doors that answer from `resolveThrownHttpError` instead (package
+ * publish, the runtime dispatcher's exits) get the same constant from the
+ * resolver's own `code`, which is where it is declared. The wrapper fallback is
+ * why this does not simply read that `code`: it recognises an abort whose
+ * `SandboxError` instance was lost, which carries no `innerMessage` for the
+ * resolver to read.
+ */
+function sandboxRefusalCodeFields(error: any, status: number): { code?: string; declaredCode?: string } {
+    const declared = thrownCodeFields(error, status);
+    return declared.code !== undefined ? declared : { code: UNDECLARED_HOOK_REFUSAL_CODE };
+}
+
+/**
  * [#12975] The caller-facing half of an ADR-0111 `CODE: message` throw — the
  * message with the leading restatement of the producer's OWN declared `code`
  * removed, or the message unchanged when it carries no such restatement.
@@ -604,21 +522,10 @@ export function declaredServerFaultAnswer(
  * [#8264] Postgres' missing-relation template, anchored on the QUOTED
  * identifier the driver always emits — never on the bare "does not exist"
  * tail, which is ordinary business English. Module-scoped (not re-compiled
- * per {@link mapDataError} call) and named, not inlined, so both of its
- * readers share the literal same pattern. See the long note above
- * `looksLikeMissingRelation`'s definition, further down this file, for why
- * this is one width, not "two widths, on purpose".
+ * per {@link mapDataError} call) and named, not inlined. Its one reader is
+ * `looksLikeMissingRelation`, further down this file.
  */
 const RELATION_DOES_NOT_EXIST = /\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i;
-
-function missingRelationIsObject(raw: string, object: string | undefined): boolean {
-    if (!object) return false;
-    const named =
-        /no such table:?\s*["'`[]?([a-z0-9_.$]+)/i.exec(raw) ||
-        /relation\s+["'`]?([a-z0-9_.$]+)["'`]?\s+does not exist/i.exec(raw);
-    const relation = named?.[1]?.toLowerCase().split('.').pop();
-    return relation !== undefined && relation === object.toLowerCase();
-}
 
 /**
  * Map a data-layer error to a clean HTTP response. Unknown-object errors are
@@ -626,17 +533,21 @@ function missingRelationIsObject(raw: string, object: string | undefined): boole
  * "object isn't registered" from real server faults. Anything else becomes a
  * 400 (bad request) preserving prior behavior. Genuine 500s are still logged.
  *
- * Two sources produce that 404, and since #3770 the FIRST one is the primary:
- *  - `code: 'OBJECT_NOT_FOUND'` from the protocol's registry gate
- *    (`assertObjectRegistered`) — an authoritative, driver-independent answer
- *    raised before the object name is ever turned into a table name.
- *  - Driver error strings (SQLite "no such table", PG "relation does not
- *    exist", …) — retained as the safety net for the *other* failure, an
- *    object that IS registered but whose physical table is missing (metadata /
- *    schema drift), plus engine-direct callers that bypass the protocol.
- *    Before #3770 this string match was the ONLY thing producing the 404,
- *    which is why an unregistered object whose table happened to exist was
- *    served instead of rejected.
+ * The 404's source is `code: 'OBJECT_NOT_FOUND'` from the registry gates —
+ * the protocol's `assertObjectRegistered` and the engine's own name
+ * resolution — an authoritative, driver-independent answer raised before the
+ * object name is ever turned into a table name. Before #3770 a driver string
+ * (SQLite "no such table", PG "relation does not exist") was the ONLY thing
+ * producing it, which is why an unregistered object whose table happened to
+ * exist was served instead of rejected.
+ *
+ * [#27702] A driver's missing-relation string is no longer a source of that
+ * 404 at all. Both gates refuse an unregistered name before any driver sees
+ * it, so a relation the driver cannot find belongs to a REGISTERED object
+ * whose storage is missing (schema drift, a datasource never provisioned) —
+ * a store fault, answered `500 DATABASE_ERROR`, the verdict the SQL driver's
+ * read exits already declare for the same table. An insert and a read on
+ * that object now answer alike.
  *
  * `PermissionDeniedError` (thrown by `SecurityPlugin`) MUST be caught
  * before the unknown-object heuristic, otherwise its message —
@@ -1283,7 +1194,7 @@ function structuredCodeAnswer(
     }
     // [#3770] Object does not exist — thrown by the protocol's registry gate
     // (`assertObjectRegistered`, which covers every data entry point) and by
-    // `cloneData`. Mapped to the SAME envelope the driver-string branch below
+    // `cloneData`. Mapped to the SAME envelope the engine-text branch below
     // produces, so one condition has exactly one wire code (`OBJECT_NOT_FOUND`,
     // a `StandardErrorCode` member) no matter which layer detected it — the
     // point of #3770 is that this 404 no longer depends on a driver erroring
@@ -1522,7 +1433,9 @@ function classifyDataError(error: any, object?: string): { status: number; body:
                 status,
                 body: {
                     error: error.innerMessage,
-                    ...thrownCodeFields(error, status),
+                    // [#27597] …and a body that declared no code answers
+                    // {@link UNDECLARED_HOOK_REFUSAL_CODE} instead of none.
+                    ...sandboxRefusalCodeFields(error, status),
                     ...(object ? { object } : {}),
                 },
             };
@@ -1826,6 +1739,10 @@ function classifyDataError(error: any, object?: string): { status: number; body:
             status: 400,
             body: {
                 error: msg,
+                // [#27597] Byte-identical to the `innerMessage` door above, the
+                // code included. A rethrow that kept the wrapper but lost the
+                // instance lost any declared code with it.
+                ...sandboxRefusalCodeFields(error, 400),
                 ...(object ? { object } : {}),
             },
         };
@@ -1970,6 +1887,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
 
     // [#5462] A driver saying "that relation is missing" is an unknown-OBJECT
     // verdict only when the missing relation IS the object the request named.
+    // [#27702] Not even then, now — the closing paragraph of this note says why.
     //
     // These three limbs are the only ones in the heuristic below whose text is
     // written by the DATABASE rather than by ObjectStack, and the database has
@@ -2028,20 +1946,34 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // this reason — different questions get different patterns even when they
     // share a substring. That precedent does NOT extend to the two USES right
     // here, though: both the 500 gate and the 404 limb are asking this file's
-    // one question, and `missingRelationIsObject` below already gates the 500
-    // path on attribution — so one width for both is correct, not "two
-    // widths, on purpose" a second time. See the reverse-verification note in
+    // one question, so one width for both was correct, not "two widths, on
+    // purpose" a second time. See the reverse-verification note in
     // `rest-unknown-object-heuristic.test.ts` for both paths measured.
+    //
+    // [#27702] …and since this card the 404 limb is gone: a missing relation
+    // is a store fault whoever it names, the request's own object included.
+    // The attribution above made the 404 depend on the relation BEING the
+    // object, and that is exactly the case the registry gates rule out. The
+    // protocol's `assertObjectRegistered` and the engine's name resolution
+    // both refuse an unregistered name with the structured `OBJECT_NOT_FOUND`
+    // (matched far above) before any driver is handed a table name, so a
+    // driver that cannot find the object's relation is reporting a REGISTERED
+    // object whose storage is missing. Answering that "Object '…' is not
+    // registered" sent the caller after the wrong problem, and disagreed with
+    // the read of the same object, which the SQL driver declares `500
+    // DATABASE_ERROR` at its read exits. The write paths leave the driver
+    // undeclared on purpose (a unique violation and an unknown column are
+    // classified here into precise 4xx answers), so this branch is where the
+    // insert's answer is decided, and it is now the read's.
     const looksLikeMissingRelation =
         lower.includes('no such table') ||
         RELATION_DOES_NOT_EXIST.test(raw) ||
         lower.includes('table not found');
-    if (looksLikeMissingRelation && !missingRelationIsObject(raw, object)) {
+    if (looksLikeMissingRelation) {
         return DATA_STORE_FAULT();
     }
 
     const looksLikeUnknownObject =
-        looksLikeMissingRelation ||
         lower.includes('unknown object') ||
         lower.includes('object not found') ||
         lower.includes('no driver available') ||
@@ -2272,6 +2204,7 @@ export function driverNotNullRefusalAnswer(
 export {
     truncateClientMessage,
     thrownCodeFields,
+    sandboxRefusalCodeFields,
     withoutDeclaredCodePrefix,
     withDeclaredUserMessage,
     isSandboxOrigin,

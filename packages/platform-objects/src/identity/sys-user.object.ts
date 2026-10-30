@@ -2,6 +2,7 @@
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
+import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 
 /**
  * The BCP-47 shape `sys_user.locale` accepts — a 2–3 letter language subtag
@@ -115,6 +116,10 @@ export const SysUser = ObjectSchema.create({
       // `{{ result.email }}`: invite-member answers the bare invitation row,
       // whose top-level `email` is the invitee's address as stored (lowercased).
       successMessage: 'Invitation sent to {{ result.email }}',
+      // [#27843] The copy per delivery outcome invite-member answers: `sent`,
+      // or `link_only` when this deployment does not deliver mail. The
+      // `successMessage` above stays the fallback for an answer without one.
+      outcomeMessages: { ...INVITE_USER_OUTCOME_MESSAGES },
       refreshAfter: true,
       params: [
         { field: 'email', required: true },
@@ -916,13 +921,28 @@ export const SysUser = ObjectSchema.create({
     // #2766 V1.5 — phone-number sign-in identifier (better-auth phoneNumber
     // plugin, mapped via buildPhoneNumberPluginSchema). Unique when present;
     // null for email-only accounts. Written through better-auth, not CRUD.
+    //
+    // Declared in the `Admin` group, with `phone_number_verified` below, on
+    // purpose: a sign-in identifier is account-administration data, not
+    // directory data. The group is the declaration the shipped permission sets
+    // read (`identityAdminFieldSecurity` in plugin-security's
+    // `default-permission-sets.ts`): the non-admin sets (`member_default`,
+    // `viewer_readonly`, `external_default`) mark every group field
+    // `readable: false` and the admin sets keep it, so an org member reading
+    // the user directory is served a colleague's name and email but not their
+    // sign-in phone number. Field-level read security is row-blind (ADR-0066,
+    // 2026-10-26 note), so the member's OWN row on the generic data API is
+    // withheld it too; the holder's own number is read through auth context
+    // (better-auth's session user, which returns both phone fields), as every
+    // other group field is. Moving either field out of the group serves it to
+    // every org peer again.
     phone_number: Field.text({
       label: 'Phone Number',
       required: false,
       readonly: true,
       searchable: true,
       maxLength: 32,
-      group: 'Account',
+      group: 'Admin',
       description:
         'Sign-in phone number (E.164 recommended). Unique per user; managed by ' +
         'better-auth when the phoneNumber plugin is enabled.',
@@ -932,7 +952,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Phone Verified',
       defaultValue: false,
       readonly: true,
-      group: 'Account',
+      group: 'Admin', // withheld from org peers with `phone_number` (see the note above it)
       description:
         'Whether the phone number has been verified (OTP verification requires ' +
         'SMS infrastructure; false until that ships). System-managed.',

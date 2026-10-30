@@ -45,6 +45,19 @@
  * ⛔ Neither suite may be cited without the other. A carve-out with only its
  * blocking half pinned is indistinguishable from having deleted this one.
  *
+ * ## ⭐ The create-name carve-out, objectstack#27865 — also read with this suite
+ *
+ * One PREDICTED verdict does hold a save, and it is bounded: on the create
+ * door only, when the live pass refuses the identity field (the Name),
+ * `doSave` sends nothing and the error stays on that field. The ruling's
+ * reason does not reach it: the create form always offers the Name input, so a
+ * client stricter than the server costs the author a different name, never a
+ * dead-bolt. Both halves are pinned in
+ * `ResourceEditPage.heldBadName-27865.test.tsx` — the hold, and its bound: a
+ * good Name beside a client-refused non-identity key (this suite's skew shape,
+ * on the create door) still sends. Every case below is unchanged by it: an
+ * edit is never held, and no other live issue holds a create.
+ *
  * ## The fixture is the real skew shape, not a contrived one
  *
  * The stored page carries `zzServerOnlyKey` — a key the bundled

@@ -28,12 +28,13 @@
  *     every row — the same verdict on both rows, i.e. the gate is not consulted.
  *     This is the pre-#4807 signature by design: it is the ruled cost of the
  *     retirement, and the console line is the notice.
- *   • legacy `data.*` does not throw: the ambient scope app-shell mounts
- *     (`providers/ExpressionProvider.tsx`) puts `data: {}` in the bag, and that
- *     `data` is the HOST's own, left standing, so `data.status` reads an
- *     undefined VALUE on the wrong object and the comparison is a constant
- *     `false` — the banner is OFF on every row, silently. Same retirement,
- *     opposite polarity, and no fault to report because nothing faulted.
+ *   • legacy `data.*` reads the HOST's own `data: {}` (the ambient scope
+ *     app-shell mounts, `providers/ExpressionProvider.tsx`), left standing.
+ *     A bare predicate is CEL (objectstack#27457), and on CEL a key the map
+ *     does not hold is a fault (`No such key: status`), not an undefined
+ *     value — so this fail-soft site answers SHOWN on every row, like the
+ *     shorthand, and the fault is reported. (It used to read on the legacy
+ *     grammar, where the comparison was a silent constant `false`.)
  *
  * ── Why groups B and C mount different shapes ──────────────────────────────
  *
@@ -72,7 +73,7 @@
  */
 
 import * as React from 'react';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, type RenderResult } from '@testing-library/react';
 import { RecordContextProvider, SchemaRenderer, PredicateScopeProvider } from '@object-ui/react';
 import '../../index';
@@ -185,14 +186,23 @@ describe('#4807 group B — only the canon binds on this renderer own gate (obje
     });
   });
 
-  it('legacy `data.*` — retired by objectui#5741: OFF on both rows (the host `data: {}` answers)', () => {
-    // No throw: the ambient `data: {}` from app-shell is the host's own and is
-    // left standing, so the comparison is constantly false and the banner never
-    // appears — on either row, and with nothing faulting to report.
-    expect(verdicts(alertNode(LEGACY, NODE_GATE_OPEN))).toEqual({
-      onMatchingRow: false,
-      onOtherRow: false,
-    });
+  it('legacy `data.*` — retired by objectui#5741: a CEL fault on the host `data: {}`, SHOWN on both rows and reported', () => {
+    // The ambient `data: {}` from app-shell is the host's own and is left
+    // standing. The bare predicate is CEL shorthand (objectstack#27457), and
+    // CEL refuses a key the map does not hold, so the predicate faults on
+    // either row: this fail-soft site answers SHOWN, and says why.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(verdicts(alertNode(LEGACY, NODE_GATE_OPEN))).toEqual({
+        onMatchingRow: true,
+        onOtherRow: true,
+      });
+      const faults = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes(LEGACY));
+      expect(faults.length).toBeGreaterThan(0);
+      expect(faults[0]).toContain('No such key: status');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('the row wins over an ambient `record`; a host `data` is left standing (objectui#5741)', () => {

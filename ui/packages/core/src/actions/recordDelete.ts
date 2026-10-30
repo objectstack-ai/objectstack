@@ -43,6 +43,14 @@
  * a batch, the count. The confirm button reads as the deletion it is; every
  * host paints it in the destructive button style.
  *
+ * ## The delete is permanent, and the toast names what went (objectstack#27823)
+ *
+ * The platform has no recycle bin, so the one-record body says the delete
+ * cannot be undone, as the batch body already did. The success toast names
+ * the deleted record by the same resolver ({@link recordDelete}.successText),
+ * the counterpart of the record-save toasts; a record with nothing nameable
+ * keeps the object-label toast.
+ *
  * ## The result shape is the action runner's, on purpose
  *
  * `run` returns what a registered `delete` handler returns, because the console
@@ -71,6 +79,8 @@ interface RecordDeleteDeps {
   t: Translate;
   /** The object's display label, used by the toasts. */
   label: string;
+  /** The object definition, so the success toast's name follows its declared `nameField`. */
+  objectDef?: unknown;
   dataSource: {
     delete(resource: string, id: string): Promise<unknown>;
   };
@@ -167,6 +177,25 @@ export const recordDelete = Object.freeze({
   },
 
   /**
+   * The success toast for ONE deleted record: the object label plus the
+   * record's display name from {@link getRecordDisplayName}. The resolver's
+   * floor (`Record #<id>`, or empty for an id-less row) is not a name, so such
+   * a record reads by the object label alone.
+   */
+  successText(
+    deps: Pick<RecordDeleteDeps, 't' | 'label' | 'objectDef'>,
+    record: Row | null | undefined,
+  ): string {
+    const { t, label } = deps;
+    const resolved = record ? getRecordDisplayName(deps.objectDef, record, { fallback: '' }) : '';
+    const id = record?.id ?? record?._id;
+    const name = resolved && !(id !== null && id !== undefined && resolved === `Record #${id}`)
+      ? resolved
+      : '';
+    return name ? t('objectActions.deletedNamed', { label, name }) : t('objectActions.deleteSuccess', { label });
+  },
+
+  /**
    * Delete, refresh and report. Several records (`params.records`, more than
    * one with an `id`) are deleted one call each and settled together, then the
    * list refreshes and ONE summary toast reports the batch. Otherwise one
@@ -215,12 +244,13 @@ export const recordDelete = Object.freeze({
 
     const recordId =
       params?.recordId ?? params?.record?.id ?? records?.[0]?.id ?? request.recordId;
+    const record = params?.record ?? records?.[0] ?? null;
     if (!recordId) return { success: false, error: t('objectActions.noRecordId') };
 
     try {
       await dataSource.delete(objectName, recordId as string);
       onRefresh?.();
-      toast.success(t('objectActions.deleteSuccess', { label }));
+      toast.success(recordDelete.successText(deps, record));
       return { success: true, reload: true, silent: true };
     } catch (err) {
       toast.error(t('objectActions.deleteFailed', { label }), {

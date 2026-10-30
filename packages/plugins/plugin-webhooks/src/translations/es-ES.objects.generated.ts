@@ -18,7 +18,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhooks",
-    description: "Suscripción saliente de Webhook HTTP. Se declara en código mediante defineStack({ webhooks }) / defineWebhook() (materializada en filas al arrancar) o se crea directamente con el editor de Studio; el encolador automático de webhooks la despacha al outbox HTTP compartido.",
+    description: "Webhook HTTP saliente que su organización crea aquí o mediante la API. Los webhooks incluidos en una aplicación no aparecen aquí. Ambos tipos se envían por la misma cola de entrega.",
     fields: {
       id: {
         label: "ID de webhook"
@@ -81,7 +81,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Gestionado por",
-        help: "Procedencia del registro: platform = integrado en el framework / package = declarado por app o paquete (sembrado al arrancar desde los webhooks de defineStack) / admin = creado en Setup.",
+        help: "Procedencia del registro: admin = creado en Setup o mediante la API / package = una copia de un webhook declarado en código que escribió el sembrador de arranque retirado de la 18.0 (ya nada la escribe: un webhook declarado se lee del registro de metadatos y no es una fila) / platform = reservado.",
         options: {
           platform: "Plataforma",
           package: "Paquete",
@@ -90,7 +90,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Personalizado",
-        help: "Se establece cuando un administrador edita un webhook declarado por un paquete; a partir de entonces el sembrado de arranque deja de sobrescribir la fila (un webhook ruidoso desactivado sobrevive a los redespliegues). Sin sentido en filas admin."
+        help: "Se establece cuando un administrador edita una fila package (una copia que escribió el sembrador de arranque retirado de la 18.0). La lee la ceremonia de propiedad: una copia editada bajo un nombre declarado se conserva como clon y una intacta se elimina. Sin sentido en filas admin."
       },
       created_at: {
         label: "Creado el"

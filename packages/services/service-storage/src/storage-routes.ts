@@ -5,7 +5,9 @@ import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService, RouteHa
 import type { ErrorCode, RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 // [#22470] The ONE upload-scope list — the upload requests' `scope` and the
 // `sys_file.scope` select read it too. A value import: the doors ask it.
-import { UploadScopeSchema } from '@objectstack/spec/api';
+// [#27549] The chunked-upload init door parses its whole body with the
+// declared request schema, so declared is enforced.
+import { InitiateChunkedUploadRequestSchema, UploadScopeSchema } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // [#23174] A catch-all 5xx answers through `sendServerFault`: the route's
 // generic text on the wire, the caught error with its stack in the fault log.
@@ -157,6 +159,55 @@ function uploadScopeRefusalMessage(scope: unknown): string {
     );
   }
   return `scope ${named} is not accepted: it is not an upload scope. ${allowed}`;
+}
+
+/**
+ * [#27413] The presigned door's declared `size`: a finite, non-negative JSON
+ * number, the byte count `GetPresignedUrlRequestSchema.size` declares. A
+ * string (even a numeric one), `NaN`, an infinity or a negative count is
+ * refused `400` / `INVALID_REQUEST` before the pending `sys_file` row is
+ * written — the code the door already answers a request missing its size
+ * with. `0` is a legal empty file.
+ */
+function isDeclaredByteCount(size: unknown): size is number {
+  return typeof size === 'number' && Number.isFinite(size) && size >= 0;
+}
+
+const PRESIGNED_SIZE_REFUSAL_MESSAGE =
+  'size must be the file size in bytes: a non-negative number, sent as a JSON number';
+
+/**
+ * [#27549] The chunked-upload init door's refusal for a body that does not
+ * parse with `InitiateChunkedUploadRequestSchema`: every failing field named
+ * with the schema's own words. `totalSize` is a whole number of bytes, at
+ * least 1, and `chunkSize` (when sent) a whole number at or above the
+ * declared 5 MiB minimum — a smaller one is refused, never clamped up.
+ */
+function chunkedInitRefusalMessage(issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>): string {
+  const named = issues.map((issue) => `${issue.path.map(String).join('.') || '(body)'}: ${issue.message}`);
+  return `The chunked upload request does not match its declared shape. ${named.join('; ')}`;
+}
+
+/**
+ * [#27412] The chunk door's `chunkIndex` path segment, read strictly: decimal
+ * digits only, so `-1`, `0.5`, `1e2` and `0x1` are not indexes. `null` ⇒ not
+ * a whole number. The range half — below the upload's declared
+ * `total_chunks` — is judged against the session row by the caller, because
+ * a chunk stored outside that range is counted in the progress and then
+ * blocks the completion door for good (no door removes a chunk).
+ */
+function parseChunkIndex(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+function chunkIndexRefusalMessage(totalChunks: number): string {
+  const range = totalChunks === 1 ? 'must be 0' : `must be a whole number from 0 to ${totalChunks - 1}`;
+  return (
+    `chunkIndex ${range}: this upload declared ${totalChunks} chunk${totalChunks === 1 ? '' : 's'}, ` +
+    'indexed from zero.'
+  );
 }
 
 /**
@@ -918,6 +969,13 @@ export function registerStorageFamily(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
+      // [#27413] Not a byte count ⇒ refused before anything is stored: a
+      // non-numeric size otherwise failed the `sys_file` insert as a 500, and
+      // a negative one was stored on a pending row.
+      if (!isDeclaredByteCount(size)) {
+        sendError(res, 400, 'INVALID_REQUEST', PRESIGNED_SIZE_REFUSAL_MESSAGE);
+        return;
+      }
       // [#22470] A scope outside the upload vocabulary is refused before
       // anything is stored or minted.
       if (!requireAcceptedUploadScope(scope, res)) return;
@@ -926,7 +984,7 @@ export function registerStorageFamily(
       // bytes are judged again at `_local/raw`; an S3 URL takes them straight
       // to the bucket, so this is the platform's one look at that upload.
       const { presignedTtl, maxUploadBytes } = currentLimits();
-      if (!requireWithinUploadLimit(Number(size), maxUploadBytes, (n) => `The declared file size is ${n} bytes`, res)) return;
+      if (!requireWithinUploadLimit(size, maxUploadBytes, (n) => `The declared file size is ${n} bytes`, res)) return;
 
       const fileId = randomUUID();
       const key = buildKey(scope ?? 'user', fileId, filename);
@@ -1056,21 +1114,35 @@ export function registerStorageFamily(
     try {
       const session = await requireUploadSession(req, res);
       if (session === false) return;
-      const { filename, mimeType, totalSize, chunkSize: reqChunkSize, scope, bucket, metadata } = req.body ?? {};
-      if (!filename || !mimeType || !totalSize) {
+      const body = req.body ?? {};
+      // [#27801] The presence check refuses nothing the schema parse below
+      // accepts: `InitiateChunkedUploadRequestSchema` declares `filename` and
+      // `mimeType` non-empty. It stays ahead of the scope gate so a missing
+      // field keeps this answer whatever `scope` says.
+      if (!body.filename || !body.mimeType || body.totalSize == null) {
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;
       }
       // [#22470] Same scope gate as the presigned door — before the file row,
-      // the backend multipart and the session row.
-      if (!requireAcceptedUploadScope(scope, res)) return;
+      // the backend multipart and the session row. Asked before the parse
+      // below so an off-vocabulary scope keeps its own remedy.
+      if (!requireAcceptedUploadScope(body.scope, res)) return;
+      // [#27549] Declared is enforced: the body must parse with the declared
+      // request schema, before anything is stored or minted. A total that is
+      // not a positive whole number used to mint a session no chunk could
+      // complete, and a `chunkSize` under the minimum was clamped up.
+      const parsed = InitiateChunkedUploadRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        sendError(res, 400, 'INVALID_REQUEST', chunkedInitRefusalMessage(parsed.error.issues));
+        return;
+      }
+      const { filename, mimeType, totalSize, chunkSize, scope, bucket, metadata } = parsed.data;
       // [#22283] The declared total against the saved limit — before the file
       // row, the backend multipart and the session row. The chunk door judges
       // the bytes as they arrive.
       const { sessionTtl, maxUploadBytes } = currentLimits();
-      if (!requireWithinUploadLimit(Number(totalSize), maxUploadBytes, (n) => `The declared total size is ${n} bytes`, res)) return;
+      if (!requireWithinUploadLimit(totalSize, maxUploadBytes, (n) => `The declared total size is ${n} bytes`, res)) return;
 
-      const chunkSize = Math.max(reqChunkSize ?? 5242880, 5242880);
       const totalChunks = Math.ceil(totalSize / chunkSize);
 
       const fileId = randomUUID();
@@ -1160,8 +1232,7 @@ export function registerStorageFamily(
       if (authSession === false) return;
       const writeContext: StorageWriteContext = { organizationId: authSession?.organizationId };
       const { uploadId, chunkIndex: chunkIndexStr } = req.params;
-      const chunkIndex = parseInt(chunkIndexStr, 10);
-      if (!uploadId || isNaN(chunkIndex)) {
+      if (!uploadId || !chunkIndexStr) {
         sendError(res, 400, 'INVALID_REQUEST', 'uploadId and chunkIndex are required');
         return;
       }
@@ -1196,6 +1267,22 @@ export function registerStorageFamily(
           'UPLOAD_SESSION_EXPIRED',
           `Upload session expired at ${live.expires_at}; start a new chunked upload`,
         );
+        return;
+      }
+
+      // [#27412] The index must name a chunk this upload declared: a whole
+      // number in [0, total_chunks). Judged here — after the resume token
+      // (a caller who cannot prove it owns the session learns nothing of its
+      // chunk count) and before a byte is read, stored or counted. An index
+      // outside the range used to be stored and counted in the progress, then
+      // refused for good by the completion door; `-1` reached the backend as
+      // part number 0 and answered 500.
+      const totalChunks = Number(session.total_chunks);
+      const chunkIndex = parseChunkIndex(chunkIndexStr);
+      if (chunkIndex === null || !(chunkIndex < totalChunks)) {
+        sendError(res, 400, 'INVALID_REQUEST', chunkIndexRefusalMessage(totalChunks), {
+          details: { chunkIndex: chunkIndexStr, totalChunks },
+        });
         return;
       }
 

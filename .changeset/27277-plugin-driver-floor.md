@@ -5,7 +5,7 @@
 
 fix(objectql)!: a plugin driver on an external datasource answers every read correctly or refuses: the engine applies the whole query to the rows the driver returns, up to 1000 of them (#27277)
 
-Clause-②: yes (two codes join ERROR_CODE_LEDGER under `@objectstack/objectql`: `EXTERNAL_WRITE_REFUSED` and `EXTERNAL_ROW_CAP_EXCEEDED`, both 422)
+Clause-②: yes (narrowing) — two codes join ERROR_CODE_LEDGER under `@objectstack/objectql` (`EXTERNAL_WRITE_REFUSED` and `EXTERNAL_ROW_CAP_EXCEEDED`, both 422), and on a plugin-driver external datasource the accepted reads and writes narrow as described below
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. A read on a plugin-driver datasource that matches more than 1000 rows is now refused with a 422 that names its own remedy (narrow the filter, or mirror the data with DataSync); there is no metadata for a migration to rewrite. -->

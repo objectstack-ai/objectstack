@@ -230,9 +230,10 @@ export type EngineFilterJudgement =
  * guarded call into a `possibly undefined` error and push code back toward the
  * `any` this contract exists to remove.
  *
- * One member is optional by ruling, not by this default: {@link judgeFilter}
- * (#19995 ruling C). Its callers must work with an engine that lacks it, so the
- * optional mark states that requirement in the type.
+ * Two members are optional by ruling, not by this default: {@link judgeFilter}
+ * (#19995 ruling C) and {@link getDisabledActions} (#27842 ruling letter B,
+ * the `getFlowRegistration?` shape). Their callers must work with an engine
+ * that lacks them, so the optional mark states that requirement in the type.
  */
 export interface IObjectQLEngine extends IDataEngine {
     // ── Schema access ────────────────────────────────────────────────────
@@ -325,6 +326,30 @@ export interface IObjectQLEngine extends IDataEngine {
     removeActionsByPackage(packageName: string): void;
     /** The dispatcher's action path — one of the two members `getObjectQL` was recorded as needing. */
     executeAction(objectName: string, actionName: string, ctx: any): Promise<any>;
+    /**
+     * The packaged actions this engine's activation ledger switches off, by
+     * declarative name (ADR-0126 §8 item 2) — the same projection the dispatch
+     * doors consult before they refuse a call 409 `ACTION_DISABLED` — or
+     * `undefined` when no activation ledger is attached to this engine.
+     *
+     * [#27842] Declared for the metadata read, which serves it beside an
+     * object as `disabledActions` (`GetMetaItemResponseSchema`,
+     * `api/protocol.zod.ts`) so a client can stop offering an action the
+     * doors will refuse. The metadata protocol reads this member through the
+     * kernel's service table by name (`objectql`), per call, as it reads
+     * `IAutomationService.getFlowRegistration`: it never imports the engine.
+     *
+     * The two answers are deliberately apart. `undefined` is "no ledger
+     * answered" (a composition that registers no `sys_metadata_activation`,
+     * or one whose ledger table failed its probe, so no store was attached):
+     * the read then serves no key, never an empty list. `[]` is an attached
+     * ledger that switches nothing off — what the doors then dispatch by. The engine's own operability read, `listDisabledActions()`,
+     * answers `[]` for both and stays off this contract.
+     *
+     * Optional: an engine that keeps no activation projection does not
+     * declare it, and the read then serves no key rather than a guess.
+     */
+    getDisabledActions?(): string[] | undefined;
 
     // ── Hook / middleware seams ──────────────────────────────────────────
     /**

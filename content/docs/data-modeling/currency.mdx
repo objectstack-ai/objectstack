@@ -1,0 +1,214 @@
+---
+title: Currency fields — dynamic, fixed and record modes
+navTitle: Currency
+description: How a currency amount gets its currency — the tenant default, one fixed code, or each record's own ISO 4217 code in a sibling field — and the writes, aggregates and declarations the platform refuses for a record-currency amount
+---
+
+A `currency` field stores a **bare number** in every mode, never a `{ value, currency }`
+object (ADR-0104 D1). What the field's `currencyConfig` decides is where that number's
+currency comes from. There are three modes, and the record mode is the one to use when
+different records of the same object are in different currencies: an invoice in USD next
+to an invoice in EUR (ADR-0144).
+
+## The three modes
+
+| `currencyMode` | The amount's currency | Keys it reads |
+|:---|:---|:---|
+| `dynamic` (the default) | The tenant default currency, the `localization.currency` setting. With no setting, the amount is a plain number with no symbol. | none — `defaultCurrency` is not read |
+| `fixed` | One currency for the whole column. | `defaultCurrency`, required |
+| `record` | Each record's own currency: the ISO 4217 code stored in a sibling field of the same record. | `currencyField`, required |
+
+```typescript
+// dynamic: displays in the organization's currency
+budget: Field.currency({ label: 'Budget' }),
+
+// fixed: every row is in USD
+list_price: Field.currency({
+  label: 'List Price',
+  currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
+}),
+
+// record: every row names its own currency in `currency_code`
+amount: Field.currency({
+  label: 'Amount',
+  currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+}),
+```
+
+Pick by asking what the currency belongs to. If it belongs to the organization, use
+`dynamic`. If it belongs to the column, such as a price list kept in one currency, use
+`fixed`. If it belongs to the document, such as an invoice billed in the customer's
+currency, use `record`.
+
+The modes do not mix in one config. `fixed` needs its code and `record` needs its pointer.
+Nothing turns multi-currency on for an organization or a deployment: declaring
+`currencyMode: 'record'` on a field is the switch, and the field is the only place it
+applies.
+
+## The record mode
+
+### The code field
+
+A record-mode amount names, through `currencyConfig.currencyField`, a field **on the same
+object** that holds each record's currency. That field must be a `text` field declaring
+`valueDomain: 'iso_4217_currency'`, so every code written to it is checked against the
+ISO 4217 list.
+
+```typescript
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Invoice = ObjectSchema.create({
+  name: 'invoice',
+  label: 'Invoice',
+  fields: {
+    name: Field.text({ label: 'Number', required: true }),
+    currency_code: Field.text({ label: 'Currency', valueDomain: 'iso_4217_currency' }),
+    amount: Field.currency({
+      label: 'Amount',
+      currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+    }),
+    tax: Field.currency({
+      label: 'Tax',
+      currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+    }),
+  },
+});
+```
+
+`currency_code` is a **convention, not a contract**. The platform never injects a code
+column and never looks one up by name: the code field is whatever field you declare and
+point at. Several amounts may share one code field, as `amount` and `tax` do above, and an
+object may carry two code fields when a record really holds amounts in two currencies.
+
+A `formula` field with `returnType: 'currency'` that computes from record-mode amounts
+carries the same config, `{ currencyMode: 'record', currencyField: … }`, naming the code
+field its source amounts name. `inferFormulaReturn` in `@objectstack/formula` answers it
+for a formula it can prove is money.
+
+### What the declaration refuses
+
+`ObjectSchema.create()`, `os validate` and publish refuse each of these, with the fix in the
+message:
+
+| Declaration | Refused at | Fix |
+|:---|:---|:---|
+| `currencyMode: 'record'` with no `currencyField` | `currencyConfig.currencyField` | Name the code field, or use `fixed` (one currency) or `dynamic` (the tenant default). |
+| `currencyField` under `dynamic` or `fixed` | `currencyConfig.currencyField` | Set `currencyMode: 'record'`, or delete `currencyField`. |
+| `defaultCurrency` under `record` | `currencyConfig.defaultCurrency` | Delete `defaultCurrency`, or use `fixed` if the field has one currency. |
+| `currencyField: ''` | `currencyConfig.currencyField` | Name a field. |
+| `currencyField` names no other field of the object, or names the amount itself | `fields.<amount>.currencyConfig.currencyField` | Point at a declared code field. The message lists the object's candidates. |
+| `currencyField` names a field that is not `text` | same | Point at a `text` field. |
+| `currencyField` names a `text` field without `valueDomain: 'iso_4217_currency'` | same | Add `valueDomain: 'iso_4217_currency'` to that field. |
+
+### Writing a record
+
+When a record-mode amount holds a value, its code field must hold a code in the same
+write. An insert, or an update that leaves the amount beside a blank code (absent, `null`
+or white space only), is refused with **`ERR_CURRENCY_CODE_REQUIRED` / 400** and nothing
+is written. The error names the code field in `field` and the amount in `amountField`.
+Fix it by writing the record's code, for example `'USD'`, in the same write, or by leaving
+the amount empty.
+
+- A blank amount needs no code.
+- On an update, only the amount and code pairs the payload touches are judged, so editing
+  an unrelated field of an older row is not refused.
+- A code that is not an ISO 4217 code is refused by the code field's own `valueDomain`,
+  not by this rule.
+
+**The platform never fills in a code.** No server default, no tenant fallback and no
+"most recent currency" is ever stored on your behalf. In the Console, a create form opens
+with the code field pre-filled with the organization's currency, and the user submits it
+as an explicit value. A `defaultValue` you declare on the code field yourself is an
+ordinary field default: the engine applies it before the check, so it satisfies the
+rule, because you wrote it.
+
+### Aggregating a record-mode amount
+
+Amounts in different currencies do not add. A `sum`, `avg`, `min` or `max` over a
+record-mode amount is refused with **`INVALID_FIELD` / 400** unless the same query groups
+by the amount's code field, and the query is not run. Grouped by the code, every group
+holds one currency and each figure is right.
+
+```typescript
+// Refused: USD 100 and EUR 100 would answer 200 under one label.
+{ aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }] }
+
+// Served: one total per currency.
+{ groupBy: ['currency_code'], aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }] }
+```
+
+The rule holds at two doors:
+
+- **The ObjectQL aggregate**, so it covers every caller that reaches the engine: the REST
+  query API, flows, hooks and the analytics strategy.
+- **The analytics cube door**, ahead of strategy selection: dataset queries (the main
+  grid, every `totals` grouping including the grand total, and the `compareTo` pass),
+  cube queries over a declared or inferred cube, and the dataset draft preview.
+
+A `count` reads no amount and is always served, grouped or not, and so is
+`count_distinct`. A `where` that happens to select one currency does not count as
+grouping: the rule is the grouping alone.
+
+In an analytics answer, a measure column over a record-mode amount, grouped by the code,
+carries **`currencyField`** instead of `currency`. It names the dimension column of the
+same answer that groups by the code field, and each row's currency is that row's value of
+that column. A `count` column never carries `currencyField`. See the
+[analytics result columns](/docs/api/data-api) for the full `fields[]` surface.
+
+### Roll-ups and datasets
+
+- **A `summary` roll-up** whose `sum`, `avg`, `min` or `max` reads a record-mode amount of
+  the child object is refused when the object registers, with **`INVALID_METADATA` /
+  422**. A roll-up stores one number with no currency, so child rows in different
+  currencies would be added together. Use `function: 'count'`. The pair is judged at
+  whichever registration completes it, the parent's or the child's.
+- **A dataset measure that declares `currency` over a record-mode amount** is refused at
+  compile with **`DATASET_INVALID` / 400**, and so is a `currency` on a derived measure that
+  sums record-mode amounts. One code cannot label amounts in several currencies: delete
+  the measure's `currency` and select the dimension over the code field, so each row
+  carries its own.
+- **A derived measure that combines a record-mode amount with an amount in another
+  currency** (another code field, a `fixed` code, an explicit measure code or the tenant
+  currency) is refused at compile with `DATASET_INVALID` / 400, whatever the operation.
+  A derived measure over a `count`, such as an amount per invoice, stays legal.
+- **A dataset measure whose `currency` differs from its field's `fixed` code** is refused
+  at compile with `DATASET_INVALID` / 400: `currency: 'USD'` over a field fixed to `EUR`
+  would label euros as dollars. Delete the measure's `currency`, and the column takes the
+  field's code. A `currency` that restates the field's code is accepted.
+- **A derived measure whose monetary operands resolve to two different `fixed` codes** is
+  refused at compile with `DATASET_INVALID` / 400, whatever the operation. Derive it from
+  measures in one currency, or drop the operand in the other. A derived `sum` or
+  `difference` over one `fixed` code carries that code, so a measure built on it is judged
+  the same way.
+- **Not judged:** a `fixed` code against the tenant currency, which compile does not know,
+  and a measure `currency` over a `dynamic` field, which wins as the top of the currency
+  chain.
+
+### In the Console
+
+Each record-mode amount shows the symbol and minor-unit decimals of its own record's code.
+A record whose code is blank shows a plain number. Grouped analytics answers do the same
+per row: the dashboard table, the report table and its export, and the Studio dataset
+preview each take a row's currency from its code column. A place that spans many records
+and is not grouped by the code has no one currency to show: the grid footer draws no
+`sum` / `avg` / `min` / `max` for that column, a group header draws them only when the
+grouping includes the code field, a report's grand total on such a column shows no
+symbol, and the counts always stand.
+
+## The home currency
+
+The organization's home currency is the existing `localization.currency` setting.
+**Metadata never names it**: no field, object or dataset declares the home currency, and a
+`dynamic` amount displays in it because that is what `dynamic` means.
+
+Consolidating record-mode amounts into one home-currency total, through dated exchange
+rates and a stored home amount, comes in a later release. Until then, total a record-mode
+amount per currency by grouping by its code field.
+
+## See also
+
+- [Field Type Gallery: `currency`](/docs/data-modeling/field-types#currency) — the field's
+  properties and decimal places.
+- [Validation rules: `currency`](/docs/data-modeling/validation-rules#currency) — the value
+  shape a write is judged against.
+- [Analytics](/docs/data-modeling/analytics) — datasets, measures and dimensions.

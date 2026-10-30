@@ -38,7 +38,7 @@ import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
-import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
+import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { appAddressSegment, appRouteSegment, canonicalAppPathname, matchAppBySegment } from '../utils/appRoute.js';
 import { resolveHref, type NavTemplateContext } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
@@ -462,8 +462,23 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // Until the app list has loaded, a scope candidate does not know its package
   // yet, and reads nothing (the splash is up).
   const readsWholeRegistry = !scopeCandidate || (!metadataLoading && !objectScope);
+  // objectstack#27626 — a record drawer (`?recordId=`) over a scoped route
+  // reads the whole registry for its related lists, BESIDE the route's scope:
+  // the route slot never waits on it, and once it has landed it joins the
+  // scope, whose own documents keep their identity. The list under the drawer
+  // reads the same object definition before, during and after it, so opening
+  // or closing a record re-reads none of its rows (the skeleton this used to
+  // show remounted the list on every first open).
+  const drawerReadsRegistry = !!objectScope && searchParamsHasRecordDrawer(location.search);
+  const drawerRegistrySettled = useLazyMetadataSettled(drawerReadsRegistry ? 'object' : '', ensureType, getTypeStatus);
+  const scopeObjects: any[] | undefined = objectScope?.objects;
+  const registryObjects: any[] | undefined = drawerReadsRegistry && drawerRegistrySettled ? metadata.objects : undefined;
+  const scopeWithRegistry = useMemo(
+    () => (scopeObjects && registryObjects ? joinRegistryToScope(scopeObjects, registryObjects) : undefined),
+    [scopeObjects, registryObjects],
+  );
   const allObjects: any[] = objectScope
-    ? objectScope.objects
+    ? scopeWithRegistry ?? objectScope.objects
     : readsWholeRegistry ? metadata.objects : NO_OBJECTS;
   const routeReadsKey = [
     ...routeReads.filter((type) => type !== 'object' || readsWholeRegistry),
@@ -505,8 +520,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // `recordHref`). A member reaches both under the Setup segment, so whether
   // they wait on Setup's verdict is a product decision, left open on
   // objectui#12706.
+  //
+  // objectstack#27507 — two more wait on it: the settings pages
+  // (`system/settings`, `system/settings/:namespace`, the console host's) and
+  // the marketplace (`system/marketplace[/:packageId]`, this file's). Without
+  // the verdict a member opening them got the default app's chrome around the
+  // page's own reading of the server's refusal: an empty settings hub ("No
+  // settings registered"), the raw capability error on a settings page, the
+  // marketplace's admin-only notice. Each now reads as the app root does; the
+  // pages' inner states stay for a caller the app lets in.
   const isSetupRootRoute = location.pathname === '/apps/setup' || location.pathname === '/apps/setup/';
-  const appSurfaceAwaitsVerdict = !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute);
+  const [appSubRoot, appSubPage] = appSubPath.split('/');
+  const isSettingsOrMarketplaceRoute =
+    appSubRoot === 'system' && (appSubPage === 'settings' || appSubPage === 'marketplace');
+  const appSurfaceAwaitsVerdict =
+    !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute || isSettingsOrMarketplaceRoute);
 
   // Post-publish readiness: when a requested app isn't in the loaded metadata,
   // re-check ONCE (the registry can lag a beat behind a publish) before
@@ -1680,6 +1708,34 @@ function resolveLandingRoute(navigation: NavigationItem[], ctx?: NavTemplateCont
 }
 
 /**
+ * objectstack-ai/objectstack#27450 — the landing target with the search and
+ * hash the app-root URL arrived with carried onto it. The URL overlays
+ * (`?palette=1`, `?recordId=`, `?form=`, `urlParams.ts`) live in the query, so
+ * a redirect that rebuilt the URL from the landing alone dropped the overlay a
+ * deep link asked for before anything read it.
+ *
+ * A landing that has a query of its own (a `page` entry's `params`, an
+ * `object` entry's `filters`) keeps it, and the two MERGE: a key the arriving
+ * URL names replaces the landing's values for that key, never doubles them —
+ * the link is the more specific ask. With nothing arriving the target is
+ * returned untouched; with no query on the landing the arriving search is
+ * appended as written.
+ */
+function carryQueryOntoLanding(target: string, search: string, hash: string): string {
+  const hashAt = target.indexOf('#');
+  const beforeHash = hashAt >= 0 ? target.slice(0, hashAt) : target;
+  const carriedHash = hash || (hashAt >= 0 ? target.slice(hashAt) : '');
+  if (!search || search === '?') return `${beforeHash}${carriedHash}`;
+  const queryAt = beforeHash.indexOf('?');
+  if (queryAt < 0) return `${beforeHash}${search}${carriedHash}`;
+  const params = new URLSearchParams(beforeHash.slice(queryAt + 1));
+  const arriving = new URLSearchParams(search);
+  for (const key of new Set(arriving.keys())) params.delete(key);
+  arriving.forEach((value, key) => params.append(key, value));
+  return `${beforeHash.slice(0, queryAt)}?${params.toString()}${carriedHash}`;
+}
+
+/**
  * The app root (`/apps/:appName`): navigates to the app's landing, or says the
  * member has nothing here.
  *
@@ -1718,6 +1774,7 @@ function AppRootLanding({
   setupPath: string | null;
 }) {
   const gates = useNavMemberGates();
+  const location = useLocation();
   // objectstack#25338 — an app that names objects, none of which this member
   // may read, has nothing for them: its dashboards and pages would answer a
   // grid of "You don't have access" tiles. Say so once, before any landing is
@@ -1750,7 +1807,9 @@ function AppRootLanding({
       </div>
     );
   }
-  if (landing) return <Navigate to={landing} replace />;
+  // objectstack-ai/objectstack#27450 — search and hash carry over, as on the
+  // other URL-rewrite redirects in this file.
+  if (landing) return <Navigate to={carryQueryOntoLanding(landing, location.search, location.hash)} replace />;
   // objectui#12079 — an app that shows this member NO navigation (every entry
   // gated away from them, or none served at all) is an app they have no access
   // in yet. Say so, and offer Setup to a caller who can grant access: the
@@ -1895,6 +1954,25 @@ function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
 function searchParamsHasRecordForm(search: string): boolean {
   const sp = new URLSearchParams(search);
   return sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
+}
+
+/**
+ * objectstack#27626 — whether the record drawer is open in the URL. Over a
+ * scoped route it reads the whole registry beside the scope.
+ */
+function searchParamsHasRecordDrawer(search: string): boolean {
+  return new URLSearchParams(search).has(RECORD_DRAWER_PARAM);
+}
+
+/**
+ * objectstack#27626 — the scope's objects, each the same document, then the
+ * registry's objects the scope does not hold. The scope itself while the
+ * registry adds nothing.
+ */
+function joinRegistryToScope(scope: any[], registry: any[]): any[] {
+  const held = new Set(scope.map((o: any) => o?.name));
+  const extra = registry.filter((o: any) => !held.has(o?.name));
+  return extra.length > 0 ? [...scope, ...extra] : scope;
 }
 
 const NO_OBJECTS: any[] = [];

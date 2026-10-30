@@ -45,9 +45,9 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import { createHash } from 'node:crypto';
-import '@object-ui/components';
+import { operatorsForFieldType } from '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
-import { FILTER_FIELD_TYPES } from '@object-ui/types';
+import { FILTER_FIELD_TYPES, FILTER_NUMBER_LIKE_TYPES } from '@object-ui/types';
 import { getExample } from '../src/index.js';
 
 const IDS = [
@@ -429,5 +429,27 @@ describe('objectui#6939 — the vocabulary the mirror now names is live', () => 
       `FILTER_FIELD_TYPES carries \`${type}\`, but the renderer draws it exactly as an unrecognised `
         + 'spelling — give it a bucket in custom/filter-builder.tsx or take it out of the list',
     ).not.toBe(`${nonsense.inputs.join(',')}|${nonsense.triggers.length}`);
+  });
+});
+
+/**
+ * objectstack#27497 — a member of the number bucket (the spec numeric family,
+ * `progress` among them) is OFFERED the number operators and none of the text
+ * ones: the server refuses a text operator on a numeric field with a 400 and
+ * accepts the comparisons.
+ */
+describe('objectstack#27497 — every number-bucket member is offered the number operators', () => {
+  const ids = (type: string) => operatorsForFieldType(type).map((op) => op.value);
+
+  it('the bucket carries `progress`', () => {
+    expect(FILTER_NUMBER_LIKE_TYPES).toContain('progress');
+  });
+
+  it.each([...FILTER_NUMBER_LIKE_TYPES])('`%s` gets exactly what `number` gets, and no text operator', (type) => {
+    expect(ids(type)).toEqual(ids('number'));
+    expect(ids(type)).toContain('greater_than');
+    for (const textOnly of ['contains', 'icontains', 'not_contains', 'starts_with', 'ends_with']) {
+      expect(ids(type)).not.toContain(textOnly);
+    }
   });
 });

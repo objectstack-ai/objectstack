@@ -20,8 +20,8 @@
  * What the file owns, in the order a thrown error meets it:
  *
  *   classification  {@link mapDataError} — the error → `{ status, body }` table,
- *                   with {@link declaredHttpStatus}, {@link isScriptFaultMessage}
- *                   and {@link missingRelationIsObject} as its judgements and
+ *                   with {@link declaredHttpStatus} and {@link isScriptFaultMessage}
+ *                   as its judgements and
  *                   {@link DATA_STORE_FAULT} / {@link UNCLASSIFIED_FAULT} as its
  *                   two sanitised 5xx terminals.
  *   resolution      {@link resolveErrorResponse} — the same answer WITHOUT
@@ -65,6 +65,7 @@ import {
     mapDataError,
     resolveThrownHttpError,
     sandboxBusinessMessage,
+    sandboxRefusalCodeFields,
     structuredCodeAnswer,
     thrownCodeFields,
     truncateClientMessage,
@@ -585,11 +586,20 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // route that passes nothing still answers exactly the bytes it answers
         // today (`classifiedRefusalAnswer` calls this door with no object at
         // all, and its families' key sets are unmoved).
+        //
+        // [#27597] A sandboxed body's refusal that declared no code answers
+        // `UNDECLARED_HOOK_REFUSAL_CODE`, read through the same
+        // `sandboxRefusalCodeFields` the unwrap door in `mapDataError` reads,
+        // so a hook that sets `status` and the one that sets `statusCode` (or
+        // neither) still answer one code. Every other producer keeps
+        // `thrownCodeFields`' answer, which invents nothing.
         return withDeclaredUserMessage(error, {
             status: error.status,
             body: {
                 error: safeMsg,
-                ...thrownCodeFields(error, error.status),
+                ...(businessMessage !== undefined
+                    ? sandboxRefusalCodeFields(error, error.status)
+                    : thrownCodeFields(error, error.status)),
                 ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
                 ...(object ? { object } : {}),
             },
@@ -866,9 +876,10 @@ function isExpectedQueryRejection(body: Record<string, unknown> | undefined): bo
  * 500, which this predicate cannot treat as expected at all
  * (`isExpectedDataStatus` names 502/503 and nothing else in the 5xx band), so
  * the handler bug is loud STRUCTURALLY rather than by this sentence. The
- * narrowness still matters for what remains in the un-coded 4xx band — the
- * sandbox unwraps' business-rule 400s — and for the next author tempted to
- * simplify the predicate down to a status range.
+ * narrowness still matters for what remains in the un-coded 4xx band — every
+ * producer's un-coded 4xx beside the sandbox unwraps' business-rule 400s, which
+ * are quiet only by their own marker read ({@link isSandboxBodyRefusal}) — and
+ * for the next author tempted to simplify the predicate down to a status range.
  *
  * [#4886] Every route catch now decides through this one function. Before, the
  * metadata family logged unconditionally — the designer's `?state=draft` probe
@@ -926,9 +937,10 @@ export function isExpectedRouteError(status: number, body: Record<string, unknow
  *     `resolveThrownHttpError`, the one rule every door reads (`status` or
  *     `statusCode`, or the 400 a validation-shaped throw declares by shape).
  *     A status the DOOR supplied is not a declaration: the sandbox unwrap's
- *     default 400 fails here, so the un-coded business-rule 400s the predicate
- *     above stays narrow for are still logged, and so is a registered code that
- *     arrived with no status (half an envelope).
+ *     default 400 fails here, and so does a registered code that arrived with
+ *     no status (half an envelope). The un-coded business-rule 400 a sandboxed
+ *     body's refusal answers is quiet by its OWN read instead —
+ *     {@link isSandboxBodyRefusal} — not by this one.
  *  3. **The producer's own code is the wire `code`.** That holds exactly when
  *     the spelling is a member of `StandardErrorCode` ∪ the ADR-0112 ledger —
  *     anything else is demoted to `declaredCode` beside a status-derived `code`
@@ -955,6 +967,55 @@ function isDeclaredClientRefusal(
     return thrown.declaredStatus === resolved.status
         && thrown.declaredCode !== undefined
         && resolved.body?.code === thrown.declaredCode;
+}
+
+/**
+ * [#27508] Is this answer a sandboxed body's own REFUSAL — a hook aborting the
+ * write under `onError: 'abort'` (the default) with a business `throw` — that
+ * the route delivered to the caller as the un-coded 4xx it always answers?
+ *
+ * Triage ruled the log half on its own: "an undeclared hook `onError` abort is
+ * a refusal the route answered", so it is not logged as `[REST] Unhandled
+ * error`. The code half (whether such an abort should carry a ledgered
+ * ADR-0112 code) is a separate spec-lane decision, so this changes NOTHING on
+ * the wire: status, body and envelope are exactly what
+ * {@link resolveErrorResponse} already answered.
+ *
+ * The recognition is the marker every door already reads, ⛔ not a message
+ * pattern: {@link sandboxBusinessMessage} answers the unwrapped sentence only
+ * for a sandbox ORIGIN (`innerMessage` set — the runner's own faults leave it
+ * unset) that is not a CRASH (a native-error sentence is declined). The
+ * operator keeps a line for it: the BodyRunner logs every body refusal at
+ * `info` (`sandboxed hook refused`), so the error-level line removed here was
+ * the second line for one ordinary refusal.
+ *
+ * The three conditions, each keeping the exemption off a genuine fault:
+ *
+ *  1. **The answer is in the 4xx band.** A crash is answered
+ *     `UNCLASSIFIED_FAULT`'s 500 and never reaches here; a declared 5xx keeps
+ *     its own `refusal: true` rule.
+ *  2. **A sandboxed body's business sentence** ({@link sandboxBusinessMessage}).
+ *     A plain un-coded 4xx from any other producer — a handler that set
+ *     `status: 400` and nothing else — fails here and stays loud.
+ *  3. **The body declared no code** — `declaredCode` from
+ *     `resolveThrownHttpError`, the same read {@link isDeclaredClientRefusal}
+ *     makes. A body that threw a code is judged by that predicate like every
+ *     other producer, so a code the ledger does not know, or a registered code
+ *     on a status the producer did not declare, is still logged exactly as
+ *     before. ⛔ Read off the THROWN error, not the answer: a code the door
+ *     itself adds to an undeclared abort's answer is the door's, not the
+ *     body's, and does not turn this refusal back into a logged fault.
+ *
+ * The marker carries no body KIND, so a sandboxed action's code-less business
+ * refusal at a data door is quiet too: the same refusal, the same answer.
+ */
+function isSandboxBodyRefusal(
+    error: any,
+    resolved: { status: number; body: Record<string, unknown> },
+): boolean {
+    if (resolved.status < 400 || resolved.status >= 500) return false;
+    return sandboxBusinessMessage(error) !== undefined
+        && resolveThrownHttpError(error, resolved.status).declaredCode === undefined;
 }
 
 /**
@@ -985,11 +1046,16 @@ function isDeclaredClientRefusal(
  * band is already the caller's — `ApiErrorSchema.refusal`'s own table says the
  * field is "redundant on a 4xx". Two declarations, one per band, each read off
  * the thrown error; neither is a list of codes or of statuses.
+ *
+ * [#27508] And a sandboxed body's un-coded business refusal — a hook's
+ * `onError: 'abort'` — is a refusal the route answered:
+ * {@link isSandboxBodyRefusal}. Log only; the wire answer is untouched.
  */
 export function logUnexpectedRouteError(error: any, resolved: { status: number; body: Record<string, unknown> }): void {
     if (!isExpectedRouteError(resolved.status, resolved.body)
         && declaredRefusalMessage(error) === undefined
-        && !isDeclaredClientRefusal(error, resolved)) {
+        && !isDeclaredClientRefusal(error, resolved)
+        && !isSandboxBodyRefusal(error, resolved)) {
         logError('[REST] Unhandled error:', error);
         return;
     }

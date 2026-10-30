@@ -71,9 +71,12 @@ describe('navPayloadOf — what a nav save sends (objectui#11776)', () => {
     expect(navPayloadOf([entry])).toEqual([entry]);
   });
 
-  it('only the separator and the group are taken bare; every other branch names a target', () => {
+  // objectstack#27525 — a bare `report` entry is the app's report index, so
+  // the spec takes it and the save sends it.
+  it('only the separator, the group and the report index are taken bare; every other branch names a target', () => {
     const takenBare = specNavTypes().filter((type) => NavigationItemSchema.safeParse(bare(type)).success);
-    expect(takenBare.sort()).toEqual(['group', 'separator']);
+    expect(takenBare.sort()).toEqual(['group', 'report', 'separator']);
+    expect(navPayloadOf([bare('report')])).toEqual([bare('report')]);
   });
 
   it('a `doc` entry names its target by `doc` OR `book`', () => {
@@ -134,7 +137,7 @@ describe('navPayloadOf — what a nav save sends (objectui#11776)', () => {
     const home = { id: 'nav_home', type: 'page', label: 'Home', pageName: 'home' };
     const sep = { type: 'separator' };
     const accounts = { id: 'nav_accounts', type: 'object', objectName: 'account' };
-    const editor = [home, { id: 'nav_item_2', type: 'object' }, sep, accounts, { id: 'nav_item_5', type: 'report' }];
+    const editor = [home, { id: 'nav_item_2', type: 'object' }, sep, accounts, { id: 'nav_item_5', type: 'dashboard' }];
     const sent = navPayloadOf(editor);
     expect(sent).toEqual([home, sep, accounts]);
     // The entries sent ARE the editor's: nothing kept is copied or rewritten.

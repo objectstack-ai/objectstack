@@ -133,7 +133,7 @@ const authClient = createAuthClient({ baseURL: '/api/v1/auth' });
 const authenticatedFetch = createAuthenticatedFetch();
 
 const dataSource = new ObjectStackAdapter({
-  baseUrl: '/api/v1',
+  baseUrl: '',
   fetch: authenticatedFetch,  // Bearer token injected on every request
 });
 ```

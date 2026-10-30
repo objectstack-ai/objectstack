@@ -298,7 +298,7 @@ they declare scope and strategy, and the runtime does the rest.
 Metadata is the most cache-hot data in the system. Every read path —
 ObjectQL planning, REST routing, UI rendering, permission checks —
 touches it. Making it correct across a cluster needs a well-defined
-invalidation signal per state owner — the three lanes of §6.2 — and, in this
+invalidation signal per state owner — the four lanes of §6.2 — and, in this
 protocol, deliberately **no** per-item version on the wire (§6.1).
 
 ### 6.1 Monotonic version
@@ -326,39 +326,47 @@ cache compare it on receipt.
 ### 6.2 The cluster-invalidation family
 
 Cross-node metadata invalidation is not one channel — it is a **family** of
-three independent PubSub lanes, late-bound by `MetadataClusterBridgePlugin`
+four independent PubSub lanes, late-bound by `MetadataClusterBridgePlugin`
 (`@objectstack/service-cluster`) at `kernel:ready`, one per state owner that
-goes stale when metadata changes on a different node:
+goes stale when a shared record changes on a different node:
 
 | Lane | Channel | Payload type | Package | Converges |
 |---|---|---|---|---|
 | 1 — metadata service cache | `metadata.changed` | `ClusterMetadataChangedPayload` | `@objectstack/metadata` | `MetadataManager`'s registry/list caches |
-| 2 — ObjectQL object registry | `metadata.mutated` (`METADATA_MUTATION_CLUSTER_CHANNEL`, #13331) | `ClusterMetadataMutationPayload` | `@objectstack/metadata-protocol` | ObjectQL's OBJECT registry, from a `sys_metadata` re-read |
+| 2 — ObjectQL object registry | `metadata.mutated` (`METADATA_MUTATION_CLUSTER_CHANNEL`, #13331) | `ClusterMetadataMutationPayload` | `@objectstack/metadata-protocol` | ObjectQL's OBJECT registry, from a `sys_metadata` re-read; then, from the same replay, the automation service's armed flows and its materialized connectors (a `connector` mutation that is not a draft, #28002), each from the replica's own re-read |
 | 3 — ObjectQL driver registry | `datasource.mutated` (`DATASOURCE_MUTATION_CLUSTER_CHANNEL`, #13805) | `ClusterDatasourceMutationPayload` | `@objectstack/service-datasource` | ObjectQL's DRIVER registry, from a shared datasource-record re-read |
+| 4 — declarative connector instances | `connector-credential.mutated` (`CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL`, #27428) | `ClusterConnectorCredentialMutationPayload` (`{ originNode, ref }`) | `@objectstack/service-automation` | the automation service's materialized connectors, from a reconcile that re-reads the shared `sys_connector_credential` rows; published by the credential door (`PUT` / `DELETE /api/v1/automation/connectors/credential-refs/:ref`) after the row is written or cleared |
 
-Lanes 2 and 3 share one contract, stated once here rather than in each
+Lanes 2 to 4 share one contract, stated once here rather than in each
 channel's own doc comment:
 
 - **Address-only signal.** No message body ever rides these channels — the
-  payload names only what changed (a metadata address, or a datasource
-  name), never the changed value.
+  payload names only what changed (a metadata address, a datasource name,
+  or a connector credential reference), never the changed value.
 - **Receipt runs convergence, not trust.** A peer that receives a signal does
   not apply the payload as content; it re-reads its OWN copy of the source of
-  truth (`sys_metadata` for lane 2, the shared datasource record for lane 3)
-  and converges its local registry from that read. A duplicate or re-ordered
+  truth (`sys_metadata` for lane 2, the shared datasource record for lane 3,
+  the shared credential rows for lane 4) and converges its local registry
+  from that read. A duplicate or re-ordered
   delivery converges to the same state as a single one.
 - **`originNode` loopback suppression.** Every payload carries the publishing
-  node's id; a peer that receives its own `originNode` drops the message —
-  the write-through or pool rebuild already ran, synchronously, at the door
-  that persisted the change.
+  node's id; a peer that receives its own `originNode` drops the message,
+  because the writer has already handled the change locally. The
+  write-through and the pool rebuild ran synchronously at the door that
+  persisted the change. A connector reconcile is queued on the writer's
+  reconcile queue instead. On lane 2 the local half of the same signal queues
+  it: the protocol notifies its own mutation listeners before it publishes,
+  and the save does not wait for the reconcile. On lane 4 the credential door
+  queues one job that writes the row, publishes, then runs the reconcile, and
+  the door answers only after that reconcile finishes.
 - **At-most-once, bounded by boot rehydration.** No shipped `IPubSub` driver
   exceeds at-most-once delivery (§4.2), so a lost message is not retried.
   Each lane narrows the staleness window this always had — "until the next
   full reload on restart" — to "one network hop"; it does not promise more.
 
-All three lanes skip their fan-out on the same condition — the in-process
+All four lanes skip their fan-out on the same condition — the in-process
 `memory` cluster driver, described for lane 1 immediately below, applies
-identically to lanes 2 and 3 (#14021).
+identically to lanes 2 to 4 (#14021).
 
 #### Lane 1 — `metadata.changed` (the metadata service cache)
 
@@ -442,6 +450,30 @@ read (`applyRemoteMetadataMutation`) rather than applying the payload as
 content. Attached by `MetadataClusterBridgePlugin`'s protocol lane at
 `kernel:ready`, duck-typed against `protocol.attachMetadataMutationPubSub()`
 so this package takes no dependency on `@objectstack/metadata-protocol`.
+
+**The same replay converges the automation service's flows and connectors.**
+After the write-through, the peer replays the event into its own
+`onMetadataMutation` listeners — locally, never re-published — and
+`AutomationServicePlugin`'s listener acts on two types. A `flow` mutation
+re-arms or disarms that flow from its stored row (#21725). A `connector`
+mutation that is not a draft (saved active, published or deleted) queues the
+soft connector reconcile that `metadata:reloaded` runs, on the reconcile queue
+that also serializes the credential door's writes (#28002). That reconcile re-reads the
+connector declaration from the replica's own protocol view
+(`getMetaItemsForExecution`, the registry with the `sys_metadata` overlay rows
+over it) and materializes, replaces or tears down instances from that read.
+One signal, no second channel: lane 2 carries connector-definition
+convergence on the replay it already delivers, and lane 4 remains the
+credential channel. A draft save reconciles nothing on any replica — the
+publisher does not publish drafts, and the listener drops them.
+
+The listener runs on the writing replica too, on the local half of the same
+signal. A direct active save (`PUT /api/v1/meta/connector/:name`) raises no
+`metadata:reloaded` anywhere, so this listener is what re-materializes the
+writer. A publish raises both signals; the second reconcile finds every
+signature unchanged and rebuilds nothing. A reconcile queued and not yet
+started answers every connector mutation reported before it starts, and a
+failed one is logged at `warn` and left to the next reload or restart.
 
 #### Lane 3 — `datasource.mutated` (the ObjectQL driver registry)
 

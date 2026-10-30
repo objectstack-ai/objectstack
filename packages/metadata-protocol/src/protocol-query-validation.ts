@@ -43,10 +43,10 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, collectFilterReads, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, suggestFieldName } from './protocol.js';
+import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, collectFilterReads, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, quotedQueryValue, suggestFieldName } from './protocol.js';
 import { objectNotFoundError, relationConditionSites } from '@objectstack/core';
 import { collectInternalWriteResponseFields } from './write-response-internal-fields.js';
-import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
+import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isCredentialFieldType, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
 
 /**
  * [#20802] The nested-relation spelling of a dotted relation path, as the
@@ -874,10 +874,26 @@ export function assertSearchFieldsAreSearchable(
         err.param = param;
         throw err;
     }
-    // An empty override is ABSENT — the engine falls through to the
-    // allowed set for it, which for a caller who named nothing is the
-    // answer they asked for, not a widened one.
-    if (names.length === 0) return;
+    // [#27484] …and an override naming NO field is refused, not read as
+    // absent. A blank or comma-only string, an empty array, or an empty
+    // object-form `search.fields` used to return here, and the engine then
+    // scanned the object's whole default set: a caller who wrote the
+    // parameter meant to narrow, so its silent widening to the defaults is
+    // the failure this gate exists for. Absent stays absent (the caller
+    // passes no override, and the door never calls this gate). The
+    // projection's envelope (`projectionFieldsValue`, #26644), so `$select`
+    // and `$searchFields` answer a value naming no field alike.
+    if (names.length === 0) {
+        const err: any = new Error(
+            `Query parameter '${param}' names no field; got ${quotedQueryValue(requested)}. The query was not `
+            + "run: an empty search-field list was read as no narrowing, which scans the object's default "
+            + 'search fields. Name at least one field, or leave the parameter out to search the default fields.',
+        );
+        err.status = 400;
+        err.code = 'VALIDATION_ERROR';
+        err.param = param;
+        throw err;
+    }
     const gate = this.resolveQueryFields(object);
     if (!gate) return;
     // [#22646] A field declared `internal: true` is never a search target,
@@ -943,10 +959,22 @@ export function assertSearchFieldsAreSearchable(
     // types have a column.
     const virtual = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && isVirtualSearchField(gate.fields[n]));
     const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && !isVirtualSearchField(gate.fields[n]));
+    // [#27829] A CREDENTIAL field (`secret` / `password`) the allowed set kept —
+    // only a declared `searchableFields` keeps one; the auto default never does,
+    // and refuses it below by its type — is refused here too. The engine
+    // withholds every credential column from the scan (ADR-0100, the
+    // fail-closed floor), so admitting the name let the engine's tolerant
+    // intersection search the REST of the declared set: a narrower search
+    // answered with a wider one, the #4254 posture this gate exists for.
+    // Judged by the predicate the engine's withhold reads
+    // (`isCredentialFieldType`, `@objectstack/spec/data`), so the door and the
+    // engine cannot disagree about which fields are credentials.
+    const credential = names.filter((n) => allowedSet.has(n) && isCredentialFieldType(gate.fields[n]?.type));
     const [offenders, reason] =
         unknown.length > 0 ? [unknown, 'unknown' as const]
         : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
         : virtual.length > 0 ? [virtual, 'virtual' as const]
+        : credential.length > 0 ? [credential, 'credential' as const]
         : [unsearchable, 'unsearchable' as const];
     if (offenders.length === 0) return;
     const first = offenders[0];
@@ -969,6 +997,18 @@ export function assertSearchFieldsAreSearchable(
                   + 'look like coverage; remove it there as well.'
                 : '')
             + ` Mirror the computed value onto a stored text field on '${object}' and search that instead.`;
+    } else if (reason === 'credential') {
+        detail = `Field '${first}' on object '${object}' is type '${gate.fields[first]?.type}', a credential, `
+            + 'and cannot be searched'
+            + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+            + `. 'search' never scans a credential column, so '${param}' naming it cannot narrow `
+            + 'anything — the engine used to drop it and scan the rest of the declared columns instead, '
+            + 'answering a NARROWER search with a WIDER one.'
+            + (declaredSet.has(first)
+                ? " The object's 'searchableFields' declares it, which is what made the entry look searchable; "
+                  + 'remove it there as well.'
+                : '')
+            + ' Search another column instead.';
     } else if (reason === 'unknown') {
         // A dotted path is a special unknown: plausible vocabulary from the
         // select/sort axes, but search scans this object's own columns.

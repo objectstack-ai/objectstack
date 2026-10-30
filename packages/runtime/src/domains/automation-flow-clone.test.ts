@@ -442,27 +442,26 @@ describe('#12156 — the source, the notice, and the gate', () => {
         expect(spies.registerFlow).not.toHaveBeenCalled();
     });
 
-    it('states plainly that references are NOT re-pointed, and that the clone is armed', async () => {
+    it('states in one line that the clone runs alongside the original, and that references are NOT re-pointed', async () => {
         const source = packagedExemplar();
         const { dispatcher } = makeDispatcher([source]);
 
         const result = await dispatcher.handleAutomation(clonePath(source.name as string), 'POST', NEW, CTX);
         const notice: string = ((result.response?.body?.data ?? result.response?.body) as any)?.notice ?? '';
 
-        // ADR-0126 §9: automatic re-pointing is explicitly not chartered, and
-        // the ADR requires the surface to TELL the admin so.
-        expect(notice).toMatch(/not re-pointed/i);
-        // And the fact an admin is most likely to be caught by: `draft` is a
+        // The fact an admin is most likely to be caught by: `draft` is a
         // lifecycle label, not an off-switch — the engine only disables on
         // `obsolete`/`invalid`, so a cloned record-change flow runs beside the
         // one it was copied from. Saying so is cheaper than the surprise.
-        expect(notice).toMatch(/off-switch/i);
-        // [#20726] And it names the switches an admin has. A clone carries no
-        // package envelope, so the packaged-flow switch does not reach it; the
-        // clone is switched off in Studio, the original from its own row.
-        expect(notice).toContain('Switch "…" off');
-        expect(notice).toContain('does not reach the clone');
-        expect(notice).toContain('open it in Studio, set its Enabled switch to Disabled, and publish');
+        expect(notice).toContain('runs alongside the original until you switch one of them off');
+        // ADR-0126 §9: automatic re-pointing is explicitly not chartered, and
+        // the ADR requires the surface to TELL the admin so.
+        expect(notice).toContain('still uses the same subflows, actions and objects as the original');
+        // [#27886] One line in business words. The console shows it beside a
+        // "Switch the original off" button, so the engine words and the switch
+        // locations stay in `flow-clone.ts`'s TSDoc.
+        expect(notice.match(/[.!?](\s|$)/g)).toHaveLength(1);
+        expect(notice).not.toMatch(/\b(draft|status|off-switch|lifecycle|Studio)\b/i);
     });
 
     it('is admin copy: it names controls, never an endpoint or a request body', async () => {

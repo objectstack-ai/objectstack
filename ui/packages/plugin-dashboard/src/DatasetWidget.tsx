@@ -472,11 +472,14 @@ const MEASURE_AXIS_CHART_FAMILIES: ReadonlySet<string> = new Set(DASHBOARD_WIDGE
 /**
  * The chart families that draw ONE series, whatever the widget declares
  * (objectui#11417). The shared chart renderer (`AdvancedChartImpl` in
- * `@object-ui/plugin-charts`) binds `series[0]` on its `pie` / `donut`,
- * `funnel`, `treemap` and `sankey` arms and reads no other series there, so a
- * chart of one of these families WITH a dimension draws its first measure and
- * drops every other one, although this widget hands each measure on as a
- * series. (Without a dimension these families take the tile, `isMetric`.)
+ * `@object-ui/plugin-charts`) draws one measure on its `pie` / `donut`,
+ * `funnel`, `treemap` and `sankey` arms, and reads the series past the first
+ * as the groups of a pivoted second dimension (objectstack#27460,
+ * objectstack#27563): the sankey and the treemap draw every group, the pie,
+ * donut and funnel refuse on the tile. So a chart of one of these families
+ * WITH a dimension is handed only the measure it renders (see `chartSeries`),
+ * and draws its first measure while every other one is dropped. (Without a
+ * dimension these families take the tile, `isMetric`.)
  *
  * Read off the family a widget renders AS (`CHART_TYPE_MAP`), so a `pyramid`
  * widget, which renders as a `funnel`, is in it too.
@@ -626,16 +629,19 @@ export { chartConfigPresentation } from '@object-ui/core';
  * bag: the metric sub-caption is retired at both ends (objectui#11389, ruling
  * C, after objectstack's half in `@objectstack/spec` 17.7.0). A widget keeps
  * one authored description, `widget.description`, which the dashboard surface
- * draws as the card-header subtitle. If a caption under a metric's value
- * returns, it returns as a declared widget-level key outside the options bag,
- * never as a key inside it. The options census in `@objectstack/sdui-parser`
+ * draws as the card-header subtitle, or, for a metric tile, hands in through
+ * `heading` to draw as the caption under the value. That is the declared
+ * widget-level key outside the options bag; a caption is never read from a key
+ * inside it. The options census in `@objectstack/sdui-parser`
  * reads this file's text, comments included, which is why this note does not
  * spell the bag's member access.
  */
 /**
  * [objectui#12528] The heading a dashboard surface hands a dataset-bound
  * metric tile instead of drawing its own card header: the widget's resolved
- * title, and its resolved description, which becomes the title's tooltip.
+ * title, and its resolved description, which the tile draws as the caption
+ * under the value in place of the measure label (objectstack#27430) and
+ * carries in the title's tooltip.
  */
 export interface DatasetMetricHeading {
   title: string;
@@ -644,8 +650,10 @@ export interface DatasetMetricHeading {
 
 /**
  * The heading line of a metric tile: the title alone (objectui#12623). It owns
- * the line, up to two lines; the measure label is drawn under the value, and
- * rides in this tooltip so a tile too narrow to draw it still carries it.
+ * the line, up to two lines; the caption is drawn under the value, and the
+ * description and the measure label ride in this tooltip, so a tile too narrow
+ * to draw the caption, or one whose caption is the description, still carries
+ * the measure label.
  */
 function MetricHeadingRow({ heading, label }: { heading: DatasetMetricHeading; label?: string }) {
   return (
@@ -713,8 +721,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   const chartType = CHART_TYPE_MAP[widgetType] ?? 'bar';
   // A chart of a single-series family draws its first measure only, with a
   // dimension too (`SINGLE_SERIES_CHART_FAMILIES`, objectui#11417). The chart
-  // branch still hands every measure on as a series: what is drawn does not
-  // change here, only what this widget says it renders.
+  // branch hands such a chart that first measure alone (`chartSeries`), because
+  // the renderer reads a second series there as a group of a pivoted second
+  // dimension (objectstack#27563).
   const drawsFirstMeasureOnly = !isMetric && !isTable && SINGLE_SERIES_CHART_FAMILIES.has(chartType);
   // ── What this widget RENDERS of what it declares (objectui#8894) ─────────
   // Settled here, by the branch decision just above, and read by both the tile
@@ -727,7 +736,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   //
   // "Renders" is what reaches the screen. For a chart that is decided in the
   // shared chart renderer, which this widget hands every measure to as a
-  // series; the one family of arms there that draws a single series is
+  // series but on the single-series families; that one family of arms is
   // stated here as `SINGLE_SERIES_CHART_FAMILIES`, with the pin that ties the
   // two named in its docblock.
   const renderedMeasures = isMetric || drawsFirstMeasureOnly ? values.slice(0, 1) : values;
@@ -1375,8 +1384,11 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     // (objectui#7293), fed by the server's `subCaption` overlay and a client
     // bundle limb; both ends are retired, and the spec never declared the key.
     // An authored one now draws the parser's `unconsumed-widget-option` warning
-    // instead of a caption node. The card-header subtitle, `widget.description`,
-    // is the surface's to draw, not this tile's.
+    // instead of a caption node. The widget-level `widget.description` is the
+    // surface's to resolve: handed in through `heading`, it is the caption
+    // under the value, in place of the measure label, which then rides only in
+    // the title's tooltip (objectstack#27430).
+    const caption = heading?.description || measureLabel;
     return (
       // Positioned only while a re-read is in flight, for the refresh bar: the
       // idle tile's markup is pinned byte-for-byte (`DatasetWidget.colorVariant`,
@@ -1384,13 +1396,14 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
       <div className={cn('flex h-full w-full flex-col items-start justify-center gap-1 p-2', heading && cn('min-w-0', METRIC_TILE_CONTAINER_CLASS), state.refreshing && 'relative')}>
         {refreshBar}
         {/* objectui#12623 — with a heading, the title owns the first line, the
-            value never wraps, and the measure label is a line under it (the
-            shared rule in `./metricTile`). Without one, the tile's markup is
-            unchanged: the label is then the only text naming the value. */}
+            value never wraps, and the caption (the description, else the
+            measure label) is a line under it (the shared rule in
+            `./metricTile`). Without one, the tile's markup is unchanged: the
+            label is then the only text naming the value. */}
         {heading && <MetricHeadingRow heading={heading} label={measureLabel} />}
         <span className={cn(heading ? cn('font-semibold', METRIC_TILE_VALUE_CLASS) : 'text-2xl font-semibold tabular-nums', accentClass)}>{formatMeasure(value, f?.format, f?.currency, f?.percentScale, displayLocale)}</span>
-        {heading && measureLabel && (
-          <span className={METRIC_TILE_MEASURE_LABEL_CLASS} data-testid="dataset-metric-label">{measureLabel}</span>
+        {heading && caption && (
+          <span className={METRIC_TILE_MEASURE_LABEL_CLASS} data-testid="dataset-metric-label">{caption}</span>
         )}
         {delta && (
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="dataset-compare-trend">
@@ -2091,9 +2104,20 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
           ...(aggregate !== undefined ? { aggregate } : {}),
         };
       });
-  const chartSeries = comparisonSeries.length > 0
+  const comparedChartSeries = comparisonSeries.length > 0
     ? [...series.map((s) => ({ ...s, variant: 'current' as const })), ...comparisonSeries]
     : series;
+  // objectstack#27460, objectstack#27563 — a single-series family reads every
+  // series past its first as a group of a pivoted second dimension: a sankey
+  // draws one flow per cell, a treemap one leaf per cell, and a pie, donut or
+  // funnel refuses on the tile. A widget of these families that declares
+  // several measures (refused by the spec's single-series arm, so only a stored
+  // document reaches here) is handed the one measure it renders, so its other
+  // measures are not read as groups and the dropped-measure warning above
+  // stays true. A pivot carries one measure, so nothing is dropped from it.
+  const chartSeries = SINGLE_SERIES_CHART_FAMILIES.has(chartType)
+    ? comparedChartSeries.filter((s) => !droppedMeasures.includes(s.dataKey))
+    : comparedChartSeries;
 
   // Ordered-sequence charts (funnel/pyramid) need a DEFINED stage order.
   // `options.stageOrder` wins when the author states one explicitly; otherwise

@@ -23,6 +23,8 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_email_template.fields.variables_json.label": "c2cfff50e8151e3d",
+  "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",
+  "objects.sys_exchange_rate.fields.source.options.manual": "c2e7a98c066bec4a",
   "objects.sys_job_run.fields.error.label": "786fed84bd8d5a32",
   "objects.sys_metadata.fields.bundle_member.help": "6912852b7523f266",
   "objects.sys_metadata.fields.bundle_member.label": "49b49e6b77397e92",

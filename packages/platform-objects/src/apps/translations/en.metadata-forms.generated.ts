@@ -1877,7 +1877,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action route refuses anyone else with 403 (script, flow and modal actions, and the MCP/AI path), and the button is hidden from them. A type api action calls its endpoint directly, so that endpoint must re-check them."
+        helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action door refuses anyone else with 403 on every call it dispatches, the MCP/AI path included, and the button is hidden from them. A type api action's endpoint stays directly reachable, so it must still check these capabilities itself; for an api action with an off-origin target the platform checks nothing server-side."
       },
       ai: {
         label: "Ai",

@@ -107,7 +107,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:dispatched` | 已派发(派发评论记轮次),恒带 assignee;与摘 `pm:queue` 同一次标签写入成对落地 |
 | `needs-user-decision` | 决定待做:永不派发、永不代答;维护者的收件箱,只由人工裁 |
 | `pm:on-hold` | 决定已做且答案是暂不做:不派发不催;仅当带机器可读 `Restart-when:` 行才合法 |
-| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关闭时由解锁扫描或 `scheduled-full-run-card.yml` 刷新放回;工已完、PR 被外部门禁卡住的同用本态;正文或线程行首 `Blocked-by:` 指向无 `Ruled:` 的 open `needs-user-decision` 卡 ⇒ ⛔ 不派发,挂本态直至其 `Ruled:` |
+| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关单(PR 则合并,关而未合并不放)时由解锁扫描或 `scheduled-full-run-card.yml` 放回;工已完而被门禁卡住的同用本态;双通道行首 `Blocked-by:` 指向无 `Ruled:` 的 open `needs-user-decision` 卡 ⇒ ⛔ 不派发,直至其 `Ruled:` |
 | `pm:awaiting-maintainer` | 决定已做,只剩一次 GitHub 之外的人工动作:不派发不催;与其它 pm 状态标签互斥;入态恒带行首 `Maintainer-action:` 行(细则见 `references/state-machine.md`),无行即半态 |
 | `pm:blocking` | 有 open 下游依赖者(自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择全序 |
 | `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉;既裁冲突砍项与整树席改标归执行席 ⛔ 不问),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
@@ -197,7 +197,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
 - ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案后,中继 `pr_request_reviewers` 请审批人。
 - 作者是审批人 ⇒ `assign` 它、请其余(请它必 422);⛔ 永不派/请席位自身账号;Tier S 不交人。
-- `pr_create` 不请不派;`pr_ready` 只补交棒漏;PASS 后 head 移 ⇒ 回等复核;脱中继 PR 自读请/派。
+- `pr_create` 不请不派;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「需要你做的」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮次报告单列 awaiting a human merge。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。

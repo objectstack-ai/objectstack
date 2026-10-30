@@ -30,7 +30,7 @@
 - 新 head 即清;点名现 head 时 (b) 不起;条件满足由持有车道挂等复核标记或落交接行。
 - 逾 24 小时条件未满的 hold 列入分诊轮次记录(`check-owed-reviews.mjs` 标出)。
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
-- 同形 = `## Contract review` 题头、head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
+- 同形 = `## Contract review` 题头、`Head-sha:` 行独占码段、①②③ 逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;
   无此行不成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`,申报面加 `--face declaration`。
 - 同形带 `Local-runs:` 行:`none` 或 `probe — REASON` 具名唯一探针;有行必校,缺行旧记录不改判。
@@ -46,7 +46,8 @@
 - ④ 恒由起草者之外的 agent 达档跑,起草已达档不免;喂入同上,⛔ 不喂起草者的结论。
 - 轮次报告设复审清单专节,与呈裁清单同为强制审计。
 - 请审/求批与落地前检两条,过则 Tier S 入队、Tier H 等人批:① 现 head 同形达档 PASS 在案。
-- 例外:纯重生成或只动上列散文面的 head 后移原记录继续管;PR 落 `Regen-provenance:` 行。
+- head 后移例外:纯重生成或只动散文面原记录续管,落 `Regen-provenance:` 行;余移或现 head 落 FAIL
+  而已挂 auto-merge ⇒ 派发席读到即照 AGENTS.md disarm 句撤挂,FAIL 记录点名欠撤挂;重挂照 ①。
 - ② PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
 - 落地时仍欠复核的 PR 在落地 head 复审,车道席或分诊按 (a)(b)(c) 接;FAIL ⛔ 不修已关 PR。
@@ -54,7 +55,6 @@
 
 ## 等复核标记 `needs:contract-review`
 
-- 只作等复核标记,⛔ 不是闸门;单载体 = PR,卡上副本在规则外、不是要求。
+- 只作等复核标记,⛔ 不是闸门:无 check、workflow 或队列守卫读它与认领/hold 行;单载体 = PR。
 - 挂:ACCEPT 时条款②任一肢命中而现 head 无同形 PASS 在案 ⇒ 派发席同笔挂于 PR。
 - 摘:现 head 同形 PASS 在案 ⇒ 写记录的席同笔摘;PR 合并或关闭 ⇒ 派发席摘;FAIL 不摘。
-- ⛔ 无 check、workflow 或队列守卫读标记与认领/hold 行;入队只认同形记录,标记有无不改判。

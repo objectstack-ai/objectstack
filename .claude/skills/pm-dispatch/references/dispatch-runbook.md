@@ -63,7 +63,7 @@
 
 - 小时层三读法之一,sweep 析取①–⑤ = `list_issues` + `since`。
 - 标签变更会刷新 `updated_at`,半标注照样入窗。
-- 之二,解锁扫描反演 = 逐仓 `state=CLOSED` + `since` 与 `Blocked-by:` 反向索引求交,命中走双查。
+- 之二,解锁扫描 = 逐张 `pm:blocked` 正向读正文目标:issue 全已关、PR 全已合并才命中走双查。
 - 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
 - 裸卡数例外:标签缺席无计数可读,取本轮析取①的枚举,⛔ 不另发查询。
 - 每日层(当日首 fire)= 全量对账 + 归集本就日频的职责。
@@ -82,7 +82,7 @@
 - 裁决执行中新生的问题另立卡并回链已裁卡,⛔ 不给已裁卡重挂 `needs-user-decision`。
 - 机械两旗 report-only,归半状态巡查;接线是另一张卡的事,⛔ 不随协议文本改脚本。
 - 旗一:open 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`。
-- 旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关闭。
+- 旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关单(PR 则已合并;关而未合并不算)。
 - 交付了一半的阻塞是判断不是 grep,归四件之③,⛔ 不进机械旗。
 - 发布窗口判据:已上膛 = 开着的 head `changeset-release/main` PR,`is:pr is:open head:changeset-release`。
 - 点亮对照 `git ls-remote origin changeset-release/main` 必中;⛔ title 永不是判据。

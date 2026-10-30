@@ -28,11 +28,14 @@
  *
  * **Dialect routing.** A predicate authored as the `{ dialect: 'cel', source }`
  * envelope is authoritative CEL and is *always* sent to the CEL engine. A bare
- * string is CEL per the spec contract, *unless* it carries legacy-only syntax
- * (`${…}` templating, `===`/`!==`, `?.` JS optional-chaining, JS string/array
- * methods) — those are routed to the legacy engine for back-compat and emit a
- * one-time deprecation warning, because such a string means something different
- * (or nothing) to the server's CEL engine.
+ * string is CEL per the spec contract and is sent there too — including one
+ * that carries legacy-only syntax (`===`/`!==`, `?.` JS optional-chaining, JS
+ * string/array methods), which faults on CEL exactly as it does on the server
+ * (objectstack#27457: a bare string has no legacy reading). Only a `${…}`
+ * template still reads on the legacy engine. Every string carrying legacy-only
+ * syntax also emits a one-time deprecation warning that prescribes the CEL
+ * spelling, because such a string means something different (or nothing) to
+ * the server's CEL engine.
  */
 import { evalFieldPredicate, type FieldRulePredicate } from './fieldRules.js';
 import { ExpressionEvaluator } from './ExpressionEvaluator.js';
@@ -306,10 +309,13 @@ export function evalRowPredicate(
       ? (pred as { source: string }).source
       : '(expression)');
 
-  // Legacy-dialect *strings* route to the legacy engine (back-compat). The
+  // Legacy-dialect *strings* are warned about; only a `${…}` TEMPLATE routes to
+  // the legacy engine (back-compat). Any other bare string is CEL shorthand
+  // (objectstack#27457) and continues to the CEL path below, where legacy-only
+  // syntax faults into the fallback with the engine's own report. The
   // `{ dialect: 'cel', source }` envelope is never routed here — it is CEL.
-  if (source !== undefined && isLegacyDialectSource(source)) {
-    warnLegacyDialect(source);
+  if (source !== undefined && isLegacyDialectSource(source)) warnLegacyDialect(source);
+  if (source !== undefined && source.includes('${')) {
     try {
       const evaluator = new ExpressionEvaluator(scope);
       return evaluator.evaluateCondition(source, { throwOnError: true });

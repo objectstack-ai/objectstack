@@ -25,9 +25,19 @@
  * (`useInvitationPreview`, `GET {authUrl}/organization/invitation-preview`):
  * "Lin invited you to join Acme". The invited address comes back MASKED
  * (`z***@example.com`), so the description shows it as the address to use and
- * nothing prefills it: a masked value is not an address. An id the server does
- * not know (404), a failed read, or a server without the route keeps the
- * generic copy (`invitationArrivalCopy`) — the preview only ever adds names.
+ * nothing prefills it: a masked value is not an address. A failed read, or a
+ * server without the route, keeps the generic copy (`invitationArrivalCopy`).
+ *
+ * The server's one not-found answer is different (#27509): ADR-0138 D2 has the
+ * door answer the same 404 for an unknown, expired, accepted, rejected or
+ * cancelled id, so the page cannot say which of those it is, but it does know
+ * the link no longer leads anywhere. All four pages then draw
+ * `InvitationGoneNotice` in place of the invitation card, the sign-up prompt
+ * and the form (`useInvitationArrival`'s `gone`); its copy never names one of
+ * the five cases. A sign-up the server refuses with `SELF_REGISTRATION_CLOSED`
+ * re-reads the preview (`recheck`): a 404 turns the page into the same
+ * notice, and an answer keeps the form with the refusal naming the masked
+ * address the invitation was sent to (`signUpRefusalMessages`).
  *
  * The sign-up prompt is rendered only when the page's sign-up offer is `form`,
  * so a server with sign-up switched off is never offered a registration it
@@ -36,7 +46,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth, type AuthInvitationPreview } from '@object-ui/auth';
+import { AuthFormHeader, AUTH_LINK_CLASS, useAuth, type AuthInvitationPreview } from '@object-ui/auth';
 import { useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 
 /** A full-width outlined link with the auth primary button's box. */
@@ -89,19 +99,41 @@ export function invitationIdOf(redirect: string | null | undefined): string | nu
   }
 }
 
+/** What the signed-out invitation preview has said about the page's invitation. */
+export interface InvitationArrival {
+  /**
+   * The preview, or `null`: until the read answers, for a redirect that is not
+   * an invitation, after a failed read, and when the invitation is `gone`.
+   */
+  preview: AuthInvitationPreview | null;
+  /**
+   * `true` once the server gave its one not-found answer for the CURRENT id
+   * (#27509): the link no longer leads to an invitation. Never `true` for a
+   * failed read or a server without the route.
+   */
+  gone: boolean;
+  /**
+   * Read the preview again — after a sign-up the server refused, so the page
+   * learns whether the invitation went away meanwhile. A failed re-read keeps
+   * what the page already knew.
+   */
+  recheck: () => void;
+}
+
 /**
- * The signed-out invitation preview for the page's `?redirect=`, or `null`.
+ * The signed-out invitation preview for the page's `?redirect=`.
  *
- * `null` until the read answers, for a redirect that is not an invitation, for
- * the server's not-found answer, and after a failed read: each of those keeps
- * the page's generic invitation copy, and none of them throws into the page.
  * Only an answer for the CURRENT id is returned, so a page whose redirect
- * changes never shows the previous invitation's names.
+ * changes never shows the previous invitation's names or calls it gone. A
+ * failed read is not news for the page and never throws into it: the generic
+ * copy stays, and the sign-in or sign-up request reports the server for
+ * itself.
  */
-export function useInvitationPreview(redirect: string | null | undefined): AuthInvitationPreview | null {
+export function useInvitationArrival(redirect: string | null | undefined): InvitationArrival {
   const { getInvitationPreview } = useAuth();
   const invitationId = invitationIdOf(redirect);
-  const [answer, setAnswer] = useState<{ id: string; preview: AuthInvitationPreview } | null>(null);
+  const [answer, setAnswer] = useState<{ id: string; preview: AuthInvitationPreview | null } | null>(null);
+  const [readCount, setReadCount] = useState(0);
   useEffect(() => {
     if (!invitationId) return;
     let cancelled = false;
@@ -109,19 +141,59 @@ export function useInvitationPreview(redirect: string | null | undefined): AuthI
     Promise.resolve()
       .then(() => getInvitationPreview(invitationId))
       .then(
+        // `null` is the door's not-found answer: the invitation is gone.
         (preview) => {
-          if (!cancelled && preview) setAnswer({ id: invitationId, preview });
+          if (!cancelled) setAnswer({ id: invitationId, preview });
         },
-        () => {
-          // A failed read is not news for this page: the generic copy stays,
-          // and the sign-in or sign-up request reports the server for itself.
-        },
+        () => {},
       );
     return () => {
       cancelled = true;
     };
-  }, [invitationId, getInvitationPreview]);
-  return answer && answer.id === invitationId ? answer.preview : null;
+  }, [invitationId, getInvitationPreview, readCount]);
+  const recheck = () => setReadCount((n) => n + 1);
+  const current = answer && answer.id === invitationId ? answer : null;
+  return { preview: current?.preview ?? null, gone: current !== null && current.preview === null, recheck };
+}
+
+/**
+ * The signed-out invitation preview for the page's `?redirect=`, or `null` —
+ * {@link useInvitationArrival}'s `preview`, for a caller that only greets.
+ */
+export function useInvitationPreview(redirect: string | null | undefined): AuthInvitationPreview | null {
+  return useInvitationArrival(redirect).preview;
+}
+
+/**
+ * What every login and register page draws for an invitation the server no
+ * longer knows (#27509), in place of the invitation card, the sign-up prompt
+ * and the form: the link is no longer valid, ask for a new one, and a way on
+ * to the plain sign-in. The copy never says which of the door's five
+ * not-found cases it is, because the server does not say (ADR-0138 D2).
+ */
+export function InvitationGoneNotice() {
+  const { t } = useObjectTranslation();
+  return (
+    <div
+      data-testid="invitation-gone"
+      className="mx-auto flex w-full flex-col justify-center space-y-7 sm:max-w-[400px]"
+    >
+      <AuthFormHeader
+        title={t('auth.login.invitationGoneTitle', {
+          defaultValue: 'This invitation link is no longer valid',
+        })}
+        description={t('auth.login.invitationGoneDescription', {
+          defaultValue:
+            'It may have expired, been used, or been withdrawn. Ask the person who invited you to send a new invitation.',
+        })}
+      />
+      <p className="text-center text-sm text-muted-foreground">
+        <Link to="/login" className={AUTH_LINK_CLASS}>
+          {t('auth.login.invitationGoneSignIn', { defaultValue: 'Go to sign in' })}
+        </Link>
+      </p>
+    </div>
+  );
 }
 
 /**

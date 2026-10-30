@@ -43,9 +43,11 @@ import * as React from 'react';
 //    load installs its own; so a period that began on another item is never
 //    sent, by the timer or by `flush`, and it ends only when the caller's dirty
 //    flag falls.
-//    The previous item's pending edit is dropped: what the Data pillar's switch
-//    has always done, and what every pillar did whenever the new load landed
-//    inside the debounce. A claim also reads moved once the target has
+//    The previous item's pending edit is dropped by the hook: what every
+//    pillar did whenever the new load landed inside the debounce. A caller
+//    that must not lose it sends it with `flush` BEFORE it switches, and
+//    switches once its save has landed: the Data pillar's object rail does
+//    (objectstack#27511). A claim also reads moved once the target has
 //    changed, so a save that lands after a switch never clears the dirty flag
 //    of the item opened since.
 //  - objectui#11272 — the buffer belongs to the item it was loaded for. The

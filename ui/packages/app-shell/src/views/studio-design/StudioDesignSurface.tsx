@@ -77,7 +77,7 @@ import {
   useStudioItemDraftStatus,
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
-import { overlayPath, packagedAutomationPath } from './BuilderLanding.js';
+import { packagedAutomationPath } from './BuilderLanding.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
@@ -199,6 +199,7 @@ import {
   listViewColumnFields,
   listViewColumnIndexOf,
   listViewColumnSelection,
+  listViewHeldEdit,
   listViewIsKanban,
   listViewTargetOf,
   ObjectListViewInspector,
@@ -219,6 +220,7 @@ import {
   type PageSourceKind,
   type ReportBinding,
 } from './interfaceCreate.js';
+import { StudioDatasetAuthoringContext, type StudioDatasetAuthoring } from './datasetCreate.js';
 import { PermissionMatrixEditPage, type PermissionStudioTab } from '../metadata-admin/PermissionMatrixEditor.js';
 import { AccessExplainPanel } from '../metadata-admin/AccessExplainPanel.js';
 import {
@@ -232,9 +234,11 @@ import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetada
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 // objectstack#26858 — the served verdict a flow's inspectors read at their own paths.
 import {
+  DraftVerdictBodyContext,
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
+  verdictPreviewEntries,
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import {
@@ -260,6 +264,7 @@ import {
   objectSaveRefusal,
   plainRefusal,
   publishRefusal,
+  reportHeldEdit,
   type PublishFailure,
   type StudioHeld,
   type StudioRefusal,
@@ -281,7 +286,7 @@ import { useSurfaceDeepLink, resolveSurfaceDeepLink, type SurfaceTarget } from '
 import { SurfaceDeepLinkProvider, useRequestedSurface, useSurfaceNavigator } from './surfaceDeepLinkChannel.js';
 import { buildObjectSkeleton, buildFlowSkeleton, buildAppSkeleton, buildPermissionSkeleton, type AppNavSeed } from './skeletons.js';
 import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
-import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { t, tFormat, translateMetadataType, translateValidationMessage, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { fieldsForNodeType, localizeFlowFields, type FlowConfigField } from '../metadata-admin/inspectors/flow-node-config.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
@@ -555,16 +560,16 @@ function CreateTakenNotice({
  *
  * Exported for its pins; `index.ts` does not re-export it.
  */
-export function StudioHeldNotice({
+export function StudioHeldNotice<Target extends MetadataSelection | null = MetadataSelection>({
   held,
   locale,
   onShow,
   className,
 }: {
-  held: StudioHeld;
+  held: StudioHeld<Target>;
   locale: string;
   /** Opens the held input; omitted while that input is the one open. */
-  onShow?: (target: MetadataSelection) => void;
+  onShow?: (target: Target) => void;
   /** Spacing and type size, which differ by pillar. */
   className?: string;
 }): React.ReactElement {
@@ -804,45 +809,72 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
 
 /**
  * objectui#12453 — a read-only package says so twice: the lock in the app
- * chip, and this link at the right of the open item's header, in every
- * pillar. It names the one way to change an installed package, an
- * environment overlay, and lands on the package's metadata directory
- * (`overlayPath`, the Studio home's read-only package card's route), where
- * each type says whether it accepts an overlay. The pillar's read-only
- * sentence (objectui#11781) is its title.
+ * chip, and this mark at the right of the open item's header, in every
+ * pillar. The pillar's read-only sentence (objectui#11781) is its title.
  *
- * objectui#12707 — at a tab row's end, the link folds to its glyph when the
+ * It offers an environment overlay only where one exists: when the open
+ * item's metadata type declares `allowEnvironmentOverlay` in the served
+ * registry (ADR-0005), it is a link to that item's Setup page, where the
+ * overlay is edited. Any other item, no open item, or a registry not yet
+ * read draws a plain "Read-only" mark that links nowhere.
+ *
+ * objectui#12707 — at a tab row's end, the mark folds to its glyph when the
  * row cannot hold it whole (`useStudioTabRowFold`), rather than being cut
  * mid-word at the row's edge. Folded, its text stays as its accessible name
- * and its title stays its tooltip; where it goes is the same.
+ * and its title stays its tooltip.
  */
-function StudioReadOnlyLink({
-  packageId,
+export function StudioReadOnlyLink({
+  item,
   title,
   locale,
 }: {
-  packageId: string;
+  /** The open item, or `null` when the header has none open. */
+  item: { type: string; name: string } | null;
   title: string;
   locale: string;
 }): React.ReactElement {
-  const ref = React.useRef<HTMLAnchorElement | null>(null);
-  const label = t('engine.studio.pkg.readonlyLink', locale);
+  const client = useMetadataClient();
+  const { entries } = useMetadataTypes(client);
+  const overlayable = item !== null && entries.some((e) => e.type === item.type && e.allowEnvironmentOverlay === true);
+  const ref = React.useRef<HTMLElement | null>(null);
+  const label = t(overlayable ? 'engine.studio.pkg.readonlyLink' : 'engine.studio.pkg.readonly', locale);
   const folded = useStudioTabRowFold(ref, label);
-  return (
+  const className = cn(
+    'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 dark:text-amber-300',
+    overlayable && 'hover:bg-amber-400/25',
+    folded ? 'w-7 justify-center' : 'px-2.5',
+  );
+  const body = (
+    <>
+      {overlayable ? (
+        <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      ) : (
+        <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      )}
+      <span className={folded ? 'sr-only' : undefined}>{label}</span>
+    </>
+  );
+  return overlayable && item ? (
     <Link
-      ref={ref}
-      to={overlayPath(packageId)}
+      ref={ref as React.Ref<HTMLAnchorElement>}
+      to={`/apps/setup/metadata/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
       title={title}
       data-testid="studio-readonly-link"
       data-folded={folded || undefined}
-      className={cn(
-        'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 hover:bg-amber-400/25 dark:text-amber-300',
-        folded ? 'w-7 justify-center' : 'px-2.5',
-      )}
+      className={className}
     >
-      <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className={folded ? 'sr-only' : undefined}>{label}</span>
+      {body}
     </Link>
+  ) : (
+    <span
+      ref={ref as React.Ref<HTMLSpanElement>}
+      title={title}
+      data-testid="studio-readonly-link"
+      data-folded={folded || undefined}
+      className={className}
+    >
+      {body}
+    </span>
   );
 }
 
@@ -1687,6 +1719,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     return new Map([...publishRefusals].filter(([key]) => listed.has(key)));
   }, [feedCount, pendingEntries, publishRefusals]);
 
+  // The publish toast's way to the Access pillar; set once the router's
+  // navigate is in hand below.
+  const openAccessRef = React.useRef<() => void>(() => {});
+
   // `options` is the review sheet's (objectui#12929): its checked backfill
   // choices, or nothing. Only the package batch door below carries it; the
   // sheet offers no choice in the package-less scope.
@@ -1758,14 +1794,17 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         } else {
           // objectui#11807 — how many went live: every draft read above, as
           // none failed.
+          // The toast names what went live: one flow in its title, several
+          // by count with their names in the description.
           setPublishRefusals(NO_PUBLISH_REFUSALS);
-          toast.success(
-            tFormat(
-              pending.length === 1 ? 'engine.studio.publishedAllFlowsOne' : 'engine.studio.publishedAllFlows',
-              locale,
-              { count: pending.length },
-            ),
-          );
+          const names = pending.map((d) => resolveI18nLabel(d.label, locale)?.trim() || d.name);
+          if (names.length === 1) {
+            toast.success(tFormat('engine.studio.publishedAllFlowsOne', locale, { label: names[0] }));
+          } else {
+            toast.success(tFormat('engine.studio.publishedAllFlows', locale, { count: names.length }), {
+              description: names.join(', '),
+            });
+          }
           setChangesOpen(false);
         }
         setPublishNonce((n) => n + 1);
@@ -1858,10 +1897,28 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         // wrote. A field that stopped short leaves the publish standing, so the
         // toast still says what went live, as a warning that carries why.
         const receipt = payload?.backfillApplied;
+        // A published app or object reaches members only through a permission
+        // set, so the toast points the author to Access.
+        const reachesMembers =
+          Array.isArray(published) &&
+          published.some((p) => {
+            const type = (p as { type?: unknown } | null)?.type;
+            return type === 'app' || type === 'object';
+          });
+        const access = reachesMembers
+          ? {
+              action: {
+                label: t('engine.studio.publishedOpenAccess', locale),
+                onClick: () => openAccessRef.current(),
+              },
+            }
+          : {};
         if (receipt) {
           const description = formatBackfillReceipt(receipt, locale);
-          if (receipt.success === false) toast.warning(title, { description });
-          else toast.success(title, { description });
+          if (receipt.success === false) toast.warning(title, { description, ...access });
+          else toast.success(title, { description, ...access });
+        } else if (reachesMembers) {
+          toast.success(title, { description: t('engine.studio.publishedAccessHint', locale), ...access });
         } else {
           toast.success(title);
         }
@@ -1933,6 +1990,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // package ships an app, offer Open app — opened in a new tab so the builder
   // context survives. (App → builder is the reverse bridge, tracked separately.)
   const shellNavigate = useNavigate();
+  React.useEffect(() => {
+    openAccessRef.current = () => {
+      if (confirmLeavePillar()) shellNavigate(`/studio/${scopeSegment}/access`);
+    };
+  });
   // objectui#11181 — `label` is the app's own `I18nLabel` (a plain string or an
   // inline locale map), held as the spec types it and never `String()`ed: a map
   // would read `[object Object]`. Only the presence of `packageApp` is read
@@ -2127,7 +2189,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   const [slotPropsClaims, setSlotPropsClaims] = React.useState(0);
   const [copilotStatus, setCopilotStatus] = React.useState<StudioCopilotStatus>({
     available: false,
-    planPending: false,
+    planPendingCount: 0,
   });
   const [copilotCanvasOpen, setCopilotCanvasOpen] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
@@ -2567,7 +2629,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
             onModeChange={setSlotMode}
             hasProps={slotHasProps}
             copilotAvailable={copilotAvailable}
-            planPending={copilotStatus.planPending}
+            planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
             wideWidth={copilotCanvasOpen && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
             overlay={isMobile}
@@ -3332,11 +3394,12 @@ export function StudioNavItemInspector({
   const visibleShown = typed ? typed.text : (heldVisible ?? '');
   const visibleHeldBack = !!typed && typed.errors > 0 && typed.text !== heldVisible;
   // Whether the entry names a target for its type yet (a group and a
-  // separator name none, and are never unbound).
+  // separator name none, and are never unbound). A `report` entry is never
+  // unbound: with no `reportName` it opens the app's report index
+  // (objectstack#27525).
   const unbound =
     (kind === 'page' && !str(node.pageName)) ||
     (kind === 'dashboard' && !str(node.dashboardName)) ||
-    (kind === 'report' && !str(node.reportName)) ||
     (kind === 'url' && !str(node.url)) ||
     (kind === 'component' && !str(node.componentRef)) ||
     (kind === 'action' && !str(actionDef?.actionName)) ||
@@ -3502,6 +3565,15 @@ export function StudioNavItemInspector({
           options={optionsOf(targets.rows)}
           loading={targets.loading}
           onPick={(v) => setTarget(NAV_TARGET_KEY[kind], v)}
+          // objectstack#27525 — a `report` entry with no `reportName` is the
+          // app's report index: its empty face says so, and picking it
+          // removes the key.
+          {...(kind === 'report'
+            ? {
+                emptyLabel: t('engine.inspector.appNav.reportIndex', locale),
+                hint: str(node.reportName) ? undefined : t('engine.inspector.appNav.reportIndexHint', locale),
+              }
+            : {})}
           locale={locale}
         />
       )}
@@ -3904,6 +3976,7 @@ function NavTargetSelect({
   loading,
   onPick,
   hint,
+  emptyLabel,
   locale,
 }: {
   label: string;
@@ -3912,6 +3985,8 @@ function NavTargetSelect({
   loading: boolean;
   onPick: (value: string) => void;
   hint?: string;
+  /** The face of the empty value, where an absent target means something; else "Choose…". */
+  emptyLabel?: string;
   locale: string;
 }): React.ReactElement {
   const id = React.useId();
@@ -3924,7 +3999,7 @@ function NavTargetSelect({
       <StudioPicker
         id={id}
         value={value}
-        options={[{ value: '', label: t('engine.inspector.appNav.choose', locale) }, ...shown]}
+        options={[{ value: '', label: emptyLabel ?? t('engine.inspector.appNav.choose', locale) }, ...shown]}
         onPick={onPick}
         className={PICKER_XS}
       />
@@ -4818,11 +4893,19 @@ export function InterfacesPillar({
   // widget's inspector hints the input, and the line on the canvas names it.
   // Asked of the spec's own widget schema (`dashboardHeldEdit`); a widget that
   // is finished but wrong is sent, and its refusal shows as before.
+  // objectstack#27459 — so is an item just added to one of the dashboard's
+  // own list properties (Global Filters, the header's Actions), asked of the
+  // spec's dashboard schema, until its required inputs are filled in.
+  // objectstack#27785 — a report likewise: an item just added to Order or a
+  // joined report's Blocks, or a chart whose type is picked before its axes,
+  // asked of the spec's report schema (`reportHeldEdit`).
   const leafType = current?.type;
-  const leafIncomplete = React.useMemo(
-    () => (ifDirty && leafType === 'dashboard' ? dashboardHeldEdit(draft, locale) : null),
-    [ifDirty, leafType, draft, locale],
-  );
+  const leafIncomplete = React.useMemo(() => {
+    if (!ifDirty) return null;
+    if (leafType === 'dashboard') return dashboardHeldEdit(draft, locale);
+    if (leafType === 'report') return reportHeldEdit(draft, locale);
+    return null;
+  }, [ifDirty, leafType, draft, locale]);
   const { loaded: draftLoaded } = useDraftAutoSave({
     // objectui#11232 — the leaf `doSave` addresses, `type:name`.
     target: leafKey,
@@ -4834,7 +4917,12 @@ export function InterfacesPillar({
   });
   // Only the open leaf's own buffer is held (objectui#11272).
   const leafHeld = draftLoaded ? leafIncomplete : null;
-  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? null);
+  // objectstack#27464 — a nav rename typed but not committed (blur / Enter)
+  // lives only in the canvas input, so it is held as the leaf's edit is: the
+  // same report, so the surface's one guard (beforeunload included) asks.
+  const [navRenamePending, setNavRenamePending] = React.useState<string | null>(null);
+  const navRenameClause =
+    navRenamePending === null ? null : tFormat('engine.studio.held.navRename', locale, { item: navRenamePending });
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const leafDraftStatus = useStudioItemDraftStatus(
     current ? { type: current.type, name: current.name } : null,
@@ -4846,14 +4934,57 @@ export function InterfacesPillar({
   // the Properties panel and shown on the canvas, autosaved to the package
   // draft like the other two. Blocked on `readOnly` like them.
   const listView = useObjectListViewDraft({ client, packageId, leaf: current, publishNonce, draftOnlyObjects, onDraftSaved });
-  useDraftAutoSave({
+  // objectstack#27895 — an edit that clears a required setting of the view
+  // type's own block (a calendar's start date) is held, not sent, as a
+  // leaf's is: asked of the spec's list-view schema (`listViewHeldEdit`).
+  const listViewHeld = listViewHeldEdit(listView, locale);
+  const { flush: flushListView } = useDraftAutoSave({
     target: listView.targetKey,
     loadedFor: listView.loadedFor,
     dirty: listView.dirty,
-    blocked: !listView.target || listView.saving || readOnly,
+    blocked: !listView.target || listView.saving || readOnly || listViewHeld !== null,
     snapshot: listView.row,
     save: listView.save,
   });
+  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? listViewHeld?.clause ?? navRenameClause);
+  const heldUnsent = leafHeld !== null || listViewHeld !== null;
+  // objectstack#27896 — the panel's view picker (and its "Back to …") opens
+  // another view of the object in the one list-view buffer, whose load
+  // replaces the open view's edits, and the autosave sends nothing once the
+  // view has changed (objectui#11232). So the switch sends a pending edit
+  // first with the autosave's own `flush` and shows the view once the buffer
+  // is clean, as the Data pillar's object rail does (objectstack#27511); a
+  // save in flight is waited out the same way. An edit that cannot be sent
+  // (held, or its save refused with the refusal on screen) is the author's to
+  // drop: the switch asks (objectstack#26705).
+  const [listViewSwitchTo, setListViewSwitchTo] = React.useState<string | null>(null);
+  const listViewDirty = listView.dirty;
+  const listViewSaving = listView.saving;
+  const listViewHolds = listViewHeld !== null;
+  const showListView = listView.showView;
+  const switchListView = React.useCallback(
+    (viewId: string) => {
+      if (listViewSaving || (listViewDirty && !listViewHolds && flushListView())) {
+        setListViewSwitchTo(viewId);
+        return;
+      }
+      if (!confirmDropUnsavedWork(listViewDirty, locale)) return;
+      setListViewSwitchTo(null);
+      setSelection(null);
+      showListView(viewId);
+    },
+    [listViewSaving, listViewDirty, listViewHolds, flushListView, locale, setSelection, showListView],
+  );
+  React.useEffect(() => {
+    if (!listViewSwitchTo || listViewSaving) return;
+    if (listViewDirty && !listViewHolds && flushListView()) return;
+    setListViewSwitchTo(null);
+    // Still dirty: the save was refused (on screen) or an edit taken meanwhile
+    // is held. The author stays; the next switch asks.
+    if (listViewDirty) return;
+    setSelection(null);
+    showListView(listViewSwitchTo);
+  }, [listViewSwitchTo, listViewSaving, listViewDirty, listViewHolds, flushListView, setSelection, showListView]);
   // objectui#12725 — a click on a column header in an `object` leaf's canvas
   // selects that column (`StudioCanvasColumnSelectionContext`): the pillar's
   // one selection, so it shows in the panel's column list, asks the slot for
@@ -4996,18 +5127,25 @@ export function InterfacesPillar({
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [reportBinding, setReportBinding] = React.useState<ReportBinding>(NO_REPORT_BINDING);
   const [pageKind, setPageKind] = React.useState<PageSourceKind>(DEFAULT_PAGE_SOURCE_KIND);
+  // objectstack#27518 — the New dataset entry beside the report dialog's and
+  // the widget inspector's dataset pickers saves into this package, and its
+  // presence is what has those pickers read the draft-overlaid catalog.
+  const datasetAuthoring = React.useMemo<StudioDatasetAuthoring>(
+    () => ({ packageId, onDraftSaved }),
+    [packageId, onDraftSaved],
+  );
   const openCreate = React.useCallback(
     (kind: InterfaceCreateKind) => {
       // objectstack#26845 — the created item opens at once, and its load
       // replaces the buffer a held widget lives in: asked before the dialog
       // opens, so Cancel costs nothing and the create itself asks nothing.
-      if (!confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+      if (!confirmDropUnsavedWork(heldUnsent, locale)) return;
       setCreateError(null);
       setReportBinding(NO_REPORT_BINDING);
       setPageKind(DEFAULT_PAGE_SOURCE_KIND);
       setCreateKind(kind);
     },
-    [leafHeld, locale],
+    [heldUnsent, locale],
   );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
@@ -5469,7 +5607,7 @@ export function InterfacesPillar({
             </span>
           )}
           {readOnly && (
-            <StudioReadOnlyLink packageId={packageId} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+            <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
           )}
           {isObjectLeaf && openSurface && current && (
             <button
@@ -5519,7 +5657,7 @@ export function InterfacesPillar({
       }}
       className={cn('flex min-w-0 flex-1 flex-col overflow-auto bg-muted/30 py-4', inSlot ? 'px-4' : 'px-6')}
     >
-      {(error || navError || leafHeld) && (
+      {(error || navError || leafHeld || listViewHeld) && (
         <div className="mb-3 flex shrink-0 flex-col gap-1.5">
           {/* objectui#11776 — the pillar's failure and the nav editor's own,
               each cleared by what settles it, the same failure shown once.
@@ -5545,11 +5683,25 @@ export function InterfacesPillar({
               held={leafHeld}
               locale={locale}
               // objectui#11910 — no "Show me" while that widget is the one open.
+              // objectstack#27459 — an item of the leaf's own list property
+              // (`target: null`) always offers it: the leaf's properties may
+              // be collapsed, or scrolled past the list it opens and focuses.
               onShow={
-                selection?.kind === leafHeld.target.kind && selection.id === leafHeld.target.id
-                  ? undefined
-                  : (target) => setSelection(target)
+                leafHeld.target === null
+                  ? () => showLeafRefusal(null, leafHeld.input)
+                  : selection?.kind === leafHeld.target.kind && selection.id === leafHeld.target.id
+                    ? undefined
+                    : (target) => setSelection(target)
               }
+              className="px-3 py-2 text-xs"
+            />
+          )}
+          {listViewHeld && (
+            <StudioHeldNotice
+              held={listViewHeld}
+              locale={locale}
+              // The setting is in the leaf's own panel, which may be collapsed or scrolled past.
+              onShow={() => showLeafRefusal(null, listViewHeld.input)}
               className="px-3 py-2 text-xs"
             />
           )}
@@ -5722,6 +5874,10 @@ export function InterfacesPillar({
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
             onSelectionChange={setSelection}
+            // objectstack#27836 — "Add view" opens another view here: the pending edit goes first.
+            onAddViewOpen={flushListView}
+            // objectstack#27896 — another view of the object: the pending edit goes first, or the author is asked.
+            onSwitchView={switchListView}
           />
         </div>
       ) : (
@@ -5883,7 +6039,7 @@ export function InterfacesPillar({
   const pickSurface = (s: Surface) => {
     // objectstack#26705 — another leaf's load replaces the buffer the held
     // widget lives in; an entry for the open leaf keeps it.
-    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(heldUnsent, locale)) return;
     setCurrent(s);
     if (isMobile) setRailOpen(false);
   };
@@ -5901,6 +6057,7 @@ export function InterfacesPillar({
   }));
 
   return (
+    <StudioDatasetAuthoringContext.Provider value={datasetAuthoring}>
     <div className="flex h-full flex-col">
       {leafConflictDialog}
       {navConflictDialog}
@@ -5956,7 +6113,12 @@ export function InterfacesPillar({
         locale={locale}
         extra={
           createKind === 'report' ? (
-            <ReportCreateFields value={reportBinding} onChange={setReportBinding} locale={locale} />
+            <ReportCreateFields
+              value={reportBinding}
+              onChange={setReportBinding}
+              authoring={datasetAuthoring}
+              locale={locale}
+            />
           ) : createKind === 'page' ? (
             <PageCreateFields value={pageKind} onChange={setPageKind} locale={locale} />
           ) : undefined
@@ -6103,6 +6265,7 @@ export function InterfacesPillar({
                 onPatch={onNavPatch}
                 selection={navSel}
                 onSelectionChange={(s) => setNavSel(s ? { kind: s.kind, id: s.id } : null)}
+                onRenamePendingChange={setNavRenamePending}
               />
             ) : navTree.length === 0 ? (
               <p className="px-2 py-3 text-[11px] text-muted-foreground">
@@ -6139,6 +6302,7 @@ export function InterfacesPillar({
         </div>
       </div>
     </div>
+    </StudioDatasetAuthoringContext.Provider>
   );
 }
 
@@ -6279,6 +6443,47 @@ function formFieldNames(fields: unknown): string[] {
     .filter((n) => !STUDIO_SYSTEM_FIELD_NAMES.has(n));
 }
 
+/**
+ * objectstack#27485 — what the field inspector's CEL verdict on `field` was
+ * judged from, as the object draft holds it: the field's type, its CEL texts
+ * (`expression`, the legacy `formula`, `visibleWhen`, `readonlyWhen`,
+ * `requiredWhen`) and the object's field names its lint resolves references
+ * against. The same stamp is the same verdict. `null` when the field is gone.
+ */
+function fieldCelStamp(draft: Record<string, unknown>, field: string): string | null {
+  const { entries } = readFields(draft.fields);
+  const def = entries.find((e) => e.name === field)?.def;
+  if (!def) return null;
+  const cel = [def.type, def.expression, def.formula, def.visibleWhen, def.readonlyWhen, def.requiredWhen];
+  return JSON.stringify([cel.map((v) => v ?? null), entries.map((e) => e.name)]);
+}
+
+/** objectstack#27629 — the Data pillar panels that mount a CEL editor and report per item. */
+type CelPanelTab = 'rules' | 'actions';
+const isCelPanelTab = (v: string): v is CelPanelTab => v === 'rules' || v === 'actions';
+
+/** The rule (`rules`) or action (`actions`) named `item` in the object draft. */
+function panelItemOf(draft: Record<string, unknown>, tab: CelPanelTab, item: string): Record<string, unknown> | undefined {
+  const list = tab === 'rules' ? draft.validations : draft.actions;
+  if (!Array.isArray(list)) return undefined;
+  return list.find(
+    (e): e is Record<string, unknown> => !!e && typeof e === 'object' && String((e as { name?: unknown }).name ?? '') === item,
+  );
+}
+
+/**
+ * objectstack#27629 — what a panel's CEL verdict on `item` was judged from, as
+ * the object draft holds it: the rule or action itself (its guard or
+ * predicates among its keys) and the object's field names its lint resolves
+ * references against. `fieldCelStamp`'s counterpart for the panel family; the
+ * same stamp is the same verdict. `null` when the item is gone.
+ */
+function panelItemCelStamp(draft: Record<string, unknown>, tab: CelPanelTab, item: string): string | null {
+  const def = panelItemOf(draft, tab, item);
+  if (!def) return null;
+  return JSON.stringify([def, readFields(draft.fields).entries.map((e) => e.name)]);
+}
+
 /** The data-source writes the Form tab's Preview refuses (objectui#12515). */
 const PREVIEW_REFUSED_WRITES = new Set<PropertyKey>(['create', 'update', 'delete', 'bulk', 'bulkUpdate', 'bulkDelete']);
 
@@ -6415,13 +6620,54 @@ export function DataPillar({
   // that does not parse must not be saveable, let alone publishable as the live
   // field definition (objectui#4306).
   //
-  // The count is STAMPED with the selection it came from, so it expires by
-  // construction when the selection changes or the panel closes: an unmounted
-  // inspector can never retract its last verdict, and a host that waited for
-  // one would leave Save wedged shut with nothing on screen to fix.
+  // The report is STAMPED with the selection it came from: it is the open
+  // inspector's live verdict, and never reads as another selection's.
   const [blockingReport, setBlockingReport] = React.useState({ key: '', count: 0 });
   const fieldSelKey = fieldSel ? `${current?.name ?? ''}:${fieldSel.kind}:${fieldSel.id}` : '';
-  const inspectorBlocking = blockingReport.key === fieldSelKey ? blockingReport.count : 0;
+  // objectstack#27485 — the verdict belongs to the draft, not to the selection.
+  // Expiring it with the selection released the hold the moment the inspector
+  // closed (Escape, Close, another field, another tab) while the broken text
+  // stayed in the draft, and the autosave sent it. So each field's last live
+  // verdict is kept with the stamp of what it judged (`fieldCelStamp`, taken
+  // while the inspector is open on it) and holds, with the inspector closed,
+  // while the draft still carries that stamp: an edit to the text, the field's
+  // removal or the object's next load ends it. Nothing is left shut with
+  // nothing to fix: the held line names the field and its "Show me" opens it,
+  // and the open inspector's live verdict always wins.
+  const [celVerdicts, setCelVerdicts] = React.useState<Record<string, { field: string; count: number; stamp: string | null }>>({});
+  const liveFieldReport = fieldSel?.kind === 'field' && blockingReport.key === fieldSelKey;
+  const openFieldStamp = fieldSel?.kind === 'field' ? fieldCelStamp(objDraft, fieldSel.id) : null;
+  React.useEffect(() => {
+    if (!liveFieldReport || fieldSel === null) return;
+    const kept = { field: fieldSel.id, count: blockingReport.count, stamp: openFieldStamp };
+    setCelVerdicts((prev) => {
+      const was = prev[fieldSelKey];
+      if (was && was.count === kept.count && was.stamp === kept.stamp) return prev;
+      return { ...prev, [fieldSelKey]: kept };
+    });
+  }, [liveFieldReport, fieldSel, fieldSelKey, blockingReport.count, openFieldStamp]);
+  // The open object's fields whose verdict holds, and their summed count.
+  const celHeldFields: string[] = [];
+  let inspectorBlocking = 0;
+  const celFieldPrefix = `${current?.name ?? ''}:field:`;
+  for (const [key, kept] of Object.entries(celVerdicts)) {
+    if (!key.startsWith(celFieldPrefix) || key === fieldSelKey) continue;
+    if (kept.count > 0 && kept.stamp === fieldCelStamp(objDraft, kept.field)) {
+      celHeldFields.push(kept.field);
+      inspectorBlocking += kept.count;
+    }
+  }
+  if (blockingReport.key === fieldSelKey && blockingReport.count > 0) {
+    if (fieldSel?.kind === 'field') celHeldFields.push(fieldSel.id);
+    inspectorBlocking += blockingReport.count;
+  } else if (fieldSelKey !== '' && !liveFieldReport) {
+    // Opened, and its inspector has not reported yet: its kept verdict stands.
+    const kept = celVerdicts[fieldSelKey];
+    if (kept && kept.count > 0 && kept.stamp === openFieldStamp) {
+      celHeldFields.push(kept.field);
+      inspectorBlocking += kept.count;
+    }
+  }
   // The pillar's PANEL family reports separately (objectui#4527): the
   // validations, actions and settings panels all write through this same draft
   // and own no Save of their own, so their CEL faults have to reach this
@@ -6430,8 +6676,10 @@ export function DataPillar({
   //
   // Stamped with the panel TAB: exactly one panel is mounted at a time, so
   // leaving the tab unmounts the reporter and it can never retract its last
-  // verdict — deriving against the live tab is what stops a fault authored
-  // under Validations from wedging Save on a tab with no CEL editor at all.
+  // verdict. objectstack#27629 — only Settings still reports through this
+  // count (its inspector mounts no CEL editor today); Validations and Actions
+  // report per item and keep their verdicts with the draft (`panelCelVerdicts`
+  // below), so leaving their tab no longer releases the hold.
   const [panelBlockingReport, setPanelBlockingReport] = React.useState({ key: '', count: 0 });
   const [dirty, setDirty] = React.useState(false);
   const [hasDraft, setHasDraft] = React.useState(false);
@@ -6459,10 +6707,17 @@ export function DataPillar({
   // its "Show me": a fresh object per press, so pressing it again re-selects
   // the action after the author picked another one.
   const [actionFocus, setActionFocus] = React.useState<{ name: string } | null>(null);
+  // objectstack#27629 — the rule a held line names, opened the same way.
+  const [ruleFocus, setRuleFocus] = React.useState<{ name: string } | null>(null);
   const showObjTarget = (target: MetadataSelection) => {
     if (target.kind === 'action') {
       selectViewMode('actions');
       setActionFocus({ name: target.id });
+      return;
+    }
+    if (target.kind === 'rule') {
+      selectViewMode('rules');
+      setRuleFocus({ name: target.id });
       return;
     }
     setFieldSel({ kind: target.kind, id: target.id });
@@ -6515,9 +6770,71 @@ export function DataPillar({
     (count: number) => setPanelBlockingReport({ key: panelKey, count }),
     [panelKey],
   );
+  // objectstack#27629 — the panel family's verdicts belong to the draft, as the
+  // field inspector's do (`celVerdicts` above, the ruling on objectstack#27485).
+  // Validations and Actions report a verdict per rule or action; each is kept
+  // with the stamp of what it judged (`panelItemCelStamp`, retaken while its
+  // panel is mounted) and holds, with the tab left, while the draft still
+  // carries that stamp: an edit to the item, its removal or the object's next
+  // load ends it. While the panel is mounted its own report is the live verdict
+  // and always wins; the held line names the item and its "Show me" reopens it.
+  const [livePanelVerdicts, setLivePanelVerdicts] = React.useState<{
+    key: string;
+    verdicts: Readonly<Record<string, number>>;
+  }>({ key: '', verdicts: {} });
+  const reportPanelVerdicts = React.useCallback(
+    (verdicts: Readonly<Record<string, number>>) => setLivePanelVerdicts({ key: panelKey, verdicts }),
+    [panelKey],
+  );
+  const [panelCelVerdicts, setPanelCelVerdicts] = React.useState<
+    Record<string, { tab: CelPanelTab; item: string; count: number; stamp: string | null }>
+  >({});
+  const livePanel = isCelPanelTab(viewMode) && livePanelVerdicts.key === panelKey ? livePanelVerdicts.verdicts : null;
+  React.useEffect(() => {
+    if (livePanel === null || !isCelPanelTab(viewMode)) return;
+    setPanelCelVerdicts((prev) => {
+      let next = prev;
+      for (const [item, count] of Object.entries(livePanel)) {
+        const kept = { tab: viewMode, item, count, stamp: panelItemCelStamp(objDraft, viewMode, item) };
+        const key = `${panelKey}:${item}`;
+        const was = prev[key];
+        if (was && was.count === kept.count && was.stamp === kept.stamp) continue;
+        if (next === prev) next = { ...prev };
+        next[key] = kept;
+      }
+      return next;
+    });
+  }, [livePanel, viewMode, panelKey, objDraft]);
+  // The open object's panel items whose verdict holds, and their summed count.
+  const celHeldPanelItems: Array<{ tab: CelPanelTab; item: string }> = [];
+  let panelCelBlocking = 0;
+  const celPanelPrefix = `${current?.name ?? ''}:`;
+  for (const [key, kept] of Object.entries(panelCelVerdicts)) {
+    if (!key.startsWith(celPanelPrefix)) continue;
+    if (livePanel !== null && kept.tab === viewMode && Object.prototype.hasOwnProperty.call(livePanel, kept.item)) continue;
+    if (kept.count > 0 && kept.stamp !== null && kept.stamp === panelItemCelStamp(objDraft, kept.tab, kept.item)) {
+      celHeldPanelItems.push({ tab: kept.tab, item: kept.item });
+      panelCelBlocking += kept.count;
+    }
+  }
+  if (livePanel !== null && isCelPanelTab(viewMode)) {
+    for (const [item, count] of Object.entries(livePanel)) {
+      if (count <= 0) continue;
+      celHeldPanelItems.push({ tab: viewMode, item });
+      panelCelBlocking += count;
+    }
+  }
+  // objectstack#27644 — the open object's served verdict (the draft read's
+  // `_diagnostics`, else the layered read's) and the body it judged, for the
+  // Validations panel: a rule guard the publish refuses holds the autosave
+  // through the panel's verdicts above while it still shows the judged text.
+  // Each load and each save's re-read replaces both; the later one wins.
+  const [objVerdict, setObjVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  const [objVerdictBody, setObjVerdictBody] = React.useState<unknown>(undefined);
+  const objVerdictSeq = React.useRef(0);
   // Either source closes the door: a malformed field formula and a malformed
   // rule guard are both unsaveable, and neither excuses the other.
-  const saveBlocking = inspectorBlocking + panelBlocking;
+  const saveBlocking = inspectorBlocking + panelBlocking + panelCelBlocking;
   // Within the Form view: Layout (WYSIWYG drag/section designer) ⇄ Preview
   // (live form).
   const [formMode, setFormMode] = React.useState<'layout' | 'preview'>('layout');
@@ -6691,6 +7008,13 @@ export function DataPillar({
     setLoading(true);
     setError(null);
     setFieldSel(null);
+    // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
+    setCelVerdicts({});
+    setPanelCelVerdicts({});
+    // objectstack#27644 — and so did the served one; a save's re-read in flight is dropped.
+    objVerdictSeq.current += 1;
+    setObjVerdict(undefined);
+    setObjVerdictBody(undefined);
     setDirty(false);
     (async () => {
       try {
@@ -6720,6 +7044,10 @@ export function DataPillar({
         const draftBody = extractDraftBody(draftRead.answer);
         // Served draft as-is, baseline only without one (objectui#10765).
         setObjDraft(draftBody ?? baseline);
+        // objectstack#27644 — the verdict on that body, and the body it judged.
+        const draftVerdict = draftEnvelopeDiagnostics(draftRead.answer);
+        setObjVerdict(editedItemDiagnostics({ hasDraft: !!draftBody, draftDiagnostics: draftVerdict, layered: lay }));
+        setObjVerdictBody(draftBody && draftVerdict ? draftBody : lay.effective);
         setObjDraftFor(`object:${current.name}`);
         setObjDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
         // objectui#11773 — the next save is pinned to what the draft read served.
@@ -6759,7 +7087,18 @@ export function DataPillar({
     };
   }, [client, current, packageId, publishNonce, objReloadNonce, recordObjRead]);
 
-  const fieldCount = React.useMemo(() => readFields(objDraft.fields).entries.length, [objDraft]);
+  // The header counts the fields the canvas shows, and names the platform's
+  // own columns apart: "2 fields (+8 system)".
+  const fieldCount = React.useMemo(() => {
+    const all = readFields(objDraft.fields).entries.length;
+    const own = formFieldNames(objDraft.fields).length;
+    return { own, system: all - own };
+  }, [objDraft]);
+  const fieldCountText =
+    tFormat(fieldCount.own === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
+      count: fieldCount.own,
+    }) +
+    (fieldCount.system > 0 ? ` ${tFormat('engine.studio.data.systemFieldCount', locale, { count: fieldCount.system })}` : '');
 
   /**
    * The design-mode grid's columns: the object's own fields in metadata order,
@@ -6936,6 +7275,14 @@ export function DataPillar({
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setDirty(false);
       setSavedAt(new Date());
+      // objectstack#27644 — the draft this save stored carries its own publish
+      // verdict on its next read; the one held described the body before it.
+      const seq = ++objVerdictSeq.current;
+      void readDraftForSave(client, 'object', current.name, packageId).then((read) => {
+        if (seq !== objVerdictSeq.current) return;
+        setObjVerdict(draftEnvelopeDiagnostics(read.answer));
+        setObjVerdictBody(extractDraftBody(read.answer) ?? undefined);
+      });
       // No success toast: with auto-save (objectui#5813) it would fire after
       // every editing pause — the quiet last-saved hint is the affordance.
       onDraftSaved?.({ type: 'object', name: current.name });
@@ -6944,7 +7291,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveObjDraft, current, objDraft, onDraftSaved, packageId, locale]);
+  }, [saveObjDraft, client, current, objDraft, onDraftSaved, packageId, locale]);
 
   // objectui#11786 — an edit whose body the write guard would refuse (a choice
   // field before its options, a relationship before its target) is held, not
@@ -6958,7 +7305,7 @@ export function DataPillar({
 
   // objectui#5813 — auto-save replaces the Save draft button; the blocked guard
   // is the button's old disabled-condition verbatim, plus the hold above.
-  const { sending: sendingObjDraft, loaded: objLoaded } = useDraftAutoSave({
+  const { flush: flushObjSave, sending: sendingObjDraft, loaded: objLoaded } = useDraftAutoSave({
     // objectui#11232 — the object `doSave` addresses.
     target: `object:${current?.name ?? ''}`,
     loadedFor: objDraftFor,
@@ -6967,8 +7314,46 @@ export function DataPillar({
     snapshot: objDraft,
     save: doSave,
   });
+  // objectstack#27485 — an unsent edit the CEL verdict holds is named like an
+  // incomplete one: the held line, the surface's Publish and the rail's
+  // question all read it, so it outlives the inspector without going unseen.
+  // objectstack#27629 — then a rule or action the panel family holds.
+  const celHeldField = celHeldFields[0] ?? null;
+  const celHeldLabel = React.useMemo(() => {
+    if (celHeldField === null) return null;
+    const label = readFields(objDraft.fields).entries.find((e) => e.name === celHeldField)?.def.label;
+    return typeof label === 'string' && label.trim() !== '' ? label.trim() : celHeldField;
+  }, [celHeldField, objDraft.fields]);
+  const celHeldPanelTab = celHeldPanelItems[0]?.tab ?? null;
+  const celHeldPanelItem = celHeldPanelItems[0]?.item ?? null;
+  const celHeldPanelLabel = React.useMemo(() => {
+    if (celHeldPanelTab === null || celHeldPanelItem === null) return null;
+    const label = panelItemOf(objDraft, celHeldPanelTab, celHeldPanelItem)?.label;
+    return typeof label === 'string' && label.trim() !== '' ? label.trim() : celHeldPanelItem;
+  }, [celHeldPanelTab, celHeldPanelItem, objDraft]);
+  const objCelHeld = React.useMemo<StudioHeld | null>(() => {
+    if (!dirty) return null;
+    if (celHeldField !== null && celHeldLabel !== null) {
+      return {
+        clause: tFormat('engine.studio.held.celInvalid', locale, { field: celHeldLabel }),
+        target: { kind: 'field', id: celHeldField },
+      };
+    }
+    if (celHeldPanelTab !== null && celHeldPanelItem !== null && celHeldPanelLabel !== null) {
+      return celHeldPanelTab === 'rules'
+        ? {
+            clause: tFormat('engine.studio.held.celInvalidRule', locale, { rule: celHeldPanelLabel }),
+            target: { kind: 'rule', id: celHeldPanelItem },
+          }
+        : {
+            clause: tFormat('engine.studio.held.celInvalidAction', locale, { action: celHeldPanelLabel }),
+            target: { kind: 'action', id: celHeldPanelItem },
+          };
+    }
+    return null;
+  }, [dirty, celHeldField, celHeldLabel, celHeldPanelTab, celHeldPanelItem, celHeldPanelLabel, locale]);
   // Only the open object's own buffer is held (objectui#11272).
-  const objHeld = objLoaded ? objIncomplete : null;
+  const objHeld = objLoaded ? (objIncomplete ?? objCelHeld) : null;
   // objectstack#26917 — the refusal's way out: the object holding the
   // identifier is on this rail, so it opens instead of a second one being
   // made. The New button already asked about a held edit (objectstack#26845).
@@ -6985,9 +7370,47 @@ export function DataPillar({
   const fieldAgentMark =
     objLoaded && fieldSel?.kind === 'field' ? agentDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
+  // objectstack#27511 — opening another object replaces the one buffer the
+  // open object's edits live in, and the autosave's timer sends nothing once
+  // the open object has changed (objectui#11232). So an edit still inside the
+  // debounce was dropped by the switch with nothing on screen. The switch now
+  // sends it first with the autosave's own `flush` and opens the object once
+  // the buffer is clean, as the Interfaces nav's "Done" closes (objectui#11189);
+  // a save already in flight is waited out the same way. An edit that cannot
+  // be sent (held, or its save refused with the refusal on screen) is the
+  // author's to drop: the switch asks (objectstack#26705).
+  const [switchTo, setSwitchTo] = React.useState<Surface | null>(null);
+  const openObject = React.useCallback(
+    (next: Surface): boolean => {
+      if (next.name === current?.name) {
+        setSwitchTo(null);
+        setCurrent(next);
+        return true;
+      }
+      if (saving || (dirty && objHeld === null && flushObjSave())) {
+        setSwitchTo(next);
+        return true;
+      }
+      if (!confirmDropUnsavedWork(dirty, locale)) return false;
+      setSwitchTo(null);
+      setCurrent(next);
+      return true;
+    },
+    [current, saving, dirty, objHeld, flushObjSave, locale],
+  );
+  React.useEffect(() => {
+    if (!switchTo || saving) return;
+    if (dirty && objHeld === null && flushObjSave()) return;
+    setSwitchTo(null);
+    // Still dirty: the save was refused (on screen) or an edit taken meanwhile
+    // is held. The author stays; the next switch asks.
+    if (dirty) return;
+    setCurrent(switchTo);
+  }, [switchTo, saving, dirty, objHeld, flushObjSave]);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
-  // asks first, as the rail does; declined, the request is spent and the held
+  // goes through the rail's own switch (`openObject`): an unsent edit is sent
+  // first, or the author is asked; declined, the request is spent and the
   // edit stays. A request for the open object drops nothing and asks nothing.
   React.useEffect(() => {
     if (!requestedSurface || !objectsLoaded) return;
@@ -6995,9 +7418,8 @@ export function DataPillar({
     appliedRequestRef.current = requestedSurface.id;
     const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
     if (!match) return;
-    if (match.name !== current?.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
-    setCurrent(match);
-  }, [requestedSurface, objects, objectsLoaded, current, objHeld, locale]);
+    openObject(match);
+  }, [requestedSurface, objects, objectsLoaded, openObject]);
   // objectstack#26845 — a created object opens at once, and its load replaces
   // the buffer a held edit lives in: asked before the dialog opens, so Cancel
   // costs nothing and the create itself asks nothing.
@@ -7283,11 +7705,10 @@ export function DataPillar({
                 key={o.name}
                 active={current?.name === o.name}
                 onClick={() => {
-                  // objectstack#26705 — another object's load replaces the
-                  // buffer the held edit lives in; the open one keeps it.
-                  if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
-                  setCurrent(o);
-                  if (isMobile) setRailOpen(false);
+                  // objectstack#26705, objectstack#27511 — another object's load
+                  // replaces the buffer the open one's edits live in: they are
+                  // sent first, or the author is asked (`openObject`).
+                  if (openObject(o) && isMobile) setRailOpen(false);
                 }}
                 icon={<Icon className="h-4 w-4 shrink-0" />}
               >
@@ -7316,7 +7737,7 @@ export function DataPillar({
             title={current ? current.label : t('engine.studio.data.objects', locale)}
             titleProps={current ? undefined : { className: 'text-[13px] font-normal text-muted-foreground' }}
             apiName={current?.name}
-            meta={current && objLoaded ? tFormat('engine.studio.data.fieldCount', locale, { count: fieldCount }) : undefined}
+            meta={current && objLoaded ? fieldCountText : undefined}
             status={objDraftStatus}
             actions={
               <>
@@ -7347,7 +7768,7 @@ export function DataPillar({
                     read-only sentence the Layout control no longer does. */}
                 {readOnly && (
                   <StudioReadOnlyLink
-                    packageId={packageId}
+                    item={current}
                     title={
                       viewMode === 'form'
                         ? t('engine.studio.data.form.layoutBadgeReadOnly', locale)
@@ -7432,12 +7853,17 @@ export function DataPillar({
                   </div>
                 )
               ) : viewMode === 'rules' ? (
-                <ObjectValidationsPanel
-                  draft={objDraft}
-                  onPatch={onPatch}
-                  disabled={readOnly}
-                  onBlockingIssuesChange={reportPanelBlocking}
-                />
+                <DraftVerdictContext.Provider value={objVerdict}>
+                  <DraftVerdictBodyContext.Provider value={objVerdictBody}>
+                    <ObjectValidationsPanel
+                      draft={objDraft}
+                      onPatch={onPatch}
+                      disabled={readOnly}
+                      focus={ruleFocus}
+                      onCelVerdictsChange={reportPanelVerdicts}
+                    />
+                  </DraftVerdictBodyContext.Provider>
+                </DraftVerdictContext.Provider>
               ) : viewMode === 'settings' ? (
                 <ObjectSettingsPanel
                   name={current.name}
@@ -7464,7 +7890,7 @@ export function DataPillar({
                     disabled={readOnly}
                     focus={actionFocus}
                     actionSchema={typeSchemas.action}
-                    onBlockingIssuesChange={reportPanelBlocking}
+                    onCelVerdictsChange={reportPanelVerdicts}
                   />
                 </div>
               ) : viewMode === 'api' ? (
@@ -8271,6 +8697,16 @@ export function AutomationsPillar({
   // draft's (what its publish will refuse), else the layered read's. Taken off
   // each read, never computed here; the inspectors read it at their paths.
   const [flowVerdict, setFlowVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // objectstack#27799 — and the flow's Problems list reads that same verdict,
+  // so it never calls a flow valid that its publish refuses.
+  const flowPreviewDiagnostics = React.useMemo(
+    () =>
+      verdictPreviewEntries(flowVerdict).map((entry) => ({
+        ...entry,
+        message: translateValidationMessage(entry.message, locale),
+      })),
+    [flowVerdict, locale],
+  );
   const flowVerdictSeq = React.useRef(0);
   const rereadFlowVerdict = React.useCallback(
     (flowName: string) => {
@@ -8936,7 +9372,7 @@ export function AutomationsPillar({
   // end, the slot objectui#12456 gave the Access note for the same reason.
   const autoReadOnlyLinkEl =
     readOnly && packageId !== null ? (
-      <StudioReadOnlyLink packageId={packageId} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+      <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
   const flowTabsEl =
     flowOpen ? (
@@ -9240,6 +9676,8 @@ export function AutomationsPillar({
                         // edge selection still open the inspector read-only below.
                         onPatch: readOnly ? undefined : onPatch,
                         locale,
+                        // objectstack#27799 — the Problems list reads the verdict the inspectors read.
+                        diagnostics: flowPreviewDiagnostics,
                       })}
                     </FlowPreviewChromeProvider>
                   </FlowRegistrationContext.Provider>
@@ -9798,7 +10236,7 @@ export function AccessPillar({
     <StudioStatusChip {...accessStatus} />
   ) : (
     <StudioReadOnlyLink
-      packageId={packageId}
+      item={current !== null && !owdOpen ? { type: 'permission', name: current } : null}
       title={t('engine.studio.access.bannerTitleReadOnly', locale)}
       locale={locale}
     />

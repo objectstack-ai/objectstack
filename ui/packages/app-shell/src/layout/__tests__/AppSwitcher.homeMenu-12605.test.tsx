@@ -110,7 +110,16 @@ describe('the app pill\'s menu (objectui#12605)', () => {
     ]);
     expect(menu().getByTestId('app-switcher-home')).toHaveTextContent('Back to home');
     expect(menu().getByTestId('app-switcher-all-apps')).toHaveTextContent('All apps');
-    expect(menu().getByTestId('app-switcher-settings')).toHaveTextContent('Settings');
+    // objectstack#27521 row 1 — the entry carries the Setup app's own label,
+    // the name its header shows once it is open.
+    expect(menu().getByTestId('app-switcher-settings')).toHaveTextContent('Setup');
+  });
+
+  it('the Setup entry follows the app’s served label, whatever it is (objectstack#27521 row 1)', () => {
+    apps = [HOTCRM, SERVICE, { ...SETUP, label: 'Administration' }];
+    renderSwitcher('hotcrm');
+    expect(menu().getByTestId('app-switcher-settings')).toHaveTextContent('Administration');
+    expect(menu().getByTestId('app-switcher-settings')).not.toHaveTextContent('Settings');
   });
 
   it('Setup is not in the switch group; the current app is checked', () => {

@@ -135,7 +135,12 @@ const { RootLandingRedirect } = await import('./RootLandingRedirect');
 /** Reports where the router ended up, so assertions read the real location. */
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname + location.search}</div>;
+  return (
+    <>
+      <div data-testid="location">{location.pathname + location.search}</div>
+      <div data-testid="location-hash">{location.hash}</div>
+    </>
+  );
 }
 
 /**
@@ -351,5 +356,37 @@ describe('redirect capture — a real deep link is honored, a bare entry is not 
     renderAt('/apps/crm_app/record/1?tab=history');
 
     expect(location()).toBe('/login?redirect=%2Fapps%2Fcrm_app%2Frecord%2F1%3Ftab%3Dhistory');
+  });
+});
+
+// ── objectstack-ai/objectstack#27450 — a deep link's query survives `/` ────
+describe('the landing carries the query and hash `/` arrived with', () => {
+  it('lands on the default app with `?palette=1` and the hash kept', () => {
+    auth.value.isAuthenticated = true;
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+
+    renderAt('/?palette=1#top');
+
+    expect(location()).toBe('/apps/crm_app?palette=1');
+    expect(screen.getByTestId('location-hash').textContent).toBe('#top');
+  });
+
+  it('lands on the launcher with the query kept too', () => {
+    auth.value.isAuthenticated = true;
+    metadata.value.apps = [OTHER_APP, { name: 'ops_app' }];
+
+    renderAt('/?palette=1');
+
+    expect(location()).toBe('/home?palette=1');
+  });
+
+  it('CONTROL: a bare `/` still lands on the bare path', () => {
+    auth.value.isAuthenticated = true;
+    metadata.value.apps = [DEFAULT_APP];
+
+    renderAt('/');
+
+    expect(location()).toBe('/apps/crm_app');
+    expect(screen.getByTestId('location-hash').textContent).toBe('');
   });
 });

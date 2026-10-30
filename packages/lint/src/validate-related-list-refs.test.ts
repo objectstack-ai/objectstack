@@ -9,7 +9,11 @@
 import { describe, expect, it } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 
-import { RELATED_LIST_REF_UNKNOWN, validateRelatedListRefs } from './validate-related-list-refs.js';
+import {
+  RELATED_LIST_GROUP_NOT_BODY,
+  RELATED_LIST_REF_UNKNOWN,
+  validateRelatedListRefs,
+} from './validate-related-list-refs.js';
 
 const lead = (extra: Record<string, unknown> = {}) => ({
   name: 'rlo_lead',
@@ -80,9 +84,41 @@ describe('validateRelatedListRefs', () => {
     expect(validateRelatedListRefs({})).toEqual([]);
   });
 
+  it('a field group naming a side card is related-list-group-not-body; a body table is its control (#27478)', () => {
+    const line = {
+      name: 'rlo_line',
+      label: 'Line',
+      fields: { lead_id: { type: 'master_detail', label: 'Lead', reference: 'rlo_lead', inlineEdit: 'grid' } },
+    };
+    const groups = (relatedList: string) => [{ key: 'basics', label: 'Basics' }, { key: 'lines', label: 'Lines', relatedList }];
+    const stack = (relatedList: string, child: Record<string, unknown> = task) =>
+      ({ objects: [lead({ fieldGroups: groups(relatedList) }), child, line] });
+    expect(rules(stack('rlo_task'))).toEqual([[RELATED_LIST_GROUP_NOT_BODY, 'objects[0].fieldGroups[1].relatedList']]);
+    const finding = validateRelatedListRefs(stack('rlo_task'))[0]!;
+    expect(finding.severity).toBe('error');
+    expect(finding.where).toBe('object "rlo_lead" › fieldGroups');
+    expect(finding.message).toContain("'rlo_task.lead_id' is a side card");
+    // Controls: the same group naming a body table, and the side card once marked primary.
+    expect(rules(stack('rlo_line'))).toEqual([]);
+    const primaryTask = { ...task, fields: { lead_id: { ...task.fields.lead_id, relatedList: 'primary' } } };
+    expect(rules(stack('rlo_task', primaryTask))).toEqual([]);
+    // A hidden list is not a body table either.
+    const hiddenTask = { ...task, fields: { lead_id: { ...task.fields.lead_id, relatedList: false } } };
+    expect(validateRelatedListRefs(stack('rlo_task', hiddenTask))[0]?.message).toContain('hidden (relatedList: false)');
+    // relatedLists entries order side cards as well; they are not judged this way.
+    expect(rules({ objects: [lead({ relatedLists: ['rlo_task', 'rlo_line'] }), task, line] })).toEqual([]);
+  });
+
   it('writes the sentence defineStack writes for the same entry, word for word', () => {
     const manifest = { id: 'com.example.rlo', namespace: 'rlo', name: 'rlo', version: '1.0.0', type: 'module' as const };
-    const stack = stackOf(lead({ relatedLists: ['rlo_task', 'rlo_task.nope'], fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'rlo_note' }] }));
+    const stack = stackOf(lead({
+      relatedLists: ['rlo_task', 'rlo_task.nope'],
+      fieldGroups: [
+        { key: 'lines', label: 'Lines', relatedList: 'rlo_note' },
+        { key: 'tasks', label: 'Tasks', relatedList: 'rlo_task' },
+        { key: 'events', label: 'Events', relatedList: 'rlo_event' },
+      ],
+    }));
     let issues: readonly string[] = [];
     try {
       defineStack({ manifest, ...stack } as never);
@@ -90,7 +126,7 @@ describe('validateRelatedListRefs', () => {
       issues = (e as { issues?: readonly string[] }).issues ?? [];
     }
     const messages = validateRelatedListRefs(stack).map((f) => f.message);
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(4);
     expect(issues).toEqual(messages);
   });
 });

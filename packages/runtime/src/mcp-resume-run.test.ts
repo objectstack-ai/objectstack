@@ -209,7 +209,11 @@ type Engine = ReturnType<typeof makeEngine>;
  * merged `action` listing alone fail, the object listing still served.
  */
 function makeHarness(
-    opts: { actions?: any[]; standalone?: any[]; engine?: Engine; merged?: 'listing' | 'throws' | 'action-throws' } = {},
+    opts: {
+        actions?: any[]; standalone?: any[]; engine?: Engine; merged?: 'listing' | 'throws' | 'action-throws';
+        /** [#27681] The object the actions are declared on (a `sys_*` name for the system-object cases). */
+        objectName?: string;
+    } = {},
 ) {
     const engine = opts.engine ?? makeEngine();
     const leads: Array<{ id: string; owner: string; name: string }> = [
@@ -218,7 +222,7 @@ function makeHarness(
     ];
     let disabled = new Set<string>();
     const object = {
-        name: OBJECT,
+        name: opts.objectName ?? OBJECT,
         label: 'Lead',
         fields: {},
         actions: opts.actions ?? [SCHEDULE, WIZARD, GATED, CONFIRMED, CONSOLE_ONLY],
@@ -448,6 +452,27 @@ describe('MCP resumeRun — (b) a caller who may not resume is refused before th
     });
 });
 
+describe('[#27681] MCP resumeRun — on a sys_* object, the same per-action gate as run_action', () => {
+    const SYS_OBJECT = 'sys_probe_lead';
+
+    it('a run of a flagged (`ai.exposed`) flow action resumes and completes', async () => {
+        const h = makeHarness({ objectName: SYS_OBJECT, actions: [SCHEDULE, CONSOLE_ONLY] });
+        const runId = await startPaused(h);
+        const done = await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } });
+        expect(done).toMatchObject({ ok: true, action: SCHEDULE.name, objectName: SYS_OBJECT });
+        expect(h.engine.resume).toHaveBeenCalledTimes(1);
+    });
+
+    it('a run of an UNFLAGGED one is refused with the system-object refusal (403), and the engine is not asked', async () => {
+        const h = makeHarness({ objectName: SYS_OBJECT, actions: [SCHEDULE, CONSOLE_ONLY] });
+        const started: any = await h.engine.execute('merge_lead', { userId: 'u1', object: SYS_OBJECT, record: { id: 'lead_1' } });
+        const refused = await refusalOf(h.bridgeFor('u1').resumeRun(started.runId, { values: { subject: 'x' } }));
+        expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(refused.message).toMatch(/is on a system object \('sys_probe_lead'\) and is not exposed via MCP/);
+        expect(h.engine.resume).not.toHaveBeenCalled();
+    });
+});
+
 describe('MCP resumeRun — (c) an unknown runId', () => {
     it('is refused 404, with exactly the envelope another user\'s run gets', async () => {
         const h = makeHarness();
@@ -492,6 +517,7 @@ describe('MCP resumeRun — (d) the engine\'s answers match the REST resume door
         ['RUN_NOT_FOUND', { success: false, code: 'RUN_NOT_FOUND', error: "Suspended node 'collect' no longer exists" }, 'RUN_NOT_FOUND'],
         ['STORE_UNAVAILABLE', { success: false, code: 'STORE_UNAVAILABLE' }, 'STORE_UNAVAILABLE'],
         ['RESUME_IN_PROGRESS', { success: false, code: 'RESUME_IN_PROGRESS', error: 'Run is already being resumed' }, 'RESUME_IN_PROGRESS'],
+        ['RESUME_CHILD_PENDING', { success: false, code: 'RESUME_CHILD_PENDING', error: "Resume run 'run_child' instead" }, 'RESUME_CHILD_PENDING'],
         ['FLOW_FAILED (stranded)', {
             success: false, error: 'tail blew up', status: 'stranded',
             errorMessage: 'Please contact support', summary: { nodes: [] },

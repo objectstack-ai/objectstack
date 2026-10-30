@@ -216,6 +216,7 @@ export function ConsoleLayout({
          <UnifiedSidebar
            activeAppName={activeAppName}
            onAppChange={onAppChange}
+           railOverlay
          />
       }
       navbar={

@@ -37,6 +37,16 @@
  * through this panel's `onFieldSave` — the calendar, the kanban and the gantt.
  * A closed row withholds the edit session as an absent handler does. The
  * delete action is `DetailView`'s own `recordDelete` read, unchanged.
+ *
+ * ⚠️ The FALLBACK, not the console's record (objectstack#27057). Every view
+ * above now gives a row click to a host that hands it an `onRowClick`, and the
+ * console does, so inside the console a record opens in the one record page
+ * (`RecordDetailView`, embedded in the drawer stack) whatever view it was
+ * clicked in. This panel is what a host that routes no click still gets: a
+ * standalone block, a `ListView` with no host handler, a host outside the
+ * console. Its retirement is ADR-0049's enforce-or-remove path: once the
+ * fallback measures zero callers, a follow-up card removes it. Nothing here is
+ * deprecated yet, and no tombstone is written until then.
  */
 
 import React from 'react';
@@ -178,6 +188,11 @@ export function buildRecordDetailFields(
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency here (objectui#12242).
         currencyConfig: def.currencyConfig,
+        // A formula's declared result type, which picks its face in the formula
+        // cell: `currency` draws through the currency cell with the
+        // `currencyConfig` above. Without it a money formula read as a bare
+        // number here (objectstack#27430).
+        returnType: def.returnType,
         precision: def.precision,
         scale: (def as any).scale,
         // Beside `scale`, whose scale-0 grouping heuristic it overrides in the

@@ -62,6 +62,13 @@ describe('[#25579] createBatchSummaryAccumulator — per roll-up kind', () => {
     expect(acc.overlay(bound({ id: 'o1', lowest: null, highest: null }))!.order!.row).toEqual({ id: 'o1', lowest: 3, highest: 7 });
   });
 
+  it('[#27462] count with no sourceField (a count reads no child field): each admitted row still adds one', () => {
+    const acc = createBatchSummaryAccumulator([desc({ summaryField: 'lines', fn: 'count', sourceField: undefined })], CHILD_FIELDS)!;
+    acc.accept({ order: 'o1', amount: 5 });
+    acc.accept({ order: 'o1' });
+    expect(acc.overlay(bound({ id: 'o1', lines: 1 }))!.order!.row).toEqual({ id: 'o1', lines: 3 });
+  });
+
   it('a row never accepted moves nothing: the caller accepts only the rows its rules admitted', () => {
     const acc = createBatchSummaryAccumulator([desc({ summaryField: 'primaries', fn: 'count' })], CHILD_FIELDS)!;
     const stored = bound({ id: 'o1', primaries: 0 });

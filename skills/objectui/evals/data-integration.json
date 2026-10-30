@@ -21,18 +21,19 @@
     },
     {
       "id": 2,
-      "prompt": "Set up MSW mock data for my ObjectUI app so I can develop the frontend without a running backend. I have a Todo object with title, completed, and dueDate fields.",
-      "expected_output": "Provides MSW browser setup using ObjectKernel + InMemoryDriver + MSWPlugin, objectstack.config with the Todo schema, and main.tsx bootstrap pattern.",
+      "prompt": "I want to build my ObjectUI frontend before the backend is deployed. I have a Todo object with title, completed, and dueDate fields. How do I get a working API locally?",
+      "expected_output": "Runs the server with os dev (Todo in objectstack.config), proxies /api from Vite, hands ObjectStackAdapter the origin ''; no MSW.",
       "files": [],
       "assertions": {
         "must_contain": [
-          "ObjectKernel",
-          "InMemoryDriver",
-          "MSWPlugin",
+          "os dev",
+          "proxy",
           "objectstack.config"
         ],
         "must_not_contain": [
-          "msw rest.get('/api/todos'"
+          "enableBrowser",
+          "setupWorker",
+          "baseUrl: '/api/v1"
         ]
       }
     },

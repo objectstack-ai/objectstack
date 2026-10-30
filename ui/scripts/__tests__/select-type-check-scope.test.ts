@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { uiTurboConfigPath } from '../workspace-root.mjs';
+import { uiScopedTurboConfig } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,10 +28,9 @@ import {
  * added to turbo.json is a root change the day it lands.
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
-  globalDependencies?: string[];
-  tasks: Record<string, { inputs?: string[]; dependsOn?: string[] }>;
-};
+// The config turbo runs, narrowed to this tree: what the production selector
+// reads (`main` below), so the rule these cases hold is the rule it applies.
+const turbo = uiScopedTurboConfig();
 const RULE = rootRule(turbo);
 const caught = (files: string[]): string[] => rootChanges(files, RULE).map((h: { file: string }) => h.file);
 
@@ -48,14 +47,30 @@ describe('select-type-check-scope — the root rule (objectui#12222)', () => {
     expect(derived.filter((g) => !globs.has(g))).toEqual([]);
   });
 
+  /**
+   * Rule item 4. objectui's own `turbo.json` made `type-check` depend on the
+   * root task `//#type-check:e2e`; the monorepo's root config cannot name
+   * objectui's root manifest (`//` is the objectstack root), so it has no root
+   * task and the e2e program is compiled by a `type-check-ui` step instead
+   * (`e2e-type-check.test.ts` pins that step and that `type-check` folds in no
+   * root task). The selector still carries the rule for a config that has one,
+   * so the case holds it on objectui's own shape of that task, verbatim.
+   */
   it('takes the root task’s own program, because it runs only as a dependency of a selected package', () => {
-    const rootDeps = (turbo.tasks['type-check'].dependsOn ?? []).filter((d) => d.startsWith('//#'));
-    expect(rootDeps, '`type-check` no longer depends on a root task — this case has nothing to hold').not.toHaveLength(0);
-    for (const dep of rootDeps) {
-      for (const glob of turbo.tasks[dep].inputs ?? []) {
-        expect(RULE.map((r: { glob: string }) => r.glob)).toContain(glob);
-      }
-    }
+    const withRootTask = {
+      tasks: {
+        'type-check': { inputs: ['$TURBO_DEFAULT$'], dependsOn: ['^build', '//#type-check:e2e'] },
+        build: { inputs: ['$TURBO_DEFAULT$'] },
+        '//#type-check:e2e': { inputs: ['e2e/**', 'playwright*.config.ts', 'tsconfig.e2e.json'] },
+      },
+    };
+    const rule = rootRule(withRootTask);
+    const globs = rule.map((r: { glob: string }) => r.glob);
+    for (const glob of withRootTask.tasks['//#type-check:e2e'].inputs) expect(globs).toContain(glob);
+    const e2eProgram = ['e2e/smoke.spec.ts', 'playwright.config.ts', 'tsconfig.e2e.json'];
+    expect(rootChanges(e2eProgram, rule).map((h: { file: string }) => h.file)).toEqual(e2eProgram);
+    // …and the root task's own inputs are all it adds: a package file stays the package graph's.
+    expect(rootChanges(['packages/plugin-kanban/src/x.ts'], rule)).toEqual([]);
   });
 
   it('widens to the whole workspace for every root file the package graph cannot see', () => {
@@ -69,9 +84,10 @@ describe('select-type-check-scope — the root rule (objectui#12222)', () => {
       'patches/some-dep@1.0.0.patch',
       'scripts/vite-crypto-stub.ts',
       'vitest.config.mts',
-      'e2e/smoke.spec.ts',
-      'playwright.config.ts',
-      'tsconfig.e2e.json',
+      // `e2e/smoke.spec.ts`, `playwright.config.ts` and `tsconfig.e2e.json` were
+      // caught by rule item 4, through objectui's root task. The monorepo has no
+      // such task (the next case holds item 4 on its shape); the e2e program runs
+      // as a step of every `type-check-ui` run instead (e2e-type-check.test.ts).
       // A `type-check` input that sits INSIDE a package: every package's
       // type-check hash reads it, while the package graph would only select its
       // owner. (The `build` specimen, `packages/sdui-parser/src/parse.ts`, left

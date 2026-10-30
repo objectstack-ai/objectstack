@@ -109,15 +109,17 @@ const KEY_ID = 'acme-2026';
 const text = (t: string) => new TextEncoder().encode(t);
 
 /** A `.osplugin` built as `os plugin build` builds one, its integrity map computed unless given. */
-function artifact(name: string, opts: { id: string; version?: string; runtime?: string; files?: ArchiveFile[]; integrity?: Record<string, string>; dir?: string }): string {
+function artifact(name: string, opts: { id: string; version?: string; runtime?: string; files?: ArchiveFile[]; integrity?: Record<string, string>; dir?: string; manifest?: Record<string, unknown> }): string {
   const files: ArchiveFile[] = opts.files ?? [{ path: 'dist/index.mjs', data: text(`export const id = ${JSON.stringify(opts.id)};\n`) }];
   const manifest = {
     id: opts.id,
     version: opts.version ?? '1.0.0',
+    name: 'Acme',
     type: 'plugin',
     runtime: opts.runtime ?? 'node',
     packaging: 'bundled',
     integrity: opts.integrity ?? computeIntegrity(files),
+    ...opts.manifest,
   };
   const path = join(opts.dir ?? project, `${name}.osplugin`);
   writeFileSync(path, createTarGz([...files, { path: MANIFEST_FILENAME, data: text(JSON.stringify(manifest)) }]));
@@ -328,6 +330,31 @@ describe('os plugin install (ADR-0025 §3.5 M1)', () => {
     expectRefused(await run(PluginInstall, [path, ...db(), '--json']), 'artifact_entries_refused', 'com.acme.escape');
     expect(existsSync(join(home, 'plugins', 'env_local', 'com.acme.escape', 'escape.txt'))).toBe(false);
     expect(existsSync(join(home, 'plugins', 'env_local', 'escape.txt'))).toBe(false);
+  }, CASE_TIMEOUT_MS);
+
+  it("refuses a pre-retirement artifact (packaging: 'manifest-deps') with the schema's prescription, before unpacking anything", async () => {
+    const path = artifact('retired', { id: 'com.acme.retired', manifest: { packaging: 'manifest-deps' } });
+    sign(path);
+    await trustPublisher();
+    const result = await run(PluginInstall, [path, ...db(), '--json']);
+    expectRefused(result, 'manifest_invalid', 'com.acme.retired');
+    // The schema's own words reach the operator: the retired value and its remedy.
+    const details = (result.payload.details as string[]).join('\n');
+    expect(details).toMatch(/^packaging: `packaging: 'manifest-deps'` was removed/m);
+    expect(details).toMatch(/Delete the key/);
+    // Nothing of it was written under the plugin home.
+    expect(existsSync(join(home, 'plugins', 'env_local', 'com.acme.retired'))).toBe(false);
+  }, CASE_TIMEOUT_MS);
+
+  it('refuses a compiled manifest ManifestSchema refuses, by name, naming each issue', async () => {
+    const path = artifact('drifted', { id: 'com.acme.drifted', manifest: { name: undefined, integrity: ['not', 'a', 'map'] } });
+    sign(path);
+    await trustPublisher();
+    const result = await run(PluginInstall, [path, ...db(), '--json']);
+    expectRefused(result, 'manifest_invalid', 'com.acme.drifted');
+    const details = (result.payload.details as string[]).join('\n');
+    expect(details).toMatch(/^name: /m);
+    expect(details).toMatch(/^integrity: /m);
   }, CASE_TIMEOUT_MS);
 
   it('refuses an unsigned artifact, and installs it only under --trust-unsigned, saying so on stderr', async () => {

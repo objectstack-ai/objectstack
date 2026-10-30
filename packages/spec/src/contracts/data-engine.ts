@@ -240,6 +240,24 @@ export interface WriteObservabilityOptions {
  */
 export interface EngineDatasourceDef {
   name: string;
+  /**
+   * The driver id the datasource selects (`driver` on the authored
+   * datasource: a built-in id such as `postgres`, or the `driver.NAME` id a
+   * server plugin published). The engine reads it to decide whether the
+   * datasource's driver is held behind its correctness floor (a non-managed
+   * `schemaMode` on a driver id that is not built in): a plugin driver is
+   * not trusted to have applied the query, so the engine re-applies it in
+   * memory and refuses over the row cap. Only the engine's own manifest
+   * install path used to carry the id, so a datasource registered through
+   * this member — the datasource-connection service on a connect, and again
+   * after a reconnect, whose eviction drops the stored def — read as "not a
+   * plugin driver" and was served unfloored. Optional because a caller that
+   * registers only the write-gate facts keeps the id stored before it; the
+   * engine never reads an absent key as "built in". {@link
+   * IDataEngine.listDatasourceDefs} answers the stored id, so a sweep can ask
+   * which datasources name a plugin driver.
+   */
+  driver?: string;
   schemaMode?: string;
   external?: {
     /** Datasource-wide write gate — ADR-0015 §5.3 Gate 3. */
@@ -452,7 +470,9 @@ export interface IDataEngine {
    * — the engine accepts and retains the reference since #12758; before
    * this catch-up a caller typed against THIS contract was refused with
    * TS2353 for a value the runtime keeps). Distinct from registering a live
-   * driver connection. Safe to call repeatedly; last write wins.
+   * driver connection. Safe to call repeatedly; last write wins, except an
+   * absent `driver` keeps the id stored before it (see
+   * {@link EngineDatasourceDef.driver}).
    */
   registerDatasourceDef?(def: EngineDatasourceDef): void;
 
@@ -476,7 +496,9 @@ export interface IDataEngine {
    * `schemaMode`, with or without a reference — `credentialsRef` is valid on
    * a managed datasource too, #8153) and answer FRESH copies: a reader must
    * not be able to reach through this accessor and mutate the write gate's
-   * own input.
+   * own input. Each entry carries the definition's stored `driver` id, and
+   * omits the key for a definition that never named one (see
+   * {@link EngineDatasourceDef.driver}).
    */
   listDatasourceDefs?(): EngineDatasourceDef[];
 

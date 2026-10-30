@@ -222,3 +222,63 @@ describe('#8284 getPackagedObjectBase — the packaged declaration, pre-fold', (
         expect(noRegistry.getPackagedObjectBase(OBJ)).toBeUndefined();
     });
 });
+
+describe('#27559 getPackagedObjectBase — the packaged RULE set is the owner plus its code extenders', () => {
+    const EXT_PKG = 'app.showcase-success';
+    const rule = (name: string, message: string) => ({
+        type: 'script', name, message, condition: 'record.name == null', fields: ['name'],
+    });
+
+    function registerRuleExtension(registry: SchemaRegistry, rules: unknown[], packageId = EXT_PKG) {
+        registry.registerObject(
+            { name: OBJ, label: EXTENSION_LABEL, validations: rules } as any,
+            packageId,
+            undefined,
+            'extend',
+            210,
+        );
+    }
+
+    it('appends each code extender\'s rules to the owner\'s, and keeps the owner\'s scalars (#8037)', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        s.registry.registerObject(
+            { name: OBJ, label: 'Ignored', validations: [rule('own_rule', 'Owner says.')] } as any,
+            PKG,
+        );
+        registerRuleExtension(s.registry, [rule('ext_rule', 'Extension says.')]);
+
+        const base = baseOf(s.protocol);
+        expect(base.validations.map((r: any) => [r.name, r.message])).toEqual([
+            ['own_rule', 'Owner says.'],
+            ['ext_rule', 'Extension says.'],
+        ]);
+        // ⛔ Not by widening the object scalars' base: the extension's label must
+        // still read as diverged from the packaged one, so it keeps winning.
+        expect(base.label).toBe('Ignored');
+        expect((s.registry.getObject(OBJ) as any).label).toBe(EXTENSION_LABEL);
+    });
+
+    it('stays the owner declaration BY REFERENCE when no extender ships a rule', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        registerExtension(s.registry);
+        expect(baseOf(s.protocol)).toBe(s.registry.getPackagedObjectOwner(OBJ)?.definition);
+    });
+
+    it('does not move under a tenant overlay that rewords an extender rule', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        registerRuleExtension(s.registry, [rule('ext_rule', 'Extension says.')]);
+        s.registry.registerObject(
+            {
+                name: OBJ, label: 'Customer', validations: [rule('ext_rule', 'Tenant says.')],
+                _packageId: 'sys_metadata', _provenance: 'org',
+            } as any,
+            'sys_metadata',
+            undefined,
+            'overlay',
+        );
+        expect(baseOf(s.protocol).validations.map((r: any) => r.message)).toEqual(['Extension says.']);
+    });
+});

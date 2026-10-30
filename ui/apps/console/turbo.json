@@ -5,7 +5,9 @@
     "build": {
       "outputs": [
         "dist/**",
+        "json-schema/**",
         ".next/**",
+        "!.next/cache/**",
         "build/**",
         "**/*.tsbuildinfo",
         "!**/node_modules/**",

@@ -278,10 +278,11 @@ const importRow = (res: any) => res.body?.results?.[0]?.error;
 const jobRow = async (_res: any, b: Booted) => (await terminalJobPatch(b)).results?.items?.[0]?.error;
 
 /**
- * [#22719] An undeclared refusal re-dressed in the nested envelope: the code
- * the classification leaves out is the catalog's own floor for `400`.
+ * [#27597] The same refusal where the family re-dresses the `/data` door's
+ * classification whole: a sandboxed hook's undeclared abort answers the
+ * ledgered `HOOK_ABORTED` there (the floor's `VALIDATION_ERROR` before).
  */
-const REFUSED_400 = { status: 400, code: 'VALIDATION_ERROR' } as const;
+const HOOK_ABORTED_400 = { status: 400, code: 'HOOK_ABORTED' } as const;
 
 /**
  * Rows that answer a refusal in the hook's own words. ⛔ The two import rows
@@ -349,25 +350,28 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     // `.message`, and emits the answer in the nested envelope. Was `500` with
     // the family's own code (`RULE_*_FAILED`, `SUGGESTION_*_FAILED` /
     // `INTERNAL`, `APPROVAL_*_FAILED`).
-    'POST /api/v1/sharing/rules': { called: 'sharingRules.defineRule', body: {}, answers: REFUSED_400 },
-    'DELETE /api/v1/sharing/rules/:idOrName': { called: 'sharingRules.deleteRule', answers: REFUSED_400 },
-    'POST /api/v1/sharing/rules/:idOrName/evaluate': { called: 'sharingRules.evaluateRule', answers: REFUSED_400 },
-    'POST /api/v1/security/suggested-bindings/:id/confirm': { called: 'security.confirmAudienceBindingSuggestion', answers: REFUSED_400 },
-    'POST /api/v1/security/suggested-bindings/:id/dismiss': { called: 'security.dismissAudienceBindingSuggestion', answers: REFUSED_400 },
-    'POST /api/v1/security/suggested-bindings/:id/reopen': { called: 'security.reopenAudienceBindingSuggestion', answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/approve': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/reject': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/recall': { called: 'approvals.recall', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/revise': { called: 'approvals.sendBack', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/resubmit': { called: 'approvals.resubmit', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/reassign': { called: 'approvals.reassign', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/remind': { called: 'approvals.remind', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/request-info': { called: 'approvals.requestInfo', body: {}, answers: REFUSED_400 },
-    'POST /api/v1/approvals/requests/:id/comment': { called: 'approvals.comment', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/sharing/rules': { called: 'sharingRules.defineRule', body: {}, answers: HOOK_ABORTED_400 },
+    'DELETE /api/v1/sharing/rules/:idOrName': { called: 'sharingRules.deleteRule', answers: HOOK_ABORTED_400 },
+    'POST /api/v1/sharing/rules/:idOrName/evaluate': { called: 'sharingRules.evaluateRule', answers: HOOK_ABORTED_400 },
+    'POST /api/v1/security/suggested-bindings/:id/confirm': { called: 'security.confirmAudienceBindingSuggestion', answers: HOOK_ABORTED_400 },
+    'POST /api/v1/security/suggested-bindings/:id/dismiss': { called: 'security.dismissAudienceBindingSuggestion', answers: HOOK_ABORTED_400 },
+    'POST /api/v1/security/suggested-bindings/:id/reopen': { called: 'security.reopenAudienceBindingSuggestion', answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/approve': { called: 'approvals.decide', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/reject': { called: 'approvals.decide', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/recall': { called: 'approvals.recall', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/revise': { called: 'approvals.sendBack', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/resubmit': { called: 'approvals.resubmit', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/reassign': { called: 'approvals.reassign', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/remind': { called: 'approvals.remind', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/request-info': { called: 'approvals.requestInfo', body: {}, answers: HOOK_ABORTED_400 },
+    'POST /api/v1/approvals/requests/:id/comment': { called: 'approvals.comment', body: {}, answers: HOOK_ABORTED_400 },
     // Package publish: the classification decides the status the door falls
     // back to, the shared read the sentence. Was `500 INTERNAL_ERROR`.
+    // [#27672] FLIPPED on purpose from `400 VALIDATION_ERROR`: the door's code
+    // is `resolveThrownHttpError`'s, which now answers an undeclared hook abort
+    // `HOOK_ABORTED`, the code `/data` answers.
     'POST /api/v1/packages/publish': {
-        called: 'service:package.publish', answers: REFUSED_400,
+        called: 'service:package.publish', answers: HOOK_ABORTED_400,
         body: { manifest: { id: 'p1', version: '1.0.0' }, metadata: {} },
     },
     // External datasources: the shared read only, so status and code are this

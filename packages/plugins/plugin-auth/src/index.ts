@@ -33,6 +33,13 @@ export {
   authEmailLocaleFromRequest,
   AuthManager,
 } from './auth-manager.js';
+// The IdP locale rule, for a host whose sign-in does not run through the OIDC
+// seams (the cloud's sso-exchange hand-off): `AuthManager.applyIdpLocaleClaim`
+// takes this claim. A user's language preference is written only while it is
+// unset or still the value an IdP sign-in last wrote, so a local choice is
+// kept; the call never throws. The pure steps of the rule stay unexported, so
+// the rule keeps one owner.
+export type { IdpLocaleClaim } from './idp-locale-claim.js';
 export * from './ensure-default-organization.js';
 // [ADR-0131 D3 / D10 fate 3] The Default Organization's boot invariant, for the
 // v18 organization-ownership ceremony (`os migrate organization-ownership

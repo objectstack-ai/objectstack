@@ -18,10 +18,10 @@
  *     fetches the existing record (in edit mode) via `dataSource.findOne`,
  *     so this page does not need to manage its own loading state for
  *     record data.
- *   - On success / cancel, navigates back if the user has history, otherwise
- *     falls back to a sensible parent route (record detail in edit mode,
- *     object list in create mode). Cancel always navigates back without a
- *     toast.
+ *   - On success / cancel, navigates back when an earlier entry of THIS
+ *     console session is behind the page, otherwise goes to the parent route
+ *     (record detail in edit mode, object list in create mode). Cancel never
+ *     toasts.
  *   - Wraps the form in a sticky page header (back button + title) for a
  *     consistent full-screen chrome.
  *
@@ -120,13 +120,20 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   /**
    * Navigate back to the most relevant location.
-   * Prefer `history.back()` so users return to the exact list/view they came
-   * from (preserving filters, scroll position, etc.). Fall back to the
-   * record detail (edit mode) or list (create mode) when there is no
-   * history entry — happens on direct/refreshed loads of the URL.
+   * Back only when this console pushed an entry behind this one, so users
+   * return to the exact list/view they came from. react-router numbers the
+   * entries it writes in `history.state.idx`: 0 on the entry the document
+   * loaded on, one more per push, unchanged by a replace. ⛔ Not
+   * `location.key !== 'default'`: a replace on load (the app-name address
+   * moved to the package-id one) mints a key with nothing behind it, so Save
+   * went Back out of the app (objectstack-ai/objectstack#28036). ⛔ Nor
+   * `window.history.length`: it counts the tab's entries from before the
+   * console loaded (objectstack-ai/objectstack#27454). Otherwise the record
+   * detail (edit) or list (create), inside the app.
    */
   const goBack = useCallback(() => {
-    if (typeof window !== 'undefined' && window.history.length > 1) {
+    const entryIndex = (window.history.state as { idx?: unknown } | null)?.idx;
+    if (typeof entryIndex === 'number' && entryIndex > 0) {
       navigate(-1);
     } else {
       navigate(recordDetailUrl, { replace: true });
