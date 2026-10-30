@@ -4514,11 +4514,35 @@ interface ProvidedCollectionEntry {
   /** Where it was declared, for a finding: the input, or a package body of it. */
   declaredIn: string;
   /**
-   * The registry slot the entry registers in: the registry keys a
+   * The registry slot the entry is judged in: the registry keys a
    * package-owned item by package id and name, so two entries under one name
    * in one slot are one item (the later wins), and in two slots they are two.
+   * For a package body's own entry ({@link ProvidedCollectionEntry.inBody})
+   * that is the slot it boots into. For a top-level entry that boots beside
+   * package bodies it is a stand-in, one per input: see `inBody`.
    */
   slot: string;
+  /**
+   * Whether the entry boots as a package body's own item: an entry of a
+   * `packages[]` body, or, under `preserve`, the top level of an input that
+   * `preservePackageEntries` folds into a body of its own manifest id.
+   *
+   * `false` for every other top-level entry. When the artifact carries
+   * package bodies, such an entry boots through the residual rule
+   * (`unclaimedTopLevel`, `@objectstack/metadata`): it is not registered at
+   * all when a body declares its name, and is registered under the composed
+   * artifact's `manifest.id` (the last input's) when none does; a dev reload
+   * then replaces the booted entries of the name with the artifact's
+   * top-level list (`mergeDeclaredConnectorSources`,
+   * `@objectstack/service-automation`). Its `slot` is therefore not the slot
+   * it boots into: `'artifact'` under `last` and for an input with no
+   * manifest id, and under `preserve` the input's own `package:${id}` for an
+   * input that carries `packages` beside its own collections. Keeping such a
+   * top level in a slot apart from the bodies is what refuses a disagreement
+   * with a body's entry as ambiguous, which is the verdict the boot-or-reload
+   * split asks for, so the stand-in stays.
+   */
+  inBody: boolean;
 }
 
 /**
@@ -4532,9 +4556,13 @@ interface ProvidedCollectionEntry {
  * reproduce its flattened half keeps both halves, holding the same entry
  * objects in each, so the bodies are read first and the top level adds only
  * what no body carries. The slot follows how the artifact boots: a package
- * body registers under its own id; a top-level entry registers under the
- * input's own package when `preserve` folds each input into a package body,
- * and under the composed artifact's one package otherwise.
+ * body registers under its own id, and so does the top level of an input that
+ * `preserve` folds into a package body. Any other top-level entry takes the
+ * input's own `package:${id}` under `preserve` when the input has a manifest
+ * id, and the `'artifact'` slot otherwise. When no input carries package
+ * bodies, `'artifact'` is the composed artifact's one package. Beside package
+ * bodies both are stand-ins, because such an entry boots through the residual
+ * rule and a dev reload replaces it (see {@link ProvidedCollectionEntry.inBody}).
  */
 function providedCollectionEntries(
   stack: ObjectStackDefinition,
@@ -4545,12 +4573,12 @@ function providedCollectionEntries(
   const entries: ProvidedCollectionEntry[] = [];
   const seen = new Set<unknown>();
   const input = stackLabel(stack, index);
-  const collect = (list: unknown, declaredIn: string, slot: string): void => {
+  const collect = (list: unknown, declaredIn: string, slot: string, inBody: boolean): void => {
     if (!Array.isArray(list)) return;
     for (const entry of list) {
       if (seen.has(entry)) continue;
       seen.add(entry);
-      entries.push({ entry, declaredIn, slot });
+      entries.push({ entry, declaredIn, slot, inBody });
     }
   };
   const source = stack as Record<string, unknown>;
@@ -4558,12 +4586,13 @@ function providedCollectionEntries(
     for (const pkg of source.packages) {
       if (!isRecord(pkg) || !isRecord(pkg.manifest)) continue;
       const id = pkg.manifest.id ?? pkg.manifest.name;
-      if (typeof id === 'string') collect(pkg.manifest[key], `package '${id}' of ${input}`, `package:${id}`);
-      else collect(pkg.manifest[key], input, `input:${index}`);
+      if (typeof id === 'string') collect(pkg.manifest[key], `package '${id}' of ${input}`, `package:${id}`, true);
+      else collect(pkg.manifest[key], input, `input:${index}`, true);
     }
   }
   const ownId = stack.manifest?.id ?? stack.manifest?.name;
-  collect(source[key], input, preserve && typeof ownId === 'string' ? `package:${ownId}` : 'artifact');
+  const ownSlot = preserve && typeof ownId === 'string' ? `package:${ownId}` : 'artifact';
+  collect(source[key], input, ownSlot, ownSlot !== 'artifact' && !Array.isArray(source.packages));
   return entries;
 }
 
@@ -4592,12 +4621,22 @@ function providedCollectionEntries(
  * registry keeps ({@link SAME_STACK_ENTRY_IDENTITY}'s `connectors` row), so
  * the kept entry is judged, and when it cannot lend but an earlier one in the
  * slot could, the finding names both and prescribes the duplicate's fix. In
- * DIFFERENT slots (two packages of the artifact) the registry keeps one entry
- * per package, and the lender answers whichever registers first, so when the
- * kept entries disagree on whether they can lend the borrow is refused as
- * ambiguous in either declaration order: the build cannot know which one the
- * datasource gets, and one name meaning one grant is what D7 asks for. When
- * they agree, the verdict is the same whichever one lends.
+ * DIFFERENT slots the kept entries are refused as ambiguous, in either
+ * declaration order, when they disagree on whether they can lend. The build
+ * cannot know which one the datasource gets, and one name meaning one grant
+ * is what D7 asks for. Which mechanism makes it unknowable depends on where
+ * the entries sit, and the finding names it:
+ *
+ * - two package bodies: the registry keeps one entry per package, and the
+ *   lender answers whichever registers first;
+ * - a package body and a top-level entry beside it: the boot does not
+ *   register the top-level entry, so the body's lends, and a dev reload
+ *   replaces the body's entry with the top-level one
+ *   ({@link ProvidedCollectionEntry.inBody});
+ * - top-level entries of two inputs, beside bodies that do not declare the
+ *   name: the runtime registers neither as a package body's own entry.
+ *
+ * When the kept entries agree, the verdict is the same whichever one lends.
  */
 function collectComposedDatasourceConnectorErrors(
   stacks: readonly ObjectStackDefinition[],
@@ -4626,13 +4665,27 @@ function collectComposedDatasourceConnectorErrors(
     const notLending = kept.filter((provided) => !lends(provided));
     if (lending.length > 0 && notLending.length > 0) {
       const sites = (list: ProvidedCollectionEntry[]): string => list.map((p) => p.declaredIn).join(', ');
+      const disagree =
+        `and they disagree: ${sites(lending)} declares an instance that can lend, and ` +
+        `${sites(notLending)} declares an entry that cannot.`;
+      const inBodies = kept.filter((provided) => provided.inBody).length;
+      const where =
+        inBodies === kept.length
+          ? `which more than one package of the composed artifact declares, ${disagree} The runtime ` +
+            `keeps one entry per package and lends from whichever registers first, so the datasource ` +
+            `could boot with no credential.`
+          : inBodies > 0
+            ? `which the composed artifact declares both in a package body and at its top level, ` +
+              `${disagree} The boot does not register a top-level entry whose name a package body ` +
+              `declares, so the body's entry lends, and a dev reload replaces it with the top-level ` +
+              `one, so the datasource could boot or reload with no credential.`
+            : `which more than one input declares at the top level of a composed artifact that ` +
+              `carries package bodies, ${disagree} The runtime registers neither as a package ` +
+              `body's own entry, so the build cannot tell which one lends, and the datasource could ` +
+              `boot with no credential.`;
       ambiguities.set(
         name,
-        `which more than one package of the composed artifact declares, and they disagree: ` +
-          `${sites(lending)} declares an instance that can lend, and ${sites(notLending)} declares an ` +
-          `entry that cannot. The runtime keeps one entry per package and lends from whichever ` +
-          `registers first, so the datasource could boot with no credential. Rename or remove the ` +
-          `entry that cannot lend, so that one connector name means one instance.`,
+        `${where} Rename or remove the entry that cannot lend, so that one connector name means one instance.`,
       );
       continue;
     }

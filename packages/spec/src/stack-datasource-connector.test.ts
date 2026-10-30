@@ -31,6 +31,12 @@
  *   both, and the first registered lends) is refused as ambiguous in either
  *   order when one entry can lend and the other cannot, and accepted when
  *   both can;
+ * - a top-level entry beside a package body's same-named entry (a nested
+ *   input's body under `last`, or another package's body under `preserve`
+ *   beside an input that carries `packages` and its own top level) is refused
+ *   as ambiguous when the two disagree, for the reason the runtime gives: the
+ *   boot keeps the body's entry, a dev reload replaces it with the top-level
+ *   one;
  * - a nested multi-package input (a `manifest: 'preserve'` artifact) is read
  *   through its package bodies, where its connectors and datasources live,
  *   and an entry it carries in both halves is read once;
@@ -162,6 +168,10 @@ describe('composeStacks judges external.connector against the connectors of ever
       return err as Envelope;
     }
   };
+  const BESIDE_BODY = 'which the composed artifact declares both in a package body and at its top level, and they disagree';
+  const BOOT_OR_RELOAD =
+    "The boot does not register a top-level entry whose name a package body declares, so the body's entry " +
+    'lends, and a dev reload replaces it with the top-level one';
   const expectComposedFinding = (refused: Envelope | undefined, fragment: string): void => {
     expectOneFinding(refused, fragment);
     expect(refused?.issues).toHaveLength(1);
@@ -275,17 +285,21 @@ describe('composeStacks judges external.connector against the connectors of ever
       ]);
     });
 
-    it("treats a package body and another input's top level as two slots, and names the body", () => {
+    it("refuses as ambiguous a top-level entry beside a package body's same-named entry, and names the body", () => {
       const strictPair = defineStack({
         manifest: pluginManifest('com.acme.orders'),
         datasources: [sapOrders()],
         connectors: [instance()],
       } as never);
       const refused = composeRefusal([nested(strictPair), owner({ name: 'sap_s4', label: 'SAP', type: 'api' })]);
-      expectComposedFinding(refused, 'which more than one package of the composed artifact declares, and they disagree');
-      expect(String(refused?.issues?.[0])).toContain(
-        "package 'com.acme.orders' of 'com.acme.other' (stack #0) declares an instance that can lend",
+      expectComposedFinding(refused, BESIDE_BODY);
+      const finding = String(refused?.issues?.[0]);
+      expect(finding).toContain(
+        "package 'com.acme.orders' of 'com.acme.other' (stack #0) declares an instance that can lend, " +
+          "and 'com.acme.sap' (stack #1) declares an entry that cannot.",
       );
+      expect(finding).toContain(BOOT_OR_RELOAD);
+      expect(finding).not.toContain('one entry per package');
     });
 
     it('reads an entry the nested input carries in both halves once', () => {
@@ -303,6 +317,53 @@ describe('composeStacks judges external.connector against the connectors of ever
       const refused = composeRefusal([owner(), both]);
       expect(refused?.issues).toHaveLength(1);
       expect(refused?.message).toContain('composeStacks artifact cross-reference validation failed (1 issue):');
+    });
+  });
+
+  describe('a `preserve` input that carries `packages` beside its own top-level collections', () => {
+    // Hand-assembled: `preservePackageEntries` passes its bodies through and
+    // assembles its own top level into none, so that top level boots through
+    // the residual rule (under the composed artifact's `manifest.id`, the last
+    // input's), and the collector judges it in its own `package:${id}` slot.
+    const mixed = (connector: Record<string, unknown>) =>
+      defineStack({
+        manifest: pluginManifest('com.acme.bundle'),
+        connectors: [connector],
+        packages: [{ manifest: pluginManifest('com.acme.inner') }],
+      } as never);
+    const strictPair = () =>
+      defineStack({
+        manifest: pluginManifest('com.acme.orders'),
+        datasources: [sapOrders()],
+        connectors: [instance()],
+      } as never);
+    const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
+
+    it.each([
+      ['mixed input first', false],
+      ['mixed input last', true],
+    ])("refuses as ambiguous its top-level entry beside another package's body — %s", (_order, reversed) => {
+      const stacks = reversed ? [strictPair(), mixed(descriptor)] : [mixed(descriptor), strictPair()];
+      const refused = composeRefusal(stacks, { manifest: 'preserve' });
+      expectComposedFinding(refused, BESIDE_BODY);
+      const finding = String(refused?.issues?.[0]);
+      expect(finding).toContain("'com.acme.orders' (stack #");
+      expect(finding).toContain("declares an instance that can lend, and 'com.acme.bundle' (stack #");
+      expect(finding).toContain(BOOT_OR_RELOAD);
+    });
+
+    it('CONTROL: its top-level instance composes beside a body whose same-named instance can lend too, in either order', () => {
+      const other = instance({ auth: { type: 'bearer', credentialRef: 'sap_token_2' } });
+      expect(composeRefusal([strictPair(), mixed(other)], { manifest: 'preserve' })).toBeUndefined();
+      const artifact = composeStacks([mixed(other), strictPair()] as never, { manifest: 'preserve' }) as Record<string, unknown>;
+      // No body owns the mixed input's top level, so the artifact keeps it,
+      // beside bodies of the inner package and the plain input only, and the
+      // residual rule reads it under the last input's manifest id.
+      expect((artifact.manifest as Record<string, unknown>).id).toBe('com.acme.orders');
+      expect(
+        (artifact.packages as { manifest: Record<string, unknown> }[]).map((pkg) => pkg.manifest.id),
+      ).toEqual(['com.acme.inner', 'com.acme.orders']);
+      expect(artifact.connectors).toContainEqual(expect.objectContaining({ auth: other.auth }));
     });
   });
 
