@@ -71,6 +71,7 @@ import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 import MigratePlan from '../commands/migrate/plan.js';
+import MigrateRecordCurrencyCodes from '../commands/migrate/record-currency-codes.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
 import MigrateSecurityCatalogOverlays from '../commands/migrate/security-catalog-overlays.js';
@@ -269,6 +270,20 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateRecordedBy),
     noWrite: [{ label: 'migrate recorded-by', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate recorded-by --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/record-currency-codes.ts': {
+    run: invoke(MigrateRecordCurrencyCodes),
+    // The fixture's app declares no record-mode amount, so the backfill
+    // refuses `status` (INVALID_FIELD) after the boot and writes nothing.
+    // The boot is what these cases are about.
+    noWrite: [{
+      label: 'migrate record-currency-codes',
+      argv: ['--object', 'osf_lead', '--field', 'status', '--code', 'USD', '--database-url', '@DB@', '--json'],
+    }],
+    write: [{
+      label: 'migrate record-currency-codes --apply',
+      argv: ['--apply', '--yes', '--object', 'osf_lead', '--field', 'status', '--code', 'USD', '--database-url', '@DB@', '--json'],
+    }],
   },
   'commands/migrate/resume.ts': {
     run: invoke(MigrateResume),
