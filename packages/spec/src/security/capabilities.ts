@@ -77,7 +77,10 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // (`sys_audit_log_org`, plugin-security's default sets) still bounds a holder
   // to its own organization's rows (only the parent-record gate is lifted). A
   // platform administrator reaches every row, deployment-level rows included,
-  // through its superuser read bypass, not through this capability.
+  // through its superuser read bypass, not through this capability; the
+  // deployment-level rows (no `tenant_id`) are served, in every posture, only
+  // to a request that carries the `PLATFORM_ADMIN` posture rung (#26750,
+  // plugin-audit's `audit-log-read-visibility.ts`).
   { name: 'view_all_audit_log', label: 'View All Audit Log', description: 'Read every compliance-ledger (sys_audit_log) row the holder’s ledger grant and row scope reach, past the parent-record read gate: rows about deleted records, ended sessions and records the holder cannot open. Under an organization wall an organization reader’s row scope is the rows about its organization (tenant_id); a platform administrator reads every row, deployment-level rows included. Under the single tenancy posture too, where no wall is enforced, deployment-level rows (no tenant_id) are served only to the platform administrator. Field-level security still narrows each row’s before/after snapshots.', scope: 'org' },
   // The mailbox administrator capability (ruling 6116489638, Q4 → A on the
   // inbound-mail record). A read of a mirrored inbound message
