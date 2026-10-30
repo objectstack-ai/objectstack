@@ -2385,13 +2385,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     },
     fields: {
-      name: {
-        label: "名前",
-        helpText: "マシン名（snake_case）"
-      },
       label: {
         label: "表示名",
         helpText: "管理者向け表示ラベル"
+      },
+      name: {
+        label: "名前",
+        helpText: "作成時に表示名から自動生成されます。snake_case"
       },
       description: {
         label: "説明",
