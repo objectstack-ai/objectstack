@@ -1988,6 +1988,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.externalDatasource.browser.colColumns': 'Columns',
   'engine.externalDatasource.browser.colRows': 'Rows (est.)',
   'engine.externalDatasource.browser.import': 'Import',
+  'engine.externalDatasource.browser.selectAll': 'Select all tables',
+  'engine.externalDatasource.browser.selectRow': 'Select {table}',
+  'engine.externalDatasource.browser.importSelected': 'Import selected ({count})',
+  'engine.externalDatasource.browser.importingSelected': 'Importing {done} of {count}…',
+  'engine.externalDatasource.browser.batchDoneOne': 'Imported {count} of {total} tables as an object.',
+  'engine.externalDatasource.browser.batchDoneOther': 'Imported {count} of {total} tables as objects.',
   'engine.externalDatasource.browser.unavailable':
     'Federation is not enabled on this server. The {service} service must be registered for table browsing, drafting, and validation to work.',
   'engine.externalDatasource.check.unavailable':
@@ -2026,6 +2032,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.externalDatasource.import.reviewOther': '{count} columns need review',
   'engine.externalDatasource.import.source': 'Generated source',
   'engine.externalDatasource.import.importing': 'Importing…',
+  'engine.externalDatasource.import.writable': 'Allow writes to this object (read-only otherwise)',
   'engine.studio.data.tab.advanced': 'Advanced',
   'engine.studio.data.nameLabel': 'Object name',
   'engine.studio.data.idLabel': 'Identifier',
