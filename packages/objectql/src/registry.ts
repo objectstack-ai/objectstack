@@ -3499,6 +3499,11 @@ export class SchemaRegistry {
    * {@link securityCatalogPackageHolders}'s answer, the one predicate. Built-in
    * names are skipped, as the cold boot skips them (see the method above).
    * Sorted by type in that list's order, then name.
+   *
+   * Also read BY NAME from `@objectstack/metadata-protocol`
+   * (`protocol-save-door-refusals.ts`, `registryPackageHoldersOf`): renaming
+   * this member means updating that caller and
+   * `protocol-permission-set-name-registry-reading.test.ts`.
    */
   private packageHeldSecurityCatalogNames(): Array<{ catalogType: SecurityCatalogType; name: string; packageIds: string[] }> {
     const held: Array<{ catalogType: SecurityCatalogType; name: string; packageIds: string[] }> = [];
@@ -5067,6 +5072,44 @@ export class SchemaRegistry {
     if (fqn === undefined) return undefined;
     const owner = this.objectContributors.get(fqn)?.find(c => c.ownership === 'own');
     return owner && isCodeArtifactBody(owner.definition) ? owner : undefined;
+  }
+
+  /**
+   * [ADR-0029 D9.2a, #27559] The packaged base a served object is compared
+   * against: the {@link getPackagedObjectOwner} declaration, with the
+   * `validations` of every CODE `extend` contributor appended in fold order.
+   *
+   * The packaged message of a rule is the message of whichever code layer
+   * ships that rule name — the owner or a code extender — because the catalog
+   * translates exactly what those layers ship. Reading the owner alone left an
+   * extender's rule with nothing to compare a tenant's rewrite with, so the
+   * catalog won over it on `/meta` and on the refusal alike. Both readers take
+   * their packaged rules from here (`getPackagedObjectBase` in
+   * `@objectstack/metadata-protocol`, `packagedRuleLookup` in this package),
+   * so they cannot split again.
+   *
+   * ⛔ ONLY `validations` widens. The scalars stay the owner's: an extension's
+   * `label` / `description` must keep reading as diverged from the packaged
+   * one, or the catalog takes back the case #8037 filed.
+   *
+   * Returns the owner's definition BY REFERENCE when no code extender ships a
+   * rule, and `undefined` exactly where {@link getPackagedObjectOwner} does.
+   */
+  getPackagedObjectBase(name: string): ServiceObject | undefined {
+    const owner = this.getPackagedObjectOwner(name);
+    if (!owner) return undefined;
+    const fqn = this.resolveObjectKey(name);
+    let rules: unknown[] | undefined;
+    for (const contrib of (fqn === undefined ? undefined : this.objectContributors.get(fqn)) ?? []) {
+      if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+      const list = contrib.definition.validations;
+      if (!Array.isArray(list) || list.length === 0) continue;
+      rules ??= [...(owner.definition.validations ?? [])];
+      rules.push(...list);
+    }
+    return rules === undefined
+      ? owner.definition
+      : { ...owner.definition, validations: rules as ServiceObject['validations'] };
   }
 
   /**

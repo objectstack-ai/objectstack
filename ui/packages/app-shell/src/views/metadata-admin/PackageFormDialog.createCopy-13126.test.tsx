@@ -9,8 +9,10 @@
  * description carries no scope word at all.
  *
  * The description is read off the rendered dialog through its
- * `aria-describedby` link, and the interpolated `{example}` is the positive
- * control that the node read is the description and not an empty one.
+ * `aria-describedby` link, and its catalogue sentence is the positive control
+ * that the node read is the description and not an empty one. (It used to be
+ * the interpolated example id; objectstack#27833 took the id out of the first
+ * step's copy.)
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -18,6 +20,14 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { PackageFormDialog } from './PackageFormDialog';
+import { t } from './i18n';
+// The zh rows live in `@object-ui/i18n`'s `studio` namespace, fetched on
+// demand (objectstack#25922). Resident before any case, so the dialog and the
+// positive control below read the same catalogue: rendering zh otherwise
+// starts the fetch, and the control could read zh while the dialog had
+// rendered the en fallback.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 let localeFixture: 'en-US' | 'zh-CN' = 'en-US';
 vi.mock('./i18n', async (importOriginal) => ({
@@ -39,8 +49,8 @@ async function createDescription(): Promise<string> {
   const dialog = screen.getByRole('dialog');
   const ids = (dialog.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
   const text = ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
-  // Positive control: the example id is interpolated into the description.
-  expect(text).toContain('com.acme.crm');
+  // Positive control: the node read is the description's own sentence.
+  expect(text).toContain(t('engine.packages.create.description', localeFixture));
   return text;
 }
 

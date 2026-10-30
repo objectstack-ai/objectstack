@@ -97,8 +97,21 @@ describe('reference-integrity suite — membership', () => {
 
   it('wires the same function the package exports', () => {
     const byName = new Map(REFERENCE_INTEGRITY_RULES.map((r) => [r.name, r.run]));
-    expect(byName.get('validateObjectReferences')).toBe(validateObjectReferences);
     expect(byName.get('validateTranslationReferences')).toBe(validateTranslationReferences);
+    // [#27827] `validateObjectReferences` is wired through an adapter that hands
+    // it `ctx.packageScope`, the way `validateListViewFieldRefs` is, so the pin
+    // is on what the member ANSWERS: the exported function's answer, with the
+    // context's closure and without it. The stack carries a real miss, so the
+    // two equalities cannot hold by both sides being empty.
+    const member = byName.get('validateObjectReferences')!;
+    const stack = { objects: [{ name: 'crm_lead', fields: {} }], datasets: [{ name: 'd', object: 'crm_ghost' }] };
+    const scope = { packageId: 'com.acme.crm', dependencies: [] };
+    expect(validateObjectReferences(stack)).toHaveLength(1);
+    expect(member(stack)).toEqual(validateObjectReferences(stack));
+    expect(member(stack, { runtimeWriteType: 'dataset', packageScope: scope })).toEqual(
+      validateObjectReferences(stack, { packageScope: scope }),
+    );
+    expect(member(stack, { runtimeWriteType: 'dataset', packageScope: scope })).not.toEqual(member(stack));
   });
 });
 

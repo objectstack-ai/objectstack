@@ -21,7 +21,7 @@ import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { runIsUnscopedUserMode, flowTouchesData, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
-import { readCarriedRefusal } from './inner-refusal.js';
+import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`
@@ -70,7 +70,7 @@ export interface RunResumeHost {
     readonly recordExpander: AutomationEngine['recordExpander'];
     readonly refuseGatedResume: AutomationEngine['refuseGatedResume'];
     readonly resumeInternal: AutomationEngine['resumeInternal'];
-    readonly resolveEffectiveSuspension: AutomationEngine['resolveEffectiveSuspension'];
+    readonly resolveSuspensionChain: AutomationEngine['resolveSuspensionChain'];
     readonly resolveSuspendedNodeType: AutomationEngine['resolveSuspendedNodeType'];
     readonly resolveResumeAuthority: AutomationEngine['resolveResumeAuthority'];
     readonly resolveDeclaredResumeAuthority: AutomationEngine['resolveDeclaredResumeAuthority'];
@@ -391,17 +391,34 @@ export async function resume(this: Pick<RunResumeHost, 'refuseGatedResume' | 're
     return this.resumeInternal(runId, signal ?? {}, false);
 }
 
-/** The body of {@link AutomationEngine.refuseGatedResume}, moved unedited; that method's docblock is its contract. */
-export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveEffectiveSuspension' | 'resolveSuspendedNodeType' | 'resolveResumeAuthority' | 'resolveDeclaredResumeAuthority' | 'logger'>, runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
-    const run = await this.resolveEffectiveSuspension(runId);
+/**
+ * [#27877] The code a resume answers when it would advance a `map` past an
+ * item whose child run is still suspended — its own member of the contract's
+ * closed union, never `RESUME_IN_PROGRESS`, which tells a caller the work is
+ * already being done and needs nothing from them. The ONE spelling of it in
+ * this package: the refusal below and its pins read this constant.
+ *
+ * ⛔ Deliberately absent from {@link RETRYABLE_RESUME_REFUSAL_CODES}: that set
+ * is what `resumeInternal` answers, and this code is answered only by the
+ * public door's gate, before `resumeInternal` is reached.
+ */
+export const MAP_ITEM_PENDING_REFUSAL_CODE: NonNullable<AutomationResult['code']> = 'RESUME_CHILD_PENDING';
+
+/** The body of {@link AutomationEngine.refuseGatedResume}; that method's docblock is its contract. */
+export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveSuspensionChain' | 'resolveSuspendedNodeType' | 'resolveResumeAuthority' | 'resolveDeclaredResumeAuthority' | 'logger'>, runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
+    const chain = await this.resolveSuspensionChain(runId);
+    const run = chain[chain.length - 1];
     if (!run) return null;
 
     const nodeType = this.resolveSuspendedNodeType(run);
-    if (!nodeType) return null;
-    if (this.resolveResumeAuthority(nodeType) !== 'service') return null;
-    // The owning service stamped the signal — this resume IS the recorded
-    // decision's tail, not a way around it.
-    if (signal?.[RESUME_AUTHORITY_SERVICE]) return null;
+    // Authority first: an item only its owning service may continue keeps
+    // answering 403 at every id that reaches it, the child's own included —
+    // naming the child here would send the caller to a door that refuses too.
+    // The owning service's stamp IS the recorded decision's tail, not a way
+    // around it.
+    if (!nodeType || this.resolveResumeAuthority(nodeType) !== 'service' || signal?.[RESUME_AUTHORITY_SERVICE]) {
+        return refuseMapItemSkip.call(this, runId, chain);
+    }
 
     // Refusing. Which of the two reasons? A second registry walk, on the
     // refusal path only, so the message can tell a node that deliberately
@@ -439,6 +456,43 @@ export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveEffect
                 : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node, ` +
                   `${undeclaredFix}`,
     };
+}
+
+/**
+ * [#27877] Refuse a resume that would re-run a `map` node past an item whose
+ * child run is still suspended — the parent would complete over an item that
+ * never ran and leave its suspension orphaned. `null` when the chain holds no
+ * such link.
+ *
+ * The DEEPEST such link names the run to resume: resuming its item either
+ * lands on the pause directly or is delegated down `subflow:` links beneath
+ * it, and a map nested inside the item answers this same refusal one level
+ * down. A `map:` link with no successor in `chain` is an item whose row is
+ * gone; there is nothing parked to skip, so it is left to `resumeInternal`.
+ * Refused before any state is touched, whatever the signal carries: a skip is
+ * not a question of who is asking.
+ */
+function refuseMapItemSkip(this: Pick<RunResumeHost, 'logger'>, runId: string, chain: readonly SuspendedRun[]): AutomationResult | null {
+    for (let i = chain.length - 2; i >= 0; i--) {
+        const link = chain[i]!;
+        if (typeof link.correlation !== 'string' || !link.correlation.startsWith('map:')) continue;
+        const item = chain[i + 1]!;
+        const at = link.runId === runId ? `'${link.nodeId}'` : `'${link.nodeId}' (linked run '${link.runId}')`;
+        this.logger.warn(
+            `[automation] refused resume of run '${runId}': parked on map node ${at}, whose item run ` +
+                `'${item.runId}' is still suspended — resuming here would advance the map past that item`,
+        );
+        return {
+            success: false,
+            code: MAP_ITEM_PENDING_REFUSAL_CODE,
+            error:
+                `Run '${runId}' is ${link.runId === runId ? '' : `waiting on run '${link.runId}', which is `}paused at ` +
+                `map node '${link.nodeId}' on item run '${item.runId}', which is still suspended — resuming here ` +
+                `would advance the map past that item without running it. Resume run '${item.runId}' instead; ` +
+                `the map continues when it completes`,
+        };
+    }
+    return null;
 }
 
 /** The body of {@link AutomationEngine.refuseUndeclaredSuspension}, moved unedited; that method's docblock is its contract. */
@@ -483,7 +537,7 @@ export async function loadSuspendedRun(this: Pick<RunResumeHost, 'loadSuspendedR
         // are therefore DROPPED outright, not merely misread — and this is
         // live during boot: `plugin.ts` `start()` → `rearmSuspendedWaitTimers`
         // → `engine.resume()` for an overdue run → the gate
-        // (`refuseGatedResume` → `resolveEffectiveSuspension`) → here.
+        // (`refuseGatedResume` → `resolveSuspensionChain`) → here.
         //
         // SECOND argument, per the `Logger` contract
         // (`packages/spec/src/contracts/logger.ts`): `warn(message, meta?)`.
@@ -1190,7 +1244,19 @@ export async function resumeInternal(
                         error,
                         this.consumedSuspensions.has(childRunId) ? childRunId : undefined,
                     );
-                    return { success: false, error, durationMs: Date.now() - run.startTime, flowLabel: flow.label };
+                    // #27743 — the child's refusal, carried beside the
+                    // re-worded `error` exactly as the synchronous `subflow`
+                    // arm carries it (`inner-refusal.ts`): this is the leg a
+                    // caller holding the PARENT's run id takes, and without it
+                    // a refusal met after the child's pause reached that
+                    // caller as text only. `{}` for a child that met none.
+                    return {
+                        success: false,
+                        error,
+                        durationMs: Date.now() - run.startTime,
+                        flowLabel: flow.label,
+                        ...carriedRefusalOfResult(childRes),
+                    };
                 }
                 // [#18714] DELEGATED-LEG REFUSAL. The child ran to a
                 // refusing terminal — an `end` declaring

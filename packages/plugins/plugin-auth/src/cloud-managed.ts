@@ -39,6 +39,12 @@ export const CLOUD_MANAGED_REFUSAL_MESSAGES = {
     'This environment is cloud-managed: the people who use it are invited by the organisation that hosts it, in the cloud, '
     + 'so an invitation cannot be created here. Invite them from the organisation in the cloud console; their account '
     + 'arrives on their first sign-in. No invitation was created.',
+  // [#27843] `sys_invitation.copy_invitation_link`: the invitation's accept
+  // link, which the hosting organisation's cloud invitation replaces here.
+  invitationLink:
+    'This environment is cloud-managed: the people who use it are invited by the organisation that hosts it, in the cloud, '
+    + 'so an invitation link is not handed out here. Invite them from the organisation in the cloud console; their account '
+    + 'arrives on their first sign-in. No link was returned.',
   createUser:
     'This environment is cloud-managed: its users are invited by the organisation that hosts it, in the cloud, so a '
     + 'local user cannot be created here. Invite the person from the organisation in the cloud console; their account '

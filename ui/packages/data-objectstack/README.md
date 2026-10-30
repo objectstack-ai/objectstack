@@ -901,7 +901,7 @@ is:
 ```ts
 import { ObjectStackAdapter, type MetaItemAccess } from '@object-ui/data-objectstack';
 
-const adapter = new ObjectStackAdapter({ baseUrl: '/api/v1' });
+const adapter = new ObjectStackAdapter({ baseUrl: '' });
 
 const access: MetaItemAccess = await adapter.probeMetaItemAccess('dashboard', 'legal_board');
 // { verdict: 'denied', message: "You do not have permission to open the 'legal_board' dashboard." }

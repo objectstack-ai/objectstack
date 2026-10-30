@@ -85,7 +85,7 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.nextRecord': 'Next record',
   'detail.recordOf': '{{current}} of {{total}}',
   'detail.recordNotFound': 'Record not found',
-  'detail.recordNotFoundDescription': 'The record you are looking for does not exist or may have been deleted.',
+  'detail.recordNotFoundDescription': 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
   'detail.goBack': 'Go back',
   'detail.details': 'Details',
   // objectstack#26678 — the record page's related column and its two-column
@@ -97,7 +97,7 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.loading': 'Loading…',
   'detail.copyToClipboard': 'Copy to clipboard',
   'detail.copied': 'Copied!',
-  'detail.deleteConfirmation': 'Are you sure you want to delete this record?',
+  'detail.deleteConfirmation': 'Are you sure you want to delete this record? This cannot be undone.',
   'detail.editRecord': 'Edit record',
   'detail.viewAll': 'View All',
   'detail.new': 'New',

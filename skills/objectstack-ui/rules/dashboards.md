@@ -178,7 +178,7 @@ export const SalesDashboard: Dashboard = {
       dataset: 'opportunity_metrics', values: ['total_amount'],
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       layout: { x: 0, y: 0, w: 3, h: 2 },
-      colorVariant: 'success',   // the accent; the measure's own `format` + `currency` drive the number
+      colorVariant: 'success',   // the accent only
       // Period-over-period: renderer fetches the prior quarter and
       // surfaces a secondary value + delta arrow automatically.
       compareTo: { kind: 'previousPeriod' },
@@ -295,13 +295,16 @@ defineDataset({
   dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
   measures: [{ name: 'signed_count', aggregate: 'count' }],
 });
-// A money measure may set `currency` (ISO 4217):
-// `{ name: 'revenue', aggregate: 'sum', field: 'amount', currency: 'USD' }`.
+// A money measure may set `currency` (ISO 4217), e.g. `currency: 'USD'`.
 // Chain: measure `currency` → the field's `defaultCurrency` (`fixed`
 // only) → tenant `localization.currency`; omit it for counts. A
 // `currencyMode: 'record'` amount refuses `currency` and ungrouped
 // sum/avg/min/max; grouped by its code field, the column carries
-// `currencyField` (per-row code column); a `count` never does.
+// `currencyField` (per-row code column); a `count` never does. A `fixed`
+// field refuses a different `currency` (delete it; restating is fine), and
+// a derived measure refuses operands in two `fixed` codes (derive from one
+// currency or drop one). Not judged: `currency` over a `dynamic` field, a
+// `fixed` code against the tenant's.
 
 // The widget just selects the dimension by name:
 const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',

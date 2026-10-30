@@ -128,10 +128,11 @@ describe('records-forms.object-hook-lifecycle — the scratch hook variants over
     }
     expect(res.status, res.text).toBe(400);
     expect(res.text).toContain(ABORT_MSG);
-    // [#27508] The abort is a refusal the route answered: the wire answer is
-    // the hook's own sentence, code-less, exactly as before, and the server
-    // does not log it as an unhandled error.
-    expect(res.json).toEqual({ error: ABORT_MSG, object: ABORT });
+    // [#27508] The abort is a refusal the route answered, and the server does
+    // not log it as an unhandled error. [#27597] The wire answer is the hook's
+    // own sentence plus the ruled `HOOK_ABORTED`, since the hook declared no
+    // code (a declared code is kept).
+    expect(res.json).toEqual({ error: ABORT_MSG, code: 'HOOK_ABORTED', object: ABORT });
     expect(log.matching('[REST] Unhandled error')).toHaveLength(0);
     expect(await stack.rows(ABORT, { name: 'ohl-abort' })).toHaveLength(0);
   });

@@ -19,10 +19,22 @@ Everything on this page is what the platform's reference test boots and asserts
 in `ui/packages/plugin-gantt/src/ObjectGantt.pluginDriverTree.test.tsx`). Read them when
 this page and the runtime seem to disagree.
 
-## Virtual, or a real object?
+## Which way in: OData, a plugin driver, or a real object
 
-Make it virtual when a copy would be **wrong**, and real when a copy is merely
-**convenient**:
+Three rules, checked in order:
+
+1. **Slow-changing reference data: a real object, fed by a sync.** Codes, catalogues and
+   registries that change monthly are better copied. Declare a real object and fill it
+   with a [scheduled pull](/docs/automation/jobs#pulling-a-mapping).
+2. **The remote exposes OData v4: an OData datasource.** SAP S/4HANA, Dynamics 365,
+   Dataverse and other CSDL 4.0 services are served by the shipped OData driver. You
+   declare a datasource and one object per entity set, and write no driver code
+   ([OData datasources](/docs/data-modeling/odata-datasources)).
+3. **No OData, rows computed on request, or a private API: a plugin driver of your
+   own**, which is what the rest of this page builds.
+
+The first rule is the question of whether to copy at all. Make the object virtual when a
+copy would be **wrong**, and real when a copy is merely **convenient**:
 
 | The data is… | Choose | Why |
 | :--- | :--- | :--- |
@@ -33,6 +45,11 @@ Make it virtual when a copy would be **wrong**, and real when a copy is merely
 
 If the remote is a SQL database you can reach, you need no driver of your own — use a
 built-in one through [External datasources](/docs/data-modeling/external-datasources).
+
+**Salesforce takes a driver of its own.** Salesforce can read other systems' OData
+services (Salesforce Connect), but it does not publish its own records as an OData
+service, so the OData datasource cannot read it. Serve Salesforce objects from a plugin
+driver over its REST API, built to the contract on this page.
 
 A virtual object pays for its freshness on every request: each list read is a round
 trip to the remote, and a read can match at most 1000 rows
@@ -443,7 +460,8 @@ So a driver grows in three steps, each correct:
 3. **Skip the floor with a conformance-tested driver.** This is planned for a later
    phase ([#27261](https://github.com/objectstack-ai/objectstack/issues/27261)): a driver
    that passes the platform's conformance kit would be trusted with paging and the cap.
-   It does not exist yet.
+   The kit ships ([Run the conformance kit](#run-the-conformance-kit)); the trust does
+   not exist yet.
 
 **The 1000-row cap.** A read that matches more than 1000 rows is refused with
 `422 EXTERNAL_ROW_CAP_EXCEEDED` rather than answered from a partial set. The fix is to
@@ -474,6 +492,61 @@ driver, and does not fail the boot when no secret store is configured. A plugin 
 configured by the host that composes it, through the options it passes to the plugin;
 keep the credential in the host's secret handling and out of metadata and the
 repository.
+
+When a [connector instance](/docs/automation/connectors#declaring-a-provider-bound-instance)
+already authorizes the vendor your driver calls, the datasource can name it in
+`external.connector` instead
+([Borrowing a connector instance's credential](/docs/data-modeling/external-datasources#borrowing-a-connector-instances-credential)):
+one credential then serves the connector's flow actions and your driver's requests. The
+connect step checks that the named instance can lend, and fails the datasource when it
+cannot, but it hands your already-built driver nothing. Your driver borrows the
+credential itself, from the `connector-credential-source` service that the automation
+service registers:
+
+```typescript
+import type { PluginContext } from '@objectstack/core';
+import {
+  CONNECTOR_CREDENTIAL_SOURCE_SERVICE,
+  callWithBorrowedCredential,
+  withoutBorrowedCredential,
+  type BorrowedConnectorAuth,
+  type ConnectorCredentialHandle,
+  type IConnectorCredentialSource,
+} from '@objectstack/types';
+
+// At the first request: `connector` is the datasource's `external.connector`.
+async function borrow(ctx: PluginContext, connector: string): Promise<ConnectorCredentialHandle> {
+  const source = ctx.getService<IConnectorCredentialSource>(CONNECTOR_CREDENTIAL_SOURCE_SERVICE);
+  return source.borrow(connector);
+}
+
+// Every request: the helper refreshes an expired credential, and on a 401 obtains it
+// afresh once and retries; a second 401 throws a 503 naming the instance.
+async function request(handle: ConnectorCredentialHandle, url: string): Promise<Response> {
+  let sent: BorrowedConnectorAuth | undefined;
+  const response = await callWithBorrowedCredential(handle, (auth) => {
+    sent = auth;
+    return fetch(url, {
+      headers: auth.type === 'bearer' ? { Authorization: `Bearer ${auth.token}` } : {},
+    });
+  });
+  if (!response.ok) {
+    // An upstream may echo the credential in its error text: remove it before throwing.
+    const text = await response.text();
+    throw Object.assign(new Error(sent ? withoutBorrowedCredential(text, sent) : text), {
+      status: response.status,
+    });
+  }
+  return response;
+}
+```
+
+The sketch sends only a bearer token. Present `auth` as its `type` says: `bearer` as
+`Authorization: Bearer`, `basic` as `Authorization: Basic`, and `api-key` in its
+`headerName` header or, with `paramName`, as a query parameter. Refuse the request,
+sending nothing, when the service is absent or the datasource also names a
+`credentialsRef`. The OData driver is the reference implementation
+(`packages/drivers/driver-odata/src/plugin.ts` and `transport.ts`).
 
 ## What your driver receives
 
@@ -587,6 +660,41 @@ operator from "refused" to a shape case, then teach `OPERATORS` the mapping. To 
 same shapes arrive through a booted stack — HTTP door, permissions, formula, hook —
 start from the reference test named at the top of this page.
 
+### Run the conformance kit
+
+The shape test pins what *your* driver sends. The platform's plugin-driver conformance
+kit pins what the *engine* relies on, from outside this repository: a driver in its own
+repository runs it in its own CI, so a platform change to that contract fails there
+before it reaches your users. It ships in `@objectstack/objectql`:
+`definePluginDriverConformanceSuite` registers one test per case under your runner's
+`describe` / `it` (vitest and jest alike), and `runPluginDriverConformance` returns a
+report without a test framework.
+
+```typescript
+import { afterAll, describe, it } from 'vitest';
+import { definePluginDriverConformanceSuite } from '@objectstack/objectql';
+import { createPortScheduleDriver } from './port-schedule-driver';
+import { fakeRemoteHolding } from './fake-remote';   // your fake of the remote's API
+
+definePluginDriverConformanceSuite(
+  { describe, it, afterAll },
+  {
+    // A driver over a remote holding exactly the fixture's rows, served under its object.
+    setup: (fixture) => ({ driver: createPortScheduleDriver(fakeRemoteHolding(fixture)) }),
+  },
+);
+```
+
+The kit's oracle is the spec's driver conformance tables, the standard every built-in
+driver is held to. Each read is checked against the floor: the driver may push all of a
+filter down, part of it or none, and may refuse what it cannot translate, but must never
+return fewer rows than match, invent a row, or answer a failure as rows. Add
+`setupUnavailable` (a remote that is down) for the outage cases and `writeProbes` (one
+write the remote accepts, one it refuses) for the write cases; without them those cases
+report `not-offered`. `tiers: ['floor', 'direct']` adds the stricter tier, where the
+driver answers the whole query itself; the floor does not need it. The OData driver runs the
+kit in `packages/drivers/driver-odata/src/odata-driver.conformance-kit.test.ts`.
+
 ## Five business examples
 
 **Port berth scheduling — computed, real-time.** The worked example above. The
@@ -595,7 +703,9 @@ plan's view and its edit door. A gantt over the tree, a per-caller lock formula,
 `beforeUpdate` guard, writes through `update` only.
 
 **SAP sales orders — must not land.** The ERP is the system of record, and orders may not
-be copied out of it. The driver reads orders through the ERP's own query API and writes
+be copied out of it. When the ERP publishes the orders as an OData v4 service, bind them
+through an [OData datasource](/docs/data-modeling/odata-datasources) and write no driver.
+Otherwise the driver reads orders through the ERP's own query API and writes
 the few fields users may change through its update API; the ERP's own validation answers
 a write it rejects, so let that error reach the caller rather than retrying around it.
 Refuse `create` and `delete` until the integration deliberately offers them, and keep
@@ -622,6 +732,8 @@ separate data-sync metadata type: a sync is defined on its target, as that mappi
 
 ## See also
 
+- [OData datasources](/docs/data-modeling/odata-datasources) — the same binding over an
+  OData v4 service, with the driver already written.
 - [External datasources](/docs/data-modeling/external-datasources) — the datasource and
   `external` binding this page builds on, federation over SQL, the write gates and
   credentials.
@@ -631,5 +743,4 @@ separate data-sync metadata type: a sync is defined on its target, as that mappi
 - [Hooks](/docs/automation/hooks) and [Hook bodies](/docs/automation/hook-bodies) — the
   `beforeUpdate` guard.
 - [Views](/docs/ui/views) — the gantt and every other list view.
-- ADR-0015 (federation spec) — the plugin driver is its Tier A: a driver, zero protocol
-  change.
+- ADR-0015 (federation spec) — `schemaMode`, the `external` binding and the write gates.

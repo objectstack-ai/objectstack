@@ -35,7 +35,7 @@
  * translates.
  *
  * Harness: the sibling relay pins' mocks (`ObjectView.viewDescriptionRelay-7199`),
- * with the REAL `ViewTabBar`, the real `useObjectLabel` under a real
+ * with the REAL view switcher of the page title, the real `useObjectLabel` under a real
  * `I18nProvider`, and a real `MetadataCtx` carrying the `/meta/view` and
  * `/meta/object` answers.
  *
@@ -48,7 +48,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen, waitFor } from '@testing-library/react';
+import { render, cleanup, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
@@ -91,15 +91,12 @@ vi.mock('sonner', () => ({
   }),
 }));
 
-// The list body is not the subject: stubbed, so only the tab bar draws text.
-// The stand-in draws the page's `toolbarLeading` node, where the tab strip
-// rides since objectui#12440 (the list's own toolbar row).
+// The list body is not the subject: stubbed, so only the page title's view
+// switcher draws view names (objectstack#27594; it replaced the tab strip).
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
-  ListView: (props: { toolbarLeading?: React.ReactNode }) => <>{props.toolbarLeading ?? null}</>,
+  ListView: () => null,
 }));
-
-// `ViewTabBar` stays REAL — it is what draws the label under test.
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ObjectView: (props: any) =>
@@ -234,9 +231,11 @@ async function renderIn(
       </MetadataCtx.Provider>
     </I18nProvider>,
   );
-  // The uncatalogued embedded tab is drawn alike in every world and on both
-  // sides of either change, so its arrival says the tab bar rendered — waiting
-  // on a label under test would hang on a regression.
+  // The switcher's dropdown names every view. The uncatalogued embedded view
+  // is drawn alike in every world and on both sides of either change, so its
+  // arrival says the dropdown rendered — waiting on a label under test would
+  // hang on a regression.
+  fireEvent.click(await screen.findByTestId('list-view-switcher', undefined, { timeout: 5000 }));
   await waitFor(() => expect(screen.getAllByText(UNCATALOGUED).length).toBeGreaterThan(0));
 }
 

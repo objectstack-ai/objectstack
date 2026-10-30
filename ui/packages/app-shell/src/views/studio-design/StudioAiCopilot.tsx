@@ -13,7 +13,7 @@ import { t } from '../metadata-admin/i18n.js';
 import { ChatPane, resolveApiBase, type PendingFirstMessage } from '../../console/ai/AiChatPage.js';
 import { AiUsageIndicator } from '../../layout/AiUsageIndicator.js';
 import { rememberDockReturnLocation } from '../../layout/chatDockState.js';
-import { usePlanApprovalPending } from '../../assistant/assistantBus.js';
+import { usePlanApprovalPendingCount } from '../../assistant/assistantBus.js';
 
 /**
  * objectui#8219 — the display label of the artifact a pillar has open, tagged
@@ -147,7 +147,8 @@ export function StudioCopilotConversation({
 /** What the copilot reports up to the slot that hosts it (objectui#12725). */
 export interface StudioCopilotStatus {
   available: boolean;
-  planPending: boolean;
+  /** Items the copilot proposed that await the author's confirmation; 0 when none. */
+  planPendingCount: number;
 }
 
 export interface StudioChatDockProps {
@@ -162,8 +163,9 @@ export interface StudioChatDockProps {
    * objectui#12725 — what the right slot draws of the copilot around it:
    * `available`, whether the agent catalog serves one (true while it is still
    * being read, as the dock always rendered then), so no segment, strip or
-   * empty body stands for a copilot that is not there; and `planPending`, the
-   * objectui#11666 reading that a plan it proposed awaits approval. Reported on
+   * empty body stands for a copilot that is not there; and `planPendingCount`,
+   * the objectui#11666 reading of a proposal awaiting approval with the number
+   * of items it asks the author to confirm (objectstack#25943). Reported on
    * every change, and as unavailable on unmount.
    */
   onStatusChange?: (status: StudioCopilotStatus) => void;
@@ -200,17 +202,17 @@ export function StudioChatDock({
   const { agents, isLoading: agentsLoading } = useAgents({ apiBase });
   const available = agentsLoading || agents.length > 0;
   // objectui#11666 — read off the assistant bus the chat publishes to.
-  const planPending = usePlanApprovalPending();
+  const planPendingCount = usePlanApprovalPendingCount();
   const onStatusChangeRef = React.useRef(onStatusChange);
   React.useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
   });
   React.useEffect(() => {
-    onStatusChangeRef.current?.({ available, planPending: available && planPending });
-  }, [available, planPending]);
+    onStatusChangeRef.current?.({ available, planPendingCount: available ? planPendingCount : 0 });
+  }, [available, planPendingCount]);
   React.useEffect(
     () => () => {
-      onStatusChangeRef.current?.({ available: false, planPending: false });
+      onStatusChangeRef.current?.({ available: false, planPendingCount: 0 });
     },
     [],
   );

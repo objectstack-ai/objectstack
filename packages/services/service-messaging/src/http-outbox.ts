@@ -487,8 +487,10 @@ export class HttpRedeliverError extends Error {
  * ## Why this is a security refusal and not a tidiness one
  * A parked row has no {@link HttpDelivery.signature}, because the signature is
  * computed at enqueue from the very secret that could not be resolved (#7722,
- * #7799). `POST /api/v1/webhooks/redeliver` is reachable by any authenticated
- * user. Without this refusal, making the drop durable would hand that user a
+ * #7799). `POST /api/v1/webhooks/redeliver` admits a caller with edit
+ * (`update`) access to `sys_webhook`, as decided by
+ * `packages/plugins/plugin-webhooks/src/redeliver-entitlement.ts`. Without this
+ * refusal, making the drop durable would hand any such webhook administrator a
  * button that delivers the webhook UNSIGNED — reopening #7799 through a door
  * nobody would think to audit. **An unsigned redelivery is strictly worse than
  * an unrecorded drop**, which is why this guard lands with — and logically

@@ -440,9 +440,10 @@ export type NavDocAudienceGate = (entry: any) => boolean;
  * Load the object metadata items for the current protocol/environment,
  * coerced to a plain array. Returns `[]` when metadata is unavailable so
  * callers fail OPEN (the data call itself needs the same metadata and will
- * surface any real error). Shared by the cross-object batch route (all ops,
- * fetched once) and the nav-servability gate; the single-object exposure gate
- * reads its one object by name ({@link loadObjectItem}).
+ * surface any real error). Read by the nav-servability gate, and by
+ * {@link loadObjectItem} for a protocol with no by-name read; the exposure
+ * gate of every data door, the cross-object batch route's per-op gate
+ * included, reads its object by name through {@link loadObjectItem}.
  */
 export async function loadObjectItems(source: MetaReadGateListSource): Promise<any[]> {
     try {
@@ -481,11 +482,16 @@ export async function loadObjectItems(source: MetaReadGateListSource): Promise<a
  * by-name read decorates only the object it serves, and [#24535] its execution
  * face, which REST hands in where the protocol has one, decorates nothing.
  *
- * The answers are the list's:
+ * The answers are the list's, save the first:
  *
- *  - The item counts only under its own name, the match the list search made,
- *    so a name the by-name read resolves to some other object is still "no
- *    object here".
+ *  - [#27729] Whatever item the by-name read serves counts, under whichever
+ *    name it carries. That read resolves a legacy `ns__short` object from its
+ *    short name exactly as the data door's `registry.getObject` does, so the
+ *    gate judges the `enable` of the object the data call will then serve. It
+ *    used to count the item only under the requested name, and a short name
+ *    therefore walked past the `enable` of the `ns__short` object behind it.
+ *    The list (below) carries no such resolution, and is asked only by a
+ *    protocol with no by-name read.
  *  - A THROWN read fails OPEN and logs, as {@link loadObjectItems} does and
  *    for the reason it records (#3545); "no object" is an answer, not a fault,
  *    and logs nothing.
@@ -506,7 +512,7 @@ export async function loadObjectItem(source: MetaReadGateListSource, name: strin
     try {
         const envelope: any = await source.getObjectItem(name);
         const item = envelope?.item;
-        return item !== null && typeof item === 'object' && item.name === name ? item : undefined;
+        return item !== null && typeof item === 'object' ? item : undefined;
     } catch (err) {
         if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') return undefined;
         logWarn(

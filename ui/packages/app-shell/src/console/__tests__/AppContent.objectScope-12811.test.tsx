@@ -22,7 +22,9 @@
  * and so does the root of an app whose package holds no objects of its own (a
  * platform app such as Setup; its object routes read by name, objectui#13046);
  * a record overlay (`?recordId=`) reads the whole registry, because a record's
- * related lists come from every object that points at it.
+ * related lists come from every object that points at it (since
+ * objectstack#27626 the drawer reads it beside the list's scope, and the list
+ * does not wait for it: `AppContent.recordDrawerKeepsScope-27626.test.tsx`).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -253,10 +255,9 @@ describe('one console open asks for the app\'s objects, not the whole registry (
 
   it('CONTROL: a record overlay reads the whole registry (a record\'s related lists come from every object)', async () => {
     boot('/apps/crm/crm_account?recordId=r1');
-    await waitFor(() => expect(screen.getByTestId('object-view')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('crm_case'));
 
     expect(objectCalls()).toContain('object');
-    expect(screen.getByTestId('object-view')).toHaveTextContent('crm_case');
   });
 });
 

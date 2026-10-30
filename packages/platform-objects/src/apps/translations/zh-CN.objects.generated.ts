@@ -140,6 +140,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
+        outcomeMessages: {
+          sent: "已向 ${result.email} 发送邀请",
+          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+        },
         params: {
           role: {
             options: {
@@ -577,6 +581,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
+        outcomeMessages: {
+          sent: "已向 ${result.email} 发送邀请",
+          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+        },
         params: {
           role: {
             options: {
@@ -664,6 +672,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
+        outcomeMessages: {
+          sent: "已向 ${result.email} 发送邀请",
+          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+        },
         params: {
           role: {
             options: {
@@ -794,6 +806,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
+        outcomeMessages: {
+          sent: "已向 ${result.email} 发送邀请",
+          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+        },
         params: {
           role: {
             options: {
@@ -813,7 +829,22 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "重新发送邀请",
-        successMessage: "邀请已重新发送"
+        successMessage: "邀请已重新发送",
+        outcomeMessages: {
+          sent: "已向 ${result.email} 重新发送邀请",
+          link_only: "已为 ${result.email} 续期邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+        }
+      },
+      copy_invitation_link: {
+        label: "复制邀请链接",
+        resultDialog: {
+          title: "邀请链接",
+          description: "任何打开此链接的人都可以接受该邀请，请只分享给您邀请的人。邀请被接受、拒绝、取消或过期后，链接即失效。",
+          acknowledge: "完成",
+          fields: {
+            acceptUrl: "邀请链接"
+          }
+        }
       },
       accept_invitation: {
         label: "接受邀请",
@@ -3528,6 +3559,47 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新时间"
+      }
+    }
+  },
+  sys_exchange_rate: {
+    label: "汇率",
+    pluralLabel: "汇率",
+    description: "从组织本位币到外币的汇率，按生效日期记录——外币金额折算为本位币时所用的汇率。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      currency: {
+        label: "币种",
+        help: "外币的 ISO 4217 代码，大写（EUR、JPY、CHF）。"
+      },
+      rate: {
+        label: "汇率",
+        help: "1 单位组织本位币（本地化 → 默认币种）= 汇率 单位的该币种。示例：本位币 USD、币种 EUR、汇率 0.92，表示 1 USD = 0.92 EUR。"
+      },
+      effective_date: {
+        label: "生效日期",
+        help: "此汇率开始适用的日期。在同一币种的更晚一行接替之前一直有效。"
+      },
+      source: {
+        label: "来源",
+        help: "该行的来源：在 Setup 中录入（手工）、从文件导入（导入），或由应用流程写入（应用）。",
+        options: {
+          manual: "手工",
+          import: "导入",
+          app: "应用"
+        }
+      }
+    },
+    _views: {
+      all_rates: {
+        label: "全部",
+        description: "1 单位组织本位币（本地化 → 默认币种）= 汇率 单位的该币种。示例：本位币 USD、币种 EUR、汇率 0.92，表示 1 USD = 0.92 EUR。",
+        emptyState: {
+          title: "还没有汇率",
+          message: "每个币种在汇率变动的每个日期各录一行，例如每月初为每个币种录一行。"
+        }
       }
     }
   }

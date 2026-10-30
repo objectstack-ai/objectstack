@@ -124,10 +124,31 @@ export function refusalCarriedBy(err: unknown): CarriedRefusal {
  * data node's and the refusal reaches the top run however deep it was met.
  * The child's result is the only source: a child that met no refusal spreads
  * `{}`, and a `map` stops at its first failing item, so it carries that
- * item's. A `try_catch` with no catch region still builds a new error the
- * brand does not cross; the run's result then carries no member, which the
- * spec's "present only when a refusal was met" allows and which never
- * invents one.
+ * item's.
+ *
+ * The other carriers (#27743), each measured at `execute` / `resume`:
+ *
+ *  - A `try_catch` with NO catch region re-words its try region's failure into
+ *    a new returned failure too, and carries the members its LAST failed
+ *    attempt's throw carried (`readCarriedRefusal`), so a retry ladder reports
+ *    the last attempt's refusal and never an earlier one's.
+ *  - A `try_catch` whose CATCH region itself fails (#27876) re-words the
+ *    handler's failure the same way, and carries the members the CATCH
+ *    region's throw carried (`readCarriedRefusal`): the refusal the handler
+ *    met, never the try region's refusal it handled. A handler that met a
+ *    fault carries none, even after a refused try region.
+ *  - A `subflow` child that PAUSED and then fails on resume, resumed at the
+ *    parent's run id (the delegated leg in `run-resume.ts`): the parent's
+ *    re-worded failure carries the child's result's members
+ *    (`carriedRefusalOfResult(childRes)`), through every delegated frame.
+ *  - Resumed at the CHILD's run id instead (the up-bubble leg, and the only
+ *    leg a `map` item takes), the caller already holds the child's own
+ *    terminal result, which carries the members; the ancestors that leg fails
+ *    record no member, and no caller reads their result.
+ *
+ * On every carrier, a failure that met no refusal carries no member, which the
+ * spec's "present only when a refusal was met" allows and which never invents
+ * one.
  */
 export const CARRIED_REFUSAL: unique symbol = Symbol.for(
     'objectstack.automation.carriedRefusal',
@@ -164,9 +185,10 @@ export function readCarriedRefusal(err: unknown): CarriedRefusal {
 /**
  * The members an attempt's RESULT carries — for `retryExecution`, whose
  * exhausted exit reports the last attempt's failure and must report that
- * attempt's refusal beside it, never an earlier attempt's — and for the
+ * attempt's refusal beside it, never an earlier attempt's — for the
  * `subflow` / `map` failure arms, which carry their child run's refusal onto
- * the failure they return.
+ * the failure they return, and for the delegated resume leg, which carries a
+ * paused-then-failed child's refusal onto the parent's.
  */
 export function carriedRefusalOfResult(result: AutomationResult): CarriedRefusal {
     return pickCarried(result);

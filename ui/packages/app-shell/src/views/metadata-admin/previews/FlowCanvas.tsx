@@ -178,6 +178,11 @@ export interface FlowCanvasProps {
    * `freshNodeId` (`flow-problems`) over the draft alone.
    */
   mintNodeId?: () => string;
+  /**
+   * The object catalog's labels by object name: a node card names the object
+   * it works on by its label, not its API name. Absent, the name shows.
+   */
+  objectLabels?: ReadonlyMap<string, string>;
 }
 
 export function FlowCanvas({
@@ -202,6 +207,7 @@ export function FlowCanvas({
   onSelectNested,
   onPatch,
   mintNodeId,
+  objectLabels,
 }: FlowCanvasProps) {
   // objectui#3172 — the ONE geometry boundary: nodes enter the canvas with the
   // retired `ui: {x,y}` spelling already lifted onto the spec's `position`, so
@@ -385,7 +391,7 @@ export function FlowCanvas({
         id,
         type,
         label,
-        ...defaultNodeExtras(type),
+        ...defaultNodeExtras(type, nodes),
         ...(at ? { position: { x: at.x, y: at.y } } : {}),
       };
       const nextNodes = appendArray(nodes, newNode);
@@ -415,7 +421,7 @@ export function FlowCanvas({
         id,
         type,
         label: defaultNodeLabel(type, locale),
-        ...defaultNodeExtras(type),
+        ...defaultNodeExtras(type, nodes),
       };
       // A→N inherits the original edge's branch semantics; N→B is plain.
       const firstSegment: FlowDesignerEdge = { ...edge, target: id };
@@ -746,13 +752,21 @@ export function FlowCanvas({
   // the toolbar. Deliberately mount-only (not re-run on every `size` change):
   // re-centering on every node add/drag would yank the viewport out from under
   // an actively editing user.
+  //
+  // #27356 row 22 — a diagram wider than the canvas (a branching flow at phone
+  // width) opens zoomed out until its width fits, never below MIN_ZOOM, so its
+  // outer branches are not cut off at both edges. Never zoomed in past 100%;
+  // width only, so a tall linear flow still opens at 1:1 and scrolls down. A 0
+  // width is a hidden canvas: nothing to fit.
   React.useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    setZoom(1);
+    const width = vp.clientWidth;
+    const z = width > 0 ? Math.max(MIN_ZOOM, Math.min(1, (width - 32) / size.width)) : 1;
+    setZoom(z);
     setPan({
-      x: (vp.clientWidth - size.width) / 2,
-      y: Math.max(16, (vp.clientHeight - size.height) / 2),
+      x: (width - size.width * z) / 2,
+      y: Math.max(16, (vp.clientHeight - size.height * z) / 2),
     });
     framedWidthRef.current = vp.clientWidth;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1256,7 +1270,7 @@ export function FlowCanvas({
                   locale={locale}
                   type={node.type}
                   label={node.label || node.id}
-                  summary={nodeSummary(node, locale)}
+                  summary={nodeSummary(node, locale, objectLabels)}
                   position={pos}
                   selected={selectedId === node.id}
                   editable={editable}
@@ -1509,9 +1523,14 @@ function layoutBranchLabels(
  * The words it adds of its own (a branch count, an approver count, `code`)
  * read in the designer `locale` (objectui#10862); config values pass through.
  */
-function nodeSummary(node: FlowDesignerNode, locale?: string): string | undefined {
+function nodeSummary(
+  node: FlowDesignerNode,
+  locale?: string,
+  objectLabels?: ReadonlyMap<string, string>,
+): string | undefined {
   const c = node.config as Record<string, unknown> | undefined;
   const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  const object = (name: string | undefined) => (name ? objectLabels?.get(name) || name : undefined);
   const block = (key: string, inner: string) => {
     const b = (node as Record<string, unknown>)[key];
     return b && typeof b === 'object' ? str((b as Record<string, unknown>)[inner]) : undefined;
@@ -1527,12 +1546,12 @@ function nodeSummary(node: FlowDesignerNode, locale?: string): string | undefine
     return (
       pick('condition') ||
       pick('criteria') ||
-      pick('objectName') ||
+      object(pick('objectName')) ||
       cfgBlock('schedule', 'expression') ||
       cfgBlock('schedule', 'cron') ||
       pick('cron') ||
       pick('schedule') ||
-      cfgBlock('timeRelative', 'object') ||
+      object(cfgBlock('timeRelative', 'object')) ||
       pick('triggerType')
     );
   }
@@ -1574,7 +1593,7 @@ function nodeSummary(node: FlowDesignerNode, locale?: string): string | undefine
     return behavior || undefined;
   }
   return (
-    pick('objectName') ||
+    object(pick('objectName')) ||
     block('connectorConfig', 'actionId') ||
     block('waitEventConfig', 'timerDuration') ||
     block('waitEventConfig', 'eventType') ||

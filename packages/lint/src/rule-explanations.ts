@@ -2465,11 +2465,24 @@ const SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION: RuleExplanation = {
     VIRTUAL_FIELD_STORAGE,
     'A formula entry is refused on EVERY surface, the object\'s own set included — the REST ingress ' +
       'answers `400 INVALID_FIELD`, the same answer a stale entry gets: measured, it ' +
-      'matched 0 rows on driver-memory, and 0 rows with no error on driver-sql. Otherwise the ' +
-      'object\'s own `searchableFields` is existence-only: its declared branch scans any stored ' +
-      'column, so a json or lookup column declared there is a narrow choice the engine executes, not ' +
-      'a finding. A system column outside the allowed set is not judged either: its runtime ' +
-      'metadata is registry-owned and invisible here.',
+      'matched 0 rows on driver-memory, and 0 rows with no error on driver-sql. Otherwise, apart ' +
+      'from a credential entry, the object\'s own `searchableFields` is existence-only: its declared ' +
+      'branch scans any stored column, so a json or lookup column declared there is a narrow choice ' +
+      'the engine executes, not a finding. A system column outside the allowed set is not judged ' +
+      'either: its runtime metadata is registry-owned and invisible here.',
+    'A `secret` or `password` entry is refused on EVERY surface as well, the object\'s own set ' +
+      'included. The engine leaves every credential column out of the set a search scans (ADR-0100), ' +
+      'an author-declared one included, and says nothing: a declaration naming one scans a narrower ' +
+      'set than written, and one naming only credential fields falls through to the AUTO-DEFAULT ' +
+      'set. A list view naming one is refused with `400 INVALID_FIELD` when the object\'s set is the ' +
+      'auto-default, which never admits a credential type; when the object declares the entry, the ' +
+      'REST ingress admits it and the engine withholds it, so a view naming only credential fields ' +
+      'searches the object\'s whole set. Credential types are judged by the spec\'s ' +
+      '`isCredentialFieldType`, the predicate the engine\'s credential collector reads, with no ' +
+      'better-auth exemption: the read mask spares a better-auth `password`, the search withhold ' +
+      'does not. An error, as a formula entry is: the entry can never match, and the narrowing is ' +
+      'otherwise silent. The one fix is to drop it — mirroring the value onto a searchable column ' +
+      'would publish what the withhold protects.',
   ],
 };
 
@@ -3948,6 +3961,17 @@ const OBJECT_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'object by its full name (the platform user object is `sys_user`, not `user`). The verdict names ' +
       'the nearest defined object when one is close; a view container written with an object\'s short ' +
       'name in a namespaced package is told the prefixed spelling.',
+    // [#27827] The closure case, so the explanation does not contradict the
+    // fix line the save door prints under one (ADR-0141 D1).
+    'A dataset written into a package at the runtime save door is judged against that package\'s ' +
+      'closure instead of one stack: the package\'s own objects, the objects of the packages its ' +
+      'manifest declares in `dependencies`, platform objects, and tenant-authored objects that carry ' +
+      'no package. A base object outside it, whether it belongs to a package the manifest never ' +
+      'declared or exists nowhere at all, is refused with the fix the flow and view doors print for ' +
+      'the same closure: declare a dependency on the package that defines the object in the ' +
+      '`dependencies` of the written package\'s manifest, or point the dataset at an object inside the ' +
+      'closure. A write that names no package, and `os validate`, `os build` and `os lint`, state no ' +
+      'closure and print the fix above.',
   ],
 };
 

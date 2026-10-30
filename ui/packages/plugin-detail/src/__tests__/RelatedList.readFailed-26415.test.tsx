@@ -281,3 +281,58 @@ describe('record:related_list — a failed list keeps its own row in the stack f
     expect(quotesTitle).toBeVisible();
   });
 });
+
+/*
+ * A refused read is not a failure of anything the reader did. The line for a
+ * 403 is neutral (`role="status"`, no destructive styling), offers no Retry (a
+ * grant only an administrator can give does not change on a retry), and says
+ * the list's no-access sentence even when the producer marked the generic
+ * action refusal as the `userMessage`. The 5xx case above is the control for
+ * the destructive styling and the Retry.
+ */
+describe('RelatedList — a refused read is a neutral no-access line, not a failure', () => {
+  /** The 403 the server answers a refused read: the generic action refusal marked for the reader. */
+  const ACTION_REFUSAL =
+    'You do not have permission to perform this action. Contact your administrator if you need access.';
+  const refused = () =>
+    Object.assign(serverError(403, '[Security] Access denied on invoice_line.invoice', 'PERMISSION_DENIED'), {
+      userMessage: ACTION_REFUSAL,
+    });
+
+  it('draws a neutral status line with the no-access sentence and no Retry', async () => {
+    const find = vi.fn(async () => {
+      throw refused();
+    });
+    renderAdapterList(find);
+
+    const line = await screen.findByTestId('related-list-load-failed');
+    expect(line).toHaveAttribute('data-error-kind', 'forbidden');
+    expect(line).toHaveAttribute('role', 'status');
+    expect(line.className).not.toMatch(/destructive/);
+    expect(line.querySelector('svg')!.getAttribute('class')).not.toMatch(/destructive/);
+    expect(line).toHaveTextContent(FORBIDDEN_TITLE);
+    expect(line).toHaveTextContent(FORBIDDEN_MESSAGE);
+    expect(line).not.toHaveTextContent('perform this action');
+    expect(within(line).queryByRole('button', { name: /Retry/ })).toBeNull();
+  });
+
+  it('CONTROL: a 5xx keeps the alert styling and the Retry', async () => {
+    const find = vi.fn(async () => {
+      throw serverError(500, 'The database did not answer in time.');
+    });
+    renderAdapterList(find);
+
+    const line = await screen.findByTestId('related-list-load-failed');
+    expect(line).toHaveAttribute('role', 'alert');
+    expect(line.className).toMatch(/destructive/);
+    expect(within(line).getByRole('button', { name: /Retry/ })).toBeInTheDocument();
+  });
+
+  it('CONTROL: a readable related list draws its rows', async () => {
+    const find = vi.fn(async () => ({ data: [{ id: 'l1', name: 'Consulting hours' }] }));
+    renderAdapterList(find);
+
+    await screen.findByText('Consulting hours');
+    expect(failedLine()).toBeNull();
+  });
+});

@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
-  "buildCommand": "cd ../.. && pnpm --filter @object-ui/app-shell... build && cd apps/console && NODE_OPTIONS=--max-old-space-size=4096 VITE_USE_MOCK_SERVER=false VITE_BASE_PATH=/ vite build",
+  "buildCommand": "cd ../.. && pnpm --filter @object-ui/app-shell... build && cd apps/console && NODE_OPTIONS=--max-old-space-size=4096 VITE_BASE_PATH=/ vite build",
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/((?!assets|mockServiceWorker\\.js).*)", "destination": "/index.html" }
+    { "source": "/((?!assets).*)", "destination": "/index.html" }
   ]
 }

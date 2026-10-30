@@ -157,6 +157,9 @@ jobs:
       # guard is true and the expression reads exactly as `<output> ||
       # 'true'` did.
       docs: ${{ github.event_name != 'merge_group' && steps.changes.outputs.docs || 'true' }}
+      # Read by `test-plan`, `test` (ORed with `crosspkg`) and `build-core`,
+      # and on push / schedule by `dogfood`, `dogfood-verify` and
+      # `temporal-conformance` — see the `core` filter below and each job's `if:`.
       core: ${{ github.event_name != 'merge_group' && steps.changes.outputs.core || 'true' }}
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
@@ -273,6 +276,10 @@ jobs:
               - 'content/**'
               - 'pnpm-lock.yaml'
               - '.github/workflows/ci.yml'
+              # Build Docs' setup (#27673): see the same three rows under `core:`.
+              - '.nvmrc'
+              - '.github/actions/setup-workspace/**'
+              - '.github/actions/setup-pnpm/**'
             core:
               - 'packages/**'
               - 'examples/**'
@@ -284,6 +291,18 @@ jobs:
               - 'tsconfig.test.base.json'
               - 'vitest.preset.mts'
               - '.github/workflows/ci.yml'
+              # THE SETUP EVERY CORE JOB RUNS FIRST (#27673): each one starts
+              # with `./.github/actions/setup-workspace`, which calls
+              # `./.github/actions/setup-pnpm` and hands actions/setup-node
+              # `.nvmrc` as its `node-version-file`. Before these rows a diff
+              # confined to one of the three matched no list here, so every job
+              # that runs it skipped on the PR and the change first ran in the
+              # merge queue. One row per action, not `.github/actions/**`:
+              # `half-state-patrol` is no step of any job in this file. The
+              # `docs` and `ui` lists carry the rows their own jobs run.
+              - '.nvmrc'
+              - '.github/actions/setup-workspace/**'
+              - '.github/actions/setup-pnpm/**'
               # BUILD INPUTS outside every package (#21202): turbo.json itself,
               # its `globalDependencies`, and each `$TURBO_ROOT$/…` input of a
               # build task Build Core's `pnpm build` runs. A diff confined to
@@ -332,6 +351,16 @@ jobs:
               - 'scripts/ts-parse.mjs'
               - 'scripts/tsup-drop-sources-content.mjs'
               - 'scripts/workspace-enumerator.mjs'
+              # The ui tree's root build inputs (#27283): turbo.json's generic
+              # `build` task hashes them for every `@object-ui/*` build, and the
+              # same task runs for every package `pnpm build` builds, so a diff
+              # confined to one moves Build Core's hashes too.
+              - 'ui/tsconfig.json'
+              - 'ui/scripts/vite-*.ts'
+              - 'ui/scripts/build-plugin-stylesheet.mjs'
+              - 'ui/scripts/check-dist-completeness.mjs'
+              - 'ui/scripts/invoked-as.mjs'
+              - 'ui/scripts/vitest-invocation-guard.mjs'
               # BUILD CORE'S GUARDS (#21341): every repository script the
               # build-core job's own steps run (named by a `run:` step or
               # reached through its `pnpm check:*` alias) and each one's
@@ -497,6 +526,13 @@ jobs:
               - 'scripts/sdui-manifest.record.json'
               - 'scripts/gen-sdui-manifest-node.mjs'
               - 'scripts/check-sdui-manifest.mjs'
+              # The setup every ui job runs first (#27673):
+              # `./.github/actions/setup-pnpm`, and `.nvmrc`, which each job's
+              # actions/setup-node step reads as `node-version-file`. A diff
+              # confined to either matched no list, so no ui job ran it on the
+              # PR, nor in the queue, where these outputs read the same diff.
+              - '.nvmrc'
+              - '.github/actions/setup-pnpm/**'
             # The seven packages objectui installs from this tree (the set its
             # `.objectstack-pin` used to pack). A change here compiles and builds
             # the Console in the same PR — the check the retired Spec Shape Gate

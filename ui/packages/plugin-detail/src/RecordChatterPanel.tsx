@@ -122,6 +122,13 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
    */
   const feedAria = useRecordAriaProps(config?.feed?.aria);
 
+  // A refused read leaves the count unknown, not zero (see the timeline's
+  // header), so the collapsed toggle names the panel without one.
+  const showLabel =
+    activityDenied || commentsDenied
+      ? t('detail.openDiscussion')
+      : t('detail.showDiscussion', { count: items.length });
+
   const isSidebar = position === 'right' || position === 'left';
   const isInline = position === 'bottom';
 
@@ -218,10 +225,10 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
           variant="ghost"
           className="w-full justify-start gap-2 text-muted-foreground"
           onClick={() => setCollapsed(false)}
-          aria-label={t('detail.showDiscussion', { count: items.length })}
+          aria-label={showLabel}
         >
           <MessageSquare className="h-4 w-4" />
-          <span>{t('detail.showDiscussion', { count: items.length })}</span>
+          <span>{showLabel}</span>
         </Button>
       ) : (
         <div>

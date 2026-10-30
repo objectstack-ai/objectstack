@@ -49,12 +49,17 @@ function openCreate() {
 }
 
 describe('New package form: display name first (objectui#12512)', () => {
-  it('opens on the display name, with the id, namespace and version after it in the same card', () => {
+  // objectstack#27833 moved the id, namespace and version out of the Basics
+  // card into the Advanced disclosure; the name still opens the form, and
+  // the three keep their order behind it.
+  it('opens on the display name, with the id, namespace and version after it under Advanced', () => {
     const f = openCreate();
-    const card = screen.getByTestId('package-form-basics');
-    const inputs = within(card).getAllByRole('textbox');
-    const order = [f.name(), f.id(), f.ns(), f.version()].map((el) => inputs.indexOf(el));
-    expect(order).toEqual([0, 1, 2, 3]);
+    const basics = within(screen.getByTestId('package-form-basics')).getAllByRole('textbox');
+    expect(basics.indexOf(f.name())).toBe(0);
+    const advanced = screen.getByTestId('package-form-advanced');
+    const inputs = Array.from(advanced.querySelectorAll('input'));
+    const order = [f.id(), f.ns(), f.version()].map((el) => inputs.indexOf(el));
+    expect(order).toEqual([0, 1, 2]);
   });
 
   it('typing a display name fills the id, namespace and version, each marked until edited', () => {

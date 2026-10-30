@@ -156,6 +156,7 @@ corrupts something the earlier axes do not:
 | `?search=alpha&searchFields=no_such_field` | `400 INVALID_FIELD` |
 | `?search=alpha&searchFields=` (or `=,`, or `[]` in a body) | `400 VALIDATION_ERROR` — names no field, the answer `$select=` gets; leave the parameter out to scan the default set |
 | `?search=alpha&searchFields=amount` | `400 INVALID_FIELD` — real field, but not searchable |
+| `?search=alpha&searchFields=api_key` (a `secret` or `password` field, even one `searchableFields` declares) | `400 INVALID_FIELD` — a credential is never searched; remove it from `searchableFields` too |
 | `?search=alpha&searchFields=project_id.name` | `400 INVALID_FIELD` — search scans this object's own columns; mirror the related title instead (see below) |
 | `?search=alpha` on an object with no searchable field (two lookups and a `formula` title, say) | `400 INVALID_FIELD` — nothing to scan; declare a stored field searchable or mirror the title (see below) |
 | `groupBy: ["status"]` | one bucket per status value |
@@ -500,6 +501,14 @@ tenant default currency (the `localization.currency` setting), if one is set. A
 `dynamic` field (the default mode) never lends its `defaultCurrency` — only `fixed` does —
 so its column shows the tenant default. The cube query on this page carries no column
 `currency`.
+
+Over a `fixed` field the measure's `currency` may only restate the field's code. A
+different code is refused when the dataset compiles, with `DATASET_INVALID` / 400: delete
+the measure's `currency`, and the column takes the field's code. A derived measure whose
+monetary operands resolve to two different `fixed` codes is refused the same way, whatever
+the operation: derive it from measures in one currency, or drop the operand in the other.
+Neither a `fixed` code against the tenant default nor a measure `currency` over a
+`dynamic` field is judged.
 
 A measure column over a `currencyMode: 'record'` amount has one currency per row, so it
 carries `currencyField` instead of `currency`: the name of the dimension column, in the same

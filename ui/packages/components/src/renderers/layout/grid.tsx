@@ -119,10 +119,19 @@ ComponentRegistry.register('grid',
     // an N-across row doesn't render as unreadable slivers on a phone. Authors
     // who pass the breakpoint object keep full control. The bare-number branch
     // sets no breakpoint count, so the ramp's only condition is that branch.
+    //
+    // Four or more across is a row of tiles sized for a quarter of the row or
+    // less (a KPI strip): a phone keeps two side by side, the dashboard's own
+    // phone layout for its metric tiles, instead of one tile per row filling
+    // the first screen. Two and three across stack on a phone and pair from `sm`.
     if (typeof schema.columns === 'number' && baseCols > 1) {
       mdCols = baseCols;
-      smCols = Math.min(2, baseCols);
-      baseCols = 1;
+      if (baseCols >= 4) {
+        baseCols = 2;
+      } else {
+        smCols = 2;
+        baseCols = 1;
+      }
     }
 
     const gap = schema.gap ?? 4;

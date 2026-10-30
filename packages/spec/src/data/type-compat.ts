@@ -26,14 +26,19 @@
 
 import type { FieldType } from './field.zod';
 
-/** SQL dialects whose type vocabularies the matrix understands. */
+/**
+ * Remote type vocabularies the matrix understands: SQL dialects, plus the two
+ * non-SQL ones a federation driver reports (`mongo`'s BSON types, `odata`'s
+ * EDM primitives).
+ */
 export type SqlDialect =
   | 'postgres'
   | 'mysql'
   | 'sqlite'
   | 'snowflake'
   | 'bigquery'
-  | 'mongo';
+  | 'mongo'
+  | 'odata';
 
 /**
  * Result of a compatibility check:
@@ -105,6 +110,20 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
     decimal: 'decimal', bool: 'boolean', boolean: 'boolean', date: 'datetime',
     object: 'json', array: 'array', bindata: 'binary',
   },
+  // OData's EDM primitives (CSDL 4.0 §4.4), lower-cased as `canonicalizeSqlType`
+  // reads them. `Collection(Edm.String)` reaches the table as `collection`: the
+  // parameter strip that turns `varchar(255)` into `varchar` drops the element
+  // type, and a collection property is an array whatever it holds. Not mapped,
+  // so a draft flags them for review: `edm.duration`, the `edm.geography*` /
+  // `edm.geometry*` families, and every enum or complex type (a service's own
+  // qualified name, never an `edm.` one).
+  odata: {
+    'edm.string': 'text', 'edm.boolean': 'boolean', 'edm.guid': 'uuid',
+    'edm.byte': 'integer', 'edm.sbyte': 'integer', 'edm.int16': 'integer', 'edm.int32': 'integer',
+    'edm.int64': 'bigint', 'edm.decimal': 'decimal', 'edm.single': 'float', 'edm.double': 'float',
+    'edm.date': 'date', 'edm.timeofday': 'time', 'edm.datetimeoffset': 'datetime',
+    'edm.binary': 'binary', 'edm.stream': 'binary', collection: 'array',
+  },
 };
 
 /**
@@ -155,9 +174,28 @@ const CANONICAL_TO_FIELD: Record<
   // reported a `text` column holding a signature as NOT exactly compatible
   // with the very field type that wrote it. They stay under `binary` as well,
   // per the many-to-many rule above.
-  text: { suggested: 'text', exact: ['text', 'textarea', 'email', 'url', 'phone', 'markdown', 'html', 'richtext', 'code', 'select', 'color', 'signature', 'qrcode'], lossy: [] },
-  integer: { suggested: 'number', exact: ['number', 'autonumber', 'rating', 'percent'], lossy: ['currency', 'boolean'] },
-  bigint: { suggested: 'number', exact: ['number', 'autonumber'], lossy: ['currency'] },
+  //
+  // `lookup` / `master_detail` are exact under `text`, `integer` and `bigint`
+  // as they are under `uuid`: a reference field stores the target record's
+  // id, and on a federated object that id is the remote key, which a foreign
+  // key column of any of those types carries (`CustomerID int`, an OData
+  // `ReferentialConstraint` over `Edm.Int32`). Without them Gate 2 refused, as
+  // a `type_mismatch` error, every lookup over a foreign key that is not a
+  // UUID.
+  //
+  // `user` is exact under `text` but NOT under `integer` / `bigint`, unlike
+  // the two reference types above: its target is fixed to `sys_user`, so the
+  // column holds a PLATFORM user id, whose shape is the platform's and never
+  // the remote system's. Measured: better-auth mints a 32-character
+  // alphanumeric string for every user it creates (sign-up, admin create,
+  // import), and a row written past it through the engine gets the SQL
+  // driver's 16-character nanoid. A minted id is never a UUID or an integer;
+  // a caller-supplied id is stored verbatim as a string, which is why the
+  // `uuid` row keeps `user`. A text column carries it; an integer column
+  // cannot hold one, so `user` there stays a `type_mismatch` error.
+  text: { suggested: 'text', exact: ['text', 'textarea', 'email', 'url', 'phone', 'markdown', 'html', 'richtext', 'code', 'select', 'color', 'signature', 'qrcode', 'lookup', 'master_detail', 'user'], lossy: [] },
+  integer: { suggested: 'number', exact: ['number', 'autonumber', 'rating', 'percent', 'lookup', 'master_detail'], lossy: ['currency', 'boolean'] },
+  bigint: { suggested: 'number', exact: ['number', 'autonumber', 'lookup', 'master_detail'], lossy: ['currency'] },
   decimal: { suggested: 'number', exact: ['number', 'currency', 'percent'], lossy: ['rating'] },
   float: { suggested: 'number', exact: ['number', 'currency', 'percent', 'slider'], lossy: [] },
   boolean: { suggested: 'boolean', exact: ['boolean', 'toggle'], lossy: [] },

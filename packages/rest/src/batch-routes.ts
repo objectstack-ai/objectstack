@@ -85,7 +85,7 @@ export interface BatchRouteHost {
     enforceAuth: RestServer['enforceAuth'];
     enforceApiAccess: RestServer['enforceApiAccess'];
     enforceBatchSize: RestServer['enforceBatchSize'];
-    loadObjectItems: RestServer['loadObjectItems'];
+    loadObjectItem: RestServer['loadObjectItem'];
 }
 
 /** One operation of the cross-object batch, as the spec contract parses it. */
@@ -279,25 +279,31 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // Enforce object-level API exposure (enable.apiEnabled /
                 // apiMethods) for EVERY op BEFORE opening the transaction — the
                 // batch write surface must honour the same per-object gate as the
-                // single-record routes (ADR-0049 / #1889). Metadata is fetched
-                // once; each distinct (object, action) is checked once.
+                // single-record routes (ADR-0049 / #1889). Each distinct object
+                // is read once; each distinct (object, action) is checked once.
+                //
+                // [#27899] Read through the single-record routes' own read
+                // (`loadObjectItem`), so an op is judged on the object the data
+                // door serves for its name: a legacy `ns__short` object named by
+                // its short name is that object, as `registry.getObject`
+                // resolves it. The object LIST keyed by declared name found
+                // nothing under the short name, and the op passed on as unknown
+                // to an engine that does resolve it.
                 const p = await this.resolveProtocol(environmentId, req);
-                const items = await this.loadObjectItems(p, environmentId);
-                if (items.length > 0) {
-                    const byName = new Map<string, any>(items.map((o: any) => [o?.name, o]));
-                    const checked = new Set<string>();
-                    for (const op of ops) {
-                        const key = `${op.object}\u0000${op.action}`;
-                        if (checked.has(key)) continue;
-                        checked.add(key);
-                        const obj = byName.get(op.object);
-                        if (!obj) continue; // unknown object → surfaced by the op inside the tx
-                        // [#3391] Cross-object batch is a bulk surface: gate each op
-                        // as `bulk ∧ child(op.action)` — the object must grant the
-                        // `bulk` primitive AND the specific write it performs.
-                        const denial = apiAccessDenialFromEnable(obj.enable, op.object, 'bulk', { bulkChild: op.action });
-                        if (denial) { res.status(denial.status).json(denial.body); return; }
-                    }
+                const objects = new Map<string, any>();
+                const checked = new Set<string>();
+                for (const op of ops) {
+                    const key = `${op.object}\u0000${op.action}`;
+                    if (checked.has(key)) continue;
+                    checked.add(key);
+                    if (!objects.has(op.object)) objects.set(op.object, await this.loadObjectItem(p, environmentId, op.object));
+                    const obj = objects.get(op.object);
+                    if (!obj) continue; // unknown object → surfaced by the op inside the tx
+                    // [#3391] Cross-object batch is a bulk surface: gate each op
+                    // as `bulk ∧ child(op.action)` — the object must grant the
+                    // `bulk` primitive AND the specific write it performs.
+                    const denial = apiAccessDenialFromEnable(obj.enable, op.object, 'bulk', { bulkChild: op.action });
+                    if (denial) { res.status(denial.status).json(denial.body); return; }
                 }
 
                 // A write to `sys_api_key` from a request an API key

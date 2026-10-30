@@ -90,6 +90,12 @@ export * from './unbacked-conflict-target.js';
 // the pure enumerator both the hard stop (install seam) and the advisories
 // (`os doctor` / `os migrate plan`) read, so the three cannot drift apart.
 export * from './unique-scope-install-gate.js';
+// The read half of the host's datasource secret binder, published as a kernel
+// service: the host (`os serve`) registers it, a plugin driver dereferencing a
+// datasource's `external.credentialsRef` reads it. Neither imports the other;
+// this package depends only on `@objectstack/spec`, so a driver (in this
+// repository or out of it) adopting the seam takes no heavier edge.
+export * from './datasource-secret-resolver.js';
 // [#20919] The REST door's error CLASSIFICATION half (`mapDataError` through
 // `classifyDataError`), moved here from `@objectstack/rest` beside the
 // primitives it composes, so the bulk-import runner in `@objectstack/core`
@@ -107,6 +113,12 @@ export * from './share-password-header.js';
 // the display projection of exactly the fields that record carries — built once
 // for the same two mounts, from this home for the same reason.
 export * from './share-link-resolve-answer.js';
+// [ADR-0015 D7] The borrowed connector credential: the contract the
+// automation service lends a connector instance's credential through, the
+// datasource connection path borrows it by, and a plugin driver presents it
+// with. Producer and consumer are two services neither of which may import
+// the other; both already depend on this package, so the seam adds no edge.
+export * from './connector-credential-source.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

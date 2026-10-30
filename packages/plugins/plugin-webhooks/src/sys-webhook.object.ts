@@ -53,7 +53,13 @@ export const SysWebhook = ObjectSchema.create({
   // create/edit/delete so admins can at least toggle `active` and edit
   // simple URL/method fields without round-tripping through code.
   userActions: { create: true, edit: true, delete: true, import: false },
-  description: 'Outbound HTTP webhook subscription. Declared in code via defineStack({ webhooks }) / defineWebhook() (materialized into rows on boot) or authored directly in the Studio editor; dispatched by the webhook auto-enqueuer onto the shared HTTP outbox.',
+  // [ADR-0131 D2] A row is an organization's own subscription; a declared
+  // webhook is read from the metadata registry (`declared-webhooks.ts`) and
+  // writes no row. The description says so to every Setup/Studio reader, in
+  // an administrator's words: a webhook declared in code (`defineStack({
+  // webhooks })` / `defineWebhook()`) is the one "built into an app", and the
+  // "delivery queue" is the auto-enqueuer's shared HTTP outbox.
+  description: 'An outbound HTTP webhook your organization creates here or through the API. Webhooks that come built into an app are not listed here. Both kinds are sent through the same delivery queue.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{label}',
@@ -283,8 +289,9 @@ export const SysWebhook = ObjectSchema.create({
         readonly: true,
         defaultValue: 'admin',
         description:
-          'Record provenance: platform = framework built-in / package = app/package-declared ' +
-          '(boot-seeded from defineStack webhooks) / admin = created in Setup.',
+          'Record provenance: admin = created in Setup or through the API / package = a copy of a ' +
+          'code-declared webhook that the retired 18.0 boot seeder wrote (nothing writes one now: a ' +
+          'declared webhook is read from the metadata registry and is not a row) / platform = reserved.',
         group: 'System',
       },
     ),
@@ -295,8 +302,9 @@ export const SysWebhook = ObjectSchema.create({
       readonly: true,
       defaultValue: false,
       description:
-        'Set when an admin edits a package-declared webhook; boot seeding will no longer ' +
-        'overwrite the row (a deactivated noisy webhook survives redeploys). Meaningless on admin rows.',
+        'Set when an admin edits a package row (a copy the retired 18.0 boot seeder wrote). The ' +
+        'ownership ceremony reads it: an edited copy under a declared name is kept as a clone, a ' +
+        'pristine one is deleted. Meaningless on admin rows.',
       group: 'System',
     }),
 

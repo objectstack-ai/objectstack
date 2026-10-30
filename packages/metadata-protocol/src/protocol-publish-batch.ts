@@ -11,6 +11,8 @@
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
  * re-indented one level and otherwise unedited: the same reads, in the same
  * order, answering with the same receipts and the same degradations.
+ * Edited since the move: `applySeedBodies`' failure receipt counts the rows the
+ * loader wrote before it threw and names the seed that stopped it.
  *
  * ## How the moved bodies reach the class
  *
@@ -46,6 +48,7 @@ import {
     seedRequestValidationError,
 } from './protocol.js';
 import { CLOSURE_CONTEXT_KEY_BY_TYPE, type RuntimePendingDeclarations } from './runtime-authoring-gate.js';
+import type { SeedLoadPartialWrites } from './seed-loader.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -72,6 +75,9 @@ export async function applySeedBodies(
     success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
     issues?: Array<{ path: string; message: string; code?: string | undefined }>;
 }> {
+    // The loader's reader of what a THROWN load had written. Unset until the
+    // loader module is imported, which no write precedes.
+    let partialWritesOf: ((e: unknown) => SeedLoadPartialWrites | undefined) | undefined;
     try {
         const seeds = bodies.filter(
             (b: any) => b && typeof b.object === 'string' && Array.isArray(b.records),
@@ -79,7 +85,8 @@ export async function applySeedBodies(
         if (seeds.length === 0) {
             return { success: false, inserted: 0, updated: 0, error: 'seed apply: no readable seed bodies' };
         }
-        const { SeedLoaderService } = await import('./seed-loader.js');
+        const { SeedLoaderService, seedLoadPartialWrites } = await import('./seed-loader.js');
+        partialWritesOf = seedLoadPartialWrites;
         const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
         // The loader only needs `getObject` from IMetadataService (dependency
         // graph + field introspection); satisfy it from the protocol's own
@@ -134,9 +141,21 @@ export async function applySeedBodies(
         // which key. That declaration is the whole reason this site could
         // be converted rather than escalated.
         console.warn(`[protocol.applySeedBodies] seed apply failed: ${e?.message ?? e}`);
+        // The counters describe what was WRITTEN. The loader writes dataset
+        // by dataset and stops at the one that throws; the rows of the
+        // datasets ahead of it stay written (nothing rolls them back), so the
+        // receipt carries the loader's own count of them and names the seed
+        // that stopped it. No reading means the throw came before the loader
+        // wrote anything — the request parse, or the loader's import.
+        const written = partialWritesOf?.(e);
+        const failure = clientFacingFailureText(e, 'seed apply failed');
         return {
-            success: false, inserted: 0, updated: 0,
-            error: clientFacingFailureText(e, 'seed apply failed'),
+            success: false,
+            inserted: written?.inserted ?? 0,
+            updated: written?.updated ?? 0,
+            error: written?.failedObject
+                ? `seed apply stopped at the seed for object '${written.failedObject}': ${failure}`
+                : failure,
             // [#10524] A DECLARED refusal's structured findings ride the
             // receipt beside the headline `error` — the message is a
             // one-sentence headline now, so this is where the per-key

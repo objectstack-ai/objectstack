@@ -126,6 +126,8 @@ test('F1: a newly created package appears in the switcher without a reload', asy
   await chip.click();
   await page.getByRole('button', { name: /New package/i }).click();
   await page.getByRole('dialog').getByLabel(/^Display name/).first().fill(pkgName);
+  // The id sits in the collapsed Advanced section (objectstack#27833).
+  await page.getByTestId('package-form-advanced-toggle').click();
   await page.getByTestId('package-form-id-input').fill(pkgId);
   await page.getByTestId('package-form-submit').click();
 

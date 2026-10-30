@@ -228,7 +228,7 @@ async function mountView(viewKey: string, navigation?: Record<string, unknown>) 
       </ExpressionProvider>
     </I18nProvider>,
   );
-  await screen.findByTestId('view-tab-bar', undefined, { timeout: 5000 });
+  await screen.findByTestId('list-view-switcher', undefined, { timeout: 5000 });
 }
 
 /** The record page is open, embedded, on record `id` — and the quick-look is not. */

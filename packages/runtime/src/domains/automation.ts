@@ -2612,6 +2612,7 @@ export const RESUME_REFUSAL_ROWS: ReadonlyMap<string, { status: number; fallback
     ['RUN_NOT_FOUND', { status: 404, fallback: 'No such suspended run' }],
     ['STORE_UNAVAILABLE', { status: 503, fallback: 'Suspended-run store unavailable' }],
     ['RESUME_IN_PROGRESS', { status: 409, fallback: 'Run is already being resumed' }],
+    ['RESUME_CHILD_PENDING', { status: 409, fallback: 'Resume the pending child run instead' }],
 ]);
 
 /**
@@ -2625,7 +2626,7 @@ export const RESUME_REFUSAL_ROWS: ReadonlyMap<string, { status: number; fallback
  * message on either door. This used to be inline in the REST arm. It moved here
  * unchanged, and the arm's wire answers are byte-identical.
  *
- * The six coded rows are REFUSALS the engine made BEFORE consuming the
+ * The seven coded rows are REFUSALS the engine made BEFORE consuming the
  * suspension, so the run is still parked and the caller can retry (the codes
  * and why each has its status are listed at the REST arm).
  *
@@ -3486,6 +3487,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         //                        existence is unknown; the same call is expected
         //                        to work once it recovers (#4420)
         //   RESUME_IN_PROGRESS → 409, a concurrent resume already has this run
+        //   RESUME_CHILD_PENDING → 409, the run waits on a `map` item whose
+        //                        child run is still suspended; the engine's
+        //                        message names that child run id to resume
+        //                        instead, and nothing moved (#27877)
         // A result with NO code and `success: false` consumed its pause and
         // ran: 400 `FLOW_FAILED` (#8684), whose details carry the engine's
         // own verdict since #15221 — `status: 'stranded'` + `repairable`

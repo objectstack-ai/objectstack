@@ -1,11 +1,13 @@
 /**
  * The fallback app tile's colours, derived from an app's declared
- * `branding.primaryColor` (objectui#12201). `AppMark` publishes them as CSS
- * custom properties on the tile; see that component for why.
+ * `branding.primaryColor` (objectui#12201). `AppMark` and the home launcher's
+ * tiles publish them as CSS custom properties on the tile (`appTileStyle`),
+ * which the static `BRANDED_TILE_CLASSES` utilities consume.
  *
  * @module
  */
 
+import type { CSSProperties } from 'react';
 import { contrastRatio, hexToHSL } from '@object-ui/core';
 
 /** The two foregrounds `AppShell` pairs with a brand colour (`--primary-foreground`). */
@@ -46,4 +48,24 @@ export function appTileColors(primaryColor: unknown): AppTileColors | undefined 
     bgDark: `hsl(${h} ${darkSaturation}% ${Math.max(l, 65)}%)`,
     fgDark: ON_BRAND_DARK,
   };
+}
+
+/**
+ * The tile for a declared `primaryColor`. The utility strings are literals so
+ * Tailwind emits them at build time; the author's colour reaches them only as
+ * CSS custom properties, so `dark:` stays a real variant the theme controls
+ * (AGENTS.md section 2, the author-declared colour carve-out).
+ */
+export const BRANDED_TILE_CLASSES =
+  'bg-[color:var(--os-app-tile-bg)] text-[color:var(--os-app-tile-fg)] ' +
+  'dark:bg-[color:var(--os-app-tile-bg-dark)] dark:text-[color:var(--os-app-tile-fg-dark)]';
+
+/** The custom properties `BRANDED_TILE_CLASSES` reads, for a tile's `style`. */
+export function appTileStyle(colors: AppTileColors): CSSProperties {
+  return {
+    '--os-app-tile-bg': colors.bg,
+    '--os-app-tile-fg': colors.fg,
+    '--os-app-tile-bg-dark': colors.bgDark,
+    '--os-app-tile-fg-dark': colors.fgDark,
+  } as CSSProperties;
 }

@@ -61,6 +61,7 @@ import {
   type SelectOptionKind,
 } from '@objectstack/spec/data';
 import { ValueDomainSchema } from '@objectstack/spec/shared';
+import { detectStatusField, type StatusFieldSource } from '@object-ui/types';
 import type { MetadataInspectorProps } from '../inspector-registry.js';
 import {
   assertObjectMetadataWritable,
@@ -304,7 +305,8 @@ interface MalformedOption {
  * row` test so every consumer has to answer the question.
  */
 type OptionRow =
-  | { kind: 'option'; option: Option }
+  /** `derive`: the value follows the label until the author types one; editor-internal, never written. */
+  | { kind: 'option'; option: Option; derive?: boolean }
   | { kind: 'malformed'; malformed: MalformedOption };
 
 /**
@@ -711,6 +713,9 @@ export function ObjectFieldInspector({
   const name = String(selection.id);
   const idx = indexOfField(view, name);
   const entry = idx >= 0 ? view.entries[idx] : null;
+  // The formula editor's field picker lists siblings by the label every other
+  // surface shows them with (the same resolver as `LabelTranslationHint`).
+  const { fieldLabel } = useSafeFieldLabel();
 
   const fieldGroups = Array.isArray((draft as any).fieldGroups)
     ? ((draft as any).fieldGroups as Array<{ key?: string; label?: string }>)
@@ -1102,6 +1107,15 @@ export function ObjectFieldInspector({
   const optionRows = readOptions(def);
   const options = representableOptions(optionRows);
   const kindAllowed = takesOptionKind(type, def.multiple);
+  // The kind picker is drawn only where a kind steers something: the field the
+  // record path follows (named by `stageField`, or found by the same heuristic
+  // the path reads), or a field whose options already declare one.
+  // `view` rather than `draft.fields`: the draft may hold its fields as an array.
+  const drivesPath =
+    detectStatusField({
+      stageField: (draft as StatusFieldSource).stageField,
+      fields: Object.fromEntries(view.entries.map((e) => [e.name, e.def])) as StatusFieldSource['fields'],
+    }) === entry.name;
   // objectstack#26729 — the object names this field as its lifecycle field, so
   // ObjectSchema refuses the save until every option declares a kind.
   const stageNeedsKinds =
@@ -1354,6 +1368,7 @@ export function ObjectFieldInspector({
               rows={optionRows}
               onChange={patchOptions}
               kindAllowed={kindAllowed}
+              drivesPath={drivesPath}
               disabled={readOnly}
               locale={locale}
             />
@@ -1424,6 +1439,13 @@ export function ObjectFieldInspector({
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               // A formula may reference every sibling, not itself (circular).
               fieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
+              fieldOptions={view.entries
+                .filter((e) => e.name !== entry.name)
+                .map((e) => {
+                  const source = typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name;
+                  const objectName = typeof (draft as any).name === 'string' ? ((draft as any).name as string) : '';
+                  return { name: e.name, label: objectName ? fieldLabel(objectName, e.name, source) : source };
+                })}
               scope="record"
               roots={FORMULA_ROOTS}
               role="value"
@@ -1799,7 +1821,8 @@ function TextareaField({
         placeholder={placeholder}
         onChange={(e) => onCommit(e.target.value)}
         className={
-          'w-full text-sm rounded-md border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary ' +
+          'w-full text-sm rounded-md border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary' +
+          ' disabled:cursor-not-allowed disabled:opacity-50 ' +
           (mono ? 'font-mono text-xs ' : '')
         }
       />
@@ -1844,13 +1867,16 @@ function OptionsEditor({
   rows: incoming,
   onChange,
   kindAllowed,
+  drivesPath,
   disabled,
   locale,
 }: {
   rows: OptionRow[];
   onChange: (next: OptionRow[]) => void;
-  /** Draw the lifecycle `kind` picker — a single-value select / radio only. */
+  /** The field may carry a lifecycle `kind` — a single-value select / radio only. */
   kindAllowed: boolean;
+  /** The record path follows this field, so its options' kinds steer it. */
+  drivesPath: boolean;
   disabled?: boolean;
   locale?: string;
 }) {
@@ -1869,8 +1895,12 @@ function OptionsEditor({
   // wearing the blank row's shape any more, so the filter below can go on
   // meaning exactly what it says. It is deliberately unchanged.
   const [rows, setRows] = React.useState<OptionRow[]>(
-    () => (incoming.length > 0 ? incoming : [{ kind: 'option', option: { value: '', label: '' } }]),
+    () => (incoming.length > 0 ? incoming : [{ kind: 'option', option: { value: '', label: '' }, derive: true }]),
   );
+  // A kind is offered where it steers the record path, and kept editable on a
+  // field whose options already declare one.
+  const showKind =
+    kindAllowed && (drivesPath || rows.some((r) => r.kind === 'option' && r.option.kind !== undefined));
   const commit = (next: OptionRow[]) => {
     setRows(next);
     onChange(next.filter((r) => r.kind === 'malformed' || r.option.value.trim() !== ''));
@@ -1881,12 +1911,26 @@ function OptionsEditor({
     // Only an `option` row has editable controls, so this is unreachable for a
     // malformed one; narrowing rather than asserting keeps it that way.
     if (row.kind !== 'option') return;
-    next[i] = { kind: 'option', option: { ...row.option, ...patch } };
+    next[i] = { kind: 'option', option: { ...row.option, ...patch }, derive: row.derive };
+    commit(next);
+  };
+  // Only a row this editor added derives its value from its label: renaming an
+  // authored option must never change the value its records store.
+  const updateLabel = (i: number, label: string) => {
+    const row = rows[i];
+    if (row?.kind !== 'option') return;
+    update(i, row.derive ? { label, value: toFieldNameOrEmpty(label) } : { label });
+  };
+  const updateValue = (i: number, value: string) => {
+    const next = [...rows];
+    const row = next[i];
+    if (row.kind !== 'option') return;
+    next[i] = { kind: 'option', option: { ...row.option, value } };
     commit(next);
   };
   const remove = (i: number) => commit(rows.filter((_, j) => j !== i));
   const move = (i: number, to: number) => commit(moveArray(rows, i, to));
-  const add = () => commit([...rows, { kind: 'option', option: { value: '', label: '' } }]);
+  const add = () => commit([...rows, { kind: 'option', option: { value: '', label: '' }, derive: true }]);
 
   /** Reorder + remove — identical for both row kinds, so an unreadable row is still movable and removable. */
   const rowControls = (i: number) => (
@@ -1979,18 +2023,22 @@ function OptionsEditor({
               <div key={i} className="rounded-md border border-border/60 p-1.5 space-y-1">
                 <div className="flex items-center gap-1">
                   <Input
-                    value={row.option.value}
-                    onChange={(e) => update(i, { value: e.target.value })}
-                    placeholder={t('designer.field.optValue', locale)}
+                    value={row.option.label ?? ''}
+                    onChange={(e) => updateLabel(i, e.target.value)}
+                    placeholder={t('designer.field.optLabel', locale)}
+                    aria-label={t('designer.field.optLabel', locale)}
                     disabled={disabled}
-                    className="h-7 min-w-0 flex-1 text-xs font-mono"
+                    data-testid="option-label"
+                    className="h-7 min-w-0 flex-1 text-xs"
                   />
                   <Input
-                    value={row.option.label ?? ''}
-                    onChange={(e) => update(i, { label: e.target.value })}
-                    placeholder={t('designer.field.optLabel', locale)}
+                    value={row.option.value}
+                    onChange={(e) => updateValue(i, e.target.value)}
+                    placeholder={t('designer.field.optValue', locale)}
+                    aria-label={t('designer.field.optValueName', locale)}
                     disabled={disabled}
-                    className="h-7 min-w-0 flex-1 text-xs"
+                    data-testid="option-value"
+                    className="h-7 min-w-0 flex-1 text-xs font-mono"
                   />
                 </div>
                 <div className="flex items-center gap-1">
@@ -2002,7 +2050,7 @@ function OptionsEditor({
                     className="h-6 w-6 rounded border bg-background cursor-pointer p-0.5"
                     title={t('designer.field.optColor', locale)}
                   />
-                  {kindAllowed && (
+                  {showKind && (
                     <Select
                       value={row.option.kind ?? KIND_UNSET}
                       onValueChange={(v) => update(i, { kind: isOptionKind(v) ? v : undefined })}

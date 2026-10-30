@@ -151,6 +151,7 @@ export { TOASTER_POSITIONS } from './renderers/feedback/toaster';
 export { useConfigDraft } from './hooks/use-config-draft';
 export type { UseConfigDraftOptions, UseConfigDraftReturn } from './hooks/use-config-draft';
 export { useIsMobile } from './hooks/use-mobile';
+export { useIsViewportBelow } from './hooks/use-viewport-below';
 export { useResizeObserver } from './hooks/use-resize-observer';
 export type { ElementSize } from './hooks/use-resize-observer';
 export { useRelatedCount, useRelatedCountVersion, RelatedCountStore } from './hooks/related-count-store';

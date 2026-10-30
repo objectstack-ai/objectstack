@@ -120,7 +120,7 @@ export function ObjectDefaultInspector({
             rows={2}
             placeholder={tr('designer.object.descriptionPlaceholder')}
             onChange={(e) => onPatch({ description: e.target.value || undefined })}
-            className="w-full text-sm rounded-md border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full text-sm rounded-md border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
           />
         </div>
       </Section>

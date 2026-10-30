@@ -32,8 +32,8 @@
  * The router is a `BrowserRouter`, as in the console, so the page's location
  * and `window.location` are one thing here as they are in production; a
  * `MemoryRouter` would not move `window.location`. Everything that decides it
- * renders for real — this page, `plugin-view`'s `ObjectView` with its tab bar
- * and `plugin-list`'s `ListView` with its `UserFilters` — and the list's query
+ * renders for real — this page with its title's view switcher, `plugin-view`'s
+ * `ObjectView` and `plugin-list`'s `ListView` with its `UserFilters` — and the list's query
  * is read at the data source.
  */
 
@@ -200,8 +200,11 @@ async function mountHost(entry: string): Promise<Host> {
       await settle();
     },
     clickTab: async (viewId) => {
-      // The tab bar's own door: `onViewChange` → this page's `handleViewChange`.
-      fireEvent.click(screen.getByTestId(`view-tab-${viewId}`));
+      // The view switcher's own door (the page title's dropdown,
+      // objectstack#27594): a row → this page's `handleViewChange`.
+      fireEvent.click(screen.getByTestId('list-view-switcher'));
+      const row = screen.getAllByTestId(`view-switcher-row-${viewId}`).at(-1)!;
+      fireEvent.click(row.querySelector('button')!);
       await settle();
     },
   };

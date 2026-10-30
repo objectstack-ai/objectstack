@@ -98,18 +98,22 @@ describe('RelatedList in the related column (objectstack#26678)', () => {
     expect(screen.queryByText(/View all/i)).not.toBeInTheDocument();
   });
 
-  it('offers ⤢ and the ⋯ menu only with the arranged stack\'s chrome, and ⤢ enlarges', async () => {
+  it('offers the handle, the ⋯ menu and the way to the whole list only with the arranged stack\'s chrome (objectstack#27524)', async () => {
     renderList(true);
     await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
-    expect(document.querySelector('[data-related-card-enlarge]')).toBeNull();
+    expect(document.querySelector('[data-related-panel-open]')).toBeNull();
+    expect(document.querySelector('[data-related-panel-handle]')).toBeNull();
     expect(document.querySelector('[data-related-card-menu]')).toBeNull();
     document.body.innerHTML = '';
     const onEnlarge = vi.fn();
-    renderList(true, { chrome: { id: 'task.lead_id', fresh: true, onCollapse: vi.fn(), onHide: vi.fn(), onEnlarge } });
+    renderList(true, { chrome: { id: 'task.lead_id', fresh: true, onHide: vi.fn(), onEnlarge } });
     await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
-    (document.querySelector('[data-related-card-enlarge]') as HTMLButtonElement).click();
-    (document.querySelector('[data-related-card-count]') as HTMLButtonElement).click();
+    // No ⤢ any more: the header (title + count chip) opens the whole list.
+    expect(document.querySelector('[data-related-card-enlarge]')).toBeNull();
+    (document.querySelector('[data-related-panel-open]') as HTMLButtonElement).click();
+    (document.querySelector('[data-related-card-count]') as HTMLElement).click();
     expect(onEnlarge).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-related-panel-handle]')).not.toBeNull();
     expect(document.querySelector('[data-related-card-menu]')).not.toBeNull();
     expect(document.querySelector('[data-related-card-new]')).not.toBeNull();
   });

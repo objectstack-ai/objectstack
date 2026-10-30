@@ -26,6 +26,10 @@
  * that is wide enough; the width rules themselves are
  * `metricTileLayout-12623.test.tsx`'s.
  *
+ * objectstack#27430 draws an authored description as the caption under the
+ * value in place of the measure label: the first pin renders a metric that
+ * declares none, and the second asserts the description as that caption.
+ *
  * CONTROL: a non-metric dataset widget (a table) keeps the card header, and
  * its description paragraph, exactly as before.
  */
@@ -64,6 +68,9 @@ const METRIC = {
   values: ['total_amount'],
 };
 
+// The same tile with no description: its caption is the measure label.
+const METRIC_UNDESCRIBED = { ...METRIC, description: undefined };
+
 function renderDashboard(...widgets: Record<string, unknown>[]) {
   return render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
@@ -74,7 +81,7 @@ function renderDashboard(...widgets: Record<string, unknown>[]) {
 
 describe('DashboardRenderer — a dataset-bound metric tile on two lines (objectui#12528)', () => {
   it('draws the title alone on the first line, then the value, then the measure label (objectui#12623)', async () => {
-    const { container } = renderDashboard(METRIC);
+    const { container } = renderDashboard(METRIC_UNDESCRIBED);
     // The answered tile, not the loading one: a loading tile draws the same
     // heading line, and only the answer names the measure label.
     const value = await screen.findByText('1964500');
@@ -93,16 +100,20 @@ describe('DashboardRenderer — a dataset-bound metric tile on two lines (object
     expect(screen.getAllByText('Total Pipeline')).toHaveLength(1);
   });
 
-  it('draws no description paragraph, and carries the description (then the measure label) as the title tooltip', async () => {
+  it('draws no description paragraph: the description is the caption under the value, and leads the title tooltip (objectstack#27430)', async () => {
     const { container } = renderDashboard(METRIC);
-    await screen.findByText('1964500');
+    const value = await screen.findByText('1964500');
     const title = screen.getByTestId('dataset-metric-title');
 
     // objectui#12623 — the measure label rides in the tooltip on its own line,
-    // the one place it survives a tile too narrow to draw it.
+    // the one place it survives a tile too narrow to draw it, and the one
+    // place it survives under a description caption.
     expect(title).toHaveAttribute('title', 'Sum of open opportunity value\nTotal Amount');
     expect(container.querySelector('p')).toBeNull();
-    expect(container.textContent).not.toContain('Sum of open opportunity value');
+    expect(value.nextElementSibling).toBe(screen.getByTestId('dataset-metric-label'));
+    expect(screen.getByTestId('dataset-metric-label')).toHaveTextContent('Sum of open opportunity value');
+    expect(container.textContent?.match(/Sum of open opportunity value/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain('Total Amount');
   });
 
   it('CONTROL: a non-metric dataset widget keeps its card header and description paragraph', async () => {

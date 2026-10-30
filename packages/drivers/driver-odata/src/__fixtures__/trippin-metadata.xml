@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The shape of the public OData v4 reference service "TripPin"
+  (services.odata.org/V4/TripPinServiceRW/$metadata), abridged to the parts
+  the driver reads: an entity type with a string key, an enum property, a
+  collection property, a complex property, single- and collection-valued
+  navigation properties with bindings, an abstract base type whose key a
+  derived type inherits, and the Alias spelling of a namespace. One part is
+  this fixture's own, not TripPin's: the `Flights` entity set and the
+  `TripDate` / `TrackingId` / `Fare` / `Cancelled` properties on `Flight`, so a
+  set over an inherited key and the Date / Guid / Decimal / Boolean literals
+  are exercised against the same document.
+-->
+<edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx" Version="4.0">
+  <edmx:DataServices>
+    <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="Microsoft.OData.SampleService.Models.TripPin" Alias="Self">
+      <EnumType Name="PersonGender">
+        <Member Name="Male" Value="0" />
+        <Member Name="Female" Value="1" />
+        <Member Name="Unknown" Value="2" />
+      </EnumType>
+      <ComplexType Name="City">
+        <Property Name="CountryRegion" Type="Edm.String" Nullable="false" />
+        <Property Name="Name" Type="Edm.String" Nullable="false" />
+        <Property Name="Region" Type="Edm.String" Nullable="false" />
+      </ComplexType>
+      <ComplexType Name="Location" OpenType="true">
+        <Property Name="Address" Type="Edm.String" Nullable="false" />
+        <Property Name="City" Type="Self.City" Nullable="false" />
+      </ComplexType>
+      <EntityType Name="Person" OpenType="true">
+        <Key>
+          <PropertyRef Name="UserName" />
+        </Key>
+        <Property Name="UserName" Type="Edm.String" Nullable="false" />
+        <Property Name="FirstName" Type="Edm.String" Nullable="false" />
+        <Property Name="LastName" Type="Edm.String" Nullable="false" />
+        <Property Name="MiddleName" Type="Edm.String" />
+        <Property Name="Emails" Type="Collection(Edm.String)" />
+        <Property Name="AddressInfo" Type="Collection(Self.Location)" />
+        <Property Name="Gender" Type="Self.PersonGender" />
+        <Property Name="Age" Type="Edm.Int64" />
+        <Property Name="Concurrency" Type="Edm.Int64" Nullable="false" />
+        <NavigationProperty Name="Friends" Type="Collection(Self.Person)" />
+        <NavigationProperty Name="BestFriend" Type="Self.Person" />
+        <NavigationProperty Name="Photo" Type="Self.Photo" />
+      </EntityType>
+      <EntityType Name="Photo" HasStream="true">
+        <Key>
+          <PropertyRef Name="Id" />
+        </Key>
+        <Property Name="Id" Type="Edm.Int64" Nullable="false" />
+        <Property Name="Name" Type="Edm.String" />
+      </EntityType>
+      <EntityType Name="Airline">
+        <Key>
+          <PropertyRef Name="AirlineCode" />
+        </Key>
+        <Property Name="AirlineCode" Type="Edm.String" Nullable="false" />
+        <Property Name="Name" Type="Edm.String" Nullable="false" />
+      </EntityType>
+      <EntityType Name="PlanItem" Abstract="true">
+        <Key>
+          <PropertyRef Name="PlanItemId" />
+        </Key>
+        <Property Name="PlanItemId" Type="Edm.Int32" Nullable="false" />
+        <Property Name="ConfirmationCode" Type="Edm.String" />
+        <Property Name="StartsAt" Type="Edm.DateTimeOffset" />
+        <Property Name="EndsAt" Type="Edm.DateTimeOffset" />
+        <Property Name="Duration" Type="Edm.Duration" />
+      </EntityType>
+      <EntityType Name="PublicTransportation" BaseType="Self.PlanItem">
+        <Property Name="SeatNumber" Type="Edm.String" />
+      </EntityType>
+      <EntityType Name="Flight" BaseType="Microsoft.OData.SampleService.Models.TripPin.PublicTransportation">
+        <Property Name="FlightNumber" Type="Edm.String" Nullable="false" />
+        <Property Name="TripDate" Type="Edm.Date" />
+        <Property Name="TrackingId" Type="Edm.Guid" />
+        <Property Name="Fare" Type="Edm.Decimal" />
+        <Property Name="Cancelled" Type="Edm.Boolean" Nullable="false" />
+        <NavigationProperty Name="Airline" Type="Self.Airline" Nullable="false">
+          <ReferentialConstraint Property="AirlineCode" ReferencedProperty="AirlineCode" />
+        </NavigationProperty>
+      </EntityType>
+      <EntityContainer Name="DefaultContainer">
+        <EntitySet Name="People" EntityType="Microsoft.OData.SampleService.Models.TripPin.Person">
+          <NavigationPropertyBinding Path="Friends" Target="People" />
+          <NavigationPropertyBinding Path="BestFriend" Target="People" />
+          <NavigationPropertyBinding Path="Photo" Target="Photos" />
+        </EntitySet>
+        <EntitySet Name="Photos" EntityType="Microsoft.OData.SampleService.Models.TripPin.Photo" />
+        <EntitySet Name="Airlines" EntityType="Microsoft.OData.SampleService.Models.TripPin.Airline" />
+        <EntitySet Name="Flights" EntityType="Self.Flight">
+          <NavigationPropertyBinding Path="Airline" Target="Airlines" />
+        </EntitySet>
+        <Singleton Name="Me" Type="Microsoft.OData.SampleService.Models.TripPin.Person" />
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>

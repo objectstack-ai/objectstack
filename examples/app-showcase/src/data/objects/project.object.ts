@@ -90,7 +90,9 @@ export const Project = ObjectSchema.create({
     }),
     start_date: Field.date({ label: 'Start Date' }),
     end_date: Field.date({ label: 'Target End Date' }),
-    owner: Field.text({ label: 'Owner', maxLength: 200 }),
+    // The owner's email, as text. Labelled apart from the platform-injected
+    // `owner_id` lookup, which is the one field here labelled "Owner".
+    owner: Field.text({ label: 'Owner Email', maxLength: 200 }),
     // Multi-value fields — the payload for the grid's *bulk-edit* showcase. A
     // multiselect (fixed options) and a multi-user field are exactly the two
     // shapes that, before #2185, the bulk dialog could not set: its people /

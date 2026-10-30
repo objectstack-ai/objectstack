@@ -28,6 +28,7 @@ import { renderChildren, renderNodeSlot, cn } from '../../lib/utils';
 import { LazyIcon } from '../../lib/lazy-icon';
 import { RelatedCountStore, useRelatedCountVersion } from '../../hooks/related-count-store';
 import { useIsMobile } from '../../hooks/use-mobile';
+import { useHorizontalOverflow } from '../../hooks/use-horizontal-overflow';
 import {
   Tabs,
   TabsList,
@@ -1114,6 +1115,10 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       ? selectedValue
       : undefined) ?? itemsWithValue[0]?.value ?? '';
 
+  // A horizontal strip with more tabs than fit scrolls sideways, and fades at
+  // each edge that hides a tab, so the reader can tell the strip goes on.
+  const [stripRef, stripOverflow] = useHorizontalOverflow<HTMLDivElement>();
+
   const listClass = cn(
     isVertical && 'flex-col h-auto items-stretch p-1',
     type === 'card' && 'bg-transparent gap-1',
@@ -1122,7 +1127,14 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // primitive defaults to a pill-card look (bg-muted, rounded-md) that
     // floats unmoored on long record pages — override it so the strip reads
     // as a section anchor with a bottom border + per-trigger underline.
-    type === 'line' && !isVertical && 'h-auto rounded-none bg-transparent p-0 gap-4 border-b border-border w-full justify-start',
+    // The bottom rule is an inset shadow, not a border, so a strip that
+    // scrolls (`overflow-x-auto` clips at the padding box) keeps the active
+    // trigger's underline drawn over it.
+    type === 'line' && !isVertical && 'h-auto rounded-none bg-transparent p-0 gap-4 shadow-[inset_0_-1px_0_var(--color-border)] w-full justify-start',
+    !isVertical && 'max-w-full overflow-x-auto overflow-y-hidden',
+    !isVertical && 'data-[overflow=end]:[mask-image:linear-gradient(to_right,#000_calc(100%-2.5rem),transparent)]',
+    !isVertical && 'data-[overflow=start]:[mask-image:linear-gradient(to_left,#000_calc(100%-2.5rem),transparent)]',
+    !isVertical && 'data-[overflow=both]:[mask-image:linear-gradient(to_right,transparent,#000_2.5rem,#000_calc(100%-2.5rem),transparent)]',
     // Pin the horizontal tab strip to the top of the scroll container so
     // users keep their bearings on long record pages. Skipped for vertical
     // layouts where the strip is a sidebar, not a header.
@@ -1133,7 +1145,8 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     isVertical && 'justify-start',
     type === 'card' && 'data-[state=active]:bg-background data-[state=active]:border data-[state=active]:shadow-sm rounded-md',
     type === 'pill' && 'rounded-full data-[state=active]:bg-background',
-    type === 'line' && !isVertical && 'rounded-none border-b-2 border-transparent bg-transparent px-1 pb-2.5 -mb-px shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground',
+    !isVertical && 'shrink-0',
+    type === 'line' && !isVertical && 'rounded-none border-b-2 border-transparent bg-transparent px-1 pb-2.5 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground',
   );
 
   return (
@@ -1174,7 +1187,11 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       {(itemsWithValue.length > 1 ||
         schema?.alwaysShowStrip === true ||
         schema?.properties?.alwaysShowStrip === true) && (
-        <TabsList className={listClass}>
+        <TabsList
+          ref={isVertical ? undefined : stripRef}
+          data-overflow={isVertical ? undefined : stripOverflow}
+          className={listClass}
+        >
           {itemsWithValue.map((item) => (
             <TabsTrigger key={item.value} value={item.value} className={triggerClass()}>
               {item.icon && (
@@ -2017,8 +2034,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // `ActionEngine.getActionsForLocation`, so the engine's gate never ran on
       // the ONE surface `record_header` / `record_more` actions live on: a
       // button declaring a capability nobody holds rendered, and only the
-      // server's 403 stopped it — and only for platform action routes, never
-      // for a `type: 'api'` action pointed at a custom endpoint. Same rule as
+      // server's 403 stopped it — and only for a call the platform action door
+      // dispatches, never for a `type: 'api'` action whose `target` is on
+      // another origin (ADR-0066 D4 as amended: the door dispatches a declared
+      // same-origin api action too). Same rule as
       // the engine, so the two surfaces can't disagree: hide unless the caller
       // holds ALL declared capabilities.
       //

@@ -2436,7 +2436,8 @@ export class ApprovalService implements IApprovalService {
       // account still resolves, as a banned team or unit member does (neither
       // expansion reads the flag). What is asked is the slot the route ENDS
       // on: an out-of-office hop that carries the request to a delegate has
-      // named someone (a removed account's delegation still routes, #24065).
+      // named someone (a removed account's delegation still routes, #24065;
+      // a delegate no account carries routes back here, #27752).
       // One that resolves to no one falls through to the graph types'
       // "expanded to nobody" warning below and adds no slot, so a slate it
       // leaves empty reaches the node's onEmptyApprovers. A failed read proves
@@ -2447,18 +2448,31 @@ export class ApprovalService implements IApprovalService {
       const value = String(a.value);
       const routed = await this.applyOooDelegation(value, now, organizationId, substitutions);
       if (routed.length !== 1 || routed[0] !== value || value.includes(':')) return routed;
-      let refusal: string | undefined;
-      try { refusal = await this.reassignTargetRefusal(value, null); } catch { refusal = undefined; }
-      if (refusal === undefined) return routed;
+      if (!await this.namesNoAccount(value)) return routed;
     }
     if (type === 'field' && record) {
       // #3447: a record field can name MANY approvers — a multi-select user
       // field arrives as an array (or a legacy CSV string). Fan each out into
       // its own slot and OOO-substitute per person; collapsing to `String(...)`
       // (→ `'u1,u2'`) would mint one bogus approver id and skip every delegate.
+      //
+      // #27752: each id takes the `user` treatment above — the slot is the id
+      // only when an account carries it. One that resolves to no one warns as
+      // `user` does and adds no slot, so a slate it leaves empty reaches the
+      // node's onEmptyApprovers; a failed read keeps the slot.
       const out: string[] = [];
       for (const id of csvSplit((record as any)[a.value])) {
-        out.push(...await this.applyOooDelegation(id, now, organizationId, substitutions));
+        const routed = await this.applyOooDelegation(id, now, organizationId, substitutions);
+        if (routed.length === 1 && routed[0] === id && !id.includes(':') && await this.namesNoAccount(id)) {
+          this.logger?.warn?.(
+            `[approvals] approver 'field:${a.value}' id '${id}' expanded to nobody — the slot names no one, so no `
+            + `one is asked through it. Staff it or re-point the approver; a slate left naming no one is decided `
+            + `by the node's onEmptyApprovers.`,
+            { type, value: a.value, id, organizationId: organizationId ?? null },
+          );
+          continue;
+        }
+        out.push(...routed);
       }
       return out;
     }
@@ -2694,11 +2708,23 @@ export class ApprovalService implements IApprovalService {
     // unstaffed-target behaviour (and #3424 admin rescue) as the static types.
     const resolveAs = String(a.resolveAs ?? 'user');
     if (resolveAs === 'user') {
+      // #27879: each value takes the `field` treatment (#27752) — the slot is
+      // the id only when an account carries it. One that resolves to no one
+      // warns and adds no slot, so a slate it leaves empty reaches the node's
+      // onEmptyApprovers; a failed read keeps the slot.
       const slots: Array<{ id: string }> = [];
       for (const id of raw) {
-        for (const routed of await this.applyOooDelegation(id, now, organizationId, substitutions)) {
-          slots.push({ id: routed });
+        const routed = await this.applyOooDelegation(id, now, organizationId, substitutions);
+        if (routed.length === 1 && routed[0] === id && !id.includes(':') && await this.namesNoAccount(id)) {
+          this.logger?.warn?.(
+            `[approvals] approver 'expression' id '${id}' expanded to nobody — the slot names no one, so no `
+            + `one is asked through it. Staff it or re-point the expression; a slate left naming no one is decided `
+            + `by the node's onEmptyApprovers.`,
+            { type: 'expression', value: source, id, organizationId: organizationId ?? null },
+          );
+          continue;
         }
+        for (const r of routed) slots.push({ id: r });
       }
       return { slots, raw };
     }
@@ -3411,6 +3437,7 @@ export class ApprovalService implements IApprovalService {
   ): Promise<string[]> {
     const start = String(userId ?? '').trim();
     if (!start) return [];
+    const mark = collector?.length ?? 0;
     let current = start;
     const visited = new Set<string>([current]);
     for (let hop = 0; hop < OOO_MAX_CHAIN; hop++) {
@@ -3422,7 +3449,32 @@ export class ApprovalService implements IApprovalService {
       visited.add(to);
       current = to;
     }
+    // #27752: a delegate no account carries is a slot no one can take. The
+    // original approver is a person the route already named, and delegation is
+    // only their convenience, so a broken one routes back to them — never to
+    // no slot — with the "expanded to nobody" warning, and its hops leave the
+    // collector so no substitution is audited or notified. A failed read
+    // proves nothing, so the delegate stays.
+    if (current !== start && !current.includes(':') && await this.namesNoAccount(current)) {
+      this.logger?.warn?.(
+        `[approvals] out-of-office delegate '${current}' of '${start}' expanded to nobody — the delegation `
+        + `names no account, so the slot stays with '${start}'. Point the delegation at a current user, or `
+        + `delete it.`,
+        { delegatorId: start, delegateId: current, organizationId: organizationId ?? null },
+      );
+      if (collector) collector.length = mark;
+      return [start];
+    }
     return [current];
+  }
+
+  /**
+   * Whether no account carries `value` — the {@link reassignTargetRefusal}
+   * predicate asked with NO organization, as a `user` approver asks it
+   * (#27397). A failed read proves nothing, so it answers `false`.
+   */
+  private async namesNoAccount(value: string): Promise<boolean> {
+    try { return (await this.reassignTargetRefusal(value, null)) !== undefined; } catch { return false; }
   }
 
   /**

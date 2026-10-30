@@ -320,11 +320,11 @@ describe('check-required-check-set — the wiring', () => {
   // invokes this script`, `the patrol asks for no write permission at all` and
   // `a run that could not read must fail the job`. Each read objectui's
   // `required-check-set-patrol.yml`, which runs nowhere under the monorepo:
-  // GitHub runs the root `.github/workflows/` alone, and the root
-  // `required-set-patrol.yml` patrols the monorepo's own ruleset. objectui's
-  // patrol is row 25 of the objectstack#25697 workflow roster (→ sub-issue 4); a
-  // port brings these pins back against the root workflow that runs this
-  // script, by path.
+  // GitHub runs the root `.github/workflows/` alone, and the
+  // `required-set-patrol` job of the root `fleet-patrols.yml` patrols the
+  // monorepo's own ruleset. objectui's patrol is row 25 of the
+  // objectstack#25697 workflow roster (→ sub-issue 4); a port brings these pins
+  // back against the root workflow that runs this script, by path.
 });
 
 /**

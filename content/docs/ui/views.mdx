@@ -357,6 +357,21 @@ gantt: {
 }
 ```
 
+### Switching views
+
+In the Console the list's title is the view switcher: it reads the open view's `label` and a
+▾, and on a grid the number of records the view holds. It opens a dropdown with a search box
+and three sections: **Pinned**, **Recent** (the user's last views of this object) and
+**All**, where the views you author come first and the views users save at runtime follow.
+The split pane beside an open record keeps the same switcher.
+
+- **📌 Pin** makes a view the one this user's list of the object opens when the address names
+  no view. The pin is kept per object, in that browser; unpinning goes back to the object's
+  default view. A view named in the address always wins.
+- **☆ Star** puts a view in the sidebar's **Favorites** section of the app, where the user can
+  drag it into place. A view your app's navigation already opens (an `object` entry with that
+  `viewName`) is in the menu already, so its star is disabled.
+
 ## Form View
 
 A Form View defines how a single record is displayed for viewing or editing. It lives in the same `defineView` container as the object's list views:
@@ -491,7 +506,7 @@ A header sort, a column drag or resize, a filter change, a density change, Hide 
 and a Manage Views drag are saved for that user (`sys_user_preference`, key
 `ui.list.<object>`), never to the view metadata, so they work even where the tenant's
 metadata is read-only. What you author (`sort`, filters, columns, `rowHeight`,
-`hiddenFields`, tab order) is the default for every user with no state of their own.
+`hiddenFields`, the views' order) is the default for every user with no state of their own.
 
 - A link carrying list state (`uf_*` parameters) wins over the stored state.
 - A user's hidden fields only subtract from the columns the view shows, never add one.

@@ -61,3 +61,16 @@ export function untranslatedFieldLabel(
   }
   return typeof fieldSpec.label === 'string' ? fieldSpec.label : undefined;
 }
+
+/**
+ * The label a form row shows for `key` when neither the form nor the schema
+ * names it: `globalFilters` reads "Global Filters". Kept here, beside the
+ * source label, so a reader that names a row as `SchemaForm` does (the Studio's
+ * held line) needs no import of the form itself.
+ */
+export function prettifyFieldName(key: string): string {
+  return key
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}

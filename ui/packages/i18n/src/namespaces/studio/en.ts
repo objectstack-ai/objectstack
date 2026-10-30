@@ -118,6 +118,10 @@ const STUDIO_EN: Record<string, string> = {
   // CEL authoring safety for RLS predicates (objectui#2413).
   'perm.cel.valid': 'Valid CEL',
   'perm.cel.suggestions': 'Field and scope suggestions',
+  // The CEL editor's field picker: fields by label, inserting the CEL reference.
+  'perm.cel.insertField': 'Insert field',
+  'perm.cel.searchFields': 'Search fields…',
+  'perm.cel.noMatchingFields': 'No matching fields.',
   'perm.cel.type': 'Result type:',
   'perm.cel.type.number': 'Number',
   'perm.cel.type.text': 'Text',
@@ -362,6 +366,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.optMalformedHint': 'It is kept exactly as authored. Repair it in the JSON source, or remove it here.',
   'designer.field.addValue': 'Add value',
   'designer.field.optValue': 'value',
+  // The option's stored value, filled in from its label on a new option.
+  'designer.field.optValueName': 'Stored value',
   'designer.field.optLabel': 'Label',
   'designer.field.optColor': 'Color',
   'designer.field.optKind': 'Lifecycle kind',
@@ -651,6 +657,11 @@ const STUDIO_EN: Record<string, string> = {
   // map (the assignment node's `assignments`); see `flow-value-envelope.ts`.
   'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  // objectstack#27834 — the Update Records filter's "Triggering record" target.
+  'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -659,6 +670,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.branch.fromEdges': 'This decision routes on its connections’ conditions. Each card is one connection; edit its condition on the connection.',
   'engine.inspector.flowNode.branch.openEdge': 'Edit connection',
   'engine.inspector.flowNode.branch.noCondition': 'No condition',
+  'engine.inspector.flowNode.help.learnMore': 'Learn more',
+  'engine.inspector.flowNode.help.showLess': 'Show less',
   'engine.inspector.flowNode.remove': 'Remove node',
   // App nav inspector
   'engine.inspector.appNav.kind': 'Nav Item',
@@ -1369,7 +1382,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.condition.always': 'Always — no condition.',
   'engine.inspector.condition.and': 'AND',
   'engine.inspector.condition.or': 'OR',
-  'engine.inspector.condition.subjectPlaceholder': 'field / context',
+  'engine.inspector.condition.subjectPlaceholder': 'Pick a field',
+  'engine.inspector.condition.previousField': '{field} (before the change)',
   'engine.inspector.condition.remove': 'Remove condition',
   'engine.inspector.condition.valuePlaceholder': 'value',
   'engine.inspector.condition.add': 'Add condition',
@@ -1401,6 +1415,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.timeline': 'Timeline',
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
+  'engine.inspector.view.type.tree': 'Tree',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -1753,6 +1768,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.emptyCreate': 'Create your first package to start authoring metadata.',
   'engine.packages.emptyFiltered': 'No packages match your filters.',
   'engine.packages.installedApps.title': 'Installed Apps',
+  'engine.packages.installedApps.description': 'The apps installed from the marketplace into this system.',
   'engine.packages.installedApps.empty': 'No apps installed from the marketplace yet',
   'engine.packages.installedApps.emptyHint': 'Apps you install from the marketplace are listed here.',
   'engine.packages.loadFailed': 'Failed to load packages',
@@ -1782,7 +1798,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.import.success': 'Imported "{id}". Refresh the app switcher to use it.',
   'engine.packages.import.failed': 'Import failed',
   'engine.packages.create.title': 'New Package',
-  'engine.packages.create.description': 'Create a writable package to author and publish your own metadata. The id should be reverse-domain (e.g. {example}).',
+  'engine.packages.create.description': 'A package holds the objects, apps and other things you build. Give it a name to start; everything else is filled in for you.',
+  'engine.packages.create.derivedSummary': 'Its ID will be {id}, and its object names will start with {namespace}_. You can change both under Advanced.',
+  'engine.packages.create.advancedHint': 'Package ID, namespace, version and type, filled in from the name.',
   'engine.packages.create.id': 'Package ID',
   'engine.packages.create.namespace': 'Object namespace',
   'engine.packages.create.name': 'Display name',
@@ -1829,7 +1847,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.pendingHint': 'Drafted, not yet published. Publish the whole app, or review each below.',
   'engine.packages.detail.publishApp': 'Publish app ({count})',
   'engine.packages.detail.discardChanges': 'Discard changes ({count})',
-  'engine.packages.detail.kernelReadOnly': 'This is a platform kernel package. Authoring actions are disabled.',
+  'engine.packages.detail.kernelReadOnly': 'This package is part of the platform. It cannot be edited, disabled or deleted.',
+  'engine.packages.detail.codeReadOnly': 'This package is loaded from code, so it is read-only here: it cannot be edited, disabled or deleted in the console. Change it in its source and deploy again.',
+  'engine.packages.detail.readOnly': 'This package is read-only here: it cannot be edited, disabled or deleted in the console.',
   'engine.packages.detail.actions': 'Actions',
   'engine.packages.detail.edit': 'Edit',
   'engine.packages.edit.title': 'Edit package',
@@ -1842,9 +1862,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.revert': 'Revert',
   'engine.packages.detail.enable': 'Enable',
   'engine.packages.detail.disable': 'Disable',
+  'engine.packages.detail.disableTitle': 'Disable "{name}"?',
+  'engine.packages.detail.disableDescription': 'The package is taken out of service for every user until it is enabled again. No records are deleted, and you can enable it again at any time.',
   'engine.packages.detail.export': 'Export',
   'engine.packages.detail.exporting': 'Exporting…',
-  'engine.packages.detail.deleteApp': 'Delete app',
+  'engine.packages.detail.deletePackage': 'Delete package',
   'engine.packages.detail.deleting': 'Deleting…',
   'engine.packages.detail.discarding': 'Discarding…',
   'engine.packages.detail.actionFailed': 'Action failed',
@@ -1982,6 +2004,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.externalDatasource.browser.colColumns': 'Columns',
   'engine.externalDatasource.browser.colRows': 'Rows (est.)',
   'engine.externalDatasource.browser.import': 'Import',
+  'engine.externalDatasource.browser.selectAll': 'Select all tables',
+  'engine.externalDatasource.browser.selectRow': 'Select {table}',
+  'engine.externalDatasource.browser.importSelected': 'Import selected ({count})',
+  'engine.externalDatasource.browser.importingSelected': 'Importing {done} of {count}…',
+  'engine.externalDatasource.browser.batchDoneOne': 'Imported {count} of {total} tables as an object.',
+  'engine.externalDatasource.browser.batchDoneOther': 'Imported {count} of {total} tables as objects.',
   'engine.externalDatasource.browser.unavailable':
     'Federation is not enabled on this server. The {service} service must be registered for table browsing, drafting, and validation to work.',
   'engine.externalDatasource.check.unavailable':
@@ -2020,6 +2048,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.externalDatasource.import.reviewOther': '{count} columns need review',
   'engine.externalDatasource.import.source': 'Generated source',
   'engine.externalDatasource.import.importing': 'Importing…',
+  'engine.externalDatasource.import.writable': 'Allow writes to this object (read-only otherwise)',
   'engine.studio.data.tab.advanced': 'Advanced',
   'engine.studio.data.nameLabel': 'Object name',
   'engine.studio.data.idLabel': 'Identifier',
@@ -2319,6 +2348,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',
   'engine.studio.data.fieldCount': '{count} fields',
+  'engine.studio.data.fieldCountOne': '{count} field',
+  // The platform's own columns, counted apart from the author's fields.
+  'engine.studio.data.systemFieldCount': '(+{count} system)',
   'engine.studio.data.pickObject': 'Select an object',
   'engine.studio.data.objects': 'Objects',
   'engine.studio.data.searchObjects': 'Search objects…',
@@ -2344,6 +2376,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.tab.api': 'API',
   'engine.studio.data.addField': 'Add field',
   'engine.studio.data.addFieldCreate': 'Create',
+  'engine.studio.data.addFieldNeedsLabel': 'Type a label first.',
   'engine.studio.data.addFieldApiNameNotDerived': 'The label has no Latin letters to make an API name from. Type one: lowercase letters, digits and underscores.',
   'engine.studio.data.addFieldApiNameTaken': 'Another field is already named {name}. Type a different API name.',
   'engine.studio.data.editFieldProps': 'Edit field properties',
@@ -3012,6 +3045,15 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11910 — a dashboard widget held until it is bound; `input` is the
   // widget inspector's own label for it (Dataset, Values (measures)).
   'engine.studio.held.widgetNeedsInput': '{input} on the widget “{widget}” needs a value',
+  // objectstack#27459 — an item of a dashboard list property (Global Filters,
+  // the header's Actions) held until it is filled in; `n` is the `#n` its row shows.
+  'engine.studio.held.listItemNeedsInput': '{input} on item #{n} of “{list}” needs a value',
+  // objectstack#27785 — a report's chart held until its axes are picked; `input`
+  // is the chart panel's own label for the axis it still needs.
+  'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
+  // objectstack#27895 — a list view held until a required setting of its type's own block is picked again;
+  // `input` is the setting's label in the panel's type settings section.
+  'engine.studio.held.listViewTypeNeedsInput': '{input} in the view’s {type} settings needs a value',
   // objectstack#27461 — a roll-up held until it is set up; `input` is the field
   // inspector's own label for the roll-up input it still needs.
   'engine.studio.held.fieldNeedsInput': '{input} on the field “{field}” needs a value',
@@ -3056,6 +3098,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.slot.expand': 'Show the right panel',
   'engine.studio.slot.backToChat': 'Back to the conversation',
   'engine.studio.slot.planPending': 'a plan awaits your approval',
+  'engine.studio.slot.pendingCount': '{count} awaiting your approval',
   'engine.studio.slot.openFullPage': 'Open full page',
   'engine.studio.pillar.data': 'Data',
   'engine.studio.pillar.automations': 'Automations',
@@ -3063,12 +3106,15 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pillar.access': 'Access',
   // Header · package-level publish + app bridge
   'engine.studio.changes': 'Changes',
-  'engine.studio.publishTitle': 'Confirm and publish all pending drafts at once (whole package · one atomic release)',
+  'engine.studio.publishTitle': 'Review and publish every pending draft in this package together',
   'engine.studio.publishNoneTitle': 'No drafts pending publish',
-  'engine.studio.publishedAll': 'Published all drafts in this package (one atomic release)',
+  'engine.studio.publishedAll': 'Published all drafts in this package',
   // objectui#11807 — the publish toast names how many items went live.
-  'engine.studio.publishedAllCount': 'Published {count} items in this package (one atomic release)',
-  'engine.studio.publishedAllCountOne': 'Published {count} item in this package (one atomic release)',
+  'engine.studio.publishedAllCount': 'Published {count} items in this package',
+  'engine.studio.publishedAllCountOne': 'Published {count} item in this package',
+  // A published app or object reaches members only through a permission set.
+  'engine.studio.publishedAccessHint': 'Members can use it once a permission set grants them access.',
+  'engine.studio.publishedOpenAccess': 'Open Access',
   // objectui#12929 — the batch door's backfill receipt, one clause per field
   // the review sheet named: the rows the server wrote, and why a field stopped.
   'engine.studio.backfillWritten': 'Default backfilled into {field}: {count} record(s)',
@@ -3116,8 +3162,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
   // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
   'engine.studio.org.openSetup': 'Open in Setup',
-  'engine.studio.publishedAllFlows': 'Published {count} package-less flow drafts',
-  'engine.studio.publishedAllFlowsOne': 'Published {count} package-less flow draft',
+  'engine.studio.publishedAllFlows': 'Published {count} flows',
+  'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
   'engine.studio.designer.select': 'Select…',
   'engine.studio.designer.pickDate': 'Pick a date…',
@@ -3160,23 +3206,23 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.rules.structured': '“{type}” rules carry structured configuration (state-machine transitions / format constraints etc.) and cannot be edited here yet — maintain them in the code package. Message: {message}',
   'engine.studio.rules.none2': '(none)',
   'engine.studio.rules.deleteRule': 'Delete rule',
-  'engine.studio.rules.nameLabel': 'Rule name (snake_case, unique)',
+  'engine.studio.rules.nameLabel': 'API name (filled in from the message until you edit it)',
   'engine.studio.rules.messageLabel': 'Error message (shown to the user when validation fails)',
   'engine.studio.rules.messagePlaceholder': 'e.g. Completion date is required when status is Done',
-  'engine.studio.rules.celPre': 'Fail condition (CEL) — when the condition is ',
+  'engine.studio.rules.celPre': 'When this condition is ',
   'engine.studio.rules.celTrue': 'true',
   'engine.studio.rules.celMid': ', the save is rejected with the message above.',
   // A conditional rule's `when`: it says when the `then` rule applies.
   'engine.studio.rules.whenPre': 'Guard (CEL) — when the condition is ',
   'engine.studio.rules.whenMid': ', the “Then” rule below applies; otherwise the “Otherwise” rule, if one is set.',
   'engine.studio.rules.severity': 'Severity',
-  'engine.studio.rules.severityError': 'error (rejects the save)',
+  'engine.studio.rules.severityError': 'Error — the save is rejected',
   'engine.studio.rules.enabled': 'Enabled',
   'engine.studio.rules.delete': 'Delete',
   'engine.studio.rules.type': 'Type',
   'engine.studio.rules.newType': 'New validation type',
-  'engine.studio.rules.typeScript': 'Script — CEL fail condition',
-  'engine.studio.rules.typeCrossField': 'Cross-field — CEL over multiple fields',
+  'engine.studio.rules.typeScript': 'Condition — reject the save when it is true',
+  'engine.studio.rules.typeCrossField': 'Compare fields — a condition over several fields',
   'engine.studio.rules.typeStateMachine': 'State machine — allowed transitions',
   'engine.studio.rules.typeFormat': 'Format — regex / built-in format',
   'engine.studio.rules.typeJsonSchema': 'JSON schema — validate a JSON field',
@@ -3809,6 +3855,10 @@ const STUDIO_EN: Record<string, string> = {
   // host binds. `Unknown variable: …` is the runtime's own fault text and stays
   // as written. (An RLS clause the runtime cannot lower has no row here: it
   // ships `@objectstack/lint`'s own message, objectui#13061.)
+  // The plain sentence the CEL editors lead the catch-all CEL refusal with
+  // (`invalid-cel`); the engine's own fault and source excerpt follow it as written.
+  'engine.celLint.invalidCel':
+    "This expression can't be worked out as written: something is missing, extra, out of place, or doesn't fit the values beside it. The ^ mark below points to the spot.",
   'engine.celLint.notTheRow':
     '`{identifier}` is not the row on this surface: a row predicate binds the record as `{canonical}` and nothing else. The CEL scope vocabulary still accepts `{identifier}`, so nothing here blocks the save, but at runtime the expression faults with `Unknown variable: {identifier}` and the rule never fires. Re-root the reference on `{canonical}`.',
   'engine.pageBlockCanvas.renderFailed':
@@ -4036,6 +4086,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ Add sort…',
   'engine.studio.inspector.listView.sortAsc': '{field} ascending',
   'engine.studio.inspector.listView.sortDesc': '{field} descending',
+  // objectstack#27836 — "Add view": a new list view of the object, its type picked first.
+  'engine.studio.inspector.listView.addView': 'Add view',
+  'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
+  'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
+  // objectstack#27896 — the panel's view picker: the object's list views, a draft one marked.
+  'engine.studio.inspector.listView.switchView': 'View',
+  'engine.studio.inspector.listView.switchViewDraft': 'Draft',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',
@@ -4051,6 +4108,26 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kanbanCard.mode.none': "Don't open",
   'engine.studio.inspector.listView.kanbanCard.groupBy': 'Group by field',
   'engine.studio.inspector.listView.kanbanCard.pickField': 'Pick a field',
+  // objectstack#27895 — the section of a view type's own settings (calendar, gallery, timeline, …).
+  'engine.studio.inspector.listView.typeSettings': '{type} settings',
+  'engine.studio.inspector.listView.typeSettings.intro': 'The settings this type of view has. A setting that names a field is picked from the object’s fields.',
+  // objectstack#27933 — a chart view's dataset binding: the dataset, its measures and dimensions, the chart type.
+  'engine.studio.inspector.listView.chart': 'Chart data',
+  'engine.studio.inspector.listView.chart.intro': 'The dataset this chart reads, and the measures and dimensions it plots. Only datasets built on this object are offered.',
+  'engine.studio.inspector.listView.chart.dataset': 'Dataset',
+  'engine.studio.inspector.listView.chart.pickDataset': 'Pick a dataset',
+  'engine.studio.inspector.listView.chart.measures': 'Measures',
+  'engine.studio.inspector.listView.chart.dimensions': 'Dimensions',
+  'engine.studio.inspector.listView.chart.addMeasure': 'Add a measure',
+  'engine.studio.inspector.listView.chart.addDimension': 'Add a dimension',
+  'engine.studio.inspector.listView.chart.allAdded': 'All added',
+  'engine.studio.inspector.listView.chart.noMeasures': 'This dataset declares no measures.',
+  'engine.studio.inspector.listView.chart.noDimensions': 'This dataset declares no dimensions.',
+  'engine.studio.inspector.listView.chart.notInDataset': 'Not in this dataset',
+  'engine.studio.inspector.listView.chart.notObjectDataset': 'Not a dataset of this object',
+  'engine.studio.inspector.listView.chart.noDatasets': 'No dataset is built on this object, so this chart has nothing to bind to.',
+  'engine.studio.inspector.listView.chart.readFailed': 'The datasets could not be read ({reason}). The binding is shown as saved.',
+  'engine.studio.inspector.listView.chart.membersFailed': 'This dataset’s measures and dimensions could not be read ({reason}). They are shown as saved.',
   'engine.studio.inspector.designersMissing':
     'No metadata designers are registered in this session, so there is nothing to edit here.',
   'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',

@@ -558,6 +558,35 @@ interface ReplayComparands {
   readonly masked: ReadonlySet<string>;
 }
 
+/**
+ * What a {@link SeedLoaderService.load} that THREW had already written.
+ *
+ * A load writes dataset by dataset and nothing undoes a dataset's rows when a
+ * later one throws, so a caller that reports the failure must still be able to
+ * say what landed: a receipt answering `inserted: 0` while the table holds the
+ * earlier datasets' rows is a receipt that lies. Read with
+ * {@link seedLoadPartialWrites} on the error the load threw.
+ */
+export interface SeedLoadPartialWrites {
+  /** Rows inserted before the load threw — finished datasets plus the one that threw. */
+  readonly inserted: number;
+  /** Rows updated before the load threw, counted the same way. */
+  readonly updated: number;
+  /** The object of the dataset that was loading when the load threw; absent when it threw outside any dataset. */
+  readonly failedObject?: string;
+}
+
+/** The writes a thrown load had made, keyed by the error it threw. */
+const partialWritesByError = new WeakMap<object, SeedLoadPartialWrites>();
+
+/**
+ * What the {@link SeedLoaderService.load} that threw `err` had written, or
+ * `undefined` when `err` did not come out of a load.
+ */
+export function seedLoadPartialWrites(err: unknown): SeedLoadPartialWrites | undefined {
+  return err !== null && typeof err === 'object' ? partialWritesByError.get(err) : undefined;
+}
+
 /** What a {@link SeedLoaderService} is built with beyond its engine, metadata and logger. */
 export interface SeedLoaderServiceOptions {
   /**
@@ -704,6 +733,17 @@ export class SeedLoaderService implements ISeedLoaderService {
   private uncomparedCredentials = new Map<string, { fields: Set<string>; rows: number }>();
 
   /**
+   * The CURRENT {@link load}'s writes so far, for {@link SeedLoadPartialWrites}:
+   * the finished datasets' results, and the counters of the dataset loading
+   * now. Reset per `load`; an instance field for {@link summariesStale}'s
+   * reason (datasets load strictly sequentially).
+   */
+  private loadProgress?: {
+    finished: readonly SeedLoadResultParsed[];
+    loading?: { object: string; written: { inserted: number; updated: number } };
+  };
+
+  /**
    * [#25779] The `field-files` service (`FIELD_FILE_SERVICE`) a seed file is
    * stored through, read per dataset. Absent — a loader built without one, or
    * a composition without `@objectstack/service-storage` — a row naming a seed
@@ -744,10 +784,34 @@ export class SeedLoaderService implements ISeedLoaderService {
    * it.
    */
   async load(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> {
-    return runWithAdvisoryAggregation(
-      () => this.loadDatasets(request),
-      (groups) => this.reportAdvisorySummary(groups),
-    );
+    this.loadProgress = undefined;
+    try {
+      return await runWithAdvisoryAggregation(
+        () => this.loadDatasets(request),
+        (groups) => this.reportAdvisorySummary(groups),
+      );
+    } catch (err) {
+      throw this.notePartialWrites(err);
+    }
+  }
+
+  /**
+   * Record on `err` what this load wrote before it threw (see
+   * {@link SeedLoadPartialWrites}) and hand back the error to rethrow — the
+   * same error, so its declared status and message reach the caller as they
+   * did; a thrown non-object is wrapped, since only an object can carry it.
+   */
+  private notePartialWrites(err: unknown): unknown {
+    const finished = this.loadProgress?.finished ?? [];
+    const loading = this.loadProgress?.loading;
+    const partial: SeedLoadPartialWrites = {
+      inserted: finished.reduce((sum, r) => sum + r.inserted, 0) + (loading?.written.inserted ?? 0),
+      updated: finished.reduce((sum, r) => sum + r.updated, 0) + (loading?.written.updated ?? 0),
+      ...(loading ? { failedObject: loading.object } : {}),
+    };
+    const carrier = err !== null && typeof err === 'object' ? err : new Error(String(err));
+    partialWritesByError.set(carrier, partial);
+    return carrier;
   }
 
   /**
@@ -852,6 +916,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     this.warnOnUnresolvedLocaleScope(config, request.seeds);
     const allErrors: ReferenceResolutionError[] = [];
     const allResults: SeedLoadResultParsed[] = [];
+    this.loadProgress = { finished: allResults };
     // Per-load counter — a service instance can be reused across loads.
     this.summariesStale = 0;
     // [#9071] Same per-load lifetime, same reason: a publish between two loads
@@ -1127,8 +1192,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     // `matchesExistingRow` in the record loop below.
     const createOnlyColumns = createOnlySeedColumns(dataset, externalId);
 
-    let inserted = 0;
-    let updated = 0;
+    // Read by `notePartialWrites` should this dataset throw part-way.
+    const written = { inserted: 0, updated: 0 };
+    if (this.loadProgress) this.loadProgress.loading = { object: objectName, written };
     let skipped = 0;
     let errored = 0;
     let referencesResolved = 0;
@@ -1342,7 +1408,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       for (const res of writeResults) {
         const { recordIndex, externalIdValue, record } = batch[res.index];
         if (res.ok) {
-          inserted++;
+          written.inserted++;
           const internalId = this.extractId(res.record);
           if (internalId) noteLanded(recordIndex, internalId); // [commit 9a884c6e4]
           if (externalIdValue && internalId) {
@@ -2046,8 +2112,8 @@ export class SeedLoaderService implements ISeedLoaderService {
               objectName, record, mode, externalId, existingRecords, comparands
             );
 
-            if (result.action === 'inserted') inserted++;
-            else if (result.action === 'updated') updated++;
+            if (result.action === 'inserted') written.inserted++;
+            else if (result.action === 'updated') written.updated++;
             else if (result.action === 'skipped') {
               skipped++;
               if (result.uncompared) this.noteUncomparedCredentials(objectName, result.uncompared); // [#24624]
@@ -2110,7 +2176,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             }
             try {
               await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, opts)));
-              updated++;
+              written.updated++;
               await settleSeedFiles(i, decision.id); // [#25779]
             } catch (err: any) {
               errored++;
@@ -2142,7 +2208,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (externalIdValue) {
           insertedRecords.get(objectName)!.set(externalIdValue, `dry-run-id-${i}`);
         }
-        inserted++; // Count as "would be inserted"
+        written.inserted++; // Count as "would be inserted"
       }
     }
 
@@ -2176,11 +2242,12 @@ export class SeedLoaderService implements ISeedLoaderService {
         .map(([, id]) => id),
     )];
 
+    if (this.loadProgress) this.loadProgress.loading = undefined;
     return {
       object: objectName,
       mode,
-      inserted,
-      updated,
+      inserted: written.inserted,
+      updated: written.updated,
       skipped,
       errored,
       total: dataset.records.length,

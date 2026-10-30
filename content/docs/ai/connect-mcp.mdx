@@ -252,6 +252,15 @@ can reach is the **default exposure policy (v1)**:
   whose `target` is on another origin — the browser calls that origin
   directly, so it is not exposed. See [Actions as Tools](/docs/ai/actions-as-tools)
   and [Actions](/docs/ui/actions).
+- **An action on a `sys_*` object follows the same opt-in**, decided action by
+  action: it is listed and runs only when the action itself declares
+  `ai.exposed: true`, and then every gate behind the flag still runs (its
+  `requiredPermissions`, the installation's action switch, its param contract,
+  `ai.requiresConfirmation`, and the target's own authorization). The object
+  being `sys_*` opens nothing, and no deployment switch opens an unflagged one.
+  The stored-metadata tables (`sys_metadata`, `sys_metadata_history`) stay
+  refused even when flagged. Each action `list_actions` returns carries
+  `aiExposed: true`, the server's attestation of that opt-in.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure
@@ -397,7 +406,7 @@ skill and a guided `/objectstack:connect` command.
 | stdio won't start / boot fails closed | `OS_MCP_STDIO_ENABLED=true` but `OS_MCP_STDIO_API_KEY` is missing, unknown, revoked, or expired — fail-closed by design (ADR-0101). Set a valid `osk_` key; there is no unscoped or `system` fallback |
 | `401` on every call | Anonymous or invalid credentials. Interactive clients: complete the browser login (the `WWW-Authenticate` header advertises the OAuth metadata). Headless: check the `osk_` key and header spelling |
 | `403 insufficient_scope` | The OAuth token lacks the scope for that tool family (e.g. writes without `data:write`) — reconnect and grant the scope |
-| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets a `sys_*` object (held back fail-closed for every type, api included — #27681 tracks that gap), or the caller fails its `requiredPermissions` |
+| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions` |
 | Reads return few rows / writes denied | Working as designed — the caller's permissions and RLS apply. Verify with the same user in the Console |
 
 ## Related

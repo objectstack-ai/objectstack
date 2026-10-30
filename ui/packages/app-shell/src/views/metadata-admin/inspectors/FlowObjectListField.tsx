@@ -45,6 +45,7 @@ import { FlowStringListField } from './FlowStringListField.js';
 import { VariableTextInput } from './VariableTextInput.js';
 import type { ScopeGroup } from './useFlowScope.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
+import { FlowFieldHelp } from './FlowFieldHelp.js';
 import { isScreenVisibleWhenColumn } from '../previews/flow-expr-problems.js';
 import { screenPredicateRoots, type ScreenPreviewNode } from '../previews/screen-spec.js';
 
@@ -707,6 +708,7 @@ export function FlowObjectListField({
                       {cellRequired && <RequiredMarker />}
                     </Label>
                     <div className="flex items-center">{cellControl(row, col, cellRequired, col.kind === 'expression')}</div>
+                    {col.help && <FlowFieldHelp text={col.help} />}
                   </div>
                 );
               })}
@@ -783,6 +785,7 @@ export function FlowObjectListField({
                         removeLabel={removeLabel}
                         emptyLabel={emptyLabel}
                       />
+                      {col.help && <FlowFieldHelp text={col.help} />}
                     </div>
                   );
                 }
@@ -804,17 +807,21 @@ export function FlowObjectListField({
                         context={context}
                         scopeGroups={scopeGroups}
                       />
+                      {col.help && <FlowFieldHelp text={col.help} />}
                     </div>
                   );
                 }
                 const cellRequired = requiredColumns?.has(col.key) === true;
                 return (
-                  <div key={col.key} className="flex items-center gap-2">
+                  <div key={col.key}>
+                  <div className="flex items-center gap-2">
                   <Label className="w-24 shrink-0 text-[11px] text-muted-foreground">
                     {col.label}
                     {cellRequired && <RequiredMarker />}
                   </Label>
                   {cellControl(row, col, cellRequired)}
+                  </div>
+                  {col.help && <FlowFieldHelp text={col.help} className="mt-0.5 pl-[6.5rem]" />}
                   </div>
                 );
               })}

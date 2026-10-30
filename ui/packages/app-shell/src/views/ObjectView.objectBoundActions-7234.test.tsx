@@ -375,8 +375,9 @@ describe('objectui#7234 — object-declared actions reach the list toolbar', () 
 
     // Paired positive: the list surface itself DID render. Without it an empty
     // tree would satisfy every negative below for the wrong reason — the same
-    // asymmetry this file's ablation note states for cases B / C / F / H.
-    expect(screen.getByText('Catalog item')).toBeTruthy();
+    // asymmetry this file's ablation note states for cases B / C / F / H. The
+    // page title is the view switcher since objectstack#27594.
+    expect(screen.getByTestId('list-view-switcher')).toBeTruthy();
 
     // Nothing names the capability, and no notice stands in for the button.
     // Asserted over the whole rendered tree rather than one node, because the

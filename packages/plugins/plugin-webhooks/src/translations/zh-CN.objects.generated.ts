@@ -18,7 +18,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhook",
-    description: "外发 HTTP Webhook 订阅。可在代码中通过 defineStack({ webhooks }) / defineWebhook() 声明（启动时物化为数据行），或直接在 Studio 编辑器中编写；由 Webhook 自动入队器分发到共享的 HTTP 发件箱。",
+    description: "由您的组织在此处或通过 API 创建的外发 HTTP Webhook。应用内置的 Webhook 不在此列出。两者都通过同一个投递队列发送。",
     fields: {
       id: {
         label: "Webhook ID"
@@ -81,7 +81,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "管理来源",
-        help: "记录来源：platform = 框架内置 / package = 应用包声明（由 defineStack 的 webhooks 在启动时种入）/ admin = 在 Setup 中创建。",
+        help: "记录来源：admin = 在 Setup 中或通过 API 创建 / package = 已退役的 18.0 启动种入器写入的代码声明 Webhook 副本（如今不再写入：声明的 Webhook 从元数据注册表读取，不是数据行）/ platform = 保留。",
         options: {
           platform: "平台",
           package: "包",
@@ -90,7 +90,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "已定制",
-        help: "当管理员编辑应用包声明的 webhook 时置位；此后启动种入不再覆盖该行（被停用的嘈杂 webhook 可跨重新部署保留）。对 admin 来源的记录无意义。"
+        help: "当管理员编辑 package 行（已退役的 18.0 启动种入器写入的副本）时置位。所有权仪式读取它：声明名称下被编辑过的副本保留为克隆，未改动的副本被删除。对 admin 来源的记录无意义。"
       },
       created_at: {
         label: "创建时间"

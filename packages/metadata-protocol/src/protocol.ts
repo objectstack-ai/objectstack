@@ -410,6 +410,7 @@ import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMut
 import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, tenancyPostureInForce } from './protocol-authoring-posture-probes.js';
 // [#25467 cut 27] The automation service's flow reads: the stored-flow canonicalizer and the engine's registrations.
 import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
+import { disabledActionsOf, resolveDisabledActionsReader } from './protocol-action-activation-reads.js';
 // [#25467 cut 28] The code-datasource predicates: declared by an installed package, or registered by the host.
 import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
 // [#25467 cut 29] The legacy-organization row filters: which rows a not-yet-migrated database still holds.
@@ -436,6 +437,8 @@ import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstall
 import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
+// [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
+import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -6734,6 +6737,48 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#27842] The data engine's packaged-action activation reader for an
+     * `object` read — the `disabledActions` beside the item read's envelope
+     * and beside the list's items (`GetMetaItemResponseSchema` in
+     * `@objectstack/spec`): given an object body, the names in its
+     * `actions[]` the activation ledger switches off.
+     *
+     * The seam {@link resolveFlowRegistrationReader} uses: the kernel's
+     * service table, read by name per call, for the member the engine declares
+     * on `IObjectQLEngine` (`getDisabledActions`). The slot is `objectql`, the
+     * one the dispatch doors resolve before they refuse a switched-off action
+     * 409 `ACTION_DISABLED`, so the read and the refusal answer from one
+     * projection. This package never imports the engine. The engine is asked
+     * once per call of this method, so one list read is one answer.
+     *
+     * `undefined` — so the read serves NO key — for every other type, where
+     * no reachable engine declares the member, and where the engine answers
+     * that no ledger is attached. ⛔ Never `[]` in those cases: absence is "no
+     * ledger answered", and `[]` is the ledger's own "nothing here is off".
+     */
+    private resolveDisabledActionsReader(type: string): ((body: unknown) => string[]) | undefined {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof resolveDisabledActionsReader> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return resolveDisabledActionsReader.call(host, type);
+    }
+
+    /**
+     * [#27842] The list's `disabledActions`: the reader's answer per listed
+     * object, keyed by its `name` — or nothing, where
+     * {@link resolveDisabledActionsReader} resolves no reader. A pending draft
+     * (`_draft: true`, the `previewDrafts` overlay) gets no entry, as
+     * {@link flowRegistrationsOf} gives it none.
+     */
+    private disabledActionsOf(type: string, items: readonly unknown[]): { disabledActions?: Record<string, string[]> } {
+        const host: ThisParameterType<typeof disabledActionsOf> = {
+            resolveDisabledActionsReader: (...a) => this.resolveDisabledActionsReader(...a),
+        };
+        return disabledActionsOf.call(host, type, items);
+    }
+
+    /**
      * [#20312] The deployment's ADR-0080 SDUI component manifest, when the host
      * registered one under {@link SDUI_MANIFEST_SERVICE} — `os serve` does, from
      * the CLI's `resolveSduiManifest`. Read per publish, exactly as
@@ -7015,6 +7060,9 @@ export class ObjectStackProtocolImplementation implements
      *  - [#26724] an object restored with a `datasource` that names no
      *    datasource here, when that is not the binding it holds now
      *    ({@link unknownDatasourceSaveRefusal});
+     *  - [#27818] a datasource restored with an `external.credentialsRef` the
+     *    active row it is restored into does not hold now
+     *    ({@link datasourceCredentialsRefSaveRefusal}, in its restore words);
      *  - a `runAs: 'system'` flow an anonymous endpoint names
      *    ({@link anonymousElevatedFlowRefusal}): a restore writes an ACTIVE
      *    row, the case the save door asks it of;
@@ -7068,6 +7116,7 @@ export class ObjectStackProtocolImplementation implements
             credentialChannelFor: (...a) => this.credentialChannelFor(...a),
             defaultRecordPageSaveRefusal: (...a) => this.defaultRecordPageSaveRefusal(...a),
             externalBindingSaveRefusal: (...a) => this.externalBindingSaveRefusal(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             permissionSetNameCollisionRefusal: (...a) => this.permissionSetNameCollisionRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
@@ -7218,6 +7267,11 @@ export class ObjectStackProtocolImplementation implements
      * Computed on every draft read rather than stored at save: the verdict
      * depends on the live universe and the package's other drafts, which a
      * stored verdict would not see change.
+     *
+     * [#27444] An object draft is also told the namespace-prefix verdict
+     * ({@link objectNamespacePrefixViolation}, `NAMESPACE_PREFIX`), the one
+     * rule outside the gate that the promotion doors refuse a draft on — the
+     * same judge, on the draft row's package, never a copy of it.
      */
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
@@ -7232,6 +7286,7 @@ export class ObjectStackProtocolImplementation implements
             foldStoredCollection: (...a) => this.foldStoredCollection(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            objectNamespacePrefixViolation: (...a) => this.objectNamespacePrefixViolation(...a),
             orgWallEnforced: (...a) => this.orgWallEnforced(...a),
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
@@ -8936,6 +8991,15 @@ export class ObjectStackProtocolImplementation implements
      * "does a code package ship this?" test (`isCodeArtifactBody`) applied to
      * the OWNER contributor alone.
      *
+     * [#27559] Its `validations` are the one exception to "owner only": the
+     * registry's `getPackagedObjectBase` appends the rules each CODE extender
+     * ships, because a rule's packaged message is whichever code layer shipped
+     * that rule name, and the rule evaluator's `packagedRuleLookup` reads the
+     * same answer, so `/meta` and the refusal judge a tenant's rewrite against
+     * one packaged rule set. The scalars above stay the owner's. A registry
+     * double that predates that method is read through
+     * `getPackagedObjectOwner`, the owner alone.
+     *
      * Returns `undefined` — meaning "no packaged baseline, do not infer
      * anything" — for a runtime/tenant-authored object (no code owner), an
      * unknown name, and a partial registry double. The caller's contract is
@@ -8944,8 +9008,10 @@ export class ObjectStackProtocolImplementation implements
     getPackagedObjectBase(name: string): unknown {
         if (typeof name !== 'string' || name === '') return undefined;
         const registry = (this.engine as any)?.registry;
-        if (!registry || typeof registry.getPackagedObjectOwner !== 'function') return undefined;
+        if (!registry) return undefined;
         try {
+            if (typeof registry.getPackagedObjectBase === 'function') return registry.getPackagedObjectBase(name);
+            if (typeof registry.getPackagedObjectOwner !== 'function') return undefined;
             return registry.getPackagedObjectOwner(name)?.definition;
         } catch {
             // Same rule as the fold above: a read over in-memory contributors
@@ -10133,6 +10199,10 @@ export class ObjectStackProtocolImplementation implements
             // see {@link flowRegistrationsOf}. The execution face is the
             // engine's own read, so it carries none.
             ...(audience === 'served' ? this.flowRegistrationsOf(request.type, governed) : {}),
+            // [#27842] Served only, likewise: the packaged actions the
+            // activation ledger switches off, per listed object — see
+            // {@link disabledActionsOf}.
+            ...(audience === 'served' ? this.disabledActionsOf(request.type, governed) : {}),
         };
     }
 
@@ -11260,6 +11330,13 @@ export class ObjectStackProtocolImplementation implements
         const readRegistration = !execution && decorated !== undefined && decorated !== null
             ? this.resolveFlowRegistrationReader(request.type)
             : undefined;
+        // [#27842] …and, on an `object` read, the names in `item.actions` the
+        // activation ledger switches off ({@link resolveDisabledActionsReader}),
+        // beside the item on the same terms: served face only, none on the
+        // draft returns above, `item` untouched.
+        const readDisabledActions = !execution && decorated !== undefined && decorated !== null
+            ? this.resolveDisabledActionsReader(request.type)
+            : undefined;
         return {
             type: request.type,
             name: request.name,
@@ -11289,6 +11366,7 @@ export class ObjectStackProtocolImplementation implements
                         : null,
                 }),
             ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
+            ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
         };
     }
 
@@ -14392,7 +14470,7 @@ export class ObjectStackProtocolImplementation implements
      * environment → code read order (ADR-0131 D6) — the whole reason this
      * method delegates rather than re-reading.
      */
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration }> {
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration; disabledActions?: string[] }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -14411,6 +14489,10 @@ export class ObjectStackProtocolImplementation implements
             // rides beside `data` for the REST layer's default door, and is
             // never hashed into the ETag below (see the 304 note there).
             const registration = (result as { registration?: FlowRegistration } | undefined)?.registration;
+            // [#27842] …and, for an object, the packaged actions the activation
+            // ledger switches off, on exactly those terms: live, beside `data`,
+            // never hashed (see the 304 note below).
+            const disabledActions = (result as { disabledActions?: string[] } | undefined)?.disabledActions;
 
             if (!item) {
                 // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
@@ -14473,7 +14555,11 @@ export class ObjectStackProtocolImplementation implements
             // flow under an unchanged body. Such a read is always answered in
             // full; the work is the same either way, since this method always
             // performs the delegate read.
-            if (request.cacheRequest?.ifNoneMatch && registration === undefined) {
+            //
+            // [#27842] The same holds for `disabledActions`: an administrator's
+            // switch moves no byte of the object document, so a 304 would keep
+            // the caller on the switched-off list it was served before.
+            if (request.cacheRequest?.ifNoneMatch && registration === undefined && disabledActions === undefined) {
                 const clientEtag = request.cacheRequest.ifNoneMatch.replace(/^"(.*)"$/, '$1').replace(/^W\/"(.*)"$/, '$1');
                 if (clientEtag === hash) {
                     // Return 304 Not Modified
@@ -14488,6 +14574,7 @@ export class ObjectStackProtocolImplementation implements
             return {
                 data: item,
                 ...(registration !== undefined ? { registration } : {}),
+                ...(disabledActions !== undefined ? { disabledActions } : {}),
                 etag,
                 lastModified: new Date().toISOString(),
                 cacheControl: {
@@ -21282,6 +21369,17 @@ export class ObjectStackProtocolImplementation implements
             if (datasourceRefusal) throw datasourceRefusal;
         }
 
+        // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
+        // holds: refused 400 before the authoring gate and every write. See {@link datasourceCredentialsRefSaveRefusal}.
+        {
+            const repo = this.getOverlayRepo();
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: request.item,
+                mode, packageId: request.packageId, source: request.source,
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
+        }
+
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
         // anonymous endpoint of `type: 'flow'` names it is refused, in publish
         // mode only (a draft does not execute; its publish is judged at the
@@ -23043,7 +23141,10 @@ export class ObjectStackProtocolImplementation implements
         // binding the active row is written under), before `repo.promoteDraft`
         // writes — so a batch publish aborts on it as it aborts on the owner
         // refusal above. See {@link permissionSetNameCollisionRefusal}.
-        {
+        // Asked only when a draft was read, like its siblings: with none at
+        // the address the caller is told `repo.promoteDraft`'s `NO_DRAFT`
+        // first, the fact about its own state, rather than another owner's.
+        if (draftForGate) {
             const nameCollision = await this.permissionSetNameCollisionRefusal(
                 singularType, request.name, promoteInto, 'publish',
             );
@@ -23082,6 +23183,15 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, request.batchDatasources,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+        // [#27818] …and a datasource draft whose `external.credentialsRef` the active row it is promoted into
+        // (`promoteInto`) does not hold now: refused before `repo.promoteDraft` writes. See {@link datasourceCredentialsRefSaveRefusal}.
+        if (draftForGate) {
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: draftForGate.body,
+                mode: 'publish', packageId: promoteInto, source: undefined, door: 'publish',
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
         }
         // [ADR-0138 D2b] …and a flow draft that would go `active` with
         // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
@@ -27121,6 +27231,15 @@ export class ObjectStackProtocolImplementation implements
      * Roll a package back THROUGH every `apply` commit newer than `commitId`
      * (newest first), leaving the package as it was at that commit. Each step is
      * an individual `revertCommit`, so the whole rollback is itself audited.
+     *
+     * `failed[]` carries both kinds of failure a step can have: a step that
+     * THREW (one entry for the commit), and every item a step REFUSED and
+     * reported in its own returned `failed[]` (one entry per item, its `error`
+     * naming the item and quoting the step's client-facing text). Either makes
+     * `success` false — the declared answer's "true exactly when nothing
+     * failed". A refused item stops neither its commit nor the rollback: the
+     * step still reverts the item's neighbours and records its revert commit,
+     * so that commit is also listed in `revertedCommits`.
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
@@ -27157,11 +27276,19 @@ export class ObjectStackProtocolImplementation implements
         const failed: Array<{ commitId: string; error: string }> = [];
         for (const c of toRevert) {
             try {
-                await this.revertCommit({
+                const step = await this.revertCommit({
                     commitId: c.id,
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 revertedCommits.push(c.id);
+                // An item the step refused is returned, never thrown; its
+                // `error` is already client-facing (P11).
+                for (const item of step.failed) {
+                    failed.push({
+                        commitId: c.id,
+                        error: `Item '${item.type}/${item.name}' was not reverted: ${item.error}`,
+                    });
+                }
             } catch (e: any) {
                 // [#8333 · P12] The derivative of P11 — `failed[].error` on the
                 // rollback response. Measured on `origin/main` by failing the

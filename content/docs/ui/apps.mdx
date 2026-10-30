@@ -813,10 +813,16 @@ The Setup app's anchors:
 | `group_people_org` | Users, organizations, business units, teams, invitations |
 | `group_access_control` | Positions, permission sets, sharing rules, API keys |
 | `group_approvals` | Approvals inbox, requests, history, delegations |
-| `group_configuration` | Settings, localization, authentication, email, storage, AI, feature flags, branding |
+| `group_configuration` | Settings, localization, exchange rates, authentication, email, storage, AI, feature flags, branding |
 | `group_diagnostics` | Sessions, notification events, audit log |
 | `group_integrations` | Webhooks, cloud connection |
 | `group_advanced` | OAuth applications |
+
+**Exchange Rates** (`sys_exchange_rate`, under Localization) holds an organization's dated rates, editable by
+its administrators. One row means 1 unit of the home currency (Localization → Default currency) = `rate` units
+of the row's currency, from its effective date until a later row for that currency. To record a month's rates,
+add one row per currency with the first day of the month as the effective date; a correction is an edit to that
+row, and every change lands in the audit log.
 
 Setup is for platform administration and needs `setup.access`. For
 project-specific administration pages, declare an app of your own.

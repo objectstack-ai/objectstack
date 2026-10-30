@@ -140,6 +140,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -577,6 +581,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -664,6 +672,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -794,6 +806,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -813,7 +829,22 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Reenviar invitación",
-        successMessage: "Invitación reenviada"
+        successMessage: "Invitación reenviada",
+        outcomeMessages: {
+          sent: "Invitación reenviada a ${result.email}",
+          link_only: "Invitación renovada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        }
+      },
+      copy_invitation_link: {
+        label: "Copiar enlace de invitación",
+        resultDialog: {
+          title: "Enlace de invitación",
+          description: "Cualquiera que abra este enlace puede aceptar la invitación, así que compártelo solo con la persona que invitaste. Deja de funcionar cuando la invitación se acepta, se rechaza, se cancela o caduca.",
+          acknowledge: "Hecho",
+          fields: {
+            acceptUrl: "Enlace de invitación"
+          }
+        }
       },
       accept_invitation: {
         label: "Aceptar invitación",
@@ -3528,6 +3559,47 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Actualizado el"
+      }
+    }
+  },
+  sys_exchange_rate: {
+    label: "Tipo de cambio",
+    pluralLabel: "Tipos de cambio",
+    description: "Tipos de cambio de la moneda local de la organización a una moneda extranjera, por fecha de entrada en vigor: los tipos con los que los importes en moneda extranjera se convierten a la moneda local.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      currency: {
+        label: "Moneda",
+        help: "Código ISO 4217 de la moneda extranjera, en mayúsculas (EUR, JPY, CHF)."
+      },
+      rate: {
+        label: "Tipo",
+        help: "1 unidad de la moneda local de la organización (Localización → Moneda predeterminada) = Tipo unidades de esta moneda. Ejemplo: moneda local USD, moneda EUR, tipo 0,92 significa 1 USD = 0,92 EUR."
+      },
+      effective_date: {
+        label: "Fecha de entrada en vigor",
+        help: "Primera fecha a la que se aplica este tipo. Sigue vigente hasta que una fila posterior de la misma moneda lo sustituya."
+      },
+      source: {
+        label: "Origen",
+        help: "Cómo llegó la fila: introducida en Setup (manual), cargada desde un archivo (importación) o escrita por un flujo de una aplicación (aplicación).",
+        options: {
+          manual: "Manual",
+          import: "Importación",
+          app: "Aplicación"
+        }
+      }
+    },
+    _views: {
+      all_rates: {
+        label: "Todos",
+        description: "1 unidad de la moneda local de la organización (Localización → Moneda predeterminada) = Tipo unidades de esta moneda. Ejemplo: moneda local USD, moneda EUR, tipo 0,92 significa 1 USD = 0,92 EUR.",
+        emptyState: {
+          title: "Aún no hay tipos de cambio",
+          message: "Añade una fila por moneda para cada fecha en que cambie su tipo, por ejemplo una fila por moneda al inicio de cada mes."
+        }
       }
     }
   }

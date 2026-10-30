@@ -130,7 +130,7 @@ import { SchemaRendererProvider, SchemaRenderer } from '@object-ui/react';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 
 const dataSource = new ObjectStackAdapter({
-  baseUrl: '/api/v1',
+  baseUrl: '',  // the server ORIGIN: '' behind a same-origin proxy, or 'https://api.example.com'
 });
 
 function App() {
@@ -152,7 +152,7 @@ const authClient = createAuthClient({ baseURL: '/api/v1/auth' });
 const authenticatedFetch = createAuthenticatedFetch(authClient);
 
 const dataSource = new ObjectStackAdapter({
-  baseUrl: '/api/v1',
+  baseUrl: '',
   fetch: authenticatedFetch,  // Injects Bearer token automatically
 });
 ```
@@ -204,7 +204,7 @@ The built-in adapter for ObjectStack backends (`packages/data-objectstack`).
 
 ```typescript
 new ObjectStackAdapter({
-  baseUrl: string;               // API base URL
+  baseUrl: string;               // Server origin ('' = same origin); the adapter adds /api/v1
   token?: string;                // Static API token
   autoReconnect?: boolean;       // Auto-reconnect on disconnect (default: true)
   maxReconnectAttempts?: number;  // Max retry count (default: 5)
@@ -215,7 +215,7 @@ new ObjectStackAdapter({
 ### Connection management
 
 ```typescript
-const adapter = new ObjectStackAdapter({ baseUrl: '/api/v1' });
+const adapter = new ObjectStackAdapter({ baseUrl: '' });
 
 // Listen for connection state changes
 adapter.onConnectionStateChange((event) => {
@@ -351,64 +351,32 @@ function MyPlugin() {
 }
 ```
 
-## MSW mock setup (frontend-first development)
+## Frontend-first development
 
-For developing the UI without a running backend, use Mock Service Worker with ObjectStack's in-browser kernel.
+There is no mock-server plugin: the MSW plugin was removed in 12.0, and npm
+still serves its stale 11.x build — ⛔ do not install it. Two supported paths:
 
-### Browser mock server
+- **No backend:** publish static values as a scope ("Static data (no backend)" above).
+- **Real API, locally:** run `os dev` in the ObjectStack app whose
+  `objectstack.config.ts` declares your objects. In a project that runs Vite
+  itself (not `objectui dev`), proxy `/api` to it so page and API share one origin:
 
-```typescript
-// src/mocks/browser.ts
-import { ObjectKernel, DriverPlugin, AppPlugin } from '@objectstack/runtime';
-import { ObjectQLPlugin } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
-import { MSWPlugin } from '@objectstack/plugin-msw';
-
-export async function startMockServer(appConfig: any) {
-  const kernel = new ObjectKernel({ skipSystemValidation: true });
-
-  await kernel.use(new ObjectQLPlugin());
-
-  const driver = new InMemoryDriver();
-  await kernel.use(new DriverPlugin(driver, 'memory'));
-  await kernel.use(new AppPlugin(appConfig));
-  await kernel.use(new MSWPlugin({
-    enableBrowser: true,
-    baseUrl: '/api/v1',
-    logRequests: true,
-  }));
-
-  await kernel.bootstrap();
-
-  // Seed initial data
-  if (appConfig.manifest?.data) {
-    for (const dataset of appConfig.manifest.data) {
-      for (const record of dataset.records) {
-        await driver.create(dataset.object, record);
-      }
-    }
-  }
-}
+```bash
+os dev          # http://localhost:3000; if busy, the banner names the port taken
+os dev --fresh  # throwaway database, deleted on exit
 ```
 
-### App entry with MSW
-
 ```typescript
-// src/main.tsx
-import { startMockServer } from './mocks/browser';
-import appConfig from '../objectstack.config';
-
-async function bootstrap() {
-  if (import.meta.env.DEV) {
-    await startMockServer(appConfig);
-  }
-
-  const root = ReactDOM.createRoot(document.getElementById('root')!);
-  root.render(<App />);
-}
-
-bootstrap();
+// vite.config.ts
+export default defineConfig({
+  server: { proxy: { '/api': { target: 'http://localhost:3000', changeOrigin: true } } },
+});
 ```
+
+By default `os dev` persists to a SQLite file and seeds a dev admin
+(`admin@objectos.ai` / `admin123`) on an empty database. It has no in-memory
+driver (`--database-driver memory` is refused); `--database :memory:` is
+SQLite's in-memory database. Commands and flags: the `objectstack-platform` skill.
 
 ### Test DataSource helper
 
@@ -491,7 +459,7 @@ export class RestApiAdapter implements DataSource {
 For real-time UI updates when data changes:
 
 ```typescript
-const adapter = new ObjectStackAdapter({ baseUrl: '/api/v1' });
+const adapter = new ObjectStackAdapter({ baseUrl: '' });
 
 // Subscribe to mutations
 const unsubscribe = adapter.onMutation?.((event) => {
@@ -507,8 +475,6 @@ unsubscribe?.();
 
 - Spelling `QueryParams` options without the `$` prefix (`limit`, `filter`, `sort`): the index signature accepts them, nothing reads them, and a dropped `$top` fetches the whole table.
 - Importing `fetch` directly in components instead of using DataSource from context.
-- Forgetting to await `startMockServer()` before rendering — MSW intercepts aren't ready.
-- Mismatched `baseUrl` between MSW plugin and ObjectStackAdapter — requests bypass mocks.
 - Not providing `getObjectSchema()` — plugins that need field metadata will fail.
 - Passing a DataSource adapter instance where a static object is expected (or vice versa).
 - Not handling loading/error states in components that fetch data.

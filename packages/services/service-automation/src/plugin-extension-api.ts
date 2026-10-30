@@ -33,7 +33,7 @@ import { FLOW_RESERVED_NODE_TYPES, defineActionDescriptor, resolveFlowTriggerKin
 import type { Connector, ConnectorOrigin } from '@objectstack/spec/integration';
 import { ConnectorSchema } from '@objectstack/spec/integration';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
-import type { AutomationEngine, ConnectorActionHandler, FlowTrigger, FlowTriggerBinding, NodeExecutor } from './engine.js';
+import type { AutomationEngine, ConnectorActionHandler, ConnectorHold, FlowTrigger, FlowTriggerBinding, NodeExecutor } from './engine.js';
 
 /**
  * The `AutomationEngine` members the moved bodies read, each typed as the class
@@ -366,20 +366,40 @@ export function registerDegradedConnector(
     reason: string,
     origin: ConnectorOrigin,
     cause?: unknown,
+    hold?: ConnectorHold,
 ): void {
     const parsed = ConnectorSchema.parse(def);
     this.assertSameOriginOrFree(parsed.name, origin);
-    this.connectors.set(parsed.name, { def: parsed, handlers: {}, origin, state: 'degraded', degradedReason: reason });
+    this.connectors.set(parsed.name, {
+        def: parsed,
+        handlers: {},
+        origin,
+        state: 'degraded',
+        degradedReason: reason,
+        ...(hold ? { degradedHold: hold } : {}),
+    });
     // `warn(message, meta?)` per the `Logger` contract — no `Error` slot
     // below `error`, so the cause belongs in argument TWO here.
     this.logger.warn(
-        `Connector registered DEGRADED: ${parsed.name} (origin: ${origin}) — no actions and no handlers ` +
-            `until its upstream is reachable; a connector_action dispatching to it fails with the stored ` +
-            `reason, and the materializer retries with backoff.`,
+        `Connector registered DEGRADED: ${parsed.name} (origin: ${origin}) — no actions and no handlers` +
+            (hold
+                ? `; a connector_action dispatching to it fails with the stored reason, and the materializer ` +
+                  `does not retry it until ${describeHold(hold)} (or a restart).`
+                : ` until its upstream is reachable; a connector_action dispatching to it fails with the stored ` +
+                  `reason, and the materializer retries with backoff.`),
         cause === undefined
             ? { degradedReason: reason }
             : { degradedReason: reason, ...describeThrownForLog(cause) },
     );
+}
+
+/**
+ * [#28016] What re-attempts a held connector, as the clause a sentence ends
+ * on: "… until <this> (or a restart)". The one spelling for the engine's
+ * degrade record and the `connector_action` refusal.
+ */
+export function describeHold(hold: ConnectorHold): string {
+    return hold.kind === 'credential' ? `credential '${hold.ref}' is set again` : 'its declaration is edited';
 }
 
 /** The body of {@link AutomationEngine.assertSameOriginOrFree}, moved unedited; that method's docblock is its contract. */

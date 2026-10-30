@@ -504,9 +504,9 @@ export async function fileOrRefreshCard({
 // THE RULE. On a refresh of a card carrying `pm:blocked`, every `Blocked-by:`
 // target the card names -- body AND comments, line-initial, read by the
 // patrol's own reader -- is resolved. When EVERY one is a LOCAL card that has
-// closed, no `Unlock-action:` line names another unlock, and the card has no
-// assignee, the refresh swaps `pm:blocked` for `pm:queue` and says so in the
-// refreshed body. Anything else changes no label:
+// closed (a PR: merged), no `Unlock-action:` line names another unlock, and the
+// card has no assignee, the refresh swaps `pm:blocked` for `pm:queue` and says
+// so in the refreshed body. Anything else changes no label:
 //
 //   not pm:blocked        nothing read at all
 //   no target named       H4's row (a block with no line), not this refresh's
@@ -520,6 +520,10 @@ export async function fileOrRefreshCard({
 //                         objectstack consumes objectui through the
 //                         `.objectui-sha` pin, so the next hourly red is the
 //                         SAME failure until the pin moves -- never released
+//   a PR target CLOSED    abandoned, not landed (#27846): the issues API answers
+//     UNMERGED            a PR number `closed` whether or not it merged, and
+//                         only `pull_request.merged_at` tells the two apart --
+//                         never released
 //   an `Unlock-action:`   the card names an unlock other than closure
 //     line (any channel)  (`references/state-machine.md`, `pm:blocked`), so
 //                         closure is not its exit -- never released. Any value
@@ -561,7 +565,8 @@ export const QUEUE_LABEL = 'pm:queue';
 
 // The pure verdict over resolved targets. `resolutions` are
 // `blockerTargetsFor`'s targets, each carrying `local` and `state`
-// ('open' | 'closed' | 'unresolved') -- the shape H19 judges.
+// ('open' | 'closed' | 'unresolved') -- the shape H19 judges -- and, on a PR
+// that closed without merging, `unmerged: true`.
 // `unlockActions` are the card's `Unlock-action:` values, both channels.
 export function staleBlockVerdict({ issue, resolutions, unlockActions = [] }) {
   if (!labelNames(issue ?? {}).includes(BLOCKED_LABEL)) return { verdict: 'not-blocked' };
@@ -569,11 +574,13 @@ export function staleBlockVerdict({ issue, resolutions, unlockActions = [] }) {
   if (rows.length === 0) return { verdict: 'no-target' };
   const open = rows.filter((r) => r.state === 'open');
   const unread = rows.filter((r) => r.state !== 'open' && r.state !== 'closed');
+  // A PR closed unmerged never landed its fix anywhere: it withholds.
+  const unmerged = rows.filter((r) => r.state === 'closed' && r.unmerged === true);
   // Closed THERE is not consumable HERE: a closed cross-repo target withholds.
   const upstream = rows.filter((r) => r.state === 'closed' && r.local !== true);
   const declared = [...(unlockActions ?? [])];
-  if (open.length > 0 || unread.length > 0 || upstream.length > 0 || declared.length > 0) {
-    return { verdict: 'held', open, unread, upstream, unlockActions: declared };
+  if (open.length > 0 || unread.length > 0 || unmerged.length > 0 || upstream.length > 0 || declared.length > 0) {
+    return { verdict: 'held', open, unread, unmerged, upstream, unlockActions: declared };
   }
   const assignees = (issue?.assignees ?? []).map((a) => String(a?.login ?? a));
   if (assignees.length > 0) return { verdict: 'assigned', assignees };
@@ -611,10 +618,17 @@ export async function judgeCardBlock({ issue, ownerRepo, listComments, getIssue,
     try {
       const got = await getIssue({ repo: target.repo, number: target.number });
       const state = got?.state === 'closed' || got?.state === 'open' ? got.state : 'unresolved';
+      // A PR answers in the issues API's PR shape; a closed one with no
+      // `merged_at` was abandoned (a missing `merged_at` reads the same: held).
+      const unmerged = state === 'closed' && got?.pull_request != null && !got.pull_request.merged_at;
+      // A closed PR with a `merged_at` released by its MERGE: the note names it so.
+      const merged = state === 'closed' && Boolean(got?.pull_request?.merged_at);
       resolutions.push({
         ...target,
         state,
         closedAt: got?.closed_at ?? null,
+        ...(unmerged ? { unmerged: true } : {}),
+        ...(merged ? { merged: true } : {}),
         detail: state === 'unresolved' ? `answered state '${got?.state}'` : null,
       });
     } catch (error) {
@@ -627,12 +641,16 @@ export async function judgeCardBlock({ issue, ownerRepo, listComments, getIssue,
 
 const targetName = (r) => (r.local ? `#${r.number}` : r.key);
 
-// What each target reads as on the summary row. A closed cross-repo target is
-// NAMED as the reason it holds, never shown as a bare `closed`.
-const targetReading = (r) =>
-  r.state === 'closed' && r.local !== true
-    ? `${targetName(r)} closed upstream (not an unlock criterion for this consumer)`
-    : `${targetName(r)} ${r.state}`;
+// What each target reads as on the summary row. A closed cross-repo target, and
+// a PR closed unmerged, are NAMED as the reason they hold, never a bare `closed`.
+const targetReading = (r) => {
+  if (r.state === 'closed' && r.unmerged === true) return `${targetName(r)} closed unmerged (a PR that never landed)`;
+  if (r.state === 'closed' && r.local !== true) {
+    return `${targetName(r)} closed upstream (not an unlock criterion for this consumer)`;
+  }
+  if (r.state === 'closed' && r.merged === true) return `${targetName(r)} merged`;
+  return `${targetName(r)} ${r.state}`;
+};
 
 // One line for the run log: the verdict and what it was read from.
 function summariseBlock(block) {
@@ -648,13 +666,18 @@ function summariseBlock(block) {
 // as a body-borne `Blocked-by:` line by the very reader it reports on (the
 // self-test runs the reader over every note).
 export function renderBlockNote(block) {
+  // Only reachable at `expired` or `assigned`, where `staleBlockVerdict` has
+  // excluded every unmerged row: a closed PR here MERGED, and is named so.
   const closed = (block.resolutions ?? [])
-    .map((r) => `${targetName(r)}${r.closedAt ? ` (closed ${r.closedAt})` : ' (closed)'}`)
+    .map((r) => {
+      const word = r.merged === true ? 'merged' : 'closed';
+      return `${targetName(r)}${r.closedAt ? ` (${word} ${r.closedAt})` : ` (${word})`}`;
+    })
     .join(', ');
   if (block.verdict === 'expired') {
     return [
       `## State: \`${BLOCKED_LABEL}\` → \`${QUEUE_LABEL}\`, moved by this refresh`,
-      `This card carried \`${BLOCKED_LABEL}\`, and every \`Blocked-by:\` target it names is closed: ${closed}.`,
+      `This card carried \`${BLOCKED_LABEL}\`, and every \`Blocked-by:\` target it names is closed (a PR: merged): ${closed}.`,
       'A red run that arrives after the last named blocker closed is new work, so this refresh moved the card',
       `back to \`${QUEUE_LABEL}\` (one additive label write, one remove by name). Priority, lane and every other`,
       "label are untouched: grading stays the seat's. If this red is still the failure the block was about,",
@@ -663,8 +686,8 @@ export function renderBlockNote(block) {
   }
   if (block.verdict === 'assigned') {
     return [
-      `## State: \`${BLOCKED_LABEL}\`, and every blocker it names is closed`,
-      `Every \`Blocked-by:\` target this card names is closed (${closed}), so this red is new work -- but the`,
+      `## State: \`${BLOCKED_LABEL}\`, and every blocker it names is closed (a PR: merged)`,
+      `Every \`Blocked-by:\` target this card names is closed or merged (${closed}), so this red is new work -- but the`,
       `card is assigned (${block.assignees.map((a) => `\`${a}\``).join(', ')}), and moving it to \`${QUEUE_LABEL}\` is`,
       "the holder's release act (clear the assignee and post the `Release:` line, in one write), never this",
       "refresh's. No label was changed.",
@@ -1726,7 +1749,7 @@ async function selfTest() {
   // log of every call the refresh makes, in order.
   const blockBoard = ({
     labels = [...CARD_LABELS, BLOCKED_LABEL], assignees = [], comments = [], states = {}, cardBody = OLD_BODY,
-    commentPages = null, failComments = null, failAdd = null, failRemove = null,
+    commentPages = null, failComments = null, failAdd = null, failRemove = null, pulls = {},
   } = {}) => {
     const card = { number: 23885, title: OPEN_CI_TITLE, body: cardBody,
       labels: labels.map((name) => ({ name })), assignees: assignees.map((login) => ({ login })) };
@@ -1751,7 +1774,9 @@ async function selfTest() {
         calls.push(`getIssue ${repo}#${number}`);
         const state = states[`${repo}#${number}`];
         if (!state) throw notFound('Not Found');
-        return { state, closed_at: state === 'closed' ? '2026-10-16T13:20:00Z' : null };
+        // A number in `pulls` is a PR, answered in the issues API's PR shape.
+        const pr = Object.hasOwn(pulls, `${repo}#${number}`) ? { pull_request: { merged_at: pulls[`${repo}#${number}`] } } : {};
+        return { state, closed_at: state === 'closed' ? '2026-10-16T13:20:00Z' : null, ...pr };
       },
       addLabels: async ({ number, labels: add }) => {
         calls.push(`addLabels #${number} ${add.join(',')}`);
@@ -1946,6 +1971,37 @@ async function selfTest() {
     const b = blockBoard({ cardBody: `${OLD_BODY}\nBlocked-by: #23908`,
       states: { 'objectstack-ai/objectstack#23908': 'closed' } });
     if ((await b.refresh()).block !== 'expired') throw new Error('body channel: a body-borne line was not read');
+  });
+  // A park on a PR (#27846): triage names the PR itself, and the issues API
+  // answers it `closed` whether it merged or was abandoned. MERGED releases
+  // the card, in either channel; closed UNMERGED holds it and says why; OPEN
+  // holds it.
+  await check(async () => {
+    const PR = 'objectstack-ai/objectstack#24305';
+    for (const where of [{ cardBody: `${OLD_BODY}\nBlocked-by: #24305` }, { comments: ['- **Blocked-by: #24305.**'] }]) {
+      const b = blockBoard({ ...where, states: { [PR]: 'closed' }, pulls: { [PR]: '2026-10-16T13:20:00Z' } });
+      const outcome = await b.refresh();
+      if (outcome.block !== 'expired' || b.names() !== sorted([...CARD_LABELS, QUEUE_LABEL])) {
+        throw new Error(`merged PR: expected the card released, got '${outcome.block}' holding ${b.names()}`);
+      }
+      // The note and the log name the PR by its MERGE, never as a bare close (#28033).
+      if (!b.card.body.includes('#24305 (merged 2026-10-16T13:20:00Z)') || b.card.body.includes('#24305 (closed')) {
+        throw new Error(`merged PR: the note does not name the merge:\n${b.card.body}`);
+      }
+      if (!outcome.blockSummary.includes('#24305 merged')) {
+        throw new Error(`merged PR: the summary does not name the merge (${outcome.blockSummary})`);
+      }
+    }
+    const abandoned = blockBoard({ cardBody: `${OLD_BODY}\nBlocked-by: #24305`,
+      states: { [PR]: 'closed' }, pulls: { [PR]: null } });
+    const held = await abandoned.refresh();
+    untouched(abandoned, held, 'held');
+    if (!held.blockSummary.includes('#24305 closed unmerged')) {
+      throw new Error(`unmerged PR: the summary does not name the abandoned PR as the reason (${held.blockSummary})`);
+    }
+    if (abandoned.card.body !== NEW_BODY) throw new Error('unmerged PR: a held block wrote a note into the body');
+    const open = blockBoard({ cardBody: `${OLD_BODY}\nBlocked-by: #24305`, states: { [PR]: 'open' }, pulls: { [PR]: null } });
+    untouched(open, await open.refresh(), 'held');
   });
   // A card naming only itself names no blocker.
   await check(async () => {

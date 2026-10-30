@@ -13,7 +13,8 @@
  * `ObjectView.renderListView` is only the page-only navigation:
  *   - `quickFilters` (never valid on an object view), and
  *   - a `tabs`-style `userFilters` (or one carrying `tabs`), which would
- *     collide with the ViewTabBar that already owns the tab-bar role.
+ *     collide with the page title's view switcher, which owns view
+ *     switching (objectstack#27594).
  *
  * An author who reaches for those on an object list view gets a page that
  * renders nothing where they expect the control — surface the drop with a

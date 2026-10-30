@@ -118,3 +118,46 @@ describe('the federation twins on a datasource that exists and is not a federati
     expect(answer.body.error.message).toContain("is the platform's managed primary datasource");
   });
 });
+
+/**
+ * [#27696] `POST …/external/validate`, the one by-name federation door the
+ * pins above left out. It answered an unknown name `200` with an empty,
+ * vacuously `ok` report, so a caller could not tell "nothing on this
+ * datasource is federated" from "this datasource does not exist". The ruling:
+ * no definition ⇒ the same `404`, before any validation; a datasource that
+ * exists and has nothing federated keeps its `200` empty report.
+ */
+describe('POST …/external/validate on a name that resolves no saved datasource', () => {
+  it('answers 404 RESOURCE_NOT_FOUND in the words GET /datasources/:name uses', async () => {
+    const call = mount();
+
+    const answer = await call('POST', '/no_such_ds/external/validate');
+
+    expect({
+      status: answer.status,
+      success: answer.body.success,
+      code: answer.body.error?.code,
+      message: answer.body.error?.message,
+    }).toEqual({
+      status: 404,
+      success: false,
+      code: 'RESOURCE_NOT_FOUND',
+      message: 'Datasource "no_such_ds" does not exist.',
+    });
+    expect(answer.body).not.toHaveProperty('data');
+  });
+
+  it.each([
+    ['a saved datasource', 'warehouse'],
+    ['the primary datasource', 'default'],
+  ])('keeps the 200 empty report for %s with nothing federated', async (_what, name) => {
+    const call = mount();
+
+    const answer = await call('POST', `/${name}/external/validate`);
+
+    expect({ status: answer.status, data: answer.body.data }).toEqual({
+      status: 200,
+      data: { ok: true, results: [] },
+    });
+  });
+});

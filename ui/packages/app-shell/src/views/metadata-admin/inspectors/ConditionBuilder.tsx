@@ -26,12 +26,13 @@ import {
   Button, Input, Label,
   Select, SelectTrigger, SelectContent, SelectItem, SelectValue,
 } from '@object-ui/components';
-import { Plus, X, Code2, ListFilter } from 'lucide-react';
+import { AlertCircle, Plus, X, Code2, ListFilter } from 'lucide-react';
 import { BOOLEAN_VALUE_TYPES, expandEmptyOperator, type EmptyOperatorArm } from '@objectstack/spec/data';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import type { CelLintIssue } from '../celAuthoring.js';
-import { t, useMetadataLocale } from '../i18n.js';
+import { useServerHoldAt } from '../draftVerdict.js';
+import { t, tFormat, useMetadataLocale } from '../i18n.js';
 
 type Op = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'truthy' | 'falsy';
 
@@ -820,7 +821,7 @@ function initFrom(value: string, valueOf: SubjectValueOf): { rows: Row[]; join: 
   return { rows: [], join: '&&', raw: !!value };
 }
 
-export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue }: {
+export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue, labelSubjects = false, verdictPath }: {
   label?: string;
   value: string;
   onCommit: (cel: string) => void;
@@ -906,6 +907,20 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
    * builder renders no verdict of its own, so it does not read this.
    */
   scopeIssue?: boolean;
+  /**
+   * The subject dropdown names a field by its label, with the CEL spelling
+   * beside it. Off by default, so a mount that lists spellings keeps them.
+   */
+  labelSubjects?: boolean;
+  /**
+   * objectstack#27644 — the item-relative path `value` is stored at in the body
+   * the page's served verdict judged (`validations.1.condition`), forwarded to
+   * `CelPredicateField`. The server's errors there count as blocking while
+   * `value` is the text they judged, in either mode: the raw editor reports
+   * them with its lint, and the row builder, which mounts no CEL editor, shows
+   * and counts them itself. Omitted: no server verdict is read.
+   */
+  verdictPath?: string;
 }) {
   const { fields: hookFields } = useObjectFields(objectName);
   const fields = fieldsProp ?? hookFields;
@@ -921,27 +936,32 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
    * advertisement and the placeholder teaches its whole example, both unchanged.
    */
   const offeredRoots = roots ?? (scope === 'record' ? RECORD_CONDITION_ROOTS : undefined);
+  const locale = useMetadataLocale();
   const subjectOptions = React.useMemo(() => {
     const visible = fields.filter((f) => !f.hidden);
-    const fieldOpts = visible.map((f) => ({
-      value: `${fieldPrefix}${f.name}`,
-      label: `${fieldPrefix}${f.name}`,
-    }));
+    // With `labelSubjects`, a field reads by its label, its spelling beside it.
+    const named = (spelling: string, label: string | undefined) =>
+      labelSubjects && label ? { value: spelling, label, hint: spelling } : { value: spelling, label: spelling, hint: undefined };
+    const fieldOpts = visible.map((f) => named(`${fieldPrefix}${f.name}`, f.label));
     // The whole-record `previous` comes first: `previous == null` is how an
     // author branches on the create leg of a create-or-update trigger, and it
     // reads as the head of the group rather than as one more field.
     const previousOpts = includePrevious
       ? [
-          { value: 'previous', label: 'previous' },
-          ...visible.map((f) => ({ value: `previous.${f.name}`, label: `previous.${f.name}` })),
+          { value: 'previous', label: 'previous', hint: undefined },
+          ...visible.map((f) =>
+            named(
+              `previous.${f.name}`,
+              f.label ? tFormat('engine.inspector.condition.previousField', locale, { field: f.label }) : undefined,
+            ),
+          ),
         ]
       : [];
-    const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value }));
+    const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value, hint: undefined }));
     return [...fieldOpts, ...previousOpts, ...contextOpts];
-  }, [fields, fieldPrefix, includePrevious, contextSubjects]);
+  }, [fields, fieldPrefix, includePrevious, contextSubjects, locale, labelSubjects]);
   // The raw-expression editor's CEL assists (#1582): field-existence lint +
   // autocomplete need the bare field-name catalog and a locale-bound `t`.
-  const locale = useMetadataLocale();
   const tLocal = React.useCallback((k: string) => t(k, locale), [locale]);
   const fieldNames = React.useMemo(
     () => fields.filter((f) => !f.hidden).map((f) => f.name),
@@ -1053,7 +1073,11 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     const errs = issues.filter((i) => i.severity === 'error').length;
     setCelErrors((prev) => (prev === errs ? prev : errs));
   }, []);
-  const blockingIssues = raw ? celErrors : 0;
+  // objectstack#27644 — the row builder has no editor to report the server's
+  // errors at this path, so it counts them here; the raw editor's report
+  // already carries them.
+  const held = useServerHoldAt(verdictPath, value || '');
+  const blockingIssues = raw ? celErrors : held.length;
   // Held in a ref so an unmemoized parent callback cannot re-fire the effect.
   const onBlockingIssuesChangeRef = React.useRef(onBlockingIssuesChange);
   React.useEffect(() => {
@@ -1104,6 +1128,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
              roots are the engine's own, unchanged. */
           roots={offeredRoots}
           scopeIssue={scopeIssue}
+          verdictPath={verdictPath}
           t={tLocal}
         />
         {value && !parse(value, valueOf) && (
@@ -1145,7 +1170,12 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
                   <Select value={r.subject} onValueChange={(v) => update(rows.map((x, j) => j === i ? { ...x, subject: v } : x))} disabled={disabled}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue placeholder={tLocal('engine.inspector.condition.subjectPlaceholder')} /></SelectTrigger>
                     <SelectContent>
-                      {subjectOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      {subjectOptions.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                          {o.hint && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{o.hint}</span>}
+                        </SelectItem>
+                      ))}
                       {r.subject && !subjectOptions.some((o) => o.value === r.subject) && (
                         <SelectItem value={r.subject}>{r.subject}</SelectItem>
                       )}
@@ -1189,6 +1219,18 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
 
       {compiled && (
         <div className="rounded bg-muted/40 px-2 py-1 text-[10px] font-mono text-muted-foreground break-all">{compiled}</div>
+      )}
+
+      {/* objectstack#27644 — what the publish refuses in this condition, as served. */}
+      {held.length > 0 && (
+        <ul className="space-y-1" aria-live="polite">
+          {held.map((e, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-[11px] text-destructive" data-testid="cel-server-error">
+              <AlertCircle className="mt-[1px] h-3 w-3 shrink-0" />
+              <span>{e.message}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -70,10 +70,15 @@ const HOTCRM = { name: 'hotcrm', label: 'HotCRM', icon: 'flame', _packageId: 'co
 const SERVICE = { name: 'hotcrm_service', label: 'HotCRM Service', icon: 'headset' };
 const SETUP = { name: 'setup', label: 'Setup', icon: 'settings', _packageId: 'com.objectstack.setup' };
 
-function renderSwitcher(active: string, designInStudioPath?: string | null) {
+function renderSwitcher(active: string, designInStudioPath?: string | null, studioPosture?: 'edit' | 'view') {
   return render(
     <MemoryRouter>
-      <AppSwitcher activeAppName={active} onAppChange={vi.fn()} designInStudioPath={designInStudioPath} />
+      <AppSwitcher
+        activeAppName={active}
+        onAppChange={vi.fn()}
+        designInStudioPath={designInStudioPath}
+        studioPosture={studioPosture}
+      />
     </MemoryRouter>,
   );
 }
@@ -110,7 +115,16 @@ describe('the app pill\'s menu (objectui#12605)', () => {
     ]);
     expect(menu().getByTestId('app-switcher-home')).toHaveTextContent('Back to home');
     expect(menu().getByTestId('app-switcher-all-apps')).toHaveTextContent('All apps');
-    expect(menu().getByTestId('app-switcher-settings')).toHaveTextContent('Settings');
+    // objectstack#27521 row 1 — the entry carries the Setup app's own label,
+    // the name its header shows once it is open.
+    expect(menu().getByTestId('app-switcher-settings')).toHaveTextContent('Setup');
+  });
+
+  it('the Setup entry follows the app’s served label, whatever it is (objectstack#27521 row 1)', () => {
+    apps = [HOTCRM, SERVICE, { ...SETUP, label: 'Administration' }];
+    renderSwitcher('hotcrm');
+    expect(menu().getByTestId('app-switcher-settings')).toHaveTextContent('Administration');
+    expect(menu().getByTestId('app-switcher-settings')).not.toHaveTextContent('Settings');
   });
 
   it('Setup is not in the switch group; the current app is checked', () => {
@@ -159,5 +173,29 @@ describe('below `sm` the pill is the glyph alone, named in its tooltip (objectui
     const chevron = pill.querySelector('svg.lucide-chevron-down')!;
     expect(chevron.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'sm:block']));
     expect(within(pill).getByTestId('app-mark-tile').className).not.toMatch(/(^|\s)hidden(\s|$)/);
+  });
+});
+
+// #27356 row 12 — for a read-only package's app the top bar hands the
+// switcher the `view` posture: the Studio row is 「Open APP in Studio」 behind
+// an eye, to the same target. A writable package's app keeps 「Edit APP in
+// Studio」 with the pencil, the default when no posture is passed.
+describe('the Studio row follows the top bar\'s posture (#27356 row 12)', () => {
+  const PATH = '/studio/com.acme.hotcrm/data';
+
+  it('view: 「Open APP in Studio」 behind an eye, to the same target, and no Edit row', () => {
+    renderSwitcher('hotcrm', PATH, 'view');
+    const row = menu().getByTestId('app-switcher-view-in-studio');
+    expect(row).toHaveAttribute('href', PATH);
+    expect(row).toHaveTextContent('Open HotCRM in Studio');
+    expect(row.querySelector('svg.lucide-eye')).not.toBeNull();
+    expect(menu().queryByTestId('app-switcher-edit-in-studio')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL — edit keeps 「Edit APP in Studio」 with the pencil (the first case above passes no posture and reads the same row)', () => {
+    renderSwitcher('hotcrm', PATH, 'edit');
+    expect(menu().getByTestId('app-switcher-edit-in-studio')).toHaveTextContent('Edit HotCRM in Studio');
+    expect(menu().getByTestId('app-switcher-edit-in-studio').querySelector('svg.lucide-pencil')).not.toBeNull();
+    expect(menu().queryByTestId('app-switcher-view-in-studio')).not.toBeInTheDocument();
   });
 });

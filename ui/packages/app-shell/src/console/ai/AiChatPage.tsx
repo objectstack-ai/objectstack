@@ -2299,15 +2299,23 @@ export function ChatPane({
   // open: an open re-reads the same thread and reports the same state.
   const { user: planApprovalUser } = useAuth();
   const planApprovalUserId = planApprovalUser?.id;
+  // objectstack#25943 — the reading carries the count of items awaiting
+  // confirmation too (Studio's right slot shows 「N 项待确认」).
   const [planApprovalPending, setPlanApprovalPending] = useState<boolean | undefined>(undefined);
+  const [planApprovalCount, setPlanApprovalCount] = useState(0);
+  const onPlanApprovalPendingChange = useCallback((pending: boolean, count: number) => {
+    setPlanApprovalPending(pending);
+    setPlanApprovalCount(count);
+  }, []);
   useEffect(() => {
     if (!conversationId || planApprovalPending === undefined) return;
     publishPlanApprovalPending({
       userId: planApprovalUserId,
       conversationId,
       pending: planApprovalPending,
+      count: planApprovalCount,
     });
-  }, [planApprovalUserId, conversationId, planApprovalPending]);
+  }, [planApprovalUserId, conversationId, planApprovalPending, planApprovalCount]);
 
   // A1.b switcher menu: every published app with a package identity, deduped
   // by package (apps sharing a package share the build thread — the scope is
@@ -2912,7 +2920,7 @@ export function ChatPane({
         onBuildMaterialized={handleBuildMaterialized}
         onBuildResult={handleBuildResult}
         // objectui#11666 — mirrored onto the assistant bus (effect above).
-        onPlanApprovalPendingChange={setPlanApprovalPending}
+        onPlanApprovalPendingChange={onPlanApprovalPendingChange}
         previewDraftLabel={t('console.ai.previewDraft', { defaultValue: 'Preview' })}
         data-testid="ai-chat-panel"
       />

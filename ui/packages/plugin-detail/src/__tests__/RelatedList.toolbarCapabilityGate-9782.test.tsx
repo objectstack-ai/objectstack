@@ -10,8 +10,10 @@
  * objectui#9782 — the related-list TOOLBAR had no ADR-0066 D4 capability gate.
  *
  * `@objectstack/spec` (`packages/spec/src/ui/action.zod.ts`) declares
- * `requiredPermissions` as "enforced with 403 on the platform action route
- * (script/flow/modal + MCP) and **mirrored as a UI hide**". The header of a
+ * `requiredPermissions` as "enforced with 403 on every call the platform action
+ * door (`POST /actions/:object/:action` and MCP `run_action`) dispatches, and
+ * **mirrored as a UI hide**" — a declared same-origin `type: api` action
+ * included (ADR-0066 D4 as amended). The header of a
  * related list evaluated only each action's `visible` CEL predicate, so a
  * `list_toolbar` action declaring a capability the caller does not hold
  * rendered anyway — one surface over from `EnvironmentListToolbar`, which

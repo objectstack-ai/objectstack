@@ -11,8 +11,9 @@
 //
 //  - acceptance[1]: a sandboxed `beforeInsert` hook that throws a business
 //    sentence and declares no code. `POST /data/OBJECT` and its `/createMany`
-//    door answer 400 carrying the sentence verbatim and NO `code` (by pinned
-//    design on the /data door), and no row is written.
+//    door answer 400 carrying the sentence verbatim and the ruled
+//    `code: 'HOOK_ABORTED'` (#27597: an undeclared hook abort answers the
+//    ledgered code, a declared one is kept), and no row is written.
 //  - acceptance[2]: a declarative `operation: 'update'` action whose patch
 //    repeats a `unique: true` email: `POST /actions/OBJECT/ACTION` answers
 //    409 UNIQUE_VIOLATION, `error.details` carries exactly `developerMessage`
@@ -71,12 +72,12 @@ describe('[#26572] error answers made honest, over HTTP on a booted scratch app'
     ];
 
     for (const [door, send] of doors) {
-      it(`${door}: 400 with the hook's own sentence, no code, nothing written`, async () => {
+      it(`${door}: 400 with the hook's own sentence, HOOK_ABORTED, nothing written`, async () => {
         const res = await send();
         const body: any = await res.json();
         expect(res.status, JSON.stringify(body)).toBe(400);
         expect(body.error).toBe(HOOK_SENTENCE);
-        expect('code' in body, `the hook declared no code, so the /data door carries none: ${JSON.stringify(body)}`).toBe(false);
+        expect(body.code, `the hook declared no code, so the /data door answers the ruled HOOK_ABORTED: ${JSON.stringify(body)}`).toBe('HOOK_ABORTED');
         expect(await ql.find('errsent_budget', { where: {}, ...SYS })).toHaveLength(0);
       });
     }
