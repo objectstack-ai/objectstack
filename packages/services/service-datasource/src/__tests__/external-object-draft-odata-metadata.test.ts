@@ -263,3 +263,89 @@ describe('the lookup the draft writes is one the driver can follow', () => {
     expect(requests).toContain('Categories?$filter=CategoryID eq 1');
   });
 });
+
+/**
+ * The same import over an OData v2 service (`version: '2.0'`, #28125): its
+ * `$metadata` is EDMX 1.0, where a navigation is an `Association` and its
+ * foreign key a `ReferentialConstraint` on the Association, and its dates are
+ * `Edm.DateTime`. The driver reads both into the shape the draft reads, under
+ * dialect `odata-2.0`, so the draft comes out as it does over v4.
+ */
+describe('an OData v2 datasource imports the same way: Associations become lookups, Edm.DateTime a datetime', () => {
+  const V2_ROOT = 'https://odata.example.test/V2/Northwind/Northwind.svc/';
+  const NORTHWIND_V2_METADATA = readFileSync(new URL('./__fixtures__/northwind-v2-metadata.xml', import.meta.url), 'utf8');
+
+  function serviceOverV2(objects: ObjectLike[] = []) {
+    const fetch: FetchLike = async (input) => {
+      const url = decodeURIComponent(input).slice(V2_ROOT.length);
+      if (url !== '$metadata') throw new Error(`northwind v2 fixture: no answer recorded for GET ${url}`);
+      return new Response(NORTHWIND_V2_METADATA, { status: 200, headers: { 'Content-Type': 'application/xml' } });
+    };
+    const driver = new ODataDriver(parseODataDriverConfig({ name: 'erp', serviceRoot: V2_ROOT, version: '2.0' }), { fetch });
+    const saved: Array<{ name: string; definition: Record<string, unknown> }> = [];
+    const registry = [...objects];
+    const service = new ExternalDatasourceService({
+      introspect: () => driver.introspectSchema(),
+      getDatasource: async (name): Promise<DatasourceLike> => ({ name, schemaMode: 'external' }),
+      getObject: async (name) => registry.find((o) => o.name === name),
+      listObjects: async () => registry,
+      persistObject: async (name, definition) => {
+        saved.push({ name, definition });
+        registry.push(definition as unknown as ObjectLike);
+      },
+    });
+    return { service, saved, driver };
+  }
+
+  it('reports dialect odata-2.0, which the matrix reads through its odata arm', async () => {
+    const { driver } = serviceOverV2();
+    expect((await driver.introspectSchema()).dialect).toBe('odata-2.0');
+  });
+
+  it('drafts the v4 fields from the v2 types, Edm.DateTime as a datetime', async () => {
+    const { service } = serviceOverV2();
+    const products = await service.generateObjectDraft('erp', 'Products');
+    expect(products.definition.fields).toEqual({
+      product_id: { type: 'number' },
+      product_name: { type: 'text' },
+      supplier_id: { type: 'number' },
+      category_id: { type: 'number' },
+      unit_price: { type: 'number' },
+      discontinued: { type: 'boolean' },
+    });
+    const employees = await service.generateObjectDraft('erp', 'Employees');
+    expect(employees.definition.fields).toMatchObject({ birth_date: { type: 'datetime' } });
+    const orders = await service.generateObjectDraft('erp', 'Orders');
+    expect(orders.definition.fields).toMatchObject({ order_date: { type: 'datetime' }, freight: { type: 'number' } });
+    expect(orders.review.filter((r) => !r.remoteType.startsWith('navigation'))).toEqual([]);
+  });
+
+  it('turns an Association\'s ReferentialConstraint into the lookup v4 gives, once the target is imported', async () => {
+    const before = await serviceOverV2().service.generateObjectDraft('erp', 'Products');
+    expect(before.review.map((r) => [r.column, r.remoteType])).toEqual([
+      ['Category', 'navigation → Categories'],
+      ['Supplier', 'navigation → Suppliers'],
+    ]);
+    const { service } = serviceOverV2([imported('categories', 'Categories')]);
+    const draft = await service.generateObjectDraft('erp', 'Products');
+    expect(draft.definition.fields).toMatchObject({
+      category_id: { type: 'lookup', reference: 'categories' },
+      supplier_id: { type: 'number' },
+    });
+  });
+
+  it('reads the self-association onto the object itself, and a composite-key set\'s lookup onto a single key', async () => {
+    const employees = await serviceOverV2().service.generateObjectDraft('erp', 'Employees');
+    expect(employees.definition.fields).toMatchObject({ reports_to: { type: 'lookup', reference: 'employees' } });
+    const lines = await serviceOverV2([imported('products', 'Products')]).service.generateObjectDraft('erp', 'Order_Details');
+    expect(lines.definition.fields).toMatchObject({ order_id: { type: 'number' }, product_id: { type: 'lookup', reference: 'products' } });
+  });
+
+  it('passes Gate 2 against the same v2 $metadata, lookups included', async () => {
+    const { service } = serviceOverV2();
+    for (const set of ['Categories', 'Suppliers', 'Products', 'Employees', 'Orders']) await service.importObject('erp', set);
+    for (const name of ['categories', 'suppliers', 'products', 'employees', 'orders']) {
+      expect(await service.validateObject(name), name).toEqual({ ok: true, datasource: 'erp', object: name, diffs: [] });
+    }
+  });
+});
