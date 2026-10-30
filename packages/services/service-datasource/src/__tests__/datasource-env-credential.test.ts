@@ -110,7 +110,7 @@ const warehouse: ConnectableDatasource = {
   driver: 'postgres',
   schemaMode: 'external',
   config: { host: 'db.internal', database: 'warehouse', username: 'svc' },
-  external: { allowWrites: false, validation: { onMismatch: 'warn', checkOnBoot: false } },
+  external: { allowWrites: false, validation: { onMismatch: 'warn' } },
 };
 const BOOT = { context: { origin: 'code' as const, trigger: 'declared-auto' as const } };
 
