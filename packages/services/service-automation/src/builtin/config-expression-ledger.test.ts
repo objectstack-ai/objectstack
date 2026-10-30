@@ -28,7 +28,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   FLOW_NODE_EXPRESSION_PATHS,
+  FLOW_NODE_SIBLING_EXPRESSION_BLOCKS,
   flowNodeConfigRefusals,
+  getFlowNodeSiblingBlockJsonSchemas,
   getSchemalessNodeConfigJsonSchemas,
   resolveFlowNodeExpressions,
   type FlowNodeExpressionRole,
@@ -126,7 +128,7 @@ function collectExpressionProps(
 const engine = new AutomationEngine(silentLogger());
 installBuiltinNodes(engine, ctx());
 
-type DeclaredSlot = { nodeType: string; path: string; role: FlowNodeExpressionRole; required: boolean };
+type DeclaredSlot = { nodeType: string; block?: string; path: string; role: FlowNodeExpressionRole; required: boolean };
 
 /** Resolve an `xExpression` marker to its ledger role, failing loudly on an unknown one. */
 function roleOf(nodeType: string, path: string, marker: string): FlowNodeExpressionRole {
@@ -177,12 +179,39 @@ function declaredFromSchemalessConfigs(): DeclaredSlot[] {
   return found;
 }
 
-/** Every declared expression slot, from BOTH declaration channels. */
-function declaredEverywhere(): DeclaredSlot[] {
-  return [...declaredFromDescriptors(), ...declaredFromSchemalessConfigs()];
+/**
+ * [#27968] Declared expression slots in a node's SIBLING blocks — the blocks
+ * of `FlowNodeSchema` beside `config` (`connectorConfig`, `waitEventConfig`,
+ * …), whose own Zod carries the marker. The ledger roots such a slot in its
+ * block (`block`), and the block names its node type through
+ * `FLOW_NODE_SIBLING_EXPRESSION_BLOCKS`. Every block is walked, so a marker on
+ * one the table does not name fails here: a slot no consumer can reach.
+ */
+function declaredFromSiblingBlocks(): DeclaredSlot[] {
+  const found: DeclaredSlot[] = [];
+  const nodeTypeOf: Readonly<Record<string, string>> = FLOW_NODE_SIBLING_EXPRESSION_BLOCKS;
+  for (const [block, json] of Object.entries(getFlowNodeSiblingBlockJsonSchemas())) {
+    for (const { path, marker, required } of collectExpressionProps(json as SchemaNode)) {
+      const nodeType = nodeTypeOf[block];
+      expect(
+        nodeType,
+        `FlowNodeSchema.${block}.${path} declares an xExpression marker on a block the ledger cannot root a path in — `
+        + 'name the block and its node type in FLOW_NODE_SIBLING_EXPRESSION_BLOCKS',
+      ).toBeDefined();
+      found.push({ nodeType: nodeType!, block, path, role: roleOf(nodeType!, `${block}.${path}`, marker), required });
+    }
+  }
+  return found;
 }
 
-const key = (e: { nodeType: string; path: string; role: string }) => `${e.nodeType}.${e.path} (${e.role})`;
+/** Every declared expression slot, from ALL THREE declaration channels. */
+function declaredEverywhere(): DeclaredSlot[] {
+  return [...declaredFromDescriptors(), ...declaredFromSchemalessConfigs(), ...declaredFromSiblingBlocks()];
+}
+
+/** `nodeType.path (role)`, the path prefixed with its block when it is not `config` (#27968). */
+const key = (e: { nodeType: string; block?: string; path: string; role: string }) =>
+  `${e.nodeType}.${e.block === undefined ? '' : `${e.block}.`}${e.path} (${e.role})`;
 
 describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
   it('every xExpression property a builtin declares is in the ledger', () => {
@@ -206,6 +235,7 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
   it.each([
     ['descriptor configSchema', declaredFromDescriptors],
     ['schemaless-node-config.zod.ts', declaredFromSchemalessConfigs],
+    ['FlowNodeSchema sibling-block', declaredFromSiblingBlocks],
   ] as const)('derives at least one slot from the %s channel', (_channel, derive) => {
     expect(derive().length).toBeGreaterThan(0);
   });
@@ -272,6 +302,28 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
       const refusals = flowNodeConfigRefusals(slot.nodeType, WHOLE[slot.nodeType]);
       expect(refusals.map((r) => [r.code, r.path]), key(slot)).toEqual([['node-config-key-missing', slot.path]]);
     }
+  });
+
+  /**
+   * [#27968] A `connector_action` node's `connectorConfig.input` is a `value`
+   * slot rooted in the node's sibling block, declared on that block's own Zod
+   * (`FlowNodeSchema.connectorConfig`'s `input` map value) and on no `config`
+   * channel — the node publishes no `configSchema` and has no `config`
+   * contract. Before #27968 the ledger could address `config` only, so the
+   * slot the executor evaluates was judged by neither door.
+   */
+  it('connector_action connectorConfig.input.* is covered — the #27968 sibling-block value slot', () => {
+    const slot = FLOW_NODE_EXPRESSION_PATHS.find(
+      (e) => e.nodeType === 'connector_action' && e.block === 'connectorConfig' && e.path === 'input.*',
+    );
+    expect(slot, 'the slot the connector_action executor evaluates through resolveValueSlotMap').toBeDefined();
+    expect(slot!.role).toBe('value');
+    expect(declaredFromSiblingBlocks().map(key)).toEqual(['connector_action.connectorConfig.input.* (value)']);
+    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'connector_action')).toEqual([]);
+    expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'connector_action')).toEqual([]);
+    // The table names exactly the blocks a slot is declared in — no block an
+    // entry could be rooted in with nothing declaring it.
+    expect(Object.keys(FLOW_NODE_SIBLING_EXPRESSION_BLOCKS)).toEqual(['connectorConfig']);
   });
 
   it('decision.conditions[].expression is covered — the #4439 hole', () => {
@@ -423,6 +475,7 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     const markers = [
       ...engine.getActionDescriptors().flatMap((d) => collectExpressionProps(d.configSchema as SchemaNode)),
       ...Object.values(getSchemalessNodeConfigJsonSchemas()).flatMap((json) => collectExpressionProps(json as SchemaNode)),
+      ...Object.values(getFlowNodeSiblingBlockJsonSchemas()).flatMap((json) => collectExpressionProps(json as SchemaNode)),
     ].map((p) => p.marker);
     expect(markers.length).toBeGreaterThan(0);
     expect(markers).not.toContain('template');
