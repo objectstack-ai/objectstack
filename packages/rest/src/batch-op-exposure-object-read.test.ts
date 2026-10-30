@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
 
 const liveEngines: ObjectQL[] = [];
@@ -67,6 +68,12 @@ async function boot() {
   for (const o of [WIDGET, VAULT, LEDGER]) engine.registry.registerObject(o as any, LEGACY_PACKAGE);
   engine.registry.registerObject(SECRET as any);
   await engine.syncSchemas();
+  // The metadata store every exposure gate reads through. Without it the
+  // protocol's object reads answer SERVICE_UNAVAILABLE and every gate fails
+  // OPEN by design (#3545), on this door and on the data door alike.
+  for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+  }
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
   const noop = () => {};
