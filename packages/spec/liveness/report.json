@@ -65,7 +65,7 @@
           "evidenceScope": "in-repo",
           "evidence": "packages/spec/src/ui/report.zod.ts#ReportChartSchema (declares `seriesBy`, an optional dataset dimension name); packages/lint/src/validate-chart-bindings.ts#validateChartBindings (resolves it against the report's bound dataset dimensions exactly as `xAxis`, `chart-dimension-unknown` at error, at os validate / os build and the report publish door)",
           "authorWarn": true,
-          "authorHint": "Keep it, but nothing draws it yet: the report chart still plots one series per `xAxis` value, so the split by this dimension appears once the report renderer reads `seriesBy`.",
+          "authorHint": "Keep it, but nothing draws it yet: the report chart still draws a single series, and the split by this dimension appears once the report renderer reads `seriesBy`.",
           "note": "Spec half of the report chart series split (#27974): a second dataset dimension that splits the one `yAxis` measure into a series per value, the report's spelling of a dashboard widget's two-entry `dimensions` selection. Planned because the renderer half is a follow-up: at this tree ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportChart still queries `[xAxis]` × `[yAxis]` and hands `buildChartSeries` one dimension, so the split is not drawn. The other children of `chart` inherit the row's `live` verdict through `childrenDefault`; this row exists to keep that blanket from vouching for the one key nothing reads yet. Flip to `live` with the renderer card."
         }
       }
