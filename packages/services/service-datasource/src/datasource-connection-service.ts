@@ -333,6 +333,21 @@ export class DatasourceConnectionService {
    */
   private readonly states = new Map<string, DatasourceConnectionState>();
 
+  /**
+   * [ADR-0015 D7] The `failed-credentials` verdicts the already-registered
+   * guard recorded for an adopted plugin driver, by datasource name, each
+   * with the connector instance the datasource names and the reason recorded.
+   * The driver stays registered and borrows again on every request, so the
+   * verdict judges the declaration at boot, not for the life of the process:
+   * the first borrow the lender grants for THAT instance retracts it
+   * ({@link retractOnLend}). A connect, reconnect or disconnect of the
+   * datasource drops its entry, since it records a verdict of its own.
+   */
+  private readonly awaitingLend = new Map<string, { connector: string; reason: string }>();
+
+  /** The lenders whose `onLent` this service subscribed to, one subscription each, with their unsubscribes. */
+  private readonly lendSubscriptions = new Map<IConnectorCredentialSource, () => void>();
+
   constructor(cfg: DatasourceConnectionServiceConfig) {
     this.cfg = cfg;
     this.policy = cfg.policy ?? allowAllConnectPolicy;
@@ -530,6 +545,42 @@ export class DatasourceConnectionService {
     });
   }
 
+  /**
+   * Subscribe to `source`'s granted borrows, once per lender. `false` when
+   * there is no lender or it offers no `onLent`, so nothing can retract a
+   * verdict recorded against it.
+   */
+  private subscribeToLends(source: IConnectorCredentialSource | undefined): boolean {
+    if (!source || typeof source.onLent !== 'function') return false;
+    if (!this.lendSubscriptions.has(source)) {
+      this.lendSubscriptions.set(source, source.onLent((connector) => this.retractOnLend(connector)));
+    }
+    return true;
+  }
+
+  /**
+   * [ADR-0015 D7] The lender granted a borrow of `connector`: every
+   * already-registered-guard verdict waiting on THAT instance is retracted —
+   * re-recorded `already-registered`, which clears the engine's unavailable
+   * mark — provided the retained state is still the verdict recorded and the
+   * plugin's driver is still registered. A grant for any other instance
+   * proves nothing about this one and leaves it standing.
+   */
+  private retractOnLend(connector: string): void {
+    for (const [name, awaiting] of this.awaitingLend) {
+      if (awaiting.connector !== connector) continue;
+      this.awaitingLend.delete(name);
+      const state = this.states.get(name);
+      if (state?.status !== 'failed-credentials' || state.reason !== awaiting.reason) continue;
+      if (!this.cfg.engine()?.getDriverByName?.(name)) continue;
+      this.logger?.info?.(
+        `datasource '${name}': connector instance '${connector}' lent its credential again — the boot's ` +
+        `failed-credentials verdict is retracted`,
+      );
+      this.recordState({ name, status: 'already-registered' }, undefined);
+    }
+  }
+
   private async attemptConnect(
     record: ConnectableDatasource,
     opts: { objects?: readonly string[]; mappedObjects?: readonly string[]; context?: DatasourceConnectContext; asDefault?: boolean } = {},
@@ -537,6 +588,7 @@ export class DatasourceConnectionService {
     const name = record.name;
     const engine = this.cfg.engine();
     const factory = this.cfg.factory();
+    this.awaitingLend.delete(name);
 
     // Idempotent: never double-register (e.g. a legacy `onEnable` bridge already
     // registered this driver — the D8 escape hatch). The default driver keeps
@@ -558,11 +610,35 @@ export class DatasourceConnectionService {
       // registered it (#13578), and it refuses each request on its own — but
       // the datasource is recorded failed (Setup → Datasources names why) and,
       // when objects bind to it, the boot fails as for any connect failure.
+      //
+      // The verdict is the boot's judgment of the declaration, and the driver
+      // borrows again on every request, so once the instance is repaired the
+      // first borrow the lender grants for it retracts the verdict and the
+      // engine's unavailable mark (`retractOnLend`) — no restart. A lender
+      // without `onLent`, or none at all, leaves the verdict until a restart,
+      // and the degraded-boot banner says which.
       const connector = borrowedConnectorOf(record.external);
       if (connector !== undefined) {
-        const borrow = await borrowConnectorCredential(this.cfg.connectorCredentials?.(), connector);
+        const source = this.cfg.connectorCredentials?.();
+        const borrow = await borrowConnectorCredential(source, connector);
         if (!borrow.ok) {
-          return this.handleFailure(record, 'failed-credentials', borrow.reason, opts.context, opts.objects, opts.mappedObjects, borrow.cause);
+          const retractable = this.subscribeToLends(source);
+          const result = this.handleFailure(
+            record,
+            'failed-credentials',
+            borrow.reason,
+            opts.context,
+            opts.objects,
+            opts.mappedObjects,
+            borrow.cause,
+            retractable
+              ? `until connector instance '${connector}' can lend its credential: the driver borrows again on every ` +
+                `request, and the first borrow granted for '${connector}' clears this verdict and the unavailable ` +
+                `mark, with no restart.`
+              : undefined,
+          );
+          if (retractable) this.awaitingLend.set(name, { connector, reason: borrow.reason });
+          return result;
         }
       }
       return { name, status: 'already-registered' };
@@ -821,6 +897,7 @@ export class DatasourceConnectionService {
     // behind would make the admin list — and the query-time error — describe a
     // datasource that no longer exists in that state.
     this.states.delete(name);
+    this.awaitingLend.delete(name);
     engine?.clearDatasourceUnavailable?.(name);
 
     // #13578 — the eviction this method never did. Closing the pool above only
@@ -999,6 +1076,9 @@ export class DatasourceConnectionService {
     for (const n of names) {
       await this.disconnect(n, { asDefault: n === DEFAULT_DATASOURCE_NAME });
     }
+    for (const unsubscribe of this.lendSubscriptions.values()) unsubscribe();
+    this.lendSubscriptions.clear();
+    this.awaitingLend.clear();
   }
 
   /**
@@ -1063,6 +1143,12 @@ export class DatasourceConnectionService {
      * credential) — those are never module-resolution failures.
      */
     cause?: unknown,
+    /**
+     * How the datasource recovers, for the degraded-boot banner, when that is
+     * not the default "until it is reachable AND the server is restarted"
+     * (the already-registered guard's verdict clears on the next lend).
+     */
+    recovery?: string,
   ): ConnectResult {
     const isExternal = record.schemaMode && record.schemaMode !== 'managed';
     const msg = `datasource '${record.name}': connect failed — ${reason}`;
@@ -1104,7 +1190,7 @@ export class DatasourceConnectionService {
     const banner =
       `⚠️ DEGRADED BOOT: ${msg} (${why}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting ` +
       `anyway. Queries against the objects bound to it fail with ERR_DATASOURCE_UNAVAILABLE (HTTP ` +
-      `503) until it is reachable AND the server is restarted: nothing re-runs the connect. ` +
+      `503) ${recovery ?? 'until it is reachable AND the server is restarted: nothing re-runs the connect.'} ` +
       `Its state shows as 'error' in Setup → Datasources. Unset OS_ALLOW_DRIVER_CONNECT_FAILURE ` +
       `to restore fail-fast boot.`;
     this.logger?.warn?.(banner);

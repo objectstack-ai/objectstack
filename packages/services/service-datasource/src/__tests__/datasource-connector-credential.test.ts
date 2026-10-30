@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import {
   CONNECTOR_CREDENTIAL_SOURCE_SERVICE,
@@ -390,6 +390,137 @@ describe('[ADR-0015 D7] a plugin driver adopted from its driver.<name> service i
     const result = await connection.connect({ ...sapOrders, external: { allowWrites: false } }, { context: { origin: 'code', trigger: 'declared-auto' } });
     expect(result.status).toBe('already-registered');
     expect(borrowed).toEqual([]);
+  });
+});
+
+/**
+ * A lender double whose declaration can be repaired, with `onLent`, as the
+ * automation service's source has it: a borrow of a declared, enabled
+ * instance is granted and announced to the subscribers.
+ */
+function repairableLender(disabled: Set<string>) {
+  const listeners = new Set<(connector: string) => void>();
+  const source: IConnectorCredentialSource = {
+    async borrow(connector) {
+      if (disabled.has(connector)) {
+        throw connectorCredentialRefusal(
+          `connector instance '${connector}' (named by this datasource's external.connector) is disabled (enabled: false).`,
+          'VALIDATION_ERROR',
+          422,
+        );
+      }
+      for (const listener of listeners) listener(connector);
+      const fixed: BorrowedConnectorCredential = { auth: { type: 'bearer', token: 'static-key' } };
+      return { connector, get: async () => fixed, refresh: async () => fixed };
+    },
+    onLent(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+  return { source, listeners };
+}
+
+describe('[ADR-0015 D7] an adopted plugin driver\'s failed-credentials verdict clears on the next granted borrow', () => {
+  const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env[ENV]; delete process.env[ENV]; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[ENV];
+    else process.env[ENV] = saved;
+  });
+
+  it('retracts the verdict and the unavailable mark once the repaired instance lends — and only for that instance', async () => {
+    const disabled = new Set(['sap_s4']);
+    const { source } = repairableLender(disabled);
+    const { ql, connection } = await adoptedPluginDriver(source);
+    const result = await connection.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
+    expect(result.status).toBe('failed-credentials');
+    expect(ql.listUnavailableDatasources()).toEqual([expect.objectContaining({ name: 'sap_orders' })]);
+
+    // A grant for another instance proves nothing about this one.
+    await source.borrow('salesforce_crm');
+    expect(connection.getConnectionState('sap_orders')).toMatchObject({ status: 'failed-credentials', availability: 'failed' });
+    expect(ql.listUnavailableDatasources()).toHaveLength(1);
+
+    // The instance is repaired, and the driver's next request borrows it.
+    disabled.delete('sap_s4');
+    await source.borrow('sap_s4');
+    expect(connection.getConnectionState('sap_orders')).toMatchObject({ status: 'already-registered', availability: 'available' });
+    expect(connection.getConnectionState('sap_orders')?.reason).toBeUndefined();
+    expect(ql.listUnavailableDatasources()).toEqual([]);
+    expect(ql.getDriverByName('sap_orders')).toBeDefined();
+  });
+
+  it('subscribes once per lender, however many datasources wait on it', async () => {
+    const { source, listeners } = repairableLender(new Set(['sap_s4']));
+    const { svc, engine } = service({ supports: () => false, create: vi.fn() } as unknown as IDatasourceDriverFactory, source);
+    for (const name of ['sap_orders', 'sap_invoices']) {
+      engine.drivers.set(name, { name } as IDataDriver);
+      await svc.connect({ ...sapOrders, name }, { context: { origin: 'code', trigger: 'declared-auto' } });
+    }
+    expect(listeners.size).toBe(1);
+    await svc.disconnectAll();
+    expect(listeners.size).toBe(0);
+  });
+
+  it('leaves a verdict standing that a disconnect or a later connect replaced', async () => {
+    const disabled = new Set(['sap_s4']);
+    const { source } = repairableLender(disabled);
+    const { svc, engine } = service({ supports: () => false, create: vi.fn() } as unknown as IDatasourceDriverFactory, source);
+    engine.drivers.set('sap_orders', { name: 'sap_orders' } as IDataDriver);
+    await svc.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
+    await svc.disconnect('sap_orders');
+    disabled.delete('sap_s4');
+    await source.borrow('sap_s4');
+    // Nothing resurrected for a datasource that was removed.
+    expect(svc.getConnectionState('sap_orders')).toBeUndefined();
+  });
+
+  it('leaves the verdict when the driver was evicted since, rather than reporting a driver that is gone', async () => {
+    const disabled = new Set(['sap_s4']);
+    const { source } = repairableLender(disabled);
+    const { svc, engine } = service({ supports: () => false, create: vi.fn() } as unknown as IDatasourceDriverFactory, source);
+    engine.drivers.set('sap_orders', { name: 'sap_orders' } as IDataDriver);
+    await svc.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
+    engine.drivers.delete('sap_orders');
+    disabled.delete('sap_s4');
+    await source.borrow('sap_s4');
+    expect(svc.getConnectionState('sap_orders')?.status).toBe('failed-credentials');
+  });
+
+  it('says in the degraded-boot banner that the next granted borrow clears it, and a restart where nothing can', async () => {
+    process.env[ENV] = '1';
+    const banners = async (source: IConnectorCredentialSource) => {
+      const warnings: string[] = [];
+      const engine = fakeEngine();
+      engine.drivers.set('sap_orders', { name: 'sap_orders' } as IDataDriver);
+      const svc = new DatasourceConnectionService({
+        factory: () => ({ supports: () => false, create: vi.fn() }) as unknown as IDatasourceDriverFactory,
+        engine: () => engine,
+        connectorCredentials: () => source,
+        logger: { info() {}, debug() {}, error() {}, warn: (m: string) => void warnings.push(m) } as never,
+      });
+      const realWrite = process.stderr.write;
+      (process.stderr as { write: unknown }).write = () => true;
+      try {
+        const result = await svc.connect(sapOrders, { objects: ['sap_order'], context: { origin: 'code', trigger: 'declared-auto' } });
+        expect(result.status).toBe('failed-credentials');
+      } finally {
+        (process.stderr as { write: unknown }).write = realWrite;
+      }
+      return warnings.join('\n');
+    };
+
+    const retractable = await banners(repairableLender(new Set(['sap_s4'])).source);
+    expect(retractable).toContain('DEGRADED BOOT');
+    expect(retractable).toContain("the first borrow granted for 'sap_s4' clears this verdict");
+    expect(retractable).not.toContain('server is restarted');
+
+    // A lender without onLent: nothing can retract the verdict, and the banner keeps the restart.
+    const { onLent: _omitted, ...withoutOnLent } = repairableLender(new Set(['sap_s4'])).source;
+    const standing = await banners(withoutOnLent);
+    expect(standing).toContain('until it is reachable AND the server is restarted');
   });
 });
 

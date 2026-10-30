@@ -27,6 +27,7 @@
  * a status and a revision, never the value.
  */
 
+import { borrowedCredentialForms } from '@objectstack/types';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 
 /** The object a connector credential lives in (`sys-connector-credential.object.ts`). */
@@ -422,27 +423,22 @@ export type WithheldCredential = string | readonly string[] | undefined;
 /** The shortest spelling a scrub withholds — a shorter one would blank ordinary words. */
 const MIN_WITHHELD_LENGTH = 4;
 
-function base64Of(text: string): string {
-    const bytes = new TextEncoder().encode(text);
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return btoa(binary);
-}
-
 /**
- * Every spelling of `value` an upstream or a client library may echo back:
- * the value itself; URL-encoded, as an api-key sent as a query parameter
- * travels in the request URL; base64; and, given the `basic` `username`,
- * base64(`username:value`), the `Authorization: Basic` header. A base64 form
- * is kept without its `=` padding, so an echo that drops the padding is
- * withheld too. Longest first, so a longer form is replaced before a shorter
- * one inside it.
+ * Every spelling of `value` an upstream or a client library may echo back —
+ * the one rule `borrowedCredentialForms` (`@objectstack/types`) holds for a
+ * datasource borrowing this credential, so the connector's own call path and
+ * the borrowing driver withhold the same list: the value itself; URL-encoded
+ * both ways (`encodeURIComponent`, and the form encoding `URLSearchParams`
+ * writes), as an api-key sent as a query parameter travels in the request
+ * URL; base64; and, given the `basic` `username`, base64(`username:value`),
+ * the `Authorization: Basic` header. Base64 forms are unpadded and the list
+ * is longest first.
  */
 export function credentialForms(value: string | undefined, username?: string): string[] {
     if (!value) return [];
-    const forms = new Set<string>([value, encodeURIComponent(value), base64Of(value).replace(/=+$/, '')]);
-    if (username !== undefined) forms.add(base64Of(`${username}:${value}`).replace(/=+$/, ''));
-    return [...forms].filter((f) => f.length >= MIN_WITHHELD_LENGTH).sort((a, b) => b.length - a.length);
+    return borrowedCredentialForms(
+        username !== undefined ? { type: 'basic', username, password: value } : { type: 'bearer', token: value },
+    );
 }
 
 function withheldForms(secret: WithheldCredential): readonly string[] {
