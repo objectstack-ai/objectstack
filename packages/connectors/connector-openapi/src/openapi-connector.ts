@@ -214,7 +214,7 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
             key,
             label: op.summary ?? titleize(key),
             description: op.description,
-            inputSchema: buildInputSchema(op),
+            inputSchema: buildInputSchema(op, auth),
             outputSchema: buildOutputSchema(op),
         });
 
@@ -319,20 +319,37 @@ function toInfo(op: Op): OperationInfo {
 }
 
 /**
+ * Header parameters OAS 3.0.3 §4.7.12.1 says SHALL be ignored, compared
+ * lower-cased: the transport sets `Content-Type`, and `applyAuth` sets
+ * `Authorization`, so a value the input supplied could never take effect.
+ */
+const IGNORED_HEADER_PARAMETERS = new Set(['accept', 'content-type', 'authorization']);
+
+/**
  * Assemble the action inputSchema from an operation's parameters + requestBody.
  * Produces { type: 'object', properties: { path, query, header, body }, required }
  * where only non-empty sections are emitted.
+ *
+ * #27995 — the `connector_action` executor now refuses a call whose input
+ * breaks this schema, so it must not demand what the caller cannot supply:
+ * the ignored header parameters above, and the header or query parameter
+ * the connector's own `auth` fills (the credential never belongs in a
+ * flow's `connectorConfig.input`), are left out of it.
  */
-function buildInputSchema(op: OpenApiOperation): JsonSchema | undefined {
+function buildInputSchema(op: OpenApiOperation, auth: RestAuth): JsonSchema | undefined {
     const sections: Record<'path' | 'query' | 'header', { props: Record<string, JsonSchema>; required: string[] }> = {
         path: { props: {}, required: [] },
         query: { props: {}, required: [] },
         header: { props: {}, required: [] },
     };
+    const authHeader = auth.type === 'api-key' && !auth.paramName ? (auth.headerName ?? 'X-API-Key').toLowerCase() : undefined;
+    const authQuery = auth.type === 'api-key' ? auth.paramName : undefined;
 
     for (const p of op.parameters ?? []) {
         if (!p || typeof p !== 'object' || '$ref' in p) continue;
         if (p.in !== 'path' && p.in !== 'query' && p.in !== 'header') continue;
+        if (p.in === 'header' && (IGNORED_HEADER_PARAMETERS.has(p.name.toLowerCase()) || p.name.toLowerCase() === authHeader)) continue;
+        if (p.in === 'query' && authQuery !== undefined && p.name === authQuery) continue;
         const sec = sections[p.in];
         sec.props[p.name] = p.schema ?? (p.description ? { type: 'string', description: p.description } : { type: 'string' });
         if (p.required) sec.required.push(p.name);
