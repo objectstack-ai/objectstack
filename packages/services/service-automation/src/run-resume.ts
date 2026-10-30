@@ -393,11 +393,16 @@ export async function resume(this: Pick<RunResumeHost, 'refuseGatedResume' | 're
 
 /**
  * [#27877] The code a resume answers when it would advance a `map` past an
- * item whose child run is still suspended. The ONE spelling of it — the
- * refusal below and its pins read this constant, so the code is a one-line
- * change wherever the vocabulary question lands.
+ * item whose child run is still suspended — its own member of the contract's
+ * closed union, never `RESUME_IN_PROGRESS`, which tells a caller the work is
+ * already being done and needs nothing from them. The ONE spelling of it in
+ * this package: the refusal below and its pins read this constant.
+ *
+ * ⛔ Deliberately absent from {@link RETRYABLE_RESUME_REFUSAL_CODES}: that set
+ * is what `resumeInternal` answers, and this code is answered only by the
+ * public door's gate, before `resumeInternal` is reached.
  */
-export const MAP_ITEM_PENDING_REFUSAL_CODE: NonNullable<AutomationResult['code']> = 'RESUME_IN_PROGRESS';
+export const MAP_ITEM_PENDING_REFUSAL_CODE = 'RESUME_CHILD_PENDING' satisfies NonNullable<AutomationResult['code']>;
 
 /** The body of {@link AutomationEngine.refuseGatedResume}; that method's docblock is its contract. */
 export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveSuspensionChain' | 'resolveSuspendedNodeType' | 'resolveResumeAuthority' | 'resolveDeclaredResumeAuthority' | 'logger'>, runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {

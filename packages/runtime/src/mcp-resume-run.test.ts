@@ -492,6 +492,7 @@ describe('MCP resumeRun — (d) the engine\'s answers match the REST resume door
         ['RUN_NOT_FOUND', { success: false, code: 'RUN_NOT_FOUND', error: "Suspended node 'collect' no longer exists" }, 'RUN_NOT_FOUND'],
         ['STORE_UNAVAILABLE', { success: false, code: 'STORE_UNAVAILABLE' }, 'STORE_UNAVAILABLE'],
         ['RESUME_IN_PROGRESS', { success: false, code: 'RESUME_IN_PROGRESS', error: 'Run is already being resumed' }, 'RESUME_IN_PROGRESS'],
+        ['RESUME_CHILD_PENDING', { success: false, code: 'RESUME_CHILD_PENDING', error: "Resume run 'run_child' instead" }, 'RESUME_CHILD_PENDING'],
         ['FLOW_FAILED (stranded)', {
             success: false, error: 'tail blew up', status: 'stranded',
             errorMessage: 'Please contact support', summary: { nodes: [] },
