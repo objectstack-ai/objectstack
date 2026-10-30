@@ -1,6 +1,6 @@
 # ADR-0025: Plugin Package Distribution (Code + Dependencies)
 
-**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2026-05, revised 2026-06-01, audited 2026-07-16 and 2026-09-12). Narrowed to what landed: Phase 1 (the `.osplugin` artifact, the compiled-manifest schema, `os plugin build` / `sign` / `publish`, cloud review and counter-signing) and install-time permission consent for package installs (console disclosure, `sys_package_installation.granted_permissions`, re-consent on a widening upgrade, the artifact → enforcer binding at load). Not yet built, carried by the M0–M3 programme on objectstack#27108: the code-plugin half of the install flow (§3.5 steps 4–7: `os plugin install`, download / verify / materialize / load — M1 local T0, M2 cloud fetch), runtime enforcement of the granted set (registered only today, §3.7 — M2), tier dispatch (T1 sandbox — M3), publish-side scans and secret-refs (M3). This revision (v2, 2026-10-28) corrects §3.3, §3.4, §3.8 and §3.10 to the code and records the maintainer's decisions Q1–Q8.
+**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2026-05, revised 2026-06-01, audited 2026-07-16 and 2026-09-12). Narrowed to what landed: Phase 1 (the `.osplugin` artifact, the compiled-manifest schema, `os plugin build` / `sign` / `publish`, cloud review and counter-signing), install-time permission consent for package installs (console disclosure, `sys_package_installation.granted_permissions`, re-consent on a widening upgrade, the artifact → enforcer binding at load), and M1, the local T0 install loop (2026-10-29, §3.5: `os plugin install ./x.osplugin` against the environment's trusted keys, the boot-time loader with the tier dispatch point, disable / enable / uninstall; its cloud-sample acceptance run is still open). Not yet built, carried by the M0–M3 programme on objectstack#27108: the cloud fetch of a code plugin (§3.5 — M2), runtime enforcement of the granted set (registered only today, §3.7 — M2), tier dispatch beyond `node` (T1 sandbox — M3), publish-side scans and secret-refs (M3). This revision (v2, 2026-10-28) corrects §3.3, §3.4, §3.8 and §3.10 to the code and records the maintainer's decisions Q1–Q8; amended 2026-10-30 to what M1 shipped (§3.3, §3.4, §3.5, §3.6, §7).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0004](./0004-cloud-multi-kernel.md) (cloud multi-kernel), [ADR-0010](./0010-metadata-protection-model.md) (L1/L2/L3 protection), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (package authoring & publish, local export/import)
 **Consumers**: `@objectstack/core` (kernel, plugin-loader, security), `@objectstack/runtime` (sandbox, marketplace install), `@objectstack/cli`, `@objectstack/spec/system` (ObjectStackManifest), `@objectstack/spec/cloud`, `../objectui` (Studio)
@@ -156,7 +156,7 @@ Extends the existing `ObjectStackManifest` with three new blocks
   "type": "plugin",
   "engines": { "platform": ">=4.0 <5", "protocol": ">=1.0" },
   "runtime": "node",                  // node | sandbox | worker  (see §3.6)
-  "packaging": "bundled",             // bundled | manifest-deps  (see §3.3)
+  "packaging": "bundled",             // bundled, the one strategy  (see §3.3)
   "permissions": {                    // explicitly requested capabilities
     "services": ["object", "http"],
     "hooks": ["record.beforeInsert"],
@@ -182,13 +182,15 @@ checks the existing `PluginPermissionEnforcer` already implements
   the manifest against `ManifestSchema` and writing per-file `integrity` into the
   compiled manifest. Install = unpack + verify; **no npm/toolchain at install
   time**. This is the closest analog to the JSON flow and keeps the security
-  surface minimal. Native (`.node`) addons are disallowed by rule; the build does
-  not yet refuse them mechanically (M1 adds the refusal).
+  surface minimal. Native (`.node`) addons are disallowed by rule, and since M1
+  `os plugin build` refuses one before writing anything (a `.node` module or a
+  native package the bundle reaches, or a `.node` file under `assets/`).
 - **manifest-deps — RETIRED (v2, maintainer decision Q6, 2026-10-28; ADR-0049
   enforce-or-remove).** The strategy existed on the build side only (it shipped
   `package.json` + `pnpm-lock.yaml` and nothing ever installed them); it had zero
-  consumers and no install path. `PluginPackagingSchema` keeps `bundled` as its
-  only live value; the build-side half is removed in M1. Plugins that need native
+  consumers and no install path. `PluginPackagingSchema` accepts `bundled` only
+  and refuses `manifest-deps` by name with its migration prescription; the
+  build-side half was removed in M1 (#27679). Plugins that need native
   addons or very large dependencies are a fresh decision for M3, with this
   retirement as the starting evidence.
 
@@ -214,9 +216,9 @@ os plugin build  →  os plugin sign  →  os plugin publish
    `<id>-<version>.osplugin` (ustar + gzip) with a placeholder `SIGNATURE` entry.
 2. **sign** — Ed25519 over the raw artifact bytes, written as
    `ed25519:<keyId>:<base64url>` to a `.sig` sidecar (`sign.ts`); the publisher
-   key stays with the publisher. Verification (`verifyPluginArtifact`) exists in
-   core and has **no production caller until M1** (the loader checks only that a
-   signature is well-formed, `plugin-loader.ts`).
+   key stays with the publisher. Since M1 the host verifies it against the
+   environment's trusted keys (§7) at `os plugin install` and again at every boot
+   (`verifyPluginArtifact`); `plugin-loader.ts` refuses a signature no host verified.
 3. **publish** — extends `os package publish` and **reuses the package registry**
    (the `/cloud/plugins` endpoints of the original text were never built):
    - `POST /cloud/packages` → ensure the `sys_package` row (reverse-domain `id`,
@@ -264,8 +266,8 @@ resolve → compat check → permission consent → download+verify → material
    trusted publisher + marketplace keys; verify each file against `integrity`.
    Reject on any mismatch.
 5. **Materialize.** Unpack to a per-environment, per-plugin dir
-   `<OS_HOME>/plugins/<env>/<id>/<version>/`. For manifest-deps, run
-   `pnpm install --frozen-lockfile --ignore-scripts` here.
+   `<OS_HOME>/plugins/<env>/<id>/<version>/`. *v2:* nothing is installed there;
+   `bundled` is the one strategy (§3.3), so install runs no package manager.
 6. **Register.** Write the installation record — `sys_package_installation`
    (`env_id`, `version_id`, `granted_permissions`, `status`; v2 §3.8, the
    `sys_plugin_installation` of the original text was never created). Persist to a local store so installs survive
@@ -290,21 +292,23 @@ explicit `--trust-unsigned` dev override).
   code-bearing package, `sys_package_installation.granted_permissions`, and a
   409 `PERMISSION_RECONSENT_REQUIRED` on a widening upgrade. The granted set
   always equals the declared set — there is no partial grant.
-- **Steps 4–7 do not exist** for code plugins: there is no `os plugin install`,
-  nothing reads a `.osplugin` back except `publish`, no `<OS_HOME>/plugins/…`
-  path, no `--trust-unsigned`, and an environment artifact carries
-  `sys_package_version.manifest_json` — metadata only, never the blob.
-- **M1 — local T0 loop, first-party / self-signed only** (`os plugin install
-  ./x.osplugin`): verify the whole-artifact Ed25519 signature against the host's
-  trusted keys (`verifyPluginArtifact` gets its first production caller) and
-  re-verify every file against `integrity` at unpack; materialize to
-  `<OS_HOME>/plugins/<env>/<id>/<version>/`; write the installation record
-  (§3.8); `--trust-unsigned` as the explicit dev override. The loader scans
-  installed plugins **at boot** (hot reload was retired with #12587),
-  dynamic-imports `dist/index.mjs`, reuses `plugin-loader.ts` dependency
-  ordering, and carries a tier dispatch point that M1 wires for `node` only.
-  Disable / uninstall reuse the package disable-state store. Acceptance: the
-  cloud `plugins/connector-stripe` sample installs, loads and disables cleanly.
+- **Steps 4–7 exist for a local artifact only** (M1, below). For a code plugin
+  in the cloud they do not: nothing serves the `.osplugin` back (§3.4), and an
+  environment artifact carries `sys_package_version.manifest_json` — metadata
+  only, never the blob.
+- ✅ **M1 — local T0 loop, first-party / self-signed only — landed 2026-10-29**
+  (objectstack#27123: #27335, #27374, #27679). `os plugin install ./x.osplugin`
+  verifies the `.sig` over the raw bytes against the environment's trusted keys
+  (§7) before inflating anything, re-verifies every file against `integrity`,
+  materializes to `<OS_HOME>/plugins/<env>/<id>/<version>/` and records the
+  install in a local store (the stand-in for the §3.8 row); `--trust-unsigned`
+  admits only an unsigned artifact, loudly. At **boot** (hot reload was retired
+  with #12587) `os serve` re-verifies each install (artifact sha, signature,
+  byte-equal tree), dispatches on the tier (§3.6) and hands what passed to
+  `kernel.use`, which orders dependencies. `os plugin disable` / `enable` use the
+  package disable-state store; `uninstall` takes effect at the next boot. Still
+  open: the acceptance run on the cloud `plugins/connector-stripe` sample
+  (objectstack#27570).
   ⛔ **M1 is first-party / self-signed only and is listed on no marketplace
   surface**: T0 is author code in the host process (§3.6).
 - **M2 — cloud fetch**: the artifact download route serves the `.osplugin` with
@@ -333,13 +337,16 @@ enforces this at publish time (an unverified publisher cannot ship `runtime:
 
 *v2 — as built and as phased (maintainer decision Q3):* `PluginRuntimeSchema`
 holds the three values, the cloud refuses `node` from an unverified publisher at
-publish, and **nothing dispatches on the tier at load** — every plugin that
-loads today loads in-process. The QuickJS runner serves hook / action script
+publish, and since M1 the boot-time loader dispatches on an installed plugin's
+tier (`dispatchPluginRuntime`): `node` is imported in process, `sandbox` /
+`worker` and an undeclared tier are refused by name — every plugin that loads
+today loads in-process. The QuickJS runner serves hook / action script
 bodies (§3.10 L1) and is never reached from a plugin's declared tier;
 `PluginSandboxRuntime` has no production construction site; T2 has no code.
-M1 wires the dispatch point for T0 only; **M3** routes `runtime: 'sandbox'` to
-QuickJS and decides the T2 RPC surface (§7). Until M3, the publish-time refusal
-is the only tier gate, which is why M1 stays first-party / self-signed.
+M1 wired the dispatch point for T0 only; **M3** routes `runtime: 'sandbox'` to
+QuickJS and decides the T2 RPC surface (§7). Until M3 nothing loads isolated
+(those tiers are refused, not confined), which is why M1 stays first-party /
+self-signed.
 
 ### 3.7 Security model (reuses existing components)
 
@@ -592,8 +599,8 @@ its download / scan half is M2 / M3; Phase 4 (sandbox tier) = M3; Phase 5
   JSON-only flow never needed.
 - Permission consent + tiering add UX and lifecycle surface (re-consent on
   permission widening, tier enforcement).
-- Bundled packaging excludes native addons by default (mitigated by the opt-in
-  manifest-deps strategy in Phase 5).
+- Bundled packaging excludes native addons, and `os plugin build` refuses them;
+  with manifest-deps retired (Q6), a plugin that needs one waits for M3 (§3.3).
 
 ### Neutral
 
@@ -628,7 +635,12 @@ its download / scan half is M2 / M3; Phase 4 (sandbox tier) = M3; Phase 5
   on the next boot.
 - **Key management & rotation** — deferred to **M3** (publisher keys stay with the
   publisher; the host's trusted root set and its rotation / revocation are
-  designed with the T1 tier).
+  designed with the T1 tier). *Note (2026-10-30, ruling `6467932167` on
+  objectstack#27123, letter B′):* the host's trusted-key **store** landed in M1
+  in its minimal form — `sys_trusted_key` (public keys only, `source: 'local'`),
+  `os plugin keygen` and `os plugin trust add | list | revoke`; install and boot
+  refuse an unknown or revoked key id by name. Rotation policy and the
+  `platform` / `cloud` sources stay M3.
 - **T2 RPC surface** — deferred to **M3** (T2 stays reserved; the minimal
   host-service RPC contract is designed when the sandbox tier lands).
 - **Cross-plugin dependency conflicts** — deferred to **M3** (M1 and M2 install
