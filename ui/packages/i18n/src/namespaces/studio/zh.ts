@@ -2683,6 +2683,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.widgetNeedsInput': '组件「{widget}」的「{input}」需要填写',
   // objectstack#27459 — a dashboard list property's item held until it is filled in.
   'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
+  // objectstack#27785 — a report's chart held until its axes are picked.
+  'engine.studio.held.reportChartNeedsInput': '报表图表的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',
   // objectstack#27464 — a navigation rename typed but not committed yet.
   'engine.studio.held.navRename': '导航项「{item}」的重命名尚未完成',
