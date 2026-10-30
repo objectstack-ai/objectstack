@@ -234,6 +234,7 @@ import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetada
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 // objectstack#26858 — the served verdict a flow's inspectors read at their own paths.
 import {
+  DraftVerdictBodyContext,
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
@@ -6823,6 +6824,14 @@ export function DataPillar({
       panelCelBlocking += count;
     }
   }
+  // objectstack#27644 — the open object's served verdict (the draft read's
+  // `_diagnostics`, else the layered read's) and the body it judged, for the
+  // Validations panel: a rule guard the publish refuses holds the autosave
+  // through the panel's verdicts above while it still shows the judged text.
+  // Each load and each save's re-read replaces both; the later one wins.
+  const [objVerdict, setObjVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  const [objVerdictBody, setObjVerdictBody] = React.useState<unknown>(undefined);
+  const objVerdictSeq = React.useRef(0);
   // Either source closes the door: a malformed field formula and a malformed
   // rule guard are both unsaveable, and neither excuses the other.
   const saveBlocking = inspectorBlocking + panelBlocking + panelCelBlocking;
@@ -7002,6 +7011,10 @@ export function DataPillar({
     // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
     setCelVerdicts({});
     setPanelCelVerdicts({});
+    // objectstack#27644 — and so did the served one; a save's re-read in flight is dropped.
+    objVerdictSeq.current += 1;
+    setObjVerdict(undefined);
+    setObjVerdictBody(undefined);
     setDirty(false);
     (async () => {
       try {
@@ -7031,6 +7044,10 @@ export function DataPillar({
         const draftBody = extractDraftBody(draftRead.answer);
         // Served draft as-is, baseline only without one (objectui#10765).
         setObjDraft(draftBody ?? baseline);
+        // objectstack#27644 — the verdict on that body, and the body it judged.
+        const draftVerdict = draftEnvelopeDiagnostics(draftRead.answer);
+        setObjVerdict(editedItemDiagnostics({ hasDraft: !!draftBody, draftDiagnostics: draftVerdict, layered: lay }));
+        setObjVerdictBody(draftBody && draftVerdict ? draftBody : lay.effective);
         setObjDraftFor(`object:${current.name}`);
         setObjDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
         // objectui#11773 — the next save is pinned to what the draft read served.
@@ -7258,6 +7275,14 @@ export function DataPillar({
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setDirty(false);
       setSavedAt(new Date());
+      // objectstack#27644 — the draft this save stored carries its own publish
+      // verdict on its next read; the one held described the body before it.
+      const seq = ++objVerdictSeq.current;
+      void readDraftForSave(client, 'object', current.name, packageId).then((read) => {
+        if (seq !== objVerdictSeq.current) return;
+        setObjVerdict(draftEnvelopeDiagnostics(read.answer));
+        setObjVerdictBody(extractDraftBody(read.answer) ?? undefined);
+      });
       // No success toast: with auto-save (objectui#5813) it would fire after
       // every editing pause — the quiet last-saved hint is the affordance.
       onDraftSaved?.({ type: 'object', name: current.name });
@@ -7266,7 +7291,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveObjDraft, current, objDraft, onDraftSaved, packageId, locale]);
+  }, [saveObjDraft, client, current, objDraft, onDraftSaved, packageId, locale]);
 
   // objectui#11786 — an edit whose body the write guard would refuse (a choice
   // field before its options, a relationship before its target) is held, not
@@ -7828,13 +7853,17 @@ export function DataPillar({
                   </div>
                 )
               ) : viewMode === 'rules' ? (
-                <ObjectValidationsPanel
-                  draft={objDraft}
-                  onPatch={onPatch}
-                  disabled={readOnly}
-                  focus={ruleFocus}
-                  onCelVerdictsChange={reportPanelVerdicts}
-                />
+                <DraftVerdictContext.Provider value={objVerdict}>
+                  <DraftVerdictBodyContext.Provider value={objVerdictBody}>
+                    <ObjectValidationsPanel
+                      draft={objDraft}
+                      onPatch={onPatch}
+                      disabled={readOnly}
+                      focus={ruleFocus}
+                      onCelVerdictsChange={reportPanelVerdicts}
+                    />
+                  </DraftVerdictBodyContext.Provider>
+                </DraftVerdictContext.Provider>
               ) : viewMode === 'settings' ? (
                 <ObjectSettingsPanel
                   name={current.name}
