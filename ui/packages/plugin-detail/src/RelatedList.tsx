@@ -1198,8 +1198,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * key back to this record (objectstack#27524, Target 11): a product's line
    * items named by their product all read the product page's own name, so the
    * row names the first column that is not that key — the list's authored
-   * columns when it has any, else the child's fields in declaration order —
-   * skipping platform columns, redacted and unreadable fields. `undefined`:
+   * columns, then the child's fields in declaration order — skipping platform
+   * columns, redacted and unreadable fields. The key is skipped even when no
+   * authored column survives: the declared fields are read next. `undefined`:
    * the row names the record as everywhere else.
    */
   const compactNameField = React.useMemo((): string | undefined => {
@@ -1215,7 +1216,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       : fields && typeof fields === 'object'
         ? Object.keys(fields)
         : [];
-    return (authored.length > 0 ? authored : declared).find(
+    return [...authored, ...declared].find(
       (key) =>
         key !== referenceField &&
         !redactedFields.has(key) &&
@@ -2564,11 +2565,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
   // In the tabbed tier's 关联 tab the reader's arrangement hands the full
-  // list its chrome (objectstack#27055): the title collapses it — a write to
-  // the reader's arrangement, after which the tab draws it collapsed — and
-  // its ⋯ menu moves and hides it.
+  // list its chrome (objectstack#27055): ⠿ moves it and ⋯ hides it. It does
+  // not collapse: a related list has no collapsed state (objectstack#27524).
   const arrangedFull = !compact && !!cardChrome;
-  const isCollapsible = collapsible || bodyTable || arrangedFull;
+  const isCollapsible = collapsible || bodyTable;
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.

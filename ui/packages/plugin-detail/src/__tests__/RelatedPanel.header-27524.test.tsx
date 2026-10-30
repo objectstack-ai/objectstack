@@ -171,6 +171,29 @@ describe('the related panel header (objectstack#27524, Target 1)', () => {
   });
 });
 
+describe('the arranged full face (the Related tab) has no collapse either (objectstack#27524)', () => {
+  it('draws ⠿ and ⋯, no chevron, and a click on its header leaves the rows drawn', async () => {
+    render(
+      <RelatedCardChromeContext.Provider value={chromeOf()}>
+        <RelatedList
+          title="Tasks"
+          type="table"
+          api="task"
+          objectName="task"
+          data={rows}
+          dataSource={{ find: vi.fn(async () => rows), getObjectSchema: vi.fn(async () => ({ name: 'task', fields })) } as any}
+        />
+      </RelatedCardChromeContext.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
+    expect(document.querySelector('[data-related-panel-handle]')).not.toBeNull();
+    expect(document.querySelector('[data-related-card-menu]')).not.toBeNull();
+    expect(document.querySelector('.lucide-chevron-down, .lucide-chevron-right')).toBeNull();
+    fireEvent.click(screen.getByText('Tasks'));
+    expect(screen.getByText('Call Ada')).toBeInTheDocument();
+  });
+});
+
 describe('the compact row’s first column (objectstack#27524, Target 11)', () => {
   // A product's line items: the child's name field IS the key back to the product.
   const lineFields = {
@@ -182,7 +205,7 @@ describe('the compact row’s first column (objectstack#27524, Target 11)', () =
     { id: 'l1', product: { id: 'p1', name: 'Widget' }, opportunity: { id: 'o1', name: 'Acme renewal' }, quantity: 2 },
     { id: 'l2', product: { id: 'p1', name: 'Widget' }, opportunity: { id: 'o2', name: 'Globex pilot' }, quantity: 5 },
   ];
-  const renderLines = (referenceField: string) =>
+  const renderLines = (referenceField: string, columns?: string[]) =>
     render(
       <RelatedListCompactContext.Provider value>
         <RelatedList
@@ -191,6 +214,7 @@ describe('the compact row’s first column (objectstack#27524, Target 11)', () =
           api="line_item"
           objectName="line_item"
           referenceField={referenceField}
+          columns={columns as never}
           data={lineRows}
           dataSource={{
             find: vi.fn(async () => lineRows),
@@ -204,6 +228,11 @@ describe('the compact row’s first column (objectstack#27524, Target 11)', () =
 
   it('on the product page, names the first column that is not the key back to it', async () => {
     renderLines('product');
+    await waitFor(() => expect(names()).toEqual(['Acme renewal', 'Globex pilot']));
+  });
+
+  it('the key is skipped even when it is the only authored column: the declared fields are read next', async () => {
+    renderLines('product', ['product']);
     await waitFor(() => expect(names()).toEqual(['Acme renewal', 'Globex pilot']));
   });
 

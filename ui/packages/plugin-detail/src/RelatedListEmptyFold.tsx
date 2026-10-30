@@ -49,13 +49,17 @@
  * in two places: a panel folds whenever it is empty — whether or not another
  * panel has records — because 展开 brings every folded panel back with its
  * own ＋ and ⋯, so the line need not carry New; and 展开 is the reader's,
- * for this view: the stack then folds nothing until it is drawn again. A panel
- * with an authoring notice still keeps its own place.
+ * for this record: the stack then folds nothing while it shows the record 展开
+ * was pressed on. A view that steps to another record in place (the pane's
+ * ↓ ↑) keeps its column element, so the record, not the element, scopes it:
+ * the next record folds again. A panel with an authoring notice still keeps
+ * its own place.
  */
 
 import * as React from 'react';
 import { Plus } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
+import { useRecordContext } from '@object-ui/react';
 import { RelatedListCompactContext } from './relatedListCompact';
 import { useDetailTranslation } from './useDetailTranslation';
 
@@ -103,8 +107,11 @@ function decideEmptyFold(
 
 class Stack {
   readonly members = new Map<string, FoldStackEntry>();
-  /** The reader pressed 展开 on the panel line: nothing folds (panels only). */
-  expanded = false;
+  /**
+   * The record the reader pressed 展开 on, as `object:id`: while the stack
+   * shows it, nothing folds (panels only). Another record folds again.
+   */
+  expandedFor: string | null = null;
   private readonly listeners = new Set<() => void>();
   private version = 0;
   subscribe = (listener: () => void): (() => void) => {
@@ -170,6 +177,8 @@ export const RelatedListStackSlot: React.FC<RelatedListStackSlotProps> = ({
   const id = React.useId();
   const [root, setRoot] = React.useState<HTMLDivElement | null>(null);
   const panels = React.useContext(RelatedListCompactContext);
+  const record = useRecordContext();
+  const recordKey = `${record?.objectName ?? ''}:${record?.recordId ?? ''}`;
 
   const onNewRef = React.useRef(onNew);
   React.useLayoutEffect(() => {
@@ -218,13 +227,13 @@ export const RelatedListStackSlot: React.FC<RelatedListStackSlotProps> = ({
   React.useSyncExternalStore(stack ? stack.subscribe : noSubscribe, stack ? stack.getVersion : noVersion, noVersion);
 
   const ordered = stack ? stack.ordered() : [];
-  const verdict = panels && stack?.expanded ? NO_FOLD : decideEmptyFold(ordered, panels);
+  const verdict = panels && stack?.expandedFor === recordKey ? NO_FOLD : decideEmptyFold(ordered, panels);
   const folded = verdict.folded.includes(id);
   const line =
     verdict.host === id ? ordered.filter((m) => verdict.folded.includes(m.id)) : null;
   const expand = () => {
     if (!stack) return;
-    stack.expanded = true;
+    stack.expandedFor = recordKey;
     stack.emit();
   };
 

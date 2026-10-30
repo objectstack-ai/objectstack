@@ -9,7 +9,8 @@
  * related lists are panels, and the empty ones (0 rows) fold into ONE line:
  * 「还有 N 个空关联 · 名字 · … · 展开」. The non-empty panels keep their order;
  * 展开 brings the empty ones back in their places, each with its own header
- * controls, so the line carries no New — and a panel with an `add` picker
+ * controls, for the record it was pressed on (the next record a view steps
+ * to folds again), so the line carries no New — and a panel with an `add` picker
  * folds too. Unlike the Related tab's line (#25895, pinned in
  * `record-related-list.emptyFold-25895.test.tsx`), a column whose panels are
  * all empty folds them as well.
@@ -65,9 +66,9 @@ const panel = (objectName: string, title: string, extra: Record<string, unknown>
 function mount(nodes: object[], rows: Rows) {
   const ds = makeDataSource(rows);
   const host: RelatedRecordActionsValue = { resolve: () => ({ onCreate: () => {} }) };
-  const r = render(
+  const tree = (recordId: string) => (
     <SchemaRendererProvider dataSource={ds as unknown as DataSource}>
-      <RecordContextProvider objectName="crm_contact" recordId="c1" dataSource={ds as never}>
+      <RecordContextProvider objectName="crm_contact" recordId={recordId} dataSource={ds as never}>
         <RelatedRecordActionsProvider value={host}>
           <RelatedListCompactContext.Provider value>
             {/* The related column: the panels are siblings in one container. */}
@@ -79,9 +80,12 @@ function mount(nodes: object[], rows: Rows) {
           </RelatedListCompactContext.Provider>
         </RelatedRecordActionsProvider>
       </RecordContextProvider>
-    </SchemaRendererProvider>,
+    </SchemaRendererProvider>
   );
-  return { ...r, ds };
+  const r = render(tree('c1'));
+  // The pane's ↓ ↑ swap the record in place: same view, same column element.
+  const stepTo = (recordId: string) => r.rerender(tree(recordId));
+  return { ...r, ds, stepTo };
 }
 
 const line = () => screen.queryByTestId('record-related-panels-empty-fold');
@@ -116,6 +120,22 @@ describe('the empty panels fold into one line (objectstack#27524, Target 2)', ()
     fireEvent.click(line()!.querySelector('[data-related-empty-fold-expand]')!);
     expect(line()).toBeNull();
     expect(shownPanels()).toEqual(['Tasks', 'Quotes', 'Opportunities']);
+  });
+
+  it('展开 is for the record it was pressed on: stepping to a sibling in the same view folds again', async () => {
+    const column = { task: [{ id: 't1', name: 'Call Ada' }] };
+    const { ds, stepTo } = mount([panel('task', 'Tasks'), panel('quote', 'Quotes'), panel('opportunity', 'Opportunities')], column);
+    await waitFor(() => expect(ds.find).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(line()).not.toBeNull());
+    const aside = screen.getByTestId('column');
+    fireEvent.click(line()!.querySelector('[data-related-empty-fold-expand]')!);
+    expect(line()).toBeNull();
+    stepTo('c2');
+    await waitFor(() => expect(ds.find).toHaveBeenCalledTimes(6));
+    await waitFor(() => expect(line()).not.toBeNull());
+    expect(screen.getByTestId('column')).toBe(aside);
+    expect(shownPanels()).toEqual(['Tasks']);
+    expect(line()!.textContent!.replace(/\s+/g, ' ')).toBe('2 more empty lists·Quotes·Opportunities·Expand');
   });
 
   it('a column whose panels are all empty folds them too', async () => {
