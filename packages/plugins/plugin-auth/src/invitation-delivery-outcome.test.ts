@@ -213,7 +213,7 @@ describe('#27843 (a) — invite-member answers its delivery outcome', () => {
     expect(answer.body.id).toBeTruthy();
   });
 
-  it('the log transport (isConfigured() false) is not delivery: link_only, and no mail was handed over', async () => {
+  it('the log transport (isConfigured() false) is not delivery: link_only', async () => {
     const { manager, invite } = await stage();
     const email = recordingEmail(false);
     manager.setEmailService(email.service as never);
