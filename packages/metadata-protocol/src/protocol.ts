@@ -13693,9 +13693,17 @@ export class ObjectStackProtocolImplementation implements
         // — the engine reports them through the write's own options, so a
         // nested write a hook makes inside this one never adds to them.
         const warnings: ValidationAdvisoryEvent[] = [];
+        // [#27703] The mentioned users the mention recipient gate withheld on
+        // THIS write, answered as `withheldMentions` to this request alone: the
+        // mention writer reads the listener off its `after*` hook's
+        // `ctx.input.options`, which is this bag, so neither a nested write
+        // nor any other request's answer ever carries them, and nothing is
+        // stored on the comment.
+        const withheldMentions = new Set<string>();
         const opts: any = {
             onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
             onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
+            onMentionsWithheld: (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); },
         };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.insert(request.object, request.data, opts);
@@ -13713,6 +13721,7 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
         };
     }
 
@@ -13861,6 +13870,10 @@ export class ObjectStackProtocolImplementation implements
         // (see `createData`).
         const warnings: ValidationAdvisoryEvent[] = [];
         opts.onValidationAdvisory = (e: ValidationAdvisoryEvent) => { warnings.push(e); };
+        // [#27703] The mentions this update ADDED that the gate withheld,
+        // answered as `withheldMentions` (see `createData`).
+        const withheldMentions = new Set<string>();
+        opts.onMentionsWithheld = (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); };
         // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
         // the path `:id` — and nothing in the payload gets to move it.
         //
@@ -13937,6 +13950,7 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
         };
     }
 

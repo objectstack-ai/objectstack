@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { EnableLike, HookContext } from '@objectstack/spec/data';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // [#6656] The read-mask CONTRACT, imported rather than re-typed. `SECRET_MASK`
 // is the exact string the engine's read path substitutes and
 // `collectMaskedReadFields` is the exact predicate that picks the fields
@@ -2537,33 +2537,34 @@ export function installAuditWriters(
   /** Said once: a writer composed without the mention gate emits no mention notification. */
   let warnedNoMentionGate = false;
   /**
-   * M10.8: Dedicated hook on `sys_comment` afterInsert that parses the
-   * `mentions` JSON field and writes one sys_notification per mentioned
-   * user who can read the comment and its record (`admitMentionRecipients`).
-   * Lives outside `writeAudit` because sys_comment is in
-   * SKIP_OBJECTS (we don't want audit/activity rows for comments —
-   * those have their own first-class feed).
+   * M10.8: Dedicated hook on `sys_comment` afterInsert and afterUpdate that
+   * parses the `mentions` JSON field and writes one sys_notification per
+   * mentioned user who can read the comment and its record
+   * (`admitMentionRecipients`). Lives outside `writeAudit` because
+   * sys_comment is in SKIP_OBJECTS (we don't want audit/activity rows for
+   * comments — those have their own first-class feed).
+   *
+   * [#27703] An update judges only the mentions it ADDED — the entries of the
+   * written row's list that the bound pre-image (`ctx.previous`) did not carry
+   * — so a mention added by editing notifies its reader, and an edit that keeps
+   * a mention never notifies that user a second time. The users the gate
+   * withholds are handed to the write's own `onMentionsWithheld` listener (on
+   * `ctx.input.options`, the caller's bag), which the data protocol answers to
+   * the author as `withheldMentions`; nothing is stored on the comment.
    */
   const writeCommentMentions = async (ctx: HookContext) => {
     if (ctx.object !== 'sys_comment') return;
-    if (ctx.event !== 'afterInsert') return;
+    if (ctx.event !== 'afterInsert' && ctx.event !== 'afterUpdate') return;
     const messaging = getMessaging();
     if (!messaging) return; // no pipeline installed → no mention notifications
     const row: any = ctx.result;
     if (!row || typeof row !== 'object') return;
 
-    // mentions is a JSON-string textarea on sys_comment. Accept either
-    // a raw array of user-ids ["u1","u2"] or an array of objects
-    // [{ id: "u1" }, ...]; tolerate parse failures silently.
-    let mentions: any = row.mentions;
-    if (typeof mentions === 'string') {
-      try { mentions = JSON.parse(mentions); } catch { mentions = null; }
+    let mentioned = parseCommentMentions(row.mentions);
+    if (ctx.event === 'afterUpdate') {
+      const before = new Set(parseCommentMentions((ctx as any).previous?.mentions));
+      mentioned = mentioned.filter((m) => !before.has(m));
     }
-    if (!Array.isArray(mentions) || mentions.length === 0) return;
-
-    const mentioned = mentions
-      .map((m: any) => (typeof m === 'string' ? m : m?.id))
-      .filter((id: any) => typeof id === 'string' && id.length > 0);
     if (mentioned.length === 0) return;
 
     const [source_object, source_id] = String(row.thread_id ?? '').split(':');
@@ -2590,6 +2591,7 @@ export function installAuditWriters(
       }
       return;
     }
+    const withheld: string[] = [];
     let userIds: string[];
     try {
       userIds = await opts.admitMentionRecipients({
@@ -2598,10 +2600,22 @@ export function installAuditWriters(
         actorId,
         organizationId: row.organization_id ?? tenantId,
         commentId,
+        onWithheld: (uid) => { if (!withheld.includes(uid)) withheld.push(uid); },
       });
     } catch (err) {
       try { (engine as any).logger?.warn?.('Mention recipient gate failed; no mention notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
       return;
+    }
+    // [#27703] The gate's own verdict, to the write that asked for it: the
+    // author learns which of the users they named will not be notified. Ids
+    // only — the reason stays in the log line the gate already wrote.
+    const onMentionsWithheld = (ctx.input?.options as WriteObservabilityOptions | undefined)?.onMentionsWithheld;
+    if (withheld.length > 0 && typeof onMentionsWithheld === 'function') {
+      try {
+        onMentionsWithheld(withheld);
+      } catch (err) {
+        try { (engine as any).logger?.warn?.('onMentionsWithheld listener threw — ignored', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      }
     }
 
     for (const uid of userIds) {
@@ -2639,6 +2653,26 @@ export function installAuditWriters(
   // was always expressible. Saying it here is behaviour-conserving and takes
   // this registration out of every other object's `afterInsert` demand.
   engine.registerHook('afterInsert', writeCommentMentions, { object: 'sys_comment', packageId });
+  // [#27703] And on `afterUpdate`, so a mention added by editing a comment is
+  // judged and notified like one written with it. The registration is what
+  // has the engine bind `previous` on this object's update.
+  engine.registerHook('afterUpdate', writeCommentMentions, { object: 'sys_comment', packageId });
+}
+
+/**
+ * The entries of a comment's `mentions` field. It is a JSON-string textarea
+ * on sys_comment holding either a raw array of user ids `["u1","u2"]` or an
+ * array of objects `[{ id: "u1" }, ...]`; a parse failure reads as no mention.
+ */
+function parseCommentMentions(value: unknown): string[] {
+  let mentions: any = value;
+  if (typeof mentions === 'string') {
+    try { mentions = JSON.parse(mentions); } catch { mentions = null; }
+  }
+  if (!Array.isArray(mentions)) return [];
+  return mentions
+    .map((m: any) => (typeof m === 'string' ? m : m?.id))
+    .filter((id: any): id is string => typeof id === 'string' && id.length > 0);
 }
 
 // Re-export for convenience.
