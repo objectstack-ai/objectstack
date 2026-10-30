@@ -285,7 +285,7 @@ import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 795 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 801 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1160,11 +1160,17 @@ export type Iso_security_sharing__SharingLevel = Assert<Eq< z.input< typeof M180
 export type Iso_security_sharing__SharingRuleType = Assert<Eq< z.input< typeof M180.SharingRuleType >, z.infer< typeof M180.SharingRuleType > >>;
 
 // shared/connector-auth.zod.ts
+export type Iso_shared_connectorAuth__ConnectorAppCredentialVendorSchema = Assert<Eq< z.input< typeof M109.ConnectorAppCredentialVendorSchema >, z.infer< typeof M109.ConnectorAppCredentialVendorSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceAPIKeyAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAPIKeyAuthSchema >, z.infer< typeof M109.ConnectorInstanceAPIKeyAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceAppCredentialAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAppCredentialAuthSchema >, z.infer< typeof M109.ConnectorInstanceAppCredentialAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAuthSchema >, z.infer< typeof M109.ConnectorInstanceAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceBasicAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceBasicAuthSchema >, z.infer< typeof M109.ConnectorInstanceBasicAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceBearerAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceBearerAuthSchema >, z.infer< typeof M109.ConnectorInstanceBearerAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceNoAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceNoAuthSchema >, z.infer< typeof M109.ConnectorInstanceNoAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2AuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2AuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2AuthorizationCodeAuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2AuthorizationCodeAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2ClientCredentialsAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2ClientCredentialsAuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2ClientCredentialsAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorOAuth2GrantSchema = Assert<Eq< z.input< typeof M109.ConnectorOAuth2GrantSchema >, z.infer< typeof M109.ConnectorOAuth2GrantSchema > >>;
 
 // shared/duration.zod.ts — the closed DURATION vocabulary (#18122), step ① of
 // ruling A on #18115 and the counterpart of the `shared/epoch` instant. Both are
@@ -1729,7 +1735,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 795 isomorphic pins', () => {
+  it('still declares all 801 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2669,7 +2675,16 @@ describe('ADR-0122 type-alias convention', () => {
     // here (Iso_data_dataEngine__DataEngineExecuteRequestSchema,
     // Iso_data_dataEngine__DataEngineInsertRequestSchema,
     // Iso_data_dataEngine__DataEngineVectorFindRequestSchema). -3 removed.
-    expect(pins).toHaveLength(795);
+    // 795 -> 801 is #28137 (ADR-0143 S0): the grant-bearing connector instance
+    // auth kinds (`shared/connector-auth.zod.ts`) — the `oauth2` union and its
+    // two per-grant shapes, the `app-credential` shape, and the `grant` and
+    // `vendor` enums — carry no default and no transform, so they are pinned
+    // here (Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthSchema,
+    // …OAuth2AuthorizationCodeAuthSchema, …OAuth2ClientCredentialsAuthSchema,
+    // …AppCredentialAuthSchema, …ConnectorOAuth2GrantSchema,
+    // …ConnectorAppCredentialVendorSchema) rather than given `…Parsed`
+    // synonyms. +6 added.
+    expect(pins).toHaveLength(801);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
