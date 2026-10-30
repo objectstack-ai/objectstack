@@ -8,7 +8,10 @@
  *       on Name is the only message (no summary banner, no server refusal);
  *   (b) a Name the client accepts but the server refuses, naming `name`, is
  *       said once: inline on Name, with no banner repeating it;
- *   (c) a good Name saves (control).
+ *   (c) a Name derived from the Label, never touched, is held the same way,
+ *       and the Save attempt shows its error inline (the create form's
+ *       show-on-touch deferral ends there);
+ *   (d) a good Name saves (control).
  *
  * The REAL page over a REAL `MetadataClient` whose transport is an in-memory
  * server that records every `PUT` and answers the way the save door does: an
@@ -94,6 +97,7 @@ vi.mock('./useMetadata', async (importOriginal) => {
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerDefaultMetadataSchemas } from './default-schemas';
+import { registerBuiltinAnchors } from './anchors';
 
 const PERMISSION_JSON_SCHEMA = z.toJSONSchema(getMetadataTypeSchema('permission') as z.ZodType, {
   io: 'input',
@@ -103,6 +107,8 @@ const PERMISSION_JSON_SCHEMA = z.toJSONSchema(getMetadataTypeSchema('permission'
 client.current = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknown as typeof fetch });
 
 registerDefaultMetadataSchemas();
+// The live registration: Label → Name derive, `createLive`.
+registerBuiltinAnchors();
 
 beforeEach(() => {
   server.puts = [];
@@ -165,7 +171,20 @@ describe('New Permission Set: one mistake, one message (objectstack#27865)', () 
     expect(screen.queryByTestId('landed')).toBeNull();
   });
 
-  it('(c) a good Name saves (control)', async () => {
+  it('(c) a derived, untouched Name the client refuses is held and its error shown inline', async () => {
+    await openNewPermissionSet();
+    const labelBox = screen.getByRole('textbox', { name: /^Label/ });
+    fireEvent.change(labelBox, { target: { value: 'A' } });
+    // Single-letter slug: refused by the spec's two-character floor.
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('a'));
+    expect(screen.queryAllByTestId('schema-form-issue')).toHaveLength(0);
+    fireEvent.click(saveButton());
+    await expectOnlyInlineIssue();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(server.puts).toEqual([]);
+  });
+
+  it('(d) a good Name saves (control)', async () => {
     const nameBox = await openNewPermissionSet();
     fireEvent.change(nameBox, { target: { value: 'sales_ops' } });
     fireEvent.click(saveButton());
