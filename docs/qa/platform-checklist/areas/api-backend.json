@@ -3307,7 +3307,7 @@
         "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with no code on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
       },
       "source": [
-        "packages/types/src/data-error-classification.ts#sandboxBusinessMessage",
+        "packages/types/src/sandbox-business-message.ts#sandboxBusinessMessage",
         "packages/types/src/data-error-classification.ts#isSandboxOwnFault",
         "packages/types/src/response-envelope.ts#sendServerFault",
         "packages/runtime/src/http-dispatcher.ts",
