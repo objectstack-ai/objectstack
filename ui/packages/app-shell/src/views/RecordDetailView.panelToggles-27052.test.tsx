@@ -27,12 +27,14 @@
  *    action row (objectstack#27241) — not on the crumb row, which keeps only
  *    the ways back and has no child without one;
  *  - it is drawn only where the tier has a right column: both two-column
- *    tiers, the embedded record at those widths too, never the one column.
+ *    tiers, the embedded record at those widths too, never the one column;
+ *  - the chord is the topmost record view's: a drawer wide enough for its
+ *    own right column flips its own switch, never the page's under it.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -125,6 +127,8 @@ const OBJECTS = [
 ];
 
 let rootWidth = 0;
+/** A record view inside a dialog (a drawer over the page) measures this, when set. */
+let dialogRootWidth: number | null = null;
 
 function makeDataSource() {
   return {
@@ -136,8 +140,13 @@ function makeDataSource() {
   };
 }
 
-function renderPage({ object = LEAD, width = 1440, embedded = false }: { object?: string; width?: number; embedded?: boolean } = {}) {
-  rootWidth = width;
+function renderPage({
+  object = LEAD,
+  width = 1440,
+  embedded = false,
+  container,
+}: { object?: string; width?: number; embedded?: boolean; container?: HTMLElement } = {}) {
+  if (!container) rootWidth = width;
   const metadata = {
     objects: OBJECTS,
     pages: [],
@@ -162,6 +171,7 @@ function renderPage({ object = LEAD, width = 1440, embedded = false }: { object?
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,
+    container ? { container } : undefined,
   );
 }
 
@@ -182,6 +192,7 @@ const RIGHT_KEY = (object: string) => `os:pref:record.columns.related@object:${o
 
 beforeEach(() => {
   cleanup();
+  dialogRootWidth = null;
   window.localStorage.clear();
   RelatedCountStore._reset();
   vi.stubGlobal(
@@ -193,7 +204,8 @@ beforeEach(() => {
   const measure = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
-    return { x: 0, y: 0, top: 0, left: 0, right: rootWidth, bottom: 800, width: rootWidth, height: 800, toJSON: () => ({}) } as DOMRect;
+    const width = dialogRootWidth !== null && this.closest('[role="dialog"]') ? dialogRootWidth : rootWidth;
+    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: 800, width, height: 800, toJSON: () => ({}) } as DOMRect;
   });
 });
 
@@ -330,5 +342,35 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
     const embedded = renderPage({ width: 1440, embedded: true });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     expect(shown(embedded.container)).toBe('details right');
+  });
+
+  it('⌘⇧, flips the topmost record view\'s switch alone: a 1000 px drawer over a 1440 px page (objectstack#27524)', async () => {
+    // A record page keeps its own tree mounted under the drawer its rows and
+    // lookups open (`RecordPageDrawerHost`), and the drawer's sheet is
+    // portaled after it, to the end of the body. A drawer dragged to 1000 px
+    // has a right column of its own, so both views draw ⊟: the chord is the
+    // drawer's, and never writes the hidden page's stored choice.
+    dialogRootWidth = 1000;
+    const page = renderPage();
+    await waitFor(() => expect(shown(page.container)).toBe('details right'), { timeout: 5000 });
+    const sheet = document.createElement('div');
+    sheet.setAttribute('role', 'dialog');
+    document.body.appendChild(sheet);
+    const drawer = renderPage({ object: PRODUCT, embedded: true, container: sheet });
+    await waitFor(() => expect(shown(sheet)).toBe('details right'), { timeout: 5000 });
+    expect(sheet.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('two-column');
+    expect(within(sheet).queryByRole('group', { name: 'Panels' })).not.toBeNull();
+
+    press('related');
+    await waitFor(() => expect(shown(sheet)).toBe('details'));
+    expect(window.localStorage.getItem(RIGHT_KEY(PRODUCT))).toContain('off');
+    expect(shown(page.container)).toBe('details right');
+    expect(window.localStorage.getItem(RIGHT_KEY(LEAD))).toBeNull();
+
+    // The drawer closes: the chord is the page's again.
+    drawer.unmount();
+    sheet.remove();
+    press('related');
+    await waitFor(() => expect(shown(page.container)).toBe('details'));
   });
 });

@@ -164,6 +164,20 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
 }
 
+/**
+ * Whether this record view is the topmost one, the one a page-wide chord is
+ * for. A record page keeps its own tree mounted under the drawer its rows and
+ * lookups open (`RecordPageDrawerHost`), and the drawer's sheet is portaled
+ * after it, to the end of the body; once the drawer is wide enough for a right
+ * column its view listens too (objectstack#27524). The last record root in
+ * document order is the one on top.
+ */
+function isTopmostRecordView(root: Element | null): boolean {
+  if (!root) return false;
+  const roots = root.ownerDocument.querySelectorAll('[data-record-page-root]');
+  return roots[roots.length - 1] === root;
+}
+
 /** `aria-keyshortcuts` spelling of a chord, for the platform the page runs on. */
 function ariaKeyShortcutsOf(chord: ShortcutChord): string {
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -972,7 +986,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   );
   // Whether the toolbar draws ⊟ — a right column the page has content for —
   // set at render below and read by the shortcut, so a shortcut never flips a
-  // switch the reader cannot see.
+  // switch the reader cannot see: not this page's under a drawer either.
   const drawnPanelSwitch = useRef(false);
   useEffect(() => {
     if (!pageHasRightColumn) return undefined;
@@ -981,12 +995,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       if (!matchesPanelChord(e, TOGGLE_RELATED_SHORTCUT.chord)) return;
       if (isTypingTarget(e.target)) return;
       if (!drawnPanelSwitch.current) return;
+      if (!isTopmostRecordView(pageRootEl)) return;
       e.preventDefault();
       setRelatedSwitch(relatedSwitch === 'on' ? 'off' : 'on');
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [pageHasRightColumn, relatedSwitch, setRelatedSwitch]);
+  }, [pageHasRightColumn, pageRootEl, relatedSwitch, setRelatedSwitch]);
   useAdvertiseShortcut(TOGGLE_RELATED_SHORTCUT, pageHasRightColumn);
   const [pageRecord, setPageRecord] = useState<any>(null);
   // 'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed' —

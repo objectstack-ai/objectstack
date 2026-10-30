@@ -88,6 +88,25 @@ function relatedNodeId(node: any): RelatedCardId | null {
  * record header, at the page's full width, with ‹ to return. Esc returns too;
  * a dialog or menu open over the page keeps its own Esc.
  */
+/**
+ * Whether an `Esc` belongs to something other than the open face: a field the
+ * reader types in, an open menu or alert, or a dialog the face is not inside
+ * (a popover, a confirm, a drawer opened over the page that holds the face).
+ * The dialog that holds the face — the record pane's drawer — is not one.
+ */
+function escapeOwnedElsewhere(target: EventTarget | null, face: Element | null): boolean {
+  if (!face) return true;
+  if (
+    target instanceof Element &&
+    target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')
+  ) {
+    return true;
+  }
+  const doc = face.ownerDocument;
+  if (doc.querySelector('[role="alertdialog"], [role="menu"]')) return true;
+  return Array.from(doc.querySelectorAll('[role="dialog"]')).some((dialog) => !dialog.contains(face));
+}
+
 const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; children: React.ReactNode }> = ({
   id,
   title,
@@ -95,18 +114,25 @@ const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; 
   children,
 }) => {
   const { t } = useDetailTranslation();
+  const faceRef = React.useRef<HTMLElement | null>(null);
   React.useEffect(() => {
     if (!onClose) return undefined;
+    // On the window, in the capture phase: inside the record pane the pane's
+    // own `Esc` (the drawer's dialog layer, the split pane's document
+    // listener) would act first and close or step the pane (objectstack#27524).
+    // The face takes the key, and keeps it from the pane.
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (escapeOwnedElsewhere(event.target, faceRef.current)) return;
+      event.preventDefault();
+      event.stopPropagation();
       onClose();
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [onClose]);
   return (
-    <section className="flex min-w-0 flex-col gap-3" data-related-enlarged={id} aria-label={title}>
+    <section ref={faceRef} className="flex min-w-0 flex-col gap-3" data-related-enlarged={id} aria-label={title}>
       <div className="flex items-center gap-2">
         <Button
           type="button"
