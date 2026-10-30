@@ -9,7 +9,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * One row per publisher key this environment accepts a plugin signature from.
  * `os plugin install ./x.osplugin` reads the `keyId` out of the artifact's
  * `ed25519:KEYID:SIG` sidecar, resolves it here and verifies the artifact bytes
- * with that row's `public_key` (`verifyPluginArtifact`, `@objectstack/core`).
+ * with that row's `public_key` (`verifyPublisherSignature`, `@objectstack/core`;
+ * `verifyPluginArtifact` wraps it and adds the platform counter-signature chain).
  * A key id with no row, or whose row is `revoked`, is refused by name.
  *
  * ## Public keys only
@@ -36,10 +37,15 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * deleted or re-activated: its key id stays refused, so a revoked key cannot
  * come back under the same handle.
  *
- * Registered by `PlatformObjectsPlugin` (`../plugin.ts`) beside `sys_secret`:
- * its readers span domains — the CLI's install command today, and ADR-0025
- * M1's boot-time loader in the runtime once it is built — and no capability
- * plugin owns plugin distribution (ADR-0029 D1/D2).
+ * Registered by `PlatformObjectsPlugin` (`../plugin.ts`) beside `sys_secret`,
+ * because its readers span domains and no capability plugin owns plugin
+ * distribution (ADR-0029 D1/D2). The readers are the CLI's install command and
+ * ADR-0025 M1's boot-time loader, `packages/runtime/src/installed-plugin-loader.ts`
+ * (run by `os serve` before the kernel bootstraps). The loader re-checks every
+ * signed install at each boot: the row for its key id must be `active` and
+ * carry the `fingerprint` the install recorded, and its `public_key` must
+ * verify the kept bytes (`verifyPluginArtifact`, publisher chain only). So a
+ * key revoked after install refuses that plugin at its next boot.
  *
  * @namespace sys
  */

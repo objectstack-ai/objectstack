@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8.
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
@@ -654,10 +654,30 @@ export default defineDatasource({
     allowWrites: false,
     validation: { onMismatch: 'fail', checkOnBoot: true },
     queryTimeoutMs: 15_000,
-    credentialsRef: 'secret:warehouse/readonly',
+    // The opaque handle the secret store minted (Setup → Datasources binds
+    // the password and writes it here); the shipped binder resolves only
+    // `sys_secret:` handles.
+    credentialsRef: 'sys_secret:9f2c…',
   },
 });
 ```
+
+> **Amendment note (2026-10-30, #27688) — the example's credential handle; no decision changes.**
+> The `credentialsRef` above is the amended one; the original read
+> `credentialsRef: 'secret:warehouse/readonly'`. That form parses, but nothing shipped resolves it.
+> The datasource secret binder dereferences only a `sys_secret:<id>` handle, `<id>` being the
+> `sys_secret` row the secret store minted when the credential was bound
+> (`packages/services/service-datasource/src/datasource-secret-binder.ts#parseCredentialsRef`).
+> A hand-written path resolves to nothing, and the connection service leaves the datasource
+> unconnected (`failed-credentials`). The Setup → Datasources connection form's secret field
+> encrypts the password into `sys_secret` and writes the handle here; the datasource schema's
+> refusals and `content/docs/data-modeling/drivers.mdx` teach the same form (PR #27656). §10's
+> `service-secrets` names no shipped package: this binder is the component that resolves the
+> reference, and what it yields is the password, injected beside a credential-free `config` at
+> connect. The rest of the example is kept as written, as the surface this record was taken on.
+> Today's parse refuses two of its keys by name, each with its fix: `external.label` (removed in
+> `@objectstack/spec` 17.0.0 under ADR-0049; the label is the datasource's top-level one) and
+> `config.connectionString` (spelled `url`).
 
 ```bash
 os datasource list-tables warehouse --schema mart

@@ -20,6 +20,12 @@
  * a read refusal's message may be shown to the caller.
  */
 
+import {
+  callWithBorrowedCredential,
+  withoutBorrowedCredential,
+  type BorrowedConnectorAuth,
+  type ConnectorCredentialHandle,
+} from '@objectstack/types';
 import type { ODataDialect } from './dialect.js';
 
 /** The `fetch` this transport calls — the global one unless the host passes its own. */
@@ -54,6 +60,36 @@ export interface ODataTransportOptions {
    * the first request that needs it and again after a 401, never at boot.
    */
   credential?: () => Promise<string | undefined>;
+  /**
+   * The credential borrowed from the connector instance the datasource names
+   * in `external.connector` (ADR-0015 D7), or `undefined` when it names none.
+   * When it answers a handle, every request is sent through
+   * `callWithBorrowedCredential` — refreshed on expiry, once on a 401, then a
+   * 503 — and {@link credential} is not asked.
+   */
+  borrowed?: () => Promise<ConnectorCredentialHandle | undefined>;
+}
+
+/** Where one request carries its credential: a header, or (an API key declared that way) a query parameter. */
+interface PresentedCredential {
+  header?: readonly [string, string];
+  query?: readonly [string, string];
+}
+
+/** A borrowed credential as the instance declares it is sent. */
+function presentBorrowed(auth: BorrowedConnectorAuth): PresentedCredential {
+  if (auth.type === 'bearer') return { header: ['Authorization', `Bearer ${auth.token}`] };
+  if (auth.type === 'basic') {
+    return { header: ['Authorization', `Basic ${Buffer.from(`${auth.username}:${auth.password}`, 'utf8').toString('base64')}`] };
+  }
+  return auth.paramName ? { query: [auth.paramName, auth.key] } : { header: [auth.headerName, auth.key] };
+}
+
+/** A 401 the borrowed-credential rule retries: its body is dropped, never read. */
+function isUnauthorizedResponse(response: Response): boolean {
+  if (response.status !== 401) return false;
+  void response.body?.cancel().catch(() => {});
+  return true;
 }
 
 export interface ODataResponse {
@@ -117,26 +153,48 @@ export class ODataTransport {
   }
 
   async request(req: ODataRequest): Promise<ODataResponse> {
-    let response = await this.send(req);
-    if (response.status === 401 && this.opts.auth.scheme !== 'none') {
-      // The credential may have been rotated in the secret store: resolve it once more.
-      this.reset();
-      response = await this.send(req);
+    const borrowed = this.opts.borrowed ? await this.opts.borrowed() : undefined;
+    let response: Response;
+    let presented: BorrowedConnectorAuth | undefined;
+    if (borrowed) {
+      // [ADR-0015 D7] The connector instance's credential, by the one rule every
+      // driver presents a borrowed credential through. A second 401 ends as its
+      // 503, which the engine's floor answers ERR_DATASOURCE_UNAVAILABLE.
+      response = await callWithBorrowedCredential(
+        borrowed,
+        (auth) => {
+          presented = auth;
+          return this.send(req, presentBorrowed(auth));
+        },
+        { isUnauthorized: isUnauthorizedResponse },
+      );
+    } else {
+      response = await this.send(req, await this.authorization());
+      if (response.status === 401 && this.opts.auth.scheme !== 'none') {
+        // The credential may have been rotated in the secret store: resolve it once more.
+        this.reset();
+        response = await this.send(req, await this.authorization());
+      }
     }
     const body = await readBody(response, req.text === true);
     if (response.ok || req.accept?.includes(response.status)) {
       return { status: response.status, headers: response.headers, body };
     }
-    const { code, message } = this.opts.dialect.readError(body);
+    const refusal = this.opts.dialect.readError(body);
+    // The upstream's own text can reach the caller (the floor answers a 400 /
+    // 404 / 422 refusal with it), and a service that echoes the request URI
+    // carries an API key presented as a query parameter: withheld first.
+    const scrub = (text: string | undefined) => (text && presented ? withoutBorrowedCredential(text, presented) : text);
+    const message = scrub(refusal.message);
     throw new ODataRequestError(
       `OData service refused ${req.method} on '${req.subject}' (HTTP ${response.status})`
         + (message ? `: ${message}` : ''),
       response.status,
-      code,
+      scrub(refusal.code),
     );
   }
 
-  private async send(req: ODataRequest): Promise<Response> {
+  private async send(req: ODataRequest, credential: PresentedCredential | undefined): Promise<Response> {
     const headers: Record<string, string> = {
       ...this.opts.dialect.requestHeaders(),
       ...(req.text ? { Accept: 'application/xml' } : {}),
@@ -144,10 +202,14 @@ export class ODataTransport {
       ...(req.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...req.headers,
     };
-    const authorization = await this.authorization();
-    if (authorization) headers.Authorization = authorization;
+    if (credential?.header) headers[credential.header[0]] = credential.header[1];
+    let url = req.url;
+    if (credential?.query) {
+      url = new URL(req.url);
+      url.searchParams.set(credential.query[0], credential.query[1]);
+    }
     try {
-      return await this.fetchImpl(req.url.toString(), {
+      return await this.fetchImpl(url.toString(), {
         method: req.method,
         headers,
         ...(req.body !== undefined ? { body: JSON.stringify(req.body) } : {}),
@@ -162,7 +224,7 @@ export class ODataTransport {
     }
   }
 
-  private async authorization(): Promise<string | undefined> {
+  private async authorization(): Promise<PresentedCredential | undefined> {
     const { auth } = this.opts;
     if (!this.opts.credential) {
       if (auth.scheme === 'none') return undefined;
@@ -184,9 +246,11 @@ export class ODataTransport {
       this.secret = undefined;
       throw new Error(`driver-odata: the credential for auth scheme '${auth.scheme}' resolved to nothing`);
     }
-    return auth.scheme === 'bearer'
-      ? `Bearer ${secret}`
-      : `Basic ${Buffer.from(`${auth.username}:${secret}`, 'utf8').toString('base64')}`;
+    return {
+      header: ['Authorization', auth.scheme === 'bearer'
+        ? `Bearer ${secret}`
+        : `Basic ${Buffer.from(`${auth.username}:${secret}`, 'utf8').toString('base64')}`],
+    };
   }
 }
 

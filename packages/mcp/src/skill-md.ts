@@ -91,6 +91,15 @@ export interface RenderSkillOptions {
    * host's business — this renderer names what it is handed and nothing else.
    */
   authoringTools?: ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
+  /**
+   * [#27745] Whether the host's bridge carries the federation pair
+   * (`list_remote_tables` / `import_object`, `registerFederationTools`). Its
+   * entries render only when this is true AND {@link grantedScopes} admit the
+   * family the pair registers under (`grantsAuthoringTools`), so the skill
+   * names them exactly where `tools/list` lists them. Default false: the
+   * renderer cannot see the bridge, so the host says so.
+   */
+  federationTools?: boolean;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
@@ -139,6 +148,22 @@ a person to publish. ${discover}
 ${bullets}
 `;
 }
+
+/**
+ * [#27745] The federation pair's entries in the tool list, rendered for the
+ * grant `registerFederationTools` registers them for ({@link grantsAuthoringTools})
+ * on a host whose bridge carries them ({@link RenderSkillOptions.federationTools}),
+ * so a connection without `metadata:write` is never taught them.
+ */
+const FEDERATION_TOOL_LINES = `- **list_remote_tables({ datasource, schema? })** — the remote tables a
+  federated datasource exposes (an OData datasource's entity sets), read live
+  from the remote schema.
+- **import_object({ datasource, remoteName, name?, writable? })** — import one
+  remote table as a federated object. It is saved at once, not as a draft, and
+  is read-only unless \`writable: true\`. A navigation becomes a lookup only
+  when its target is already imported, so import targets first; the result's
+  \`review\` names lossy columns and left-out navigations.
+`;
 
 /**
  * Render the full `SKILL.md` (YAML frontmatter + body). Pass the env's MCP URL
@@ -274,7 +299,7 @@ create/update payload.
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
   (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
+${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a

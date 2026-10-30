@@ -259,3 +259,81 @@ export async function importObjectDraft(draft: ObjectDraft): Promise<void> {
       (typeof flat === 'string' && flat ? flat : `${res.status} ${res.statusText}`),
   );
 }
+
+/**
+ * The draft with its runtime-persona write opt-in applied: `external.writable`
+ * set when the author asked for writes, the draft as the server wrote it
+ * otherwise. Federated objects are read-only unless opted in (ADR-0015 Gate 3,
+ * which also needs the datasource's own `external.allowWrites`).
+ */
+export function withWriteOptIn(draft: ObjectDraft, writable: boolean): ObjectDraft {
+  if (!writable) return draft;
+  const external = (draft.definition.external ?? {}) as Record<string, unknown>;
+  return { ...draft, definition: { ...draft.definition, external: { ...external, writable: true } } };
+}
+
+/** One table's outcome in {@link importRemoteTables}. */
+export interface RemoteTableImport {
+  table: RemoteTable;
+  /** The object name the draft was saved under, when the import landed. */
+  name?: string;
+  /** The draft's review notes (lossy columns, navigations left out). */
+  review: ObjectDraft['review'];
+  /** The refusal, when the draft or the save failed. */
+  error?: string;
+}
+
+/**
+ * Import several remote tables in one go, targets before the tables that
+ * reference them (objectstack#27745).
+ *
+ * A draft turns a navigation into a lookup only when its target is already
+ * imported, and an imported object cannot have a field retyped into a lookup
+ * later without the save door's destructive-change acknowledgement. So the
+ * order matters: each round drafts every table still pending and saves the
+ * ones whose draft waits on no other pending table, then drafts the rest again
+ * against the objects that round saved. A draft waits on a table when its
+ * review names it as a navigation target the draft left out — the review entry
+ * whose `remoteType` the service writes as `navigation → <entity set>`. When a
+ * round saves nothing (a cycle), the remaining tables are saved as drafted,
+ * their navigations onto each other left out and named in their reviews.
+ */
+export async function importRemoteTables(
+  datasource: string,
+  tables: readonly RemoteTable[],
+  opts: { writable?: boolean; onProgress?: (done: number) => void } = {},
+): Promise<RemoteTableImport[]> {
+  const results: RemoteTableImport[] = [];
+  let pending = [...tables];
+  let forced = false;
+  while (pending.length > 0) {
+    const waiting: RemoteTable[] = [];
+    for (const table of pending) {
+      let draft: ObjectDraft;
+      try {
+        draft = await generateObjectDraft(datasource, table.name, { remoteSchema: table.schema });
+      } catch (err) {
+        results.push({ table, review: [], error: err instanceof Error ? err.message : String(err) });
+        opts.onProgress?.(results.length);
+        continue;
+      }
+      const waitsOn = !forced && draft.review.some((r) =>
+        pending.some((other) => other !== table && r.remoteType === `navigation → ${other.name}`),
+      );
+      if (waitsOn) {
+        waiting.push(table);
+        continue;
+      }
+      try {
+        await importObjectDraft(withWriteOptIn(draft, opts.writable === true));
+        results.push({ table, name: draft.name, review: draft.review });
+      } catch (err) {
+        results.push({ table, review: draft.review, error: err instanceof Error ? err.message : String(err) });
+      }
+      opts.onProgress?.(results.length);
+    }
+    forced = waiting.length === pending.length;
+    pending = waiting;
+  }
+  return results;
+}

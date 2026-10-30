@@ -599,6 +599,11 @@ export function registerExternalDatasourceRoutes(
     // the post-filter used to keep are exactly the rows this returns (see
     // `external-datasource-validate-scope.test.ts`, which pins the two answers
     // against each other and the introspection call record beside them).
+    //
+    // [#27696] A name no saved datasource has is the service's 404
+    // `datasourceNotFoundError`, thrown before any validation and relayed as
+    // such by `refused`; a datasource with nothing federated keeps its empty
+    // `200` report.
     {
       method: 'POST',
       path: `${ext}/validate`,

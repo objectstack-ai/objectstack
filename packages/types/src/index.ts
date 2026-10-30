@@ -107,6 +107,12 @@ export * from './share-password-header.js';
 // the display projection of exactly the fields that record carries — built once
 // for the same two mounts, from this home for the same reason.
 export * from './share-link-resolve-answer.js';
+// [ADR-0015 D7] The borrowed connector credential: the contract the
+// automation service lends a connector instance's credential through, the
+// datasource connection path borrows it by, and a plugin driver presents it
+// with. Producer and consumer are two services neither of which may import
+// the other; both already depend on this package, so the seam adds no edge.
+export * from './connector-credential-source.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

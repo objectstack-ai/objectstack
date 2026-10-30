@@ -54,6 +54,7 @@ import type { DriverOptions } from '@objectstack/spec/data';
 import type { EdmEntitySet, EdmEntityType, EdmProperty, ODataDialect, ODataServiceModel } from './dialect.js';
 import { odataV4Dialect } from './dialect-v4.js';
 import { translateWhere, type FilterTarget } from './filter.js';
+import type { ConnectorCredentialHandle } from '@objectstack/types';
 import { ODataRequestError, ODataTransport, type FetchLike, type ODataResponse } from './transport.js';
 import type { ODataDriverConfig } from './config.js';
 
@@ -71,14 +72,28 @@ export interface ODataDriverRuntime {
   fetch?: FetchLike;
   /** The secret behind the datasource's `external.credentialsRef`; see `plugin.ts`. */
   credential?: () => Promise<string | undefined>;
+  /** The credential borrowed from the connector instance the datasource names in `external.connector`; see `plugin.ts`. */
+  borrowed?: () => Promise<ConnectorCredentialHandle | undefined>;
 }
 
 /** An introspected table, with the navigation properties the import offers as lookups. */
 export interface ODataIntrospectedTable extends IntrospectedTable {
   /** The qualified entity type. */
   entityType: string;
-  /** Single-valued navigation properties: candidates for a lookup field, never followed by reads. */
-  navigationProperties: Array<{ name: string; targetEntitySet?: string; targetEntityType: string; nullable: boolean }>;
+  /**
+   * Single-valued navigation properties: candidates for a lookup field, never
+   * followed by reads. A lookup needs a column holding the target's key, which
+   * only a `ReferentialConstraint` names (the dependent property on this type →
+   * the principal property on the target); a navigation without one has no
+   * column to back a lookup.
+   */
+  navigationProperties: Array<{
+    name: string;
+    targetEntitySet?: string;
+    targetEntityType: string;
+    nullable: boolean;
+    referentialConstraints: Array<{ property: string; referencedProperty: string }>;
+  }>;
 }
 
 export interface ODataIntrospectedSchema extends IntrospectedSchema {
@@ -141,6 +156,7 @@ export class ODataDriver implements IDataDriver {
       pageSize: config.pageSize,
       ...(runtime.fetch ? { fetch: runtime.fetch } : {}),
       ...(runtime.credential ? { credential: runtime.credential } : {}),
+      ...(runtime.borrowed ? { borrowed: runtime.borrowed } : {}),
     });
   }
 
@@ -245,6 +261,7 @@ export class ODataDriver implements IDataDriver {
             targetEntityType: nav.type,
             ...(set.navigationBindings[nav.name] ? { targetEntitySet: set.navigationBindings[nav.name] } : {}),
             nullable: nav.nullable,
+            referentialConstraints: nav.referentialConstraints.map((rc) => ({ ...rc })),
           })),
       };
     }
