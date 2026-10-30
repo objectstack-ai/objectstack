@@ -179,6 +179,14 @@ function describeNonFieldMap(value: unknown): string {
     return `a ${typeof value}`;
 }
 
+/**
+ * The `error` of an async import job that ended `failed` because every row
+ * failed (maintainer ruling B, record 6509036166): the per-row reasons are the
+ * job's `results`, which this sentence points the reader at.
+ */
+const IMPORT_JOB_EVERY_ROW_FAILED =
+    'Every row of this import failed and nothing was imported; each row\'s reason is in the job\'s results.';
+
 /** [#27500] The formats `GET /data/:object/export` serves, csv first as the default. */
 const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
 type ExportFormatServed = typeof EXPORT_FORMATS[number];
@@ -762,7 +770,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         // the durable row 'cancelled', and a late 'succeeded' here
                         // would silently overwrite it (framework#2824). Counts stay
                         // truthful either way — they reflect what was written.
-                        let finalStatus = summary.cancelled ? 'cancelled' : 'succeeded';
+                        let finalStatus: 'cancelled' | 'succeeded' | 'failed' = summary.cancelled ? 'cancelled' : 'succeeded';
                         if (finalStatus === 'succeeded' && this.cancelledImportJobs.has(jobId)) finalStatus = 'cancelled';
                         if (finalStatus === 'succeeded') {
                             try {
@@ -770,8 +778,20 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                                 if (String(row?.status ?? '') === 'cancelled') finalStatus = 'cancelled';
                             } catch { /* keep succeeded */ }
                         }
+                        // A job that was not cancelled, had rows, and created,
+                        // updated or skipped none of them accomplished nothing: it
+                        // ends `failed`, not `succeeded` (maintainer ruling B,
+                        // record 6509036166). Decided after every cancel re-check
+                        // above, so a cancel still wins. `ok` is not the test: a
+                        // skipped row is not counted in it. A zero-row job, an
+                        // all-skipped job and a partly-failed job stay `succeeded`
+                        // on purpose; a dry run follows the same rule.
+                        const everyRowFailed = finalStatus === 'succeeded' && summary.total > 0
+                            && summary.created + summary.updated + summary.skipped === 0;
+                        if (everyRowFailed) finalStatus = 'failed';
                         await patch({
                             status: finalStatus,
+                            ...(everyRowFailed ? { error: IMPORT_JOB_EVERY_ROW_FAILED } : {}),
                             processed_rows: summary.processed,
                             created_count: summary.created,
                             updated_count: summary.updated,
