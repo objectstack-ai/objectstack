@@ -113,7 +113,10 @@ describe('an x-axis label rotates and is cut only when its band cannot hold it (
     // The cut name is still reachable whole: the pointer over its bar opens
     // the tooltip, which names the category in full. recharts throttles a
     // pointer move through `requestAnimationFrame`, so the frame is flushed.
-    expect(container.textContent).not.toContain('Needs Analysis');
+    // The axis draws only the cut; the full name rides in the tick's own
+    // tooltip (objectstack#27520) and in the chart tooltip below.
+    expect(labelsOf(ticks)).not.toContain('Needs Analysis');
+    expect(ticks[2].closest('.recharts-cartesian-axis-tick-label')?.querySelector('title')?.textContent).toBe('Needs Analysis');
     const bar = container.querySelectorAll('.recharts-rectangle')[2] as SVGElement;
     const x = Number(bar.getAttribute('x')) + Number(bar.getAttribute('width')) / 2;
     const y = Number(bar.getAttribute('y')) + Number(bar.getAttribute('height')) / 2;
