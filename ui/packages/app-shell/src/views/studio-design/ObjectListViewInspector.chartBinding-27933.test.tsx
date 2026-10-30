@@ -178,6 +178,7 @@ function Host({ readOnly = false }: { readOnly?: boolean }) {
   const listView = useObjectListViewDraft({ client, packageId: PKG, leaf: LEAF, publishNonce: 0 });
   return (
     <>
+      <span data-testid="dirty">{String(listView.dirty)}</span>
       <span data-testid="held">{listViewHeldEdit(listView, 'en')?.input ?? ''}</span>
       <button type="button" data-testid="save" onClick={() => void listView.save({ unmoved: () => true })}>
         save
@@ -275,8 +276,8 @@ describe('objectstack#27933 — a chart view’s dataset binding in the list-vie
     expect(members('dimensions').labels).toEqual(['By status']);
     // The add pickers offer the bound dataset's other members, by label.
     expect(await optionsOf(addPicker('values'))).toEqual(['Tasksrecord_count']);
-    // Opening the panel writes nothing.
-    await save();
+    // Opening the panel edits nothing, so the autosave has nothing to send.
+    expect(screen.getByTestId('dirty')).toHaveTextContent('false');
     expect(server.puts).toEqual([]);
   });
 
