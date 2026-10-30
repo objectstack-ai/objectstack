@@ -350,8 +350,9 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 - Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
   `object.field`) lists those first. A child in the stack with no inbound FK is
   refused everywhere; one that exists nowhere is refused by `os validate` /
-  `os build` and by a metadata write naming no package — a write into a package
-  stores it, and the page places nothing.
+  `os build` (which leave a `sys_` / `cloud_` / `ai_` or sibling-artifact name
+  to the runtime) and by a metadata write naming no package — a write into a
+  package stores it, and the page places nothing.
 
 `relatedListTitle` / `relatedListColumns` override the derived title / columns;
 otherwise columns auto-derive from the child object's
