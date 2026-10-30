@@ -90,7 +90,7 @@ function registrationError(node: Record<string, unknown>): string {
 
 /** The three shapes the #27327 thread measured registering under `connectorConfig.input`. */
 const SHAPES = [
-  ['a malformed CEL envelope', { dialect: 'cel', source: 'rec.' }, ''],
+  ['a malformed CEL envelope', { dialect: 'cel', source: 'rec.' }, VALUE_ENVELOPE_REFUSAL],
   ['a template-dialect envelope', { dialect: 'template', source: '{rec.id}' }, VALUE_ENVELOPE_REFUSAL],
   ['a bare `{…}` token string', '{rec.id}', VALUE_SLOT_TEMPLATE_REFUSAL],
 ] as const;
@@ -105,8 +105,10 @@ describe('1. registerFlow refuses the three shapes at `connectorConfig.input.<ke
     // one slot rule, two positions, one reject set.
     const control = registrationError(subflowNode({ customerId: value }));
     expect(control).toContain(`node 'call' (subflow) subflow input value at config.input.customerId: ${lead}`);
-    const detail = (m: string) => m.slice(m.indexOf('input.customerId: ') + 'input.customerId: '.length).split('\n')[0];
-    expect(detail(message)).toBe(detail(control));
+    // The connector's refusal is the subflow's, minus the callee sentence a
+    // child flow's input value adds: the action was handed the text, not nothing.
+    const detail = (m: string) => m.slice(m.indexOf('input.customerId: ') + 'input.customerId: '.length).split('\n')[0]!;
+    expect(detail(control).startsWith(detail(message))).toBe(true);
   });
 
   it('a refused flow is not registered: it cannot be run', async () => {
