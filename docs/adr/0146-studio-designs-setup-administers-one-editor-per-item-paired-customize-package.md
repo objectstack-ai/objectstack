@@ -257,7 +257,9 @@ Setup → Metadata route whose administrative action has no Setup home yet.
 
 ## Rollout
 
-Cut as cards after this record merges; nothing below binds a seat before that. Each card cites this record.
+Tracked by epic [#28130](https://github.com/objectstack-ai/objectstack/issues/28130) (`pm:epic`, `pm:blocked` on
+PR #28045), which carries the phase 2 and phase 3 child-card plan. Cut as cards after this record merges; nothing
+below binds a seat before that. Each card cites this record and the epic.
 
 1. **Now** (#27356 row 19, letter **A1**, independent of this record): Studio deletes a writable package's flow from
    the Automations item menu (confirm; the same `DELETE /meta/:type/:name` door; a pending draft of the item is
@@ -292,6 +294,7 @@ landing), ADR-0029 D7 (the greyed-with-source presentation is this record's). No
 
 ## Refs
 
+- Epic [#28130](https://github.com/objectstack-ai/objectstack/issues/28130) (the rollout's tracking card).
 - [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 13, 14, 19, 20, 21 and their landed
   PRs #27376 (read-only flow switch), #27927 (overlay link only where an overlay exists).
 - ADR-0126 §7.4 (the Setup surface this record moves from) and §9 (first bullet lifted in part by D2; second bullet
