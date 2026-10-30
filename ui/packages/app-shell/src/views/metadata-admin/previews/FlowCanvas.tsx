@@ -178,6 +178,11 @@ export interface FlowCanvasProps {
    * `freshNodeId` (`flow-problems`) over the draft alone.
    */
   mintNodeId?: () => string;
+  /**
+   * The object catalog's labels by object name: a node card names the object
+   * it works on by its label, not its API name. Absent, the name shows.
+   */
+  objectLabels?: ReadonlyMap<string, string>;
 }
 
 export function FlowCanvas({
@@ -202,6 +207,7 @@ export function FlowCanvas({
   onSelectNested,
   onPatch,
   mintNodeId,
+  objectLabels,
 }: FlowCanvasProps) {
   // objectui#3172 — the ONE geometry boundary: nodes enter the canvas with the
   // retired `ui: {x,y}` spelling already lifted onto the spec's `position`, so
@@ -1256,7 +1262,7 @@ export function FlowCanvas({
                   locale={locale}
                   type={node.type}
                   label={node.label || node.id}
-                  summary={nodeSummary(node, locale)}
+                  summary={nodeSummary(node, locale, objectLabels)}
                   position={pos}
                   selected={selectedId === node.id}
                   editable={editable}
@@ -1509,9 +1515,14 @@ function layoutBranchLabels(
  * The words it adds of its own (a branch count, an approver count, `code`)
  * read in the designer `locale` (objectui#10862); config values pass through.
  */
-function nodeSummary(node: FlowDesignerNode, locale?: string): string | undefined {
+function nodeSummary(
+  node: FlowDesignerNode,
+  locale?: string,
+  objectLabels?: ReadonlyMap<string, string>,
+): string | undefined {
   const c = node.config as Record<string, unknown> | undefined;
   const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  const object = (name: string | undefined) => (name ? objectLabels?.get(name) || name : undefined);
   const block = (key: string, inner: string) => {
     const b = (node as Record<string, unknown>)[key];
     return b && typeof b === 'object' ? str((b as Record<string, unknown>)[inner]) : undefined;
@@ -1527,12 +1538,12 @@ function nodeSummary(node: FlowDesignerNode, locale?: string): string | undefine
     return (
       pick('condition') ||
       pick('criteria') ||
-      pick('objectName') ||
+      object(pick('objectName')) ||
       cfgBlock('schedule', 'expression') ||
       cfgBlock('schedule', 'cron') ||
       pick('cron') ||
       pick('schedule') ||
-      cfgBlock('timeRelative', 'object') ||
+      object(cfgBlock('timeRelative', 'object')) ||
       pick('triggerType')
     );
   }
@@ -1574,7 +1585,7 @@ function nodeSummary(node: FlowDesignerNode, locale?: string): string | undefine
     return behavior || undefined;
   }
   return (
-    pick('objectName') ||
+    object(pick('objectName')) ||
     block('connectorConfig', 'actionId') ||
     block('waitEventConfig', 'timerDuration') ||
     block('waitEventConfig', 'eventType') ||

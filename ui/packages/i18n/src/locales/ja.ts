@@ -1144,7 +1144,7 @@ const ja = {
     loading: "読み込み中…",
     copyToClipboard: "クリップボードにコピー",
     copied: "コピーしました！",
-    deleteConfirmation: "このレコードを削除してもよろしいですか？",
+    deleteConfirmation: "このレコードを削除してもよろしいですか？この操作は元に戻せません。",
     deleted: "レコードを削除しました",
     editRecord: "レコードを編集",
     viewAll: "すべて表示",
@@ -1724,7 +1724,7 @@ const ja = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。",
+      accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セット」で権限セットを使って付与できます。",
     },
     saveAdvisoryTitle: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",
     saveAdvisoryTitle_one: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",
@@ -2790,7 +2790,9 @@ const ja = {
         title: "パスワードの有効期限が切れました",
         resetTitle: "パスワードの変更が必要です",
         fallbackMessage: "続行するには新しいパスワードを設定してください。",
+        resetBody: "管理者が一時パスワードを設定しました。続行するには、ご自身の新しいパスワードを設定してください。",
         current: "現在のパスワード",
+        temporary: "一時パスワード",
         next: "新しいパスワード",
         confirm: "新しいパスワード（確認）",
         submit: "パスワードを変更して続行",
@@ -3227,9 +3229,10 @@ const ja = {
   },
   objectActions: {
     deleteSuccess: "{{label}} を削除しました",
+    deletedNamed: "{{label}}「{{name}}」を削除しました",
     deleteFailed: "{{label}} の削除に失敗しました",
     noRecordId: "レコードIDが指定されていません",
-    deleteConfirm: "このレコードを削除してもよろしいですか？",
+    deleteConfirm: "このレコードを削除してもよろしいですか？この操作は元に戻せません。",
     deleteConfirmTitle: "{{label}}「{{name}}」を削除しますか？",
     bulkDeleteConfirmTitle: "{{count}} 件の {{label}} レコードを削除しますか？",
     bulkDeleteConfirmTitle_one: "{{count}} 件の {{label}} レコードを削除しますか？",
@@ -4382,9 +4385,9 @@ const ja = {
       detailChangedKeys: 'その他の変更：',
       detailNewKeys: '含まれるもの：',
       generatedGroup: 'プラットフォームが生成（{{n}}）',
-      confirmNote: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
-      confirmNote_one: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
-      confirmNote_other: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
+      confirmNote: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて公開されます。すべて公開されるか、何も公開されないかのどちらかです。',
+      confirmNote_one: '公開すると、このパッケージの保留中ドラフト {{count}} 件が公開されます。公開されるか、何も変わらないかのどちらかです。',
+      confirmNote_other: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて公開されます。すべて公開されるか、何も公開されないかのどちらかです。',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: '公開すると、保留中のドラフト {{count}} 件がそれぞれ個別に公開されます。公開に失敗したドラフトは保留中のまま残り、ほかのドラフトは公開されます。',
@@ -4689,6 +4692,11 @@ const ja = {
     actionsEmptyTitle: "パッケージアクションはありません",
     actionsEmptyBody: "このデプロイには、アクションを宣言するインストール済みパッケージがありません。自分で作成したアクションは Studio にあります。",
     actionsLoadFailed: "パッケージアクションを読み込めませんでした。",
+    switchedOn: "「{{label}}」をオンにしました。",
+    switchedOff: "「{{label}}」をこのデプロイでオフにしました。",
+    actionOffTitle: "「{{label}}」をオフにしますか？",
+    actionOffBody: "再びオンにするまで、このデプロイで提供されているすべての場所で、すべてのユーザーに対して実行されなくなります。",
+    actionOffConfirm: "オフにする",
   },
   element: {
     number: {

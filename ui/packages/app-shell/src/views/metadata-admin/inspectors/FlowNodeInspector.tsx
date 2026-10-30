@@ -862,7 +862,7 @@ export function FlowNodeInspector({ selection, draft, onPatch, onClearSelection,
               disabled={readOnly}
               rows={6}
               placeholder="{ }"
-              className="w-full rounded border bg-background px-2 py-1.5 font-mono text-xs"
+              className="w-full rounded border bg-background px-2 py-1.5 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
             />
             {advError && <div className="text-xs text-destructive">{advError}</div>}
           </div>

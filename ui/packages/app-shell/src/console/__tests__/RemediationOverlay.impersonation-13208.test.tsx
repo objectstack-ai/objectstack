@@ -150,7 +150,7 @@ describe('RemediationOverlay on an impersonation session (objectui#13208)', () =
     expect(screen.getByText(/only they can do this themselves/)).toBeTruthy();
     expect(screen.getByTestId('remediation-impersonation-stop').textContent).toBe('Stop impersonating');
     // Not the target's credential form, and not the message written to them.
-    expect(screen.queryByLabelText('Current password')).toBeNull();
+    expect(screen.queryByLabelText('Temporary password')).toBeNull();
     expect(screen.queryByLabelText('New password')).toBeNull();
     expect(screen.queryByText(HELD_MESSAGE)).toBeNull();
     // The other way out stays.
@@ -196,7 +196,7 @@ describe('RemediationOverlay on an impersonation session (objectui#13208)', () =
     const stranded = await screen.findByTestId('remediation-impersonation-not-restored');
     expect(stranded.textContent).toMatch(/still impersonating RT8 Dave/);
     expect(screen.getByTestId('remediation-impersonation-exit')).toBeTruthy();
-    expect(screen.queryByLabelText('Current password')).toBeNull();
+    expect(screen.queryByLabelText('Temporary password')).toBeNull();
     expect(reload).not.toHaveBeenCalled();
   });
 
@@ -227,9 +227,9 @@ describe('RemediationOverlay on an impersonation session (objectui#13208)', () =
     await act(async () => {});
     await raiseGate();
 
-    expect(await screen.findByLabelText('Current password')).toBeTruthy();
+    expect(await screen.findByLabelText('Temporary password')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'You must change your password' })).toBeTruthy();
-    expect(screen.getByText(HELD_MESSAGE)).toBeTruthy();
+    expect(screen.getByText(/An administrator set a temporary password for you/)).toBeTruthy();
     expect(screen.queryByTestId('remediation-impersonation-exit')).toBeNull();
     expect(screen.queryByTestId('remediation-impersonation-stop')).toBeNull();
   });
