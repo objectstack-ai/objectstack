@@ -76,9 +76,9 @@ export function formKeyLabel(type: string, key: string): string | undefined {
 
 /**
  * Whether a row named `label` should still show its key: only when the label
- * does not already spell it — `SchemaForm`'s own machine-name rule, so
- * `sharingModel` under "Sharing Model" shows no key and `config.data` under
- * "Data source" does.
+ * does not already spell its last segment — `SchemaForm`'s own machine-name
+ * rule, so `sharingModel` under "Sharing Model" shows no key and
+ * `fieldGroups.relatedList` under "Related List" shows none either.
  */
 export function labelSpellsKey(label: string, key: string): boolean {
   const last = key.split('.').pop() ?? key;
