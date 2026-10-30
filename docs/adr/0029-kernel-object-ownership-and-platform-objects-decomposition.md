@@ -540,6 +540,40 @@ Binding consequences:
   were considered and **rejected**. Dropping scalars from the fold entirely
   (#8284's arm B) remains rejected and is not this clause.
 
+> **Note (2026-10-30, #27949; ruling of record 6524229156, letter C′): "validations
+> stay additive" means rules of DIFFERENT names add. A same-named rule merges by
+> name, with the condition owned by the package.**
+>
+> A validation rule's identity within an object is its `name` (the schema's
+> "unique rule name"). The fold therefore merges `validations` by name across the
+> layers, the way `fields` merge by key, instead of concatenating them: two rules
+> of one name in one object are one rule. Measured before this note: a tenant
+> overlay that reworded an extension's rule (the Studio GET → edit → PUT of the
+> folded object stores a copy of every rule it served) held a copy beside the
+> extension's original, and both ran, so a refused write reported the rule twice.
+>
+> - **What the tenant owns.** A tenant overlay's copy of a packaged or
+>   extension-contributed rule supplies the rule's `message` and `active`
+>   (`active: false` is the explicit, visible deactivation). Everything else —
+>   the `type`, the condition and every other key the evaluator reads — is the
+>   package's: the fold enforces the code layer's rule with the tenant's
+>   sentence and switch, so a later package fix to the rule reaches the tenant.
+>   This is the opposite of whole-rule replacement, which would freeze the
+>   enforced rule against package fixes.
+> - **A changed condition or type is refused, loudly, with the prescription "to
+>   change the condition, add a rule under a new name, or change it in the
+>   package"** — never two rules running beside each other, never a silent
+>   replacement. A copy stored before the condition changed (a package upgrade)
+>   is indistinguishable from one the tenant changed, so the fold never runs a
+>   copy's condition and names each such copy once, at `error`, with that
+>   prescription; it never drops the tenant's layer for it.
+> - **Different names stay additive**, as this clause has always protected: an
+>   extender's or a tenant's rule of a new name is added. A rule the overlay
+>   leaves out stays out, as D9.2's replace means. Between two code layers a
+>   later layer's same-named rule replaces the earlier one, as a field does.
+> - **Idempotence (#8027) holds by the merge itself:** a folded base re-folds to
+>   the same rules, so `validations` are no longer subtracted before the fold.
+
 #### D9.3 — selection is by KIND; priority stays descriptive
 
 `contributors.sort((a, b) => a.priority - b.priority)` (`#contributors`) totals the whole
