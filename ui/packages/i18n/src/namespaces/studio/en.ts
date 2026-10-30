@@ -118,6 +118,10 @@ const STUDIO_EN: Record<string, string> = {
   // CEL authoring safety for RLS predicates (objectui#2413).
   'perm.cel.valid': 'Valid CEL',
   'perm.cel.suggestions': 'Field and scope suggestions',
+  // The CEL editor's field picker: fields by label, inserting the CEL reference.
+  'perm.cel.insertField': 'Insert field',
+  'perm.cel.searchFields': 'Search fields…',
+  'perm.cel.noMatchingFields': 'No matching fields.',
   'perm.cel.type': 'Result type:',
   'perm.cel.type.number': 'Number',
   'perm.cel.type.text': 'Text',
@@ -3817,6 +3821,10 @@ const STUDIO_EN: Record<string, string> = {
   // host binds. `Unknown variable: …` is the runtime's own fault text and stays
   // as written. (An RLS clause the runtime cannot lower has no row here: it
   // ships `@objectstack/lint`'s own message, objectui#13061.)
+  // The plain sentence the CEL editors lead the catch-all CEL refusal with
+  // (`invalid-cel`); the engine's own fault and source excerpt follow it as written.
+  'engine.celLint.invalidCel':
+    "This expression can't be read as written. Something is missing, extra or out of place: the ^ mark below points to where reading stopped.",
   'engine.celLint.notTheRow':
     '`{identifier}` is not the row on this surface: a row predicate binds the record as `{canonical}` and nothing else. The CEL scope vocabulary still accepts `{identifier}`, so nothing here blocks the save, but at runtime the expression faults with `Unknown variable: {identifier}` and the rule never fires. Re-root the reference on `{canonical}`.',
   'engine.pageBlockCanvas.renderFailed':

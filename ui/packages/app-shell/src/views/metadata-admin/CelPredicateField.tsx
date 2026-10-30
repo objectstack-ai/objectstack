@@ -34,12 +34,32 @@
  * the advisory the lint words itself (the wrong-layer root): `lintCelPredicate`
  * hands it back as a catalogue key with its values, and the findings list reads
  * it through the same `t` (objectui#10862). The engine's and
- * `@objectstack/lint`'s messages pass through as written.
+ * `@objectstack/lint`'s messages pass through as written — except the
+ * catch-all CEL refusal, which the editor leads with a plain sentence of its
+ * own and follows with the engine's fault and source excerpt in monospace, so
+ * the excerpt's mark lines up under the spot it points to.
+ *
+ * With `fieldOptions` the host also offers an "Insert field" picker: the
+ * object's fields by label, inserting the CEL reference (`record.<name>` in
+ * `record` scope, the bare name otherwise) at the caret.
  */
 
 import * as React from 'react';
-import { Label, Textarea, cn } from '@object-ui/components';
-import { AlertCircle, AlertTriangle, CheckCircle2, Sigma } from 'lucide-react';
+import {
+  Button,
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Textarea,
+  cn,
+} from '@object-ui/components';
+import { AlertCircle, AlertTriangle, CheckCircle2, ListPlus, Sigma } from 'lucide-react';
 import {
   lintCelPredicate,
   introspectCelScope,
@@ -83,6 +103,13 @@ export interface CelPredicateFieldProps {
   objectName?: string;
   /** Known field names of {@link objectName}. */
   fieldNames?: string[];
+  /**
+   * The fields the "Insert field" picker offers, each with the label the
+   * author knows it by. Omitted: no picker (the autocomplete still offers
+   * {@link fieldNames}). Choosing one inserts its CEL reference at the caret —
+   * `record.<name>` in `record` scope, the bare name otherwise.
+   */
+  fieldOptions?: ReadonlyArray<{ name: string; label: string }>;
   /** Which RLS clause this is (turns on the blocking verdicts of `@objectstack/lint`'s RLS rule). */
   clause?: 'using' | 'check';
   /**
@@ -178,6 +205,7 @@ export function CelPredicateField({
   label,
   objectName,
   fieldNames = EMPTY_FIELDS,
+  fieldOptions,
   clause,
   scope,
   roots,
@@ -217,6 +245,13 @@ export function CelPredicateField({
   const [active, setActive] = React.useState(0);
   const tokenRef = React.useRef<{ start: number; end: number } | null>(null);
   const pendingCaret = React.useRef<number | null>(null);
+
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const [pickerSearch, setPickerSearch] = React.useState('');
+  // The selection to replace, read when the picker opens: focus moves to the
+  // picker's search input, and the textarea's own selection is what it was.
+  const pickerRange = React.useRef<{ start: number; end: number } | null>(null);
+  const findingsRef = React.useRef<HTMLUListElement>(null);
 
   // Stable deps for the identifier arrays (parent may pass fresh arrays each render).
   const fieldsKey = fieldNames.join(',');
@@ -380,6 +415,43 @@ export function CelPredicateField({
     [onChange, closeAc],
   );
 
+  const openPicker = (next: boolean) => {
+    if (next) {
+      const ta = taRef.current;
+      const end = ta ? ta.value.length : value.length;
+      pickerRange.current = ta
+        ? { start: ta.selectionStart ?? end, end: ta.selectionEnd ?? end }
+        : { start: end, end };
+      setPickerSearch('');
+      closeAc();
+    }
+    setPickerOpen(next);
+  };
+
+  // Back to the editor after an insert, caret after the inserted reference.
+  const pickerCaret = React.useRef<number | null>(null);
+  const insertField = (name: string) => {
+    const ref = scope === 'record' ? `record.${name}` : name;
+    const range = pickerRange.current ?? { start: value.length, end: value.length };
+    const next = value.slice(0, range.start) + ref + value.slice(range.end);
+    pickerCaret.current = range.start + ref.length;
+    setPickerOpen(false);
+    onChange(next);
+  };
+
+  React.useEffect(() => {
+    if (pickerOpen || pickerCaret.current == null || !taRef.current) return;
+    const pos = pickerCaret.current;
+    pickerCaret.current = null;
+    taRef.current.focus();
+    taRef.current.setSelectionRange(pos, pos);
+  }, [pickerOpen, value]);
+
+  const pickerQuery = pickerSearch.trim().toLowerCase();
+  const pickerShown = (fieldOptions ?? []).filter(
+    (f) => !pickerQuery || f.label.toLowerCase().includes(pickerQuery) || f.name.toLowerCase().includes(pickerQuery),
+  );
+
   // When the async identifier catalog resolves while the author is mid-token,
   // surface the menu without requiring another keystroke.
   const refreshAcRef = React.useRef(refreshAc);
@@ -413,6 +485,16 @@ export function CelPredicateField({
   // the lint does not already say in the same words. objectstack#27452 — the
   // held ones: a verdict on text no longer on screen describes nothing here.
   const serverErrors = held.filter((e) => !issues.some((iss) => issueText(iss, t) === e.message));
+  // A finding that appears while the author types is brought into view: in a
+  // scrolling inspector the editor often sits at the bottom of the visible
+  // area, so the line under it would land past the inspector's footer, out of
+  // sight. Only while the editor has focus, so a finding read on mount never
+  // scrolls the panel.
+  const findingsKey = [...issues.map((iss) => issueText(iss, t)), ...serverErrors.map((e) => e.message)].join('\n');
+  React.useEffect(() => {
+    if (!findingsKey || !findingsRef.current || document.activeElement !== taRef.current) return;
+    findingsRef.current.scrollIntoView?.({ block: 'nearest' });
+  }, [findingsKey]);
   // "Valid CEL" only when nothing — the lint, the host's scope verdict
   // (objectui#11789) or the server's verdict at this path — says otherwise.
   const clean = linted && !!value.trim() && issues.length === 0 && !scopeIssue && held.length === 0;
@@ -426,9 +508,52 @@ export function CelPredicateField({
 
   return (
     <div>
-      <Label className="text-[10px] uppercase text-muted-foreground" htmlFor={fieldId}>
-        {label}
-      </Label>
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-[10px] uppercase text-muted-foreground" htmlFor={fieldId}>
+          {label}
+        </Label>
+        {fieldOptions && fieldOptions.length > 0 && !disabled && (
+          <Popover open={pickerOpen} onOpenChange={openPicker}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-expanded={pickerOpen}
+                data-testid="cel-insert-field"
+                className="h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground"
+              >
+                <ListPlus aria-hidden className="h-3.5 w-3.5" />
+                {t('perm.cel.insertField')}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-0">
+              <Command shouldFilter={false} label={t('perm.cel.insertField')}>
+                <CommandInput
+                  value={pickerSearch}
+                  onValueChange={setPickerSearch}
+                  placeholder={t('perm.cel.searchFields')}
+                />
+                <CommandList className="max-h-64">
+                  {pickerShown.length === 0 && <CommandEmpty>{t('perm.cel.noMatchingFields')}</CommandEmpty>}
+                  {pickerShown.map((f) => (
+                    <CommandItem
+                      key={f.name}
+                      value={f.name}
+                      onSelect={() => insertField(f.name)}
+                      data-field-name={f.name}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="min-w-0 truncate text-xs">{f.label}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{f.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
       <div className="relative">
         <Textarea
           ref={taRef}
@@ -492,11 +617,20 @@ export function CelPredicateField({
 
       {/* Inline lint findings, then the server's at this path (as written). */}
       {(errors.length > 0 || warnings.length > 0 || serverErrors.length > 0) && (
-        <ul className="mt-1 space-y-1" aria-live="polite">
+        <ul ref={findingsRef} className="mt-1 space-y-1" aria-live="polite">
           {errors.map((iss, i) => (
             <li key={`e${i}`} className="flex items-start gap-1.5 text-[11px] text-destructive">
               <AlertCircle className="mt-[1px] h-3 w-3 shrink-0" />
-              <span>{issueText(iss, t)}</span>
+              {iss.plain ? (
+                <span className="min-w-0 flex-1" data-testid="cel-plain-error">
+                  {t(iss.plain.key)}
+                  <pre className="mt-1 overflow-x-auto whitespace-pre rounded bg-destructive/5 px-1.5 py-1 font-mono text-[10px] leading-4 text-destructive/90">
+                    {iss.plain.detail}
+                  </pre>
+                </span>
+              ) : (
+                <span>{issueText(iss, t)}</span>
+              )}
             </li>
           ))}
           {serverErrors.map((e, i) => (

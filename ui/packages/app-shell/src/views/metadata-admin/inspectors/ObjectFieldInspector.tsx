@@ -711,6 +711,9 @@ export function ObjectFieldInspector({
   const name = String(selection.id);
   const idx = indexOfField(view, name);
   const entry = idx >= 0 ? view.entries[idx] : null;
+  // The formula editor's field picker lists siblings by the label every other
+  // surface shows them with (the same resolver as `LabelTranslationHint`).
+  const { fieldLabel } = useSafeFieldLabel();
 
   const fieldGroups = Array.isArray((draft as any).fieldGroups)
     ? ((draft as any).fieldGroups as Array<{ key?: string; label?: string }>)
@@ -1424,6 +1427,13 @@ export function ObjectFieldInspector({
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               // A formula may reference every sibling, not itself (circular).
               fieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
+              fieldOptions={view.entries
+                .filter((e) => e.name !== entry.name)
+                .map((e) => {
+                  const source = typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name;
+                  const objectName = typeof (draft as any).name === 'string' ? ((draft as any).name as string) : '';
+                  return { name: e.name, label: objectName ? fieldLabel(objectName, e.name, source) : source };
+                })}
               scope="record"
               roots={FORMULA_ROOTS}
               role="value"
