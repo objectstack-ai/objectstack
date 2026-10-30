@@ -502,6 +502,14 @@ tenant default currency (the `localization.currency` setting), if one is set. A
 so its column shows the tenant default. The cube query on this page carries no column
 `currency`.
 
+Over a `fixed` field the measure's `currency` may only restate the field's code. A
+different code is refused when the dataset compiles, with `DATASET_INVALID` / 400: delete
+the measure's `currency`, and the column takes the field's code. A derived measure whose
+monetary operands resolve to two different `fixed` codes is refused the same way, whatever
+the operation: derive it from measures in one currency, or drop the operand in the other.
+Neither a `fixed` code against the tenant default nor a measure `currency` over a
+`dynamic` field is judged.
+
 A measure column over a `currencyMode: 'record'` amount has one currency per row, so it
 carries `currencyField` instead of `currency`: the name of the dimension column, in the same
 answer, that groups by the amount's code field (`currencyConfig.currencyField`). Each row's
