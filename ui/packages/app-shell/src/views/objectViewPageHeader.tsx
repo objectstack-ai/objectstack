@@ -76,9 +76,10 @@ export function ObjectViewPageHeader({
              <div className="hidden sm:block">
              <PageHeader
                  // The title is the view switcher, 「VIEW ▾ · COUNT」
-                 // (objectstack#27594); the object stays named in the app
-                 // bar's breadcrumb and the sidebar's highlight. With no view
-                 // to switch, the page lists the object's records and is
+                 // (objectstack#27594); the object stays named by the
+                 // sidebar's active entry and this header's icon. A view with
+                 // no label is called by the plural (objectui#12774); with no
+                 // view to switch, the page lists the object's records and is
                  // titled with the plural, as the nav entry that opens it is
                  // (objectui#11696); the record page keeps the singular.
                  title={titleSwitcher ?? objectPluralLabel(objectDef)}

@@ -2,7 +2,7 @@
 
 /**
  * objectui#11576, the dialog's SECOND persisting door: `ObjectView`'s
- * `handleViewCreate`, reached from the view tab bar's add button. The first
+ * `handleViewCreate`, reached from the view switcher's New view. The first
  * door (`ObjectDataPage.buildSaveAsViewSpec`, "Save as view") is pinned in
  * `CreateViewDialog.chartBinding-11576.test.tsx`; the two doors assemble the
  * spec separately, so each is pinned on its own.
@@ -178,11 +178,13 @@ async function optionLabels(key: string): Promise<string[]> {
   return labels;
 }
 
-/** Create a chart view through the tab bar's add button; return the saved body. */
-async function createChartViewThroughTheTabBar() {
+/** Create a chart view through the view switcher's New view; return the saved body. */
+async function createChartViewThroughTheSwitcher() {
   mount({ [`${OBJECT_NAME}.all`]: { name: `${OBJECT_NAME}.all`, label: 'All', type: 'grid', columns: ['name'] } });
   await settle();
-  fireEvent.click(screen.getByTestId('view-tab-add'));
+  // New view, from the page title's view switcher (objectstack#27594).
+  fireEvent.click(screen.getByTestId('list-view-switcher'));
+  fireEvent.click(screen.getByTestId('list-view-switcher-new'));
   const card = await screen.findByTestId('create-view-type-chart');
   await waitFor(() => expect((card as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(card);
@@ -223,7 +225,7 @@ afterEach(() => {
 
 describe('ObjectView.handleViewCreate saves the ADR-0021 chart block the dialog wrote (objectui#11576)', () => {
   it('DOOR 2: the saved config passes the spec ListViewSchema, the envelope the ViewItem gate, and no legacy key rides', async () => {
-    const body = await createChartViewThroughTheTabBar();
+    const body = await createChartViewThroughTheSwitcher();
     // The spec's verdict first: it is the claim this pin exists for.
     const listView = ListViewSchema.safeParse(body.config);
     expect(listView.success, JSON.stringify(listView.error?.issues)).toBe(true);
@@ -240,7 +242,7 @@ describe('ObjectView.handleViewCreate saves the ADR-0021 chart block the dialog 
   });
 
   it('the saved view renders on the object page through the dataset branch', async () => {
-    const body = await createChartViewThroughTheTabBar();
+    const body = await createChartViewThroughTheSwitcher();
     cleanup();
     capturedChartSchema = null;
     mount({ [body.name]: { name: body.name, label: body.label, ...body.config } });

@@ -75,9 +75,16 @@ const FIELDS = {
   name: { type: 'text', label: 'Name' },
 };
 
+/**
+ * One list view with no `label`. The list title is the view switcher since
+ * objectstack#27594, and a label-less view is called by the object's plural
+ * (objectui#12774), so the H1 still reads it.
+ */
+const LISTVIEWS = { all: { type: 'grid', columns: ['name'] } };
+
 const OBJECTS = [
-  { name: 'auth_user_12194', label: 'User', pluralLabel: 'Users', managedBy: 'better-auth', fields: FIELDS },
-  { name: 'plain_note_12194', label: 'Note', pluralLabel: 'Notes', fields: FIELDS },
+  { name: 'auth_user_12194', label: 'User', pluralLabel: 'Users', managedBy: 'better-auth', fields: FIELDS, listViews: LISTVIEWS },
+  { name: 'plain_note_12194', label: 'Note', pluralLabel: 'Notes', fields: FIELDS, listViews: LISTVIEWS },
 ];
 
 /** A `/me/permissions` answer holding exactly `held`. */

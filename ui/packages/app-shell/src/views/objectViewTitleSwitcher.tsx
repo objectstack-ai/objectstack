@@ -62,7 +62,7 @@ export interface ObjectViewTitleSwitcherProps {
     activeLabel: string;
     /** The records the open view matched, when the list reported them. */
     count?: number;
-    /** The open view's description, the title's tooltip. */
+    /** The open view's description, the title's tooltip (a chart face's; a list draws its own). */
     description?: string;
     onViewChange: (viewId: string) => void;
     /** The reader's pinned view for this object, if any. */
@@ -365,11 +365,13 @@ export function useObjectViewTitleSwitcher({
     /** The records the list reported for a view, when it did. */
     viewTotal: { viewId: string; total: number } | null;
 }) {
-    // objectui#12528 — the view's description rides on the switcher (the
-    // title's tooltip). Resolved the way `ListView` resolves the same text
-    // (`pickLocalized` on the display locale), and gated on the same switch
-    // the relay hands `ListView` as `appearance.showDescription`: `false`
-    // shows it nowhere.
+    // objectui#12528 — the view's description is shown once. A list face
+    // draws it itself, as the info control at the start of its toolbar row
+    // (`ListView`, with no leading node from the host). A chart face has no
+    // such row, so there it rides on the switcher, as the title's tooltip:
+    // resolved the way `ListView` resolves the same text (`pickLocalized` on
+    // the display locale), and gated on the same switch the relay hands
+    // `ListView` as `appearance.showDescription`: `false` shows it nowhere.
     const displayLocale = useDisplayLocale();
     const viewTabItems: ViewTabItem[] = views.map((view: any) => {
         const saved = savedViews.find((sv: any) => viewRowId(sv) === view.id);
@@ -430,7 +432,7 @@ export function useObjectViewTitleSwitcher({
             activeViewId={openViewId}
             activeLabel={openView?.label ?? unlabelledViewText}
             count={viewTotal && viewTotal.viewId === openViewId ? viewTotal.total : undefined}
-            description={openView?.description}
+            description={openView?.type === 'chart' ? openView.description : undefined}
             onViewChange={handleViewChange}
             pinnedViewId={pinnedViewId}
             onPinnedViewChange={setPinnedViewId}
