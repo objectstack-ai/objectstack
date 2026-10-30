@@ -16,6 +16,11 @@
  * server refuses one. These drive the REAL ObjectGrid, a real ActionProvider
  * and the real `createServerActionHandler` (the dispatch the console
  * registers as `script`) over a stubbed transport that answers per record.
+ *
+ * A record the server refuses answers a 4xx (the `/actions` door's rule:
+ * a handler that says no throws), so the counts follow each record's answer;
+ * the first case pins that. What a refusal is listed under is the record's
+ * title, read the way the confirm step lists the affected records.
  */
 
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
