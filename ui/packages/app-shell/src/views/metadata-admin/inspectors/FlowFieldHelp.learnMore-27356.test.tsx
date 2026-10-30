@@ -26,11 +26,12 @@ afterEach(cleanup);
 
 // The approval node's fields as the engine publishes them: the installed
 // contract's own JSON Schema, not a copy of it.
-const served = jsonSchemaToFlowFields(z.toJSONSchema(ApprovalNodeConfigSchema, { io: 'input' }))!;
+const schema = z.toJSONSchema(ApprovalNodeConfigSchema, { io: 'input' });
+const served = jsonSchemaToFlowFields(schema)!;
 const approvers = served.find((f) => f.id === 'approvers')!;
 const orgCol = approvers.columns!.find((c) => c.key === 'organization')!;
 const orgDescription = (
-  z.toJSONSchema(ApprovalNodeConfigSchema, { io: 'input' }) as {
+  schema as unknown as {
     properties: { approvers: { items: { properties: { organization: { description: string } } } } };
   }
 ).properties.approvers.items.properties.organization.description;
