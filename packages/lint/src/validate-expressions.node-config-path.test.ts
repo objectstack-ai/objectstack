@@ -80,11 +80,19 @@ describe('a flow node config-value finding carries a key path (#27828)', () => {
       // A value slot's retired single-brace token (the template-refusal arm).
       { id: 'tok', type: 'update_record', label: 'Tok', config: { objectName: 'task', filter: { id: 'x' }, fields: { title: '{record.name}' } } },
       // A text slot's single-brace token (the text-slot arm).
-      { id: 'say', type: 'notify', label: 'Say', config: { channel: 'email', recipients: ['a@b.c'], title: 'Hi {record.name}', message: 'ok' } },
+      { id: 'say', type: 'notify', label: 'Say', config: { recipients: ['a@b.c'], title: 'Hi {record.name}', message: 'ok' } },
       // A key the node's contract does not declare (the config-refusal arm).
-      { id: 'odd', type: 'end', label: 'Odd', config: { bogusKey: 1 } },
+      { id: 'odd', type: 'notify', label: 'Odd', config: { bogusKey: 1, recipients: ['a@b.c'], title: 'ok', message: 'ok' } },
       // A script with no callable (the script arm).
       { id: 'run', type: 'script', label: 'Run', config: {} },
+      // A sibling-block value slot (#27968): the path names its block.
+      {
+        id: 'call',
+        type: 'connector_action',
+        label: 'Call',
+        config: {},
+        connectorConfig: { connectorId: 'crm', actionId: 'push', input: { customerId: '{record.id}' } },
+      },
     ];
     const issues = validateStackExpressions({ flows: [flow(nodes, { edges: [] })] });
     const pathsOf = (id: string) => [...new Set(onNode(issues, id).map((i) => i.path))];
@@ -93,6 +101,7 @@ describe('a flow node config-value finding carries a key path (#27828)', () => {
     expect(pathsOf('say')).toEqual(['flows[0].nodes[2].config.title']);
     expect(pathsOf('odd')).toEqual(['flows[0].nodes[3].config.bogusKey']);
     expect(pathsOf('run')).toEqual(['flows[0].nodes[4].config.function']);
+    expect(pathsOf('call')).toEqual(['flows[0].nodes[5].connectorConfig.input.customerId']);
   });
 
   it('a map-form flows collection has no index to spell, so the finding keeps where alone', () => {
