@@ -617,6 +617,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.datasource-credentials-ref-restore-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.datasource-credentials-ref-restore-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.datasource-credentials-ref-restore-doors.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
       "verb": "delete",
       "pinned": 1

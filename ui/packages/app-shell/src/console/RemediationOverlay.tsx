@@ -178,14 +178,23 @@ function ChangePasswordForm({ forcedReset, message }: { forcedReset: boolean; me
         <h2 className="text-lg font-semibold">
           {forcedReset ? t('auth.remediation.password.resetTitle') : t('auth.remediation.password.title')}
         </h2>
-        {/* `message` is server-authored (localized upstream or not at all); only
-            the empty-message fallback is ours to translate. */}
+        {/* An expiry's `message` is server-authored (localized upstream or not
+            at all); only the empty-message fallback is ours to translate. A
+            forced reset's body is ours, as its title is: the code alone says
+            what happened, and the server's sentence only repeats the title in
+            the server's language. */}
         <p className="mt-1 text-sm text-muted-foreground">
-          {message || t('auth.remediation.password.fallbackMessage')}
+          {forcedReset
+            ? t('auth.remediation.password.resetBody')
+            : message || t('auth.remediation.password.fallbackMessage')}
         </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="rem-cur">{t('auth.remediation.password.current')}</Label>
+        {/* After a forced reset the password in hand is the one an
+            administrator issued, so the field is named for it. */}
+        <Label htmlFor="rem-cur">
+          {forcedReset ? t('auth.remediation.password.temporary') : t('auth.remediation.password.current')}
+        </Label>
         <Input id="rem-cur" type="password" autoComplete="current-password" value={current}
           onChange={(e) => setCurrent(e.target.value)} required />
       </div>

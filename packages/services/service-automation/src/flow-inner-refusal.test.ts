@@ -25,7 +25,10 @@
  *     through does not lose them; a `fault` edge that handles the failure
  *     leaves the run with none; a `map` item's or a `subflow` child's
  *     refusal crosses that container (nested too), and a child that met no
- *     refusal carries none;
+ *     refusal carries none; (#27743) a `try_catch` with no catch region
+ *     carries its last failed attempt's refusal, and a `subflow` child that
+ *     paused and fails on resume carries it to a caller holding either the
+ *     parent's run id or the child's (the leg a `map` item takes);
  *  4. ⛔ `error` is byte-identical to the composition it always had — the
  *     diagnostic channel does not move.
  *
@@ -43,6 +46,7 @@ import { registerCrudNodes } from './builtin/crud-nodes.js';
 import { registerLoopNode } from './builtin/loop-node.js';
 import { registerMapNode } from './builtin/map-node.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
+import { registerTryCatchNode } from './builtin/try-catch-node.js';
 import { DuplicateRecordError, ValidationError } from '@objectstack/objectql';
 import { PermissionDeniedError } from '@objectstack/plugin-security';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
@@ -496,5 +500,244 @@ describe('a `map` item and a `subflow` child carry the refusal across the contai
         }
         const outer = await engine.execute('outer', { userId: 'u1' });
         expect(outer.error).toBe(`Node 'call' failed: subflow '${WRITER}' failed: ${childText(fault)}`);
+    });
+});
+
+describe('#27743 — a `try_catch` with no catch region carries the guarded refusal', () => {
+    /** start → guard (try_catch, try = [mk], no catch) → end. */
+    function guardedFlow(retry?: Record<string, unknown>): any {
+        return {
+            name: 'guarded', label: 'Guarded', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'guard', type: 'try_catch', label: 'Guard',
+                    config: {
+                        try: {
+                            nodes: [
+                                { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'crm_account', fields: { name: 'Acme' } } },
+                            ],
+                            edges: [],
+                        },
+                        ...(retry ? { retry } : {}),
+                    },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'guard' },
+                { id: 'e2', source: 'guard', target: 'end' },
+            ],
+        };
+    }
+
+    function guardedEngine(data: any): AutomationEngine {
+        const engine = new AutomationEngine(makeLogger());
+        const ctx = ctxWith(data);
+        registerCrudNodes(engine, ctx);
+        registerTryCatchNode(engine, ctx);
+        return engine;
+    }
+
+    it('the region\'s refusal reaches the run — code and userMessage — and the text keeps its chain', async () => {
+        const err = markedHook();
+        const engine = guardedEngine(refusingData(err));
+        engine.registerFlow('guarded', guardedFlow());
+
+        const result = await engine.execute('guarded', { userId: 'u1' });
+
+        expect(result.status).toBe('failed');
+        expect(result.innerRefusal).toEqual({ code: 'RESOURCE_CONFLICT', message: err.message });
+        expect(result.userMessage).toBe(HOOK_USER_TEXT);
+        expect(result.error).toBe(
+            `Node 'guard' failed: try_catch 'guard': try region failed — `
+            + `Node 'mk' failed: create_record(crm_account) failed: ${err.message}`,
+        );
+    });
+
+    it('a retry ladder carries the LAST attempt\'s refusal, never an earlier one\'s', async () => {
+        const first = validation();
+        const last = permission();
+        let calls = 0;
+        const data = refusingData(undefined);
+        data.insert = async () => { calls += 1; throw calls === 1 ? first : last; };
+        const engine = guardedEngine(data);
+        engine.registerFlow('guarded', guardedFlow({ maxRetries: 1, backoffMs: 0 }));
+
+        const result = await engine.execute('guarded', { userId: 'u1' });
+
+        expect(calls).toBe(2);
+        expect(result.status).toBe('failed');
+        expect(result.innerRefusal).toEqual({ code: 'PERMISSION_DENIED', message: last.message });
+    });
+
+    it('control: a retry whose last attempt met a FAULT carries neither member, even after an earlier refusal', async () => {
+        let calls = 0;
+        const data = refusingData(undefined);
+        data.insert = async () => {
+            calls += 1;
+            throw calls === 1 ? validation() : new Error('ECONNREFUSED: could not reach the store');
+        };
+        const engine = guardedEngine(data);
+        engine.registerFlow('guarded', guardedFlow({ maxRetries: 1, backoffMs: 0 }));
+
+        const result = await engine.execute('guarded', { userId: 'u1' });
+
+        expect(calls).toBe(2);
+        expect(result.status).toBe('failed');
+        expect('innerRefusal' in result).toBe(false);
+        expect('userMessage' in result).toBe(false);
+    });
+});
+
+describe('#27743 — a `map` item or `subflow` child that pauses and fails on resume', () => {
+    /** start → hold (pause) → mk (create_record) → end — the child that fails after its pause. */
+    const PAUSING_WRITER = 'hold_then_write';
+
+    function pausingEngine(err: unknown): AutomationEngine {
+        const engine = new AutomationEngine(makeLogger());
+        const ctx = ctxWith(refusingData(err));
+        registerCrudNodes(engine, ctx);
+        registerMapNode(engine, ctx);
+        registerSubflowNode(engine, ctx);
+        engine.registerNodeExecutor({
+            type: 'hold',
+            descriptor: defineActionDescriptor({ type: 'hold', version: '1.0.0', name: 'hold', supportsPause: true, resumeAuthority: 'any' }),
+            async execute() { return { success: true, suspend: true }; },
+        } as NodeExecutor);
+        engine.registerNodeExecutor({
+            type: 'seed',
+            async execute(_node, variables) {
+                variables.set('rows', [{ n: 1 }]);
+                return { success: true };
+            },
+        } as NodeExecutor);
+        engine.registerFlow(PAUSING_WRITER, {
+            name: PAUSING_WRITER, label: 'Hold then write', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'hold', type: 'hold', label: 'Hold' },
+                { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'crm_account', fields: { name: 'Acme' } } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'hold' },
+                { id: 'e2', source: 'hold', target: 'mk' },
+                { id: 'e3', source: 'mk', target: 'end' },
+            ],
+        } as any);
+        return engine;
+    }
+
+    function subflowFlow(name: string, flowName: string): any {
+        return {
+            name, label: name, type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'call', type: 'subflow', label: 'Call', config: { flowName } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        };
+    }
+
+    function mapFlow(name: string, flowName: string): any {
+        return {
+            name, label: name, type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'query', type: 'seed', label: 'Seed' },
+                {
+                    id: 'each', type: 'map', label: 'Each',
+                    config: { collection: { dialect: 'cel', source: 'rows' }, flowName, iteratorVariable: 'row' },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'query' },
+                { id: 'e2', source: 'query', target: 'each' },
+                { id: 'e3', source: 'each', target: 'end' },
+            ],
+        };
+    }
+
+    const childRunIdOf = (engine: AutomationEngine) =>
+        engine.listSuspendedRuns().find(r => r.flowName === PAUSING_WRITER)?.runId;
+
+    it('subflow, resumed at the PARENT\'s run id (the delegated leg): the child\'s refusal reaches the caller', async () => {
+        const err = markedHook();
+        const engine = pausingEngine(err);
+        engine.registerFlow('outer', subflowFlow('outer', PAUSING_WRITER));
+
+        const paused = await engine.execute('outer', { userId: 'u1' });
+        expect(paused.status).toBe('paused');
+        const childRunId = childRunIdOf(engine)!;
+        const result = await engine.resume(paused.runId!, {});
+
+        expect(result.success).toBe(false);
+        expect(result.innerRefusal).toEqual({ code: 'RESOURCE_CONFLICT', message: err.message });
+        expect(result.userMessage).toBe(HOOK_USER_TEXT);
+        expect(result.error).toBe(
+            `subflow run '${childRunId}' (${PAUSING_WRITER}) failed: `
+            + `Node 'mk' failed: create_record(crm_account) failed: ${err.message}`,
+        );
+    });
+
+    it('subflow → subflow, resumed at the TOP run id: the refusal crosses both delegated frames', async () => {
+        const err = permission();
+        const engine = pausingEngine(err);
+        engine.registerFlow('middle', subflowFlow('middle', PAUSING_WRITER));
+        engine.registerFlow('outer', subflowFlow('outer', 'middle'));
+
+        const paused = await engine.execute('outer', { userId: 'u1' });
+        expect(paused.status).toBe('paused');
+        const result = await engine.resume(paused.runId!, {});
+
+        expect(result.success).toBe(false);
+        expect(result.innerRefusal).toEqual({ code: 'PERMISSION_DENIED', message: err.message });
+    });
+
+    it('subflow, resumed at the CHILD\'s run id (the up-bubble leg): the caller already gets the refusal', async () => {
+        const err = markedHook();
+        const engine = pausingEngine(err);
+        engine.registerFlow('outer', subflowFlow('outer', PAUSING_WRITER));
+
+        const paused = await engine.execute('outer', { userId: 'u1' });
+        expect(paused.status).toBe('paused');
+        const result = await engine.resume(childRunIdOf(engine)!, {});
+
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('stranded');
+        expect(result.innerRefusal).toEqual({ code: 'RESOURCE_CONFLICT', message: err.message });
+        expect(result.userMessage).toBe(HOOK_USER_TEXT);
+    });
+
+    it('map, its item resumed at the CHILD\'s run id (the bubble leg a `map` takes): the caller already gets the refusal', async () => {
+        const err = validation();
+        const engine = pausingEngine(err);
+        engine.registerFlow('recalc', mapFlow('recalc', PAUSING_WRITER));
+
+        const paused = await engine.execute('recalc', { userId: 'u1' });
+        expect(paused.status).toBe('paused');
+        const result = await engine.resume(childRunIdOf(engine)!, {});
+
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('stranded');
+        expect(result.innerRefusal).toEqual({ code: 'VALIDATION_FAILED', message: 'Amount must be positive' });
+    });
+
+    it('control: a child that fails on resume with a FAULT carries neither member on the delegated leg', async () => {
+        const engine = pausingEngine(new Error('ECONNREFUSED: could not reach the store'));
+        engine.registerFlow('outer', subflowFlow('outer', PAUSING_WRITER));
+
+        const paused = await engine.execute('outer', { userId: 'u1' });
+        const result = await engine.resume(paused.runId!, {});
+
+        expect(result.success).toBe(false);
+        expect('innerRefusal' in result).toBe(false);
+        expect('userMessage' in result).toBe(false);
     });
 });

@@ -298,13 +298,16 @@ describe('the builder chips (objectui#12601)', () => {
 });
 
 describe('the apps strip (objectui#12601)', () => {
-  it('Setup is not among the tiles: it is the heading’s System Settings link, on the /setup alias’s route', () => {
+  it('Setup is not among the tiles: it is the heading’s link, named for the app, on the /setup alias’s route', () => {
     render(<HomePage />);
     expect(screen.getByTestId('app-tile-crm')).toBeInTheDocument();
     expect(screen.queryByTestId('app-tile-setup')).toBeNull();
 
     const link = screen.getByTestId('home-system-settings-link');
-    expect(link).toHaveTextContent('«home.systemSettings»');
+    // objectstack#27521 row 1 — named by the Setup app's own label, the name
+    // its header and the app switcher show.
+    expect(link).toHaveTextContent('Setup');
+    expect(link).not.toHaveTextContent('«home.systemSettings»');
     expect(link).toHaveAttribute('href', '/apps/com.objectstack.setup');
     // The count pill counts the tiles, so Setup is not in it.
     expect(screen.getByTestId('home-apps-count')).toHaveTextContent(/^1$/);

@@ -24,13 +24,15 @@
  *
  * The console's own list (`app-shell` `ObjectView` → `useObjectActions`) is
  * the behaviour matched, and every case below reads one of its steps:
- *  - a row asks "Are you sure you want to delete this record?"; a selection
+ *  - a row asks "Are you sure you want to delete this record? This cannot be
+ *    undone." (objectstack-ai/objectstack#27823); a selection
  *    asks "Delete N selected records? This cannot be undone." once; the
  *    title names the row (or counts the selection) and the confirm button is
  *    a destructive "Delete" (objectui#11695);
  *  - Delete deletes through `dataSource.delete`, one call per record, and the
  *    row is gone after the refresh; Cancel deletes nothing;
- *  - success toasts `{{label}} deleted successfully` /
+ *  - success toasts `{{label}} "{{name}}" deleted` (the row's name,
+ *    objectstack-ai/objectstack#27823) /
  *    `Deleted N {{label}} records`; a failure toasts `Failed to delete
  *    {{label}}` (with the error message) or `N deleted, M failed`;
  *  - whether the affordance is offered at all is `ObjectGrid`'s own verdict,
@@ -224,7 +226,9 @@ describe('objectui#10383 — row Delete on the registered object-view path', () 
     await userEvent.click(deleteItem!);
 
     const dialog = await confirmDialog();
-    expect(within(dialog).getByText('Are you sure you want to delete this record?')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('Are you sure you want to delete this record? This cannot be undone.'),
+    ).toBeInTheDocument();
     // objectui#11695 — the title names the row and its object; the confirm is
     // a destructive Delete, not the generic "Confirm Action" / "Continue".
     expect(within(dialog).getByRole('heading')).toHaveTextContent('Delete Test object "Alice"?');
@@ -239,7 +243,7 @@ describe('objectui#10383 — row Delete on the registered object-view path', () 
     expect(ds.delete).toHaveBeenCalledWith(OBJECT, 'r1');
     await waitFor(() => expect(screen.queryByText('Alice')).not.toBeInTheDocument());
     expect(screen.getByText('Bob')).toBeInTheDocument();
-    expect(successSpy).toHaveBeenCalledWith('Test object deleted successfully');
+    expect(successSpy).toHaveBeenCalledWith('Test object "Alice" deleted');
     expect(errorSpy).not.toHaveBeenCalled();
   });
 

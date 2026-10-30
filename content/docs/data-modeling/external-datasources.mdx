@@ -17,9 +17,11 @@ auto-connected, validated at boot, and queryable — with no application code.**
 This guide is about reading/writing the *live* remote tables (federation). To
 *copy* rows into ObjectStack-owned tables instead, see seed data / data sync. For
 the plain multi-datasource routing of **managed** databases ObjectStack owns, see
-[Database Drivers](/docs/data-modeling/drivers). When the remote is not a database a
-built-in driver reaches — a REST API, a planning engine, a device gateway — serve the
-object from your own plugin driver instead: [Virtual objects](/docs/data-modeling/virtual-objects).
+[Database Drivers](/docs/data-modeling/drivers). When the remote is an OData v4 service
+(SAP S/4HANA, Dynamics 365), bind it through the shipped OData driver:
+[OData datasources](/docs/data-modeling/odata-datasources). When it is neither — a REST
+API, a planning engine, a device gateway — serve the object from your own plugin driver
+instead: [Virtual objects](/docs/data-modeling/virtual-objects).
 </Callout>
 
 ## 1. Declare the datasource
@@ -312,6 +314,8 @@ default allows all connects (subject to the gating above).
 - [Database Drivers](/docs/data-modeling/drivers) — managed multi-datasource routing,
   [read-only via database privileges](/docs/data-modeling/drivers#read-only-grant-it-at-the-database-not-in-metadata),
   and [why the platform does not route read replicas](/docs/data-modeling/drivers#read-replicas-the-platform-does-not-route).
+- [OData datasources](/docs/data-modeling/odata-datasources) — the same binding over an
+  OData v4 service, through the shipped OData driver.
 - [Virtual objects](/docs/data-modeling/virtual-objects) — the same binding served by
   a plugin driver you write, for a remote that is not a database.
 - [Datasource reference](/docs/references/data/datasource) — every `defineDatasource` field.

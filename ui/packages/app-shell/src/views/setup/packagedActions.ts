@@ -87,6 +87,12 @@ export interface PackagedActionRow {
   objectName: string;
   /** Display name; falls back to the machine name when the item has none. */
   label: string;
+  /**
+   * The owning object's label as `GET /meta/object` serves it, when the
+   * object is in that list and declares one; the page resolves it in the
+   * reader's language and keeps the machine name beside it.
+   */
+  objectLabel?: string;
   /** Activation as the ledger reports it — `true` when no row says otherwise. */
   enabled: boolean;
 }
@@ -241,10 +247,12 @@ export function collectPackagedActions(
     seen.add(key);
     if (!isPackagedFlowItem(packagedActionSource(action, obj))) return;
     const label = a?.label;
+    const objectLabel = (obj as { label?: unknown } | null | undefined)?.label;
     rows.push({
       name,
       objectName,
       label: typeof label === 'string' && label ? label : name,
+      ...(typeof objectLabel === 'string' && objectLabel ? { objectLabel } : {}),
       enabled: activation.get(name) ?? true,
     });
   };

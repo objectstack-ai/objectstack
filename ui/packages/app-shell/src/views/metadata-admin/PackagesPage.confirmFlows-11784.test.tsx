@@ -134,14 +134,14 @@ async function settle() {
 }
 
 async function openDeleteDialog() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Delete app' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete package' }));
   return screen.findByTestId('pkg-detail-delete-dialog');
 }
 
-describe('PackageDetailSheet — Delete app is one in-app dialog (objectui#11784)', () => {
+describe('PackageDetailSheet — Delete package is one in-app dialog (objectui#11784)', () => {
   it('Cancel deletes nothing, however the question is asked', async () => {
     renderSheet();
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete app' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete package' }));
     await settle();
     // If a dialog is up, answer it with Cancel; a native confirm was already
     // answered by the spy (OK, then Cancel).
@@ -367,7 +367,7 @@ describe('PackageDetailSheet — Duplicate is the landing inline form (objectui#
 describe('PackageDetailSheet — no native dialog on these three paths (objectui#11784)', () => {
   it('Delete, Discard and Duplicate never call window.confirm or window.prompt', async () => {
     renderSheet();
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete app' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete package' }));
     await settle();
     const del = screen.queryByTestId('pkg-detail-delete-dialog');
     if (del) fireEvent.click(within(del).getByTestId('pkg-detail-delete-cancel'));
@@ -422,7 +422,7 @@ describe('Console Packages page — a delete there stays on the page (objectui#1
 
     await waitFor(() => expect(deletes()).toHaveLength(1));
     await waitFor(() => expect(listReads()).toHaveLength(2));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete app' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete package' })).toBeNull());
     expect(screen.getByTestId('path').textContent).toBe(START);
     expect(screen.queryByTestId('studio-landing')).toBeNull();
     expect(screen.queryByTestId('elsewhere')).toBeNull();
