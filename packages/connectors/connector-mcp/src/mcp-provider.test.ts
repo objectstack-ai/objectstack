@@ -5,12 +5,15 @@
 // fake client here), listing its tools, and mapping them to actions.
 
 import { describe, it, expect } from 'vitest';
+import { LiteKernel } from '@objectstack/core';
+import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ConnectorProviderContext } from '@objectstack/spec/integration';
 import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import type { McpClientLike, McpToolDescriptor, McpTransport } from './mcp-connector.js';
+import { ConnectorMcpPlugin } from './connector-mcp-plugin.js';
 import { createMcpProviderFactory, MCP_PROVIDER_KEY } from './mcp-provider.js';
 
 const TOOLS: McpToolDescriptor[] = [
@@ -362,5 +365,145 @@ describe('mcp provider: declarative stdio working directory (#22423)', () => {
         expect(err).toBeInstanceOf(Error);
         expect(isConnectorUpstreamUnavailable(err)).toBe(false);
         expect(seen.transport).toBeUndefined();
+    });
+});
+
+// #27402 — `providerConfig.include` is the allowlist that keeps destructive
+// tools away from flows and agents, with the `openapi` provider's one meaning
+// (#26709, #27387): a shape it cannot read is refused before connecting, an
+// entry naming a tool the server does not list is refused after listing, and
+// the instance never falls back to exposing every tool.
+describe('mcp provider: providerConfig.include refuses loudly (#27402)', () => {
+    const SERVER_TOOLS: McpToolDescriptor[] = [
+        { name: 'web_search', description: 'Search the web' },
+        { name: 'delete_everything', description: 'Destructive' },
+    ];
+    const http = { kind: 'http', url: 'https://mcp.vendor.example/mcp' };
+
+    /** A fake server listing SERVER_TOOLS; records whether it was connected and closed. */
+    function server() {
+        const state = { connected: false, closed: false };
+        const clientFactory = async (): Promise<McpClientLike> => {
+            state.connected = true;
+            return {
+                listTools: async () => SERVER_TOOLS,
+                callTool: async () => ({ content: [] }),
+                close: async () => { state.closed = true; },
+            };
+        };
+        return { clientFactory, state };
+    }
+
+    async function refusal(include: unknown) {
+        const { clientFactory, state } = server();
+        const factory = createMcpProviderFactory({ clientFactory });
+        const err: unknown = await Promise.resolve(
+            factory(ctx({ name: 'vendor', providerConfig: { transport: http, include } })),
+        ).then(
+            (mat) => { throw new Error(`expected a refusal, got actions ${Object.keys(mat.handlers).join(', ')}`); },
+            (e: unknown) => e,
+        );
+        return { err, state };
+    }
+
+    /** A configuration fault: plain, neither retryable nor a credential refusal. */
+    function expectConfigurationFault(err: unknown) {
+        expect(err).toBeInstanceOf(Error);
+        expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        expect(isConnectorCredentialRejected(err)).toBe(false);
+    }
+
+    it.each([
+        ['a string', 'web_search'],
+        ['an array with a non-string entry', ['web_search', 7]],
+        ['an array with an empty name', ['web_search', '']],
+        ['an object', { web_search: true }],
+        ['null', null],
+    ])('refuses an include that is %s, before connecting', async (_shape, include) => {
+        const { err, state } = await refusal(include);
+        expectConfigurationFault(err);
+        expect((err as Error).message).toMatch(
+            /^connector-mcp provider: connector 'vendor' providerConfig\.include must be an array of tool names \(strings\)/,
+        );
+        expect(state.connected).toBe(false);
+    });
+
+    it('refuses an entry naming a tool the server does not list, naming it and the listed tools, and closes the client', async () => {
+        const { err, state } = await refusal(['nope']);
+        expectConfigurationFault(err);
+        expect((err as Error).message).toMatch(
+            /^connector-mcp provider: connector 'vendor' providerConfig\.include names 'nope', which the MCP server does not list\./,
+        );
+        expect((err as Error).message).toContain("the server lists 2 tool(s): 'web_search', 'delete_everything'.");
+        expect(state.closed).toBe(true);
+    });
+
+    it('refuses when one entry is listed and another is not: no partial instance', async () => {
+        const { err } = await refusal(['web_search', 'nope', 'nope']);
+        expectConfigurationFault(err);
+        expect((err as Error).message).toContain("providerConfig.include names 'nope', which");
+    });
+
+    it('an include of listed tools exposes exactly those tools', async () => {
+        const { clientFactory, state } = server();
+        const mat = await createMcpProviderFactory({ clientFactory })(
+            ctx({ name: 'vendor', providerConfig: { transport: http, include: ['web_search'] } }),
+        );
+        expect(Object.keys(mat.handlers)).toEqual(['web_search']);
+        expect(mat.def.actions?.map((a) => a.key)).toEqual(['web_search']);
+        expect(state.closed).toBe(false);
+    });
+
+    it('control: no include exposes every tool the server lists', async () => {
+        const { clientFactory } = server();
+        const mat = await createMcpProviderFactory({ clientFactory })(
+            ctx({ name: 'vendor', providerConfig: { transport: http } }),
+        );
+        expect(Object.keys(mat.handlers)).toEqual(['web_search', 'delete_everything']);
+    });
+
+    // Through the materializer: a refused include fails the boot naming the
+    // instance and the fault, and no connector exposing the server's tools is
+    // ever registered under the declared name.
+    it('a declarative instance with a string include fails boot, never registering every tool', async () => {
+        const { clientFactory, state } = server();
+        const declared = [
+            {
+                name: 'vendor_mcp',
+                label: 'Vendor MCP',
+                type: 'api',
+                provider: 'mcp',
+                providerConfig: { transport: http, include: 'web_search' },
+            },
+        ];
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        kernel.use(new AutomationServicePlugin());
+        kernel.use({
+            name: 'test.connector-metadata',
+            type: 'standard',
+            version: '1.0.0',
+            dependencies: ['com.objectstack.service-automation'],
+            async init(c: { registerService(name: string, service: unknown): void }) {
+                c.registerService('objectql', {
+                    registry: { listItems: (type: string) => (type === 'connector' ? declared : []) },
+                });
+            },
+            async start() {},
+        } as never);
+        kernel.use(new ConnectorMcpPlugin({ clientFactory }));
+        try {
+            const booted: unknown = await kernel.bootstrap().then(() => undefined, (e: unknown) => e);
+            expect(booted).toBeInstanceOf(Error);
+            expect((booted as Error).message).toContain(
+                "failed to materialize connector instance 'vendor_mcp' via provider 'mcp'",
+            );
+            expect((booted as Error).message).toContain('providerConfig.include must be an array of tool names');
+            expect(state.connected).toBe(false);
+            const engine = kernel.getService('automation') as AutomationEngine | undefined;
+            const descriptor = engine?.getConnectorDescriptors().find((d) => d.name === 'vendor_mcp');
+            expect(descriptor?.actions ?? []).toEqual([]);
+        } finally {
+            await kernel.shutdown().catch(() => {});
+        }
     });
 });
