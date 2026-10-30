@@ -116,6 +116,38 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // slot's, and nothing is sent upstream.
             const input = resolveValueSlotMap(engine, cfg.input, variables, 'input', context);
 
+            // #27995 — the action's declared `inputSchema` is a contract, not a
+            // hint: the EVALUATED input is judged against it here, after the
+            // value slots resolved and before the handler is called, so a call
+            // missing a required parameter (or carrying one of the wrong type)
+            // fails this step instead of reaching the remote API, whose answer
+            // to a malformed call is the remote's to choose. Read from the
+            // designer-facing descriptor — `inputSchema` is projected from the
+            // stored def unchanged, and it is the very schema an author picks
+            // the action by on `GET /connectors`, so what is enforced is what
+            // was shown. A `runtime` failure, not a guard: the input can come
+            // from run data, so a `fault` edge may handle it.
+            const inputSchema = engine
+                .getConnectorDescriptors()
+                .find((d) => d.name === cfg.connectorId)
+                ?.actions.find((a) => a.key === cfg.actionId)?.inputSchema;
+            const violations: string[] = [];
+            collectInputSchemaViolations(inputSchema, input, '', violations);
+            if (violations.length > 0) {
+                const shown = violations.slice(0, MAX_NAMED_VIOLATIONS);
+                const more = violations.length - shown.length;
+                return {
+                    success: false,
+                    code: 'VALIDATION_ERROR',
+                    error:
+                        `connector_action '${node.id}': input for '${cfg.connectorId}.${cfg.actionId}' `
+                        + `does not match the action's inputSchema — ${shown.join('; ')}`
+                        + (more > 0 ? `; and ${more} more` : '')
+                        + `. Nothing was sent. Fix connectorConfig.input so it satisfies the inputSchema `
+                        + `GET /api/v1/automation/connectors lists for this action.`,
+                };
+            }
+
             try {
                 const output = await handler(input, handlerCtx);
                 return {
@@ -148,4 +180,80 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
     });
 
     ctx.logger.info('[Connector] 1 built-in node executor registered (connector_action)');
+}
+
+/** How many violations one refusal names before it summarises the rest as a count. */
+const MAX_NAMED_VIOLATIONS = 5;
+
+/** JSON Schema `type` names this check can judge; any other name leaves the value unjudged. */
+const JUDGED_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'object', 'array', 'null']);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+
+/** The value's JSON kind, or `undefined` for one with no JSON spelling to judge (a `Date`, a `Map`, …). */
+function jsonKindOf(value: unknown): string | undefined {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'array';
+    if (isPlainRecord(value)) return 'object';
+    if (typeof value === 'bigint') return 'number';
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return typeof value;
+    return undefined;
+}
+
+function matchesType(type: string, value: unknown, kind: string): boolean {
+    if (type === 'integer') return typeof value === 'bigint' || (typeof value === 'number' && Number.isInteger(value));
+    return type === kind;
+}
+
+/**
+ * Collect where `value` breaks `schema` (#27995), each as a sentence naming the
+ * parameter by its dotted path. Judges a deliberate SUBSET of JSON Schema —
+ * `required`, `type` (with OpenAPI 3.0 `nullable`), and descent through
+ * `properties` and `items` — because the schemas reaching here are not ours:
+ * an OpenAPI document's operation (which may keep an unresolved `$ref`), an
+ * MCP server's `tools/list` entry (any draft), or a code connector's literal.
+ * A keyword outside the subset (`$ref`, `oneOf`/`anyOf`/`allOf`, `enum`,
+ * `format`, bounds, `additionalProperties`, …) never refuses a call: the
+ * remote still judges those, as it did before. A missing piece is the narrow
+ * direction on purpose — a call this check refuses is one the declared
+ * schema itself says is wrong under every draft.
+ */
+function collectInputSchemaViolations(schema: unknown, value: unknown, path: string, out: string[]): void {
+    if (!isPlainRecord(schema)) return;
+    const kind = jsonKindOf(value);
+    if (kind === undefined) return;
+    const declared = typeof schema.type === 'string' ? [schema.type] : Array.isArray(schema.type) ? schema.type : [];
+    const types = declared.filter((t): t is string => typeof t === 'string');
+    const judgeable = types.length > 0 && types.length === declared.length && types.every((t) => JUDGED_TYPES.has(t));
+    if (
+        judgeable
+        && !(kind === 'null' && schema.nullable === true)
+        && !types.some((t) => matchesType(t, value, kind))
+    ) {
+        out.push(`'${path || 'input'}' must be ${types.join(' or ')}, got ${kind}`);
+        return;
+    }
+    if (kind === 'object') {
+        const record = value as Record<string, unknown>;
+        if (Array.isArray(schema.required)) {
+            for (const key of schema.required) {
+                if (typeof key === 'string' && (!Object.prototype.hasOwnProperty.call(record, key) || record[key] === undefined)) {
+                    out.push(`missing required '${path ? `${path}.${key}` : key}'`);
+                }
+            }
+        }
+        if (isPlainRecord(schema.properties)) {
+            for (const [key, sub] of Object.entries(schema.properties)) {
+                if (Object.prototype.hasOwnProperty.call(record, key) && record[key] !== undefined) {
+                    collectInputSchemaViolations(sub, record[key], path ? `${path}.${key}` : key, out);
+                }
+            }
+        }
+    } else if (kind === 'array' && isPlainRecord(schema.items)) {
+        (value as unknown[]).forEach((item, i) => collectInputSchemaViolations(schema.items, item, `${path}[${i}]`, out));
+    }
 }
