@@ -202,6 +202,36 @@
  * baseline) is not a script and is not derived. The self-test pins the first
  * two against the real tree.
  *
+ * ## The fourth subject: Test Core and the generic test tasks' root inputs (#27961)
+ *
+ * turbo.json's generic `test` and `test:repo` tasks -- the two Test Core's
+ * `turbo run test test:repo` names -- run for every package Test Core tests,
+ * so each `$TURBO_ROOT$/...` input of theirs moves every package's test hash.
+ * Before this subject nothing held them to the scheduler: `vitest.preset.mts`
+ * sat in `core:` by hand, and five ui-tree inputs (`ui/vitest.config.mts`,
+ * `ui/vitest.setup.*`, `ui/scripts/test-shard-*` and the Console's two Vite
+ * configs) matched no list the `test` job's `if:` reads, so a diff confined to
+ * one started Test Core first in the merge queue.
+ *
+ * `judgeTestInputs` derives the population from turbo.json and judges it with
+ * the same pure-string rule against the lists the `test` job ORs, read back
+ * out of its `if:` exactly as the first subject reads them. The remedy is a
+ * `core:` row, never `crosspkg:`: the first subject holds `crosspkg` to the
+ * declarations, and a generic test input is no package's declaration.
+ *
+ * The population is also a REASON for the third subject's leftover rule. A
+ * literal `core:` row in a directory holding a build input is there for a test
+ * input just as legitimately: without it, `ui/vitest.config.mts` (beside the
+ * build input `ui/tsconfig.json`) read as a leftover the moment it was added.
+ *
+ * Known bounds: a `<package>#test` task's root inputs are the first subject's
+ * population (the declarations `--verify` mirrors into turbo.json) and are not
+ * judged a second time here; `globalDependencies` are the third subject's, and
+ * `core` covering them starts Test Core too. Refusals: the first subject's
+ * reads of ci.yml and the `test` job's `if:`, turbo.json unreadable or not
+ * JSON, no `tasks` map, and no generic `test` task. The self-test pins the task
+ * pair against the real job's command.
+ *
  * ## Wiring
  *
  * Invoked from `.github/workflows/lint.yml` through its root alias, which runs
@@ -253,11 +283,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // (see the header); the numbers below keep their names.
   '(9) Build Core and the build inputs turbo.json declares': 42,
   '(10) Build Core and the scripts its own steps run': 30,
+  '(11) Test Core and the generic test tasks\' root inputs': 18,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -666,10 +697,12 @@ export function judgeBuildInputs(source, turboSource, manifestSource, closureOf 
   // populations alone: a LITERAL entry in a directory that holds a declared
   // literal build input or a guard is there for the same reason those are, so
   // one that covers none of them is a leftover -- of an input turbo.json
-  // dropped, or of a guard step Build Core dropped. Root-level files and
-  // pattern entries are not this subject's to judge -- nothing here says why
-  // they are in `core`.
-  const reasons = [...declared.rows, ...guards.rows];
+  // dropped, or of a guard step Build Core dropped. A generic test task's root
+  // input is a reason too (the fourth subject, #27961); a turbo.json without
+  // one only shrinks the reasons, which reports more, never less. Root-level
+  // files and pattern entries are not this subject's to judge -- nothing here
+  // says why they are in `core`.
+  const reasons = [...declared.rows, ...guards.rows, ...(testInputsOf(turbo).rows ?? [])];
   const reasonDirs = new Set(reasons.filter(({ path }) => !WILDCARD.test(path)).map(({ path }) => dirOf(path)).filter(Boolean));
   const stale = entries.filter(
     (entry) =>
@@ -722,10 +755,11 @@ function reportBuildInputs(verdict) {
   if (verdict.stale.length > 0) {
     problems.push(
       `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries literal entr(ies) beside the build inputs and Build Core's ` +
-        `guards that cover none of them -- left over from an input ${TURBO_CONFIG} no longer declares, or from a ` +
-        `script no \`${BUILD_JOB}\` step runs any more:\n` +
+        `guards that cover none of them, nor any generic test task's root input -- left over from an input ` +
+        `${TURBO_CONFIG} no longer declares, or from a script no \`${BUILD_JOB}\` step runs any more:\n` +
         verdict.stale.map((e) => `      ${e}`).join('\n') +
-        `\n    Delete them. Each one starts the whole core pipeline on a diff that neither a build nor Build Core reads.`,
+        `\n    Delete them. Each one starts the whole core pipeline on a diff that no build, no test task and no ` +
+        'Build Core step reads.',
     );
   }
   if (problems.length > 0) {
@@ -746,6 +780,92 @@ function reportBuildInputs(verdict) {
       `\`${BUILD_JOB}\` job's \`if:\` reads; no literal \`${BUILD_FILTER}\` entry beside them is a leftover. Left out ` +
       `because \`${BUILD_COMMAND}\` excludes their package: ` +
       `${verdict.excludedTasks.length > 0 ? verdict.excludedTasks.join(', ') : 'none'}.`,
+  );
+  return 0;
+}
+
+// ── The fourth subject: Test Core and the generic test tasks' root inputs (#27961) ──
+
+/**
+ * The generic turbo tasks Test Core runs for every package it tests: the step's
+ * `turbo run test test:repo`. The self-test pins this pair against the real job.
+ */
+export const TEST_TASKS = Object.freeze(['test', 'test:repo']);
+/** Where an uncovered generic test input belongs -- see the header for why not `crosspkg`. */
+export const TEST_REMEDY_FILTER = 'core';
+
+/**
+ * Every repo-root-relative `$TURBO_ROOT$/...` input of a TEST_TASKS task, each
+ * with the task that names it, or `{ refusal }`. Negated inputs are skipped, as
+ * for the build inputs: a negation can only narrow a hash.
+ */
+export function testInputsOf(turbo) {
+  const tasks = turbo?.tasks;
+  if (!tasks || typeof tasks !== 'object' || Array.isArray(tasks)) {
+    return { refusal: `${TURBO_CONFIG} declares no \`tasks\` map.` };
+  }
+  if (!tasks[TEST_TASKS[0]]) {
+    return { refusal: `${TURBO_CONFIG} declares no generic \`${TEST_TASKS[0]}\` task -- the test task Test Core runs has moved.` };
+  }
+  const byPath = new Map();
+  for (const task of TEST_TASKS) {
+    const inputs = Array.isArray(tasks[task]?.inputs) ? tasks[task].inputs : [];
+    for (const input of inputs) {
+      if (typeof input !== 'string' || !input.startsWith(TURBO_ROOT)) continue;
+      const path = input.slice(TURBO_ROOT.length);
+      byPath.set(path, [...(byPath.get(path) ?? []), task]);
+    }
+  }
+  return { rows: [...byPath].map(([path, from]) => ({ path, from })) };
+}
+
+/**
+ * The verdict on Test Core's scheduling against the generic test tasks' root
+ * inputs. Takes the two SOURCE STRINGS (null for one that could not be read);
+ * `{ refusal }` for every state in which the subject was not read.
+ */
+export function judgeTestInputs(source, turboSource) {
+  const read = readSchedulingFilters(source);
+  if (read.refusal) return read;
+  if (typeof turboSource !== 'string') return { refusal: `${TURBO_CONFIG} could not be read.` };
+  let turbo;
+  try {
+    turbo = JSON.parse(turboSource);
+  } catch (err) {
+    return { refusal: `${TURBO_CONFIG} could not be read as JSON: ${err?.message ?? err}` };
+  }
+  const declared = testInputsOf(turbo);
+  if (declared.refusal) return declared;
+  const covered = [];
+  const uncovered = [];
+  for (const row of declared.rows) {
+    const verdict = coverageVerdict(row.path, read.entries);
+    (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
+  }
+  return { condition: read.condition, inputs: declared.rows, covered, uncovered };
+}
+
+function reportTestInputs(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge Test Core's test inputs.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  if (verdict.uncovered.length > 0) {
+    console.error(
+      `FAIL: ci.yml's scheduling filters are out of step with the generic test tasks' root inputs.\n\n` +
+        `  - ${verdict.uncovered.length} root input(s) of ${TEST_TASKS.map((t) => `\`${t}\``).join(' / ')} in ${TURBO_CONFIG} are ` +
+        `covered by NEITHER ${SCHEDULING_FILTERS.map((n) => `\`${n}\``).join(' nor ')} in ${CI_WORKFLOW}. A diff confined to\n` +
+        `    one moves every package's test hash and starts no \`${SCHEDULED_JOB}\` job, so the merge queue is the first place\n` +
+        `    Test Core runs on it:\n` +
+        verdict.uncovered.map((r) => `      ${r.path}   (${r.from.join(', ')})`).join('\n') +
+        `\n    Add each one VERBATIM to the \`${TEST_REMEDY_FILTER}:\` filter in ${CI_WORKFLOW}. Not \`${REMEDY_FILTER}:\`, which is held to\n` +
+        '    the cross-package declarations, and not the subtree it sits in.\n',
+    );
+    return 1;
+  }
+  console.log(
+    `OK: all ${verdict.inputs.length} root input(s) of ${TEST_TASKS.map((t) => `\`${t}\``).join(' / ')} in ${TURBO_CONFIG} are ` +
+      `covered by ${SCHEDULING_FILTERS.map((n) => `\`${n}\``).join(' or ')}, which the \`${SCHEDULED_JOB}\` job's \`if:\` reads.`,
   );
   return 0;
 }
@@ -817,7 +937,8 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
   const buildCode = reportBuildInputs(
     judgeBuildInputs(source, readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST), closureIn(root)),
   );
-  return crosspkg === 0 && buildCode === 0 ? 0 : 1;
+  const testCode = reportTestInputs(judgeTestInputs(source, readOrNull(root, TURBO_CONFIG)));
+  return crosspkg === 0 && buildCode === 0 && testCode === 0 ? 0 : 1;
 }
 
 /** A root file's text, or null when it cannot be read -- the judge refuses on null by name. */
@@ -865,10 +986,21 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
   }
   for (const entry of build.stale) console.log(`FAIL ${entry}   stale: covers no declared build input and no script a ${BUILD_JOB} step runs`);
   console.log(`left out (excluded by \`${BUILD_COMMAND}\`): ${build.excludedTasks.join(', ') || 'none'}`);
+
+  const test = judgeTestInputs(readFileSync(join(root, CI_WORKFLOW), 'utf8'), readOrNull(root, TURBO_CONFIG));
+  if (test.refusal) {
+    console.error(`FAIL: ${test.refusal}`);
+    return 1;
+  }
+  console.log(`\nroot inputs of ${TEST_TASKS.join(' / ')} in ${TURBO_CONFIG}, against ${SCHEDULING_FILTERS.join(' + ')} (${SCHEDULED_JOB}):`);
+  for (const row of [...test.covered, ...test.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
+  }
   return verdict.uncovered.length > 0 ||
     build.uncovered.length > 0 ||
     build.guardsUncovered.length > 0 ||
-    build.stale.length > 0
+    build.stale.length > 0 ||
+    test.uncovered.length > 0
     ? 1
     : 0;
 }
@@ -1607,6 +1739,96 @@ export async function selfTest() {
     `bound 2: the local composite action(s) Build Core uses (${localActions.join(', ') || 'none found'}) run no repository script -- got ${actionScripts.join(', ') || 'none'}`,
   );
 
+  // ── (11) Test Core and the generic test tasks' root inputs (#27961) ─────
+  battery('(11) Test Core and the generic test tasks\' root inputs');
+  const testTurbo = ({ tasks } = {}) =>
+    JSON.stringify({
+      tasks: tasks ?? {
+        build: { inputs: ['$TURBO_DEFAULT$'] },
+        test: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/vitest.preset.mts', '$TURBO_ROOT$/ui/vitest.config.mts', '!$TURBO_ROOT$/ui/skip.mts'] },
+        'test:repo': { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/repo-scan.mjs'] },
+        '@objectstack/probe#test': { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/docker/**'] },
+      },
+    });
+  const testWorkflow = (core = ['packages/**', 'vitest.preset.mts', 'ui/vitest.config.mts'], condition) =>
+    fixtureWorkflow({ core, crosspkg: ['scripts/**'], condition });
+  const uncoveredTestPaths = (v) => (v.uncovered ?? ['(no verdict)']).map((r) => r.path ?? r);
+
+  const testClean = judgeTestInputs(testWorkflow(), testTurbo());
+  assert(!testClean.refusal && uncoveredTestPaths(testClean).length === 0, `positive control: the synthetic tree's test inputs are all covered -- ${testClean.refusal ?? uncoveredTestPaths(testClean).join(', ')}`);
+  assert(
+    (testClean.inputs ?? []).map((r) => r.path).sort().join(',') === 'scripts/repo-scan.mjs,ui/vitest.config.mts,vitest.preset.mts',
+    '-- the population is the `test` and `test:repo` root inputs: a package task\'s input and a negated input are not in it',
+  );
+  assert(
+    testClean.covered?.find((r) => r.path === 'scripts/repo-scan.mjs')?.via === 'scripts/**',
+    '-- an input `crosspkg` covers is covered: the `test` job ORs both lists',
+  );
+
+  // THE HOLE the card reads: a generic test input neither list covers.
+  const testDropped = judgeTestInputs(testWorkflow(['packages/**', 'vitest.preset.mts']), testTurbo());
+  assert(
+    uncoveredTestPaths(testDropped).join(',') === 'ui/vitest.config.mts' && testDropped.uncovered[0].from.join(',') === 'test',
+    `a \`test\` root input dropped from \`core\` is reported by path and task -- got ${uncoveredTestPaths(testDropped).join(', ')}`,
+  );
+  const repoDropped = judgeTestInputs(testWorkflow(), testTurbo({ tasks: { test: { inputs: [] }, 'test:repo': { inputs: ['$TURBO_ROOT$/tools/scan.mjs'] } } }));
+  assert(
+    uncoveredTestPaths(repoDropped).join(',') === 'tools/scan.mjs' && repoDropped.uncovered[0].from.join(',') === 'test:repo',
+    `-- and so is a \`test:repo\` root input under a root no list names -- got ${uncoveredTestPaths(repoDropped).join(', ')}`,
+  );
+  assert(quietly(() => reportTestInputs(testDropped)) === 1 && quietly(() => reportTestInputs(testClean)) === 0, '-- and the report path returns 1 over the hole and 0 over the clean tree');
+
+  // Refusals: never a clean zero over a subject that was not read.
+  const testRefusal = (v) => typeof v.refusal === 'string' && v.refusal.length > 0;
+  assert(testRefusal(judgeTestInputs(testWorkflow(), null)), 'refuses when turbo.json could not be read');
+  assert(testRefusal(judgeTestInputs(testWorkflow(), '{ not json')), 'refuses when turbo.json is not JSON');
+  assert(testRefusal(judgeTestInputs(testWorkflow(), JSON.stringify({}))), 'refuses when turbo.json declares no `tasks` map');
+  assert(testRefusal(judgeTestInputs(testWorkflow(), testTurbo({ tasks: { build: {} } }))), 'refuses when turbo.json declares no generic `test` task');
+  assert(
+    testRefusal(judgeTestInputs(testWorkflow(undefined, "${{ !cancelled() && needs.filter.outputs.core != 'false' }}"), testTurbo())),
+    'refuses when the `test` job\'s `if:` stops naming `crosspkg`, as the first subject does',
+  );
+
+  // The population is a REASON for the third subject's leftover rule: a literal
+  // `core` row beside a build input that covers a test input is not a leftover.
+  const leftoverTurbo = (testInputs) =>
+    JSON.stringify({
+      tasks: {
+        build: { inputs: ['$TURBO_ROOT$/ui/tsconfig.json'] },
+        test: { inputs: testInputs },
+      },
+    });
+  const leftoverCore = ['packages/**', 'turbo.json', 'ui/tsconfig.json', 'ui/vitest.config.mts'];
+  const withTestReason = judgeBuildInputs(buildWorkflow({ core: leftoverCore }), leftoverTurbo(['$TURBO_ROOT$/ui/vitest.config.mts']), manifestFixture('turbo run build'));
+  assert(!withTestReason.refusal && (withTestReason.stale ?? ['(no verdict)']).length === 0, `a literal \`core\` row beside a build input that covers a test input is no leftover -- got ${withTestReason.refusal ?? withTestReason.stale.join(', ')}`);
+  const withoutTestReason = judgeBuildInputs(buildWorkflow({ core: leftoverCore }), leftoverTurbo([]), manifestFixture('turbo run build'));
+  assert((withoutTestReason.stale ?? []).join(',') === 'ui/vitest.config.mts', '-- and the same row IS one once turbo.json stops declaring that test input');
+
+  // The real tree: clean, and the five #27961 rows are what makes it so.
+  const realTurbo = readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8');
+  const realTest = judgeTestInputs(realSource, realTurbo);
+  assert(!realTest.refusal && uncoveredTestPaths(realTest).length === 0, `the checked-in tree's generic test inputs are all covered -- ${realTest.refusal ?? uncoveredTestPaths(realTest).join(', ')}`);
+  const TEST_ROWS = ['ui/vitest.config.mts', 'ui/vitest.setup.*', 'ui/scripts/test-shard-*', 'ui/apps/console/vitest.config.ts', 'ui/apps/console/vite.config.ts'];
+  let testRowsDropped = realSource;
+  for (const row of TEST_ROWS) testRowsDropped = testRowsDropped.replace(`              - '${row}'\n`, '');
+  assert(
+    TEST_ROWS.every((row) => !testRowsDropped.includes(`              - '${row}'\n`)) && TEST_ROWS.every((row) => realSource.includes(`              - '${row}'\n`)),
+    'the real-tree rollback found all five #27961 rows in the checked-in ci.yml and removed them',
+  );
+  assert(
+    uncoveredTestPaths(judgeTestInputs(testRowsDropped, realTurbo)).sort().join(',') === [...TEST_ROWS].sort().join(','),
+    'the checked-in ci.yml with the five #27961 rows dropped reports exactly those five, and nothing else',
+  );
+  assert(inScratchTree(testRowsDropped, (root) => quietly(() => main(root))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeTestInputs`');
+
+  // The bound the header states: TEST_TASKS is the pair the real job runs.
+  const realTestRuns = (parse(realSource)?.jobs?.[SCHEDULED_JOB]?.steps ?? []).map((s) => String(s?.run ?? ''));
+  const turboTaskLists = realTestRuns.flatMap((r) => [...r.matchAll(/pnpm turbo run (test(?::[\w-]+)?(?:\s+[a-z][\w:-]*)*)\s+\$FILTERS/g)].map((m) => m[1].trim()));
+  assert(
+    turboTaskLists.length > 0 && turboTaskLists.every((t) => t === TEST_TASKS.join(' ')),
+    `bound: every whole-package test \`turbo run\` the real \`${SCHEDULED_JOB}\` job makes names exactly ${TEST_TASKS.join(' ')} -- got ${JSON.stringify(turboTaskLists)}`,
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1673,7 +1895,11 @@ export async function selfTest() {
       `row each observed red by path and step, through an alias, an alias chain, a direct path and an import, a ` +
       `commented-out line requiring nothing, a row whose step is gone reported as a leftover, an unresolvable ` +
       `script refused, the five real guards and the imported population-floor covered by their own rows, the ` +
-      `lean-entry row dropped observed red through the report path, and both recognizer bounds pinned to the real job.`,
+      `lean-entry row dropped observed red through the report path, and both recognizer bounds pinned to the real job; ` +
+      `and Test Core's generic test inputs: a \`test\` and a \`test:repo\` root input each observed red by path and task, ` +
+      `one covered only by \`crosspkg\`, package-task and negated inputs left out, five refusals, a test input keeping a ` +
+      `\`core\` row beside a build input from reading as a leftover, the checked-in tree green with the five #27961 rows ` +
+      `dropped observed red through the report path, and the task pair pinned to the real job.`,
   );
   selfTestReachedVerdict = true;
   return 0;
