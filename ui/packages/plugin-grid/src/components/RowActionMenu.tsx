@@ -28,7 +28,7 @@ import {
   resolveIcon,
 } from '@object-ui/components';
 import { Edit, Trash2, MoreVertical } from 'lucide-react';
-import { evalRowPredicate, hasDeclaredPredicate, type CrudAffordances } from '@object-ui/core';
+import { evalRowPredicate, hasDeclaredPredicate, isActionSwitchedOff, type CrudAffordances } from '@object-ui/core';
 import { useObjectTranslation, useRowPredicate, useCapabilityGate, usePredicateScope } from '@object-ui/react';
 
 const ROW_ACTION_FALLBACKS: Record<string, string> = {
@@ -562,7 +562,7 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = ({
   // server remains the authority.
   const mayInvoke = useCapabilityGate();
   const gatedActionDefs = React.useMemo(
-    () => (rowActionDefs ?? []).filter(d => mayInvoke((d as any)?.requiredPermissions)),
+    () => (rowActionDefs ?? []).filter(d => mayInvoke((d as any)?.requiredPermissions) && !isActionSwitchedOff(d)),
     [rowActionDefs, mayInvoke],
   );
   // What this row will ACTUALLY render, per-record predicates applied — the

@@ -56,6 +56,10 @@ export * from './utils/unmaterialized-fields.js';
 // because a consumer that reaches for one must be able to see the other and
 // know which one the platform actually served.
 export * from './utils/column-sortability.js';
+// [objectstack#27504] The served packaged-action activation: which declared
+// actions the installation switched off, stamped by the data layer and asked
+// by every action gate beside the capability check.
+export * from './utils/action-activation.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.
 export {
