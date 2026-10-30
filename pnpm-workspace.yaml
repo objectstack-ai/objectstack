@@ -524,10 +524,12 @@ overrides:
   #     (^6.15.2) and express@5.2.1 (^6.14.0) both admit it.
   #     2026-10-30 (#27921): GHSA-6pq8-jhm2-2vcw (6.3 medium) flags 6.16.0, the
   #     version this pin had settled on, fixed in 6.16.1 — target lifted from
-  #     ^6.16.0, selector stays at the 7.0.0 boundary. The floor is load-bearing:
-  #     express@4.22.2 (objectui's @object-ui/cli) declares ~6.15.1 and
-  #     body-parser@1.20.9 ~6.16.0, so without it they re-lock an affected line;
-  #     body-parser@2.4.0 (^6.16.1) and express@5.2.1 (^6.14.0) admit the lift.
+  #     ^6.16.0, selector stays at the 7.0.0 boundary; it resolves 6.17.1. The
+  #     floor is load-bearing: express@4.22.2 (under @object-ui/cli) declares
+  #     ~6.15.1, a line with no patched release, so without it that edge re-locks
+  #     an affected qs. body-parser@2.4.0 (^6.16.1) and express@5.2.1 (^6.14.0)
+  #     admit the lift; express@4.22.2 and body-parser@1.20.9 (~6.16.0) are moved
+  #     past their tilde ranges, exactly as the ^6.16.0 target already moved them.
   #   Transitive-only, like dompurify and nanoid above: no workspace manifest
   #     declares either package, so there is no publishable declared range to
   #     keep in lockstep and check-override-consistency.mjs lists both as
