@@ -154,9 +154,10 @@ describe('ObjectStackProtocolImplementation - currency_mode_to_record', () => {
                     },
                 } as any);
             } catch (err: any) {
-                expect(err?.issues ?? []).not.toEqual(
-                    expect.arrayContaining([expect.objectContaining({ code: 'currency_mode_to_record' })]),
-                );
+                // The finding codes this save raised (a destructive-change issue's
+                // own field-addressed vocabulary, not an `error.code`).
+                const findings = ((err?.issues ?? []) as Array<{ code: string }>).map((i) => i.code);
+                expect(findings).not.toContain('currency_mode_to_record');
             }
         }
     });
