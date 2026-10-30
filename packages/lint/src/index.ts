@@ -549,12 +549,16 @@ export type {
 // header query cannot order by (`min` / `max` refused for its type).
 // [#26719] Its SEVENTH: a list view whose `chart` binds a dataset declared
 // over another object than the one the list view lists.
+// [#28018] Its EIGHTH: a `kanban.lanes` entry that is not an option of the
+// group field, or a lane listed twice.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
+  LIST_VIEW_KANBAN_LANE_UNKNOWN,
+  LIST_VIEW_KANBAN_LANE_REPEATED,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,
