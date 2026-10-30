@@ -7,8 +7,8 @@
  *
  * On mobile (<sm), the AppHeader replaces its static page label with a
  * `<viewName> ▾` dropdown trigger when a switcher has been registered.
- * Desktop continues to use the inline `ViewTabBar` and ignores this
- * context entirely.
+ * Desktop switches from the page title's view switcher (objectstack#27594)
+ * and ignores this context entirely.
  *
  * Design notes:
  *   - The provider stores a single nullable value (last registered wins).

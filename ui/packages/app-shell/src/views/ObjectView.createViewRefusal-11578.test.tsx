@@ -16,7 +16,7 @@
  *
  * ## What runs
  *
- * The real `ObjectView`, reached through the view tab bar's add button, the
+ * The real `ObjectView`, reached through the view switcher's New view (the page title's dropdown), the
  * real `CreateViewDialog`, and a real `@object-ui/data-objectstack`
  * `MetadataClient` whose fetch answers the PUT with the refusal under test, so
  * the error the door catches is the one the client's own parser builds from
@@ -162,8 +162,8 @@ const labelInput = () => screen.getByTestId('create-view-name-input') as HTMLInp
 const nameInput = () => screen.getByTestId('create-view-machine-name-input') as HTMLInputElement;
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 300)));
 
-/** Open Create View from the tab bar, name the view, press Create, and wait for the PUT. */
-async function createViewThroughTheTabBar() {
+/** Open Create View from the view switcher, name the view, press Create, and wait for the PUT. */
+async function createViewThroughTheSwitcher() {
   render(
     <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
       <MemoryRouter initialEntries={[PAGE]}>
@@ -189,7 +189,9 @@ async function createViewThroughTheTabBar() {
     </ExpressionProvider>,
   );
   await settle();
-  fireEvent.click(screen.getByTestId('view-tab-add'));
+  // New view, from the page title's view switcher (objectstack#27594).
+  fireEvent.click(screen.getByTestId('list-view-switcher'));
+  fireEvent.click(screen.getByTestId('list-view-switcher-new'));
   await screen.findByTestId('create-view-dialog');
   fireEvent.change(labelInput(), { target: { value: 'Pipeline board' } });
   await waitFor(() => expect(nameInput().value).toBe('pipeline_board'));
@@ -222,7 +224,7 @@ describe('Create View on the object page says a refused save, and never reports 
     { refusal: '403 permission', answer: PERMISSION_DENIED, says: ['Saving views requires the Manage Metadata permission'] },
   ])('a $refusal refusal shows the door\'s message; the dialog stays open with the input, and the page does not move', async ({ answer, says }) => {
     putAnswer = answer;
-    await createViewThroughTheTabBar();
+    await createViewThroughTheSwitcher();
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
     const [, options] = vi.mocked(toast.error).mock.calls[0] as [unknown, { description?: unknown } | undefined];
@@ -238,7 +240,7 @@ describe('Create View on the object page says a refused save, and never reports 
 
   it('a saved view still lands the user on the new draft in preview mode (control)', async () => {
     putAnswer = () => json({ success: true }, 200);
-    await createViewThroughTheTabBar();
+    await createViewThroughTheSwitcher();
 
     await waitFor(() => expect(where()).toBe(`${PAGE}/view/${OBJECT_NAME}.pipeline_board?preview=draft`));
     expect(toast.error).not.toHaveBeenCalled();

@@ -31,6 +31,17 @@ import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
+type OverlaySizeBucket = 'sm' | 'md' | 'lg' | 'xl' | 'full';
+
+/**
+ * The record pane's size bucket (objectstack#27545): `auto` — or no size —
+ * is `md` (720 px) whatever the object's field count; an authored bucket
+ * stands as authored.
+ */
+function recordPaneSize(size: 'auto' | OverlaySizeBucket | undefined): OverlaySizeBucket {
+    return !size || size === 'auto' ? 'md' : size;
+}
+
 export function useObjectViewRecordNavigation({
     activeView,
     objectDef,
@@ -78,13 +89,14 @@ export function useObjectViewRecordNavigation({
             const authored = activeView?.navigation ?? objectDef.navigation;
             if (authored) {
                 // Authored config wins. For an overlay, resolve the `size`
-                // bucket (or 'auto') to a viewport-clamped width when no explicit
-                // width was given — objectstack-ai/objectstack#2578: a pixel width can't be authored blind.
+                // bucket to a viewport-clamped width when no explicit width was
+                // given — objectstack-ai/objectstack#2578: a pixel width can't
+                // be authored blind. `auto` is the pane's 720 (objectstack#27545).
                 if (authored.mode === 'page') return authored;
                 return {
                     ...authored,
                     width: authored.width ?? overlayWidthFor(
-                        (authored as { size?: 'auto' | 'sm' | 'md' | 'lg' | 'xl' | 'full' }).size,
+                        recordPaneSize((authored as { size?: 'auto' | OverlaySizeBucket }).size),
                         objectDef,
                     ),
                 };
@@ -92,10 +104,11 @@ export function useObjectViewRecordNavigation({
             // No authored navigation: the drawer, whatever the object's field
             // count. Until objectstack#26677 a field-heavy object paged here by
             // itself (`deriveRecordSurface`, objectstack-ai/objectstack#2578), a
-            // surface no author chose; `page` is now a declaration only. The
-            // drawer's WIDTH still follows the field count (`size: 'auto'`),
-            // clamped to the viewport.
-            return { mode: 'drawer', width: overlayWidthFor('auto', objectDef) };
+            // surface no author chose; `page` is now a declaration only. Since
+            // objectstack#27545 the pane's width no longer follows the field
+            // count either: `md` (720 px), clamped to the viewport, which the
+            // reader drags.
+            return { mode: 'drawer', width: overlayWidthFor(recordPaneSize(undefined), objectDef) };
         },
         [activeView?.navigation, objectDef]
     );

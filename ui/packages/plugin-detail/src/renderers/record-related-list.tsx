@@ -37,8 +37,8 @@ import {
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
 import { RelatedArrangementScopeContext } from '../ArrangedRelatedTab';
-import { CollapsedRelatedCard, RelatedDefaultChangedHint, RelatedFootLine } from '../RelatedCardStack';
-import { RelatedCardChromeContext } from '../relatedListCompact';
+import { RelatedDefaultChangedHint, RelatedFootLine } from '../RelatedCardStack';
+import { RelatedCardChromeContext, RelatedListCompactContext } from '../relatedListCompact';
 import { relatedCardId } from '../synth/relatedArrangement';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
@@ -227,6 +227,8 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
   }, []);
   const i18n = useSafeFieldLabel();
   const { language } = useObjectTranslation();
+  // A panel of the record page's related column (the fold rule below).
+  const panel = React.useContext(RelatedListCompactContext);
 
   const objectName = schema.objectName;
 
@@ -610,10 +612,14 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    * May this list fold into its stack's empty line when it has no records
    * (#25895, `RelatedListEmptyFold.tsx`)? Only when that line can carry
    * everything its row offers, which is New alone: an `add` picker, child
-   * toolbar actions or an authoring notice keep the list's own row.
+   * toolbar actions or an authoring notice keep the list's own row. A panel
+   * of the related column folds with its `add` and its actions too: the
+   * panel line's 展开 brings it back with them (objectstack#27524, Target 2).
    */
   const foldable =
-    !schema.add && !(toolbarActions && toolbarActions.length > 0) && !showActionRefusals && !showUnservedActions;
+    !showActionRefusals &&
+    !showUnservedActions &&
+    (panel || (!schema.add && !(toolbarActions && toolbarActions.length > 0)));
 
   return (
     <RelatedListStackSlot
@@ -875,12 +881,10 @@ const NoParentRecord: React.FC<{
  */
 export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps> = elementDataSourceBlock((props) => {
   const { schema } = props;
-  const { language } = useObjectTranslation();
   // objectstack#27055 — inside the tabbed tier's 关联 tab the reader's
-  // arrangement applies (`ArrangedRelatedTab`): a collapsed list draws as its
-  // title + count and reads no rows; every other list carries its chrome; the
-  // tab's last list closes it with the changed-default hint and the foot line
-  // (the hidden cards, 「恢复默认顺序」).
+  // arrangement applies (`ArrangedRelatedTab`): every list carries its chrome;
+  // the tab's last list closes it with the changed-default hint and the foot
+  // line (the hidden lists, 「恢复默认顺序」).
   const scope = React.useContext(RelatedArrangementScopeContext);
   const arrangedId =
     scope && typeof schema?.objectName === 'string' && typeof schema?.relationshipField === 'string'
@@ -899,25 +903,6 @@ export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps>
         />
       </>
     );
-    if (scope.isCollapsed(arrangedId)) {
-      // `arrangedId` is set only when the schema names both keys.
-      const block = schema!;
-      const node = {
-        type: 'record:related_list',
-        properties: {
-          objectName: block.objectName,
-          relationshipField: block.relationshipField,
-          title: pickLocalized(block.title, language) || block.objectName,
-          ...(block.filter ? { filter: block.filter } : {}),
-        },
-      };
-      return (
-        <>
-          <CollapsedRelatedCard node={node} chrome={chrome} onExpand={() => scope.expand(arrangedId)} />
-          {lines}
-        </>
-      );
-    }
     return (
       <>
         <RelatedCardChromeContext.Provider value={chrome}>

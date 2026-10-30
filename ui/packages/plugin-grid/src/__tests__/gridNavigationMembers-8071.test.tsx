@@ -127,8 +127,11 @@ function panelWidth(): string {
   return panel!.style.getPropertyValue('--ov-w').trim();
 }
 
-/** What the shell makes of an authored width: the authored value as a FLOOR. */
-const withFloor = (css: string) => `max(${css}, min(60vw, 880px))`;
+/**
+ * What the shell makes of an authored width: the authored value itself. It was
+ * a FLOOR (`max(WIDTH, min(60vw, 880px))`) until objectstack#27545 retired it.
+ */
+const asDrawn = (css: string) => css;
 
 beforeEach(() => {
   try { window.localStorage.clear(); } catch { /* private mode */ }
@@ -240,10 +243,10 @@ describe('object-grid `navigation` members decide the row click (objectui#8071)'
 
   it('`size` reaches the overlay through the bucket table', async () => {
     // `lg` is a NAME on the authoring side and a CSS length by the time it
-    // reaches the shell, which then treats it as a floor.
+    // reaches the shell, which draws it as given.
     await clickRow({ mode: 'drawer', size: 'lg' });
     await waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
-    expect(panelWidth()).toBe(withFloor('min(92vw, 960px)'));
+    expect(panelWidth()).toBe(asDrawn('min(92vw, 960px)'));
   });
 
   it('a deprecated `width` WINS over `size` authored beside it', async () => {
@@ -251,7 +254,7 @@ describe('object-grid `navigation` members decide the row click (objectui#8071)'
     // explicit 720px. The deprecated spelling is the one that lands.
     await clickRow({ mode: 'drawer', size: 'sm', width: '720px' });
     await waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
-    expect(panelWidth()).toBe(withFloor('720px'));
+    expect(panelWidth()).toBe(asDrawn('720px'));
   });
 
   it('`size: "auto"` resolves to NEITHER member and lands on the block default', async () => {
@@ -260,12 +263,12 @@ describe('object-grid `navigation` members decide the row click (objectui#8071)'
     // same width an unauthored overlay gets, which is the point.
     await clickRow({ mode: 'drawer', size: 'auto' });
     await waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
-    expect(panelWidth()).toBe(withFloor(RECORD_OVERLAY_DEFAULT_WIDTH));
+    expect(panelWidth()).toBe(asDrawn(RECORD_OVERLAY_DEFAULT_WIDTH));
 
     cleanup();
     try { window.localStorage.clear(); } catch { /* private mode */ }
     await clickRow({ mode: 'drawer' });
     await waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
-    expect(panelWidth()).toBe(withFloor(RECORD_OVERLAY_DEFAULT_WIDTH));
+    expect(panelWidth()).toBe(asDrawn(RECORD_OVERLAY_DEFAULT_WIDTH));
   });
 });

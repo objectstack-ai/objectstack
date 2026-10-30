@@ -10,10 +10,11 @@ import * as React from 'react';
 
 /**
  * `true` inside the record page's related column (objectstack#26678): a
- * fixed rail 320 px wide, where a related list draws as a compact card —
- * title + count + ＋ in one row, no table header, up to three rows of name +
- * one status / date chip, ⤢ to enlarge (objectstack#27055, Target 4) —
- * instead of a table cut off at the column's edge.
+ * fixed rail 320 px wide, where a related list draws as a panel — its header
+ * (title + count, the ⠿ ＋ ⋯ controls on hover, objectstack#27524 Target 1),
+ * no table header, up to three rows of name + one status / date chip
+ * (objectstack#27055, Target 4) — instead of a table cut off at the column's
+ * edge.
  *
  * Set by `RecordPageColumns` only, so a related list anywhere else — the
  * Related tab, an authored page — draws exactly as before. Package-internal:
@@ -25,25 +26,30 @@ export const RelatedListCompactContext = React.createContext(false);
 export const COMPACT_RELATED_ROWS = 3;
 
 /**
- * The reader's controls over one related card (objectstack#27055, Targets 7,
- * 9 and 10), handed to the card by the arranged stack that draws it. Absent
- * outside that stack: the card then has no menu, no drag and no enlarge.
+ * The reader's controls over one related panel (objectstack#27055, Targets 7,
+ * 9 and 10; objectstack#27524, Target 1), handed to the panel by the arranged
+ * stack that draws it. Absent outside that stack: the panel then has no
+ * handle, no menu and no way to its whole list.
  */
 export interface RelatedCardChrome {
   /** The relationship id, `CHILD_OBJECT.FK_FIELD`. */
   id: string;
   /** New since the reader's last drag — the 「新」 badge. */
   fresh: boolean;
-  /** Collapse the card to its title + count. */
-  onCollapse: () => void;
-  /** Move one place up / down in the column; absent at the edge. */
+  /**
+   * Move one place up / down in the column — ⌥↑ / ⌥↓ on the focused ⠿
+   * handle, the drag's keyboard twin; absent at the edge.
+   */
   onMoveUp?: () => void;
   onMoveDown?: () => void;
-  /** Hide the card (「隐藏」). */
+  /** Hide the panel (「隐藏」, the ⋯ menu's one item). */
   onHide: () => void;
-  /** Enlarge the list in place (⤢, the count chip) — `?related=object.field`. */
+  /**
+   * Open the panel's whole list — its header row or its count chip
+   * (「查看全部 N 条」). The host's `?related=object.field`.
+   */
   onEnlarge?: () => void;
-  /** Spread onto the title row: the card's drag handle (desktop only). */
+  /** Spread onto the ⠿ handle: the panel's drag source (desktop only). */
   dragHandleProps?: React.HTMLAttributes<HTMLElement> & { draggable?: boolean };
 }
 

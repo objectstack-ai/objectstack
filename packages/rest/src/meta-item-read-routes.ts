@@ -765,6 +765,20 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         const cachedRegistration = metaType === 'flow' && result.registration !== undefined
                             ? { registration: result.registration }
                             : {};
+                        // [#27842] The action twin, for an OBJECT: the
+                        // packaged actions the activation ledger switches
+                        // off, beside the document on the same terms. This
+                        // branch is the default door of
+                        // `GET /meta/object/:name`. An object's validator is
+                        // folded and judged HERE (`audienceFolds`), so the
+                        // 304 below stands down for a read that carries the
+                        // key, as the protocol's does for `registration`: the
+                        // switch moves no byte the validator hashes.
+                        const cachedDisabledActions = metaType === 'object' && result.disabledActions !== undefined
+                            ? { disabledActions: result.disabledActions }
+                            : {};
+                        const cachedBeside = { ...cachedRegistration, ...cachedDisabledActions };
+                        const besideJudged = Object.keys(cachedBeside).length > 0;
 
                         if (result.notModified) {
                             res.status(304).send();
@@ -835,7 +849,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             res.header('Vary', 'Accept-Language');
                             res.json(await this.translateMetaEnvelope(
                                 req, req.params.type, environmentId,
-                                { type: metaType, name: req.params.name, ...cachedRegistration },
+                                { type: metaType, name: req.params.name, ...cachedBeside },
                                 cachedDocument, cacheI18n, runtimeView.document,
                             ));
                             return;
@@ -871,7 +885,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                                 ? `W/"${value}"`
                                 : `"${value}"`;
                             res.header('ETag', etagValue);
-                            if ((maskApplies || intakeFolds || audienceFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
+                            if ((maskApplies || intakeFolds || audienceFolds) && !besideJudged
+                                && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
                                 res.status(304).send();
                                 return;
                             }
@@ -921,7 +936,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         const cachedEnvelope = {
                             type: metaType,
                             name: req.params.name,
-                            ...cachedRegistration,
+                            ...cachedBeside,
                         };
                         res.json(await this.translateMetaEnvelope(
                             req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,

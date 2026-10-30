@@ -7,14 +7,16 @@
  */
 
 /**
- * objectstack#27055, Targets 7 and 10 — the related column's cards in the
+ * objectstack#27055, Targets 7 and 10 — the related column's panels in the
  * reader's arrangement, through `RecordPageColumns`. The related-list block
  * is stubbed (it draws its relationship id and the chrome it was handed), so
- * what is measured is the stack: the order the store says, a collapsed card
- * drawn without the list (no rows read), the keyboard moves of the `⋯` menu
- * written back through the host's setter, the hidden line and the
- * changed-default hint. The merge rules themselves are pinned in
- * `synth/__tests__/relatedArrangement-27055.test.ts`.
+ * what is measured is the stack: the order the store says, the keyboard
+ * moves the ⠿ handle hands each panel (objectstack#27524) written back
+ * through the host's setter, the hidden line and the changed-default hint.
+ * A panel no longer collapses (objectstack#27524, Target 1): its chrome
+ * carries no collapse. The merge rules themselves are pinned in
+ * `synth/__tests__/relatedArrangement-27055.test.ts`; the panel's own header
+ * in `RelatedPanel.header-27524.test.tsx`.
  */
 
 import * as React from 'react';
@@ -37,7 +39,6 @@ function StubNode({ schema }: { schema: any }) {
       {p.objectName ?? schema?.type}
       {chrome?.onMoveUp && <button onClick={chrome.onMoveUp}>{`up ${p.objectName}`}</button>}
       {chrome?.onMoveDown && <button onClick={chrome.onMoveDown}>{`down ${p.objectName}`}</button>}
-      {chrome && <button onClick={chrome.onCollapse}>{`collapse ${p.objectName}`}</button>}
       {chrome && <button onClick={chrome.onHide}>{`hide ${p.objectName}`}</button>}
       {chrome?.fresh && <span data-fresh="">new</span>}
     </section>
@@ -93,7 +94,7 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
     expect(cardOrder(container)).toEqual(['call.lead_id', 'task.lead_id', 'note.parent_id']);
   });
 
-  it('上移 / 下移 write the new order through the host', () => {
+  it('the handle’s ⌥↑ / ⌥↓ write the new order through the host', () => {
     const onWrite = vi.fn();
     const { container } = render(<Host onWrite={onWrite} />);
     fireEvent.click(screen.getByText('down task'));
@@ -104,16 +105,10 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
     expect(screen.queryByText('down call')).toBeNull();
   });
 
-  it('a collapsed card is drawn without the list — it reads no rows', () => {
+  it('a panel carries no collapse: every shown panel mounts its list (objectstack#27524, Target 1)', () => {
     const { container } = render(<Host />);
-    fireEvent.click(screen.getByText('collapse note'));
-    const collapsed = container.querySelector('[data-related-card-collapsed]');
-    expect(collapsed?.getAttribute('data-related-card-id')).toBe('note.parent_id');
-    // The list block for `note` is not mounted at all.
-    expect(container.querySelector('[data-node="record:related_list"][data-related-card-id="note.parent_id"]')).toBeNull();
-    // Expanding mounts it again.
-    fireEvent.click(collapsed!.querySelector('button[aria-expanded="false"]')!);
-    expect(container.querySelector('[data-node="record:related_list"][data-related-card-id="note.parent_id"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-node="record:related_list"]')).toHaveLength(DEFAULT.length);
+    expect(container.querySelector('[data-related-card-collapsed]')).toBeNull();
   });
 
   it('a hidden card leaves the column; the last line brings them back', () => {
