@@ -31,6 +31,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
+import { STORED_METADATA_BODY_OBJECTS } from '@objectstack/spec/kernel';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
@@ -132,6 +133,12 @@ describe('[#27681] the per-action predicate', () => {
     it('refuses an unflagged action on a sys_* object, and only there', () => {
         expect(systemObjectActionExposureError(deps, UNFLAGGED, SYS_OBJECT)).toMatch(/system object/);
         expect(systemObjectActionExposureError(deps, UNFLAGGED, APP_OBJECT)).toBeNull();
+    });
+
+    it('does NOT yield on a stored-metadata table: the family stays refused even when flagged (#21594)', () => {
+        for (const table of STORED_METADATA_BODY_OBJECTS) {
+            expect(systemObjectActionExposureError(deps, { ...FLAGGED, name: 'probe_on_family' }, table)).toMatch(/stores metadata bodies/);
+        }
     });
 
     it('yields to `ai.exposed: true` and to nothing else — a truthy non-boolean is not the opt-in', () => {

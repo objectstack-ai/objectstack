@@ -20,6 +20,7 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 // declaration its type names, so the refusal and the type cannot drift apart.
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
@@ -127,6 +128,17 @@ export function isSystemObjectName(name: string): boolean {
  */
 export function systemObjectActionExposureError(_deps: ActionExecutionDeps, action: any, objectName: string): string | null {
     if (!isSystemObjectName(objectName)) return null;
+    // [#21594] The stored-metadata family is NOT opened by the flag: the MCP
+    // door never reaches the subject load for one of its tables (a row carries
+    // a stored metadata body, credential material included). That boundary
+    // predates the ruling, which opened identity actions and named no family
+    // table; it held here only because every `sys_*` action was refused.
+    if (isStoredMetadataBodyObject(objectName)) {
+        return (
+            `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') that stores metadata bodies ` +
+            `and is never exposed via MCP — read and change those through the metadata API`
+        );
+    }
     if (action?.ai?.exposed === true) return null;
     return (
         `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') and is not exposed via MCP — ` +
