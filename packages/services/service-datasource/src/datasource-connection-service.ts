@@ -834,10 +834,18 @@ export class DatasourceConnectionService {
    * Not for the DEFAULT datasource: runtime-admin records can never be named
    * `default` (the name is host-reserved), and the default driver's natural-
    * name registration (#3826) would make a name-keyed swap evict nothing.
+   *
+   * [#27750] `objects` are the objects bound to the NEW record, passed to the
+   * rebuild's {@link connect} so its sync loop gives them their tables on the
+   * pool the new configuration opens (a changed `config` can point at a new,
+   * empty database). The caller passes them only for a MANAGED datasource, the
+   * same gate `registerPool` applies on create. The kept-old-pool path syncs
+   * nothing: that pool already served those objects.
    */
   async reconnect(
     record: ConnectableDatasource,
     opts: {
+      objects?: readonly string[];
       context?: DatasourceConnectContext;
       previous: Pick<ConnectableDatasource, 'driver' | 'schemaMode' | 'external'>;
     },
@@ -859,7 +867,7 @@ export class DatasourceConnectionService {
       // plain connect is the whole job: it builds when the name is free, and
       // on a door-less engine it degrades to the pre-#13804 idempotent no-op —
       // the safe direction for a host that cannot express a swap.
-      return this.connect(record, { context: opts.context });
+      return this.connect(record, { objects: opts.objects, context: opts.context });
     }
     const oldOwnership = this.states.get(name)?.ownership;
 
@@ -882,7 +890,7 @@ export class DatasourceConnectionService {
     engine.unregisterDriver(name);
     let result: ConnectResult;
     try {
-      result = await this.connect(record, { context: opts.context });
+      result = await this.connect(record, { objects: opts.objects, context: opts.context });
     } catch (err) {
       // `connect` re-throws authoring verdicts (an unhonourable `pool` block,
       // #5714) after recording a failed state. Same settlement as a returned

@@ -84,11 +84,13 @@ async function openEntryDetail() {
   fireEvent.click(await screen.findByTestId('draft-entry-toggle'));
 }
 
-/** The text of every key row the drill-in rendered, `+ name` / `~ name` / `− name`. */
+/** The text of every field and key row the drill-in rendered, `+ name` / `~ name` / `− name`. */
 function renderedRows(): string[] {
-  return [...screen.getByTestId('draft-entry-detail').querySelectorAll('p.font-mono')].map((p) =>
-    (p.textContent ?? '').trim(),
-  );
+  return [
+    ...screen
+      .getByTestId('draft-entry-detail')
+      .querySelectorAll('[data-testid="draft-field-row"], [data-testid="draft-key-row"]'),
+  ].map((row) => (row.textContent ?? '').trim());
 }
 
 describe('DraftChangesPanel — the protection envelope never lists as authored (objectui#12594)', () => {
@@ -108,7 +110,7 @@ describe('DraftChangesPanel — the protection envelope never lists as authored 
     await openEntryDetail();
 
     // CONTROL: the authored key and the field are listed, so the diff ran.
-    await waitFor(() => expect(renderedRows()).toContain('+ label'));
+    await waitFor(() => expect(renderedRows()).toContain('+ Label'));
     expect(renderedRows()).toContain('+ subject');
 
     const text = screen.getByTestId('draft-entry-detail').textContent ?? '';
@@ -122,7 +124,7 @@ describe('DraftChangesPanel — the protection envelope never lists as authored 
     await openEntryDetail();
 
     await waitFor(() => expect(renderedRows()).toContain('+ _unpublished'));
-    expect(renderedRows()).toContain('+ label');
+    expect(renderedRows()).toContain('+ Label');
     const text = screen.getByTestId('draft-entry-detail').textContent ?? '';
     for (const key of ENVELOPE_KEYS) expect(text).not.toContain(key);
   });
