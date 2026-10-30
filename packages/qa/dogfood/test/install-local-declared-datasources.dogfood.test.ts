@@ -128,6 +128,7 @@ describe('dogfood: an install-local install connects and records the package\'s 
   const states: Record<string, { status: string; reason?: string } | undefined> = {};
   const registered: Record<string, any> = {};
   let codeNames: string[];
+  let listed: Record<string, any>;
   let write: Answer;
   let read: Answer;
   let readVault: Answer;
@@ -157,6 +158,8 @@ describe('dogfood: an install-local install connects and records the package\'s 
       registered[name] = await metadata.get('datasource', name);
     }
     codeNames = codeNamesOf(stack);
+    const admin = stack.kernel.getService('datasource-admin') as { listDatasources(): Promise<Array<{ name: string }>> };
+    listed = Object.fromEntries((await admin.listDatasources()).map((d) => [d.name, d]));
     write = await json(await stack.apiAs(token, 'POST', `/data/${NOTE}`, { title: 'hello' }));
     read = await json(await stack.apiAs(token, 'GET', `/data/${NOTE}`));
     readVault = await json(await stack.apiAs(token, 'GET', `/data/${SECRET_ROW}`));
@@ -193,6 +196,12 @@ describe('dogfood: an install-local install connects and records the package\'s 
       expect(registered[name]?._packageVersion, name).toBe('1.0.0');
     }
     expect(codeNames).toEqual(expect.arrayContaining([STORE, VAULT]));
+  });
+
+  it('the admin list serves both as code-defined: the connected one ok, the other error naming the credential', () => {
+    expect(listed[STORE]).toMatchObject({ origin: 'code', status: 'ok' });
+    expect(listed[VAULT]).toMatchObject({ origin: 'code', status: 'error' });
+    expect(listed[VAULT]?.statusReason).toContain(UNSET_REF);
   });
 
   it('a write and a read of the object bound to the connected datasource reach its driver', () => {
