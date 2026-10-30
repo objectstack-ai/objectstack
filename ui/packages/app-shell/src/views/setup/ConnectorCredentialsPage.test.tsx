@@ -61,7 +61,7 @@ const STORED = entry({
   source: 'object',
   updatedAt: '2026-10-29T08:00:00.000Z',
   updatedBy: 'ada@acme.test',
-  connectors: [{ name: 'crm_api', packageId: 'com.acme.crm', state: 'active' }],
+  connectors: [{ name: 'crm_api', packageId: 'com.acme.crm', state: 'ready' }],
 });
 const FROM_ENV = entry({ ref: 'MAPS_KEY', status: 'set', source: 'env', writable: false });
 const REJECTED = entry({ ref: 'MCP_TOKEN', status: 'rejected', source: 'object', statusReason: '401 Unauthorized: token expired' });
