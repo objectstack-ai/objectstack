@@ -111,7 +111,7 @@ describe('DraftChangesPanel — read decorations never reach the review diff (ob
 
     // The CONTROL first: the real authored change IS reported, so the diff ran
     // and this harness reaches the changed-keys strip.
-    await waitFor(() => expect(detail.textContent).toContain('label'));
+    await waitFor(() => expect(detail.textContent).toContain('Label'));
 
     // …and the framework's own keys are not sitting next to it. `_draft` is the
     // deterministic one — the server stamps it on the draft read and never on

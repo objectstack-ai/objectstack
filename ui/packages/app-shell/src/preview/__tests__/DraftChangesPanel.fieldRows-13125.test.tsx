@@ -287,7 +287,7 @@ describe('the drill-in of an UPDATE (objectui#13125)', () => {
     const detail = await expandRow('Ticket');
     const changed = fieldRow(detail, '~ Subject');
     expect(within(changed).getByText('subject')).toHaveClass('font-mono');
-    expect(changed).toHaveTextContent('· label');
+    expect(changed).toHaveTextContent('· Label');
     const removed = fieldRow(detail, '− Legacy Code');
     expect(within(removed).getByText('legacy_code')).toHaveClass('font-mono');
     expect(detail.textContent ?? '').not.toContain('__search');

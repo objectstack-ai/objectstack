@@ -102,6 +102,8 @@ import { isStudioHiddenSystemField } from '../views/studio-design/studioHiddenSy
 // EAGER graph (see the `@objectstack/spec` note above for what that costs).
 import { useSurfaceNavigator } from '../views/studio-design/surfaceDeepLinkChannel.js';
 import { lintDraftSecurityPosture, type DraftSecurityProblem } from './securityPostureLint.js';
+// objectstack#27835 — a property by its label on the item type's form.
+import { formKeyLabel, labelSpellsKey } from './changeKeyLabels.js';
 
 export interface DraftChangeEntry {
   /**
@@ -333,22 +335,29 @@ export interface EntryChangeDetail {
    * `config.KEY`). Present only for a flow whose two bodies key every node by
    * a string `id`; otherwise `nodes` stays a top-level key row.
    */
-  nodes: {
-    added: FlowNodeRow[];
-    changed: Array<FlowNodeRow & { keys: string[] }>;
-    removed: FlowNodeRow[];
-  } | null;
+  nodes: ListEntryDiff | null;
   /**
    * Top-level keys (other than `fields`) whose values differ, split the way the
    * `fields` diff is (objectui#11807): `added` has no published value, `removed`
    * has no draft value, `changed` has both. An absent key and a `null` one read
-   * as the same value, as they always have here.
+   * as the same value, as they always have here. A view's body is compared one
+   * level down, as `config.KEY` (objectstack#27835): its inspector edits that
+   * body, so `config` alone would name every view change the same.
    */
   keys: {
     added: string[];
     changed: string[];
     removed: string[];
   };
+  /**
+   * objectstack#27835 — the entries of each listed key whose value is a list
+   * of named entries (an object's `validations` by `name`, its `fieldGroups`
+   * by `key`): the key's row names each entry that publishing adds, changes or
+   * removes, by its `label` when it has one, as a flow names its nodes. A Map,
+   * keyed by the key as it appears in `keys`. Never read for a flow, whose
+   * lists are its nodes above.
+   */
+  entries: ReadonlyMap<string, ListEntryDiff>;
   /**
    * What publishing installs that the PLATFORM wrote, not the author: the
    * system columns it provisions for the object and the keys it derives
@@ -371,10 +380,23 @@ function valueEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** One flow node in the drill-in: its `id`, and its `label` when it declares one. */
-export interface FlowNodeRow {
+/**
+ * One list entry in the drill-in — a flow node, a validation rule: its
+ * identity (`id`, `name` or `key`), and its `label` when it declares one.
+ */
+export interface ListEntryRow {
   id: string;
   label?: string;
+}
+
+/** One flow node in the drill-in (objectstack#27356): a list entry keyed by `id`. */
+export type FlowNodeRow = ListEntryRow;
+
+/** A list's entries that publishing adds, changes (with the properties that differ) and removes. */
+export interface ListEntryDiff {
+  added: ListEntryRow[];
+  changed: Array<ListEntryRow & { keys: string[] }>;
+  removed: ListEntryRow[];
 }
 
 /** True when the detail lists nothing: no field row, no node row, no key row and no generated row. */
@@ -392,30 +414,34 @@ function isPlainBody(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A flow's `nodes` by `id`, or `null` when the value is not a list of nodes
- * each keyed by a string `id` (the drill-in then compares `nodes` whole). An
- * absent list is an empty one: a new flow adds every node.
+ * A list's entries by their identity key `idKey`, or `null` when the value is
+ * not a list of entries each keyed by a distinct non-empty string there (the
+ * drill-in then compares the list whole). An absent list is an empty one: a
+ * new item adds every entry.
  */
-function flowNodesById(value: unknown): Map<string, Record<string, unknown>> | null {
+function listEntriesById(value: unknown, idKey: string): Map<string, Record<string, unknown>> | null {
   if (value == null) return new Map();
   if (!Array.isArray(value)) return null;
   const out = new Map<string, Record<string, unknown>>();
-  for (const node of value) {
-    if (!isPlainBody(node) || typeof node.id !== 'string' || node.id === '' || out.has(node.id)) return null;
-    out.set(node.id, node);
+  for (const entry of value) {
+    if (!isPlainBody(entry)) return null;
+    const id = entry[idKey];
+    if (typeof id !== 'string' || id === '' || out.has(id)) return null;
+    out.set(id, entry);
   }
   return out;
 }
 
-function flowNodeRow(node: Record<string, unknown>): FlowNodeRow {
-  const label = typeof node.label === 'string' ? node.label.trim() : '';
-  return label === '' ? { id: node.id as string } : { id: node.id as string, label };
+function listEntryRow(entry: Record<string, unknown>, idKey: string): ListEntryRow {
+  const label = typeof entry.label === 'string' ? entry.label.trim() : '';
+  return label === '' ? { id: entry[idKey] as string } : { id: entry[idKey] as string, label };
 }
 
 /**
- * The properties that differ between two versions of one node: its top-level
- * keys, with `config` read one level down (`config.fields`), since nearly
- * every edit in the flow inspector lands there.
+ * The properties that differ between two versions of one body — a node, a
+ * list entry, a view: its top-level keys, with `config` read one level down
+ * (`config.fields`), since nearly every edit in the flow inspector lands there
+ * and a view's whole body sits there.
  */
 function changedNodeKeys(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
   const out: string[] = [];
@@ -437,25 +463,47 @@ function changedNodeKeys(before: Record<string, unknown>, after: Record<string, 
 }
 
 /**
- * objectstack#27356 — the node rows of a flow's publish summary, or `null`
- * when either side's `nodes` is not a list keyed by `id`. Nodes sort by id,
- * as field rows sort by name.
+ * The entry rows of one list, matched by `idKey`, or `null` when either side
+ * is not a list keyed by it. Entries sort by id, as field rows sort by name.
+ * A flow's nodes (objectstack#27356, by `id`) and an item's named lists
+ * (objectstack#27835, by `name` or `key`) both read this one diff.
  */
-function diffFlowNodes(before: unknown, after: unknown): EntryChangeDetail['nodes'] {
-  const pub = flowNodesById(before);
-  const cur = flowNodesById(after);
+function diffListEntries(before: unknown, after: unknown, idKey: string): ListEntryDiff | null {
+  const pub = listEntriesById(before, idKey);
+  const cur = listEntriesById(after, idKey);
   if (!pub || !cur) return null;
-  const byId = (x: FlowNodeRow, y: FlowNodeRow) => x.id.localeCompare(y.id);
-  const added: FlowNodeRow[] = [];
-  const changed: Array<FlowNodeRow & { keys: string[] }> = [];
-  const removed: FlowNodeRow[] = [];
-  for (const [id, node] of cur) {
+  const byId = (x: ListEntryRow, y: ListEntryRow) => x.id.localeCompare(y.id);
+  const added: ListEntryRow[] = [];
+  const changed: Array<ListEntryRow & { keys: string[] }> = [];
+  const removed: ListEntryRow[] = [];
+  for (const [id, entry] of cur) {
     const was = pub.get(id);
-    if (!was) added.push(flowNodeRow(node));
-    else if (!valueEqual(was, node)) changed.push({ ...flowNodeRow(node), keys: changedNodeKeys(was, node) });
+    if (!was) added.push(listEntryRow(entry, idKey));
+    else if (!valueEqual(was, entry)) changed.push({ ...listEntryRow(entry, idKey), keys: changedNodeKeys(was, entry) });
   }
-  for (const [id, node] of pub) if (!cur.has(id)) removed.push(flowNodeRow(node));
+  for (const [id, entry] of pub) if (!cur.has(id)) removed.push(listEntryRow(entry, idKey));
   return { added: added.sort(byId), changed: changed.sort(byId), removed: removed.sort(byId) };
+}
+
+/**
+ * objectstack#27835 — the keys a list entry can be named by, in the order
+ * tried: a validation rule's `name`, a field group's `key`. The first key
+ * every entry on both sides carries as a distinct string identifies them;
+ * a list none of them identifies stays one key row.
+ */
+const LIST_ENTRY_IDENTITY_KEYS = ['name', 'key'] as const;
+
+function diffNamedList(before: unknown, after: unknown): ListEntryDiff | null {
+  if (!Array.isArray(before) && !Array.isArray(after)) return null;
+  for (const idKey of LIST_ENTRY_IDENTITY_KEYS) {
+    const diff = diffListEntries(before, after, idKey);
+    if (diff) return diff;
+  }
+  return null;
+}
+
+function listEntryRowCount(diff: ListEntryDiff | null): number {
+  return diff ? diff.added.length + diff.changed.length + diff.removed.length : 0;
 }
 
 /**
@@ -661,14 +709,27 @@ export function computeChangeDetail(
   // A reorder alone changes no node, so it keeps the key row.
   let nodes: EntryChangeDetail['nodes'] = null;
   if (type === 'flow') {
-    nodes = diffFlowNodes(pub.nodes, cur.nodes);
-    if (nodes && nodes.added.length + nodes.changed.length + nodes.removed.length > 0) names.delete('nodes');
+    nodes = diffListEntries(pub.nodes, cur.nodes, 'id');
+    if (listEntryRowCount(nodes) > 0) names.delete('nodes');
+  }
+  // objectstack#27835 — a view's body sits under `config`, one level down.
+  const viewBody =
+    type === 'view' && (pub.config == null || isPlainBody(pub.config)) && (cur.config == null || isPlainBody(cur.config));
+  const valueAt = (body: Record<string, unknown>, k: string): unknown =>
+    viewBody && k.startsWith('config.')
+      ? ((body.config ?? {}) as Record<string, unknown>)[k.slice('config.'.length)]
+      : body[k];
+  if (viewBody) {
+    names.delete('config');
+    for (const ck of Object.keys((pub.config ?? {}) as Record<string, unknown>)) names.add(`config.${ck}`);
+    for (const ck of Object.keys((cur.config ?? {}) as Record<string, unknown>)) names.add(`config.${ck}`);
   }
   const keys: EntryChangeDetail['keys'] = { added: [], changed: [], removed: [] };
+  const entries = new Map<string, ListEntryDiff>();
   const generatedKeys: EntryChangeDetail['generated'] = [];
   for (const k of [...names].sort()) {
-    const before = (pub as Record<string, unknown>)[k];
-    const after = (cur as Record<string, unknown>)[k];
+    const before = valueAt(pub, k);
+    const after = valueAt(cur, k);
     if (valueEqual(before, after)) continue;
     const kind = before == null ? 'added' : after == null ? 'removed' : 'changed';
     const derived = Object.prototype.hasOwnProperty.call(DERIVED_KEY_TESTS, k) ? DERIVED_KEY_TESTS[k] : undefined;
@@ -678,8 +739,10 @@ export function computeChangeDetail(
       continue;
     }
     keys[kind].push(k);
+    const list = type === 'flow' ? null : diffNamedList(before, after);
+    if (listEntryRowCount(list) > 0) entries.set(k, list!);
   }
-  return { fields, nodes, keys, generated: [...generatedFields, ...generatedKeys], isNew };
+  return { fields, nodes, keys, entries, generated: [...generatedFields, ...generatedKeys], isNew };
 }
 
 /**
@@ -836,6 +899,81 @@ function FieldRow({
 }
 
 /**
+ * One property row of the drill-in (objectstack#27835): the property's label
+ * on the item type's form leads ({@link formKeyLabel}), with its key as
+ * secondary text when the label does not already spell it. A property the
+ * form has no row for reads as its key, in monospace, as before.
+ */
+function KeyRow({
+  kind,
+  type,
+  name,
+  children,
+}: {
+  kind: keyof typeof FIELD_ROW_MARK;
+  type: string;
+  name: string;
+  children?: ReactNode;
+}) {
+  const label = formKeyLabel(type, name);
+  return (
+    <div data-testid="draft-key-row">
+      <p className={`${label === undefined ? 'font-mono ' : ''}text-xs ${FIELD_ROW_TONE[kind]}`}>
+        {FIELD_ROW_MARK[kind]}{' '}
+        {label === undefined ? (
+          name
+        ) : (
+          <>
+            {label}
+            {labelSpellsKey(label, name) ? null : (
+              <>
+                {' '}
+                <span className="font-mono text-[11px] text-muted-foreground">{name}</span>
+              </>
+            )}
+          </>
+        )}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The properties a changed field or list entry lists after its name, each by
+ * its label on `type`'s form where the form has a row for it, else its key.
+ */
+function propertyList(type: string, keys: readonly string[]): string {
+  return keys.map((key) => formKeyLabel(type, key) ?? key).join(', ');
+}
+
+/**
+ * objectstack#27835 — the entries of one listed key, under its row: each by
+ * its label, identity beside it, in the shape of the field rows. A changed
+ * entry lists what differs by the labels the list's own form row declares for
+ * its sub-rows (`fieldGroups` → "Label", "Collapse").
+ */
+function ListEntryRows({ type, listKey, diff }: { type: string; listKey: string; diff: ListEntryDiff }) {
+  const entryKeys = (keys: readonly string[]) =>
+    keys.map((key) => formKeyLabel(type, `${listKey}.${key}`) ?? key).join(', ');
+  return (
+    <div className="ml-3 flex flex-col gap-0.5">
+      {diff.added.map((e) => (
+        <FieldRow key={`+${e.id}`} kind="added" name={e.id} label={e.label} testId="draft-list-entry-row" />
+      ))}
+      {diff.changed.map((e) => (
+        <FieldRow key={`~${e.id}`} kind="changed" name={e.id} label={e.label} testId="draft-list-entry-row">
+          {e.keys.length > 0 && <span className="text-muted-foreground"> · {entryKeys(e.keys)}</span>}
+        </FieldRow>
+      ))}
+      {diff.removed.map((e) => (
+        <FieldRow key={`-${e.id}`} kind="removed" name={e.id} label={e.label} testId="draft-list-entry-row" />
+      ))}
+    </div>
+  );
+}
+
+/**
  * Lazily-loaded drill-in for one draft entry: published vs draft, rendered as
  * added / changed / removed field rows, then the top-level keys split the same
  * way.
@@ -972,7 +1110,7 @@ function EntryDetail({
     );
   }
 
-  const { fields, nodes, keys, generated, isNew } = detail;
+  const { fields, nodes, keys, entries, generated, isNew } = detail;
   const hasKeyRows = keys.added.length > 0 || keys.changed.length > 0 || keys.removed.length > 0;
   // objectstack#27176 — which AI tools drafted part of this item, one line each.
   const agentLines = agents.map((source) => (
@@ -1041,7 +1179,7 @@ function EntryDetail({
       })}
       {fields?.changed.map((f) => (
         <FieldRow key={`~${f.name}`} kind="changed" name={f.name} label={fields.labels.get(f.name)}>
-          {f.keys.length > 0 && <span className="text-muted-foreground"> · {f.keys.join(', ')}</span>}
+          {f.keys.length > 0 && <span className="text-muted-foreground"> · {propertyList('field', f.keys)}</span>}
         </FieldRow>
       ))}
       {fields?.removed.map((name) => (
@@ -1073,21 +1211,16 @@ function EntryDetail({
             : t('preview.changes.detailChangedKeys', { defaultValue: 'Also changed:' })}
         </p>
       )}
-      {keys.added.map((name) => (
-        <p key={`k+${name}`} className="font-mono text-xs text-emerald-700 dark:text-emerald-400">
-          + {name}
-        </p>
-      ))}
-      {keys.changed.map((name) => (
-        <p key={`k~${name}`} className="font-mono text-xs text-amber-700 dark:text-amber-400">
-          ~ {name}
-        </p>
-      ))}
-      {keys.removed.map((name) => (
-        <p key={`k-${name}`} className="font-mono text-xs text-red-700 line-through dark:text-red-400">
-          − {name}
-        </p>
-      ))}
+      {(['added', 'changed', 'removed'] as const).flatMap((kind) =>
+        keys[kind].map((name) => {
+          const list = entries.get(name);
+          return (
+            <KeyRow key={`k${FIELD_ROW_MARK[kind]}${name}`} kind={kind} type={entry.type} name={name}>
+              {list ? <ListEntryRows type={entry.type} listKey={name} diff={list} /> : null}
+            </KeyRow>
+          );
+        }),
+      )}
       {generated.length > 0 && <GeneratedGroup rows={generated} labels={fields?.labels} />}
     </div>
   );

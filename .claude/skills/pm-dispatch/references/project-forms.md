@@ -33,10 +33,10 @@
 
 ## 信箱 PR
 
-- 每席一个 draft PR:分支 `mailbox/<login>`,标签 `pm:mailbox`+`pinned`,正文首行 `To: <login>`。
-- 坐席即开(`mailbox-open.mjs`)并订阅,存根指针行记其号;永不合并,移交或换账号关旧开新。
-- `pm:mailbox` PR 不欠 CI,一切落地与台账查询排除它。
-- 首行恒为下列七键之一(发→收;何时):一事一行 ≤200 字节,只写键与编号;表外即半态。
+- 每席一个 draft PR,键是席位 ⛔ 非账号:分支 `mailbox/<login>/<slug>`,标签 `pm:mailbox`+`pinned`。
+- 正文首行 `Mailbox-of: <席位> · <login>`;坐席即开(`mailbox-open.mjs`)并订阅,存根指针行记其号。
+- 永不合并,不欠 CI,落地与台账查询排除它;移交或换账号关旧开新;评论首行 `To: <席位>`。
+- 次行恒为下列七键之一(发→收;何时):一事一行 ≤200 字节,只写键与编号;表外即半态。
 - `Request: contract-review · PR #n · head SHA · REASON`:车道→分诊;本席复审档不可用,一 head 一次。
 - `Request: urgent-triage · #n · ONE-LINE-CRITERION`:任一席→分诊;p0 嫌疑、main 红、确定性队列红。
 - `Request: main-red · CHECK-NAME · anchor #n · suggested lane X`:发现席→分诊(缺则总监);锚卡立起时。

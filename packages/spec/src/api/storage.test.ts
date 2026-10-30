@@ -338,6 +338,28 @@ describe('InitiateChunkedUploadRequestSchema', () => {
     });
     expect(req.metadata?.source).toBe('upload-form');
   });
+
+  // [#27801] `filename` and `mimeType` are non-empty: the init door has always
+  // refused `''` for either, and the declaration now says the same.
+  it.each(['filename', 'mimeType'] as const)('refuses an empty %s, naming that key', (key) => {
+    const result = InitiateChunkedUploadRequestSchema.safeParse({
+      filename: 'report.pdf',
+      mimeType: 'application/pdf',
+      totalSize: 1,
+      [key]: '',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toHaveLength(1);
+    expect(result.error!.issues[0].path).toEqual([key]);
+    expect(result.error!.issues[0].code).toBe('too_small');
+  });
+
+  it('CONTROL: a one-character filename and mimeType parse', () => {
+    const result = InitiateChunkedUploadRequestSchema.safeParse({ filename: 'a', mimeType: 'b', totalSize: 1 });
+    expect(result.success).toBe(true);
+    expect(result.data!.filename).toBe('a');
+    expect(result.data!.mimeType).toBe('b');
+  });
 });
 
 describe('InitiateChunkedUploadResponseSchema', () => {

@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import { InitiateChunkedUploadRequestSchema } from '@objectstack/spec/api';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
@@ -283,6 +284,28 @@ describe('Storage REST Routes', () => {
       expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
       expect(createSession, 'no upload-session row').not.toHaveBeenCalled();
     });
+
+    // [#27801] An empty `filename` or `mimeType` is refused at the door, and
+    // the declared request schema refuses the same body: declared and
+    // enforced agree on `''`.
+    it.each(['filename', 'mimeType'] as const)(
+      'REFUSED 400 INVALID_REQUEST: an empty %s, which the declared schema refuses too, with no row written',
+      async (key) => {
+        const initHandler = httpServer._getHandler('POST', '/api/v1/storage/upload/chunked')!;
+        const createFile = vi.spyOn(store, 'createFile');
+        const createSession = vi.spyOn(store, 'createSession');
+        const body = { filename: 'b.bin', mimeType: 'application/octet-stream', totalSize: 100, [key]: '' };
+        const res = createMockRes();
+        await initHandler(createMockReq({ body }), res);
+
+        expect(res._status, JSON.stringify(res._json)).toBe(400);
+        expect(res._json.success).toBe(false);
+        expect(res._json.error.code).toBe('INVALID_REQUEST');
+        expect(InitiateChunkedUploadRequestSchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
+        expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
+        expect(createSession, 'no upload-session row').not.toHaveBeenCalled();
+      },
+    );
 
     it.each<[string, number | undefined, number, number]>([
       ['an omitted chunkSize takes the declared default', undefined, 5242880, 3],
