@@ -263,6 +263,76 @@ for the datasources listed under [When auto-connect fails](#when-auto-connect-fa
 and degrades with a warning otherwise. (Credential-less drivers such as SQLite
 simply have no `credentialsRef`.)
 
+### Borrowing a connector instance's credential
+
+An **API-backed** datasource, one served by a plugin driver such as the
+[OData driver](/docs/data-modeling/odata-datasources), has a second channel. When a
+[connector instance](/docs/automation/connectors#declaring-a-provider-bound-instance)
+already authorizes the vendor, name it in `external.connector` and the datasource
+borrows that instance's credential (ADR-0015 amendment D7). The credential is set once,
+where the connector's own is set
+([What `credentialRef` resolves through](/docs/automation/connectors#what-credentialref-resolves-through)),
+and it serves both the connector's flow actions and the datasource's records.
+
+{/* os:check */}
+```typescript
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: { id: 'com.example.sales', name: 'Sales', version: '1.0.0', type: 'app' },
+  connectors: [
+    {
+      name: 'erp_api',
+      label: 'ERP API',
+      type: 'api',
+      provider: 'rest',
+      providerConfig: { baseUrl: 'https://erp.example.com' },
+      auth: { type: 'bearer', credentialRef: 'ERP_API_TOKEN' },
+    },
+  ],
+  datasources: [
+    {
+      name: 'erp',
+      driver: 'erp',                  // the OData plugin's name, i.e. the `driver.erp` service
+      schemaMode: 'external',
+      config: {},
+      external: {
+        connector: 'erp_api',         // no credentialsRef: exactly one channel
+        validation: { onMismatch: 'warn', checkOnBoot: false },
+      },
+    },
+  ],
+});
+```
+
+The instance's `auth` decides what is sent: a bearer token, basic auth, or an API key in
+its header or query parameter. The rules:
+
+- **One channel.** `connector` beside a `credentialsRef` is refused. Keep the one that
+  should supply the credential.
+- **API-backed datasources only.** `connector` is refused on a built-in driver
+  (`postgres`, `mysql`, `mongodb` and the rest), which takes a database credential: bind
+  that with `credentialsRef`. It is refused on a `managed` datasource too, since an API's
+  schema is never ObjectStack's to manage: set `schemaMode: 'external'` (or
+  `'validate-only'`).
+- **An instance that can lend.** The name must match a `connectors` entry of the stack
+  that has a `provider` and an `auth` other than `none`. A catalog descriptor (no
+  `provider`) or an instance with no `auth` is refused when the stack is validated, and a
+  datasource created or edited under Setup → Integrations → Datasources is judged the
+  same way when it is saved.
+- **Fail-closed at connect.** An instance that cannot lend when the datasource connects
+  (not declared, disabled with `enabled: false`, no `auth`), or a stack with no
+  automation service (`@objectstack/service-automation` is what lends the credential),
+  leaves the datasource unconnected with the reason, the same connect failure as an
+  unresolvable `credentialsRef`.
+- **A credential not set yet does not fail the connect.** Each request is answered
+  `503 ERR_DATASOURCE_UNAVAILABLE`, with the reference named in the server log, until
+  an administrator sets it; the next request after that reads with it, with no restart.
+- **Rotation.** A credential set again in the connector credential store reaches the
+  next request. One the upstream refuses with a `401` is obtained afresh once and the
+  request retried, which also picks up a rotated environment variable; a second `401`
+  answers `503`.
+
 ## 5. Writes (double opt-in)
 
 Federation is read-only by default. To allow writes, **both** the datasource and the
