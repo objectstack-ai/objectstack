@@ -22,6 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   FlowRegistrationSchema,
+  GetMetaItemCachedResponseSchema,
   GetMetaItemResponseSchema,
   GetMetaItemsResponseSchema,
   GetMetaItemLayeredResponseSchema,
@@ -29,6 +30,7 @@ import {
 } from './protocol.zod';
 import type {
   FlowRegistration,
+  GetMetaItemCachedResponse,
   GetMetaItemResponse,
   GetMetaItemsResponse,
   GetMetaItemLayeredResponse,
@@ -375,5 +377,62 @@ describe('`draftChanges` — which surface last changed each key of a pending dr
     expect(issueOf([withoutAt])).toMatchObject({ code: 'invalid_type', path: ['draftChanges', 0, 'at'] });
     expect(issueOf([{ ...ENTRIES[0], at: 'two minutes ago' }]))
       .toMatchObject({ code: 'invalid_format', path: ['draftChanges', 0, 'at'] });
+  });
+});
+
+/**
+ * #27842 — the packaged actions the activation ledger switches off, beside an
+ * object on all three reads: typed as a name list (the list keyed by object
+ * name), optional, and never defaulted — absence means no ledger answered.
+ */
+export type DisabledActionsAreNamesOrAbsent = Assert< Eq< GetMetaItemResponse['disabledActions'], string[] | undefined > >;
+export type CachedDisabledActionsAreNamesOrAbsent = Assert< Eq< GetMetaItemCachedResponse['disabledActions'], string[] | undefined > >;
+export type ListDisabledActionsAreKeyedByObject = Assert< Eq< GetMetaItemsResponse['disabledActions'], Record<string, string[]> | undefined > >;
+
+describe('`disabledActions` beside an object: the names, `[]`, or absent (#27842)', () => {
+  const TASK = {
+    name: 'showcase_task',
+    actions: [{ name: 'showcase_mark_done', label: 'Mark Done' }, { name: 'showcase_snooze', label: 'Snooze' }],
+  };
+
+  it('keeps the names through a parse, beside an item whose `actions` are untouched', () => {
+    const parsed = GetMetaItemResponseSchema.parse({
+      type: 'object', name: 'showcase_task', item: TASK, disabledActions: ['showcase_mark_done'],
+    });
+    expect(parsed.disabledActions).toEqual(['showcase_mark_done']);
+    expect(parsed.item).toEqual(TASK);
+  });
+
+  it('`[]` survives a parse as `[]`, and an absent key stays ABSENT — never defaulted to `[]`', () => {
+    expect(GetMetaItemResponseSchema.parse({ type: 'object', name: 'showcase_task', item: TASK, disabledActions: [] })
+      .disabledActions).toEqual([]);
+    expect('disabledActions' in GetMetaItemResponseSchema.parse({ type: 'object', name: 'showcase_task', item: TASK }))
+      .toBe(false);
+    expect('disabledActions' in GetMetaItemCachedResponseSchema.parse({ data: TASK, notModified: false })).toBe(false);
+  });
+
+  it('the cached default door carries it beside `data`', () => {
+    const parsed = GetMetaItemCachedResponseSchema.parse({
+      data: TASK, notModified: false, disabledActions: ['showcase_mark_done'],
+    });
+    expect(parsed.disabledActions).toEqual(['showcase_mark_done']);
+  });
+
+  it('the list keeps it keyed by object name, `[]` entries included', () => {
+    const parsed = GetMetaItemsResponseSchema.parse({
+      type: 'object',
+      items: [TASK, { name: 'showcase_project' }],
+      disabledActions: { showcase_task: ['showcase_mark_done'], showcase_project: [] },
+    });
+    expect(parsed.disabledActions).toEqual({ showcase_task: ['showcase_mark_done'], showcase_project: [] });
+    expect('disabledActions' in GetMetaItemsResponseSchema.parse({ type: 'object', items: [TASK] })).toBe(false);
+  });
+
+  it('refuses a name that is not a string, located at the key', () => {
+    const verdict = GetMetaItemResponseSchema.safeParse({
+      type: 'object', name: 'showcase_task', item: TASK, disabledActions: [{ name: 'showcase_mark_done' }],
+    });
+    expect(verdict.success).toBe(false);
+    if (!verdict.success) expect(verdict.error.issues[0]?.path).toEqual(['disabledActions', 0]);
   });
 });

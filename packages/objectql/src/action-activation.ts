@@ -290,16 +290,28 @@ export class ActionActivationProjection {
      * here so both dispatch doors state it identically (the flow twin's
      * `describeDisabledFlow` shape).
      *
-     * It names the ledger, the ADR and the remedies — and ⛔ never a clone:
-     * action-clone is not chartered (ADR-0126 §8 item 2), so recommending one
-     * would advertise machinery that does not exist. Authoring an ordinary
-     * sibling action is open exactly as it is today, and that is what it says.
+     * [#27842] It is written for the person who clicked the button, and it is
+     * what their red toast reads: what happened, who can undo it and where,
+     * and what they can do meanwhile. It carries no system table, no ADR and
+     * no tracker number (AGENTS.md: a runtime string carries the lesson, not
+     * its citation). The machine half stays where a machine reads it: the
+     * envelope's `ACTION_DISABLED` code and 409, and the log line the engine
+     * writes when a door asks for this sentence
+     * (`ObjectQL.describeDisabledAction`), which names the ledger and
+     * ADR-0126 §8.
+     *
+     * ⛔ Never a clone: action-clone is not chartered (ADR-0126 §8 item 2), so
+     * recommending one would advertise machinery that does not exist. Using
+     * another action is open exactly as it is today, and that is what it says.
+     *
+     * The name is not in the sentence: the caller named the action it asked
+     * for, and a machine name read in a toast is not plain language. The
+     * parameter stays so the doors' call is unchanged.
      */
-    describeDisabled(name: string): string {
+    describeDisabled(_name: string): string {
         return (
-            `Action '${name}' is disabled — it is switched off for this installation in the packaged-metadata ` +
-            `activation ledger (sys_metadata_activation, ADR-0126 §8). Re-enable the packaged action to arm it again, ` +
-            `or author your own action instead.`
+            'This action is turned off for this deployment. An administrator can turn it on again under ' +
+            'Setup › Packaged automation, or you can use another action.'
         );
     }
 }

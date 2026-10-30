@@ -410,6 +410,7 @@ import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMut
 import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, tenancyPostureInForce } from './protocol-authoring-posture-probes.js';
 // [#25467 cut 27] The automation service's flow reads: the stored-flow canonicalizer and the engine's registrations.
 import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
+import { disabledActionsOf, resolveDisabledActionsReader } from './protocol-action-activation-reads.js';
 // [#25467 cut 28] The code-datasource predicates: declared by an installed package, or registered by the host.
 import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
 // [#25467 cut 29] The legacy-organization row filters: which rows a not-yet-migrated database still holds.
@@ -6736,6 +6737,48 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#27842] The data engine's packaged-action activation reader for an
+     * `object` read — the `disabledActions` beside the item read's envelope
+     * and beside the list's items (`GetMetaItemResponseSchema` in
+     * `@objectstack/spec`): given an object body, the names in its
+     * `actions[]` the activation ledger switches off.
+     *
+     * The seam {@link resolveFlowRegistrationReader} uses: the kernel's
+     * service table, read by name per call, for the member the engine declares
+     * on `IObjectQLEngine` (`getDisabledActions`). The slot is `objectql`, the
+     * one the dispatch doors resolve before they refuse a switched-off action
+     * 409 `ACTION_DISABLED`, so the read and the refusal answer from one
+     * projection. This package never imports the engine. The engine is asked
+     * once per call of this method, so one list read is one answer.
+     *
+     * `undefined` — so the read serves NO key — for every other type, where
+     * no reachable engine declares the member, and where the engine answers
+     * that no ledger is attached. ⛔ Never `[]` in those cases: absence is "no
+     * ledger answered", and `[]` is the ledger's own "nothing here is off".
+     */
+    private resolveDisabledActionsReader(type: string): ((body: unknown) => string[]) | undefined {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof resolveDisabledActionsReader> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return resolveDisabledActionsReader.call(host, type);
+    }
+
+    /**
+     * [#27842] The list's `disabledActions`: the reader's answer per listed
+     * object, keyed by its `name` — or nothing, where
+     * {@link resolveDisabledActionsReader} resolves no reader. A pending draft
+     * (`_draft: true`, the `previewDrafts` overlay) gets no entry, as
+     * {@link flowRegistrationsOf} gives it none.
+     */
+    private disabledActionsOf(type: string, items: readonly unknown[]): { disabledActions?: Record<string, string[]> } {
+        const host: ThisParameterType<typeof disabledActionsOf> = {
+            resolveDisabledActionsReader: (...a) => this.resolveDisabledActionsReader(...a),
+        };
+        return disabledActionsOf.call(host, type, items);
+    }
+
+    /**
      * [#20312] The deployment's ADR-0080 SDUI component manifest, when the host
      * registered one under {@link SDUI_MANIFEST_SERVICE} — `os serve` does, from
      * the CLI's `resolveSduiManifest`. Read per publish, exactly as
@@ -10156,6 +10199,10 @@ export class ObjectStackProtocolImplementation implements
             // see {@link flowRegistrationsOf}. The execution face is the
             // engine's own read, so it carries none.
             ...(audience === 'served' ? this.flowRegistrationsOf(request.type, governed) : {}),
+            // [#27842] Served only, likewise: the packaged actions the
+            // activation ledger switches off, per listed object — see
+            // {@link disabledActionsOf}.
+            ...(audience === 'served' ? this.disabledActionsOf(request.type, governed) : {}),
         };
     }
 
@@ -11283,6 +11330,13 @@ export class ObjectStackProtocolImplementation implements
         const readRegistration = !execution && decorated !== undefined && decorated !== null
             ? this.resolveFlowRegistrationReader(request.type)
             : undefined;
+        // [#27842] …and, on an `object` read, the names in `item.actions` the
+        // activation ledger switches off ({@link resolveDisabledActionsReader}),
+        // beside the item on the same terms: served face only, none on the
+        // draft returns above, `item` untouched.
+        const readDisabledActions = !execution && decorated !== undefined && decorated !== null
+            ? this.resolveDisabledActionsReader(request.type)
+            : undefined;
         return {
             type: request.type,
             name: request.name,
@@ -11312,6 +11366,7 @@ export class ObjectStackProtocolImplementation implements
                         : null,
                 }),
             ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
+            ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
         };
     }
 
@@ -14415,7 +14470,7 @@ export class ObjectStackProtocolImplementation implements
      * environment → code read order (ADR-0131 D6) — the whole reason this
      * method delegates rather than re-reading.
      */
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration }> {
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration; disabledActions?: string[] }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -14434,6 +14489,10 @@ export class ObjectStackProtocolImplementation implements
             // rides beside `data` for the REST layer's default door, and is
             // never hashed into the ETag below (see the 304 note there).
             const registration = (result as { registration?: FlowRegistration } | undefined)?.registration;
+            // [#27842] …and, for an object, the packaged actions the activation
+            // ledger switches off, on exactly those terms: live, beside `data`,
+            // never hashed (see the 304 note below).
+            const disabledActions = (result as { disabledActions?: string[] } | undefined)?.disabledActions;
 
             if (!item) {
                 // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
@@ -14496,7 +14555,11 @@ export class ObjectStackProtocolImplementation implements
             // flow under an unchanged body. Such a read is always answered in
             // full; the work is the same either way, since this method always
             // performs the delegate read.
-            if (request.cacheRequest?.ifNoneMatch && registration === undefined) {
+            //
+            // [#27842] The same holds for `disabledActions`: an administrator's
+            // switch moves no byte of the object document, so a 304 would keep
+            // the caller on the switched-off list it was served before.
+            if (request.cacheRequest?.ifNoneMatch && registration === undefined && disabledActions === undefined) {
                 const clientEtag = request.cacheRequest.ifNoneMatch.replace(/^"(.*)"$/, '$1').replace(/^W\/"(.*)"$/, '$1');
                 if (clientEtag === hash) {
                     // Return 304 Not Modified
@@ -14511,6 +14574,7 @@ export class ObjectStackProtocolImplementation implements
             return {
                 data: item,
                 ...(registration !== undefined ? { registration } : {}),
+                ...(disabledActions !== undefined ? { disabledActions } : {}),
                 etag,
                 lastModified: new Date().toISOString(),
                 cacheControl: {

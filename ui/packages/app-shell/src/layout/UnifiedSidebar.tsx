@@ -19,6 +19,7 @@ import { getIcon } from '../utils/getIcon.js';
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarHeader,
   SidebarGroup,
   SidebarGroupLabel,
@@ -27,6 +28,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuAction,
+  cn,
   useSidebar,
 } from '@object-ui/components';
 import {
@@ -36,6 +38,7 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
+  Pin,
 } from 'lucide-react';
 import { NavigationRenderer, hasVisibleNavigationItems, type NavItemActionContext } from '@object-ui/layout';
 import type { NavigationArea, NavigationItem } from '@object-ui/types';
@@ -69,6 +72,7 @@ import {
 } from './ContextSelectors.js';
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
+import { useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 
 /**
@@ -136,6 +140,13 @@ interface UnifiedSidebarProps {
   activeAppName?: string;
   /** Callback when user switches apps */
   onAppChange?: (name: string) => void;
+  /**
+   * Below the fold width, draw the sidebar as the icon rail that expands over
+   * the content (objectstack#27593). The console layout sets it, and folds
+   * the sidebar with `useResponsiveSidebar`; off, the sidebar is drawn as the
+   * provider says at every width.
+   */
+  railOverlay?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -153,7 +164,7 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
+export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
@@ -170,6 +181,11 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
   // metadata cache at render time (objectui#9868). `nav:menu` wires the same
   // hook, so the two surfaces cannot name one entry two ways.
   const resolveNavTargetLabel = useNavTargetLabel();
+  // Below the fold width the sidebar is the icon rail and expands over the
+  // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
+  const rail = useConsoleSidebarRail({ enabled: railOverlay });
+  const railPanel = useConsoleSidebarRailPanel(rail);
+  const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
 
   // Swipe-from-left-edge gesture to open sidebar on mobile
   React.useEffect(() => {
@@ -494,8 +510,12 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
     : null;
 
   return (
-    <>
-    <Sidebar collapsible="icon" className={CONSOLE_BELOW_TOP_BAR}>
+    <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
+    <Sidebar
+      collapsible="icon"
+      className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
+      {...railPanel.panelProps}
+    >
       {/* Mobile-only drawer header — the app's glyph and name (objectui#12201
           item 3). On a phone the top bar hides the app pill, so this is the
           one place that says which app the user is in. It replaces the old
@@ -721,6 +741,26 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
          )}
         </div>
       </SidebarContent>
+      {/* "Keep sidebar open" turns the fold off for this browser; offered
+          where the fold applies, while the rail is expanded or kept open. */}
+      {rail.narrow && (rail.overlayOpen || rail.keepOpen) && (
+        <SidebarFooter className="border-t border-sidebar-border">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                data-testid="sidebar-keep-open"
+                aria-pressed={rail.keepOpen}
+                isActive={rail.keepOpen}
+                tooltip={keepOpenLabel}
+                onClick={() => rail.setKeepOpen(!rail.keepOpen)}
+              >
+                <Pin className="h-4 w-4" />
+                <span>{keepOpenLabel}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      )}
       {/* No footer trigger: the app bar's left slot holds the shell's one
           sidebar trigger at every width (objectui#12429). */}
     </Sidebar>
@@ -728,6 +768,6 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
         surfaces the full navigation tree, so a bottom strip of the
         first 5 leaves was pure duplication and ate ~52px of vertical
         space. Pattern follows Notion / Linear (drawer-only). */}
-    </>
+    </div>
   );
 }
