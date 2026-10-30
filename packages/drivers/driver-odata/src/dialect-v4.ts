@@ -284,9 +284,7 @@ export const odataV4Dialect: ODataDialect = {
 
   inList(property, literals) {
     // OData 4.0 has no `in` operator (4.01 added it): an `or` chain answers on both.
-    return literals.length === 1
-      ? `${property} eq ${literals[0]}`
-      : `(${literals.map((literal) => `${property} eq ${literal}`).join(' or ')})`;
+    return literals.map((literal) => `${property} eq ${literal}`).join(' or ');
   },
 
   countOptions() {

@@ -173,6 +173,38 @@ describe.each(COLLATIONS)('driver-odata conformance over a %s service', (collati
     }
   });
 
+  // Not a shared case-set: the shared filter rows negate text, which the driver never pushes
+  // down. A negation on a number is pushed down, under `not`, to a service whose parser reads
+  // OData's precedence (`not` binds tighter than `eq`) and refuses a non-Boolean operand.
+  describe('negation pushed down on a non-text property', () => {
+    const setup = () => boot({
+      collation,
+      properties: [
+        STRING('id', false), { name: 'n', type: 'Edm.Int32' }, { name: 'm', type: 'Edm.Int32', nullable: false },
+      ],
+      rows: [{ id: 'r1', n: 1, m: 1 }, { id: 'r2', n: 2, m: 2 }, { id: 'r3', n: null, m: 3 }],
+      fields: { n: { type: 'number' }, m: { type: 'number' } },
+    });
+    const cases: Array<[string, object, string[], string]> = [
+      ['$nin of one value, nullable', { n: { $nin: [1] } }, ['r2', 'r3'], 'not (n eq 1) or n eq null'],
+      ['$nin of two values, nullable', { n: { $nin: [1, 2] } }, ['r3'], 'not (n eq 1 or n eq 2) or n eq null'],
+      ['$nin of one value, not nullable', { m: { $nin: [1] } }, ['r2', 'r3'], 'not (m eq 1)'],
+      ['$ne, nullable', { n: { $ne: 1 } }, ['r2', 'r3'], 'n ne 1 or n eq null'],
+    ];
+    for (const [name, where, expected, filter] of cases) {
+      it(name, async () => {
+        const { engine, service } = await setup();
+        expect(sortedIds(await engine.find(OBJECT, { where, ...SYSTEM } as never))).toEqual(expected);
+        expect(service.filters.join('\n')).toContain(filter);
+      });
+    }
+    it('the service refuses `not` over a non-Boolean operand, as a precedence-reading parser does', async () => {
+      const { service } = await setup();
+      const answer = await service.fetch(`${CONFORMANCE_ROOT}Rows?$filter=${encodeURIComponent('not n eq 1')}`, { method: 'GET' });
+      expect(answer.status).toBe(400);
+    });
+  });
+
   describe('TEMPORAL_CASES', () => {
     const setup = () => boot({
       collation,

@@ -198,7 +198,10 @@ function translateOperator(
       if (isText || !Array.isArray(comparand)) return null;
       const values = comparand.map(lit);
       if (values.some((v) => v === undefined) || comparand.some((v) => v === null)) return null;
-      const excluded = `not ${dialect.inList(name, values as string[])}`;
+      // `not` binds tighter than `eq` and `or`: without the parentheses `not P eq 1` reads as
+      // `(not P) eq 1`, which a service refuses, and the nullable form's `or P eq null` would
+      // fall under the `not` and drop the null rows.
+      const excluded = `not (${dialect.inList(name, values as string[])})`;
       return property.nullable ? `${excluded} or ${name} eq null` : excluded;
     }
     case '$null': {

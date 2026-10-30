@@ -111,7 +111,11 @@ export interface ODataDialect {
   stringFunction(fn: ODataStringFunction, property: string, literal: string): string;
   /** Spell a case-folded property reference (for `$icontains`). */
   toLower(property: string): string;
-  /** Spell set membership over already-spelled literals (non-empty). */
+  /**
+   * Spell set membership over already-spelled literals (non-empty). The
+   * result need not be grouped: the translator parenthesizes it wherever it
+   * is an operand (under `not`, beside `and` / `or`).
+   */
   inList(property: string, literals: readonly string[]): string;
   /** The query options that ask a collection read to carry its total count. */
   countOptions(): Record<string, string>;

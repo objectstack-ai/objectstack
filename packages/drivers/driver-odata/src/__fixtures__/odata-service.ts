@@ -106,7 +106,7 @@ type Node =
 const COMPARISON = new Set(['eq', 'ne', 'gt', 'ge', 'lt', 'le']);
 const FUNCTIONS = new Set(['contains', 'startswith', 'endswith', 'tolower']);
 
-function parse(text: string, properties: ReadonlySet<string>): Node {
+function parse(text: string, types: ReadonlyMap<string, EdmType>): Node {
   const tokens = tokenize(text);
   let pos = 0;
   const peek = () => tokens[pos];
@@ -126,9 +126,26 @@ function parse(text: string, properties: ReadonlySet<string>): Node {
     while (isWord('and')) { pos++; left = { kind: 'and', left, right: unary() }; }
     return left;
   };
+  // OData's precedence: `not` is unary and binds tighter than the comparisons, so
+  // `not P eq 1` is `(not P) eq 1`. Its operand must be Boolean, as a real service's
+  // parser requires; a non-Boolean one is refused (400), never read as `not (P eq 1)`.
+  const negation = (): Node => {
+    if (!isWord('not')) return operand();
+    pos++;
+    const inner = negation();
+    if (!isBoolean(inner)) throw new FilterSyntaxError("the operand of 'not' is not Boolean");
+    return { kind: 'not', operand: inner };
+  };
+  const isBoolean = (node: Node): boolean => {
+    switch (node.kind) {
+      case 'and': case 'or': case 'not': case 'compare': return true;
+      case 'call': return node.fn !== 'tolower';
+      case 'property': return types.get(node.name) === 'Edm.Boolean';
+      case 'literal': return !node.quoted && (node.text === 'true' || node.text === 'false');
+    }
+  };
   const unary = (): Node => {
-    if (isWord('not')) { pos++; return { kind: 'not', operand: unary() }; }
-    const left = operand();
+    const left = negation();
     const t = peek();
     if (t?.kind === 'word' && COMPARISON.has(t.value)) {
       pos++;
@@ -153,7 +170,7 @@ function parse(text: string, properties: ReadonlySet<string>): Node {
       expect(')');
       return { kind: 'call', fn: t.value, args };
     }
-    if (properties.has(t.value)) return { kind: 'property', name: t.value };
+    if (types.has(t.value)) return { kind: 'property', name: t.value };
     if (/^[A-Za-z_]/.test(t.value) && !['true', 'false', 'null'].includes(t.value)) {
       throw new FilterSyntaxError(`'${t.value}' is not a property of the entity type`);
     }
@@ -256,7 +273,6 @@ export function odataService(options: ODataServiceOptions): ODataService {
   const { entitySet, properties } = options;
   const key = properties[0]!.name;
   const types = new Map(properties.map((p) => [p.name, p.type] as const));
-  const names = new Set(properties.map((p) => p.name));
   const fold = options.collation === 'case-insensitive' ? (t: string) => t.toLowerCase() : (t: string) => t;
   const pageSize = options.serverPageSize ?? 1000;
   const rows = options.rows.map((r) => ({ ...r }));
@@ -286,7 +302,7 @@ export function odataService(options: ODataServiceOptions): ODataService {
         filters.push(filter);
         let tree: Node;
         try {
-          tree = parse(filter, names);
+          tree = parse(filter, types);
         } catch (error) {
           return refused(400, `The query specified in the URI is not valid: ${(error as Error).message}`);
         }

@@ -62,10 +62,14 @@ const TABLE: Row[] = [
   ['$ne on a non-nullable property', flights, { cancelled: { $ne: true } }, 'Cancelled ne true', true],
   ['$ne null', people, { middle_name: { $ne: null } }, 'MiddleName ne null', true],
   ['$nin on a nullable property', people, { age: { $nin: [1, 2] } }, 'not (Age eq 1 or Age eq 2) or Age eq null', true],
+  ['$nin of one value on a nullable property', people, { age: { $nin: [1] } }, 'not (Age eq 1) or Age eq null', true],
+  ['$nin of one value on a non-nullable property', flights, { id: { $nin: [42] } }, 'not (PlanItemId eq 42)', true],
+  ['$nin of one boolean', flights, { cancelled: { $nin: [true] } }, 'not (Cancelled eq true)', true],
   ['$nin empty', people, { age: { $nin: [] } }, null, true],
 
   // Sets and nulls.
-  ['$in', people, { user_name: { $in: ['russellwhyte', 'scottketchum'] } }, "(UserName eq 'russellwhyte' or UserName eq 'scottketchum')", true],
+  ['$in', people, { user_name: { $in: ['russellwhyte', 'scottketchum'] } }, "UserName eq 'russellwhyte' or UserName eq 'scottketchum'", true],
+  ['$in beside another predicate is grouped', people, { user_name: { $in: ['russellwhyte', 'scottketchum'] }, first_name: 'Russell' }, "(UserName eq 'russellwhyte' or UserName eq 'scottketchum') and (FirstName eq 'Russell')", true],
   ['$in one', people, { user_name: { $in: ['russellwhyte'] } }, "UserName eq 'russellwhyte'", true],
   ['$in empty', people, { user_name: { $in: [] } }, 'false', true],
   ['$null true', people, { middle_name: { $null: true } }, 'MiddleName eq null', true],

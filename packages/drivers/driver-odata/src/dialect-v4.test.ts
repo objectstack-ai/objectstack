@@ -76,6 +76,6 @@ describe('OData v4 envelope', () => {
   });
 
   it('spells set membership as an or-chain, which 4.0 services answer (4.01 added `in`)', () => {
-    expect(odataV4Dialect.inList('A', ['1', '2'])).toBe('(A eq 1 or A eq 2)');
+    expect(odataV4Dialect.inList('A', ['1', '2'])).toBe('A eq 1 or A eq 2');
   });
 });
