@@ -23,11 +23,17 @@
  * - a dangling name, a descriptor or an instance with nothing to lend, carried
  *   by an input built with `strict: false`, is refused with the same finding
  *   and envelope, under `last` and `preserve`;
- * - a connector name a later input re-declares is judged against that later
- *   entry, the one the runtime keeps, and that finding names both
- *   declarations and prescribes the duplicate's fix;
+ * - a connector name declared twice in one registration slot (the flattened
+ *   artifact's top level) is judged against the later entry, the one the
+ *   registry keeps, and that finding names both declarations and prescribes
+ *   the duplicate's fix;
+ * - a connector name two PACKAGES declare (two slots: the registry keeps
+ *   both, and the first registered lends) is refused as ambiguous in either
+ *   order when one entry can lend and the other cannot, and accepted when
+ *   both can;
  * - a nested multi-package input (a `manifest: 'preserve'` artifact) is read
- *   through its package bodies, where its connectors and datasources live;
+ *   through its package bodies, where its connectors and datasources live,
+ *   and an entry it carries in both halves is read once;
  * - CONTROL: a datasource borrowing an instance another input declares
  *   composes, in either order;
  * - CONTROL: the per-stack strict refusal is unchanged, so a strict input
@@ -186,7 +192,7 @@ describe('composeStacks judges external.connector against the connectors of ever
     );
   });
 
-  it('judges a name two inputs declare against the later entry, the one the runtime keeps', () => {
+  it('judges a name two inputs declare in the flattened artifact against the later entry, the one the registry keeps', () => {
     const strictPair = defineStack({
       manifest: pluginManifest('com.acme.orders'),
       datasources: [sapOrders()],
@@ -202,6 +208,36 @@ describe('composeStacks judges external.connector against the connectors of ever
     );
     expect(String(refused?.issues?.[0])).not.toContain('Give it the provider');
     expect(composeRefusal([owner(descriptor), strictPair])).toBeUndefined();
+  });
+
+  describe('a name two packages of a `preserve` artifact declare: the registry keeps both, the first registered lends', () => {
+    const strictPair = () =>
+      defineStack({
+        manifest: pluginManifest('com.acme.orders'),
+        datasources: [sapOrders()],
+        connectors: [instance()],
+      } as never);
+    const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
+
+    it.each([
+      ['instance first', false],
+      ['descriptor first', true],
+    ])('refuses the borrow as ambiguous when one can lend and the other cannot — %s', (_order, reversed) => {
+      const stacks = reversed ? [owner(descriptor), strictPair()] : [strictPair(), owner(descriptor)];
+      const refused = composeRefusal(stacks, { manifest: 'preserve' });
+      expectComposedFinding(refused, 'which more than one package of the composed artifact declares, and they disagree');
+      const finding = String(refused?.issues?.[0]);
+      expect(finding).toContain("'com.acme.orders' (stack #");
+      expect(finding).toContain("declares an instance that can lend, and 'com.acme.sap' (stack #");
+      expect(finding).toContain('lends from whichever registers first');
+      expect(finding).not.toContain('which the runtime keeps');
+    });
+
+    it('CONTROL: two packages that each declare an instance that can lend compose, in either order', () => {
+      const other = owner(instance({ auth: { type: 'bearer', credentialRef: 'sap_token_2' } }));
+      expect(composeRefusal([strictPair(), other], { manifest: 'preserve' })).toBeUndefined();
+      expect(composeRefusal([other, strictPair()], { manifest: 'preserve' })).toBeUndefined();
+    });
   });
 
   it('keeps the per-stack prescription when no declaration of the name could lend', () => {
@@ -239,14 +275,34 @@ describe('composeStacks judges external.connector against the connectors of ever
       ]);
     });
 
-    it('names the package body that declares a shadowed instance', () => {
+    it("treats a package body and another input's top level as two slots, and names the body", () => {
       const strictPair = defineStack({
         manifest: pluginManifest('com.acme.orders'),
         datasources: [sapOrders()],
         connectors: [instance()],
       } as never);
       const refused = composeRefusal([nested(strictPair), owner({ name: 'sap_s4', label: 'SAP', type: 'api' })]);
-      expect(String(refused?.issues?.[0])).toContain("package 'com.acme.orders' of 'com.acme.other' (stack #0)");
+      expectComposedFinding(refused, 'which more than one package of the composed artifact declares, and they disagree');
+      expect(String(refused?.issues?.[0])).toContain(
+        "package 'com.acme.orders' of 'com.acme.other' (stack #0) declares an instance that can lend",
+      );
+    });
+
+    it('reads an entry the nested input carries in both halves once', () => {
+      // A nested artifact whose bodies did not reproduce its flattened half
+      // keeps both, holding the same entry objects in each.
+      const borrower = sapOrders('sap_missing');
+      const both = defineStack(
+        {
+          manifest: pluginManifest('com.acme.bundle'),
+          datasources: [borrower],
+          packages: [{ manifest: { ...pluginManifest('com.acme.orders'), datasources: [borrower] } }],
+        } as never,
+        { strict: false },
+      );
+      const refused = composeRefusal([owner(), both]);
+      expect(refused?.issues).toHaveLength(1);
+      expect(refused?.message).toContain('composeStacks artifact cross-reference validation failed (1 issue):');
     });
   });
 
