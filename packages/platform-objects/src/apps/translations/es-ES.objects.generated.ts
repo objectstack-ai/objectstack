@@ -694,7 +694,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       update_member_role: {
         label: "Cambiar rol",
-        successMessage: "Rol del miembro actualizado"
+        successMessage: "Rol del miembro actualizado",
+        outcomeMessages: {
+          permission_set_granted: "Rol del miembro actualizado. El nuevo rol también concedió el conjunto de permisos ${result.grantedPermissionSet.label}."
+        }
       },
       remove_member: {
         label: "Eliminar miembro",
@@ -704,7 +707,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       transfer_ownership: {
         label: "Hacer propietario",
         confirmText: "¿Hacer propietario de esta organización al miembro seleccionado? Obtendrá todos los privilegios de propietario, incluido eliminar la organización. Tú sigues siendo propietario; para dejar de serlo, usa «Cambiar rol» en tu propia membresía.",
-        successMessage: "El miembro ahora es propietario"
+        successMessage: "El miembro ahora es propietario",
+        outcomeMessages: {
+          permission_set_granted: "El miembro ahora es propietario. El nuevo rol también concedió el conjunto de permisos ${result.grantedPermissionSet.label}."
+        }
       }
     }
   },

@@ -694,7 +694,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       update_member_role: {
         label: "Change Role",
-        successMessage: "Member role updated"
+        successMessage: "Member role updated",
+        outcomeMessages: {
+          permission_set_granted: "Member role updated. The new role also granted the permission set ${result.grantedPermissionSet.label}."
+        }
       },
       remove_member: {
         label: "Remove Member",
@@ -704,7 +707,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       transfer_ownership: {
         label: "Make Owner",
         confirmText: "Make the selected member an owner of this organization? They get every owner privilege, including deleting the organization. You stay an owner too; to step down, use Change Role on your own membership.",
-        successMessage: "Member is now an owner"
+        successMessage: "Member is now an owner",
+        outcomeMessages: {
+          permission_set_granted: "Member is now an owner. The new role also granted the permission set ${result.grantedPermissionSet.label}."
+        }
       }
     }
   },
@@ -2531,9 +2537,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Severity",
         help: "Severity hint for rendering / filtering",
         options: {
-          info: "info",
-          warning: "warning",
-          critical: "critical"
+          info: "Info",
+          warning: "Warning",
+          critical: "Critical"
         }
       },
       suppressed_channels: {

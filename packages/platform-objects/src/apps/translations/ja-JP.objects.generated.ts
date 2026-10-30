@@ -694,7 +694,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       update_member_role: {
         label: "ロールを変更",
-        successMessage: "メンバーロールを更新しました"
+        successMessage: "メンバーロールを更新しました",
+        outcomeMessages: {
+          permission_set_granted: "メンバーのロールを更新しました。新しいロールにより権限セット ${result.grantedPermissionSet.label} も付与されました。"
+        }
       },
       remove_member: {
         label: "メンバーを削除",
@@ -704,7 +707,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       transfer_ownership: {
         label: "所有者にする",
         confirmText: "選択したメンバーをこの組織の所有者にしますか？このメンバーには、組織の削除を含む所有者のすべての権限が付与されます。あなたも引き続き所有者です。退く場合は、自分のメンバーシップで「ロールを変更」を使用してください。",
-        successMessage: "メンバーが所有者になりました"
+        successMessage: "メンバーが所有者になりました",
+        outcomeMessages: {
+          permission_set_granted: "このメンバーはオーナーになりました。新しいロールにより権限セット ${result.grantedPermissionSet.label} も付与されました。"
+        }
       }
     }
   },
