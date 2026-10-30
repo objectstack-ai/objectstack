@@ -851,19 +851,10 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             // …) as the target wrote them — see `apiActionRefusalMembers`. Only
             // a refusal the target did not envelope is rebuilt from its code.
             const members = actionExec.apiActionRefusalMembers(answer);
-            if (members) {
-                return {
-                    handled: true,
-                    response: {
-                        ...apiErrorResponse({ message: refusal.message, httpStatus: answer.status, code: (refusal as any).code, extra: members }),
-                        ...relayed,
-                    },
-                };
-            }
-            return {
-                handled: true,
-                response: { ...deps.error(refusal.message, answer.status, { code: (refusal as any).code }), ...relayed },
-            };
+            const refused = members
+                ? apiErrorResponse({ message: refusal.message, httpStatus: answer.status, code: (refusal as any).code, extra: members })
+                : deps.error(refusal.message, answer.status, { code: (refusal as any).code });
+            return { handled: true, response: { ...refused, ...relayed } };
         }
 
         const actionContext: any = {
