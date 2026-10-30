@@ -1,6 +1,7 @@
 ---
 '@object-ui/app-shell': patch
 '@object-ui/i18n': patch
+'@object-ui/console': patch
 ---
 
 fix(studio): plainer authoring in Studio — option labels first, named validation rules, labelled condition fields, object labels on flow cards, honest field counts, a Create that says why it is off, and a publish toast that points to Access
@@ -15,3 +16,4 @@ Metadata-protocol: none
 - **Add field**: a Create that cannot run yet stays focusable and says what is missing.
 - **Read-only inspectors**: disabled text areas take the muted disabled look.
 - **Publish**: the "one atomic release" wording is plain ("together: all of them go live, or none do"), and a publish that put an app or object live says members need a permission set, with an "Open Access" action.
+- **Studio access refusal** names who grants access (an administrator, in Setup → Permission Sets), in `en` and `zh` and in the Console's own fallback sentence.
