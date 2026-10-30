@@ -285,7 +285,7 @@ import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 795 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 801 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1735,7 +1735,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 795 isomorphic pins', () => {
+  it('still declares all 801 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2675,7 +2675,16 @@ describe('ADR-0122 type-alias convention', () => {
     // here (Iso_data_dataEngine__DataEngineExecuteRequestSchema,
     // Iso_data_dataEngine__DataEngineInsertRequestSchema,
     // Iso_data_dataEngine__DataEngineVectorFindRequestSchema). -3 removed.
-    expect(pins).toHaveLength(795);
+    // 795 -> 801 is #28137 (ADR-0143 S0): the grant-bearing connector instance
+    // auth kinds (`shared/connector-auth.zod.ts`) — the `oauth2` union and its
+    // two per-grant shapes, the `app-credential` shape, and the `grant` and
+    // `vendor` enums — carry no default and no transform, so they are pinned
+    // here (Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthSchema,
+    // …OAuth2AuthorizationCodeAuthSchema, …OAuth2ClientCredentialsAuthSchema,
+    // …AppCredentialAuthSchema, …ConnectorOAuth2GrantSchema,
+    // …ConnectorAppCredentialVendorSchema) rather than given `…Parsed`
+    // synonyms. +6 added.
+    expect(pins).toHaveLength(801);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
