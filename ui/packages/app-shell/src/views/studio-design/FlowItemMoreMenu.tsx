@@ -6,7 +6,8 @@
  * objectui#12725). The confirmation is Setup's: the in-app dialog naming the
  * flow by its label and `type/name` (objectui#13333). The pillar draws it only
  * for a writable package's flow and sends the delete itself. Reset overlay is
- * not offered: it arrives with ADR-0146 Phase 2's overlay editing.
+ * not offered: it arrives with the overlay editing of the Studio / Setup
+ * boundary record's phase 2 (#28045).
  */
 
 import * as React from 'react';
