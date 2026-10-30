@@ -250,7 +250,7 @@ export function createActionInvocationAuditWriter(
     engine: IDataEngine,
     row: Record<string, unknown>,
   ): Promise<void> => {
-    await engine.insert('sys_audit_log', row, { context: { isSystem: true } } as any);
+    await engine.insert('sys_audit_log', row, { context: { isSystem: true } });
   };
 
   return {

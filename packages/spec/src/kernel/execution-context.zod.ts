@@ -347,7 +347,7 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * `action_invocation` row, beside `performed_by` / `on_behalf_of` when an
    * agent performed the call.
    */
-  surface: z.enum(['rest', 'mcp']).optional().describe('[#27908] The door an action invocation came through: `rest` (the REST POST /actions/:object/:action door — console buttons, the SDK) or `mcp` (the /mcp bridge\'s run_action and resume_run tools — an AI client). Set only by those two doors, on the envelope of the invocation they hand the audit writer, from the door\'s own identity (an upstream value, header or body member never moves it); absent on every other operation. ATTRIBUTION ONLY — no security middleware reads it and it is never an authorization subject, scope or gate. Server-constructed only, never client-supplied. Recorded by the audit writer as sys_audit_log.metadata.surface on the action_invocation row.'),
+  surface: z.enum(['rest', 'mcp']).optional().describe('The door an action invocation came through: `rest` (the REST POST /actions/:object/:action door — console buttons, the SDK) or `mcp` (the /mcp bridge\'s run_action and resume_run tools — an AI client). Set only by those two doors, on the envelope of the invocation they hand the audit writer, from the door\'s own identity (an upstream value, header or body member never moves it); absent on every other operation. ATTRIBUTION ONLY — no security middleware reads it and it is never an authorization subject, scope or gate. Server-constructed only, never client-supplied. Recorded by the audit writer as sys_audit_log.metadata.surface on the action_invocation row.'),
 
   /** Aggregated permission names (resolved from PermissionSet) */
   permissions: z.array(z.string()).default([]),
