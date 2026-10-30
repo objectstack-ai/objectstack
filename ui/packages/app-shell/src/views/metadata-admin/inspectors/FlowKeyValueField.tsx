@@ -253,8 +253,8 @@ export interface FlowKeyValueFieldProps {
   keyHint?: string;
   /**
    * objectstack#27834: render the key cell as a picker that shows each of
-   * {@link keyOptions} by its label and stores its value. Omitted, the key is
-   * the text box with the options as suggestions.
+   * {@link keyOptions} by its label and stores its value, while there are
+   * options. Omitted, the key is the text box with the options as suggestions.
    */
   keysByLabel?: boolean;
   /**
@@ -363,7 +363,9 @@ export function FlowKeyValueField({
     setRows((rs) => flush(rs.map((r) => (r.id === id ? { ...r, key } : r))));
   };
 
-  const pickKeys = !!keysByLabel && !!keyOptions;
+  // A picker only over a list to pick from: with none (no object chosen, or
+  // its fields not read) the key is the plain box.
+  const pickKeys = !!keysByLabel && suggestsKeys;
   const keyPickerOptions = React.useMemo(
     () => (keyOptions ?? []).map((o) => ({ value: o.value, label: o.label })),
     [keyOptions],
