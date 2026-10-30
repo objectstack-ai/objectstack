@@ -51,7 +51,24 @@
     "chart": {
       "status": "live",
       "verifiedAt": "2026-09-27",
-      "note": "objectui: DatasetReportChart plots `chart.xAxis` (dataset dimension) × `chart.yAxis` (measure) via useDatasetRows, honoring `type`/`title` (framework#1890/#3441). Supersedes the 2026-06 audit's DEAD finding. Sub-key `groupBy` stays experimental (its own describe marker) — the dataset renderer plots a single series and never reads it. Live on NON-joined reports only (#20161, re-read at the `.objectui-sha` pin f8a9d0fb): the one `report.chart` read (DatasetReportRenderer.tsx:1557) sits after the joined branch's return (:1462-1524), so on a `type: 'joined'` report the schema's refinement REFUSES `chart` rather than accepting a key nothing reads. A `joined` report draws no chart (packages/spec/src/ui/report.zod.ts, the joined-chart prescription, #20161; read point moved out of spec source, #23434): at objectui @f8a9d0fb0596 packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer the joined branch draws each block as a `DatasetMatrixTable` / `DatasetReportTable` and returns before the one `report.chart` read, and no renderer reads a block's `chart`."
+      "note": "objectui: DatasetReportChart plots `chart.xAxis` (dataset dimension) × `chart.yAxis` (measure) via useDatasetRows, honoring `type`/`title` (framework#1890/#3441). Supersedes the 2026-06 audit's DEAD finding. Sub-key `groupBy` stays experimental (its own describe marker) — the dataset renderer plots a single series and never reads it. Live on NON-joined reports only (#20161, re-read at the `.objectui-sha` pin f8a9d0fb): the one `report.chart` read (DatasetReportRenderer.tsx:1557) sits after the joined branch's return (:1462-1524), so on a `type: 'joined'` report the schema's refinement REFUSES `chart` rather than accepting a key nothing reads. A `joined` report draws no chart (packages/spec/src/ui/report.zod.ts, the joined-chart prescription, #20161; read point moved out of spec source, #23434): at objectui @f8a9d0fb0596 packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer the joined branch draws each block as a `DatasetMatrixTable` / `DatasetReportTable` and returns before the one `report.chart` read, and no renderer reads a block's `chart`.",
+      "childrenDefault": "live",
+      "children": {
+        "aria": {
+          "status": "dead",
+          "verifiedAt": "2026-10-30",
+          "note": "REMOVED in @objectstack/spec 17 (ADR-0049 D2; the `chart-config-aria-removed` conversion): `ChartConfigSchema` tombstones it with retiredKey, so authoring `report.chart.aria` is a tsc error and a parse error carrying the prescription (use `description` on this same chart config). The row exists because the tombstone keeps the key in the walked shape now that `chart` drills; the retirement record is `dashboard.json`'s `widgets.chartConfig.aria` row."
+        },
+        "seriesBy": {
+          "status": "planned",
+          "verifiedAt": "2026-10-30",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/ui/report.zod.ts#ReportChartSchema (declares `seriesBy`, an optional dataset dimension name); packages/lint/src/validate-chart-bindings.ts#validateChartBindings (resolves it against the report's bound dataset dimensions exactly as `xAxis`, `chart-dimension-unknown` at error, at os validate / os build and the report publish door)",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing draws it yet: the report chart still draws a single series, and the split by this dimension appears once the report renderer reads `seriesBy`.",
+          "note": "Spec half of the report chart series split (#27974): a second dataset dimension that splits the one `yAxis` measure into a series per value, the report's spelling of a dashboard widget's two-entry `dimensions` selection. Planned because the renderer half is a follow-up: at this tree ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportChart still queries `[xAxis]` × `[yAxis]` and hands `buildChartSeries` one dimension, so the split is not drawn. The other children of `chart` inherit the row's `live` verdict through `childrenDefault`; this row exists to keep that blanket from vouching for the one key nothing reads yet. Flip to `live` with the renderer card."
+        }
+      }
     },
     "dateRange": {
       "status": "live",
