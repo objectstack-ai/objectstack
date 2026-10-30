@@ -23,7 +23,7 @@ deployment and to the sender. Scaffolded apps list the three executors in
   `VALIDATION_ERROR` (`fault`-routable) naming each path, nothing sent. Text
   is never converted: cast a string-held id,
   `path: { dialect: 'cel', source: '{"petId": int(record.vendor_id)}' }`.
-  `os validate` does not judge it yet.
+  `os validate` does not judge the `inputSchema` fit yet.
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value
   slot: `{ dialect: 'cel', source: 'bal.body.available[0].amount' }`.
@@ -40,7 +40,7 @@ deployment and to the sender. Scaffolded apps list the three executors in
 // it in the package, package-relative.
 export const StripeConnector = defineConnector({
   name: 'stripe', label: 'Stripe', type: 'api', provider: 'openapi',
-  providerConfig: { spec: './src/connectors/stripe.trimmed.json' },   // holds `GetBalance` alone
+  providerConfig: { spec: './src/connectors/stripe.trimmed.json' },
   auth: { type: 'bearer', credentialRef: 'STRIPE_SECRET_KEY' },        // admin sets STRIPE_SECRET_KEY
 });
 // crm_account gains `stripe_available` (currency) and `stripe_synced_at` (datetime).
