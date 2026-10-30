@@ -1,12 +1,14 @@
 ---
 title: "OData datasources — ERP records, live, with no driver of your own"
 navTitle: OData Datasources
-description: Declare a datasource over an OData v4 service such as SAP S/4HANA or Dynamics 365, bind objects to its entity sets, and read and write them live, with no code per entity set.
+description: Declare a datasource over an OData v4 or v2 service such as SAP S/4HANA, SAP Gateway or Dynamics 365, bind objects to its entity sets, and read and write them live, with no code per entity set.
 ---
 
 Many business systems already publish their records over **OData v4**: SAP S/4HANA,
 Microsoft Dynamics 365 and Dataverse, and any service that serves a CSDL 4.0
-`$metadata` document. For those you need no driver of your own. Mount
+`$metadata` document. Many others still speak **OData v2**: most SAP Gateway services,
+the older Dynamics CRM `OrganizationData.svc` and SharePoint 2013 REST. For those you
+need no driver of your own. Mount
 `@objectstack/driver-odata` once per service, declare a datasource, and bind an object
 to each entity set you want. Every view, form, permission set, formula and hook then
 works on those records, and no row is stored on the platform side.
@@ -20,16 +22,17 @@ says when to choose it over a driver of your own or a synced copy.
 
 Everything on this page is what the driver's own tests assert, against an in-process
 OData service and behind the real engine
-(`packages/drivers/driver-odata/src/odata-driver.floor.test.ts` and
-`odata-driver.conformance.test.ts`). Read them when this page and the runtime seem to
-disagree.
+(`packages/drivers/driver-odata/src/odata-driver.floor.test.ts`,
+`odata-driver.conformance.test.ts`, which runs over a v4 and a v2 service, and
+`odata-driver-v2.test.ts`). Read them when this page and the runtime seem to disagree.
 
 ## Check the service first
 
-- **It speaks OData v4.** Open `<serviceRoot>$metadata`. The root element must say
-  `Version="4.0"`. Only the v4 dialect ships. A service that speaks only OData v2 needs a
-  v2 dialect, which this package does not include. Many older SAP Gateway services are
-  v2 only, so check each service you plan to bind.
+- **Which OData version it speaks.** Open `<serviceRoot>$metadata`. A root element
+  that says `Version="4.0"` is a v4 service, the default. One that says `Version="1.0"`
+  (EDMX 1.0, with `m:DataServiceVersion="2.0"` or `"1.0"` below it) is a v2 service:
+  declare `version: '2.0'` ([OData v2 services](#odata-v2-services)). A document of the
+  other version is refused at the first request, with the version that reads it named.
 - **Each entity set you bind has a key.** The key becomes the record's `id`. An entity
   type with no usable key is refused at the first request.
 - **You know how it authenticates.** The driver sends no credential, a bearer token, or
@@ -61,15 +64,15 @@ export default defineStack({
 | :--- | :--- | :--- |
 | `name` | `odata` | The datasource it serves. It is also the driver name and the `driver.<name>` service suffix. |
 | `serviceRoot` | (required) | The service root URL, http or https, with no credentials and no query string. |
-| `version` | `4.0` | The protocol version. `4.0` is the only value. |
+| `version` | `4.0` | The protocol version: `4.0` or `2.0` ([OData v2 services](#odata-v2-services)). |
 | `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. Leave it `none` when the datasource borrows a connector instance's credential ([Credentials](#3-credentials)). |
 | `secrets` | (none) | Where `credentialsRef` is resolved: an object with `resolve(credentialsRef)`. When absent, the host's `datasource-secret-resolver` service is used; `os serve` registers one. |
-| `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
+| `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). A v2 service has no such preference and pages by its own size. |
 | `requestTimeoutMs` | `30000` | The timeout of each request. |
 
 The options are checked when the plugin is built. An unknown key, a `serviceRoot` with
-a user name or a query in it, or a version other than `4.0` refuses the boot with every
-problem named.
+a user name or a query in it, or a version other than `4.0` or `2.0` refuses the boot
+with every problem named.
 
 ## 2. Declare the datasource and bind objects
 
@@ -324,6 +327,54 @@ and the ways out are the same as on any plugin driver
 - **Editable data:** declare `sharingModel: 'public_read_write'`, and decide who may edit
   in a `beforeUpdate` hook. A member's delete is still refused on this model.
 
+## OData v2 services
+
+Declare the version on the plugin; nothing else in the datasource or the objects changes:
+
+```typescript
+createODataDriverPlugin({
+  name: 'gateway',
+  serviceRoot: 'https://erp.example.com/sap/opu/odata/sap/ZSALES_SRV/',
+  version: '2.0',
+  auth: { scheme: 'basic', username: 'SVC_PLATFORM' },
+});
+```
+
+The driver then speaks the public v2 protocol. Everything above holds, spelled the v2 way:
+
+| | v4 | v2 |
+| :--- | :--- | :--- |
+| Request headers | `OData-Version: 4.0` | `DataServiceVersion: 2.0`, `Accept: application/json` (verbose JSON) |
+| A collection | `value`, `@odata.nextLink`, `@odata.count` | `d.results`, `__next`, `__count` (a 1.0 service's bare `d` array is read too) |
+| The count | `$count=true` | `$inlinecount=allpages` |
+| `$contains` | `contains(P,'x')` | `substringof('x',P)` |
+| Literals | `2024-03-01T10:00:00Z`, a bare GUID, `1.5` | `datetime'…'`, `datetimeoffset'…'`, `time'PT13H20M0S'`, `guid'…'`, `7L`, `1.5M`, `1.5d`, `1.5f` |
+| Keys | `Orders(4711)` | the same typed literals: `Shipments(guid'…')`, `Items(7L)` |
+| A partial update | `PATCH` | `POST` with `X-HTTP-Method: MERGE` |
+| The ETag | `@odata.etag` | `__metadata.etag` |
+| `$metadata` | CSDL 4.0, navigation with its `ReferentialConstraint` | EDMX 1.0: `Association` / `AssociationSet`, the constraint on the Association |
+
+- **Values are read the way the engine reads them.** `Edm.DateTime` arrives as
+  `/Date(<ms>)/` and is read as that UTC instant (`1996-07-04T00:00:00.000Z`).
+  `Edm.Int64` and `Edm.Decimal` arrive as text and are read as numbers, except an
+  `Edm.Int64` beyond JavaScript's safe range, which stays text. `Edm.Time` is a duration
+  since midnight (`PT13H20M`) and is read as the time of day (`13:20:00`). Writes go out in
+  the same forms.
+- **v2 has no `Edm.Date`.** A v2 service keeps a date in an `Edm.DateTime` at midnight.
+  Declare the field `date`, and the driver reads the date alone (`1996-07-04`).
+- **A zone-less date comparand is left to the engine.** A filter on an `Edm.DateTime`
+  is pushed down only when its value names its instant (`…Z`, an offset, or a `Date`).
+  A bare date or a date-time without a zone is applied by the engine instead, so the
+  service is never asked a narrower question.
+- **The import reads Associations.** An imported `Edm.DateTime` becomes a `datetime`
+  field and an `Edm.Time` a `time` field. A navigation whose Association carries a
+  `ReferentialConstraint`, with this entity type on its dependent end, becomes the same
+  `lookup` a v4 navigation does.
+- **What stays out of this package.** Only the public v2 protocol ships here. Vendor
+  mechanics stay out: SAP Gateway's CSRF token handshake, the `sap-client` parameter and
+  the `sap:*` annotations, for example. A service that needs one is served by a vendor
+  plugin.
+
 ## When the service fails
 
 | What happened | The caller is answered |
@@ -340,7 +391,8 @@ as a sharing scope. The full mapping is in
 
 ## What it does not do
 
-- **OData v2.** Only the v4 dialect ships.
+- **Vendor-specific mechanics** on a v2 service, such as SAP's CSRF token handshake or
+  `sap-client` ([OData v2 services](#odata-v2-services)).
 - **`$expand` and navigation properties.** Bind each related entity set as an object of
   its own; an imported foreign key becomes a `lookup` onto it.
 - **Actions and functions** of the service. `execute` is refused.

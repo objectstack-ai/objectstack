@@ -3097,6 +3097,53 @@ describe('validateTranslationReferences — a form view\'s title (`_views.<view>
   });
 });
 
+/**
+ * A form view's thank-you panel (`_views.<view>.submitBehavior`) is legal on
+ * exactly the views a `title` is — a named form view, the default form, a
+ * `viewKind: 'form'` item — because `translateView` overlays both onto the
+ * served form's `config`. A list view submits nothing, so the key over one
+ * resolves nothing.
+ */
+describe('validateTranslationReferences — a form view\'s thank-you panel (`_views.<view>.submitBehavior`)', () => {
+  const data = { provider: 'object', object: 'crm_lead' };
+  const panel = { kind: 'thank-you', title: 'Thanks!', message: 'We will reach out.' };
+  const stack = (views: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+    views: [
+      {
+        list: { type: 'grid', name: 'all_leads', label: 'All Leads', data },
+        form: { type: 'simple', data, submitBehavior: panel },
+        formViews: { web_to_lead: { type: 'simple', data, submitBehavior: panel } },
+      },
+      { name: 'quick_lead', object: 'crm_lead', viewKind: 'form', config: { type: 'simple', data, submitBehavior: panel } },
+    ],
+    translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索', _views: views } } } }],
+  });
+  const zh = { title: '感谢您！', message: '我们会联系您。' };
+
+  it('accepts a panel over a named form view, the default form and a form item', () => {
+    const findings = validateTranslationReferences(stack({
+      web_to_lead: { submitBehavior: zh },
+      form: { title: '新建线索', submitBehavior: zh },
+      quick_lead: { submitBehavior: zh },
+    }));
+    expect(findings).toEqual([]);
+  });
+
+  it('refuses a panel over a LIST view by name', () => {
+    const findings = validateTranslationReferences(stack({ all_leads: { label: '全部线索', submitBehavior: zh } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].objects.crm_lead._views.all_leads.submitBehavior'],
+    ]);
+    expect(findings[0].message).toBe('View "all_leads" of object "crm_lead" is not a form view, so no thank-you panel resolves this key.');
+  });
+
+  it('CONTROL: the default form\'s key stays a non-key for a tail beside the panel', () => {
+    const findings = validateTranslationReferences(stack({ form: { label: '表单', submitBehavior: zh } }));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].objects.crm_lead._views.form']);
+  });
+});
+
 describe('validateTranslationReferences — section anchors', () => {
   it('resolves a section named on a form view or a record:details page', () => {
     const stack = {

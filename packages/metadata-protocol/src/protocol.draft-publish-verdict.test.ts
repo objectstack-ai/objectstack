@@ -462,6 +462,39 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
             expect.objectContaining({ path: 'nodes.0.config.secret', code: 'flow-api-trigger-secret-missing' }),
         );
     });
+
+    it('[#27828] a node config value refused by expression-invalid is located at the node, not in where prose', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        // Studio's Update Records value with its expression left blank.
+        const flow = {
+            name: 'blank_value',
+            label: 'Blank Value',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'set',
+                    type: 'update_record',
+                    label: 'Set',
+                    config: { objectName: 'deal', filter: { id: 'x' }, fields: { name: { dialect: 'cel', source: '   ' } } },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'set' },
+                { id: 'e2', source: 'set', target: 'end' },
+            ],
+        };
+        await stageDraft(protocol, 'flow', flow);
+
+        const diagnostics = await draftDiagnostics(protocol, 'flow', flow.name);
+        const refused = (diagnostics.errors ?? []).filter((e) => e.code === 'expression-invalid');
+        expect(diagnostics.valid).toBe(false);
+        expect(refused.length).toBeGreaterThan(0);
+        // `nodes.<index>.…` is the spelling Studio's Problems list maps onto a node.
+        for (const e of refused) expect(e.path).toBe('nodes.1.config.fields.name');
+    });
 });
 
 describe('[#27444] an object draft without its package namespace prefix', () => {

@@ -14,8 +14,9 @@ export {
 } from './config.js';
 export type { ODataDriverConfig, ODataDriverConfigInput } from './config.js';
 
-// The dialect seam: a v2 dialect implements `ODataDialect` in a file of its own.
+// The dialect seam: each OData version implements `ODataDialect` in a file of its own.
 export { odataV4Dialect, parseCsdlV4 } from './dialect-v4.js';
+export { odataV2Dialect, parseCsdlV2 } from './dialect-v2.js';
 export type {
   EdmEntitySet,
   EdmEntityType,

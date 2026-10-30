@@ -1375,6 +1375,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry.',
   },
   {
+    id: 'connector-auth-config-oauth2-retired',
+    order: 115,
+    text:
+      "It also retires the runtime `oauth2` variant of a connector's `authentication` (ADR-0143 D7), the "
+      + '`ConnectorOAuth2Schema` shape a plugin handed to registerConnector. It inlined a client secret and a '
+      + 'refresh token, and nothing consumed it: every provider factory takes the four static kinds, and the '
+      + "authoring door refused any non-`none` `authentication`. OAuth2 is declared instead on a provider-bound "
+      + "instance's `auth` (ADR-0143 D2.1), with the client secret behind a `credentialRef` and the tokens kept "
+      + 'by the platform as runtime state. The variant is refused by name on the union\'s own error map, with no '
+      + 'D2 conversion (the secret must move into the secrets layer, which no mechanical edit may do); its D3 '
+      + 'record is the semantic entry `connector-auth-config-oauth2-retired`.',
+  },
+  {
     id: 'connector-error-mapping-retired',
     order: 22,
     text:

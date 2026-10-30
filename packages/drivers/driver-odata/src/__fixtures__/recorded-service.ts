@@ -40,17 +40,18 @@ export interface RecordedRequest {
 
 export const METADATA_EXCHANGE: Exchange = { url: '$metadata', body: TRIPPIN_METADATA, headers: { 'Content-Type': 'application/xml' } };
 
-const relative = (url: string) => {
+const relative = (url: string, root: string) => {
   const decoded = decodeURIComponent(url);
-  return decoded.startsWith(SERVICE_ROOT) ? decoded.slice(SERVICE_ROOT.length) : decoded;
+  return decoded.startsWith(root) ? decoded.slice(root.length) : decoded;
 };
 
-export function recordedService(exchanges: Exchange[]): { fetch: FetchLike; requests: RecordedRequest[] } {
+/** `root`: the service root the exchanges are written relative to (TripPin's by default). */
+export function recordedService(exchanges: Exchange[], root: string = SERVICE_ROOT): { fetch: FetchLike; requests: RecordedRequest[] } {
   const pending = [...exchanges];
   const requests: RecordedRequest[] = [];
   const fetch: FetchLike = async (input, init) => {
     const method = init.method ?? 'GET';
-    const url = relative(input);
+    const url = relative(input, root);
     const headers = Object.fromEntries(Object.entries((init.headers ?? {}) as Record<string, string>));
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     requests.push({ method, url, headers, ...(body !== undefined ? { body } : {}) });

@@ -34,12 +34,14 @@ export const DcConnector: Connector = {
   label: 'DC HubSpot',
   type: 'saas',
   description: 'Example SaaS connector.',
+  // The runtime `oauth2` variant was retired in @objectstack/spec 18 (#28137,
+  // ADR-0143 D7): an intended break, documented in that PR's BREAKING changeset
+  // and its ADR-0087 entry `connector-auth-config-oauth2-retired`. A third party
+  // that wrote `{ type: 'oauth2', ... }` here now meets that prescription; the
+  // grant lives on a declarative instance's `auth`, the secret as a reference.
   authentication: {
-    type: 'oauth2',
-    authorizationUrl: 'https://example.com/oauth/authorize',
-    tokenUrl: 'https://example.com/oauth/token',
-    clientId: 'env:DC_CLIENT_ID',
-    clientSecret: 'env:DC_CLIENT_SECRET',
+    type: 'bearer',
+    token: 'env:DC_TOKEN',
   },
   actions: [
     {

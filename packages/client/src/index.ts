@@ -490,6 +490,14 @@ export interface CreateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
 }
 
 /**
@@ -544,6 +552,14 @@ export interface UpdateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
 }
 
 /**
@@ -5366,9 +5382,14 @@ export class ObjectStackClient {
   storage = {
     upload: async (file: any, scope: UploadScope = 'user'): Promise<FileUploadResponse> => {
         // 1. Get Presigned URL
+        // A browser `File` of unknown type carries `type === ''`, and the
+        // presigned door refuses an empty `mimeType` (its published contract,
+        // `GetPresignedUrlRequestSchema.mimeType` is `min(1)`). An unknown type
+        // is therefore sent as `application/octet-stream`; a typed file keeps
+        // its own type.
         const presignedReq: GetPresignedUrlRequest = {
             filename: file.name,
-            mimeType: file.type,
+            mimeType: file.type || 'application/octet-stream',
             size: file.size,
             scope
         };
@@ -5946,7 +5967,9 @@ export class ObjectStackClient {
        * intact keep their own codes and stay retryable — `INVALID_SIGNAL` /
        * `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409),
        * `RESUME_CHILD_PENDING` (409: the run waits on a `map` item run that is
-       * still suspended; the message names that run, resume it instead),
+       * still suspended; the message names that run, resume it instead — or
+       * whose suspension is gone without a `cancelled` history entry; the
+       * message names the remedy, cancelling the parent run),
        * `STORE_UNAVAILABLE` (503).
        */
       resume: async <T extends AutomationResult = AutomationResult>(

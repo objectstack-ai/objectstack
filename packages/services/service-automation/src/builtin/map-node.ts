@@ -14,6 +14,40 @@ import { collectionNotAList, resolveCollectionSlot, resolveValueSlotMap } from '
 const MAX_MAP_ITEMS = 10_000;
 
 /**
+ * [#27971] The result a `map` records in an item's slot when that item's run was
+ * cancelled (`cancelRun`) while the map waited on it, and the map's own run is
+ * then resumed. The item keeps its position, so `results[i]` is still item `i`;
+ * the marker is never a run or a success, and `count` leaves it out.
+ *
+ * Closed and `$`-keyed: a child flow's output keys are its output variable
+ * names, which never start with `$`, so no item output can look like it.
+ * Downstream nodes read it where they read the results:
+ * `results[i]['$status'] == 'cancelled'`.
+ */
+export interface MapItemCancelledMarker {
+  readonly $status: 'cancelled';
+  /** The item's cancelled run, as its run history records it. */
+  readonly $itemRunId: string;
+}
+
+/** Whether a recorded result is the {@link MapItemCancelledMarker}. */
+export function isMapItemCancelledMarker(value: unknown): value is MapItemCancelledMarker {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  const marker = value as Record<string, unknown>;
+  return keys.length === 2 && marker.$status === 'cancelled' && typeof marker.$itemRunId === 'string';
+}
+
+/**
+ * The handoff variable the resume gate sets, on the map node, when it lets a
+ * resume continue past a cancelled item: `<nodeId>.$mapItemCancelled` holds the
+ * cancelled item run id. Engine-owned like `$mapItemDone`; a caller cannot write it.
+ */
+export function mapItemCancelledVariable(nodeId: string): string {
+  return `${nodeId}.$mapItemCancelled`;
+}
+
+/**
  * `map` built-in node — **sequential multi-instance** (ADR-0037 Track A2).
  *
  * Runs a per-item **subflow** for each element of a collection, **one item at a
@@ -87,7 +121,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
           // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`), so this stays the open map
           // the Studio keyValue editor renders, like the CRUD `fields`.
           input: { type: 'object', additionalProperties: true, title: 'Item input', description: 'Params passed to each item’s subflow: each value a CEL value envelope evaluated per item (the item variable is in scope), or a literal.' },
-          outputVariable: { type: 'string', title: 'Output variable', description: 'Each item’s subflow output, collected in order.' },
+          outputVariable: { type: 'string', title: 'Output variable', description: 'Each item’s subflow output, collected in order. An item whose run was cancelled keeps its slot as { $status: \'cancelled\', $itemRunId }.' },
         },
         required: ['collection', 'flowName'],
       },
@@ -142,6 +176,15 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         variables.delete(`${node.id}.$mapItemDone`);
         variables.delete(`${node.id}.$mapItemOutput`);
       }
+      // [#27971] Re-entry past an item whose run was cancelled: the resume gate
+      // read `cancelled` in that run's history and says so here. The item keeps
+      // its slot with the marker, not an output — nothing ran, so no totals move.
+      const cancelledItemRunId = variables.get(mapItemCancelledVariable(node.id));
+      if (typeof cancelledItemRunId === 'string' && cancelledItemRunId) {
+        const marker: MapItemCancelledMarker = { $status: 'cancelled', $itemRunId: cancelledItemRunId };
+        state.results.push(marker);
+      }
+      variables.delete(mapItemCancelledVariable(node.id));
 
       const parentRunId = variables.get('$runId');
 
@@ -329,7 +372,9 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       if (outVar) variables.set(outVar, state.results);
       return {
         success: true,
-        output: { results: state.results, count: state.results.length },
+        // `count` is the items that RAN: a cancelled item's marker holds its
+        // slot in `results` but is never counted as a run (#27971).
+        output: { results: state.results, count: state.results.filter(r => !isMapItemCancelledMarker(r)).length },
         metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}), ...rolledFailures() },
       };
     },

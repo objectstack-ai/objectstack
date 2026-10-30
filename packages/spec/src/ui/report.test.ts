@@ -566,4 +566,17 @@ describe('ReportChartSchema', () => {
     expect(ReportChartSchema.parse({ type: 'bar', xAxis: 'stage', yAxis: 'revenue' }).type).toBe('bar');
     expect(() => ReportChartSchema.parse({ type: 'bar' })).toThrow();
   });
+
+  it('accepts an optional `seriesBy` split dimension and keeps it as authored', () => {
+    const r = ReportChartSchema.safeParse({ type: 'bar', xAxis: 'owner', yAxis: 'amount', seriesBy: 'stage' });
+    expect(r.success).toBe(true);
+    expect(r.data?.seriesBy).toBe('stage');
+    expect(ReportChartSchema.parse({ type: 'bar', xAxis: 'owner', yAxis: 'amount' }).seriesBy).toBeUndefined();
+  });
+
+  it('refuses a non-string `seriesBy` — it names one dimension, not a list', () => {
+    const r = ReportChartSchema.safeParse({ type: 'bar', xAxis: 'owner', yAxis: 'amount', seriesBy: ['stage'] });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join('.'))).toContain('seriesBy');
+  });
 });
