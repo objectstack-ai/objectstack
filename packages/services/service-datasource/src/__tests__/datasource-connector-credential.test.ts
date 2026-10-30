@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { ObjectQL } from '@objectstack/objectql';
 import {
+  CONNECTOR_CREDENTIAL_SOURCE_SERVICE,
   callWithBorrowedCredential,
   connectorCredentialRefusal,
   type BorrowedConnectorAuth,
@@ -21,6 +23,7 @@ import {
   type StoredDatasource,
 } from '../datasource-admin-service.js';
 import { borrowConnectorCredential } from '../datasource-connector-credential.js';
+import { DatasourceAdminServicePlugin } from '../datasource-admin-plugin.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 
 /**
@@ -39,6 +42,9 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
  *    a `401` (the grant-bearing kinds answer through the same handle);
  *  - an undeclared instance — and a host with no lender at all — is refused
  *    at connect, fail-closed: no driver built, nothing registered;
+ *  - the same verdict for a PLUGIN driver (driver-odata), which the engine
+ *    adopts from its `driver.<name>` service before any connect runs, so the
+ *    connect reaches only the already-registered guard;
  *  - the admin door refuses to save (and to probe) a draft naming an
  *    instance that cannot lend, and probes a lendable one with its credential.
  */
@@ -298,6 +304,92 @@ describe('[ADR-0015 D7] a datasource borrows its connector instance\'s credentia
     expect(result.status).toBe('connected');
     expect(borrowed).toEqual([]);
     expect(specs[0].credential).toBeUndefined();
+  });
+});
+
+/**
+ * The shipped shape: a plugin driver publishes `driver.<name>` in `init()`,
+ * `ObjectQLPlugin.start()` adopts it (`registerDriver`), and only then does
+ * `AppPlugin.start()` call `connectDeclared`, whose connect meets the
+ * already-registered guard. The composition is the real one — a real
+ * `ObjectQL` engine and the real `DatasourceAdminServicePlugin` through
+ * `init()` and `start()`, with the lender on its kernel slot — and the driver
+ * is adopted the way the discovery loop adopts it.
+ */
+async function adoptedPluginDriver(source: IConnectorCredentialSource | undefined) {
+  const ql = new ObjectQL();
+  const services = new Map<string, unknown>([['objectql', ql], ['data', ql], ['metadata', { get: async () => undefined, list: async () => [], register: async () => {}, unregister: async () => {} }]]);
+  if (source) services.set(CONNECTOR_CREDENTIAL_SOURCE_SERVICE, source);
+  const ctx = {
+    getService: (n: string) => {
+      if (!services.has(n)) throw new Error(`no service: ${n}`);
+      return services.get(n);
+    },
+    registerService: (n: string, value: unknown) => void services.set(n, value),
+    trigger: async () => {},
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+  };
+  const driver = { name: 'sap_orders', version: '1.0.0', connect: async () => {}, disconnect: async () => {}, find: vi.fn(async () => []) };
+  ctx.registerService('driver.sap_orders', driver);
+  const plugin = new DatasourceAdminServicePlugin({ driverFactory: { supports: () => false, create: vi.fn() } as unknown as IDatasourceDriverFactory });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+  // ObjectQLPlugin.start()'s discovery loop, for every `driver.*` service.
+  for (const [name, service] of services) if (name.startsWith('driver.')) ql.registerDriver(service as IDataDriver);
+  const connection = services.get('datasource-connection') as DatasourceConnectionService;
+  return { ql, connection, driver };
+}
+
+describe('[ADR-0015 D7] a plugin driver adopted from its driver.<name> service is judged at connect too', () => {
+  it('fails the boot for a datasource objects bind to, when its instance is not declared', async () => {
+    const { source } = lender({ declared: [] });
+    const { connection } = await adoptedPluginDriver(source);
+    await expect(connection.connectDeclared({
+      datasources: [sapOrders],
+      objects: [{ name: 'sap_order', datasource: 'sap_orders' }],
+    })).rejects.toThrow(/connector instance 'sap_s4'.*is not declared/s);
+  });
+
+  it('records a disabled instance as failed, naming it, and marks the datasource unavailable', async () => {
+    const disabled: IConnectorCredentialSource = {
+      borrow: async (connector) => {
+        throw connectorCredentialRefusal(`connector instance '${connector}' (named by this datasource's external.connector) is disabled (enabled: false).`, 'VALIDATION_ERROR', 422);
+      },
+    };
+    const { ql, connection, driver } = await adoptedPluginDriver(disabled);
+    const result = await connection.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
+    expect(result).toMatchObject({ status: 'failed-credentials' });
+    expect(result.reason).toContain('is disabled (enabled: false)');
+    expect(connection.getConnectionState('sap_orders')?.availability).toBe('failed');
+    expect(ql.listUnavailableDatasources()).toEqual([expect.objectContaining({ name: 'sap_orders', kind: 'failed' })]);
+    // Not evicted: the driver is its plugin's, and it refuses each request on its own.
+    expect(ql.getDriverByName('sap_orders')).toBeDefined();
+    expect(driver.find).not.toHaveBeenCalled();
+  });
+
+  it('refuses with no lender registered, naming the plugin that lends', async () => {
+    const { connection } = await adoptedPluginDriver(undefined);
+    const result = await connection.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
+    expect(result.status).toBe('failed-credentials');
+    expect(result.reason).toContain('@objectstack/service-automation');
+  });
+
+  it('answers already-registered for an instance that can lend, borrowing once to judge it', async () => {
+    const { source, borrowed } = lender({});
+    const { ql, connection } = await adoptedPluginDriver(source);
+    const result = await connection.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
+    expect(result.status).toBe('already-registered');
+    expect(borrowed).toEqual(['sap_s4']);
+    expect(connection.getConnectionState('sap_orders')?.availability).toBe('available');
+    expect(ql.listUnavailableDatasources()).toEqual([]);
+  });
+
+  it('judges nothing for an adopted driver whose datasource names no connector', async () => {
+    const { source, borrowed } = lender({ declared: [] });
+    const { connection } = await adoptedPluginDriver(source);
+    const result = await connection.connect({ ...sapOrders, external: { allowWrites: false } }, { context: { origin: 'code', trigger: 'declared-auto' } });
+    expect(result.status).toBe('already-registered');
+    expect(borrowed).toEqual([]);
   });
 });
 

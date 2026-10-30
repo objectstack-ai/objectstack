@@ -22,6 +22,7 @@
 
 import {
   callWithBorrowedCredential,
+  withoutBorrowedCredential,
   type BorrowedConnectorAuth,
   type ConnectorCredentialHandle,
 } from '@objectstack/types';
@@ -154,13 +155,17 @@ export class ODataTransport {
   async request(req: ODataRequest): Promise<ODataResponse> {
     const borrowed = this.opts.borrowed ? await this.opts.borrowed() : undefined;
     let response: Response;
+    let presented: BorrowedConnectorAuth | undefined;
     if (borrowed) {
       // [ADR-0015 D7] The connector instance's credential, by the one rule every
       // driver presents a borrowed credential through. A second 401 ends as its
       // 503, which the engine's floor answers ERR_DATASOURCE_UNAVAILABLE.
       response = await callWithBorrowedCredential(
         borrowed,
-        (auth) => this.send(req, presentBorrowed(auth)),
+        (auth) => {
+          presented = auth;
+          return this.send(req, presentBorrowed(auth));
+        },
         { isUnauthorized: isUnauthorizedResponse },
       );
     } else {
@@ -175,12 +180,17 @@ export class ODataTransport {
     if (response.ok || req.accept?.includes(response.status)) {
       return { status: response.status, headers: response.headers, body };
     }
-    const { code, message } = this.opts.dialect.readError(body);
+    const refusal = this.opts.dialect.readError(body);
+    // The upstream's own text can reach the caller (the floor answers a 400 /
+    // 404 / 422 refusal with it), and a service that echoes the request URI
+    // carries an API key presented as a query parameter: withheld first.
+    const scrub = (text: string | undefined) => (text && presented ? withoutBorrowedCredential(text, presented) : text);
+    const message = scrub(refusal.message);
     throw new ODataRequestError(
       `OData service refused ${req.method} on '${req.subject}' (HTTP ${response.status})`
         + (message ? `: ${message}` : ''),
       response.status,
-      code,
+      scrub(refusal.code),
     );
   }
 

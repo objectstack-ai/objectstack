@@ -186,6 +186,26 @@ describe('createODataDriverPlugin — a credential borrowed from external.connec
     expect(requests).toHaveLength(2);
   });
 
+  it('withholds a query-parameter API key from an upstream refusal that echoes the request URI', async () => {
+    const key = 'k-2/x+y==';
+    const { services } = lender([{ auth: { type: 'api-key', key, headerName: 'X-API-Key', paramName: 'apikey' } }]);
+    const echoed = new URL(`People?apikey=${encodeURIComponent(key)}`, SERVICE_ROOT).toString();
+    const { plugin } = await boot({ name: 'trippin' }, BORROWING, {
+      services,
+      exchanges: [
+        { ...METADATA_EXCHANGE, url: `$metadata?apikey=${key}` },
+        { url: `People?apikey=${key}`, status: 404, body: { error: { code: 'NotFound', message: `No resource at '${echoed}' (apikey=${key}, form ${new URLSearchParams({ apikey: key }).toString()})` } } },
+      ],
+    });
+    const failure = (await plugin.driver.find('trip_person', {}).then(() => undefined, (err: unknown) => err)) as Error & { status?: number };
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.status).toBe(404);
+    expect(failure.message).toContain('[credential withheld]');
+    for (const spelling of [key, encodeURIComponent(key), new URLSearchParams({ v: key }).toString().slice(2)]) {
+      expect(failure.message).not.toContain(spelling);
+    }
+  });
+
   const refusals: Array<[string, Omit<ODataDriverPluginOptions, 'serviceRoot' | 'fetch'>, Def[], Record<string, unknown>, RegExp]> = [
     ['no connector credential source registered', { name: 'trippin' }, BORROWING, {}, /no connector credential source is registered/],
     ['both credential channels', { name: 'trippin', secrets: SECRETS }, [{ name: 'trippin', external: { connector: 'trippin_api', credentialsRef: 'sys_secret:sec_trippin' } }], lender([bearer('tok-1')]).services, /names both external\.connector and external\.credentialsRef/],

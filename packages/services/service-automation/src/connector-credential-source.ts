@@ -20,11 +20,13 @@
  *
  * Today's instances carry the static kinds (bearer, API key, basic), which
  * ADR-0143 D4 leaves resolved once rather than per dispatch. A handle keeps
- * the value it resolved until one of three things: a `refresh()` (the
+ * the value it resolved until one of two things: a `refresh()` (the
  * driver's `401` path, so a rotated credential is picked up by the first
- * request it refuses), a credential write or reconcile in this plugin (the
- * {@link ConnectorCredentialSourceDeps.generation} moves), or the instance's
- * declaration changing under it. The grant-bearing kinds ADR-0143 adds answer
+ * request it refuses), or a credential write or reconcile in this plugin (the
+ * {@link ConnectorCredentialSourceDeps.generation} moves). The handle does not
+ * watch the declaration itself: a change to the instance (disabled, its
+ * `auth` rewritten) is seen after the next reconcile, which every declaration
+ * path runs, or on a `refresh()`. The grant-bearing kinds ADR-0143 adds answer
  * through the same handle, per dispatch, when they land.
  *
  * ⛔ A value leaves this module only as the return of a handle's `get` /

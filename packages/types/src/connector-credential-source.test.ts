@@ -12,7 +12,9 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+    borrowedCredentialForms,
     callWithBorrowedCredential,
+    withoutBorrowedCredential,
     type BorrowedConnectorAuth,
     type BorrowedConnectorCredential,
     type ConnectorCredentialHandle,
@@ -186,5 +188,28 @@ describe('callWithBorrowedCredential', () => {
         const refusal = Object.assign(new Error("credential 'sap_token' is not set"), { code: 'SERVICE_UNAVAILABLE', status: 503 });
         const handle: ConnectorCredentialHandle = { connector: 'sap_s4', get: async () => { throw refusal; }, refresh: async () => { throw refusal; } };
         await expect(callWithBorrowedCredential(handle, async () => 'never')).rejects.toBe(refusal);
+    });
+});
+
+describe('withoutBorrowedCredential — an upstream\'s echo of the presented credential', () => {
+    const b64 = (text: string) => Buffer.from(text, 'utf8').toString('base64').replace(/=+$/, '');
+
+    it('withholds a query-parameter API key in every spelling a request URL carries it', () => {
+        const auth: BorrowedConnectorAuth = { type: 'api-key', key: 'k-2/x+y==', headerName: 'X-API-Key', paramName: 'apikey' };
+        const text = `raw k-2/x+y== · uri ${encodeURIComponent('k-2/x+y==')} · form ${new URLSearchParams({ a: 'k-2/x+y==' }).toString().slice(2)} · b64 ${b64('k-2/x+y==')}`;
+        const out = withoutBorrowedCredential(text, auth);
+        expect(out).toBe('raw [credential withheld] · uri [credential withheld] · form [credential withheld] · b64 [credential withheld]');
+    });
+
+    it('withholds a basic credential as its password and as the Authorization header spells it', () => {
+        const auth: BorrowedConnectorAuth = { type: 'basic', username: 'svc', password: 'pw-secret' };
+        expect(borrowedCredentialForms(auth)).toContain(b64('svc:pw-secret'));
+        expect(withoutBorrowedCredential(`Basic ${b64('svc:pw-secret')} refused for pw-secret`, auth))
+            .toBe('Basic [credential withheld] refused for [credential withheld]');
+    });
+
+    it('leaves text that carries no spelling alone, and never blanks a value shorter than four characters', () => {
+        expect(withoutBorrowedCredential('Resource not found', { type: 'bearer', token: 'tok-1' })).toBe('Resource not found');
+        expect(withoutBorrowedCredential('a bad request', { type: 'bearer', token: 'a' })).toBe('a bad request');
     });
 });

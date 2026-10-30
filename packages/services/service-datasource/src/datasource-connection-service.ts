@@ -547,6 +547,24 @@ export class DatasourceConnectionService {
         return { name, status: 'already-registered' };
       }
     } else if (engine?.getDriverByName?.(name)) {
+      // [ADR-0015 D7] …except for the credential it borrows. A plugin driver
+      // (driver-odata) is adopted from its `driver.<name>` service before this
+      // runs, so this guard is the only connect a datasource naming
+      // `external.connector` ever reaches: without a verdict here an instance
+      // that cannot lend (undeclared, disabled, no `auth`, no automation
+      // service) would boot as available and fail every read with its cause in
+      // the server log only. The borrow judges the declaration and resolves no
+      // value. The driver is not evicted — it belongs to the plugin that
+      // registered it (#13578), and it refuses each request on its own — but
+      // the datasource is recorded failed (Setup → Datasources names why) and,
+      // when objects bind to it, the boot fails as for any connect failure.
+      const connector = borrowedConnectorOf(record.external);
+      if (connector !== undefined) {
+        const borrow = await borrowConnectorCredential(this.cfg.connectorCredentials?.(), connector);
+        if (!borrow.ok) {
+          return this.handleFailure(record, 'failed-credentials', borrow.reason, opts.context, opts.objects, opts.mappedObjects, borrow.cause);
+        }
+      }
       return { name, status: 'already-registered' };
     }
 

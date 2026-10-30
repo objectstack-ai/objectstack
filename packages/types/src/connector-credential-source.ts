@@ -44,7 +44,9 @@
  *
  * ⛔ A value crosses this seam only as the return of `get` / `refresh`, into
  * the driver's request. Nothing here logs, stores or echoes it, and the
- * refusals below name the connector instance, never a value.
+ * refusals below name the connector instance, never a value. An upstream's
+ * own text, which may echo it, goes through {@link withoutBorrowedCredential}
+ * before a driver throws it.
  */
 
 /** The kernel service name the connector credential source is registered under. */
@@ -126,6 +128,52 @@ export interface IConnectorCredentialSource {
 /** A refusal of this seam: a standard-catalog `code` and its `status` on the error, the message naming the instance. */
 export function connectorCredentialRefusal(message: string, code: 'VALIDATION_ERROR' | 'SERVICE_UNAVAILABLE', status: 422 | 503): Error {
     return Object.assign(new Error(message), { code, status, statusCode: status });
+}
+
+/** The shortest spelling a scrub withholds: a shorter one would blank ordinary words. */
+const MIN_WITHHELD_LENGTH = 4;
+
+function base64Unpadded(text: string): string {
+    let binary = '';
+    for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/=+$/, '');
+}
+
+/**
+ * Every spelling of a borrowed credential an upstream may echo back in its
+ * own text: the value; URL-encoded both ways (`encodeURIComponent`, and the
+ * form encoding `URLSearchParams` writes), as an API key presented as a query
+ * parameter travels in the request URL; base64; and, for `basic`,
+ * base64(`username:password`), the `Authorization: Basic` header. A base64
+ * form is kept without its `=` padding, so an echo that drops it is caught
+ * too. Longest first, so a longer form is replaced before a shorter one
+ * inside it. The same spellings `@objectstack/service-automation`'s
+ * connector call path withholds.
+ */
+export function borrowedCredentialForms(auth: BorrowedConnectorAuth): string[] {
+    const value = auth.type === 'bearer' ? auth.token : auth.type === 'api-key' ? auth.key : auth.password;
+    const forms = new Set<string>([
+        value,
+        encodeURIComponent(value),
+        new URLSearchParams({ v: value }).toString().slice(2),
+        base64Unpadded(value),
+    ]);
+    if (auth.type === 'basic') forms.add(base64Unpadded(`${auth.username}:${auth.password}`));
+    return [...forms].filter((f) => f.length >= MIN_WITHHELD_LENGTH).sort((a, b) => b.length - a.length);
+}
+
+/**
+ * `text` with every spelling of the presented credential withheld
+ * ({@link borrowedCredentialForms}). A driver runs an upstream's own text
+ * through this before it reaches an error it throws: the engine's floor may
+ * hand that message to the caller (a request-shaped refusal is answered `400`
+ * with it), and an upstream that echoes the request URI carries a
+ * query-parameter API key with it.
+ */
+export function withoutBorrowedCredential(text: string, auth: BorrowedConnectorAuth): string {
+    let out = text;
+    for (const form of borrowedCredentialForms(auth)) out = out.split(form).join('[credential withheld]');
+    return out;
 }
 
 /** The margin before `expiresAt` inside which a credential is refreshed rather than sent. */
