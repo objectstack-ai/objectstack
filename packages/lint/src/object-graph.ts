@@ -612,6 +612,29 @@ export function suggestName(target: string, known: Iterable<string>): string {
   return best ? ` Did you mean "${best}"?` : '';
 }
 
+/**
+ * The fix line for an object reference outside a package closure — ONE
+ * prescription, printed by every save-door rule that judges an object name
+ * under a stated `packageScope` (#27827): the flow trigger door
+ * (`flow-trigger-unknown-object`), the list view door
+ * (`list-view-object-outside-closure`) and the dataset base-object door
+ * (`object-reference-unknown`). The closure is the written package's own
+ * objects, the objects of the packages its manifest declares in
+ * `dependencies`, and platform objects, so the declaration is the fix that
+ * puts another package's object in reach (ADR-0141 D1). Three hand-written
+ * copies are how one door came to print a remedy pointing away from it.
+ *
+ * `alternative` is the door's own second remedy — the key it re-points, as a
+ * lower-case verb phrase with no trailing period. Like {@link suggestName},
+ * this decides no severity and holds no rule id; the caller's verdict does.
+ */
+export function closureDependencyRemedy(object: string, packageId: string, alternative: string): string {
+  return (
+    `Declare a dependency on the package that defines "${object}" in the \`dependencies\` of ` +
+    `"${packageId}"'s manifest, or ${alternative}`
+  );
+}
+
 function distance(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
