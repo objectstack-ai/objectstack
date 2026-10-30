@@ -25,7 +25,12 @@ export type {
   McpAuthoringToolRegistry,
   McpAuthoringInjection,
 } from './types.js';
-export { registerObjectTools, registerActionTools, grantsAuthoringTools } from './mcp-http-tools.js';
+export {
+  registerObjectTools,
+  registerActionTools,
+  registerFederationTools,
+  grantsAuthoringTools,
+} from './mcp-http-tools.js';
 export type {
   McpDataBridge,
   McpObjectSummary,
@@ -34,6 +39,7 @@ export type {
   McpActionSummary,
   McpActionParamSummary,
   RegisterActionToolsOptions,
+  McpFederationBridge,
 } from './mcp-http-tools.js';
 // The portable `SKILL.md` distributable (ADR-0036 Amendment C) — NOT the
 // `skill` metadata type; that one is projected onto MCP prompts just below.

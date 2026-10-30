@@ -77,8 +77,20 @@ export interface ODataDriverRuntime {
 export interface ODataIntrospectedTable extends IntrospectedTable {
   /** The qualified entity type. */
   entityType: string;
-  /** Single-valued navigation properties: candidates for a lookup field, never followed by reads. */
-  navigationProperties: Array<{ name: string; targetEntitySet?: string; targetEntityType: string; nullable: boolean }>;
+  /**
+   * Single-valued navigation properties: candidates for a lookup field, never
+   * followed by reads. A lookup needs a column holding the target's key, which
+   * only a `ReferentialConstraint` names (the dependent property on this type →
+   * the principal property on the target); a navigation without one has no
+   * column to back a lookup.
+   */
+  navigationProperties: Array<{
+    name: string;
+    targetEntitySet?: string;
+    targetEntityType: string;
+    nullable: boolean;
+    referentialConstraints: Array<{ property: string; referencedProperty: string }>;
+  }>;
 }
 
 export interface ODataIntrospectedSchema extends IntrospectedSchema {
@@ -245,6 +257,7 @@ export class ODataDriver implements IDataDriver {
             targetEntityType: nav.type,
             ...(set.navigationBindings[nav.name] ? { targetEntitySet: set.navigationBindings[nav.name] } : {}),
             nullable: nav.nullable,
+            referentialConstraints: nav.referentialConstraints.map((rc) => ({ ...rc })),
           })),
       };
     }
