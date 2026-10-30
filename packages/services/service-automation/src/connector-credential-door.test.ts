@@ -722,3 +722,64 @@ describe('[#27237] contract review: an encoded spelling of the value is withheld
         }
     });
 });
+
+/** [#28016] Run a one-node flow dispatching to `billing.request` and return its refusal text. */
+async function dispatchRefusal(engine: AutomationEngine): Promise<string> {
+    engine.registerFlow('call_billing', {
+        name: 'call_billing',
+        label: 'Call billing',
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'call', type: 'connector_action', label: 'Request', connectorConfig: { connectorId: 'billing', actionId: 'request', input: {} } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'call' },
+            { id: 'e2', source: 'call', target: 'end' },
+        ],
+    } as never);
+    const result = await engine.execute('call_billing');
+    expect(result.success).toBe(false);
+    return String(result.error);
+}
+
+describe('[#28016] a dispatch to an instance held on a refused stored credential says to set it again', () => {
+    it('refused at materialization (the mcp shape): set the credential again; nothing retries it', async () => {
+        const { engine, provider } = await boot([billing()]);
+        provider.state.rejectAtMaterialization = true;
+        await engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+
+        const error = await dispatchRefusal(engine);
+        expect(error).toContain("connector 'billing' is degraded — ");
+        expect(error).toContain(`until credential '${REF}' is set again (or the server restarts); the platform does not retry it.`);
+        expect(error).not.toMatch(/retries automatically/);
+        expect(error).not.toContain('.. Dispatch');
+        expect(error.includes(DUMMY_VALUE)).toBe(false);
+    });
+
+    it('refused on a call (the rest / openapi shape): set the credential again; nothing retries it', async () => {
+        const { engine, provider, call } = await boot([billing()]);
+        await engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+        provider.state.callStatus = 401;
+        await call();
+
+        const error = await dispatchRefusal(engine);
+        expect(error).toContain(`until credential '${REF}' is set again (or the server restarts); the platform does not retry it.`);
+        expect(error).not.toMatch(/retries automatically/);
+        expect(error).not.toContain('.. Dispatch');
+    });
+
+    it('control: an environment value refused on a call is on the backoff, and the refusal says the platform retries it', async () => {
+        process.env[REF] = DUMMY_ENV_VALUE;
+        envKeys.push(REF);
+        const { engine, provider, call } = await boot([billing()]);
+        provider.state.callStatus = 403;
+        await call();
+
+        const error = await dispatchRefusal(engine);
+        expect(error).toContain('The instance is retried with backoff.');
+        expect(error).toContain('Dispatch is unavailable until that is resolved; the platform retries automatically.');
+        expect(error).not.toMatch(/does not retry/);
+    });
+});

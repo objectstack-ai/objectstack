@@ -1,45 +1,52 @@
 /**
  * useResponsiveSidebar
  *
- * Auto-collapses the sidebar on tablet-width viewports (768px–1023px).
+ * Folds the sidebar to its icon rail while the window is narrower than
+ * `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` (and wider than the phone breakpoint,
+ * where the drawer takes over), and unfolds it when the window widens again
+ * (objectstack#27593). A reader who keeps the sidebar open is left alone.
  * Must be called inside a SidebarProvider context.
+ *
+ * The fold is not the reader's choice, so it does not keep one: the open
+ * state the sidebar had on the wide window is stashed when the rail takes
+ * over and handed back when the window widens, or on the next load that
+ * opens wide, because the primitive's cookie records every open and close,
+ * the fold's included.
  * @module
  */
 
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { useSidebar } from '@object-ui/components';
-
-/** Tablet breakpoint range: 768px <= width < 1024px */
-const TABLET_MIN = 768;
-const TABLET_MAX = 1024;
+import {
+  readStashedWideOpen,
+  useConsoleSidebarRail,
+  writeStashedWideOpen,
+} from '../layout/consoleSidebarRail.js';
 
 export function useResponsiveSidebar() {
-  const { setOpen, isMobile } = useSidebar();
+  const { open, setOpen } = useSidebar();
+  const { narrow, keepOpen, railMode } = useConsoleSidebarRail();
+  const openRef = useRef(open);
   const setOpenRef = useRef(setOpen);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    openRef.current = open;
     setOpenRef.current = setOpen;
-  }, [setOpen]);
+  });
 
-  useEffect(() => {
-    if (isMobile) return undefined;
-
-    let wasTablet = false;
-
-    function handleResize() {
-      const width = window.innerWidth;
-      const isTablet = width >= TABLET_MIN && width < TABLET_MAX;
-      if (isTablet && !wasTablet) {
-        // Auto-collapse once when entering tablet width, then preserve manual toggles.
-        setOpenRef.current(false);
-      }
-      wasTablet = isTablet;
+  // A layout effect, so a window that opens narrow paints the rail first.
+  useLayoutEffect(() => {
+    if (railMode) {
+      // A stash left by an earlier narrow load is the wide state; keep it.
+      if (readStashedWideOpen() === undefined) writeStashedWideOpen(openRef.current);
+      setOpenRef.current(false);
+      return;
     }
-
-    // Run on mount to set initial state
-    handleResize();
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [isMobile]);
+    const wideOpen = readStashedWideOpen();
+    if (wideOpen === undefined) return;
+    writeStashedWideOpen(undefined);
+    // "Keep open" on a narrow window: the reader just chose the open sidebar.
+    if (narrow && keepOpen) return;
+    setOpenRef.current(wideOpen);
+  }, [railMode, narrow, keepOpen]);
 }

@@ -1237,6 +1237,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.object-disabled-actions.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts",
       "verb": "delete",
       "pinned": 1

@@ -16,7 +16,6 @@ import type { AIActionConfirmation, IExternalDatasourceService } from '@objectst
 import { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from '@objectstack/rest';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
-import { isSystemObjectName } from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -828,7 +827,11 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 deps, meta, await readServedObjects(), await readServedActions(),
             );
             for (const { action, objectName, obj } of declarations) {
-                if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
+                if (!objectName) continue;
+                // [#27681] Fail-closed on `sys_*` PER ACTION: the same predicate
+                // `run_action` asks, so an agent that lists sees exactly the
+                // system-object actions it may run (their author's `ai.exposed`).
+                if (actionExec.systemObjectActionExposureError(deps, action, objectName)) continue;
                 if (!actionExec.isHeadlessInvokableAction(deps, action, hasAutomation)) continue;
                 // The script arm — every action `invokeBusinessAction` sends to
                 // the handler registry, i.e. neither the declarative update, nor
@@ -1172,9 +1175,8 @@ function resumeAdmissionRefusal(
     activationEngine: any,
 ): Error | undefined {
     const { action, objectName } = candidate;
-    if (isSystemObjectName(objectName)) {
-        return resumeDoorError(deps, `Action '${action?.name}' is on a system object and is not exposed via MCP`, 403);
-    }
+    const systemObject = actionExec.systemObjectActionExposureError(deps, action, objectName);
+    if (systemObject) return resumeDoorError(deps, systemObject, 403);
     const exposure = actionExec.actionAiExposureError(deps, action, objectName);
     if (exposure) return resumeDoorError(deps, exposure, 403);
     const permission = actionExec.actionPermissionError(deps, action, ec, objectName);

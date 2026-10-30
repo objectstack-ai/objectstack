@@ -3073,6 +3073,7 @@ const ru = {
     starred: "Отмеченные",
     removeFromFavorites: "Убрать {{name}} из избранного",
     allReports: "Все отчёты",
+    keepOpen: "Не сворачивать боковую панель",
   },
   topbar: {
     openAssistant: "Открыть ассистента {{name}}",

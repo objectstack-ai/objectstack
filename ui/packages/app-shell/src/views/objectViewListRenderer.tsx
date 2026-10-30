@@ -412,6 +412,10 @@ export function useObjectViewListRenderer({
 
         const fullSchema: ListViewSchema = {
             ...listSchema,
+            // objectstack#27626 — `columns` is named by identity in `ListView`'s
+            // fetch effect too, and opening or closing a record hands this page
+            // new object documents of equal content: hold it like the blocks.
+            columns: holdBlock('columns', listSchema.columns),
             // objectui#10035 — the refresh signal, in place of the remount the
             // key used to force. The spread above carries only the plugin
             // ObjectView's counter; this page's own counter (actions, import,
@@ -643,7 +647,8 @@ export function useObjectViewListRenderer({
             navigation: viewDef.navigation ?? listSchema.navigation,
             selection: viewDef.selection ?? listSchema.selection,
             pagination: viewDef.pagination ?? listSchema.pagination,
-            searchableFields: viewDef.searchableFields ?? listSchema.searchableFields,
+            // objectstack#27626 — named by identity in the fetch effect too.
+            searchableFields: holdBlock('searchableFields', viewDef.searchableFields ?? listSchema.searchableFields),
             resizable: viewDef.resizable ?? listSchema.resizable,
             rowActions: viewDef.rowActions ?? listSchema.rowActions,
             /**
