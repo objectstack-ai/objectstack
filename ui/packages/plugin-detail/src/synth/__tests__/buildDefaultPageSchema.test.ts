@@ -366,14 +366,15 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-      // Details, Related, then the Timeline (leadDef is not a worked object).
+      // Details, the Timeline, then Related (objectstack#27524: 动态 is
+      // second for every object).
       expect(tabItems(tabs)).toHaveLength(3);
-      expect(tabItems(tabs)[1].label).toBe('Related');
-      expect(tabItems(tabs)[1].children).toHaveLength(2);
-      expect(tabItems(tabs)[1].children[0].type).toBe('record:related_list');
-      expect(props(tabItems(tabs)[1].children[0]).objectName).toBe('task');
-      expect(props(tabItems(tabs)[1].children[0]).relationshipField).toBe('lead_id');
-      expect(props(tabItems(tabs)[1].children[0]).limit).toBe(10);
+      expect(tabItems(tabs)[2].label).toBe('Related');
+      expect(tabItems(tabs)[2].children).toHaveLength(2);
+      expect(tabItems(tabs)[2].children[0].type).toBe('record:related_list');
+      expect(props(tabItems(tabs)[2].children[0]).objectName).toBe('task');
+      expect(props(tabItems(tabs)[2].children[0]).relationshipField).toBe('lead_id');
+      expect(props(tabItems(tabs)[2].children[0]).limit).toBe(10);
     });
 
     it('draws an isPrimary related list as a body table of the Details tab (objectstack#27055)', () => {
@@ -396,7 +397,7 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Related', 'Timeline']);
+      expect(labels).toEqual(['Details', 'Timeline', 'Related']);
       const related = tabItems(tabs).find((t: any) => t.label === 'Related');
       expect(related.children).toHaveLength(2);
       expect(related.children.map((c: any) => props(c).objectName)).toEqual(['task', 'note']);
@@ -431,16 +432,16 @@ describe('buildDefaultPageSchema', () => {
       });
     });
 
-    it('a worked object opens its Timeline second, any other last (objectstack#27055)', () => {
+    it('every object opens its Timeline second — a worked one and any other (objectstack#27524, Target 5)', () => {
       const related = [{ objectName: 'task', relationshipField: 'lead_id' }];
       const worked = { ...leadDef, stageField: 'status' } as ObjectDefLike;
       const workedTabs = buildDefaultPageSchema(worked, { related }).regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(workedTabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
       const plainTabs = buildDefaultPageSchema(leadDef, { related }).regions[0].components.find((c: any) => c.type === 'page:tabs');
-      expect(tabItems(plainTabs).map((t: any) => t.value)).toEqual(['details', 'related', 'timeline']);
+      expect(tabItems(plainTabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
     });
 
-    it('Details / Related / Approvals / Timeline tab order is stable', () => {
+    it('Details / Timeline / Related / Approvals tab order is stable', () => {
       const page = buildDefaultPageSchema(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { count: 1 },
@@ -448,9 +449,9 @@ describe('buildDefaultPageSchema', () => {
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
+        'Timeline',
         'Related',
         'Approvals',
-        'Timeline',
       ]);
     });
 
@@ -515,8 +516,8 @@ describe('buildDefaultPageSchema', () => {
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Related',
         'Timeline',
+        'Related',
       ]);
       expect(tabItems(tabs)[0].children).toEqual([{ type: 'div', id: 'custom-details' }]);
       // record:details default body must be gone
@@ -590,15 +591,15 @@ describe('buildDefaultPageSchema', () => {
       expect(types).toContain('record:path');
     });
 
-    it('buildDefaultTabs emits Details/Related/Timeline in order', () => {
+    it('buildDefaultTabs emits Details/Timeline/Related in order', () => {
       const tabs = buildDefaultTabs(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
       });
       expect(tabs.type).toBe('page:tabs');
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Related',
         'Timeline',
+        'Related',
       ]);
     });
 
@@ -637,7 +638,7 @@ describe('buildDefaultPageSchema', () => {
       const tabs = buildDefaultTabs(filesDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
       });
-      // `enable.files` makes the object worked: the Timeline opens second.
+      // The Timeline opens second, as for every object (objectstack#27524).
       expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
       const related = tabItems(tabs).find((t: any) => t.value === 'related');
       expect(related.children.map((c: any) => c.type)).toEqual(['record:related_list', 'record:attachments']);
@@ -685,12 +686,12 @@ describe('buildDefaultPageSchema', () => {
       expect(tab.children).toEqual([{ type: 'record:approvals', properties: { ...nodePayload } }]);
     });
 
-    it('the Approvals tab sits after Related (and before a non-worked object\'s Timeline)', () => {
+    it('the Approvals tab sits after Related, for every object (objectstack#27524)', () => {
       const plain = buildDefaultTabs(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { node: nodePayload },
       });
-      expect(tabItems(plain).map((t: any) => t.value)).toEqual(['details', 'related', 'approvals', 'timeline']);
+      expect(tabItems(plain).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related', 'approvals']);
       const worked = buildDefaultTabs({ ...leadDef, enable: { files: true } }, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { node: nodePayload },
@@ -987,12 +988,12 @@ describe('buildDefaultTabs — stable tab values (objectui#2257)', () => {
   const relA = { title: 'Invoices', objectName: 'invoice', relationshipField: 'account', isPrimary: true };
   const relB = { title: 'Notes', objectName: 'note', relationshipField: 'account' };
 
-  it('emits semantic values: details (primary in its body) / related (rest) / timeline', () => {
+  it('emits semantic values: details (primary in its body) / timeline / related (rest)', () => {
     const tabs = buildDefaultTabs(undefined, {
       related: [relA, relB],
     });
     expect(tabItems(tabs).map((i: any) => i.value)).toEqual([
-      'details', 'related', 'timeline',
+      'details', 'timeline', 'related',
     ]);
   });
 

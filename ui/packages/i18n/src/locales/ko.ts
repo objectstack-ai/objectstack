@@ -1325,9 +1325,12 @@ const ko = {
     concurrentUpdateRecordLabel: "이 레코드",
     openInNewTab: "새 탭에서 열기",
     activity: "활동",
-    timeline: "타임라인",
-    timelineFolded: "활동",
-    relatedColumn: "관련 열",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "활동",
+    relatedColumn: "오른쪽 열",
+    timelineComposer: "메모 작성… @로 멘션",
     // objectstack#27055 — the record page v3.
     emptySections: "빈 섹션 {{count}}개",
     emptySections_one: "빈 섹션 {{count}}개",
@@ -2150,8 +2153,7 @@ const ko = {
       newChat: "새 채팅",
       toggleChatsList: "채팅 목록 전환",
       goHome: "홈으로 돌아가기",
-      toggleTimeline: "타임라인 표시 / 숨기기",
-      toggleRelated: "관련 표시 / 숨기기",
+      toggleRelated: "오른쪽 열 표시 / 숨기기",
     },
     reportIndex: {
       title: "보고서",

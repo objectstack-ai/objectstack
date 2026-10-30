@@ -16,8 +16,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  RECORD_RELATED_ARRANGEMENT_PREFERENCE,
   RECORD_RELATED_COLUMN_PREFERENCE,
-  RECORD_TIMELINE_COLUMN_PREFERENCE,
   defineWorkspacePreference,
   objectPreferenceScope,
   readWorkspacePreference,
@@ -38,9 +38,6 @@ const memoryStorage = () => {
 describe('workspacePreference keys (objectstack#27052)', () => {
   it('one key per preference × scope; the per-object scope names the object', () => {
     expect(objectPreferenceScope('crm_lead')).toBe('object:crm_lead');
-    expect(workspacePreferenceStorageKey(RECORD_TIMELINE_COLUMN_PREFERENCE, objectPreferenceScope('crm_lead'))).toBe(
-      'os:pref:record.columns.timeline@object:crm_lead',
-    );
     expect(workspacePreferenceStorageKey(RECORD_RELATED_COLUMN_PREFERENCE, objectPreferenceScope('crm_lead'))).toBe(
       'os:pref:record.columns.related@object:crm_lead',
     );
@@ -60,38 +57,38 @@ describe('workspacePreference keys (objectstack#27052)', () => {
   });
 });
 
-describe('the column switches — a versioned record (objectstack#27052)', () => {
+describe('the column switch — a versioned record (objectstack#27052)', () => {
   const lead = objectPreferenceScope('crm_lead');
   const product = objectPreferenceScope('crm_product');
 
   it('stores a record carrying `v`, and reads it back per object', () => {
     const storage = memoryStorage();
-    writeWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, 'off', storage);
-    const stored = JSON.parse(storage.kept.get('os:pref:record.columns.timeline@object:crm_lead')!);
+    writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, 'off', storage);
+    const stored = JSON.parse(storage.kept.get('os:pref:record.columns.related@object:crm_lead')!);
     expect(stored).toEqual({ value: 'off', v: 1 });
-    expect(readWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, storage)).toBe('off');
-    // Another object, and the other column, have no choice.
-    expect(readWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, product, storage)).toBeUndefined();
-    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, storage)).toBeUndefined();
-    writeWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, 'on', storage);
-    expect(readWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, storage)).toBe('on');
+    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, storage)).toBe('off');
+    // Another object, and another preference, have no choice.
+    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, product, storage)).toBeUndefined();
+    expect(readWorkspacePreference(RECORD_RELATED_ARRANGEMENT_PREFERENCE, lead, storage)).toBeUndefined();
+    writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, 'on', storage);
+    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, storage)).toBe('on');
   });
 
   it('reads no choice from a record of another version, a value it does not know, or a spelling that is not a record', () => {
-    const key = 'os:pref:record.columns.timeline@object:crm_lead';
+    const key = 'os:pref:record.columns.related@object:crm_lead';
     const storageWith = (value: string) => ({ getItem: (k: string) => (k === key ? value : null) });
     for (const spelling of ['{"value":"off","v":2}', '{"value":"off"}', '{"value":"hidden","v":1}', 'off', '[1]', 'null', '{']) {
-      expect(readWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, storageWith(spelling))).toBeUndefined();
+      expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, storageWith(spelling))).toBeUndefined();
     }
   });
 
   it('reads no choice with no storage, or with one that throws; a write to either throws nothing', () => {
-    expect(readWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, null)).toBeUndefined();
+    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, null)).toBeUndefined();
     const throwing = { getItem: () => { throw new Error('SecurityError'); } };
-    expect(readWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, throwing)).toBeUndefined();
-    expect(() => writeWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, lead, 'off', null)).not.toThrow();
+    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, throwing)).toBeUndefined();
+    expect(() => writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, 'off', null)).not.toThrow();
     const refusing = { setItem: () => { throw new Error('QuotaExceededError'); } };
-    expect(() => writeWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, product, 'off', refusing)).not.toThrow();
+    expect(() => writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, product, 'off', refusing)).not.toThrow();
   });
 
   it('with no `window` (SSR — this file runs in the node project), the default storage is absent: no choice', () => {

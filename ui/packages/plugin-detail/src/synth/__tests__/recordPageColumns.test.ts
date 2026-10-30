@@ -7,23 +7,25 @@
  */
 
 /**
- * objectstack#26678 — the synthesized record page at two widths.
+ * objectstack#26678 / objectstack#27524 (Target 6) — the synthesized record
+ * page laid out by its width, by one rule.
  *
  * Two facts are pinned here, both pure: the tier a container width takes
  * (`recordPageTierFor`), and how the synthesized tabbed page partitions into
- * the column tiers' header and columns (`buildDefaultPageColumns`). The
- * partition is read off `buildDefaultPageSchema`'s real output, never a
+ * its header, details, 动态 and related panels (`buildDefaultPageColumns`).
+ * The partition is read off `buildDefaultPageSchema`'s real output, never a
  * hand-built page, so a synthesizer change reaches these assertions.
  */
 
 import { describe, it, expect } from 'vitest';
 import { buildDefaultPageSchema, buildDefaultTabs, type ObjectDefLike } from '../buildDefaultPageSchema';
 import {
-  RECORD_PAGE_THREE_COLUMN_MIN_WIDTH,
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
+  RECORD_PAGE_WIDE_MIN_WIDTH,
   buildDefaultPageColumns,
   recordPageColumnOfTab,
   recordPageTierFor,
+  recordPageTierHasRightColumn,
 } from '../recordPageColumns';
 
 const types = (nodes: any[]): string[] => nodes.map((n) => n?.type);
@@ -59,38 +61,50 @@ const maximal = {
   approvals: { count: 2, node: { requests: [] } },
 };
 
-describe('recordPageTierFor (objectstack#26678)', () => {
-  it('three columns from 1120 px, two from 760 px, the tabs below (objectstack#27241)', () => {
-    expect(RECORD_PAGE_THREE_COLUMN_MIN_WIDTH).toBe(1120);
+describe('recordPageTierFor — one rule by the container width (objectstack#27524, Target 6)', () => {
+  it('wide from 1120 px, details | right column from 760 px, one column below — no tabbed tier', () => {
+    expect(RECORD_PAGE_WIDE_MIN_WIDTH).toBe(1120);
     expect(RECORD_PAGE_TWO_COLUMN_MIN_WIDTH).toBe(760);
-    expect(recordPageTierFor(1440)).toBe('three-column');
-    expect(recordPageTierFor(1120)).toBe('three-column');
+    expect(recordPageTierFor(1440)).toBe('wide');
+    expect(recordPageTierFor(1120)).toBe('wide');
     expect(recordPageTierFor(1119.5)).toBe('two-column');
     expect(recordPageTierFor(900)).toBe('two-column');
     expect(recordPageTierFor(760)).toBe('two-column');
-    expect(recordPageTierFor(759)).toBe('tabs');
-    expect(recordPageTierFor(600)).toBe('tabs');
+    expect(recordPageTierFor(759)).toBe('stack');
+    expect(recordPageTierFor(600)).toBe('stack');
   });
 
-  it('the windows the thresholds serve, with the 256 px sidebar expanded (objectstack#27241)', () => {
+  it('the faces the card measures: 1440 / 1200 page, 720 split pane, 390 phone', () => {
     const SIDEBAR = 256;
-    // 「1440 窗口（含侧栏）即三栏」 — the record page root measured 1184 px there.
-    expect(recordPageTierFor(1440 - SIDEBAR)).toBe('three-column');
-    // A 1024 px window with the sidebar stays two columns (768 px of container).
+    // 「1440 窗口（含侧栏）」 — the record page root measured 1184 px there.
+    expect(recordPageTierFor(1440 - SIDEBAR)).toBe('wide');
+    // A 1200 px window with the sidebar: 944 px of container.
+    expect(recordPageTierFor(1200 - SIDEBAR)).toBe('two-column');
+    // A 1024 px window with the sidebar keeps the right column (768 px).
     expect(recordPageTierFor(1024 - SIDEBAR)).toBe('two-column');
-    // A 1280 px window with the sidebar: 1024 px of container, two columns.
-    expect(recordPageTierFor(1280 - SIDEBAR)).toBe('two-column');
+    // The default split pane is 720 px wide: it stacks, it is not tabbed.
+    expect(recordPageTierFor(720)).toBe('stack');
+    expect(recordPageTierFor(390)).toBe('stack');
   });
 
-  it('an embedded page is tabbed at every width', () => {
-    expect(recordPageTierFor(1440, { embedded: true })).toBe('tabs');
-    expect(recordPageTierFor(1100, { embedded: true })).toBe('tabs');
+  it('only the width counts: there is no embedded answer, and an embedded pane maximized to 1184 px is wide', () => {
+    // The signature takes the width alone (objectstack#27524: the drawer, the
+    // pane and the maximized pane use the page's rule).
+    expect(recordPageTierFor.length).toBe(1);
+    expect(recordPageTierFor(1184)).toBe('wide');
   });
 
-  it('an unknown width keeps the tabs', () => {
-    expect(recordPageTierFor(0)).toBe('tabs');
-    expect(recordPageTierFor(Number.NaN)).toBe('tabs');
-    expect(recordPageTierFor(-1)).toBe('tabs');
+  it('an unknown width is the stack, the narrowest tier', () => {
+    expect(recordPageTierFor(0)).toBe('stack');
+    expect(recordPageTierFor(Number.NaN)).toBe('stack');
+    expect(recordPageTierFor(-1)).toBe('stack');
+  });
+
+  it('the right column, and so ⊟, exists in the two tiers beside the details only', () => {
+    expect(recordPageTierHasRightColumn('wide')).toBe(true);
+    expect(recordPageTierHasRightColumn('two-column')).toBe(true);
+    expect(recordPageTierHasRightColumn('stack')).toBe(false);
+    expect(recordPageTierHasRightColumn(null)).toBe(false);
   });
 });
 
@@ -112,11 +126,11 @@ describe('recordPageColumnOfTab — every synthesized tab has a column', () => {
 });
 
 describe('buildDefaultPageColumns (objectstack#26678)', () => {
-  it('partitions the synthesized page: one header, details | timeline | related', () => {
+  it('partitions the synthesized page: one header, the details, the 动态 panel, the related panels', () => {
     const page = buildDefaultPageSchema(leadDef, maximal);
     const columns = buildDefaultPageColumns(page);
     expect(columns).not.toBeNull();
-    // The header is every node before the strip — the same nodes the tabbed tier draws.
+    // The header is every node before the strip — the same nodes the strip draws above it.
     const main = page.regions.find((r: any) => r.name === 'main');
     const tabIndex = main.components.findIndex((n: any) => n.type === 'page:tabs');
     expect(columns!.header).toEqual(main.components.slice(0, tabIndex));
@@ -134,7 +148,6 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
       'record:approvals',
     ]);
     expect(columns!.related.slice(0, 2).map((n: any) => n.properties.objectName)).toEqual(['note', 'call']);
-    expect(columns!.relatedCount).toBe(2);
   });
 
   it('places every node the page holds exactly once', () => {
@@ -169,10 +182,9 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
     const columns = buildDefaultPageColumns(page)!;
     expect(columns.timeline).toEqual([]);
     expect(columns.related).toEqual([]);
-    expect(columns.relatedCount).toBe(0);
   });
 
-  it('answers null — keep the tabs — for a strip it cannot read', () => {
+  it('answers null — draw the page as written — for a strip it cannot read', () => {
     const tabsSlot = { type: 'page:tabs', properties: { items: [{ label: 'Overview', value: 'overview', children: [] }] } };
     // An authored strip (a `kind: 'full'` page's own; the slotted `tabs` slot
     // that once carried one retired, objectstack#27053).

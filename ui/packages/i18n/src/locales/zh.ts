@@ -1247,9 +1247,12 @@ const zh = {
     new: '新建',
     add: '添加',
     activity: '活动',
-    timeline: '时间线',
-    timelineFolded: '动态',
-    relatedColumn: '关联',
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: '动态',
+    relatedColumn: '右栏',
+    timelineComposer: '写一条备注… @ 提到同事',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} 个空分区',
     emptySections_one: '{{count}} 个空分区',
@@ -1938,8 +1941,7 @@ const zh = {
       newChat: '新建对话',
       toggleChatsList: '切换对话列表',
       goHome: '返回首页',
-      toggleTimeline: '显示 / 隐藏时间线',
-      toggleRelated: '显示 / 隐藏相关',
+      toggleRelated: '显示 / 隐藏右栏',
     },
     reportIndex: {
       title: '报表',

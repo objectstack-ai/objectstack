@@ -32,7 +32,6 @@ import { detectStatusField } from '@object-ui/types';
 // at this depth, and both spellings resolve to one table and one dedupe set.
 import { isRetiredFieldType, reportRetiredFieldType, resolveNameField } from '@object-ui/core';
 import { inferDetailColumns } from '../autoLayout';
-import { recordTimelineDefaultReason } from './recordPageColumns';
 import { relatedListEntryNames } from './relatedListEntry';
 
 /** Minimal shape of an object definition we read here. We deliberately
@@ -154,7 +153,7 @@ export interface BuildPageOptions {
   sections?: Array<{ label?: string; columns?: number; fields?: any[] }>;
   /**
    * Suppress the timeline stream (objectstack#27055): no Timeline tab, no
-   * timeline column. It used to suppress the discussion footer the stream
+   * 动态 panel. It used to suppress the discussion footer the stream
    * replaced.
    */
   hideDiscussion?: boolean;
@@ -1018,8 +1017,9 @@ export function bodyTablePlacement(
  * then the Timeline tab (the one stream, objectstack#27055: field changes
  * join it under its Changes filter, so there is no History tab), the Related
  * tab and the Approvals tab, each of those three only when the options give
- * it content. The order is stable: Timeline sits second for a worked object
- * and last otherwise.
+ * it content. The order is stable: Timeline sits second for every object —
+ * the 动态 panel is the first panel of the record page's right column
+ * (objectstack#27524, Target 5).
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into
@@ -1081,15 +1081,13 @@ export function buildDefaultTabs(
       children: bodyTablePlacement(def, options.sections, highlightFields, bodies),
     },
   ];
-  // objectstack#27055, Targets 3 and 6 — the tab strip is 详情 / 时间线 / 关联 /
-  // （审批）: the timeline stream is ONE tab, second for a worked object (the
-  // object-derived default of the timeline column, `recordTimelineDefaultReason`)
-  // and last otherwise; attachments close the Related tab, as they close the
-  // related column.
+  // objectstack#27055, Target 3 — the tab strip is 详情 / 动态 / 关联 /
+  // （审批）: the timeline stream is ONE tab, second for every object
+  // (objectstack#27524, Target 5: 动态 is a panel, the first of the right
+  // column, for every object — no object-derived default places it);
+  // attachments close the Related tab, as they close the right column.
   const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
-  const timelineTab = timeline.length > 0 ? { label: 'Timeline', value: 'timeline', children: timeline } : null;
-  const worked = recordTimelineDefaultReason(def as never) !== null;
-  if (timelineTab && worked) items.push(timelineTab);
+  if (timeline.length > 0) items.push({ label: 'Timeline', value: 'timeline', children: timeline });
   // Attachments (objectstack#4358) — for `enable.files: true` objects; the
   // tab strip's count badge reads the `record:attachments` node.
   const relatedChildren = [
@@ -1116,7 +1114,6 @@ export function buildDefaultTabs(
       children: [componentNode('record:approvals', { ...(options.approvals.node || {}) })],
     });
   }
-  if (timelineTab && !worked) items.push(timelineTab);
   return componentNode('page:tabs', { items });
 }
 

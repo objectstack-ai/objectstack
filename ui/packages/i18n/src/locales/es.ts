@@ -1366,9 +1366,12 @@ const es = {
     concurrentUpdateRecordLabel: "este registro",
     openInNewTab: "Abrir en nueva pestaña",
     activity: "Actividad",
-    timeline: "Cronología",
-    timelineFolded: "Actividad",
-    relatedColumn: "Columna relacionada",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Actividad",
+    relatedColumn: "Columna derecha",
+    timelineComposer: "Escribe una nota… @ para mencionar",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} secciones vacías",
     emptySections_one: "{{count}} sección vacía",
@@ -2208,8 +2211,7 @@ const es = {
       newChat: "Nuevo chat",
       toggleChatsList: "Alternar lista de chats",
       goHome: "Volver al inicio",
-      toggleTimeline: "Mostrar / ocultar la cronología",
-      toggleRelated: "Mostrar / ocultar relacionados",
+      toggleRelated: "Mostrar / ocultar la columna derecha",
     },
     reportIndex: {
       title: "Informes",

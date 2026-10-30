@@ -41,6 +41,9 @@ export interface RichTextCommentInputProps {
   /** When true, the Send button is enabled even if the text value is empty.
    *  Hosts pass this when attachments-only submits should be allowed. */
   canSubmitEmpty?: boolean;
+  /** Focus the editor when it mounts: the 动态 panel opens this composer
+   *  from its one-line stand-in, and the reader's press lands in it. */
+  autoFocus?: boolean;
 }
 
 /** Render minimal markdown to HTML for preview. */
@@ -84,6 +87,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   disabled = false,
   extraSlot,
   canSubmitEmpty = false,
+  autoFocus = false,
 }) => {
   const { t } = useDetailTranslation();
   const [isPreview, setIsPreview] = React.useState(false);
@@ -91,6 +95,11 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   const [mentionQuery, setMentionQuery] = React.useState('');
   const [mentionIndex, setMentionIndex] = React.useState(0);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  React.useEffect(() => {
+    if (autoFocus) textareaRef.current?.focus();
+    // On mount only: a later re-render must not pull focus back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredMentions = React.useMemo(() => {
     if (!mentionQuery) return mentionSuggestions;

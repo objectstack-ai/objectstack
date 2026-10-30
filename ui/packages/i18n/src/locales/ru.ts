@@ -1237,9 +1237,12 @@ const ru = {
     new: "Создать",
     add: "Добавить",
     activity: "Активность",
-    timeline: "Хронология",
-    timelineFolded: "Активность",
-    relatedColumn: "Связанная колонка",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Активность",
+    relatedColumn: "Правая колонка",
+    timelineComposer: "Написать заметку… @ — упомянуть",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} пустых разделов",
     emptySections_one: "{{count}} пустой раздел",
@@ -2268,8 +2271,7 @@ const ru = {
       newChat: "Новый чат",
       toggleChatsList: "Переключить список чатов",
       goHome: "Вернуться на главную",
-      toggleTimeline: "Показать / скрыть хронологию",
-      toggleRelated: "Показать / скрыть связанные",
+      toggleRelated: "Показать / скрыть правую колонку",
     },
     reportIndex: {
       title: "Отчёты",
