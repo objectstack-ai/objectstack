@@ -1,0 +1,415 @@
+{
+ "case1": {
+  "summary": {
+   "totalFrames": 509,
+   "framesBeforeSidebar": 417,
+   "firstSidebarFrame": {
+    "t": 8192,
+    "w": 48,
+    "st": "collapsed",
+    "path": "/apps/com.example.crm/crm_contact"
+   },
+   "widthCounts": {
+    "48": 92
+   },
+   "stateCounts": {
+    "collapsed": 92
+   },
+   "nonRail": []
+  },
+  "after": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "mainX": 48,
+  "errors": []
+ },
+ "case2": {
+  "at1440": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BUTTON  Toggle sidebar"
+  },
+  "summary": {
+   "totalFrames": 478,
+   "framesBeforeSidebar": 390,
+   "firstSidebarFrame": {
+    "t": 7994,
+    "w": 48,
+    "st": "collapsed",
+    "path": "/apps/com.example.crm/crm_contact"
+   },
+   "widthCounts": {
+    "48": 88
+   },
+   "stateCounts": {
+    "collapsed": 88
+   },
+   "nonRail": []
+  },
+  "after": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "errors": []
+ },
+ "case2newTab": {
+  "summary": {
+   "totalFrames": 564,
+   "framesBeforeSidebar": 474,
+   "firstSidebarFrame": {
+    "t": 9592,
+    "w": 48,
+    "st": "collapsed",
+    "path": "/apps/com.example.crm/crm_contact"
+   },
+   "widthCounts": {
+    "48": 90
+   },
+   "stateCounts": {
+    "collapsed": 90
+   },
+   "nonRail": []
+  },
+  "after": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  }
+ },
+ "case3": {
+  "overlay": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "summary": {
+   "totalFrames": 476,
+   "framesBeforeSidebar": 384,
+   "firstSidebarFrame": {
+    "t": 7683,
+    "w": 48,
+    "st": "collapsed",
+    "path": "/apps/com.example.crm/crm_contact"
+   },
+   "widthCounts": {
+    "48": 92
+   },
+   "stateCounts": {
+    "collapsed": 92
+   },
+   "nonRail": []
+  },
+  "after": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "errors": []
+ },
+ "case3keepOpenReload": {
+  "kept": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "true",
+   "active": "BUTTON sidebar-keep-open Keep sidebar open"
+  },
+  "summary": {
+   "totalFrames": 489,
+   "framesBeforeSidebar": 399,
+   "firstSidebarFrame": {
+    "t": 7807,
+    "w": 256,
+    "st": "expanded",
+    "path": "/apps/com.example.crm/crm_contact"
+   },
+   "widthCounts": {
+    "256": 90
+   },
+   "stateCounts": {
+    "expanded": 90
+   },
+   "nonRail": [
+    {
+     "t": 7807,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 7916,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8036,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8384,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8454,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8559,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8631,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8647,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8656,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8657,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    }
+   ]
+  },
+  "after": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "true",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  }
+ },
+ "wide1440": {
+  "summary": {
+   "totalFrames": 491,
+   "framesBeforeSidebar": 400,
+   "firstSidebarFrame": {
+    "t": 8103,
+    "w": 256,
+    "st": "expanded",
+    "path": "/apps/com.example.crm/crm_contact"
+   },
+   "widthCounts": {
+    "256": 91
+   },
+   "stateCounts": {
+    "expanded": 91
+   },
+   "nonRail": [
+    {
+     "t": 8103,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8207,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8232,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8311,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8639,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8745,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8839,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8862,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8863,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8884,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    }
+   ]
+  },
+  "after": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "mainX": 256,
+  "errors": []
+ },
+ "wide1440reload": {
+  "summary": {
+   "totalFrames": 454,
+   "framesBeforeSidebar": 364,
+   "firstSidebarFrame": {
+    "t": 7429,
+    "w": 256,
+    "st": "expanded",
+    "path": "/apps/com.example.crm/crm_contact"
+   },
+   "widthCounts": {
+    "256": 90
+   },
+   "stateCounts": {
+    "expanded": 90
+   },
+   "nonRail": [
+    {
+     "t": 7429,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 7603,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 7744,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 7828,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 7945,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 7985,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8095,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8152,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8154,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    },
+    {
+     "t": 8176,
+     "w": 256,
+     "st": "expanded",
+     "path": "/apps/com.example.crm/crm_contact"
+    }
+   ]
+  },
+  "after": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "mainX": 256
+ }
+}

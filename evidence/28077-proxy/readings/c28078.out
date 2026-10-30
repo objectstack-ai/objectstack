@@ -1,0 +1,316 @@
+{
+ "pointer-nav": {
+  "before": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "navCount": 6,
+  "item": {
+   "tag": "A",
+   "text": "Leads",
+   "x": 128,
+   "y": 114,
+   "sb": "menu-button"
+  },
+  "preEsc": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "tooltipsPreEsc": [
+   {
+    "text": "Leads",
+    "display": "none",
+    "vis": "visible"
+   }
+  ],
+  "afterEsc1": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "tooltipsAfterEsc1": [],
+  "errors": []
+ },
+ "focus-nav-tab": {
+  "before": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "navCount": 6,
+  "item": {
+   "tag": "A",
+   "text": "Leads",
+   "x": 128,
+   "y": 114,
+   "sb": "menu-button"
+  },
+  "tabbedTo": {
+   "inSb": true,
+   "sb": "menu-button",
+   "tid": null,
+   "text": "Leads",
+   "tag": "A",
+   "href": "/apps/com.example.crm/crm_lead"
+  },
+  "tabs": 2,
+  "found": true,
+  "stateAfterTabbing": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "A  Leads"
+  },
+  "preEsc": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "A  Leads"
+  },
+  "tooltipsPreEsc": [
+   {
+    "text": "Leads",
+    "display": "none",
+    "vis": "visible"
+   }
+  ],
+  "afterEsc1": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "A  Leads"
+  },
+  "tooltipsAfterEsc1": [],
+  "errors": []
+ },
+ "focus-nav-programmatic": {
+  "before": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "navCount": 6,
+  "item": {
+   "tag": "A",
+   "text": "Leads",
+   "x": 128,
+   "y": 114,
+   "sb": "menu-button"
+  },
+  "preEsc": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "A  Leads"
+  },
+  "tooltipsPreEsc": [
+   {
+    "text": "Leads",
+    "display": "none",
+    "vis": "visible"
+   }
+  ],
+  "afterEsc1": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "A  Leads"
+  },
+  "tooltipsAfterEsc1": [],
+  "errors": []
+ },
+ "focus-keepopen-tab": {
+  "before": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "navCount": 6,
+  "item": {
+   "tag": "A",
+   "text": "Leads",
+   "x": 128,
+   "y": 114,
+   "sb": "menu-button"
+  },
+  "tabbedTo": {
+   "inSb": true,
+   "sb": "menu-button",
+   "tid": "sidebar-keep-open",
+   "text": "Keep sidebar open",
+   "tag": "BUTTON",
+   "href": null
+  },
+  "tabs": 15,
+  "found": true,
+  "stateAfterTabbing": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BUTTON sidebar-keep-open Keep sidebar open"
+  },
+  "preEsc": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BUTTON sidebar-keep-open Keep sidebar open"
+  },
+  "tooltipsPreEsc": [
+   {
+    "text": "Keep sidebar open",
+    "display": "none",
+    "vis": "visible"
+   }
+  ],
+  "afterEsc1": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "tooltipsAfterEsc1": [],
+  "errors": []
+ },
+ "focus-keepopen-programmatic": {
+  "before": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "navCount": 6,
+  "item": {
+   "tag": "A",
+   "text": "Leads",
+   "x": 128,
+   "y": 114,
+   "sb": "menu-button"
+  },
+  "preEsc": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BUTTON sidebar-keep-open Keep sidebar open"
+  },
+  "tooltipsPreEsc": [
+   {
+    "text": "Keep sidebar open",
+    "display": "none",
+    "vis": "visible"
+   }
+  ],
+  "afterEsc1": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "tooltipsAfterEsc1": [],
+  "errors": []
+ },
+ "pointer-nav-then-focus-keepopen": {
+  "before": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "navCount": 6,
+  "item": {
+   "tag": "A",
+   "text": "Leads",
+   "x": 128,
+   "y": 114,
+   "sb": "menu-button"
+  },
+  "preEsc": {
+   "panelW": 256,
+   "panelX": 0,
+   "state": "expanded",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": "false",
+   "active": "BUTTON sidebar-keep-open Keep sidebar open"
+  },
+  "tooltipsPreEsc": [
+   {
+    "text": "Keep sidebar open",
+    "display": "none",
+    "vis": "visible"
+   }
+  ],
+  "afterEsc1": {
+   "panelW": 48,
+   "panelX": 0,
+   "state": "collapsed",
+   "collapsible": "icon",
+   "variant": "sidebar",
+   "keepOpen": null,
+   "active": "BODY  Skip to contentToggle sidebarC"
+  },
+  "tooltipsAfterEsc1": [],
+  "errors": []
+ }
+}

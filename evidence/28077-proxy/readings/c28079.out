@@ -1,0 +1,50 @@
+== collapsed reloadAt1280=false PASS=true
+  1440 initial: expanded/256px mainX=256 keepOpen=null ls=true ck=
+  1440 after choosing collapsed: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1280 after narrowing: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1280 after clicking rail: expanded/256px mainX=48 keepOpen=false ls=false ck=sidebar_state=true
+  1280 keep open ON: expanded/256px mainX=256 keepOpen=true ls=false ck=sidebar_state=true
+  1280 keep open OFF: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1280 pointer moved to content: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1440 after widening: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1440 after reload: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1440 new tab same profile: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  errors []
+== expanded reloadAt1280=false PASS=true
+  1440 initial: expanded/256px mainX=256 keepOpen=null ls=true ck=
+  1440 after choosing expanded: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  1280 after narrowing: collapsed/48px mainX=48 keepOpen=null ls=true ck=sidebar_state=false
+  1280 after clicking rail: expanded/256px mainX=48 keepOpen=false ls=true ck=sidebar_state=true
+  1280 keep open ON: expanded/256px mainX=256 keepOpen=true ls=true ck=sidebar_state=true
+  1280 keep open OFF: collapsed/48px mainX=48 keepOpen=null ls=true ck=sidebar_state=false
+  1280 pointer moved to content: collapsed/48px mainX=48 keepOpen=null ls=true ck=sidebar_state=false
+  1440 after widening: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  1440 after reload: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  1440 new tab same profile: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  errors []
+== collapsed reloadAt1280=true PASS=true
+  1440 initial: expanded/256px mainX=256 keepOpen=null ls=true ck=
+  1440 after choosing collapsed: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1280 after narrowing: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1280 after clicking rail: expanded/256px mainX=48 keepOpen=false ls=false ck=sidebar_state=true
+  1280 keep open ON: expanded/256px mainX=256 keepOpen=true ls=false ck=sidebar_state=true
+  1280 keep open OFF: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1280 pointer moved to content: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1280 after reload: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1440 after widening: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1440 after reload: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  1440 new tab same profile: collapsed/48px mainX=48 keepOpen=null ls=false ck=sidebar_state=false
+  errors []
+== expanded reloadAt1280=true PASS=true
+  1440 initial: expanded/256px mainX=256 keepOpen=null ls=true ck=
+  1440 after choosing expanded: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  1280 after narrowing: collapsed/48px mainX=48 keepOpen=null ls=true ck=sidebar_state=false
+  1280 after clicking rail: expanded/256px mainX=48 keepOpen=false ls=true ck=sidebar_state=true
+  1280 keep open ON: expanded/256px mainX=256 keepOpen=true ls=true ck=sidebar_state=true
+  1280 keep open OFF: collapsed/48px mainX=48 keepOpen=null ls=true ck=sidebar_state=false
+  1280 pointer moved to content: collapsed/48px mainX=48 keepOpen=null ls=true ck=sidebar_state=false
+  1280 after reload: collapsed/48px mainX=48 keepOpen=null ls=true ck=sidebar_state=false
+  1440 after widening: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  1440 after reload: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  1440 new tab same profile: expanded/256px mainX=256 keepOpen=null ls=true ck=sidebar_state=true
+  errors []
