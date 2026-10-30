@@ -175,17 +175,25 @@ async function boot() {
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
-  const open = (rec: string, upcoming: string | null = null, embedded = false) => render(
+  const view = (rec: string, upcoming: string | readonly string[] | null, embedded: boolean) => (
     <React.StrictMode>
       <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${rec}`]}>
         <MetadataCtx.Provider value={metadata}>
-          <RecordDrawerUpcomingContext.Provider value={upcoming ? { objectName: OBJECT, recordId: upcoming } : null}>
+          <RecordDrawerUpcomingContext.Provider value={[upcoming ?? []].flat().map((recordId) => ({ objectName: OBJECT, recordId }))}>
             <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride={rec} embedded={embedded} />
           </RecordDrawerUpcomingContext.Provider>
         </MetadataCtx.Provider>
       </MemoryRouter>
-    </React.StrictMode>,
+    </React.StrictMode>
   );
+  const open = (rec: string, upcoming: string | readonly string[] | null = null, embedded = false) => {
+    const mounted = render(view(rec, upcoming, embedded));
+    // The pane swaps the record in place (`recordDrawerStack`'s level key):
+    // a step or a row click re-renders the same view with the next id.
+    const step = (next: string, nextUpcoming: string | readonly string[] | null = null) =>
+      mounted.rerender(view(next, nextUpcoming, embedded));
+    return Object.assign(mounted, { step });
+  };
   return { held, state, open, ds };
 }
 
@@ -262,6 +270,35 @@ describe('objectstack#27627 — one request opens a record page', () => {
       `/api/v1/data/${OBJECT}/c2/page`,
     ]);
     expect(countProbesFor(held, 'c2')).toEqual([]);
+  });
+
+  // Record pane v4 (objectstack#27545): the split pane beside the list and the
+  // drawer draw the same embedded view, now handed BOTH neighbours, and a step,
+  // ↑ ↓ or a click on another row swaps the record in place (maximize only
+  // restyles the pane). Each neighbour is asked once, as a page, and the swap
+  // to either one sends nothing for the record it opens.
+  it('in the v4 pane, both neighbours are asked ahead as pages, and an in-place step to either opens from that answer', async () => {
+    const { held, state, open } = await boot();
+    const pane = open('c2', ['c3', 'c1'], true);
+    await runWaves(held, state);
+    expect(held.filter(isPage).map((h) => h.path)).toEqual([
+      `/api/v1/data/${OBJECT}/c2/page`,
+      `/api/v1/data/${OBJECT}/c3/page`,
+      `/api/v1/data/${OBJECT}/c1/page`,
+    ]);
+    expect(countProbesFor(held, 'c3')).toEqual([]);
+    expect(countProbesFor(held, 'c1')).toEqual([]);
+
+    // ↑ to c1 (or a click on its row): its page is the prefetched answer. The
+    // one neighbour asked is the record just left, whose answer the open took.
+    held.length = 0;
+    await act(async () => { pane.step('c1', ['c0', 'c2']); });
+    await runWaves(held, state);
+    expect(held.filter(isPage).map((h) => h.path)).toEqual([
+      `/api/v1/data/${OBJECT}/c0/page`,
+      `/api/v1/data/${OBJECT}/c2/page`,
+    ]);
+    expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
   });
 
   it('in a drawer, an adapter without the payload keeps the count warm-up: each of the next record\'s counts is asked once', async () => {

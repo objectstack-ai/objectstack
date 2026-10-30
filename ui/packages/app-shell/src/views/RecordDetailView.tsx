@@ -2202,25 +2202,27 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     seedRecordPageReaders({ payload, objectName, recordId: pureRecordId, principal: recordPagePrincipal, ...plan });
   }, [recordPagePlan, objectName, pureRecordId, dataSource, recordPagePrincipal]);
 
-  // The record a drawer step shows next (objectstack#27056's `upcoming`): its
-  // payload is asked once this record's has answered, so the step opens from
-  // an answer already on its way.
+  // The records a pane step shows (objectstack#27056's `upcoming`; both
+  // neighbours since objectstack#27545): their payloads are asked once this
+  // record's has answered, so a step either way opens from an answer already
+  // on its way. Keyed on the ids' CONTENT (AGENTS.md #10).
   const upcoming = useContext(RecordDrawerUpcomingContext);
-  const upcomingId = upcoming && upcoming.objectName === objectName ? upcoming.recordId : null;
+  const upcomingKey = upcoming.filter((u) => u.objectName === objectName).map((u) => u.recordId).join('\n');
   useEffect(() => {
     const opened = recordPageRead.current;
-    if (!opened || !recordPagePlan || !upcomingId || !objectName) return;
+    if (!opened || !recordPagePlan || !upcomingKey || !objectName) return;
     if (typeof dataSource?.prefetchRecordPage !== 'function') return;
     let cancelled = false;
     const request = recordPageRequestOf(JSON.parse(recordPagePlan));
     const prefetch = () => {
-      if (!cancelled) dataSource.prefetchRecordPage!(objectName, upcomingId, request);
+      if (cancelled) return;
+      for (const upcomingId of upcomingKey.split('\n')) dataSource.prefetchRecordPage!(objectName, upcomingId, request);
     };
     opened.payload.then(prefetch, prefetch);
     return () => {
       cancelled = true;
     };
-  }, [recordPagePlan, upcomingId, objectName, dataSource]);
+  }, [recordPagePlan, upcomingKey, objectName, dataSource]);
   const [claiming, setClaiming] = useState(false);
   const claimingRef = useRef(false);
   const handleClaim = useCallback(async () => {
