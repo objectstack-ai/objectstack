@@ -76,9 +76,18 @@ export function recordCurrencyPairs(fields: unknown): RecordCurrencyPair[] {
   return pairs;
 }
 
-function isBlank(value: unknown): boolean {
+/**
+ * Is one side of a record-mode pair blank — absent, `null`, or a string with no
+ * characters but white space? The one predicate this refusal and the backfill
+ * behind `os migrate record-currency-codes` (`record-currency-backfill.ts`)
+ * both judge by, so the rows the backfill fills are exactly the rows this
+ * refusal would answer on their next write of the pair.
+ */
+export function isRecordCurrencyBlank(value: unknown): boolean {
   return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
 }
+
+const isBlank = isRecordCurrencyBlank;
 
 /**
  * `ERR_CURRENCY_CODE_REQUIRED` / 400 — see the module header. Identified by
