@@ -975,10 +975,11 @@ const DISPATCHER_DOMAINS = {
   // carry the TARGET's credential-rotation headers (`Set-Cookie` lines,
   // `set-auth-token`, `set-admin-session-token`) — neither `deps.success` nor
   // `deps.error` takes headers, so each spreads the helper's own envelope and
-  // adds `headers`.
+  // adds `headers` (since #27738 an enveloped non-2xx refusal is built by
+  // `apiErrorResponse`, which takes none either, and is spread the same way).
   'actions.ts': {
     handBuilt: 3,
-    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); and the two answers of the same-origin api forward — the 2xx relay (`deps.success` spread) and the non-2xx relay (`deps.error` spread) — which must carry the target\'s Set-Cookie / set-auth-token / set-admin-session-token headers (neither helper takes any); every body is the helper\'s own declared envelope',
+    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); and the two answers of the same-origin api forward — the 2xx relay (`deps.success` spread) and the non-2xx relay (`apiErrorResponse` for an enveloped refusal, else `deps.error`, spread) — which must carry the target\'s Set-Cookie / set-auth-token / set-admin-session-token headers (neither helper takes any); every body is the helper\'s own declared envelope',
   },
   // [#12160] Not a domain either — the ADR-0126 §5 activation write-authority
   // gates, shared by the `/automation` toggle door, the `/actions` activation
