@@ -101,7 +101,9 @@ test('the timeline stream\'s Changes chip shows display values (localized dates,
   // The page-open wait: the same 15 s budget the spec gives its first element.
   await expect(timelineSwitch, 'the Timeline switch is off for an object that is not worked').toHaveAttribute('aria-pressed', 'false', { timeout: 15_000 });
   const activityCard = page.getByRole('region', { name: /^(Activity|动态)$/ });
-  const activityToggle = activityCard.getByRole('button', { name: /^(Activity|动态)$/ });
+  // The toggle is the card heading's button: once open, the stream inside the
+  // card has an "Activity" filter chip of its own.
+  const activityToggle = activityCard.getByRole('heading', { name: /^(Activity|动态)$/ }).getByRole('button');
   await expect(activityToggle, 'the switched-off timeline is folded into a closed Activity card').toHaveAttribute('aria-expanded', 'false');
   await activityToggle.click();
   await expect(activityToggle).toHaveAttribute('aria-expanded', 'true');
