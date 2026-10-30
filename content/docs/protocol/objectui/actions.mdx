@@ -246,6 +246,7 @@ interface Action {
   requiresFeature?: string;     // Public auth feature flag gate — lowered into `visible` at parse time
   disabled?: boolean | ExpressionInput; // Disabled when TRUE (CEL)
   disabledReason?: I18nLabel;   // Why it is greyed — hover title + accessible description (display only)
+  pressed?: ExpressionInput;    // Drawn as already pressed for this reader when TRUE (CEL; display only)
 
   // Bulk
   bulkEnabled?: boolean;        // Apply to multiple selected records
@@ -348,6 +349,26 @@ disabledReason: An approved legal review is required before the contract enters 
 - It is an `I18nLabel`: a plain string, translated at `objects.<object>._actions.<action>.disabledReason` (`globalActions.<action>.disabledReason` for an action with no `objectName`), or an inline locale map. `os i18n extract` scaffolds the key.
 - A blank string (`''` or whitespace only) is refused at parse. Omit the key to keep the default.
 - It is **display only**. It does not change what `disabled` evaluates to, nothing reads it as a condition, and it is not access control: a call that reaches the server anyway is refused by the action's own rules (its body or hook, `requiredPermissions`), never by this text.
+
+#### The reader's own state: `pressed`
+
+An action the reader toggles, such as a "Helpful" vote on a knowledge article, says the reader **already acted** with `pressed`, a CEL predicate over the same scope as `visible`. While it is true the button is drawn pressed (`aria-pressed="true"`).
+
+```yaml
+name: mark_article_helpful
+label: Helpful
+type: script
+locations: [record_header]
+pressed: "has(record.viewer) && record.viewer.vote == 'helpful'"
+```
+
+- It is **display only**. A pressed action stays runnable, and the action's own body decides what a second press does (records the vote again, withdraws it, or answers "already").
+- A boolean literal is refused: `pressed: true` would draw the button pressed for every reader, which is a style rather than the reader's state.
+- A per-reader fact is usually not a column of the row (a vote is a child record per user). Declare it as a block under the object's `attachedOnRead`, have the serving side attach it to each row it returns for the caller (a service, or an `afterFind` hook that shapes the rows), and read it as `record.<block>.<leaf>`, guarded with `has()`. `os build` and `os validate` check the leaf against the declared block.
+
+<Callout type="info">
+The spec, the build check and this contract are in place; the console's record header and declared actions bar do not draw the pressed face yet, so today the button looks the same whatever the predicate answers.
+</Callout>
 
 #### Evaluation context
 
