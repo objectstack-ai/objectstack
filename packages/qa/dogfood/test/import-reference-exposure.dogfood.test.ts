@@ -83,7 +83,12 @@ describe('[#22739] an import matches a lookup cell only against a target whose d
       const { jobId } = (await res.json()) as { jobId: string };
       for (let i = 0; i < 200; i++) {
         const body: any = await (await stack.apiAs(who, 'GET', `/data/import/jobs/${jobId}/results`)).json();
-        if (body.status === 'succeeded') return body.results;
+        // A job whose every row failed ends `failed`, one with any row ok
+        // ends `succeeded` (maintainer ruling B, record 6509036166).
+        if (body.status === 'succeeded' || body.status === 'failed') {
+          expect(body.status, JSON.stringify(body)).toBe((body.results as Row[]).some((r) => r.ok) ? 'succeeded' : 'failed');
+          return body.results;
+        }
         expect(['pending', 'running'], JSON.stringify(body)).toContain(body.status);
         await new Promise((r) => setTimeout(r, 25));
       }
