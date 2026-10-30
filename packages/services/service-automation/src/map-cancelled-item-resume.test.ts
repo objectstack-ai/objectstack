@@ -179,6 +179,8 @@ describe('a parent-id resume of a map whose item run was cancelled (#27971)', ()
     expect(refused.success).toBe(false);
     expect(refused.code).toBe(MAP_ITEM_PENDING_REFUSAL_CODE);
     expect(refused.error).toContain(`item run '${item1!.runId}', which is no longer suspended`);
+    // The remedy names the run to cancel — the map's own, not the gone item's.
+    expect(refused.error).toContain(`To end the batch, cancel run '${paused.runId}'`);
     expect(mapState(paused.runId!)).toEqual({ started: 1, results: [] });
     expect(parked('batch_flow').map(r => r.runId)).toEqual([paused.runId]);
     expect(seen).toBeUndefined();
@@ -195,6 +197,7 @@ describe('a parent-id resume of a map whose item run was cancelled (#27971)', ()
 
     expect(refused.code).toBe(MAP_ITEM_PENDING_REFUSAL_CODE);
     expect(refused.error).toContain('no run history for it can be read');
+    expect(refused.error).toContain(`To end the batch, cancel run '${paused.runId}'`);
     expect(mapState(paused.runId!)).toEqual({ started: 1, results: [] });
   });
 

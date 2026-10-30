@@ -576,7 +576,9 @@ async function continuePastCancelledMapItem(
                 `Run '${runId}' is ${link.runId === runId ? '' : `waiting on run '${link.runId}', which is `}paused at ` +
                 `map node '${link.nodeId}' on item run '${itemRunId}', which is no longer suspended, and ${found}. ` +
                 `The map records an item only when it completes or when its run was cancelled, so resuming here ` +
-                `would advance the map past that item with nothing recorded for it. Nothing was changed`,
+                `would advance the map past that item with nothing recorded for it. Nothing was changed. To end the ` +
+                `batch, cancel run '${link.runId}'${link.runId === runId ? '' : ` and run '${runId}', which waits on it`}; ` +
+                `if the run history store was unreachable, retry once it is readable`,
         };
     }
 

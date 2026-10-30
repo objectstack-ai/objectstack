@@ -531,6 +531,13 @@ export interface AutomationResult {
      *    to **409**. Distinct from `'RESUME_IN_PROGRESS'` on purpose: that one is
      *    benign and needs nothing from the caller, this one is answered only by
      *    resuming a different run id.
+     *    The same code answers the map's second refusal (#27971): the item's
+     *    suspension is gone and its run history does not record it as
+     *    `cancelled` (no entry, an unreadable store, or another status), so the
+     *    map has nothing true to record for that item. Nothing moves; `error`
+     *    names the item run and the remedy, which is cancelling the parent run
+     *    to end the batch, or retrying once the store is readable. A cancelled
+     *    item is not refused: the map records it and goes on.
      *  - `'INVALID_SCREEN_INPUT'` — the run is parked on a `screen` node and
      *    the submitted bag violates that screen's declared field contract: a
      *    `required` field the caller WAS asked for is missing, or a key the

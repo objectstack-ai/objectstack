@@ -5946,7 +5946,9 @@ export class ObjectStackClient {
        * intact keep their own codes and stay retryable — `INVALID_SIGNAL` /
        * `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409),
        * `RESUME_CHILD_PENDING` (409: the run waits on a `map` item run that is
-       * still suspended; the message names that run, resume it instead),
+       * still suspended; the message names that run, resume it instead — or
+       * whose suspension is gone without a `cancelled` history entry; the
+       * message names the remedy, cancelling the parent run),
        * `STORE_UNAVAILABLE` (503).
        */
       resume: async <T extends AutomationResult = AutomationResult>(
