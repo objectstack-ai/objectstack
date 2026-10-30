@@ -915,6 +915,50 @@ describe('[#22161] one-line verdicts — object-reference-unregistered-platform'
   });
 });
 
+// [#27827] Under a stated package closure (the runtime save door's
+// `packageScope`), the rung-② fix line is the closure prescription the flow and
+// view doors print — declare the dependency (ADR-0141 D1). Recorded like every
+// case here, so the one-line cases below read it too.
+describe('[#27827] the object-reference-unknown fix line under a package closure', () => {
+  const SCOPE = { packageId: 'com.acme.crm', dependencies: ['com.acme.core'] };
+  const withDataset = (object: string) => ({
+    ...baseStack(),
+    datasets: [{ name: 'm', object, dimensions: [], measures: [] }],
+  });
+
+  it('names the manifest `dependencies` declaration when a closure is stated', () => {
+    const [f, ...rest] = validateObjectReferences(withDataset('other_cube'), { packageScope: SCOPE });
+    expect(rest).toEqual([]);
+    expect(f).toMatchObject({ severity: 'error', rule: OBJECT_REFERENCE_UNKNOWN, path: 'datasets[0].object' });
+    expect(f!.hint).toBe(
+      'Declare a dependency on the package that defines "other_cube" in the `dependencies` of ' +
+        '"com.acme.crm"\'s manifest, or point it at an object inside that closure',
+    );
+  });
+
+  it('keeps today s hint, and the same verdict, when no closure is stated', () => {
+    const [cli] = validateObjectReferences(withDataset('other_cube'));
+    const [scoped] = validateObjectReferences(withDataset('other_cube'), { packageScope: SCOPE });
+    expect(cli!.hint.startsWith('Point it at one of this stack\'s objects')).toBe(true);
+    expect({ ...cli, hint: '' }).toEqual({ ...scoped, hint: '' });
+  });
+
+  it('a site s own sharper remedy still wins under a closure, and the platform rung is untouched', () => {
+    const ns = validateObjectReferences(
+      {
+        manifest: { id: 'com.example.my_app', namespace: 'my_app' },
+        objects: [{ name: 'my_app_order_line', fields: { name: { type: 'text' } } }],
+        views: [{ name: 'order_line', object: 'order_line', list: { type: 'grid', columns: ['name'] } }],
+      },
+      { packageScope: SCOPE },
+    );
+    expect(ns.map((f) => f.hint.startsWith('Object names carry the package namespace prefix'))).toEqual([true]);
+    const platform = validateObjectReferences(withDataset('sys_approval_process'), { packageScope: SCOPE });
+    expect(platform.map((f) => f.rule)).toEqual([OBJECT_REFERENCE_UNREGISTERED_PLATFORM]);
+    expect(platform[0]!.hint).not.toContain('dependencies');
+  });
+});
+
 // [#22161] Slice 12: the `fix:` line, both ids. One remedy line each (the
 // namespace prescription, where it applies, IS the line); what a miss costs at
 // each site, the ladder and the approval-object example are the explanations'
@@ -930,6 +974,7 @@ describe('[#22161] one-line fixes — the two object-reference ids', () => {
     const unknown = converted.filter((f) => f.rule === OBJECT_REFERENCE_UNKNOWN).map((f) => f.hint);
     expect(unknown.some((h) => h.startsWith('Point it at one of'))).toBe(true);
     expect(unknown.some((h) => h.startsWith('Object names carry the package namespace prefix'))).toBe(true);
+    expect(unknown.some((h) => h.startsWith('Declare a dependency on the package that defines'))).toBe(true);
     for (const f of converted) {
       expect(f.hint, f.rule).not.toContain('\n');
       expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
@@ -957,6 +1002,12 @@ describe('[#22161] one-line fixes — the two object-reference ids', () => {
     }
     expect(explainRule(OBJECT_REFERENCE_UNKNOWN)!.paragraphs.join('\n')).toContain(
       'the platform user object is `sys_user`, not `user`',
+    );
+    // [#27827] The closure case, so `os explain` agrees with the fix line the
+    // save door prints under one.
+    expect(explainRule(OBJECT_REFERENCE_UNKNOWN)!.paragraphs.join('\n')).toContain(
+      'declare a dependency on the package that defines the object in the `dependencies` of the written ' +
+        'package\'s manifest',
     );
     expect(explainRule(OBJECT_REFERENCE_UNREGISTERED_PLATFORM)!.paragraphs.join('\n')).toContain(
       'if a third-party package genuinely provides the name, the warning is expected',

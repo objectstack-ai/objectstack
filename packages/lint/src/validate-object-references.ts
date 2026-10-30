@@ -86,7 +86,7 @@ import {
 } from '@objectstack/spec/system';
 import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
-import { packagesOf, recordsOf, suggestName } from './object-graph.js';
+import { closureDependencyRemedy, packagesOf, recordsOf, suggestName } from './object-graph.js';
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
@@ -181,10 +181,29 @@ function artifactProvidedObjectNames(stack: AnyRec): string[] {
 /**
  * Validate every object-name reference on the surfaces listed in the module
  * header. Returns findings (empty = clean).
+ *
+ * @param options.packageScope [#27827] The package closure the runtime publish
+ *   gate narrowed `stack.objects` to (`AuthoringRuleContext.packageScope`),
+ *   present only when one was in force — the fact the flow trigger and list
+ *   view doors receive, handed over the same way. Stated, a rung-② miss is a
+ *   name outside what the package declared it may reference (or nowhere at
+ *   all: the closure is all the snapshot carries), so its fix line is the
+ *   shared closure prescription — declare the dependency (ADR-0141 D1) —
+ *   instead of the stack-relative one. It changes the HINT only: the ladder,
+ *   the severity and the verdict sentence are the same with or without it.
+ *   The CLI never sets it, so `os validate` / `os build` / `os lint` print
+ *   today's hint. In practice the dataset base object is the site that reaches
+ *   it: the gate dispatches this rule on `flow` and `dataset` writes, a flow
+ *   body carries none of this rule's sites, and the differential cancels what
+ *   the context collections already hold.
  */
-export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
+export function validateObjectReferences(
+  stack: AnyRec,
+  options: { packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] } } = {},
+): ObjectRefFinding[] {
   const findings: ObjectRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
+  const closure = options.packageScope;
 
   const objects = recordsOf(stack.objects);
   const ownObjects = new Set<string>();
@@ -272,11 +291,16 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         suggestName(name, resolvable),
       // [#22161] One remedy line. The verdict's "Did you mean" names the
       // nearest object this stack or its artifact provides, so the whole list
-      // is not echoed.
+      // is not echoed. [#27827] Under a stated closure the stack IS the
+      // closure, so the generic line becomes the closure prescription the flow
+      // and view doors print (ADR-0141 D1); a site's own sharper remedy still
+      // wins.
       hint:
         remedy ||
-        'Point it at one of this stack\'s objects, or at a platform object by its full name (the platform ' +
-          'user object is "sys_user", not "user")',
+        (closure
+          ? closureDependencyRemedy(name, closure.packageId, 'point it at an object inside that closure')
+          : 'Point it at one of this stack\'s objects, or at a platform object by its full name (the platform ' +
+            'user object is "sys_user", not "user")'),
     });
   };
 
