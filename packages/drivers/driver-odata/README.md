@@ -10,6 +10,8 @@ The driver is a **plugin driver**: a server plugin publishes it as the service
 external-driver floor and re-applies every query to the rows the service returns. The
 driver pushes down what it can translate and only ever asks the service a wider
 question; see [Virtual objects](https://objectstack.ai/docs/data-modeling/virtual-objects).
+The guide is [OData datasources](https://objectstack.ai/docs/data-modeling/odata-datasources):
+checking a service, credentials, what the service is asked, writes and failures.
 
 ## Usage
 
