@@ -1,28 +1,23 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#27735] The Pipeline dashboard's audience gate, as the stack ships it.
+ * [#27735] The Pipeline nav entry is offered only to a member who can read
+ * what the dashboard shows (ruling 6512784198, letter G).
  *
- * The server judges these declarations: the dashboard read by name refuses a
- * caller missing any `requiredPermissions` entry (`audience-permission`), and
- * the app's navigation drops an entry whose `requiredPermissions` the caller
- * does not hold. Both compare against the union of the caller's sets'
- * `systemPermissions`. This example does not depend on the REST package, so
- * the gate itself is not run here; what is pinned is every input it reads,
- * read off the parsed stack rather than the source constants:
- *
- * - the dashboard and its nav entry require the same, non-empty list;
- * - every required capability is declared on the stack (`scope: 'org'`) and
- *   granted by exactly the CRM sets that read `crm_opportunity`, the object
- *   behind `opportunity_metrics` — never a gate nobody holds;
- * - those sets reach people through the CRM positions, and no other set
- *   (a plain member's) grants it.
+ * The entry carries a `visible` predicate, `current_user.can(OBJECT, 'read')`,
+ * which the console's nav guard answers from the member's permissions payload.
+ * It hides; it refuses nothing. The refusal stays where it already is: the
+ * dataset query of every widget answers 403 to a caller who cannot read the
+ * dataset's object (ADR-0066 D4: `visibleWhen` hides, `requiredPermissions`
+ * refuses). So the one thing that can go wrong here is the predicate naming
+ * an object other than the one the widgets read, and that is what is pinned,
+ * off the parsed stack rather than the source constants.
  */
 
 import { describe, expect, it } from 'vitest';
 import stack from '../objectstack.config.js';
 
-type NavEntry = { id?: string; type?: string; dashboardName?: string; requiredPermissions?: string[]; children?: NavEntry[] };
+type NavEntry = { id?: string; type?: string; dashboardName?: string; visible?: unknown; children?: NavEntry[] };
 
 function findNav(entries: NavEntry[] | undefined, id: string): NavEntry | undefined {
   for (const entry of entries ?? []) {
@@ -33,48 +28,25 @@ function findNav(entries: NavEntry[] | undefined, id: string): NavEntry | undefi
   return undefined;
 }
 
-const dashboard = (stack.dashboards ?? []).find((d) => d.name === 'pipeline_dashboard');
+const READ_PREDICATE = /^current_user\.can\('([a-z0-9_]+)', 'read'\)$/;
+
 const app = (stack.apps ?? []).find((a) => a.name === 'crm_app');
 const navEntry = findNav(app?.navigation as NavEntry[] | undefined, 'nav_pipeline_dashboard');
-const sets = (stack.permissions ?? []) as Array<{ name: string; systemPermissions?: string[]; objects?: Record<string, { allowRead?: boolean }> }>;
-const required = dashboard?.requiredPermissions ?? [];
+const dashboard = (stack.dashboards ?? []).find((d) => d.name === 'pipeline_dashboard');
 
-describe('Pipeline dashboard audience (#27735)', () => {
-  it('the dashboard and its nav entry require the same capability list', () => {
-    expect(dashboard).toBeDefined();
+describe('Pipeline nav entry audience (#27735)', () => {
+  it('carries a read predicate on one object', () => {
     expect(navEntry).toMatchObject({ type: 'dashboard', dashboardName: 'pipeline_dashboard' });
-    expect(required).toEqual(['crm.view_pipeline']);
-    expect(navEntry!.requiredPermissions).toEqual(required);
+    expect(navEntry!.visible).toMatch(READ_PREDICATE);
   });
 
-  it('every required capability is declared on the stack, scoped to the organization', () => {
-    const declared = new Map((stack.capabilities ?? []).map((c) => [c.name, c]));
-    for (const cap of required) {
-      expect(declared.get(cap)).toMatchObject({ name: cap, scope: 'org' });
-    }
-  });
-
-  it('is granted by exactly the sets that read the opportunities its widgets aggregate', () => {
-    const readers = sets.filter((s) => s.objects?.crm_opportunity?.allowRead === true).map((s) => s.name).sort();
-    expect(readers).toEqual(['crm_sales_user']);
-    for (const cap of required) {
-      const holders = sets.filter((s) => (s.systemPermissions ?? []).includes(cap)).map((s) => s.name).sort();
-      expect(holders).toEqual(readers);
-    }
-  });
-
-  it('reaches sales users through the CRM positions and no other set', () => {
-    const distributed = (stack.positions ?? [])
-      .filter((p) => (p.permissionSets ?? []).includes('crm_sales_user'))
-      .map((p) => p.name)
-      .sort();
-    expect(distributed).toEqual(['finance_approver', 'sales_manager', 'sales_rep']);
-    // A member without a sales position is left with the stack's other sets,
-    // and none of them grants the gate.
-    const others = sets.filter((s) => s.name !== 'crm_sales_user');
-    expect(others.map((s) => s.name)).toEqual(['guest_portal']);
-    for (const s of others) {
-      expect((s.systemPermissions ?? []).filter((cap) => required.includes(cap))).toEqual([]);
-    }
+  it("names the object of the dataset every pipeline_dashboard widget reads", () => {
+    const named = String(navEntry?.visible).match(READ_PREDICATE)?.[1];
+    const widgets = (dashboard?.widgets ?? []) as Array<{ dataset?: string }>;
+    expect(widgets.length).toBeGreaterThan(0);
+    const objects = new Set(
+      widgets.map((w) => (stack.datasets ?? []).find((d) => d.name === w.dataset)?.object),
+    );
+    expect([...objects]).toEqual([named]);
   });
 });

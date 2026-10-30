@@ -59,9 +59,6 @@ export const SalesUserPermissionSet = definePermissionSet({
     crm_lead: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     crm_activity: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
   },
-  // The Pipeline dashboard's audience: granted here, beside the
-  // `crm_opportunity` read its widgets need (see capabilities.ts).
-  systemPermissions: ['crm.view_pipeline'],
 });
 
 /**

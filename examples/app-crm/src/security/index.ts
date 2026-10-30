@@ -7,4 +7,4 @@ export {
   SalesUserPermissionSet,
   GuestPortalProfile,
 } from './sales-positions.js';
-export { ViewPipelineCapability, allCapabilities } from './capabilities.js';
+
