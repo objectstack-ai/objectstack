@@ -14,8 +14,8 @@
  * The client is a server double that judges the way the server does: the save
  * door parses `FlowSchema` (the flow parse does not run the value-slot rule),
  * and the draft read folds in the publish gate's finding, which is the real
- * `validateStackExpressions` from `@objectstack/lint`, located by its `where`
- * as the gate locates a node's config value. The canvas is the real
+ * `validateStackExpressions` from `@objectstack/lint`, located at the node's
+ * config key path re-spelled item-relative as the door does. The canvas is the real
  * `FlowPreview` beside a button that selects the Update Records node.
  */
 
@@ -55,11 +55,22 @@ function schemaErrors(body: unknown): Entry[] {
   return parsed.success ? [] : parsed.error.issues.map((i) => ({ path: i.path.map(String).join('.'), message: i.message }));
 }
 
+/**
+ * The door re-spells a gate path found on the written item item-relative
+ * (`flows[0].nodes[1].config.fields.id` → `nodes.1.config.fields.id`) and keeps
+ * any other as written: mirrors `itemRelativeIssuePath` in
+ * `packages/metadata-protocol/src/metadata-diagnostics.ts`.
+ */
+function itemRelative(path: string): string {
+  if (path !== 'flows[0]' && !path.startsWith('flows[0].') && !path.startsWith('flows[0][')) return path;
+  return path.slice('flows[0]'.length).replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+}
+
 /** The draft read's `_diagnostics`: the parse, plus what the publish gate refuses. */
 function draftVerdict(body: Record<string, unknown>): { valid: boolean; errors?: Entry[] } {
   const publish = validateStackExpressions({ flows: [body] })
     .filter((i) => (i.severity ?? 'error') === 'error')
-    .map((i) => ({ path: i.path ?? i.where, message: i.message, code: 'expression-invalid' }));
+    .map((i) => ({ path: itemRelative(i.path ?? i.where), message: i.message, code: 'expression-invalid' }));
   const errors = [...schemaErrors(body), ...publish];
   return errors.length ? { valid: false, errors } : { valid: true };
 }
@@ -208,8 +219,9 @@ describe('Automations page — Problems and the node agree on a blank expression
     expect(screen.queryByText(EMPTY())).toBeNull();
     const row = target.closest('li')!;
     expect(within(row).getByText(NEEDED())).toBeInTheDocument();
-    expect(target.textContent).toContain("node 'write'");
-    expect(target.textContent).toContain('config.fields.id');
+    // The row is located at the node itself (#28192): its name, keyed by its id.
+    expect(target.textContent).toBe('Write');
+    expect(target.getAttribute('title')).toBe('write');
     expect(screen.getByTestId('auto-problems-count')).toHaveTextContent('1');
   });
 
