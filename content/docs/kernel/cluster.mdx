@@ -350,9 +350,15 @@ channel's own doc comment:
   from that read. A duplicate or re-ordered
   delivery converges to the same state as a single one.
 - **`originNode` loopback suppression.** Every payload carries the publishing
-  node's id; a peer that receives its own `originNode` drops the message —
-  the write-through, pool rebuild or connector reconcile already ran,
-  synchronously, at the door that persisted the change.
+  node's id; a peer that receives its own `originNode` drops the message,
+  because the writer has already handled the change locally. The
+  write-through and the pool rebuild ran synchronously at the door that
+  persisted the change. A connector reconcile is queued on the writer's
+  reconcile queue instead. On lane 2 the local half of the same signal queues
+  it: the protocol notifies its own mutation listeners before it publishes,
+  and the save does not wait for the reconcile. On lane 4 the credential door
+  queues one job that writes the row, publishes, then runs the reconcile, and
+  the door answers only after that reconcile finishes.
 - **At-most-once, bounded by boot rehydration.** No shipped `IPubSub` driver
   exceeds at-most-once delivery (§4.2), so a lost message is not retried.
   Each lane narrows the staleness window this always had — "until the next
