@@ -1057,6 +1057,14 @@ export interface ActionContext {
   /** Selected records (for list actions) */
   selectedRecords?: Record<string, any>[];
 
+  /**
+   * Whether the list that publishes `selectedRecords` lets its rows be
+   * selected at all. `false`: its rows draw no selection control, so
+   * `selectedRecords` stays empty there and a launch that needs a selected row
+   * can never be made from it (objectstack#27831). Unset when no list says.
+   */
+  selectionAvailable?: boolean;
+
   /** Live page-variable snapshot (ADR-0049) published by PageVariableActionBridge —
    *  lets a submit action read page-local form state via `{{page.<var>}}` tokens. */
   pageVariables?: Record<string, any>;

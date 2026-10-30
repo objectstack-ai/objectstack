@@ -17,6 +17,7 @@
     "seed-data",
     "import-mappings",
     "external-datasources",
+    "odata-datasources",
     "drivers",
     "virtual-objects",
     "analytics"

@@ -19,10 +19,22 @@ Everything on this page is what the platform's reference test boots and asserts
 in `ui/packages/plugin-gantt/src/ObjectGantt.pluginDriverTree.test.tsx`). Read them when
 this page and the runtime seem to disagree.
 
-## Virtual, or a real object?
+## Which way in: OData, a plugin driver, or a real object
 
-Make it virtual when a copy would be **wrong**, and real when a copy is merely
-**convenient**:
+Three rules, checked in order:
+
+1. **Slow-changing reference data: a real object, fed by a sync.** Codes, catalogues and
+   registries that change monthly are better copied. Declare a real object and fill it
+   with a [scheduled pull](/docs/automation/jobs#pulling-a-mapping).
+2. **The remote exposes OData v4: an OData datasource.** SAP S/4HANA, Dynamics 365,
+   Dataverse and other CSDL 4.0 services are served by the shipped OData driver. You
+   declare a datasource and one object per entity set, and write no driver code
+   ([OData datasources](/docs/data-modeling/odata-datasources)).
+3. **No OData, rows computed on request, or a private API: a plugin driver of your
+   own**, which is what the rest of this page builds.
+
+The first rule is the question of whether to copy at all. Make the object virtual when a
+copy would be **wrong**, and real when a copy is merely **convenient**:
 
 | The data is… | Choose | Why |
 | :--- | :--- | :--- |
@@ -33,6 +45,11 @@ Make it virtual when a copy would be **wrong**, and real when a copy is merely
 
 If the remote is a SQL database you can reach, you need no driver of your own — use a
 built-in one through [External datasources](/docs/data-modeling/external-datasources).
+
+**Salesforce takes a driver of its own.** Salesforce can read other systems' OData
+services (Salesforce Connect), but it does not publish its own records as an OData
+service, so the OData datasource cannot read it. Serve Salesforce objects from a plugin
+driver over its REST API, built to the contract on this page.
 
 A virtual object pays for its freshness on every request: each list read is a round
 trip to the remote, and a read can match at most 1000 rows
@@ -595,7 +612,9 @@ plan's view and its edit door. A gantt over the tree, a per-caller lock formula,
 `beforeUpdate` guard, writes through `update` only.
 
 **SAP sales orders — must not land.** The ERP is the system of record, and orders may not
-be copied out of it. The driver reads orders through the ERP's own query API and writes
+be copied out of it. When the ERP publishes the orders as an OData v4 service, bind them
+through an [OData datasource](/docs/data-modeling/odata-datasources) and write no driver.
+Otherwise the driver reads orders through the ERP's own query API and writes
 the few fields users may change through its update API; the ERP's own validation answers
 a write it rejects, so let that error reach the caller rather than retrying around it.
 Refuse `create` and `delete` until the integration deliberately offers them, and keep
@@ -622,6 +641,8 @@ separate data-sync metadata type: a sync is defined on its target, as that mappi
 
 ## See also
 
+- [OData datasources](/docs/data-modeling/odata-datasources) — the same binding over an
+  OData v4 service, with the driver already written.
 - [External datasources](/docs/data-modeling/external-datasources) — the datasource and
   `external` binding this page builds on, federation over SQL, the write gates and
   credentials.

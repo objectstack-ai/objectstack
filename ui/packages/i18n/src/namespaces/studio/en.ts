@@ -1789,7 +1789,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.import.success': 'Imported "{id}". Refresh the app switcher to use it.',
   'engine.packages.import.failed': 'Import failed',
   'engine.packages.create.title': 'New Package',
-  'engine.packages.create.description': 'Create a writable package to author and publish your own metadata. The id should be reverse-domain (e.g. {example}).',
+  'engine.packages.create.description': 'A package holds the objects, apps and other things you build. Give it a name to start; everything else is filled in for you.',
+  'engine.packages.create.derivedSummary': 'Its ID will be {id}, and its object names will start with {namespace}_. You can change both under Advanced.',
+  'engine.packages.create.advancedHint': 'Package ID, namespace, version and type, filled in from the name.',
   'engine.packages.create.id': 'Package ID',
   'engine.packages.create.namespace': 'Object namespace',
   'engine.packages.create.name': 'Display name',
@@ -3141,8 +3143,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
   // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
   'engine.studio.org.openSetup': 'Open in Setup',
-  'engine.studio.publishedAllFlows': 'Published {count} package-less flow drafts',
-  'engine.studio.publishedAllFlowsOne': 'Published {count} package-less flow draft',
+  'engine.studio.publishedAllFlows': 'Published {count} flows',
+  'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
   'engine.studio.designer.select': 'Select…',
   'engine.studio.designer.pickDate': 'Pick a date…',
@@ -4061,6 +4063,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ Add sort…',
   'engine.studio.inspector.listView.sortAsc': '{field} ascending',
   'engine.studio.inspector.listView.sortDesc': '{field} descending',
+  // objectstack#27836 — "Add view": a new list view of the object, its type picked first.
+  'engine.studio.inspector.listView.addView': 'Add view',
+  'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
+  'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',
