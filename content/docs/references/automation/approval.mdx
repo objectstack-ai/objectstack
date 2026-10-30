@@ -38,11 +38,11 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `true`) | SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all |
-| **timeoutHours** | `number` | ✅ | Calendar (wall-clock) hours before escalation triggers — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with timeoutHours 4 escalates at 21:00 that same Friday |
-| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
-| **escalateTo** | `string` | optional | User id, email, position machine name or 'position:`<name>`' to escalate to. A 'team:', 'department:', 'org_membership_level:' or 'role:' address is refused: no approver acts under one |
-| **notifySubmitter** | `boolean` | optional (default: `true`) | Notify the original submitter on escalation |
+| **enabled** | `boolean` | optional (default: `true`) | Turns this step's deadline on or off. It is on by default once a deadline is set: switch it off to keep the settings without acting on them, or remove the escalation to drop the deadline altogether |
+| **timeoutHours** | `number` | ✅ | How many hours a request may wait before the escalation runs. These are calendar (wall-clock) hours — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with 4 hours escalates at 21:00 that same Friday |
+| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | What happens when the deadline passes: hand the request to someone else, approve it, reject it, or notify someone (the default) |
+| **escalateTo** | `string` | optional | Who takes over or is notified when the deadline passes: usually a position, or a specific person. Write a position machine name or 'position:`<name>`', a user id or an email. A 'team:', 'department:', 'org_membership_level:' or 'role:' address is refused: no approver acts under one |
+| **notifySubmitter** | `boolean` | optional (default: `true`) | Tell the person who submitted the request when it escalates |
 
 
 ---
@@ -53,11 +53,11 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user'>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue name — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
-| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
-| **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
-| **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user'>` | ✅ | How this step finds its approvers. Prefer a role in the organization (manager, position, department, team) over one named person, who may leave or not exist in another environment. A manager step only finds someone once an administrator has recorded each user's manager in the user directory; until then it finds nobody and the request follows the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the ways to fill the directory in and the full remedy; the Approvals guide states the same remedy in prose. |
+| **value** | `string` | optional | Who exactly, for the chosen type: the user, membership tier, position, team, department or queue, or the record field that holds the approver. Leave it empty for a manager step. For an expression step, write the CEL expression that returns the approvers; it may read `current.*`, `trigger.*` and `vars.*`. |
+| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | Expression steps only: what the expression's results name. By default each result is a person; choose departments, positions or teams to make all their members approvers. |
+| **group** | `string` | optional | Group name for one-from-each-group sign-off: approvers with the same name form one group, and the step needs approval from every group (e.g. "legal", "finance"). Read only when approvers combine per group. |
+| **organization** | `string` | optional | Look this approver up in another organization of the same group instead of the request's own, for example a group CFO approving a plant's purchase order. Leave it empty to use the request's organization. Write `$root` for the top of the group, `$parent` for one level up, or an organization's slug. |
 
 
 ---
@@ -68,64 +68,64 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
-| **excludeSubmitter** | `boolean` | optional | Segregation of duties for this step: when true, the request's submitter (the user whose action started the flow run, recorded on the approval request as `submitter_id`) is removed from the slate `approvers` resolves to, whatever approver type produced them. If that leaves nobody, the request takes the node's `onEmptyApprovers` route (`admin_rescue` by default, or `fallbackApprovers` under `'fallback'`) and never passes silently, and the approval record shows that the exclusion changed the route. `onEmptyApprovers: 'auto_approve'` is refused beside `excludeSubmitter: true`, because it would approve exactly the request this option exists to stop; choose `'admin_rescue'`, `'fail'` or `'fallback'`. Omitted or false (the default), the slate stays as resolved. |
-| **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | optional (default: `"first_response"`) | How to combine multiple approvers |
-| **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group |
-| **lockRecord** | `boolean` | optional (default: `true`) | Lock the record from editing while pending |
-| **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
-| **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve' \| 'fallback'>` | optional (default: `"admin_rescue"`) | Behavior when no concrete approver resolves at node entry — 'admin_rescue' (default) opens the request on the organization's administrators; 'fallback' opens it on fallbackApprovers instead, naming who decides |
-| **fallbackApprovers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | optional | Approvers the request opens on when onEmptyApprovers is 'fallback' |
-| **decisionOutputs** | `(string \| { key: string; label?: string; type?: Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>; multiple?: boolean; … })[]` | optional | Author-declared decision outputs — bare keys or typed `{ key, type, multiple }` declarations |
-| **escalation** | `{ enabled?: boolean; timeoutHours: number; action?: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
-| **maxRevisions** | `integer` | optional (default: `3`) | Max send-backs for revision before auto-reject (0 = send-back disabled) |
+| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Who can approve this step |
+| **excludeSubmitter** | `boolean` | optional | Stops people approving their own requests: when on, whoever submitted the request is taken off this step's approvers, whichever way they were found. If that leaves no one, the request goes where the step's `onEmptyApprovers` policy sends it (the organization's administrators by default, or the backup approvers you name) and is never approved automatically; the approval record notes the reason. So `'auto_approve'` cannot be chosen alongside this option. Off by default: the approvers stay as found. |
+| **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | optional (default: `"first_response"`) | How several approvers decide: the first answer wins (the default), everyone must approve, a minimum number must approve, or one from each group must approve. Any single rejection rejects the step |
+| **minApprovals** | `integer` | optional | How many approvals this step needs: in total when a minimum number must approve, or from each group when one from each group signs off. Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group |
+| **lockRecord** | `boolean` | optional (default: `true`) | Stop anyone editing the record while it waits for this approval |
+| **approvalStatusField** | `string` | optional | A field on the record that shows where its approval stands (pending, approved, rejected or recalled); make it read-only |
+| **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve' \| 'fallback'>` | optional (default: `"admin_rescue"`) | What happens when this step finds no one to approve: by default the organization's administrators decide; you can instead name backup approvers, fail the step, or approve it automatically. 'admin_rescue' (default) opens the request on the administrators; 'fallback' opens it on fallbackApprovers instead, naming who decides; 'fail' fails the step; 'auto_approve' approves it with no one deciding |
+| **fallbackApprovers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | optional | Backup approvers who decide when this step finds no one else. Read only when onEmptyApprovers is 'fallback' |
+| **decisionOutputs** | `(string \| { key: string; label?: string; type?: Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>; multiple?: boolean; … })[]` | optional | Extra answers the approver gives with the decision, such as who approves a later step; later steps read them. Each entry is a plain name (a text box) or `{ key, type, multiple }` to show a picker |
+| **escalation** | `{ enabled?: boolean; timeoutHours: number; action?: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | A deadline for this step, and what happens when it passes |
+| **maxRevisions** | `integer` | optional (default: `3`) | How many times a request can be sent back for changes before it is rejected automatically (0 turns send-back off) |
 
 ### Nested Shape: `ApprovalNodeConfig.approvers[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue name — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
-| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
-| **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
-| **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>` | ✅ | How this step finds its approvers. Prefer a role in the organization (manager, position, department, team) over one named person, who may leave or not exist in another environment. A manager step only finds someone once an administrator has recorded each user's manager in the user directory; until then it finds nobody and the request follows the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the ways to fill the directory in and the full remedy; the Approvals guide states the same remedy in prose. |
+| **value** | `string` | optional | Who exactly, for the chosen type: the user, membership tier, position, team, department or queue, or the record field that holds the approver. Leave it empty for a manager step. For an expression step, write the CEL expression that returns the approvers; it may read `current.*`, `trigger.*` and `vars.*`. |
+| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | Expression steps only: what the expression's results name. By default each result is a person; choose departments, positions or teams to make all their members approvers. |
+| **group** | `string` | optional | Group name for one-from-each-group sign-off: approvers with the same name form one group, and the step needs approval from every group (e.g. "legal", "finance"). Read only when approvers combine per group. |
+| **organization** | `string` | optional | Look this approver up in another organization of the same group instead of the request's own, for example a group CFO approving a plant's purchase order. Leave it empty to use the request's organization. Write `$root` for the top of the group, `$parent` for one level up, or an organization's slug. |
 
 ### Nested Shape: `ApprovalNodeConfig.fallbackApprovers[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue name — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
-| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
-| **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
-| **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>` | ✅ | How this step finds its approvers. Prefer a role in the organization (manager, position, department, team) over one named person, who may leave or not exist in another environment. A manager step only finds someone once an administrator has recorded each user's manager in the user directory; until then it finds nobody and the request follows the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the ways to fill the directory in and the full remedy; the Approvals guide states the same remedy in prose. |
+| **value** | `string` | optional | Who exactly, for the chosen type: the user, membership tier, position, team, department or queue, or the record field that holds the approver. Leave it empty for a manager step. For an expression step, write the CEL expression that returns the approvers; it may read `current.*`, `trigger.*` and `vars.*`. |
+| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | Expression steps only: what the expression's results name. By default each result is a person; choose departments, positions or teams to make all their members approvers. |
+| **group** | `string` | optional | Group name for one-from-each-group sign-off: approvers with the same name form one group, and the step needs approval from every group (e.g. "legal", "finance"). Read only when approvers combine per group. |
+| **organization** | `string` | optional | Look this approver up in another organization of the same group instead of the request's own, for example a group CFO approving a plant's purchase order. Leave it empty to use the request's organization. Write `$root` for the top of the group, `$parent` for one level up, or an organization's slug. |
 
 ### Nested Shape: `ApprovalNodeConfig.decisionOutputs[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Output key (the flow variable name under the node id) |
+| **key** | `string` | ✅ | Name of the answer the approver fills in; later steps read it as a flow variable under this step's id |
 | **label** | `string` | optional | Field label in the decision dialog |
-| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | Decision-dialog input widget (default 'text'). The user, department and team pickers commit record ids; the position picker commits position machine names |
-| **multiple** | `boolean` | optional | Collect multiple values (an array of what the picker commits) |
-| **required** | `boolean` | optional | Approver must supply this output to approve |
+| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | What the approver answers with: free text (the default), or a picker of users, departments, positions or teams. The user, department and team pickers store record ids; the position picker stores position machine names |
+| **multiple** | `boolean` | optional | Let the approver pick more than one value (stored as a list) |
+| **required** | `boolean` | optional | The approver must fill this in to approve; a rejection never needs it |
 
 ### Nested Shape: `ApprovalNodeConfig.escalation`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `true`) | SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all |
-| **timeoutHours** | `number` | ✅ | Calendar (wall-clock) hours before escalation triggers — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with timeoutHours 4 escalates at 21:00 that same Friday |
-| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
-| **escalateTo** | `string` | optional | User id, email, position machine name or 'position:`<name>`' to escalate to. A 'team:', 'department:', 'org_membership_level:' or 'role:' address is refused: no approver acts under one |
-| **notifySubmitter** | `boolean` | optional (default: `true`) | Notify the original submitter on escalation |
+| **enabled** | `boolean` | optional (default: `true`) | Turns this step's deadline on or off. It is on by default once a deadline is set: switch it off to keep the settings without acting on them, or remove the escalation to drop the deadline altogether |
+| **timeoutHours** | `number` | ✅ | How many hours a request may wait before the escalation runs. These are calendar (wall-clock) hours — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with 4 hours escalates at 21:00 that same Friday |
+| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | What happens when the deadline passes: hand the request to someone else, approve it, reject it, or notify someone (the default) |
+| **escalateTo** | `string` | optional | Who takes over or is notified when the deadline passes: usually a position, or a specific person. Write a position machine name or 'position:`<name>`', a user id or an email. A 'team:', 'department:', 'org_membership_level:' or 'role:' address is refused: no approver acts under one |
+| **notifySubmitter** | `boolean` | optional (default: `true`) | Tell the person who submitted the request when it escalates |
 
 
 ---
 
 ## ApproverType
 
-Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose.
+How this step finds its approvers. Prefer a role in the organization (manager, position, department, team) over one named person, who may leave or not exist in another environment. A manager step only finds someone once an administrator has recorded each user's manager in the user directory; until then it finds nobody and the request follows the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the ways to fill the directory in and the full remedy; the Approvals guide states the same remedy in prose.
 
 ### Allowed Values
 
@@ -149,11 +149,11 @@ Approval step approver type. `manager` is resolved from the directory rather tha
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Output key (the flow variable name under the node id) |
+| **key** | `string` | ✅ | Name of the answer the approver fills in; later steps read it as a flow variable under this step's id |
 | **label** | `string` | optional | Field label in the decision dialog |
-| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | Decision-dialog input widget (default 'text'). The user, department and team pickers commit record ids; the position picker commits position machine names |
-| **multiple** | `boolean` | optional | Collect multiple values (an array of what the picker commits) |
-| **required** | `boolean` | optional | Approver must supply this output to approve |
+| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | What the approver answers with: free text (the default), or a picker of users, departments, positions or teams. The user, department and team pickers store record ids; the position picker stores position machine names |
+| **multiple** | `boolean` | optional | Let the approver pick more than one value (stored as a list) |
+| **required** | `boolean` | optional | The approver must fill this in to approve; a rejection never needs it |
 
 
 ---
