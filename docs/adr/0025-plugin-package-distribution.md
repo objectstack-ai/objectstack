@@ -292,10 +292,10 @@ explicit `--trust-unsigned` dev override).
   code-bearing package, `sys_package_installation.granted_permissions`, and a
   409 `PERMISSION_RECONSENT_REQUIRED` on a widening upgrade. The granted set
   always equals the declared set — there is no partial grant.
-- **Steps 4–7 exist for a local artifact only** (M1, below). For a code plugin
-  in the cloud they do not: nothing serves the `.osplugin` back (§3.4), and an
-  environment artifact carries `sys_package_version.manifest_json` — metadata
-  only, never the blob.
+- **Steps 4–7 exist for a local artifact only** (M1, below; step 7's per-plugin
+  enforcer is M2, §3.7). For a code plugin in the cloud they do not: nothing
+  serves the `.osplugin` back (§3.4), and an environment artifact carries
+  `sys_package_version.manifest_json` — metadata only, never the blob.
 - ✅ **M1 — local T0 loop, first-party / self-signed only — landed 2026-10-29**
   (objectstack#27123: #27335, #27374, #27679). `os plugin install ./x.osplugin`
   verifies the `.sig` over the raw bytes against the environment's trusted keys
