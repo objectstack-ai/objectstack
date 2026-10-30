@@ -37,7 +37,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
-import type { IMetadataService } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE, type IMetadataService } from '@objectstack/spec/contracts';
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
 
@@ -384,5 +384,134 @@ describe('ADR-0130 D4 — the manifest service registers the residual\'s flows',
       residualStack(noteObj(), { flows: [flow()] }, { flows: [flow()] }),
     ]));
     expect(flowOwners(engineOf(kernel))).toEqual([['acme_escalate', SERVICE_ID, '2.4.0']]);
+  });
+});
+
+/**
+ * [ADR-0130 D4] EVERY other residual type a package body's collections take
+ * into the registry reaches it too, under the stack's manifest id and version:
+ * the engine registered a residual's objects, connectors and flows only, so a
+ * residual item of any other type was registered by the metadata door alone
+ * and every reader that asks the registry — the save door's managed-content
+ * seal among them — answered as if it were not declared. Two residual types
+ * keep a path of their own and are not in this population: objects (above) and
+ * picklists, which stay metadata-only for the reason the objects rule names.
+ */
+describe('ADR-0130 D4 — the manifest service registers every other residual type', () => {
+  /** The stack collection of each type, with a minimal named item. */
+  const GENERIC: Record<string, string> = {
+    apps: 'app', pages: 'page', dashboards: 'dashboard', reports: 'report', actions: 'action',
+    workflows: 'workflow', positions: 'position', permissions: 'permission', capabilities: 'capability',
+    sharingRules: 'sharing_rule', apis: 'api', webhooks: 'webhook', agents: 'agent', tools: 'tool',
+    skills: 'skill', ragPipelines: 'rag_pipeline', hooks: 'hook', mappings: 'mapping',
+    analyticsCubes: 'analytics_cube', emailTemplates: 'email_template', docs: 'doc', books: 'book',
+  };
+  const itemOf = (type: string) => ({ name: `acme_top_${type}`, label: `Top ${type}` });
+  /** The registry parses an action on registration, so the residual's action is a valid one too. */
+  const ITEM_EXTRA: Record<string, Record<string, unknown>> = { actions: { type: 'url', target: 'https://example.com' } };
+  const collectionsOf = (pick: (type: string) => boolean = () => true) => Object.fromEntries(
+    Object.entries(GENERIC).filter(([, type]) => pick(type))
+      .map(([field, type]) => [field, [{ ...itemOf(type), ...ITEM_EXTRA[field] }]]),
+  );
+  /**
+   * A package BODY is strictly parsed on registration, so the pins that put an
+   * item on a body take a schema-valid one: every security-domain type, and
+   * one of each other kind the body schema admits with a short item.
+   */
+  const BODY_VALID: Record<string, Record<string, unknown>> = {
+    permissions: { objects: {} },
+    positions: {},
+    capabilities: {},
+    sharingRules: {
+      type: 'criteria', object: 'acme_case', condition: "record.subject == 'x'", accessLevel: 'read',
+      sharedWith: { type: 'position', value: 'acme_top_position' },
+    },
+    apps: {},
+    pages: {},
+    actions: { type: 'url', target: 'https://example.com' },
+    hooks: { object: 'acme_case', events: ['beforeInsert'] },
+    agents: { role: 'Triage', instructions: 'Triage cases.' },
+    webhooks: { object: 'acme_case', url: 'https://example.com/hook', triggers: ['create'] },
+    emailTemplates: { subject: 'Subject', bodyHtml: '<p>Body</p>' },
+  };
+  const bodyCollections = () => Object.fromEntries(
+    Object.entries(BODY_VALID).map(([field, extra]) => [field, [{ ...itemOf(GENERIC[field]), ...extra }]]),
+  );
+  const ownerOf = (ql: ObjectQL, type: string, name: string) => {
+    const item = ql.registry.getItem(type, name) as { _packageId?: string; _packageVersion?: string } | undefined;
+    return item ? [item._packageId, item._packageVersion] : undefined;
+  };
+  const namesOf = (ql: ObjectQL, type: string) =>
+    (ql.registry.listItems(type) as Array<{ name?: string }>).map((i) => i.name).filter((n) => n?.startsWith('acme_')).sort();
+
+  it.each(Object.values(GENERIC))('registers a residual %s under the stack\'s manifest id and version', async (type) => {
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), collectionsOf((t) => t === type))]));
+    expect(ownerOf(engineOf(kernel), type, `acme_top_${type}`)).toEqual([RELEASE_ID, '1.0.0']);
+  });
+
+  it('registers every one of them from one stack, and leaves the artifact\'s own entries as they arrived', async () => {
+    const collections = collectionsOf();
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), collections)]));
+    const ql = engineOf(kernel);
+    for (const type of Object.values(GENERIC)) {
+      expect(ownerOf(ql, type, `acme_top_${type}`), type).toEqual([RELEASE_ID, '1.0.0']);
+    }
+    for (const [field] of Object.entries(GENERIC)) {
+      expect((collections[field] as Array<{ _packageId?: string }>)[0]._packageId, field).toBeUndefined();
+    }
+  });
+
+  it('a residual view container registers under its object, expanded into its views, like a body\'s', async () => {
+    const container = { object: 'acme_note', list: { type: 'grid', columns: ['title'] } };
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), { views: [container] })]));
+    const ql = engineOf(kernel);
+    const views = ql.registry.listItems('view') as Array<{ name?: string; _packageId?: string }>;
+    const noteViews = views.filter((v) => v.name === 'acme_note' || v.name?.startsWith('acme_note.'));
+    expect(noteViews.map((v) => v.name)).toContain('acme_note');
+    expect(noteViews.length).toBeGreaterThan(1);
+    expect(new Set(noteViews.map((v) => v._packageId))).toEqual(new Set([RELEASE_ID]));
+    expect((container as { _packageId?: string })._packageId).toBeUndefined();
+  });
+
+  it('a residual queue and assignment rule register when the ownership-queue service is composed', async () => {
+    const queues = { queues: [itemOf('queue')], assignmentRules: [itemOf('assignment_rule')] };
+    const queueService: Plugin = {
+      name: 'test.ownership-queue',
+      init: async (ctx: PluginContext) => { ctx.registerService(OWNERSHIP_QUEUE_SERVICE, {}); },
+    } as Plugin;
+    const { kernel } = await boot(queueService, registering('app', [residualStack(noteObj(), queues)]));
+    const ql = engineOf(kernel);
+    expect(ownerOf(ql, 'queue', 'acme_top_queue')).toEqual([RELEASE_ID, '1.0.0']);
+    expect(ownerOf(ql, 'assignment_rule', 'acme_top_assignment_rule')).toEqual([RELEASE_ID, '1.0.0']);
+  });
+
+  it('…and, like a body\'s, refuse the boot loudly when it is not', async () => {
+    const queues = { queues: [itemOf('queue')], assignmentRules: [itemOf('assignment_rule')] };
+    await expect(boot(registering('app', [residualStack(noteObj(), queues)])))
+      .rejects.toThrow(/declares queues \(1\) and assignmentRules \(1\), but no 'ownership-queue' service is registered/);
+  });
+
+  it('a residual permission set whose body `packageId` names another package is refused, as a body\'s is', async () => {
+    const set = { ...itemOf('permission'), objects: {}, packageId: OTHER_ID };
+    await expect(boot(registering('app', [residualStack(noteObj(), { permissions: [set] })])))
+      .rejects.toThrow(/Drop `packageId` from permission set 'acme_top_permission'/);
+  });
+
+  it('a top-level item a body repeats is the body\'s, registered once', async () => {
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), bodyCollections(), bodyCollections())]));
+    const ql = engineOf(kernel);
+    for (const type of Object.keys(BODY_VALID).map((field) => GENERIC[field])) {
+      expect(ownerOf(ql, type, `acme_top_${type}`), type).toEqual([SERVICE_ID, '2.4.0']);
+      expect(namesOf(ql, type), type).toEqual([`acme_top_${type}`]);
+    }
+  });
+
+  it('CONTROL: a stack with no residual item of these types registers exactly the bodies\' items', async () => {
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), {}, bodyCollections())]));
+    const ql = engineOf(kernel);
+    for (const type of Object.keys(BODY_VALID).map((field) => GENERIC[field])) {
+      expect(namesOf(ql, type), type).toEqual([`acme_top_${type}`]);
+      expect(ownerOf(ql, type, `acme_top_${type}`), type).toEqual([SERVICE_ID, '2.4.0']);
+    }
   });
 });
