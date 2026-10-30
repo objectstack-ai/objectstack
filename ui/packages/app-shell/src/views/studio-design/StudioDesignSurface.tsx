@@ -556,16 +556,16 @@ function CreateTakenNotice({
  *
  * Exported for its pins; `index.ts` does not re-export it.
  */
-export function StudioHeldNotice({
+export function StudioHeldNotice<Target extends MetadataSelection | null = MetadataSelection>({
   held,
   locale,
   onShow,
   className,
 }: {
-  held: StudioHeld;
+  held: StudioHeld<Target>;
   locale: string;
   /** Opens the held input; omitted while that input is the one open. */
-  onShow?: (target: MetadataSelection) => void;
+  onShow?: (target: Target) => void;
   /** Spacing and type size, which differ by pillar. */
   className?: string;
 }): React.ReactElement {
@@ -4832,6 +4832,9 @@ export function InterfacesPillar({
   // widget's inspector hints the input, and the line on the canvas names it.
   // Asked of the spec's own widget schema (`dashboardHeldEdit`); a widget that
   // is finished but wrong is sent, and its refusal shows as before.
+  // objectstack#27459 — so is an item just added to one of the dashboard's
+  // own list properties (Global Filters, the header's Actions), asked of the
+  // spec's dashboard schema, until its required inputs are filled in.
   const leafType = current?.type;
   const leafIncomplete = React.useMemo(
     () => (ifDirty && leafType === 'dashboard' ? dashboardHeldEdit(draft, locale) : null),
@@ -5572,10 +5575,15 @@ export function InterfacesPillar({
               held={leafHeld}
               locale={locale}
               // objectui#11910 — no "Show me" while that widget is the one open.
+              // objectstack#27459 — an item of the leaf's own list property
+              // (`target: null`) always offers it: the leaf's properties may
+              // be collapsed, or scrolled past the list it opens and focuses.
               onShow={
-                selection?.kind === leafHeld.target.kind && selection.id === leafHeld.target.id
-                  ? undefined
-                  : (target) => setSelection(target)
+                leafHeld.target === null
+                  ? () => showLeafRefusal(null, leafHeld.input)
+                  : selection?.kind === leafHeld.target.kind && selection.id === leafHeld.target.id
+                    ? undefined
+                    : (target) => setSelection(target)
               }
               className="px-3 py-2 text-xs"
             />
