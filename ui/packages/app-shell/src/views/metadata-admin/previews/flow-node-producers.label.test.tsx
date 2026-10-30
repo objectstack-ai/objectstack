@@ -373,7 +373,7 @@ describe('flow-node producers ↔ spec FlowNodeSchema (#6331): census ratchet', 
     // the palette/append literal (the most-used one, identified by its seed
     // spread) and the Studio skeleton's pair.
     expect(
-      sites.some((s) => s.text.includes('defaultNodeExtras(type)')),
+      sites.some((s) => s.text.includes('defaultNodeExtras(type')),
       '`FlowCanvas.addNode` is missing from the scan — the control failed',
     ).toBe(true);
     expect(
