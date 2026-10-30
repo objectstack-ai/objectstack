@@ -33,7 +33,7 @@
 // And it is live during boot, not only in theory: `plugin.ts` `start()` calls
 // `rearmSuspendedWaitTimers`, which calls `engine.resume(run.runId)` for every
 // overdue run, and the public `resume()` runs its authorization gate
-// (`refuseGatedResume` → `resolveEffectiveSuspension`) through THIS degrading
+// (`refuseGatedResume` → `resolveSuspensionChain`) through THIS degrading
 // reader before `resumeInternal` ever takes the strict one.
 //
 // ## The fix, and the one thing deliberately NOT changed
@@ -356,7 +356,7 @@ describe('#6230 — one "store unreachable while resuming" incident, both record
      * unrelated finding. `resume()` walks BOTH catches around
      * `loadSuspendedRunStrict`:
      *
-     *   gate  → `refuseGatedResume` → `resolveEffectiveSuspension` →
+     *   gate  → `refuseGatedResume` → `resolveSuspensionChain` →
      *           `loadSuspendedRun`  → this seam,       `warn`  → **stdout**
      *   then  → `resumeInternal`    → strict read      → #5912, `error` → stderr
      *

@@ -6373,6 +6373,13 @@ export class AutomationEngine implements IAutomationService {
      * (subflow delegation / up-bubble, `map` re-entry, wait-timer wake) go
      * through {@link resumeInternal} and are not re-gated — they continue work
      * some already-authorized call started.
+     *
+     * **A map whose item is still parked is refused, not advanced (#27877).**
+     * Resuming a run parked on a `map` node by ITS OWN id re-runs the map,
+     * which advances past the in-flight item — so a run whose item child is
+     * still suspended answers a coded refusal naming that child's run id, and
+     * nothing moves. Resuming the child is the door; the map continues when it
+     * completes. See {@link refuseGatedResume}.
      */
     resume(runId: string, signal?: ResumeSignal): Promise<AutomationResult> {
         // The body lives in ./run-resume.ts (#25222).
@@ -6398,8 +6405,18 @@ export class AutomationEngine implements IAutomationService {
      * chain and judges the node the signal lands on (subflow) or would advance
      * past (map) — see {@link LINKED_RUN_PREFIXES}. A run it cannot resolve at
      * all (unknown run id, nothing suspended, no resolvable node type) is left to
-     * `resumeInternal`, which reports the machine-state error — the gate only
-     * ever speaks to authorization.
+     * `resumeInternal`, which reports the machine-state error — the gate speaks
+     * to authorization, and to the one machine-state fact only its chain walk
+     * can see.
+     *
+     * **That fact is a skip (#27877).** When the chain passes a `map` link
+     * whose item child is still suspended, continuing the id the caller holds
+     * would re-run the map and advance it PAST that item without running it —
+     * the parent completes and the item's suspension is left behind, orphaned.
+     * Authority is judged first, so a service-owned item keeps its 403; an item
+     * open to this route is refused with a coded 409 naming the child run id to
+     * resume instead, before any state is touched. A `subflow` link is not a
+     * skip — the signal is delegated to the child — and is unchanged.
      *
      * **An UNDECLARED node type is refused, not deferred** (#5561 step two). It
      * used to be let through on the schema default's inherited `'any'`; a pause
@@ -6416,7 +6433,7 @@ export class AutomationEngine implements IAutomationService {
     private refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof refuseGatedResume> = {
-            resolveEffectiveSuspension: (...a) => this.resolveEffectiveSuspension(...a),
+            resolveSuspensionChain: (...a) => this.resolveSuspensionChain(...a),
             resolveSuspendedNodeType: (...a) => this.resolveSuspendedNodeType(...a),
             resolveResumeAuthority: (...a) => this.resolveResumeAuthority(...a),
             resolveDeclaredResumeAuthority: (...a) => this.resolveDeclaredResumeAuthority(...a),
@@ -6594,38 +6611,48 @@ export class AutomationEngine implements IAutomationService {
      *    node is literally where it lands.
      *  - `map:` — the signal is not delegated; the `map` node RE-RUNS, and since
      *    `$mapState.started` was advanced past the in-flight item before the
-     *    suspend, continuing here advances the map *past* the item whose child
-     *    is still parked. Judging the parent's own `map` node (always
+     *    suspend, continuing here would advance the map *past* the item whose
+     *    child is still parked. Judging the parent's own `map` node (always
      *    `resumeAuthority: 'any'`) let a raw resume skip a pending approval in a
-     *    batch-approval flow — the gate has to read the item, not the loop.
+     *    batch-approval flow — the gate has to read the item, not the loop. And
+     *    since #27877 the gate does not let that advance happen at all: a
+     *    resume that reaches a `map:` link whose child is still suspended is
+     *    refused with a code naming the child run id, whatever the item's
+     *    authority — so no parent completes past an item that never ran, and no
+     *    item suspension is left orphaned. The engine's own up-bubble from the
+     *    completed child goes through `resumeInternal` and is not gated.
      */
     private static readonly LINKED_RUN_PREFIXES = ['subflow:', 'map:'] as const;
 
     /**
      * Follow the linked-run chain from `runId` to the suspension whose node
-     * actually governs a resume — see {@link LINKED_RUN_PREFIXES}. The deepest
-     * reachable suspension, not the id the caller holds, is what a resume
-     * really continues (or skips past). Returns `null` when nothing is
-     * suspended under that id; stops at the last resolvable link when a child
-     * row is gone (that run is where `resumeInternal` will continue).
+     * actually governs a resume — see {@link LINKED_RUN_PREFIXES}. Returns every
+     * suspension the walk loaded, the caller's own first: the LAST one, not the
+     * id the caller holds, is what a resume really continues (or skips past),
+     * and each `map:` link with a successor is an item still parked under it
+     * (#27877). Empty when nothing is suspended under that id; stops at the
+     * last resolvable link when a child row is gone (that run is where
+     * `resumeInternal` will continue).
      */
-    private async resolveEffectiveSuspension(runId: string): Promise<SuspendedRun | null> {
+    private async resolveSuspensionChain(runId: string): Promise<SuspendedRun[]> {
         const seen = new Set<string>();
+        const chain: SuspendedRun[] = [];
         let run = await this.loadSuspendedRun(runId);
         for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {
+            chain.push(run);
             const correlation = run.correlation;
             const prefix = typeof correlation === 'string'
                 ? AutomationEngine.LINKED_RUN_PREFIXES.find(p => correlation.startsWith(p))
                 : undefined;
-            if (!prefix) return run;
+            if (!prefix) return chain;
             const childRunId = correlation!.slice(prefix.length);
-            if (!childRunId || seen.has(childRunId)) return run;
+            if (!childRunId || seen.has(childRunId)) return chain;
             seen.add(childRunId);
-            const child = await this.loadSuspendedRun(childRunId);
-            if (!child) return run;
-            run = child;
+            run = await this.loadSuspendedRun(childRunId);
         }
-        return run;
+        // The depth bound stopped the walk on a run it loaded but never read.
+        if (run) chain.push(run);
+        return chain;
     }
 
     /** Read a suspended run from the hot cache, falling back to the durable
