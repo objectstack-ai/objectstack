@@ -275,6 +275,9 @@ const commitRow = (prevVersion: number) => ({
 
 const expectRuleEnvelope = (r: { code: unknown; status?: unknown; message: string }) => {
     expect({ code: r.code, status: r.status }, r.message).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+    // The named subject, never the prose: the refusal names the datasource and the key, and no reference.
+    expect(r.message).toContain("'ledger'");
+    expect(r.message).toContain('external.credentialsRef');
     for (const ref of ALL_REFS) expect(r.message).not.toContain(ref);
 };
 
