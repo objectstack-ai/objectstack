@@ -48,8 +48,8 @@ import { dependentRequired } from './refinement-projection';
  * surface and needs a secret moved out of the source.
  */
 const CONNECTOR_AUTH_CONFIG_OAUTH2_RETIRED =
-  "`authentication: { type: 'oauth2' }` was removed in @objectstack/spec 18 (ADR-0143 D7) — the runtime "
-  + 'variant inlined a client secret and a refresh token and no provider ever read it, so a connector that '
+  "`ConnectorOAuth2Schema` (`authentication: { type: 'oauth2' }`) was removed in @objectstack/spec 18 "
+  + '(ADR-0143 D7) — the runtime variant inlined a client secret and a refresh token and no provider ever read it, so a connector that '
   + 'declared it was dispatched without the credential. Declare the connector as a provider-bound instance '
   + "(`provider: 'openapi' | 'rest' | 'mcp'`) with `auth: { type: 'oauth2', grant, tokenUrl, clientId, "
   + "credentialRef, ... }`, where `credentialRef` names the client secret in the secrets layer, and set "
