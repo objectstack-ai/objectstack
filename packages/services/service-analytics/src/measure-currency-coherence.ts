@@ -185,8 +185,8 @@ export function assertMeasureCurrenciesCoherent(
       throw datasetInvalidError(
         `[dataset-compiler] dataset "${dataset.name}" derived measure "${m.name}" declares currency `
         + `"${m.currency}" over measures ${operands}, whose amounts are fixed to ${resolved.code}. The amounts are `
-        + `${resolved.code}, so the column would print them as ${m.currency}: delete the measure's \`currency\` `
-        + `(the column takes the operands' ${resolved.code}).`,
+        + `${resolved.code}, so the column would print them as ${m.currency}: restate the operands' `
+        + `${resolved.code} as the measure's \`currency\`, or delete it (the column then carries no currency code).`,
       );
     }
   }

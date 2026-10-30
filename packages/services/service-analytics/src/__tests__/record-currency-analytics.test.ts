@@ -21,7 +21,8 @@
  *   column-description seam.
  * - The two compile-time guards (`measure-currency-coherence.ts`):
  *   `DATASET_INVALID` / 400 for a measure `currency` over a record-mode amount
- *   or contradicting a `fixed` field's code, and for a derived measure
+ *   or contradicting a `fixed` field's code or a derived measure's operands'
+ *   one `fixed` code, and for a derived measure
  *   combining a record-mode amount with another currency or two different
  *   `fixed` codes. The `fixed` arms reach boot registration, `queryDataset`
  *   and the draft preview alike (ruling 6486427200 on #8345).
@@ -383,7 +384,7 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
           + 'measures "eur", "eur_restated", whose amounts are fixed to EUR.',
         );
         expect(compileRefusal(measures)?.message)
-          .toContain("delete the measure's `currency` (the column takes the operands' EUR)");
+          .toContain("restate the operands' EUR as the measure's `currency`, or delete it (the column then carries no currency code)");
       });
     }
 
