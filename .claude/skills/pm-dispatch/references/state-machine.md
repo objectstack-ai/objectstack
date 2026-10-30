@@ -21,14 +21,14 @@
 ## `pm:blocked`
 
 - 正典标记 = 行首 `Blocked-by: #N`(跨仓 `owner/repo#N`)、写时无装饰;读者兼收列表/粗体/反引号。
-- 句中提及刻意拒收;等 PR 合并或等发布且 pin 覆盖的卡同理,指一张在该刻关闭的卡。
+- 句中提及刻意拒收;等 PR 合并写该 PR 号:合并才放,关而未合并 ⛔ 不放;等发布见下行。
 - ⛔ 不扩词表;等发布的目标 = pin-bump 杂事卡,`Part of` 型 PR 的跟踪卡 ⛔ 不可用作目标。
 - 工已完而被门禁缺陷卡住者同用本态,⛔ 不设新标签、不重派;`Blocked-by:` 指向门禁卡。
 - 正文行 `Unlock-action: re-check PR #M`(重查落地)或 `re-check #N when label <标签> <absent|present>`。
 - 只认此二值,别的拼写静默回落重派,散文另起行;停放的 PR 正文须点名那张门禁卡。
 - 上游已关 ⇒ 先重新推导是否有新阻塞并改写该行,⛔ 不反射式放行。
 - `scheduled-full-run-card.yml` 经 `scripts/ci/scheduled-full-run.mjs` 刷新小时红卡时亦放回,规则更窄:
-- 双通道目标全为本仓已关卡、无 `Unlock-action:` 行、无 assignee 才放;跨仓已关不放。
+- 双通道目标全为本仓已关卡(PR 已合并)、无 `Unlock-action:` 行与 assignee 才放;跨仓已关不放。
 - 正文是正典家:新 blocker 停在评论、正文留已关旧目标 ⇒ 巡查报 stale 并要求迁回正文。
 
 ## `pm:awaiting-maintainer` 与 `pm:retriage`
