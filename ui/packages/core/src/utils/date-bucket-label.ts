@@ -25,18 +25,13 @@
 
 const MONTH_BUCKET_KEY_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
-/** Whether `value` is a month bucket key (`YYYY-MM`). */
-export function isMonthBucketKey(value: unknown): value is string {
-  return typeof value === 'string' && MONTH_BUCKET_KEY_RE.test(value);
-}
-
 /**
  * `Oct 2025` for the month bucket key `2025-10`, in `locale`; `undefined` for
  * any other value, or when `Intl` refuses the locale, so the caller keeps the
  * key as written.
  */
 export function formatMonthBucketLabel(value: unknown, locale?: string): string | undefined {
-  if (!isMonthBucketKey(value)) return undefined;
+  if (typeof value !== 'string' || !MONTH_BUCKET_KEY_RE.test(value)) return undefined;
   const [year, month] = value.split('-').map(Number);
   const date = new Date(0);
   // `setUTCFullYear`, not `Date.UTC(year, …)`: the latter maps years 0-99 onto 1900+y.
