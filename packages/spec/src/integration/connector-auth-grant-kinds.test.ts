@@ -140,7 +140,7 @@ describe('ADR-0143 D2.1 — `oauth2` instance auth', () => {
 
   it('refuses client_credentials without its secret: the grant is for a confidential client', () => {
     const { credentialRef: _r, ...noSecret } = clientCredentials;
-    expect(located(entry(noSecret))).toEqual(['custom @ auth']);
+    expect(located(entry(noSecret))).toEqual(['custom @ auth.credentialRef']);
   });
 
   it('has no PKCE switch: S256 is always on', () => {

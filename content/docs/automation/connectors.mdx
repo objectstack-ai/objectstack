@@ -394,22 +394,67 @@ auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' },
 — fails validation, and `auth: { type: 'bearer', token: … }` is not even a
 legal shape (the declarative union has no `token` field to put a secret in).
 
-### Where is `oauth2`?
+### Grant-bearing kinds: `oauth2` and `app-credential`
 
-Deliberately absent from declarative instances — **not** an oversight to work
-around. The runtime auth shape has five variants (`none`, `bearer`,
-`api-key`, `basic`, `oauth2`); the declarative shape stops at four. Static
-credentials resolved from env/config are the open tier; the OAuth2
-authorization-code/refresh **lifecycle** — token acquisition, rotation,
-per-tenant connections — is the enterprise tier (ADR-0015). If your upstream
-needs OAuth2, use an enterprise credential resolver or register the connector
-from a plugin that manages its own tokens; don't try to emulate it by stuffing
-a short-lived access token behind a `bearer` ref.
+Some upstreams take no static credential: the token is obtained from a token
+endpoint and refreshed as it expires. Two more `auth` kinds declare that, in
+the open tier (ADR-0143). They are **grant-bearing**: the metadata carries the
+endpoints, the client id and a `credentialRef` for the client or app secret,
+never a token. Access and refresh tokens are runtime state and have no key here.
+
+```ts
+// OAuth 2.0 — a user grants access once (`authorization_code`, PKCE S256 always on):
+auth: {
+  type: 'oauth2',
+  grant: 'authorization_code',
+  authorizationUrl: 'https://vendor.example.com/oauth/authorize',
+  tokenUrl: 'https://vendor.example.com/oauth/token',
+  scopes: ['crm.read'],
+  clientId: 'objectstack-prod',
+  credentialRef: 'VENDOR_CLIENT_SECRET',   // omit for a public client
+}
+
+// OAuth 2.0 — server to server (`client_credentials`, a confidential client):
+auth: {
+  type: 'oauth2',
+  grant: 'client_credentials',
+  tokenUrl: 'https://vendor.example.com/oauth/token',
+  resource: 'https://api.vendor.example.com',
+  clientId: 'objectstack-prod',
+  credentialRef: 'VENDOR_CLIENT_SECRET',   // required for this grant
+}
+
+// A vendor app credential (Feishu, DingTalk, WeCom): app id + app secret → tenant token
+auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialRef: 'FEISHU_APP_SECRET' }
+```
+
+What the publish door checks, each refusal located at its key under `auth`:
+
+- **`oauth2`** needs `tokenUrl` and `clientId`, plus `authorizationUrl` on
+  `authorization_code`. The one exception is `provider: 'mcp'` over an `http`
+  transport, which may omit the endpoints and the client id: the MCP
+  authorization flow discovers the server's metadata and can register the
+  client. `client_credentials` has no authorization step, so
+  `authorizationUrl` is refused there, and it requires `credentialRef`.
+  A `credentialRef` without its `clientId` is refused. An inline
+  `clientSecret`, `refreshToken` or `accessToken` is refused by name, pointing
+  at `credentialRef`. There is no PKCE switch.
+- **`app-credential`** takes `vendor` (`feishu`, `dingtalk` or `wecom`), `appId`
+  and a required `credentialRef`. An inline `appSecret` is refused by name.
+
+A server that does not yet run the per-dispatch token resolution holds such an
+instance **degraded**, with a reason that names the grant-bearing kind, and
+never calls the upstream without its credential. A datasource that borrows
+from it (`external.connector`) is refused with `422`. Until the server serves
+them, declare a static kind (`bearer`, `api-key` or `basic`) to dispatch now;
+don't emulate a grant by putting a short-lived access token behind a `bearer`
+ref.
 
 ### The runtime shape: `authentication`
 
-The `authentication` field is the **runtime** auth config — it carries the
-resolved secret *inline* (`{ type: 'bearer', token }`), because it is supplied
+The `authentication` field is the **runtime** auth config, with four static
+variants (`none`, `bearer`, `api-key`, `basic`). It carries the resolved
+secret *inline* (`{ type: 'bearer', token }`), because it is supplied
 by **host code** (a plugin calling `engine.registerConnector`, or the
 executors' hand-wired instance options reading `process.env`). That is a
 different trust anchor than metadata: code review guards what enters it, and
@@ -417,6 +462,11 @@ it is never serialized into a versioned artifact. On declarative entries,
 leave `authentication` alone — provider-bound instances must use `auth`, and
 catalog descriptors documenting a planned integration must still never carry a
 live secret value.
+
+The runtime shape's `oauth2` variant was removed in `@objectstack/spec` 18
+(ADR-0143 D7): it held a client secret and a refresh token inline and nothing
+ran its lifecycle. `authentication: { type: 'oauth2' }` is refused with that
+prescription; declare the grant on an instance's `auth` instead, as above.
 
 ## Dispatching from a flow
 
@@ -449,6 +499,7 @@ retry):
 |:---|:---|
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
+| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a server that does not yet run its per-dispatch resolution | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
 | `credentialRef` resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
 | The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |

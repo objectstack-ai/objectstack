@@ -301,6 +301,7 @@ export const ConnectorInstanceOAuth2ClientCredentialsAuthSchema = lazySchema(() 
   ),
 }).refine(dependentRequired({ credentialRef: ['clientId'], clientId: ['credentialRef'] }), {
   message: "`grant: 'client_credentials'` is only for a confidential client (RFC 6749 §4.4): declare `clientId` and the `credentialRef` naming its secret together, or omit both on `provider: 'mcp'` over http to let the provider register a client.",
+  path: ['credentialRef'],
 }));
 export type ConnectorInstanceOAuth2ClientCredentialsAuth = z.input<typeof ConnectorInstanceOAuth2ClientCredentialsAuthSchema>;
 
