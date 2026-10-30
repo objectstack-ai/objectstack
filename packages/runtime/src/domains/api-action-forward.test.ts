@@ -36,8 +36,10 @@ import {
     isHeadlessInvokableAction,
     headlessActionTypeError,
     offOriginApiActivationRefusal,
+    apiActionIdentityRouteKeyRefusal,
     API_FORWARD_MARK_HEADER,
 } from '../action-execution.js';
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { ActionActivationProjection } from '@objectstack/objectql';
 
 const OBJECT = 'crm_lead';
@@ -718,5 +720,94 @@ describe('buildApiActionRequest — the declaration\'s request, by the console\'
         expect((plain as any).body).toEqual({ a: 1 });
         const explicit = buildApiActionRequest({ name: 'q', type: 'api', target: '/api/v1/auth/organization/update' }, { params: { organizationId: 'org_other' }, ec });
         expect((explicit as any).body).toEqual({ organizationId: 'org_other' });
+    });
+});
+
+// [#28217] An identity route (the auth mount) reads its caller from its own
+// signed-in session and admits no API key, so an API-key caller forwarded to it
+// arrived as nobody and came back as the target's anonymous 401. The doors now
+// refuse that one combination by name, before the target is called; which
+// credentials the identity route accepts is unchanged, so the session lane is
+// forwarded exactly as before and a key still reaches every other target.
+describe('[#28217] an API-key caller is refused by name before a forward to an identity route', () => {
+    /** A caller the door admitted by API key: the key header, no session bearer or cookie. */
+    const KEY_CTX = (): HttpProtocolContext => {
+        const ctx: any = CTX({ 'x-api-key': 'osk_member_key' });
+        delete ctx.request.headers.authorization;
+        delete ctx.request.headers.cookie;
+        ctx.admission = { credential: 'api_key', authGate: undefined };
+        return ctx as HttpProtocolContext;
+    };
+    const SESSION_CTX = (): HttpProtocolContext =>
+        ({ ...CTX(), admission: { credential: 'session', authGate: undefined } } as unknown as HttpProtocolContext);
+    const runViaMcp = async (h: ReturnType<typeof boot>, ctx: HttpProtocolContext, name: string, input: any = {}) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, ctx as any, name, input, {
+            driver: h.ql,
+            ec: { userId: 'u_member', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        });
+    };
+
+    it('REST: a key-admitted caller of an identity-route action gets the named 401 and the target is never called', async () => {
+        const { dispatcher, request } = boot();
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' }, KEY_CTX());
+
+        expect(statusOf(res)).toBe(401);
+        expect(codeOf(res)).toBe(standardErrorCodeForHttpStatus(401));
+        expect(messageOf(res)).toBe(apiActionIdentityRouteKeyRefusal(BAN_LEAD, BAN_LEAD.target));
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it('REST: the same action for a session-admitted caller is forwarded exactly as before', async () => {
+        const { dispatcher, injected } = boot({ answer: { body: { success: true, data: { banned: true } } } });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' }, SESSION_CTX());
+
+        expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+        expect(injected).toHaveLength(1);
+        expect(headersOf(injected[0].init).authorization).toBe('Bearer tok_member');
+    });
+
+    it('REST: a key-admitted caller of a NON-identity target is still forwarded, the key carried across', async () => {
+        const { dispatcher, injected } = boot();
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${DELETE_LEAD.name}`, 'POST', { recordId: 'lead 7' }, KEY_CTX());
+
+        expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+        expect(injected).toHaveLength(1);
+        expect(injected[0].url).toBe('http://app.example.test/api/v1/data/crm_lead/lead%207');
+        expect(headersOf(injected[0].init)['x-api-key']).toBe('osk_member_key');
+    });
+
+    it('MCP `run_action`: the key-admitted caller gets the same refusal on the throw, and nothing is forwarded', async () => {
+        const h = boot();
+
+        const thrown = await runViaMcp(h, KEY_CTX(), BAN_LEAD.name, { recordId: 'u_target' }).catch((e) => e);
+
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as any).status).toBe(401);
+        expect((thrown as any).code).toBe(standardErrorCodeForHttpStatus(401));
+        expect(String(thrown.message)).toBe(apiActionIdentityRouteKeyRefusal(BAN_LEAD, BAN_LEAD.target));
+        expect(h.request).not.toHaveBeenCalled();
+    });
+
+    it('MCP `run_action`: a key-admitted caller of a non-identity target is forwarded', async () => {
+        const h = boot({ answer: { body: { success: true, data: { recalculated: 1 } } } });
+
+        const result: any = await runViaMcp(h, KEY_CTX(), RECALC_LEAD.name, { recordId: 'u_target' });
+
+        expect(result.ok).toBe(true);
+        expect(result.result).toEqual({ recalculated: 1 });
+        expect(h.injected[0].url).toBe('http://app.example.test/api/v1/apps/showcase/recalc');
     });
 });
