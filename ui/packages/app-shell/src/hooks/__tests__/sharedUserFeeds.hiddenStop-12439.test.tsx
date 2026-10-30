@@ -61,9 +61,12 @@ import {
 } from '../sharedUserFeeds';
 import { HIDDEN_POLL_STOP_MS } from '../hiddenTabPollStop';
 
-/** The declared cadences, restated as the pins' units. */
-const INBOX_POLL_MS = 10_000;
-const APPROVALS_POLL_MS = 30_000;
+/**
+ * The declared cadences, restated as the pins' units — both the 60 s fallback
+ * of a push channel since objectstack#27626 (they were 10 s and 30 s).
+ */
+const INBOX_POLL_MS = 60_000;
+const APPROVALS_POLL_MS = 60_000;
 const HIDDEN_POLL_MS = 60_000;
 
 const approvalsReads = () =>
