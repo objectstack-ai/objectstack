@@ -145,6 +145,17 @@ describe('calendar.initialDate — refused values', () => {
     expect(r.success).toBe(false);
     expect(r.error!.issues.map((i) => i.code)).toContain('unrecognized_keys');
   });
+
+  it('a flat `initialDate` on `object-calendar` is refused with the nested-shape prescription', () => {
+    const r = objectCalendar.safeParse({ objectName: 'renewals', calendar: binding, initialDate: '{today}' });
+    expect(r.success).toBe(false);
+    const issue = r.success === false
+      ? r.error.issues.find((i) => i.code === 'unrecognized_keys')
+      : undefined;
+    expect((issue as { keys?: string[] } | undefined)?.keys).toEqual(['initialDate']);
+    expect(issue?.message).toContain('Write this as a key of the `calendar` config object instead');
+    expect(issue?.message).toContain('`initialDate`, the date it opens on, in the same block');
+  });
 });
 
 describe('calendar.initialDate — one vocabulary with the date macros', () => {

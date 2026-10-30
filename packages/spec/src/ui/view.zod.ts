@@ -2225,7 +2225,18 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
    * Spelling: no sibling view config (gantt, timeline, map) declares an
    * initial date or range, so there is nothing to mirror; `initialDate` names
    * where the calendar OPENS, and avoids the `default*` prefix, which on this
-   * platform also reads as "fallback value" (`defaultValue`).
+   * platform also reads as "fallback value" (`defaultValue`). Two console
+   * facts were in view: the `calendar-view` node reads an authored, FIXED
+   * `currentDate` (`ui/packages/types/src/zod/complex.zod.ts`,
+   * `calendar-view-renderer.tsx#resolveAuthoredCurrentDate`), the one producer
+   * of a fixed opening date, deliberately not admitted here because a date
+   * stored on a view goes stale; and the same node retired `defaultDate` as
+   * inert, which is a second reason not to spell this key `defaultDate`.
+   *
+   * Marked `[PLANNED — not yet rendered]` in its describe until the console
+   * half (#28102) reads it where `ObjectCalendar` seeds its current date; that
+   * change removes the marker, as `navigation.dataSource` (`app.zod.ts`) and
+   * the bound-record empty state (`component.zod.ts`) do.
    *
    * Two forms, and only two (see {@link CALENDAR_INITIAL_DATE_RE}): a record
    * anchor, or a wrapped, KNOWN date-macro token — the formula vocabulary the
@@ -2247,7 +2258,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
    * Lands ahead of its reader: the renderer seeds its current date from the
    * clock until the console half reads this key where it seeds that date.
    */
-  initialDate: z.string().regex(CALENDAR_INITIAL_DATE_RE, { error: (issue) => calendarInitialDateRefusal(issue.input) }).optional().describe("Where the calendar opens. Two forms. A record anchor: `first_record` opens on the period containing the earliest start date (the startDateField value) among the records the view selects, `next_record` on the period containing the earliest start date on or after today among those records; when no record qualifies, the calendar opens on today. Or a wrapped date-macro token, resolved each time the calendar opens: `{today}`, `{next_month_start}`, `{current_quarter_start}`, `{3_months_from_now}` (the full vocabulary is `DATE_MACRO_TOKENS` and the parameterised `DATE_MACRO_PARAM_RE` grammar in `@objectstack/spec/data`). Omit the key to open on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: it goes stale as time passes, while a macro does not"),
+  initialDate: z.string().regex(CALENDAR_INITIAL_DATE_RE, { error: (issue) => calendarInitialDateRefusal(issue.input) }).optional().describe("[PLANNED — not yet rendered] Where the calendar opens. No console reads it yet: until the calendar renderer reads it, a calendar that declares it still opens on today. Two forms. A record anchor: `first_record` opens on the period containing the earliest start date (the startDateField value) among the records the view's filter selects (its whole filter scope, not only the visible window), `next_record` on the period containing the earliest start date on or after today among those records; when no record qualifies, the calendar opens on today. \"Today\" is the viewer's local calendar day, and a `date` start field compares as a calendar day. Or a wrapped date-macro token, resolved each time the calendar opens: `{today}`, `{next_month_start}`, `{current_quarter_start}`, `{3_months_from_now}` (the full vocabulary is `DATE_MACRO_TOKENS` and the parameterised `DATE_MACRO_PARAM_RE` grammar in `@objectstack/spec/data`). Omit the key to open on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: it goes stale as time passes, while a macro does not"),
 }));
 
 /**
