@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
-import type { IJobService } from '@objectstack/spec/contracts';
+import type { IJobService, IPubSub } from '@objectstack/spec/contracts';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -37,6 +37,7 @@ import {
     CONNECTOR_CREDENTIAL_VALUE_MAX_LENGTH,
     ConnectorCredentialStore,
     ConnectorCredentialUnavailableError,
+    CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL,
     SECRET_HANDLE_PREFIX,
     connectorCredentialFingerprint,
     credentialDoorRefusal,
@@ -50,6 +51,7 @@ import {
     resolveConnectorCredential,
     upstreamRefusalMessage,
     withoutCredentialThrown,
+    type ClusterConnectorCredentialMutationPayload,
     type ConnectorCredentialChain,
     type ConnectorCredentialRecord,
     type ConnectorCredentialResolution,
@@ -804,6 +806,12 @@ export class AutomationServicePlugin implements Plugin {
      */
     private connectorCredentialStore?: ConnectorCredentialStore;
     /**
+     * [#27428] The cluster transport the credential door's writes fan out on,
+     * this node's id (stamps `originNode`), and the subscription's disposer —
+     * set by {@link attachCredentialClusterPubSub}.
+     */
+    private credentialCluster?: { pubsub: IPubSub; nodeId: string; unsubscribe: () => void };
+    /**
      * [ADR-0015 D7] Moved by every reconcile — which every credential write
      * runs — so a datasource's borrowed credential is resolved again after a
      * write or a declaration change instead of serving the value it held
@@ -1081,6 +1089,7 @@ export class AutomationServicePlugin implements Plugin {
             list: () => this.listConnectorCredentialRefs(ctx),
             set: (request) => this.setConnectorCredential(ctx, request),
             clear: (request) => this.clearConnectorCredential(ctx, request),
+            attachClusterPubSub: (pubsub, nodeId) => this.attachCredentialClusterPubSub(ctx, pubsub, nodeId),
         });
 
         // [ADR-0015 D7] The connector credential source: a datasource that
@@ -2834,6 +2843,7 @@ export class AutomationServicePlugin implements Plugin {
                 `[Automation] connector credential '${ref}' set (revision ${revision})${userId ? ` by user '${userId}'` : ''}; ` +
                     `reconciling ${declaredBy.map((c) => `'${c.name}'`).join(', ')}.`,
             );
+            this.publishCredentialMutation(ctx, ref);
             await this.reconcileDeclaredConnectors(ctx, { fatal: false });
         });
         return this.describeCredentialRef(chain, ref, declaredBy, await this.readCredentialRowsForDoor(chain));
@@ -2866,10 +2876,93 @@ export class AutomationServicePlugin implements Plugin {
                 throw credentialDoorRefusal(`Nothing is stored for credential '${ref}'.`, 'RESOURCE_NOT_FOUND', 404);
             }
             ctx.logger.info(`[Automation] connector credential '${ref}' cleared${userId ? ` by user '${userId}'` : ''}.`);
+            this.publishCredentialMutation(ctx, ref);
             await this.reconcileDeclaredConnectors(ctx, { fatal: false });
         });
         const declared = await this.declaredCredentialRefs(ctx);
         return this.describeCredentialRef(chain, ref, declared.get(ref), await this.readCredentialRowsForDoor(chain));
+    }
+
+    /**
+     * [#27428] Attach the cluster transport for connector credential writes —
+     * the door half of lane 4 of the cluster-invalidation family
+     * (`content/docs/kernel/cluster.mdx` §6.2), reached through
+     * `AutomationEngine.attachConnectorCredentialPubSub()`, which
+     * `MetadataClusterBridgePlugin` calls once per boot at `kernel:ready`.
+     * Idempotent on the `(pubsub, nodeId)` pair, as lanes 2 and 3 are.
+     *
+     * ⭐ Receipt runs CONVERGENCE, not trust: a peer's signal names a
+     * reference, and this replica answers it with its own reconcile on the
+     * reconcile queue, which re-reads the shared rows — the revision joins
+     * each instance's signature, so exactly the instances naming a changed
+     * reference re-materialize, a held one included. A duplicate runs a
+     * reconcile that changes nothing. Loss is bounded the way it always was,
+     * by the next metadata reload or boot: no shipped driver exceeds
+     * at-most-once delivery.
+     *
+     * @returns a disposer that detaches the transport.
+     */
+    private attachCredentialClusterPubSub(ctx: PluginContext, pubsub: IPubSub, nodeId: string): () => void {
+        const current = this.credentialCluster;
+        if (current?.pubsub === pubsub && current.nodeId === nodeId) {
+            return () => this.detachCredentialClusterPubSub();
+        }
+        this.detachCredentialClusterPubSub();
+        const unsubscribe = pubsub.subscribe<ClusterConnectorCredentialMutationPayload>(
+            CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL,
+            (msg) => {
+                const p = msg.payload;
+                // Loopback guard — the door that wrote the row already
+                // reconciled this replica, on the same queue.
+                if (p?.originNode && p.originNode === nodeId) return;
+                if (typeof p?.ref !== 'string' || p.ref.length === 0) return;
+                ctx.logger.info(
+                    `[Automation] connector credential '${p.ref}' was written on node '${p.originNode ?? 'unknown'}'; `
+                        + `reconciling the connectors on node '${nodeId}'.`,
+                );
+                void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch((err) => {
+                    ctx.logger.warn(
+                        `[Automation] reconciling after a peer's write of connector credential '${p.ref}' failed; `
+                            + 'the next metadata reload or restart reconciles it.',
+                        describeThrownForLog(err),
+                    );
+                });
+            },
+        );
+        this.credentialCluster = { pubsub, nodeId, unsubscribe };
+        return () => this.detachCredentialClusterPubSub();
+    }
+
+    /** [#27428] Tear down the credential cluster wiring. Safe to call multiple times. */
+    private detachCredentialClusterPubSub(): void {
+        const current = this.credentialCluster;
+        this.credentialCluster = undefined;
+        try {
+            current?.unsubscribe();
+        } catch {
+            /* idempotent */
+        }
+    }
+
+    /**
+     * [#27428] The cluster half of a credential door write: publish the
+     * reference to peers, after the row is written or cleared. Best-effort and
+     * fire-and-forget, as lanes 2 and 3 publish — the row is already stored
+     * and this replica's reconcile follows it, so a publish failure never
+     * fails the write it announces. No-op until a bridge attaches a transport.
+     */
+    private publishCredentialMutation(ctx: PluginContext, ref: string): void {
+        const cluster = this.credentialCluster;
+        if (!cluster) return;
+        const payload: ClusterConnectorCredentialMutationPayload = { originNode: cluster.nodeId, ref };
+        void cluster.pubsub
+            .publish(CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL, payload, { partitionKey: `connector-credential:${ref}` })
+            .catch((err) => {
+                ctx.logger.warn(
+                    `[Automation] publishing connector credential '${ref}' to peer replicas failed; they follow it on their next metadata reload or restart.`,
+                    describeThrownForLog(err),
+                );
+            });
     }
 
     /**
@@ -3602,6 +3695,8 @@ export class AutomationServicePlugin implements Plugin {
         // Stop the degraded-instance retry loop first (#3017): mark destroyed so
         // an already-queued reconcile no-ops, and cancel any armed timer.
         this.destroyed = true;
+        // [#27428] No peer credential write reconciles after shutdown.
+        this.detachCredentialClusterPubSub();
         // [#20790] No credential move after shutdown, and none left in flight.
         this.unsubscribeCryptoProvider?.();
         this.unsubscribeCryptoProvider = undefined;
