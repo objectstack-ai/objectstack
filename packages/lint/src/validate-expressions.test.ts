@@ -3624,6 +3624,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // its `traversals` and `multiHopFields` — the formula package's own
       // result keys, never metadata keys.
       'analysis',
+      // [#27828] A node's `where` → judged key path index, filled by the
+      // node walk's own sites. Its keys are `Map.prototype.set` / `get`, never
+      // metadata keys; the config it describes is read off the tabled `cfg`.
+      'nodeSlotKeys',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

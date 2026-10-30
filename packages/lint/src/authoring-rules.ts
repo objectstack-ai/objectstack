@@ -793,7 +793,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         rule: EXPRESSION_INVALID,
         where: i.where,
         // [#26858] The slot's key path where the pass spells one (a flow edge's
-        // `condition`), so a draft's `_diagnostics` can address the field.
+        // `condition`, #27828 a flow node's config value), so a draft's
+        // `_diagnostics` can address the field.
         path: i.path ?? i.where,
         // [#22161] The authored source is a QUOTE of what the author wrote, not
         // a fix, so it rides the verdict — `— source: \`…\`` is the spelling
