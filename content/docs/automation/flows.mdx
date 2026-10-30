@@ -1525,7 +1525,10 @@ success: the node's `count` is the items that ran. A downstream step reads it
 where it reads the results — `signoffResults[i]['$status'] == 'cancelled'` (a
 child flow's output keys never start with `$`, so no real output looks like
 it). An item whose run is gone *without* a `cancelled` entry in its run history
-is refused with the same 409: the map has nothing true to record for it.
+is refused with the same 409: the map has nothing true to record for it. A
+submitter's recall of a batch item from its revise window does this itself: the
+recall cancels the item's run and resumes the batch, so the item's slot holds
+the cancelled marker and the next item opens.
 
 v1 is sequential and
 fail-fast (the first item whose subflow fails fails the map). Concurrent fan-out (all items at once) is the
