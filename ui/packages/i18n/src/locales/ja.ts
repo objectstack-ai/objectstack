@@ -2972,6 +2972,7 @@ const ja = {
     aiAssistant: "AI アシスタント",
     designInStudio: "Studio でデザイン",
     editApp: "アプリを編集",
+    openAppInStudio: "Studio でアプリを表示",
   },
   home: {
     build: {
@@ -3104,6 +3105,7 @@ const ja = {
       appsAvailable: "{{count}} 個のアプリが利用可能",
       allApps: "すべてのアプリ",
       editAppInStudio: "Studio で {{app}} を編集",
+      openAppInStudio: "Studio で {{app}} を表示",
       backToHome: "ホームに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",

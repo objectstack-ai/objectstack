@@ -3093,6 +3093,7 @@ const ru = {
     aiAssistant: "ИИ-ассистент",
     designInStudio: "Дизайн в Studio",
     editApp: "Редактировать приложение",
+    openAppInStudio: "Открыть приложение в Studio",
   },
   home: {
     build: {
@@ -3230,6 +3231,7 @@ const ru = {
       appsAvailable: "Доступно приложений: {{count}}",
       allApps: "Все приложения",
       editAppInStudio: "Редактировать {{app}} в Studio",
+      openAppInStudio: "Открыть {{app}} в Studio",
       backToHome: "Вернуться на главную",
       settings: "Настройки",
       productHome: "Главная {{product}}",

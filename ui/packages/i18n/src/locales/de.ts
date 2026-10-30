@@ -2970,6 +2970,7 @@ const de = {
     aiAssistant: "KI-Assistent",
     designInStudio: "Im Studio gestalten",
     editApp: "App bearbeiten",
+    openAppInStudio: "App im Studio ansehen",
   },
   home: {
     build: {
@@ -3102,6 +3103,7 @@ const de = {
       appsAvailable: "{{count}} Apps verfügbar",
       allApps: "Alle Apps",
       editAppInStudio: "{{app}} im Studio bearbeiten",
+      openAppInStudio: "{{app}} im Studio ansehen",
       backToHome: "Zurück zur Startseite",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",

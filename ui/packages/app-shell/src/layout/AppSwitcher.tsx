@@ -12,7 +12,8 @@
  * then 「Back to home」 with its `⌘⇧H` keycaps, 「All apps」, and 「Settings」 (the
  * Setup app, when the viewer's app list carries it). For the viewers the top
  * bar offers its Studio button to, 「Edit APP in Studio」 follows a second
- * divider.
+ * divider; for a read-only package's app it is 「Open APP in Studio」 behind an
+ * eye (#27356 row 12).
  *
  * One app, on a host's request (objectui#12913): when the runtime config asks
  * for it (`hideSingleAppSwitcher`) and the viewer's list holds exactly one
@@ -32,7 +33,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@object-ui/components';
-import { ChevronDown, Check, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
+import { ChevronDown, Check, Eye, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { resolveKeyedI18nLabel, matchAppBySegment, appRouteSegment } from '../utils/index.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -63,9 +64,16 @@ export interface AppSwitcherProps {
    * disagree about who may cross or where it lands.
    */
   designInStudioPath?: string | null;
+  /**
+   * How Studio opens `designInStudioPath` (#27356 row 12): `edit` (the
+   * default) draws 「Edit APP in Studio」 with a pencil; `view`, for a read-only
+   * package's app, draws 「Open APP in Studio」 with an eye. The top bar's
+   * posture, passed in for the same reason as the path.
+   */
+  studioPosture?: 'edit' | 'view';
 }
 
-export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath }: AppSwitcherProps) {
+export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, studioPosture = 'edit' }: AppSwitcherProps) {
   const { apps: metadataApps } = useMetadata();
   const { t } = useObjectTranslation();
   const { appLabel } = useObjectLabel();
@@ -208,15 +216,23 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath }: 
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild className="flex items-center gap-2.5 py-2">
-              <Link to={designInStudioPath} data-testid="app-switcher-edit-in-studio">
+              <Link
+                to={designInStudioPath}
+                data-testid={studioPosture === 'view' ? 'app-switcher-view-in-studio' : 'app-switcher-edit-in-studio'}
+              >
                 <span className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
-                  <Pencil className="size-4" />
+                  {studioPosture === 'view' ? <Eye className="size-4" /> : <Pencil className="size-4" />}
                 </span>
                 <span className="flex-1 truncate">
-                  {t('layout.appSwitcher.editAppInStudio', {
-                    defaultValue: 'Edit {{app}} in Studio',
-                    app: appLabelText,
-                  })}
+                  {studioPosture === 'view'
+                    ? t('layout.appSwitcher.openAppInStudio', {
+                        defaultValue: 'Open {{app}} in Studio',
+                        app: appLabelText,
+                      })
+                    : t('layout.appSwitcher.editAppInStudio', {
+                        defaultValue: 'Edit {{app}} in Studio',
+                        app: appLabelText,
+                      })}
                 </span>
               </Link>
             </DropdownMenuItem>
