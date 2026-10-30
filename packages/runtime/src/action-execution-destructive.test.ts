@@ -22,7 +22,8 @@
  * That bridge gates every candidate action through THREE checks before
  * `summarizeAction` ever runs:
  *
- *   1. fail-closed on `sys_*` objects (`isSystemObjectName`)
+ *   1. fail-closed on `sys_*` objects unless the action declares
+ *      `ai.exposed: true` (`systemObjectActionExposureError`, #27681)
  *   2. `isHeadlessInvokableAction` — `type: 'script'` (with `target` or
  *      `body`), `type: 'flow'` (with `target` + an automation service), or —
  *      since #27506 — a `type: 'api'` action with a SAME-ORIGIN `target`,
@@ -32,11 +33,13 @@
  *
  * All 14 of #7309's identity actions lived on `sys_*` objects (13 still do), are
  * `type: 'api'` with same-origin targets, and none declares `ai.exposed`. So
- * today's real declarations are excluded on TWO independent grounds before
- * `actionLooksDestructive` ever runs on them (the #7828 triage comment's two;
- * gate 2 was a third until #27506 admitted same-origin api actions, which is
- * pinned below so the count of grounds is a measurement, not a memory) — this
- * fix has zero observable effect on any request a caller can make today.
+ * today's real declarations are excluded before `actionLooksDestructive` ever
+ * runs on them (gate 2 was another ground until #27506 admitted same-origin api
+ * actions, which is pinned below so the count of grounds is a measurement, not
+ * a memory). Since #27681 gates 1 and 3 read ONE fact — the action's own
+ * `ai.exposed` — so the exclusion is one ground asserted at both gates, not two
+ * independent ones — this fix has zero observable effect on any request a
+ * caller can make today.
  *
  * That is a fact about *today's platform objects*, not about the heuristic —
  * a future `ai.exposed`, non-`sys_*`, `script`/`flow` action carrying only
@@ -54,6 +57,7 @@ import {
     actionLooksDestructive,
     summarizeAction,
     isSystemObjectName,
+    systemObjectActionExposureError,
     actionAiExposureError,
     isHeadlessInvokableAction,
     type ActionExecutionDeps,
@@ -311,8 +315,11 @@ describe('today, all 13 #7309 identity actions the platform still declares are e
         expect(allThirteen).toHaveLength(13);
     });
 
-    it.each(allThirteen)('%s is excluded by isSystemObjectName (gate 1: sys_* fail-closed)', (_label, objName) => {
+    it.each(allThirteen)('%s is excluded by systemObjectActionExposureError (gate 1: sys_* fail-closed unless ai.exposed)', (_label, objName, obj, name) => {
         expect(isSystemObjectName(objName)).toBe(true);
+        // Since #27681 the name alone no longer decides: the action's own
+        // `ai.exposed` does, and none of the 13 declares it.
+        expect(systemObjectActionExposureError(deps, actionByName(obj, name), objName)).toMatch(/system object/);
     });
 
     it.each(allThirteen)('%s is ADMITTED by isHeadlessInvokableAction since #27506 (gate 2: a same-origin api action is server-dispatched)', (_label, _objName, obj, name) => {

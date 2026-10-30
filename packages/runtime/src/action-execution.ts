@@ -20,6 +20,7 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 // declaration its type names, so the refusal and the type cannot drift apart.
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
@@ -99,6 +100,50 @@ export {
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
 export function isSystemObjectName(name: string): boolean {
     return /^sys_/i.test(name);
+}
+
+/**
+ * [#27681 / ADR-0011] The `sys_*` gate of the MCP action surface, PER ACTION.
+ * Returns a human-readable refusal for an action on a system object that its
+ * author did not opt into the AI surface, or `null` when the action may pass
+ * (a non-system object, or a system-object action declaring `ai.exposed: true`).
+ *
+ * Maintainer ruling 6513869839 (letter B): a `sys_*` action is reachable over
+ * MCP only when the action itself declares `ai: { exposed: true, description }`.
+ * The guard that stood here refused EVERY action on a `sys_*` object by name,
+ * ahead of the exposure check, so no declaration could open one, while the REST
+ * `/actions` door served the same action to the same principal. The refusal now
+ * yields to the author's opt-in and to nothing else:
+ *
+ *  - no deployment switch reaches it (the MCP package's `allowSystemObjects`
+ *    stays on the tool layer and gains no reach here — ruling parameter 1);
+ *  - every later gate still runs behind it, unchanged: the ADR-0066 D4
+ *    capability gate, the ADR-0126 §8 activation consult, the param contract,
+ *    the `ai.requiresConfirmation` gate and the subject load under RLS.
+ *
+ * ONE predicate for the three MCP sites that ask it — `run_action`
+ * ({@link invokeBusinessAction}), the `list_actions` bridge and the
+ * `resume_run` admission (`domains/mcp.ts`) — so an agent that lists sees
+ * exactly the system-object actions it may run.
+ */
+export function systemObjectActionExposureError(_deps: ActionExecutionDeps, action: any, objectName: string): string | null {
+    if (!isSystemObjectName(objectName)) return null;
+    // [#21594] The stored-metadata family is NOT opened by the flag: the MCP
+    // door never reaches the subject load for one of its tables (a row carries
+    // a stored metadata body, credential material included). That boundary
+    // predates the ruling, which opened identity actions and named no family
+    // table; it held here only because every `sys_*` action was refused.
+    if (isStoredMetadataBodyObject(objectName)) {
+        return (
+            `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') that stores metadata bodies ` +
+            `and is never exposed via MCP — read and change those through the metadata API`
+        );
+    }
+    if (action?.ai?.exposed === true) return null;
+    return (
+        `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') and is not exposed via MCP — ` +
+        `a system object's action is reachable here only when its author declares \`ai: { exposed: true, description: … }\` on it`
+    );
 }
 
 /**
@@ -2256,6 +2301,12 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
         ...(declarativeUpdate ? { operation: DECLARATIVE_UPDATE_OPERATION } : {}),
         requiresRecord: Boolean(requiresRecord),
         requiresConfirmation: actionLooksDestructive(deps, action),
+        // [#27681] The author's AI opt-in, attested by the bridge that read the
+        // declaration. The MCP tool layer reads it to let a `sys_*` action
+        // through its own fail-closed filter (`allowSystemObjects` off): it
+        // never sees the declaration, so this is the only way the per-action
+        // flag reaches it. Emitted only when declared, like `operation`.
+        ...(action?.ai?.exposed === true ? { aiExposed: true } : {}),
         ...(params.length > 0 ? { params } : {}),
     };
 }
@@ -3316,10 +3367,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     const { action, objectName, obj } = resolved;
 
-    // Fail-closed on system-object actions (mirrors the object-tool guard).
-    if (isSystemObjectName(objectName)) {
-        throw new Error(`Action '${name}' is on a system object and is not exposed via MCP`);
-    }
+    // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
+    // action passes only on its author's `ai.exposed` opt-in, and every gate
+    // below still runs for it.
+    const systemObjectError = systemObjectActionExposureError(deps, action, objectName);
+    if (systemObjectError) throw new Error(systemObjectError);
     const hasAutomation = Boolean(await resolveAutomationService(deps, requestContext, envId));
     if (!isHeadlessInvokableAction(deps, action, hasAutomation)) {
         throw new Error(
