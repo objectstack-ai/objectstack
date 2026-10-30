@@ -2077,6 +2077,10 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
+        // [#28099] The caller's already-resolved posture rung, the trigger
+        // door's twin (`buildAutomationContext`): never re-derived or raised,
+        // absent when the request carries none. See `AutomationContext.posture`.
+        ...(typeof ec?.posture === 'string' && ec.posture.length > 0 ? { posture: ec.posture } : {}),
         // [#22450] The caller's already-resolved language, the trigger door's
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
