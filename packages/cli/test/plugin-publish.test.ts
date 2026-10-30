@@ -135,6 +135,9 @@ describe('os plugin publish (end-to-end, mocked cloud)', () => {
         // Exactly the artifact's own manifest: `ManifestSchema` would stamp
         // `scope` and `defaultDatasource`, and neither is uploaded.
         expect(bodies[1].plugin_manifest).toEqual(manifest);
+        // Key for key, in the archive entry's own order (#27914).
+        const entry = readTarGz(blob).find((f) => f.path === MANIFEST_FILENAME)!;
+        expect(JSON.stringify(bodies[1].plugin_manifest)).toBe(JSON.stringify(JSON.parse(Buffer.from(entry.data).toString('utf8'))));
         expect(bodies[1].plugin_manifest).not.toHaveProperty('scope');
         expect(bodies[1].plugin_manifest).not.toHaveProperty('defaultDatasource');
     });

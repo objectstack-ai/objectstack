@@ -10,6 +10,12 @@
  * never disabled. The app switcher's Studio row takes the pencil's own
  * target, so it follows the same rule.
  *
+ * #27356 row 12 (maintainer-ruled B): the read-only package's app is not left
+ * with no entry. The same gate answers it with the `view` posture, and the bar
+ * draws an eye (「Open app in Studio」) in the pencil's place, the switcher row
+ * taking the same target in the same posture. Kernel packages, an unlisted
+ * package and an unread list still draw neither.
+ *
  * The package list is served the way `GET /api/v1/packages` serves it: one row
  * per package, the manifest nested, and the server's `writable` verdict on the
  * row (ADR-0070 D2). Each absence is read after the list has answered, beside
@@ -110,8 +116,12 @@ vi.mock('../../hooks/useAiSurface', () => ({
 }));
 // Recorder: the target the header hands the pill's Studio row.
 vi.mock('../AppSwitcher', () => ({
-  AppSwitcher: (p: { designInStudioPath?: string | null }) => (
-    <div data-testid="app-switcher-stub" data-studio-path={p.designInStudioPath ?? ''} />
+  AppSwitcher: (p: { designInStudioPath?: string | null; studioPosture?: string }) => (
+    <div
+      data-testid="app-switcher-stub"
+      data-studio-path={p.designInStudioPath ?? ''}
+      data-studio-posture={p.designInStudioPath ? (p.studioPosture ?? '') : ''}
+    />
   ),
 }));
 
@@ -225,13 +235,19 @@ function mountAt(pathname: string, perms: MePermissionsResponse = AUTHOR) {
 }
 
 /** What the bar offers on `pathname`, once the list has answered. */
-async function editAppOn(pathname: string): Promise<{ pencil: string | null; switcherRow: string }> {
+async function editAppOn(
+  pathname: string,
+): Promise<{ pencil: string | null; eye: string | null; switcherRow: string; switcherPosture: string }> {
   mountAt(pathname);
   await settle();
   const button = screen.queryByTestId('app-design-in-studio-button');
+  const eye = screen.queryByTestId('app-view-in-studio-button');
+  const stub = screen.getByTestId('app-switcher-stub');
   const reading = {
     pencil: button ? (button.querySelector('a')?.getAttribute('href') ?? '') : null,
-    switcherRow: screen.getByTestId('app-switcher-stub').getAttribute('data-studio-path') ?? '',
+    eye: eye ? (eye.querySelector('a')?.getAttribute('href') ?? '') : null,
+    switcherRow: stub.getAttribute('data-studio-path') ?? '',
+    switcherPosture: stub.getAttribute('data-studio-posture') ?? '',
   };
   // Absent, not disabled: no element is named for the pencil at all.
   if (reading.pencil === null) expect(screen.queryByLabelText('Edit app')).toBeNull();
@@ -243,6 +259,7 @@ const SETUP_ROUTE = '/apps/com.objectstack.setup/dashboard/system_overview';
 const HOTCRM_ROUTE = '/apps/app.objectstack.hotcrm/dashboard/pipeline';
 const BASE_ROUTE = '/apps/com.example.my_base/dashboard/pipeline';
 const BASE_PENCIL = '/studio/com.example.my_base/interfaces?surface=dashboard:pipeline';
+const HOTCRM_VIEW = '/studio/app.objectstack.hotcrm/interfaces?surface=dashboard:pipeline';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -257,19 +274,32 @@ afterEach(() => {
 
 describe('the app bar\'s Edit app follows the owning package\'s posture (objectui#12615)', () => {
   it('no pencil, and no switcher Studio row, inside the Setup app (`com.objectstack.setup`)', async () => {
-    expect(await editAppOn(SETUP_ROUTE)).toEqual({ pencil: null, switcherRow: '' });
+    expect(await editAppOn(SETUP_ROUTE)).toEqual({ pencil: null, eye: null, switcherRow: '', switcherPosture: '' });
   });
 
-  it('no pencil for a package whose posture is read-only (HotCRM, `writable: false`)', async () => {
-    expect(await editAppOn(HOTCRM_ROUTE)).toEqual({ pencil: null, switcherRow: '' });
+  it('#27356 row 12 — a read-only package (HotCRM, `writable: false`) gets no pencil but the eye, and the switcher row in the view posture, to the same target', async () => {
+    expect(await editAppOn(HOTCRM_ROUTE)).toEqual({
+      pencil: null,
+      eye: HOTCRM_VIEW,
+      switcherRow: HOTCRM_VIEW,
+      switcherPosture: 'view',
+    });
+    mountAt(HOTCRM_ROUTE);
+    await settle();
+    expect(screen.getByLabelText('Open app in Studio')).toBeInTheDocument();
   });
 
   it('CONTROL — the pencil for a writable package, deep-linked, and the switcher row to the same target', async () => {
-    expect(await editAppOn(BASE_ROUTE)).toEqual({ pencil: BASE_PENCIL, switcherRow: BASE_PENCIL });
+    expect(await editAppOn(BASE_ROUTE)).toEqual({
+      pencil: BASE_PENCIL,
+      eye: null,
+      switcherRow: BASE_PENCIL,
+      switcherPosture: 'edit',
+    });
   });
 
   it('no pencil for a package the list does not name', async () => {
-    expect(await editAppOn('/apps/com.example.unlisted/dashboard/pipeline')).toEqual({ pencil: null, switcherRow: '' });
+    expect(await editAppOn('/apps/com.example.unlisted/dashboard/pipeline')).toEqual({ pencil: null, eye: null, switcherRow: '', switcherPosture: '' });
   });
 
   it('a system package served in the registry\'s flat shape answers no pencil either', async () => {
@@ -279,7 +309,7 @@ describe('the app bar\'s Edit app follows the owning package\'s posture (objectu
     serve(async () => ({
       data: { packages: [{ id: 'com.objectstack.setup', name: 'Setup', scope: 'system', writable: false }] },
     }));
-    expect(await editAppOn(SETUP_ROUTE)).toEqual({ pencil: null, switcherRow: '' });
+    expect(await editAppOn(SETUP_ROUTE)).toEqual({ pencil: null, eye: null, switcherRow: '', switcherPosture: '' });
   });
 });
 
@@ -301,7 +331,7 @@ describe('no verdict, no pencil (objectui#12615)', () => {
         ? { ok: false, status: 403, json: async () => ({ success: false, error: { code: 'FORBIDDEN', message: 'no' } }) }
         : { ok: true, status: 200, json: async () => ({ data: [] }) },
     ));
-    expect(await editAppOn(BASE_ROUTE)).toEqual({ pencil: null, switcherRow: '' });
+    expect(await editAppOn(BASE_ROUTE)).toEqual({ pencil: null, eye: null, switcherRow: '', switcherPosture: '' });
   });
 });
 

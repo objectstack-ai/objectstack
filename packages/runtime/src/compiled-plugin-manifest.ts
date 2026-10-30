@@ -29,7 +29,14 @@ export interface CompiledManifestEntry {
 }
 
 export type CompiledPluginManifestRead =
-  | { ok: true; manifest: ObjectStackManifestParsed }
+  /**
+   * `manifest` is the parsed value, with the schema's defaults stamped.
+   * `document` is the entry as decoded, before the parse: a door that
+   * forwards the manifest the artifact carries (`os plugin publish`'s
+   * upload, which must match the signed bytes) forwards this, and decodes
+   * nothing a second time.
+   */
+  | { ok: true; manifest: ObjectStackManifestParsed; document: Record<string, unknown> }
   /** `unreadable`: no manifest, or not a JSON object. `invalid`: `ManifestSchema` refused it. */
   | { ok: false; reason: 'unreadable' | 'invalid'; message: string; issues: string[] };
 
@@ -39,17 +46,18 @@ export type CompiledPluginManifestRead =
  * for `unreadable`) and `message` says the whole of it on one line.
  */
 export function readCompiledPluginManifest(files: readonly CompiledManifestEntry[]): CompiledPluginManifestRead {
-  let raw: unknown;
+  let raw: Record<string, unknown>;
   try {
     const entry = files.find((f) => f.path === COMPILED_PLUGIN_MANIFEST_FILE);
     if (!entry) throw new Error(`${COMPILED_PLUGIN_MANIFEST_FILE} not found`);
-    raw = JSON.parse(Buffer.from(entry.data).toString('utf8')) as unknown;
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${COMPILED_PLUGIN_MANIFEST_FILE} is not a JSON object`);
+    const decoded = JSON.parse(Buffer.from(entry.data).toString('utf8')) as unknown;
+    if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw new Error(`${COMPILED_PLUGIN_MANIFEST_FILE} is not a JSON object`);
+    raw = decoded as Record<string, unknown>;
   } catch (error) {
     return { ok: false, reason: 'unreadable', message: error instanceof Error ? error.message : String(error), issues: [] };
   }
   const parsed = ManifestSchema.safeParse(raw);
-  if (parsed.success) return { ok: true, manifest: parsed.data };
+  if (parsed.success) return { ok: true, manifest: parsed.data, document: raw };
   const issues = parsed.error.issues.flatMap((issue) =>
     formatZodIssue(issue as Parameters<typeof formatZodIssue>[0])
       .split('\n')

@@ -2990,6 +2990,7 @@ const ko = {
     aiAssistant: "AI 어시스턴트",
     designInStudio: "Studio에서 디자인",
     editApp: "앱 편집",
+    openAppInStudio: "Studio에서 앱 보기",
   },
   home: {
     build: {
@@ -3121,6 +3122,7 @@ const ko = {
       appsAvailable: "사용 가능한 앱 {{count}}개",
       allApps: "모든 앱",
       editAppInStudio: "Studio에서 {{app}} 편집",
+      openAppInStudio: "Studio에서 {{app}} 보기",
       backToHome: "홈으로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",
