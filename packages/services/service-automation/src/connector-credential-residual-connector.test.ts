@@ -38,6 +38,7 @@ import { composeStacks, defineStack } from '@objectstack/spec';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE, type IConnectorCredentialSource } from '@objectstack/types';
 
 import { AutomationServicePlugin } from './plugin.js';
+import type { AutomationEngine } from './engine.js';
 
 const REF = 'DUMMY_RESIDUAL_SAP_TOKEN';
 const DUMMY_ENV_VALUE = 'dummy-residual-dddd-0004';
@@ -125,7 +126,7 @@ async function boot(stack: Record<string, unknown>) {
         version: '1.0.0',
         dependencies: ['com.objectstack.engine.objectql', 'com.objectstack.service-automation'],
         async init(ctx: PluginContext) {
-            ctx.getService<any>('automation').registerConnectorProvider('fake', (pctx: any) => ({
+            ctx.getService<AutomationEngine>('automation').registerConnectorProvider('fake', (pctx: any) => ({
                 def: { name: pctx.name, label: pctx.label, type: 'api', actions: [{ key: 'request', label: 'Request' }] },
                 handlers: { request: async () => ({ status: 200, ok: true, body: {} }) },
             }));
