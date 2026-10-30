@@ -1831,12 +1831,6 @@ export class ActionRunner {
   }
 
   /**
-   * The early refusal of the handler {@link dispatchCollected} would route
-   * this action to, in the translator's language when it names a key —
-   * `undefined` when there is none. An update-operation action never reaches
-   * a registered handler, so it is never asked.
-   */
-  /**
    * The early refusal {@link ActionRunner.execute} would give `action` if it
    * were launched now, against this runner's context — `undefined` when it
    * would go on. It is the refusal `execute` asks before the confirmation and
@@ -1853,6 +1847,12 @@ export class ActionRunner {
     return this.refusalBeforeInput(action, resolveDispatchType(action, (name) => this.handlers.has(name)));
   }
 
+  /**
+   * The early refusal of the handler {@link dispatchCollected} would route
+   * this action to, in the translator's language when it names a key —
+   * `undefined` when there is none. An update-operation action never reaches
+   * a registered handler, so it is never asked.
+   */
   private refusalBeforeInput(action: ActionDef, actionType: string): string | undefined {
     if (isUpdateOperationAction(action)) return undefined;
     const handler = actionType ? this.handlers.get(actionType) : undefined;
