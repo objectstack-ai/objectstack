@@ -284,7 +284,8 @@ function bannerItems(): string[] {
 
 /** The last toast's content, drawn, as its list items. */
 function toastItems(): string[] {
-  const content = vi.mocked(toast.error).mock.calls.at(-1)![0] as React.ReactNode;
+  const calls = vi.mocked(toast.error).mock.calls;
+  const content = calls[calls.length - 1][0] as React.ReactNode;
   const { container } = render(<>{content}</>);
   return Array.from(container.querySelectorAll('li')).map((li) => li.textContent ?? '');
 }
