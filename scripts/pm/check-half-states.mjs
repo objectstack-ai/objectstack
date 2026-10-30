@@ -12676,9 +12676,9 @@ export function contractReviewHeadSha(body) {
  * The three legacy dialects the scan existed for — the head in the heading (two
  * spellings), on the first body line, in an adoption record's opening sentence
  * — are RETIRED, by count: in that same week they had 0, 1 and 0 records (the
- * one, on a PR merged two days earlier, named a head the PR had already moved
- * past), against 700 of 702 carrying the `Head-sha:` line the template has
- * printed since #18042. A legacy record now names no head — fail-closed, in the
+ * one, on PR #25399, named `448de8ca` while the PR landed at `e5f87a19` an hour
+ * later — a head the record never saw), against 700 of 702 carrying the
+ * `Head-sha:` line the template has printed since #18042. A legacy record now names no head — fail-closed, in the
  * one direction that matters — and the repair is to post a record with the
  * line.
  */
