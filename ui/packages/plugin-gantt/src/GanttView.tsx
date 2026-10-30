@@ -736,6 +736,11 @@ export interface GanttViewProps {
    */
   exportFileName?: string
   /**
+   * Heading of the task list's name column — what the rows are, e.g. the bound
+   * object's label ("Campaign"). Falls back to the generic "Task Name".
+   */
+  taskColumnLabel?: string
+  /**
    * Per-interaction switches. Omit for all-on. See
    * {@link GanttInteractions}: e.g. `{ resize: false }` keeps bars movable and
    * links drawable but pins every duration; `{ link: false }` removes the
@@ -928,6 +933,7 @@ export function GanttView({
   dependencyTypes = true,
   timeZone,
   exportFileName,
+  taskColumnLabel,
   interactions,
   onBeforeTaskUpdate,
 }: GanttViewProps) {
@@ -3821,7 +3827,7 @@ export function GanttView({
             className="flex items-center font-medium text-xs text-muted-foreground px-2 sm:px-4 border-r bg-card z-20 shadow-sm"
             style={{ width: taskListWidth, minWidth: taskListWidth }}
           >
-            <div className="flex-1 truncate">{t('gantt.column.taskName')}</div>
+            <div className="flex-1 truncate" data-testid="gantt-task-column-heading">{taskColumnLabel || t('gantt.column.taskName')}</div>
             {showSEColumns && (
               <>
                 <div className="w-16 gantt-sm-w20 text-right">{t('gantt.column.start')}</div>
