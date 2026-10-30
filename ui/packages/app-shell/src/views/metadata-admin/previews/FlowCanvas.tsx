@@ -752,13 +752,21 @@ export function FlowCanvas({
   // the toolbar. Deliberately mount-only (not re-run on every `size` change):
   // re-centering on every node add/drag would yank the viewport out from under
   // an actively editing user.
+  //
+  // #27356 row 22 — a diagram wider than the canvas (a branching flow at phone
+  // width) opens zoomed out until its width fits, never below MIN_ZOOM, so its
+  // outer branches are not cut off at both edges. Never zoomed in past 100%;
+  // width only, so a tall linear flow still opens at 1:1 and scrolls down. A 0
+  // width is a hidden canvas: nothing to fit.
   React.useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    setZoom(1);
+    const width = vp.clientWidth;
+    const z = width > 0 ? Math.max(MIN_ZOOM, Math.min(1, (width - 32) / size.width)) : 1;
+    setZoom(z);
     setPan({
-      x: (vp.clientWidth - size.width) / 2,
-      y: Math.max(16, (vp.clientHeight - size.height) / 2),
+      x: (width - size.width * z) / 2,
+      y: Math.max(16, (vp.clientHeight - size.height * z) / 2),
     });
     framedWidthRef.current = vp.clientWidth;
     // eslint-disable-next-line react-hooks/exhaustive-deps
