@@ -219,7 +219,10 @@ export async function seedRunGrants(
                     // as the user's request carries it. Seeded with them and
                     // only with them: carried grants keep the rung they came
                     // with, so a narrowed ceiling never gains a wider rung.
+                    // A rung a door forwarded without grants (#28099) gives
+                    // way to this one, or to none.
                     if (grants.posture) (runContext as SeededRunContext).posture = grants.posture;
+                    else delete (runContext as SeededRunContext).posture;
                 }
                 if (needsPeers && Array.isArray(grants.org_user_ids)) {
                     (runContext as SeededRunContext).org_user_ids = grants.org_user_ids;
