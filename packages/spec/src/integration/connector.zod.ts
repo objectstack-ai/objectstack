@@ -1251,6 +1251,20 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         });
       }
     }
+    // ADR-0143 D2.3 — a `signed` instance is signed by the HTTP providers
+    // (`openapi`, `rest`), which apply the host's request signer to every
+    // request. An MCP server authenticates its clients with a token, never a
+    // per-request signature, so the mcp provider has no signer to apply: the
+    // instance would be called unsigned. Refused here, where the provider is
+    // known; the host refuses any other provider that does not apply the
+    // signer when it materializes the instance.
+    if (entry.auth?.type === 'signed' && entry.provider === 'mcp') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['auth', 'type'],
+        message: `Connector instance '${entry.name}' declares \`auth: { type: 'signed' }\` on \`provider: 'mcp'\`. An MCP server authenticates its clients with a token, not a per-request signature, so the request would go out unsigned. Declare the signing vendor's API through \`provider: 'openapi'\` or \`provider: 'rest'\`, or give the MCP instance the auth its server asks for (ADR-0143 D2.3).`,
+      });
+    }
   }), CONNECTOR_RETIRED_KEY_RESIDUE),
 );
 
@@ -1272,6 +1286,9 @@ export {
   ConnectorInstanceAppCredentialAuthSchema,
   ConnectorOAuth2GrantSchema,
   ConnectorAppCredentialVendorSchema,
+  ConnectorInstanceSignedAuthSchema,
+  ConnectorInstanceSignedAliyunAcs3AuthSchema,
+  ConnectorSigningSchemeSchema,
 } from '../shared/connector-auth.zod';
 export type {
   ConnectorInstanceAuth,
@@ -1290,4 +1307,7 @@ export type {
   ConnectorInstanceAppCredentialAuth,
   ConnectorOAuth2Grant,
   ConnectorAppCredentialVendor,
+  ConnectorInstanceSignedAuth,
+  ConnectorInstanceSignedAliyunAcs3Auth,
+  ConnectorSigningScheme,
 } from '../shared/connector-auth.zod';
