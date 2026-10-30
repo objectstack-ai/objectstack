@@ -878,7 +878,8 @@ const pt = {
     recordOpen: "Abrir registros",
     recordOpenDrawer: "Painel lateral",
     recordOpenSplit: "Dividido",
-    recordOpenNote: "Sua preferência pessoal, não faz parte da declaração do objeto. Ambos se expandem para a página inteira.",
+    recordOpenPage: "Página inteira",
+    recordOpenNote: "Sua preferência pessoal, não faz parte da declaração do objeto. O ↗ de um registro sempre abre a página inteira.",
     recordOpenDeclaredPage: "Este objeto está declarado para abrir como página inteira",
     addGroup: "Adicionar campo de grupo",
     collapsedByDefault: "Recolhido por padrão",
@@ -3046,6 +3047,7 @@ const pt = {
     aiAssistant: "Assistente de IA",
     designInStudio: "Projetar no Studio",
     editApp: "Editar aplicativo",
+    openAppInStudio: "Ver aplicativo no Studio",
   },
   home: {
     build: {
@@ -3180,6 +3182,7 @@ const pt = {
       appsAvailable: "{{count}} aplicativos disponíveis",
       allApps: "Todos os aplicativos",
       editAppInStudio: "Editar {{app}} no Studio",
+      openAppInStudio: "Ver {{app}} no Studio",
       backToHome: "Voltar ao início",
       settings: "Configurações",
       productHome: "Início do {{product}}",

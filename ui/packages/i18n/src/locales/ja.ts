@@ -853,7 +853,8 @@ const ja = {
     recordOpen: "レコードを開く",
     recordOpenDrawer: "ドロワー",
     recordOpenSplit: "分割",
-    recordOpenNote: "個人の設定で、オブジェクトの宣言には含まれません。どちらもフルページに展開できます。",
+    recordOpenPage: "フルページ",
+    recordOpenNote: "個人の設定で、オブジェクトの宣言には含まれません。レコードの ↗ はいつでもフルページを開きます。",
     recordOpenDeclaredPage: "このオブジェクトはフルページで開くよう宣言されています",
     addGroup: "グループフィールドを追加",
     collapsedByDefault: "デフォルトで折りたたむ",
@@ -2992,6 +2993,7 @@ const ja = {
     aiAssistant: "AI アシスタント",
     designInStudio: "Studio でデザイン",
     editApp: "アプリを編集",
+    openAppInStudio: "Studio でアプリを表示",
   },
   home: {
     build: {
@@ -3124,6 +3126,7 @@ const ja = {
       appsAvailable: "{{count}} 個のアプリが利用可能",
       allApps: "すべてのアプリ",
       editAppInStudio: "Studio で {{app}} を編集",
+      openAppInStudio: "Studio で {{app}} を表示",
       backToHome: "ホームに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",

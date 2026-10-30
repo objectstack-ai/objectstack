@@ -154,31 +154,38 @@ function unclaimedTopLevelObjects(
 }
 
 /**
- * The CONNECTORS of a multi-package stack's residual, and the id they are owned
- * by — the residual rule's answer read the way {@link unclaimedTopLevelObjects}
- * reads it, for the one other residual type a boot-time reader takes from the
- * registry alone.
+ * The items of ONE registry type in a multi-package stack's residual, and the
+ * id they are owned by — the residual rule's answer read the way
+ * {@link unclaimedTopLevelObjects} reads it, for the residual types a
+ * boot-time reader takes from the registry alone:
  *
- * Why the engine needs them (ADR-0015 D7): the connector credential lender and
- * the ADR-0097 reconcile read `registry.listItems('connector')`, never the
- * metadata service. A residual connector instance registered by the metadata
- * door only was therefore invisible to both at boot — the instance did not
- * materialize, and a datasource's `external.connector` borrow of it was refused
- * as undeclared until a dev reload carried the artifact in — while the composed
- * check (`composeStacks`) accepts that borrow, because the instance is declared.
+ *  - `connector` (ADR-0015 D7): the connector credential lender and the
+ *    ADR-0097 reconcile read `registry.listItems('connector')`, never the
+ *    metadata service. A residual connector instance registered by the
+ *    metadata door only was therefore invisible to both at boot — the instance
+ *    did not materialize, and a datasource's `external.connector` borrow of it
+ *    was refused as undeclared until a dev reload carried the artifact in —
+ *    while the composed check (`composeStacks`) accepts that borrow, because
+ *    the instance is declared.
+ *  - `flow`: the automation plugin's boot pull (`service-automation`'s
+ *    `start()`) reads `registry.listItems('flow')`, never the metadata service.
+ *    A residual flow registered by the metadata door only was listed by `/meta`
+ *    and never registered with the engine: `getFlow` answered `null`, a run
+ *    answered "not found", and its trigger never armed.
  *
- * @returns `undefined` when the stack has no residual connector.
+ * @returns `undefined` when the stack has no residual item of `type`.
  */
-function unclaimedTopLevelConnectors(
+function unclaimedTopLevelItemsOfType(
   stack: unknown,
-): { ownerId: string | undefined; ownerVersion: string | undefined; connectors: Record<string, unknown>[] } | undefined {
+  type: 'connector' | 'flow',
+): { type: 'connector' | 'flow'; ownerId: string | undefined; ownerVersion: string | undefined; items: Record<string, unknown>[] } | undefined {
   const residual = unclaimedTopLevel(stack);
   if (!residual) return undefined;
-  const connectors = residual.items
-    .filter((entry) => entry.type === 'connector')
+  const items = residual.items
+    .filter((entry) => entry.type === type)
     .map((entry) => entry.item as Record<string, unknown>);
-  return connectors.length > 0
-    ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, connectors }
+  return items.length > 0
+    ? { type, ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, items }
     : undefined;
 }
 
@@ -800,11 +807,14 @@ export class ObjectQLPlugin implements Plugin {
         // no package body declares — as the residual rule answers it. See
         // {@link unclaimedTopLevelObjects}.
         const residual = unclaimedTopLevelObjects(artifact);
-        // …and its CONNECTORS, which the credential lender reads from the
-        // registry alone. See {@link unclaimedTopLevelConnectors}.
-        const residualConnectors = unclaimedTopLevelConnectors(artifact);
+        // …and its CONNECTORS and FLOWS, which the credential lender and the
+        // automation plugin's boot pull read from the registry alone. See
+        // {@link unclaimedTopLevelItemsOfType}.
+        const residualItems = (['connector', 'flow'] as const)
+          .map((type) => unclaimedTopLevelItemsOfType(artifact, type))
+          .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
 
-        if (ordered.length === 0 && residual === undefined && residualConnectors === undefined) {
+        if (ordered.length === 0 && residual === undefined && residualItems.length === 0) {
           // An artifact that declared `packages: []` registers nothing. Said out
           // loud rather than returning quietly: "the install did nothing" is not
           // a state anyone should have to infer from an absence.
@@ -878,20 +888,20 @@ export class ObjectQLPlugin implements Plugin {
         // bodies (a composed stack keeps one member's manifest) that body's
         // record must not be replaced.
         if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
-        // [ADR-0015 D7] The residual's connectors, the same way and in the same
-        // place: after every body, under the residual rule's id, through the
-        // registry verb a body's own connectors take (`registerApp`'s metadata
-        // collections). No body declares one of these names — that is what
-        // makes it residual — so none of them shadows a body's entry.
-        // Stamped as a residual object is: the version first, on a shallow
-        // copy, leaving the artifact's own entry as the registry leaves it.
-        if (residualConnectors) {
-          const { ownerId, ownerVersion, connectors } = residualConnectors;
-          for (const connector of connectors) {
+        // [ADR-0015 D7, ADR-0130 D4] The residual's connectors and flows, the
+        // same way and in the same place: after every body, under the residual
+        // rule's id, through the registry verb a body's own connectors and
+        // flows take (`registerApp`'s metadata collections). No body declares
+        // one of these names — that is what makes it residual — so none of
+        // them shadows a body's entry. Stamped as a residual object is: the
+        // version first, on a shallow copy, leaving the artifact's own entry as
+        // the registry leaves it.
+        for (const { type, ownerId, ownerVersion, items } of residualItems) {
+          for (const item of items) {
             const stamped = ownerVersion === undefined
-              ? { ...connector }
-              : applyProtection({ ...connector } as any, { packageId: ownerId, packageVersion: ownerVersion });
-            ql.registry.registerItem('connector', stamped, 'name' as any, ownerId);
+              ? { ...item }
+              : applyProtection({ ...item } as any, { packageId: ownerId, packageVersion: ownerVersion });
+            ql.registry.registerItem(type, stamped, 'name' as any, ownerId);
           }
         }
         // [#24472] The boot reported every same-name pair it found

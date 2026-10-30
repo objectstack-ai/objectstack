@@ -48,7 +48,7 @@
  */
 
 import React, { forwardRef, useMemo } from 'react';
-import { ComponentRegistry } from '@object-ui/core';
+import { ComponentRegistry, isActionSwitchedOff } from '@object-ui/core';
 import type { UIActionSchema, ActionBarSchema, ActionComponent } from '@object-ui/types';
 import { ACTION_LOCATIONS, actionRendersAt } from '@object-ui/types';
 import { useCondition, toPredicateInput, useCapabilityGate, useConfigBagEvaluator } from '@object-ui/react';
@@ -147,7 +147,9 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
       // so without this a `list_toolbar` action declaring a capability nobody
       // holds rendered as a live button. Same rule as the engine; unknown
       // capabilities fail OPEN (see `useCapabilityGate`).
-      const permitted = actions.filter(a => mayInvoke((a as any)?.requiredPermissions));
+      // [objectstack#27504] …and an action this installation switched off is
+      // not offered either: the served activation state, beside the same gate.
+      const permitted = actions.filter(a => mayInvoke((a as any)?.requiredPermissions) && !isActionSwitchedOff(a));
       // Placement is `actionRendersAt`'s call, not ours (objectui#3142): an
       // action renders here only if it DECLARES this location. This bar used
       // to show a locationless action at every location, which is how an

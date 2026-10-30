@@ -909,7 +909,8 @@ const ru = {
     recordOpen: "Открытие записей",
     recordOpenDrawer: "Боковая панель",
     recordOpenSplit: "Разделённый вид",
-    recordOpenNote: "Ваша личная настройка, не входит в объявление объекта. Оба варианта разворачиваются на всю страницу.",
+    recordOpenPage: "Вся страница",
+    recordOpenNote: "Ваша личная настройка, не входит в объявление объекта. ↗ у записи всегда открывает её на всю страницу.",
     recordOpenDeclaredPage: "Этот объект объявлен для открытия на всю страницу",
     addGroup: "Добавить поле группировки",
     collapsedByDefault: "Свёрнуто по умолчанию",
@@ -3117,6 +3118,7 @@ const ru = {
     aiAssistant: "ИИ-ассистент",
     designInStudio: "Дизайн в Studio",
     editApp: "Редактировать приложение",
+    openAppInStudio: "Открыть приложение в Studio",
   },
   home: {
     build: {
@@ -3254,6 +3256,7 @@ const ru = {
       appsAvailable: "Доступно приложений: {{count}}",
       allApps: "Все приложения",
       editAppInStudio: "Редактировать {{app}} в Studio",
+      openAppInStudio: "Открыть {{app}} в Studio",
       backToHome: "Вернуться на главную",
       settings: "Настройки",
       productHome: "Главная {{product}}",

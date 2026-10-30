@@ -262,21 +262,26 @@ export const SysAuditLog = ObjectSchema.create({
     // action, plus the refusal's machine code in `metadata`), the time and the
     // client fingerprint; never the attempted credential. Their shipped
     // surface is the `auth_events` list view above.
+    //
+    // Each option carries a label (#27855): the list, the detail and the System
+    // Overview "Audit Events by Action" chart (whose dimension resolves through
+    // these options) read it, where the bare-array shorthand made the label the
+    // stored code, `config_change`. The stored values are unchanged.
     action: Field.select(
-      [
-        'create',
-        'read',
-        'update',
-        'delete',
-        'login',
-        'logout',
-        'login_failed',
-        'account_locked',
-        'config_change',
-        'import',
-        'platform_admin_standing_change',
-      ],
       {
+        options: [
+          { label: 'Create', value: 'create' },
+          { label: 'Read', value: 'read' },
+          { label: 'Update', value: 'update' },
+          { label: 'Delete', value: 'delete' },
+          { label: 'Login', value: 'login' },
+          { label: 'Logout', value: 'logout' },
+          { label: 'Login Failed', value: 'login_failed' },
+          { label: 'Account Locked', value: 'account_locked' },
+          { label: 'Config Change', value: 'config_change' },
+          { label: 'Import', value: 'import' },
+          { label: 'Platform Admin Standing Change', value: 'platform_admin_standing_change' },
+        ],
         label: 'Action',
         required: true,
         readonly: true,

@@ -853,7 +853,8 @@ const de = {
     recordOpen: "Datensätze öffnen",
     recordOpenDrawer: "Seitenleiste",
     recordOpenSplit: "Geteilt",
-    recordOpenNote: "Ihre persönliche Einstellung, nicht Teil der Objektdeklaration. Beide lassen sich zur ganzen Seite erweitern.",
+    recordOpenPage: "Ganze Seite",
+    recordOpenNote: "Ihre persönliche Einstellung, nicht Teil der Objektdeklaration. Das ↗ eines Datensatzes öffnet immer die ganze Seite.",
     recordOpenDeclaredPage: "Dieses Objekt ist so deklariert, dass es als ganze Seite geöffnet wird",
     addGroup: "Gruppenfeld hinzufügen",
     collapsedByDefault: "Standardmäßig eingeklappt",
@@ -2990,6 +2991,7 @@ const de = {
     aiAssistant: "KI-Assistent",
     designInStudio: "Im Studio gestalten",
     editApp: "App bearbeiten",
+    openAppInStudio: "App im Studio ansehen",
   },
   home: {
     build: {
@@ -3122,6 +3124,7 @@ const de = {
       appsAvailable: "{{count}} Apps verfügbar",
       allApps: "Alle Apps",
       editAppInStudio: "{{app}} im Studio bearbeiten",
+      openAppInStudio: "{{app}} im Studio ansehen",
       backToHome: "Zurück zur Startseite",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",

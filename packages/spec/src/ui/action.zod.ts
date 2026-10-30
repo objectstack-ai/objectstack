@@ -1657,11 +1657,6 @@ const actionObject = () => strictObject({
    * and ungoverned — the door does not dispatch it, MCP does not list it, the
    * activation switch refuses to flip it, and nothing checks this declaration
    * server-side.
-   *
-   * Landing, as of 2026-10-29: ADR-0066 records the decision; the server half,
-   * the ruling's step 2 (#27506), is on `main` (#27649). Until step 3 (#27611)
-   * lands the console fetches `target` directly; card #27694 removes this
-   * paragraph when it does.
    */
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on every call the platform action door (`POST /actions/:object/:action` and MCP `run_action`) dispatches, and mirrored as a UI hide. ADR-0066 D4, as amended 2026-10-29, brings a `type: api` action whose declared `target` is a same-origin platform path (exactly one leading `/`, followed by neither `/` nor a backslash, with a path after it) under that door; its `target` endpoint stays directly reachable, so it MUST still enforce this capability itself, the door\'s gate being the added check. A `type: api` action with an off-origin `target` is browser-only and not gated server-side.'),
 

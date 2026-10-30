@@ -186,7 +186,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **percentComplete** | `number` | ✅ | processed / total as a percentage |
 | **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted) |
 | **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows. |
-| **error** | `string` | optional | Fatal error message (when status = failed) |
+| **error** | `string` | optional | Why the job failed (when status = failed): the fatal error that aborted it, or, when every row failed, one sentence pointing at the job's `results`, which carry each row's reason |
 | **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
 | **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
@@ -214,7 +214,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **percentComplete** | `number` | ✅ | processed / total as a percentage |
 | **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted) |
 | **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows. |
-| **error** | `string` | optional | Fatal error message (when status = failed) |
+| **error** | `string` | optional | Why the job failed (when status = failed): the fatal error that aborted it, or, when every row failed, one sentence pointing at the job's `results`, which carry each row's reason |
 | **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
 | **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |

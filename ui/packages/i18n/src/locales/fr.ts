@@ -878,7 +878,8 @@ const fr = {
     recordOpen: "Ouvrir les enregistrements",
     recordOpenDrawer: "Panneau latéral",
     recordOpenSplit: "Partagé",
-    recordOpenNote: "Votre préférence personnelle, hors de la déclaration de l’objet. Les deux s’agrandissent en pleine page.",
+    recordOpenPage: "Pleine page",
+    recordOpenNote: "Votre préférence personnelle, hors de la déclaration de l’objet. Le ↗ d’un enregistrement ouvre toujours la pleine page.",
     recordOpenDeclaredPage: "Cet objet est déclaré pour s’ouvrir en pleine page",
     addGroup: "Ajouter un champ de groupe",
     collapsedByDefault: "Réduit par défaut",
@@ -3047,6 +3048,7 @@ const fr = {
     aiAssistant: "Assistant IA",
     designInStudio: "Concevoir dans Studio",
     editApp: "Modifier l'application",
+    openAppInStudio: "Voir l'application dans Studio",
   },
   home: {
     build: {
@@ -3181,6 +3183,7 @@ const fr = {
       appsAvailable: "{{count}} applications disponibles",
       allApps: "Toutes les applications",
       editAppInStudio: "Modifier {{app}} dans Studio",
+      openAppInStudio: "Voir {{app}} dans Studio",
       backToHome: "Retour à l'accueil",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",

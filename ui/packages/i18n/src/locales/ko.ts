@@ -853,7 +853,8 @@ const ko = {
     recordOpen: "레코드 열기",
     recordOpenDrawer: "서랍",
     recordOpenSplit: "분할",
-    recordOpenNote: "개인 설정이며 객체 선언에 포함되지 않습니다. 둘 다 전체 페이지로 확장할 수 있습니다.",
+    recordOpenPage: "전체 페이지",
+    recordOpenNote: "개인 설정이며 객체 선언에 포함되지 않습니다. 레코드의 ↗는 항상 전체 페이지를 엽니다.",
     recordOpenDeclaredPage: "이 객체는 전체 페이지로 열리도록 선언되어 있습니다",
     addGroup: "그룹 필드 추가",
     collapsedByDefault: "기본적으로 접힘",
@@ -2990,6 +2991,7 @@ const ko = {
     aiAssistant: "AI 어시스턴트",
     designInStudio: "Studio에서 디자인",
     editApp: "앱 편집",
+    openAppInStudio: "Studio에서 앱 보기",
   },
   home: {
     build: {
@@ -3121,6 +3123,7 @@ const ko = {
       appsAvailable: "사용 가능한 앱 {{count}}개",
       allApps: "모든 앱",
       editAppInStudio: "Studio에서 {{app}} 편집",
+      openAppInStudio: "Studio에서 {{app}} 보기",
       backToHome: "홈으로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",

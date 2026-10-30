@@ -962,7 +962,8 @@ const ar = {
     recordOpen: "فتح السجلات",
     recordOpenDrawer: "درج جانبي",
     recordOpenSplit: "عرض مقسوم",
-    recordOpenNote: "تفضيلك الشخصي، وليس جزءًا من تعريف الكائن. كلاهما يتوسّع إلى صفحة كاملة.",
+    recordOpenPage: "صفحة كاملة",
+    recordOpenNote: "تفضيلك الشخصي، وليس جزءًا من تعريف الكائن. يفتح ↗ الخاص بالسجل الصفحة الكاملة دائمًا.",
     recordOpenDeclaredPage: "هذا الكائن مُعرَّف ليُفتح كصفحة كاملة",
     addGroup: "إضافة حقل مجموعة",
     collapsedByDefault: "مطوي افتراضياً",
@@ -3228,6 +3229,7 @@ const ar = {
     aiAssistant: "مساعد الذكاء الاصطناعي",
     designInStudio: "التصميم في Studio",
     editApp: "تعديل التطبيق",
+    openAppInStudio: "عرض التطبيق في Studio",
   },
   home: {
     build: {
@@ -3368,6 +3370,7 @@ const ar = {
       appsAvailable: "{{count}} من التطبيقات المتاحة",
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
+      openAppInStudio: "عرض {{app}} في Studio",
       backToHome: "العودة إلى الرئيسية",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
