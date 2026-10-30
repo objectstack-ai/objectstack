@@ -108,6 +108,9 @@ const STUDIO_ZH: Record<string, string> = {
   // 行级安全 CEL 编写安全 (objectui#2413)。
   'perm.cel.valid': 'CEL 有效',
   'perm.cel.suggestions': '字段与作用域建议',
+  'perm.cel.insertField': '插入字段',
+  'perm.cel.searchFields': '搜索字段…',
+  'perm.cel.noMatchingFields': '没有匹配的字段。',
   'perm.cel.type': '返回类型:',
   'perm.cel.type.number': '数字',
   'perm.cel.type.text': '文本',
@@ -3469,6 +3472,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.docPreview.source': 'Markdown 源码',
   'engine.docPreview.sourceLocale': 'Markdown 源码（{locale}）',
   'engine.docPreview.sourcePlaceholder': '# 标题\n\n在此编写 Markdown…',
+  'engine.celLint.invalidCel': '这个表达式无法按原样计算：有内容缺失、多余、位置不对，或与旁边的值不匹配。下方的 ^ 标记指出了出问题的位置。',
   'engine.celLint.notTheRow':
     '`{identifier}` 在此处不是记录行：行条件只把记录绑定为 `{canonical}`，别无其他。CEL 作用域词汇仍接受 `{identifier}`，所以这里不会阻止保存，但运行时表达式会以 `Unknown variable: {identifier}` 报错，规则永远不会触发。请改为以 `{canonical}` 为根引用。',
   'engine.pageBlockCanvas.renderFailed': '“{type}” 无法以当前配置渲染 —— 请检查它的属性。',

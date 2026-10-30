@@ -2,10 +2,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * mailbox-open — open (or close) a seat's mailbox PR (#25417; one per seat since the per-seat doorbell).
+ * mailbox-open — open (or close) a seat's mailbox PR (#25417; keyed by the seat, not the login, since #27637).
  *
- *   node scripts/pm/mailbox-open.mjs --repo owner/name --login <login> [--base main] [--dry-run] [--json]
- *   node scripts/pm/mailbox-open.mjs --repo owner/name --login <login> --head <branch> [--dry-run]
+ *   node scripts/pm/mailbox-open.mjs --repo owner/name --seat <seat> --login <login> [--base main] [--dry-run] [--json]
+ *   node scripts/pm/mailbox-open.mjs --repo owner/name --seat <seat> --login <login> --head <branch> [--dry-run]
  *   node scripts/pm/mailbox-open.mjs --repo owner/name --close <n> [--dry-run]
  *   node scripts/pm/mailbox-open.mjs --self-test          # offline, no network, no git
  *
@@ -17,32 +17,61 @@
  * ~70 s, a comment from a second account in 4 s. An issue comment wakes
  * nothing. So each SEAT — a lane seat, the triage seat, the director seat —
  * keeps ONE draft PR as its mailbox: labelled `pm:mailbox` and `pinned`, on
- * the branch `mailbox/<login>` (the account that holds the seat), its body's
- * first line `To: <login>`, opened at seating and subscribed by the seated
- * session, ⛔ never merged, closed at hand-over or account switch (the
- * successor opens its own). A comment on it is ONE line opening with one of
- * the seven doorbell keys (`Request:` / `Notify:`), read by
- * `record-recognisers.mjs`. The protocol text — the keys, who sends what to
- * whom — is the pm-dispatch skill's `references/project-forms.md` 〈信箱 PR〉;
- * this file is only the tooling.
+ * the branch `mailbox/<login>/<seat-slug>` (`mailbox/os-bill/ui-4` for the
+ * seat `domain:ui#4` held by `os-bill`), its body's first line
+ * `Mailbox-of: <seat> · <login>`, opened at seating and subscribed by the
+ * seated session, ⛔ never merged, closed at hand-over or account switch (the
+ * successor opens its own). A message on it is ONE comment: the line
+ * `To: <seat>`, then ONE line opening with one of the seven doorbell keys
+ * (`Request:` / `Notify:`), read by `record-recognisers.mjs`. The protocol
+ * text — the keys, who sends what to whom — is the pm-dispatch skill's
+ * `references/project-forms.md` 〈信箱 PR〉; this file is only the tooling.
+ *
+ * ## The key is the seat, never the login
+ *
+ * One account routinely holds several seats — on 2026-10-29 one login held two
+ * `domain:server` seats and `domain:ui#1` behind ONE mailbox, and another held
+ * three `domain:ui` seats and none — while the platform delivers a PR's events
+ * to one subscribed session at a time: a second session's subscription
+ * succeeds and then hears nothing while the first holds the PR. A mailbox keyed
+ * by login therefore wakes one of its account's seats, the others never hear,
+ * and nothing tells the sender or the recipient. An earlier version of this
+ * header argued that a login holds one seat at a time, so a per-login refusal
+ * was a per-seat one; the board falsified that premise, and nothing here reads
+ * a login as a seat any more.
+ *
+ * A seat is spelled `LANE#N` — `domain:ui#4`, `repo:cloud#1`, `triage` — its
+ * lane one of the four a seat post's title names (`domain:<x>`, `repo:<x>`,
+ * `triage`, `director`), so a login never reads as a seat, and an absent
+ * number read as seat 1 (`seatKey`). It is compared lower-cased and written
+ * canonically with its number (`triage#1`). Its SLUG is that key as one ref
+ * segment, because a ref cannot carry `:` or `#`: the default `domain:` kind
+ * dropped, every other `:` and the `#` turned into `-` (`ui-4`,
+ * `repo-cloud-1`, `triage-1`). No `domain:` lane is named `triage`,
+ * `director` or `repo-…`, which is what keeps the slug one-to-one.
  *
  * ## What it does, in order (open)
  *
  *   ① READ the open pulls and REFUSE (exit 4) when one already carries
- *      `pm:mailbox` for this login — by head `mailbox/<login>` or by the body's
- *      `To: <login>` line. One mailbox per login per repo, which IS one per
- *      seat: a login holds one seat at a time, and a lane's second seat is a
- *      second login (measured 2026-10-28 on the seat posts, so this refusal
- *      needed no seat name).
+ *      `pm:mailbox` for this SEAT, whichever login holds it — by the seat on
+ *      the body's `Mailbox-of:` line or by a head `mailbox/<login>/<slug>`
+ *      (`mailboxOwner`). A second seat under the same login opens freely. A
+ *      legacy per-login mailbox (head `mailbox/<login>`, or a body opening
+ *      `To: <login>`) names no seat, so it blocks nothing; the open prints it,
+ *      so that the account closes it once each of its seats holds its own.
  *   ② the BRANCH. Default: one empty commit on `origin/<base>` (`git
  *      commit-tree` of the base's own tree — no checkout, no index, no working
- *      tree touched), pushed as `mailbox/<login>` through `with-fleet.sh
- *      --kind 'git push'`, the write gate every push goes through. The relay
- *      has no ref-creating op, so a cloud seat container cannot do this step:
- *      with-fleet refuses there (exit 3) and nothing else is sent. `--head
- *      <branch>` names a branch that already exists instead (a thread's own
- *      pushed branch, as #25392 used) and skips the push; it must be ahead of
- *      `<base>`, because GitHub refuses a pull with no commits.
+ *      tree touched), pushed as `mailbox/<login>/<slug>` through `with-fleet.sh
+ *      --kind 'git push'`, the write gate every push goes through. ⚠️ A legacy
+ *      branch `mailbox/<login>` blocks that push: git refuses a ref nested
+ *      under an existing ref (measured 2026-10-30 on a local bare repository:
+ *      `failed to update ref`), so the legacy branch is deleted after its
+ *      mailbox closes. The relay has no ref-creating op, so a cloud seat
+ *      container cannot do this step: with-fleet refuses there (exit 3) and
+ *      nothing else is sent. `--head <branch>` names a branch that already
+ *      exists instead (a thread's own pushed branch, as #25392 used) and skips
+ *      the push; it must be ahead of `<base>`, because GitHub refuses a pull
+ *      with no commits.
  *   ③ ONE relay stroke: `pr_create` (draft is forced by the relay) with labels
  *      `pm:mailbox`, `pinned` and `skip-changeset`, sent through
  *      `fleet-write/dispatch.mjs` as `objectstack-fleet[bot]`. `pinned` is
@@ -129,15 +158,34 @@ const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const BRANCH_SHAPE = /^(?!\/|.*\/\/|.*\.\.|.*[\s~^:?*[\\]|.*\.lock$|.*\/$)[A-Za-z0-9._/-]+$/;
 const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
+// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, the four a seat post's title names — then `#N`;
+// absent = seat 1. Read lower-cased. The bare lanes are a closed pair, so a login is never read as a seat.
+const SEAT_SHAPE = /^((?:domain|repo):[a-z0-9._-]+|triage|director)(?:#([1-9][0-9]*))?$/;
+/** A per-seat mailbox body's first line, `Mailbox-of: <seat> · <login>`. */
+const MAILBOX_OF_LINE = /^Mailbox-of:[ \t]*(\S+)[ \t]*·[ \t]*(\S+)$/;
+/** The first lines a legacy per-login mailbox opened with: `To: <login>` (this file's), `Mailbox-of: <login>`. */
+const LEGACY_OWNER_LINE = /^(?:To|Mailbox-of):[ \t]*(\S+)$/;
 
-export const mailboxBranch = (login) => `${MAILBOX_BRANCH_PREFIX}${login}`;
+/**
+ * A seat spelled `LANE#N` → `{ key, slug }`, or null when it is not one. `key` is canonical — lower case, the
+ * number always spelled (`triage` → `triage#1`); `slug` is the key as one ref segment (header). Pure.
+ */
+export function seatKey(text) {
+  const m = SEAT_SHAPE.exec(String(text ?? '').trim().toLowerCase());
+  if (!m) return null;
+  const n = m[2] ?? '1';
+  return { key: `${m[1]}#${n}`, slug: `${m[1].replace(/^domain:/, '').replace(/:/g, '-')}-${n}` };
+}
+
+/** `mailbox/<login>/<seat-slug>`; `seat` is a `seatKey` reading. */
+export const mailboxBranch = (login, seat) => `${MAILBOX_BRANCH_PREFIX}${login}/${seat.slug}`;
 
 // ---------------------------------------------------------------------------
 // The pure core
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const opts = { repo: null, login: null, head: null, base: 'main', close: null, dryRun: false, json: false, selfTest: false, help: false, errors: [] };
+  const opts = { repo: null, seat: null, login: null, head: null, base: 'main', close: null, dryRun: false, json: false, selfTest: false, help: false, errors: [] };
   const args = [...argv];
   const value = (flag) => {
     const v = args.shift();
@@ -154,6 +202,7 @@ export function parseArgs(argv) {
     else if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--json') opts.json = true;
     else if (a === '--repo') opts.repo = value(a);
+    else if (a === '--seat') opts.seat = value(a);
     else if (a === '--login') opts.login = value(a);
     else if (a === '--head') opts.head = value(a);
     else if (a === '--base') opts.base = value(a);
@@ -168,9 +217,14 @@ export function parseArgs(argv) {
   if (opts.close !== null) {
     if (Number.isNaN(opts.close)) opts.errors.push('--close takes a pull number');
     if (opts.head !== null) opts.errors.push('--close takes no --head');
+    if (opts.seat !== null) opts.errors.push('--close takes no --seat');
   } else {
+    const seat = opts.seat === null ? null : seatKey(opts.seat);
+    if (!opts.seat) opts.errors.push('--seat <seat> is required to open a mailbox — the mailbox is the seat\'s, never the login\'s');
+    else if (!seat) opts.errors.push(`--seat ${JSON.stringify(opts.seat)} is not a seat — spell it LANE#N, e.g. domain:ui#4`);
     if (!opts.login) opts.errors.push('--login <login> is required to open a mailbox');
     else if (!LOGIN_SHAPE.test(opts.login)) opts.errors.push(`--login ${JSON.stringify(opts.login)} is not a GitHub login`);
+    else if (seat && opts.head === null && !BRANCH_SHAPE.test(mailboxBranch(opts.login, seat))) opts.errors.push(`the seat's branch ${JSON.stringify(mailboxBranch(opts.login, seat))} is not a legal ref`);
     if (opts.head !== null && !BRANCH_SHAPE.test(opts.head)) opts.errors.push(`--head ${JSON.stringify(opts.head)} is not a branch name`);
     if (opts.base !== null && !BRANCH_SHAPE.test(opts.base)) opts.errors.push(`--base ${JSON.stringify(opts.base)} is not a branch name`);
   }
@@ -183,25 +237,28 @@ export function bodyFooter(session) {
   return `\n\n---\n_Generated by [Claude Code](https://claude.ai/code${id ? `/${id}` : ''})_`;
 }
 
-export function mailboxBody({ login, session = null }) {
+/** `seat` is the canonical key (`seatKey(...).key`). */
+export function mailboxBody({ seat, login, session = null }) {
   return [
-    `To: ${login}`,
+    `Mailbox-of: ${seat} · ${login}`,
     '',
-    `The mailbox of the seat held by \`${login}\` (\`${MAILBOX_LABEL}\`): one per seat, opened at seating, subscribed by the seated session.`,
+    `The mailbox of the seat \`${seat}\`, held by \`${login}\` (\`${MAILBOX_LABEL}\`): one per seat, opened at seating, subscribed by the seated session.`,
     '',
     '- ⛔ Never merged, never readied. Closed at hand-over or account switch: `node scripts/pm/mailbox-open.mjs --close N` (N = this number); the successor opens its own.',
-    '- A message is ONE comment whose first line is one of the seven doorbell keys (`Request:` / `Notify:`; pm-dispatch `references/project-forms.md` 〈信箱 PR〉): one event, one line, keys and numbers only. Nothing else is allowed here — no acknowledgements, no re-sends.',
+    `- A message is ONE comment: the line \`To: ${seat}\`, then ONE line opening with one of the seven doorbell keys (\`Request:\` / \`Notify:\`; pm-dispatch \`references/project-forms.md\` 〈信箱 PR〉): one event, keys and numbers only. Nothing else is allowed here — no acknowledgements, no re-sends.`,
     `- **CI: owes none.** \`skip-changeset\` exempts Check Changeset; any other check red on this empty diff is RED BY DESIGN — never fix, rerun or report it. \`${STALE_EXEMPT_LABEL}\` keeps the stale sweep off it.`,
     `- Excluded from every landing ledger: queries add \`${LEDGER_EXCLUSION}\`.`,
   ].join('\n') + bodyFooter(session);
 }
 
-export function planOpen({ repo, login, head = null, base = 'main', session = null }) {
-  const branch = head ?? mailboxBranch(login);
+export function planOpen({ repo, seat, login, head = null, base = 'main', session = null }) {
+  const s = seatKey(seat);
+  if (!s) return { kind: 'open', repo, seat: null, login, branch: head, base, push: false, actions: [], errors: [`${JSON.stringify(seat)} is not a seat`] };
+  const branch = head ?? mailboxBranch(login, s);
   const actions = [
-    { op: 'pr_create', title: `pm:mailbox — ${login}`, head: branch, base, body: mailboxBody({ login, session }), labels: [...PR_LABELS] },
+    { op: 'pr_create', title: `pm:mailbox — ${s.key} · ${login}`, head: branch, base, body: mailboxBody({ seat: s.key, login, session }), labels: [...PR_LABELS] },
   ];
-  return { kind: 'open', repo, login, branch, base, push: head === null, actions, errors: validateStroke(repo, actions) };
+  return { kind: 'open', repo, seat: s, login, branch, base, push: head === null, actions, errors: validateStroke(repo, actions) };
 }
 
 export function planClose({ repo, pull }) {
@@ -213,16 +270,42 @@ export function planClose({ repo, pull }) {
 }
 
 const labelNames = (pr) => (Array.isArray(pr?.labels) ? pr.labels.map((l) => (typeof l === 'string' ? l : l?.name)) : []);
-/** The body's first line, `To: <login>` — the addressee, which is the seat the mailbox belongs to. */
-const addresseeOf = (pr) => /^To: (\S+)/.exec(typeof pr?.body === 'string' ? pr.body : '')?.[1] ?? null;
+const firstLine = (text) => String(text ?? '').split(/\r?\n/).find((l) => l.trim() !== '')?.trim() ?? '';
 
-/** The open `pm:mailbox` pulls that belong to `login`, by head branch or by the body's `To:` line. Pure. */
-export function openMailboxesOf(pulls, login) {
+/**
+ * Whose mailbox a pull is — `{ seat, slug, login }` — or null when it carries no `pm:mailbox`. A per-seat mailbox
+ * names its seat on the body's first line `Mailbox-of: <seat> · <login>` (`seat` is then the canonical key), or
+ * only by its head `mailbox/<login>/<slug>` (`seat` null, `slug` set). A legacy per-login mailbox — head
+ * `mailbox/<login>`, or a first line `To: <login>` / `Mailbox-of: <login>` — names a login and NO seat, so its
+ * `slug` is null: unassigned to a seat, ⛔ never attributed to the login's seats. A `pm:mailbox` pull that names
+ * neither reads `{ seat: null, slug: null, login: null }`. The body outranks the head. The one reading of a
+ * mailbox's owner: `fleet-roster.mjs` imports it, never re-spells it. Pure.
+ */
+export function mailboxOwner(pr) {
+  if (!labelNames(pr).includes(MAILBOX_LABEL)) return null;
+  const first = firstLine(pr?.body);
+  const perSeat = MAILBOX_OF_LINE.exec(first);
+  const seat = perSeat && LOGIN_SHAPE.test(perSeat[2]) ? seatKey(perSeat[1]) : null;
+  if (seat) return { seat: seat.key, slug: seat.slug, login: perSeat[2] };
+  const ref = String(pr?.head?.ref ?? '');
+  const parts = ref.startsWith(MAILBOX_BRANCH_PREFIX) ? ref.slice(MAILBOX_BRANCH_PREFIX.length).split('/') : [];
+  if (parts.length === 2 && LOGIN_SHAPE.test(parts[0]) && parts[1] !== '') return { seat: null, slug: parts[1].toLowerCase(), login: parts[0] };
+  const legacy = LEGACY_OWNER_LINE.exec(first)?.[1] ?? (parts.length === 1 ? parts[0] : null);
+  return { seat: null, slug: null, login: legacy !== null && LOGIN_SHAPE.test(legacy) ? legacy : null };
+}
+
+const openMailboxes = (pulls) =>
+  (Array.isArray(pulls) ? pulls : []).filter((pr) => pr?.state === 'open').map((pr) => ({ pr, owner: mailboxOwner(pr) })).filter((m) => m.owner !== null);
+
+/** The open mailboxes of `seat` (a `seatKey` reading), whichever login holds them — matched by slug. Pure. */
+export function openMailboxesOf(pulls, seat) {
+  return openMailboxes(pulls).filter((m) => m.owner.slug === seat.slug).map((m) => m.pr);
+}
+
+/** The open legacy per-login mailboxes of `login`: they name no seat, so they block nothing — the open names them. Pure. */
+export function legacyMailboxesOf(pulls, login) {
   const want = String(login).toLowerCase();
-  return (Array.isArray(pulls) ? pulls : []).filter((pr) => {
-    if (pr?.state !== 'open' || !labelNames(pr).includes(MAILBOX_LABEL)) return false;
-    return String(pr?.head?.ref ?? '').toLowerCase() === mailboxBranch(want) || String(addresseeOf(pr) ?? '').toLowerCase() === want;
-  });
+  return openMailboxes(pulls).filter((m) => m.owner.slug === null && String(m.owner.login ?? '').toLowerCase() === want).map((m) => m.pr);
 }
 
 /** Why `pr` may not be closed as a mailbox, or null when it may. Pure. */
@@ -236,7 +319,7 @@ export function closeRefusal(pr, pull) {
 export function planText(plan) {
   const lines = [`mailbox-open: DRY RUN — nothing read, nothing pushed, nothing sent (${plan.repo}).`];
   if (plan.kind === 'open') {
-    lines.push(`  ① read open pulls; refuse if a ${MAILBOX_LABEL} PR for ${plan.login} is open`);
+    lines.push(`  ① read open pulls; refuse if a ${MAILBOX_LABEL} PR for the seat ${plan.seat.key} is open, whoever holds it; name ${plan.login}'s legacy per-login one`);
     lines.push(
       plan.push
         ? `  ② git commit-tree origin/${plan.base}^{tree} -p origin/${plan.base} (empty commit) → with-fleet.sh --kind 'git push' → refs/heads/${plan.branch}`
@@ -283,21 +366,26 @@ async function openLive(plan, opts) {
     console.error(`✗ mailbox-open: could not read the open pulls — ${pulls.error}. Nothing was sent.`);
     return EXIT_PREREQUISITE;
   }
-  const existing = openMailboxesOf(pulls.value, plan.login);
+  const existing = openMailboxesOf(pulls.value, plan.seat);
   if (existing.length) {
-    console.error(`✗ mailbox-open: ${plan.login} already has an open mailbox on ${plan.repo}: ${existing.map((p) => `#${p.number}`).join(', ')}. Nothing was sent.`);
+    const held = existing.map((p) => `#${p.number}${mailboxOwner(p).login ? ` (held by ${mailboxOwner(p).login})` : ''}`).join(', ');
+    console.error(`✗ mailbox-open: the seat ${plan.seat.key} already has an open mailbox on ${plan.repo}: ${held}. Nothing was sent.`);
     return EXIT_REFUSED;
+  }
+  const legacy = legacyMailboxesOf(pulls.value, plan.login);
+  if (legacy.length) {
+    console.error(`⚠️  mailbox-open: ${plan.login} still holds a legacy per-login mailbox on ${plan.repo}: ${legacy.map((p) => `#${p.number}`).join(', ')}. It names no seat, so it blocks nothing here; close it (--close N) once each of this account's seats holds its own.`);
   }
   if (plan.push) {
     const fetched = run('git', ['fetch', '--quiet', 'origin', plan.base]);
-    const sha = fetched.ok ? run('git', ['commit-tree', `origin/${plan.base}^{tree}`, '-p', `origin/${plan.base}`, '-m', `chore(pm): mailbox of ${plan.login}`]) : fetched;
+    const sha = fetched.ok ? run('git', ['commit-tree', `origin/${plan.base}^{tree}`, '-p', `origin/${plan.base}`, '-m', `chore(pm): mailbox of ${plan.seat.key} · ${plan.login}`]) : fetched;
     if (!sha.ok || !/^[0-9a-f]{40}$/.test(sha.out)) {
       console.error(`✗ mailbox-open: could not build the empty commit on origin/${plan.base}. Nothing was sent.`);
       return EXIT_PREREQUISITE;
     }
     const pushed = run('bash', [join(PM_DIR, 'with-fleet.sh'), '--kind', 'git push', '--', 'git', 'push', 'origin', `${sha.out}:refs/heads/${plan.branch}`]);
     if (!pushed.ok) {
-      console.error(`✗ mailbox-open: the push of ${plan.branch} was refused (with-fleet exit ${pushed.status}). A cloud seat cannot push it — pass --head <a branch this session pushed>. No PR was opened.`);
+      console.error(`✗ mailbox-open: the push of ${plan.branch} was refused (with-fleet exit ${pushed.status}). A cloud seat cannot push it — pass --head <a branch this session pushed>. A legacy branch ${MAILBOX_BRANCH_PREFIX}${plan.login} refuses it too: git nests no ref under an existing one, so delete that branch once its mailbox is closed. No PR was opened.`);
       return EXIT_PREREQUISITE;
     }
   } else {
@@ -316,8 +404,8 @@ async function openLive(plan, opts) {
     console.error(`⚠️  mailbox-open: the stroke completed but no open pull on ${plan.branch} was read back — read the board before re-running.`);
     return EXIT_PREREQUISITE;
   }
-  console.log(`✓ mailbox #${pr.number} ${pr.html_url} — subscribe_pr_activity ${plan.repo} ${pr.number}`);
-  if (opts.json) console.log(JSON.stringify({ number: pr.number, html_url: pr.html_url, repo: plan.repo, branch: plan.branch }));
+  console.log(`✓ mailbox #${pr.number} of ${plan.seat.key} ${pr.html_url} — subscribe_pr_activity ${plan.repo} ${pr.number}`);
+  if (opts.json) console.log(JSON.stringify({ number: pr.number, html_url: pr.html_url, repo: plan.repo, seat: plan.seat.key, branch: plan.branch }));
   return EXIT_OK;
 }
 
@@ -339,7 +427,7 @@ async function closeLive(plan, opts) {
 
 const USAGE = [
   'usage:',
-  '  node scripts/pm/mailbox-open.mjs --repo owner/name --login <login> [--head <branch>] [--base main] [--dry-run] [--json]',
+  '  node scripts/pm/mailbox-open.mjs --repo owner/name --seat <LANE#N> --login <login> [--head <branch>] [--base main] [--dry-run] [--json]',
   '  node scripts/pm/mailbox-open.mjs --repo owner/name --close <n> [--dry-run]',
   '  node scripts/pm/mailbox-open.mjs --self-test',
   `  Exits: ${EXIT_OK} done · ${EXIT_USAGE} usage or refused stroke · ${EXIT_PREREQUISITE} prerequisite · ${EXIT_REFUSED} refused on board state · 5+ the relay's own exit`,
@@ -358,7 +446,7 @@ export async function main(argv, { env = process.env } = {}) {
     return EXIT_USAGE;
   }
   const session = env.OS_FLEET_SESSION || env.CLAUDE_CODE_REMOTE_SESSION_ID || null;
-  const plan = opts.close !== null ? planClose({ repo: opts.repo, pull: opts.close }) : planOpen({ repo: opts.repo, login: opts.login, head: opts.head, base: opts.base, session });
+  const plan = opts.close !== null ? planClose({ repo: opts.repo, pull: opts.close }) : planOpen({ repo: opts.repo, seat: opts.seat, login: opts.login, head: opts.head, base: opts.base, session });
   if (plan.errors.length) {
     for (const e of plan.errors) console.error(`✗ mailbox-open: REFUSED by the relay validator — ${e}`);
     console.error('  Nothing was sent.');
@@ -378,16 +466,18 @@ export async function main(argv, { env = process.env } = {}) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'arguments: the two modes and every refusal': 10,
-  'the open plan: branch, labels, body, and the relay validator': 9,
+  'arguments: the two modes and every refusal': 13,
+  'the seat: canonical key, ref slug, and the per-seat branch': 7,
+  'the open plan: branch, labels, body, and the relay validator': 10,
   'the close plan: comment then close, judged by the validator': 3,
-  'finding an open mailbox: head, body line, label, state': 6,
+  'whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither': 7,
+  "finding a seat's open mailbox: by seat, never by login": 9,
   'refusing to close what is not an open mailbox': 4,
   'the ledger exclusion and the footer': 4,
-  'the CLI: dry run prints the actions file and sends nothing': 5,
+  'the CLI: dry run prints the actions file and sends nothing': 6,
   'paging: a three-page read through the loop equals the slurped array': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 async function selfTest() {
   let failed = 0;
@@ -406,30 +496,44 @@ async function selfTest() {
   };
 
   battery('arguments: the two modes and every refusal');
-  const open = parseArgs(['--repo', 'o/r', '--login', 'os-bill']);
-  t('open: repo, login, default base main, no head', [open.errors, open.repo, open.login, open.base, open.head], [[], 'o/r', 'os-bill', 'main', null]);
+  const OPEN = ['--repo', 'o/r', '--seat', 'domain:ui#4', '--login', 'os-bill'];
+  const open = parseArgs(OPEN);
+  t('open: repo, seat, login, default base main, no head', [open.errors, open.repo, open.seat, open.login, open.base, open.head], [[], 'o/r', 'domain:ui#4', 'os-bill', 'main', null]);
   const close = parseArgs(['--repo', 'o/r', '--close', '12']);
-  t('close: a number, no login needed', [close.errors, close.close], [[], 12]);
-  t('no --repo is refused', parseArgs(['--login', 'a']).errors.some((e) => e.includes('--repo')), true);
-  t('a repo not shaped owner/name is refused', parseArgs(['--repo', 'nope', '--login', 'a']).errors.some((e) => e.includes('owner/name')), true);
-  t('open without --login is refused', parseArgs(['--repo', 'o/r']).errors.some((e) => e.includes('--login')), true);
-  t('a login GitHub would refuse is refused', parseArgs(['--repo', 'o/r', '--login', '-bad--']).errors.some((e) => e.includes('not a GitHub login')), true);
+  t('close: a number, no seat and no login needed', [close.errors, close.close], [[], 12]);
+  t('no --repo is refused', parseArgs(['--seat', 'triage', '--login', 'a']).errors.some((e) => e.includes('--repo')), true);
+  t('a repo not shaped owner/name is refused', parseArgs(['--repo', 'nope', '--seat', 'triage', '--login', 'a']).errors.some((e) => e.includes('owner/name')), true);
+  t('⭐ open without --seat is refused, naming why — the mailbox is the seat\'s, never the login\'s', parseArgs(['--repo', 'o/r', '--login', 'os-bill']).errors.some((e) => e.includes('--seat <seat> is required') && e.includes('never the login')), true);
+  t('a --seat that is not LANE#N is refused, a login among them', ['ui 4', 'domain:ui#0', '#4', 'domain:', 'domain:ui#4#5', 'os-bill', 'marchtian'].every((s) => parseArgs(['--repo', 'o/r', '--seat', s, '--login', 'a']).errors.some((e) => e.includes('is not a seat'))), true);
+  t('open without --login is refused', parseArgs(['--repo', 'o/r', '--seat', 'triage']).errors.some((e) => e.includes('--login')), true);
+  t('a login GitHub would refuse is refused', parseArgs(['--repo', 'o/r', '--seat', 'triage', '--login', '-bad--']).errors.some((e) => e.includes('not a GitHub login')), true);
+  t('a seat whose branch is no legal ref is refused', parseArgs(['--repo', 'o/r', '--seat', 'repo:a..b#1', '--login', 'a']).errors.some((e) => e.includes('not a legal ref')), true);
   t('--close with a non-number is refused', parseArgs(['--repo', 'o/r', '--close', '1x']).errors.some((e) => e.includes('pull number')), true);
-  t('--close with --head is refused', parseArgs(['--repo', 'o/r', '--close', '3', '--head', 'x']).errors.some((e) => e.includes('no --head')), true);
-  t('an unknown flag is refused, never ignored', parseArgs(['--repo', 'o/r', '--login', 'a', '--bogus']).errors.some((e) => e.includes('--bogus')), true);
-  t('a --head with a space or .. is refused', [parseArgs(['--repo', 'o/r', '--login', 'a', '--head', 'a b']).errors.length > 0, parseArgs(['--repo', 'o/r', '--login', 'a', '--head', 'a..b']).errors.length > 0], [true, true]);
+  t('--close with --head or --seat is refused', [parseArgs(['--repo', 'o/r', '--close', '3', '--head', 'x']).errors.some((e) => e.includes('no --head')), parseArgs(['--repo', 'o/r', '--close', '3', '--seat', 'triage']).errors.some((e) => e.includes('no --seat'))], [true, true]);
+  t('an unknown flag is refused, never ignored', parseArgs([...OPEN, '--bogus']).errors.some((e) => e.includes('--bogus')), true);
+  t('a --head with a space or .. is refused', [parseArgs([...OPEN, '--head', 'a b']).errors.length > 0, parseArgs([...OPEN, '--head', 'a..b']).errors.length > 0], [true, true]);
+
+  battery('the seat: canonical key, ref slug, and the per-seat branch');
+  t('domain:ui#4 → key domain:ui#4, slug ui-4 (the default kind dropped)', seatKey('domain:ui#4'), { key: 'domain:ui#4', slug: 'ui-4' });
+  t('an absent number is seat 1, spelled', [seatKey('triage'), seatKey('domain:skills')], [{ key: 'triage#1', slug: 'triage-1' }, { key: 'domain:skills#1', slug: 'skills-1' }]);
+  t('another kind keeps its name, its colon turned into a hyphen', [seatKey('repo:cloud#1').slug, seatKey('repo:www.objectos.ai#2').slug], ['repo-cloud-1', 'repo-www.objectos.ai-2']);
+  t('read lower-cased, so one seat has one key', [seatKey('Domain:UI#4').key, seatKey(' domain:ui#4 ').key], ['domain:ui#4', 'domain:ui#4']);
+  t('not a seat ⇒ null — ⛔ a login above all, the confusion a per-login mailbox made', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null, 'os-bill', 'marchtian', 'epic:#12'].map(seatKey), [null, null, null, null, null, null, null, null, null]);
+  t('the branch is mailbox/<login>/<slug> — no `:` and no `#` in a ref', mailboxBranch('os-bill', seatKey('domain:ui#4')), 'mailbox/os-bill/ui-4');
+  t('⭐ two seats under ONE login get two branches', [mailboxBranch('os-sales', seatKey('domain:server#1')), mailboxBranch('os-sales', seatKey('domain:ui#1'))], ['mailbox/os-sales/server-1', 'mailbox/os-sales/ui-1']);
 
   battery('the open plan: branch, labels, body, and the relay validator');
-  const p = planOpen({ repo: 'objectstack-ai/objectstack', login: 'os-bill', session: 'cse_01ABC' });
-  t('the default branch is mailbox/<login> and it is pushed', [p.branch, p.push], ['mailbox/os-bill', true]);
-  t('one pr_create action, base main', [p.actions.length, p.actions[0].op, p.actions[0].base, p.actions[0].head], [1, 'pr_create', 'main', 'mailbox/os-bill']);
+  const p = planOpen({ repo: 'objectstack-ai/objectstack', seat: 'domain:ui#4', login: 'os-bill', session: 'cse_01ABC' });
+  t('the default branch is mailbox/<login>/<slug> and it is pushed', [p.branch, p.push], ['mailbox/os-bill/ui-4', true]);
+  t('one pr_create action, base main, titled by seat and login', [p.actions.length, p.actions[0].op, p.actions[0].base, p.actions[0].head, p.actions[0].title], [1, 'pr_create', 'main', 'mailbox/os-bill/ui-4', 'pm:mailbox — domain:ui#4 · os-bill']);
   t('labels: pm:mailbox, pinned (the stale-sweep exemption) and skip-changeset (the changeset-check exemption)', p.actions[0].labels, ['pm:mailbox', 'pinned', 'skip-changeset']);
   t('⭐ pinned IS stale.yml\'s exemption, read off the workflow — and pm:mailbox is not one', (() => { const y = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'stale.yml'), 'utf8'); const m = /exempt-pr-labels:\s*'([^']*)'/.exec(y); const names = m ? m[1].split(',').map((s) => s.trim()) : []; return [names.includes(STALE_EXEMPT_LABEL), names.includes(MAILBOX_LABEL)]; })(), [true, false]);
-  t('the body opens with To: <login> — the addressee is the seat', p.actions[0].body.split('\n')[0], 'To: os-bill');
+  t('⭐ the body opens with Mailbox-of: <seat> · <login> — the seat is the key, the login only who holds it', p.actions[0].body.split('\n')[0], 'Mailbox-of: domain:ui#4 · os-bill');
+  t('the body tells a sender to open with To: <seat>', p.actions[0].body.includes('the line `To: domain:ui#4`, then ONE line'), true);
   t('the body states the CI posture, the never-merged rule and the closed vocabulary', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body), /seven doorbell keys/.test(p.actions[0].body) && /no acknowledgements/.test(p.actions[0].body)], [true, true, true]);
   t('the relay validator accepts the stroke', p.errors, []);
-  const ph = planOpen({ repo: 'o/r', login: 'os-bill', head: 'claude/project-thread-x' });
-  t('--head names the branch and skips the push', [ph.branch, ph.push, ph.actions[0].head], ['claude/project-thread-x', false, 'claude/project-thread-x']);
+  const ph = planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/project-thread-x' });
+  t('--head names the branch and skips the push; the body still names the seat', [ph.branch, ph.push, ph.actions[0].head, ph.actions[0].body.split('\n')[0]], ['claude/project-thread-x', false, 'claude/project-thread-x', 'Mailbox-of: triage#1 · os-bill']);
   t('no draft key is sent — the relay forces draft itself', 'draft' in p.actions[0], false);
 
   battery('the close plan: comment then close, judged by the validator');
@@ -438,14 +542,34 @@ async function selfTest() {
   t('the relay validator accepts the stroke', c.errors, []);
   t('the comment carries the bare footer under its rule line', c.actions[0].body.endsWith('\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_'), true);
 
-  battery('finding an open mailbox: head, body line, label, state');
+  battery('whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither');
   const pr = (o) => ({ state: 'open', number: 1, labels: [{ name: 'pm:mailbox' }], head: { ref: 'x' }, body: '', ...o });
-  t('found by head mailbox/<login>', openMailboxesOf([pr({ head: { ref: 'mailbox/os-bill' } })], 'os-bill').length, 1);
-  t('found by the body line on another head', openMailboxesOf([pr({ body: 'To: os-bill\n\nx' })], 'os-bill').length, 1);
-  t('login match is case-insensitive', openMailboxesOf([pr({ head: { ref: 'mailbox/OS-Bill' } })], 'os-bill').length, 1);
-  t('without the label it is not a mailbox', openMailboxesOf([pr({ labels: [], head: { ref: 'mailbox/os-bill' } })], 'os-bill').length, 0);
-  t('another login’s mailbox is not ours', openMailboxesOf([pr({ head: { ref: 'mailbox/os-elon' } })], 'os-bill').length, 0);
-  t('a closed one does not block a new one', openMailboxesOf([pr({ state: 'closed', head: { ref: 'mailbox/os-bill' } })], 'os-bill').length, 0);
+  t('⭐ the body this file writes reads back as its seat — writer and reader are one spelling', mailboxOwner(pr({ head: { ref: 'claude/project-thread-x' }, body: ph.actions[0].body })), { seat: 'triage#1', slug: 'triage-1', login: 'os-bill' });
+  t('a head mailbox/<login>/<slug> with no body line reads the slug and the login', mailboxOwner(pr({ head: { ref: 'mailbox/os-bill/ui-4' } })), { seat: null, slug: 'ui-4', login: 'os-bill' });
+  t('the body outranks the head', mailboxOwner(pr({ head: { ref: 'mailbox/os-bill/ui-4' }, body: 'Mailbox-of: domain:ui#2 · os-bill' })).slug, 'ui-2');
+  t('⛔ a legacy per-login mailbox names a login and NO seat — head mailbox/<login>, a To: <login> or a Mailbox-of: <login> first line', [mailboxOwner(pr({ head: { ref: 'mailbox/os-justin' } })), mailboxOwner(pr({ head: { ref: 'claude/x' }, body: 'To: os-sales\n\nThe mailbox' })), mailboxOwner(pr({ body: 'Mailbox-of: os-elon-musk\n' }))], [{ seat: null, slug: null, login: 'os-justin' }, { seat: null, slug: null, login: 'os-sales' }, { seat: null, slug: null, login: 'os-elon-musk' }]);
+  t('a pm:mailbox pull naming neither is a mailbox of nobody, never a non-mailbox', mailboxOwner(pr({ body: 'hello' })), { seat: null, slug: null, login: null });
+  t('a malformed seat or login on the body line names no seat', [mailboxOwner(pr({ body: 'Mailbox-of: ui 4 · os-bill' })).slug, mailboxOwner(pr({ body: 'Mailbox-of: domain:ui#4 · -bad-' })).slug], [null, null]);
+  t('without the label it is not a mailbox', mailboxOwner(pr({ labels: [], head: { ref: 'mailbox/os-bill/ui-4' } })), null);
+
+  battery("finding a seat's open mailbox: by seat, never by login");
+  const UI4 = seatKey('domain:ui#4');
+  const opened = (seat, login, number) => pr({ number, head: { ref: `claude/project-thread-${number}` }, body: planOpen({ repo: 'o/r', seat, login, head: `claude/project-thread-${number}` }).actions[0].body });
+  t('found by the body line on a --head branch', openMailboxesOf([opened('domain:ui#4', 'os-bill', 7)], UI4).map((x) => x.number), [7]);
+  t('found by the head slug on the default branch', openMailboxesOf([pr({ head: { ref: planOpen({ repo: 'o/r', seat: 'domain:ui#4', login: 'os-bill' }).branch } })], UI4).length, 1);
+  t('⭐ two seats under ONE login both open: with seat 3\'s mailbox open seat 4 finds none, then each finds exactly its own', (() => {
+    const s3 = seatKey('domain:server#3');
+    const s4 = seatKey('domain:server#4');
+    const one = [opened('domain:server#3', 'os-elon-musk', 3)];
+    const both = [...one, opened('domain:server#4', 'os-elon-musk', 4)];
+    return [openMailboxesOf(one, s4).length, openMailboxesOf(both, s3).map((x) => x.number), openMailboxesOf(both, s4).map((x) => x.number)];
+  })(), [0, [3], [4]]);
+  t('⭐ the same seat held by ANOTHER login is still that seat\'s mailbox — the refusal is per seat', openMailboxesOf([opened('domain:ui#4', 'os-sales', 9)], UI4).map((x) => x.number), [9]);
+  t('the seat match is case- and spelling-insensitive (domain:skills ≡ domain:skills#1)', [openMailboxesOf([opened('domain:skills', 'a', 1)], seatKey('Domain:Skills#1')).length, openMailboxesOf([pr({ head: { ref: 'mailbox/a/UI-4' } })], UI4).length], [1, 1]);
+  t('⛔ a legacy per-login mailbox blocks no seat of its login', [openMailboxesOf([pr({ head: { ref: 'mailbox/os-bill' } }), pr({ body: 'To: os-bill' })], UI4).length], [0]);
+  t('…and is named for its login, case-insensitively, never for another', [legacyMailboxesOf([pr({ number: 5, head: { ref: 'mailbox/OS-Bill' } }), pr({ number: 6, body: 'To: os-bill' }), pr({ number: 8, body: 'To: os-sales' }), opened('domain:ui#4', 'os-bill', 7)], 'os-bill').map((x) => x.number)], [[5, 6]]);
+  t('without the label it is not a mailbox', openMailboxesOf([pr({ labels: [], head: { ref: 'mailbox/os-bill/ui-4' } })], UI4).length, 0);
+  t('a closed one does not block a new one', openMailboxesOf([pr({ state: 'closed', head: { ref: 'mailbox/os-bill/ui-4' } })], UI4).length, 0);
 
   battery('refusing to close what is not an open mailbox');
   t('an open pm:mailbox PR may be closed', closeRefusal(pr({}), 1), null);
@@ -478,16 +602,17 @@ async function selfTest() {
 
   battery('the CLI: dry run prints the actions file and sends nothing');
   const cli = (args) => spawnSync(process.execPath, [SELF_PATH, ...args], { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent', OS_FLEET_SESSION: '', CLAUDE_CODE_REMOTE_SESSION_ID: '' } });
-  const dry = cli(['--repo', 'objectstack-ai/objectstack', '--login', 'os-bill', '--dry-run']);
+  const dry = cli(['--repo', 'objectstack-ai/objectstack', '--seat', 'domain:ui#4', '--login', 'os-bill', '--dry-run']);
   t('open dry run exits 0 with no gh/git on PATH (nothing reached for)', dry.status, EXIT_OK);
   const printed = dry.stdout.split('--- actions file ---\n')[1] ?? '';
   let parsed = null;
   try {
     parsed = JSON.parse(printed);
   } catch {}
-  t('the printed actions file parses and is the plan', parsed?.[0]?.op === 'pr_create' && parsed?.[0]?.head === 'mailbox/os-bill', true);
+  t('the printed actions file parses and is the plan', parsed?.[0]?.op === 'pr_create' && parsed?.[0]?.head === 'mailbox/os-bill/ui-4', true);
+  t('the printed plan names the seat it refuses on', /refuse if a pm:mailbox PR for the seat domain:ui#4 is open/.test(dry.stdout), true);
   t('close dry run exits 0 and prints both actions', [cli(['--repo', 'o/r', '--close', '7', '--dry-run']).status, (cli(['--repo', 'o/r', '--close', '7', '--dry-run']).stdout.match(/"op":/g) ?? []).length], [EXIT_OK, 2]);
-  t('a usage error is exit 2', cli(['--repo', 'o/r']).status, EXIT_USAGE);
+  t('a usage error is exit 2 — an open with no --seat among them', [cli(['--repo', 'o/r']).status, cli(['--repo', 'o/r', '--login', 'os-bill', '--dry-run']).status], [EXIT_USAGE, EXIT_USAGE]);
   t('--help is exit 0', cli(['--help']).status, EXIT_OK);
 
   const floor = [];

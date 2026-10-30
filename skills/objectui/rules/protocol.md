@@ -13,8 +13,8 @@ value must clear before it reaches the screen.
 | Field | Evaluation Type | Return Type | Example |
 |---|---|---|---|
 | `content` | Template (`${}`) | string | `"content": "Total: ${data.total}"` |
-| `visibleWhen` | Condition | boolean | `"visibleWhen": "data.permissions.canView"` (raw expression, no `${}`) |
-| `hidden` | Condition | boolean | `"hidden": "data.status === 'draft'"` |
+| `visibleWhen` | Condition | boolean | `"visibleWhen": "data.permissions.canView"` (bare string = CEL) |
+| `hidden` | Condition | boolean | `"hidden": "data.status == 'draft'"` |
 | `visible` | Condition | boolean | `"visible": "${data.isActive}"` |
 | `disabled` | Condition | boolean | `"disabled": "!data.hasPermission"` |
 | `title` / `label` / `value` / `description` | Template (`${}`) | Preserves original type | **Only on the component types the spec declares** — see "Rule: Bindable Text Keys" below. `"value": "${data.total}"` on a `statistic` renders the number. |

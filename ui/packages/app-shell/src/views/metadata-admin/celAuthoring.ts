@@ -107,6 +107,24 @@ export interface CelSchemaHint {
 export type CelLintMessageKey = 'engine.celLint.notTheRow';
 
 /**
+ * The refusal codes of `@objectstack/formula`'s `validateExpression` whose
+ * English message an editor leads with a plain sentence of its own: the
+ * catch-all CEL refusal, whose message opens with the engine's own fault
+ * ("Unexpected token: EOF") and closes with a dialect prescription that says
+ * nothing about this fault. The engine's `detail` — its fault with an excerpt
+ * of the source marking where it stopped — is kept and shown as written. The
+ * other CEL codes already carry a prescription for their fault and keep their
+ * message. Keyed to the code, never matched against the English: the package's
+ * refusal vocabulary exists for exactly this (`expression-refusal.ts`).
+ */
+const PLAIN_LEAD_CODES: Readonly<Record<string, CelLintPlainKey>> = {
+  'invalid-cel': 'engine.celLint.invalidCel',
+};
+
+/** The plain sentence an editor leads a refusal with — see {@link PLAIN_LEAD_CODES}. */
+export type CelLintPlainKey = 'engine.celLint.invalidCel';
+
+/**
  * A single lint finding surfaced inline under the editor. `error` blocks save
  * (a parse fault, or an RLS clause `@objectstack/lint`'s rule refuses);
  * `warning` is advisory (a typo, a wrong-layer root).
@@ -118,7 +136,20 @@ export type CelLintMessageKey = 'engine.celLint.notTheRow';
  * errors alone (`clientValidation`) never meets one.
  */
 export type CelLintIssue =
-  | { severity: 'error'; message: string; messageKey?: never; messageVars?: never }
+  | {
+      severity: 'error';
+      message: string;
+      messageKey?: never;
+      messageVars?: never;
+      /**
+       * Set on a refusal whose message the editor leads with a plain sentence
+       * (`CelPredicateField`): that sentence's key and the engine's `detail`,
+       * shown beneath it as written. `message` is unchanged, so every caller
+       * that reads the producer's words (the Save gate, `clientValidation`, the
+       * server-verdict dedupe) reads the same text as before.
+       */
+      plain?: { key: CelLintPlainKey; detail: string };
+    }
   | { severity: 'warning'; message: string; messageKey?: never; messageVars?: never }
   | { severity: 'warning'; messageKey: CelLintMessageKey; messageVars: Record<string, string>; message?: never };
 
@@ -181,7 +212,7 @@ interface FormulaModule {
     schema?: unknown,
   ) => {
     ok: boolean;
-    errors?: Array<{ message?: string }>;
+    errors?: Array<{ message?: string; code?: string; params?: { detail?: unknown } }>;
     warnings?: Array<{ message?: string }>;
   };
   introspectScope?: (
@@ -636,7 +667,14 @@ export async function lintCelPredicate(
     });
     const issues: CelLintIssue[] = [];
     for (const e of res?.errors ?? []) {
-      if (e?.message) issues.push({ severity: 'error', message: e.message });
+      if (!e?.message) continue;
+      const key = e.code !== undefined && Object.prototype.hasOwnProperty.call(PLAIN_LEAD_CODES, e.code) ? PLAIN_LEAD_CODES[e.code] : undefined;
+      const detail = e.params?.detail;
+      issues.push(
+        key && typeof detail === 'string' && detail.trim()
+          ? { severity: 'error', message: e.message, plain: { key, detail } }
+          : { severity: 'error', message: e.message },
+      );
     }
     for (const w of res?.warnings ?? []) {
       if (w?.message) issues.push({ severity: 'warning', message: w.message });
