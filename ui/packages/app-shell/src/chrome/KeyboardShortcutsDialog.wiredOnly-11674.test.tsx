@@ -146,9 +146,11 @@ function chordEvents(chord: ShortcutChord): KeyboardEventInit[] {
 
 const probe = () => screen.getByTestId('probe');
 // `SidebarProvider` persists its state in this cookie and reads it on mount,
-// so one toggle would decide the next mount's starting state.
+// and the console keeps the wide-window choice under its own key
+// (objectstack#28079), so one toggle would decide the next mount's starting state.
 const clearSidebarCookie = () => {
   document.cookie = 'sidebar_state=; path=/; max-age=0';
+  localStorage.removeItem('os:console-sidebar:wide-open');
 };
 const dialogShown = () => screen.queryByTestId('overlay:keyboard-shortcuts') !== null;
 
