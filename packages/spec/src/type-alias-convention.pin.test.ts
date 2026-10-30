@@ -1160,11 +1160,17 @@ export type Iso_security_sharing__SharingLevel = Assert<Eq< z.input< typeof M180
 export type Iso_security_sharing__SharingRuleType = Assert<Eq< z.input< typeof M180.SharingRuleType >, z.infer< typeof M180.SharingRuleType > >>;
 
 // shared/connector-auth.zod.ts
+export type Iso_shared_connectorAuth__ConnectorAppCredentialVendorSchema = Assert<Eq< z.input< typeof M109.ConnectorAppCredentialVendorSchema >, z.infer< typeof M109.ConnectorAppCredentialVendorSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceAPIKeyAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAPIKeyAuthSchema >, z.infer< typeof M109.ConnectorInstanceAPIKeyAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceAppCredentialAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAppCredentialAuthSchema >, z.infer< typeof M109.ConnectorInstanceAppCredentialAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAuthSchema >, z.infer< typeof M109.ConnectorInstanceAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceBasicAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceBasicAuthSchema >, z.infer< typeof M109.ConnectorInstanceBasicAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceBearerAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceBearerAuthSchema >, z.infer< typeof M109.ConnectorInstanceBearerAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceNoAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceNoAuthSchema >, z.infer< typeof M109.ConnectorInstanceNoAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2AuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2AuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2AuthorizationCodeAuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2AuthorizationCodeAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2ClientCredentialsAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2ClientCredentialsAuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2ClientCredentialsAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorOAuth2GrantSchema = Assert<Eq< z.input< typeof M109.ConnectorOAuth2GrantSchema >, z.infer< typeof M109.ConnectorOAuth2GrantSchema > >>;
 
 // shared/duration.zod.ts — the closed DURATION vocabulary (#18122), step ① of
 // ruling A on #18115 and the counterpart of the `shared/epoch` instant. Both are

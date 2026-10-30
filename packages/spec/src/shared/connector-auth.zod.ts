@@ -219,7 +219,7 @@ function runtimeTokenGuidance(kind: string): string {
  */
 export const ConnectorOAuth2GrantSchema = z.enum(['authorization_code', 'client_credentials'])
   .describe('OAuth2 grant (RFC 6749): `authorization_code` (an administrator connects once; PKCE S256 always) or `client_credentials` (no user step).');
-export type ConnectorOAuth2Grant = z.infer<typeof ConnectorOAuth2GrantSchema>;
+export type ConnectorOAuth2Grant = z.input<typeof ConnectorOAuth2GrantSchema>;
 
 /** The `oauth2` instance keys both grants share (ADR-0143 D2.1). */
 function oauth2SharedShape() {
@@ -342,7 +342,7 @@ export type ConnectorInstanceOAuth2Auth = z.input<typeof ConnectorInstanceOAuth2
  */
 export const ConnectorAppCredentialVendorSchema = z.enum(['feishu', 'dingtalk', 'wecom'])
   .describe('Vendor whose app-credential token exchange to run: `feishu`, `dingtalk` or `wecom`.');
-export type ConnectorAppCredentialVendor = z.infer<typeof ConnectorAppCredentialVendorSchema>;
+export type ConnectorAppCredentialVendor = z.input<typeof ConnectorAppCredentialVendorSchema>;
 
 /**
  * Vendor app-credential auth for a provider-bound instance (ADR-0143 D2.2):
