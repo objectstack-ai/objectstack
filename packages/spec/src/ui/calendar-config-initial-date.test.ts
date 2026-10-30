@@ -4,6 +4,7 @@ import { CalendarConfigSchema, ListViewSchema } from './view.zod';
 import { ComponentPropsMap } from './component.zod';
 import { zodIssuesToFields } from '../api/zod-issues-to-fields';
 import { ErrorHttpStatusMap } from '../api/errors.zod';
+import { DATE_MACRO_TOKENS, DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
 
 /**
  * `calendar.initialDate` — the date a calendar opens on.
@@ -100,7 +101,7 @@ describe('calendar.initialDate — refused values', () => {
     const issues = r.error!.issues;
     expect(issues).toHaveLength(1);
     const [issue] = issues;
-    expect(issue.code).toBe('custom');
+    expect(issue.code).toBe('invalid_format');
     expect(issue.path).toEqual(['calendar', 'initialDate']);
     // The message names the value, both accepted forms and the vocabulary to read.
     expect(issue.message.startsWith(`${JSON.stringify(value)} is not a calendar \`initialDate\`.`)).toBe(true);
@@ -112,7 +113,7 @@ describe('calendar.initialDate — refused values', () => {
     // under the validation class's HTTP status.
     const fields = zodIssuesToFields(issues, view);
     expect(fields).toEqual([
-      expect.objectContaining({ field: 'calendar.initialDate', code: 'invalid_value' }),
+      expect.objectContaining({ field: 'calendar.initialDate', code: 'invalid_format' }),
     ]);
     expect(ErrorHttpStatusMap.validation).toBe(400);
   });
@@ -143,5 +144,35 @@ describe('calendar.initialDate — refused values', () => {
     const r = CalendarConfigSchema.safeParse({ ...binding, initialView: 'month' });
     expect(r.success).toBe(false);
     expect(r.error!.issues.map((i) => i.code)).toContain('unrecognized_keys');
+  });
+});
+
+describe('calendar.initialDate — one vocabulary with the date macros', () => {
+  /** The verdict the date-macro vocabulary's own predicate pair gives, plus the two anchors. */
+  const vocabularyVerdict = (value: string): boolean => {
+    if (value === 'first_record' || value === 'next_record') return true;
+    const m = value.match(DATE_MACRO_WRAPPED_RE);
+    return !!m && isDateMacroToken(m[1]);
+  };
+  const accepts = (value: string): boolean =>
+    CalendarConfigSchema.safeParse({ ...binding, initialDate: value }).success;
+
+  it('every fixed DATE_MACRO_TOKENS member is accepted wrapped, in both wrappings, and refused bare', () => {
+    // Control: the vocabulary is the real list, not an empty one.
+    expect(DATE_MACRO_TOKENS.length).toBeGreaterThan(30);
+    for (const token of DATE_MACRO_TOKENS) {
+      expect(accepts(`{${token}}`), `{${token}}`).toBe(true);
+      expect(accepts(`\${${token}}`), `\${${token}}`).toBe(true);
+      expect(accepts(token), token).toBe(false);
+    }
+  });
+
+  it.each([
+    '{1_day_ago}', '{30_days_ago}', '{90_days_from_now}', '{1_year_ago}', '{15_minutes_ago}', '{2_hours_from_now}',
+    '{0_days_ago}', '{3_fortnights_from_now}', '{3_days}', '{days_ago}', '{-3_days_ago}', '{3_Days_ago}',
+    '{today', 'today}', '{{today}}', '{ today }', '{today}x', 'x{today}', '{}', '', '\${}', '{first_record}',
+    'first_record ', ' next_record', 'first_record|{today}',
+  ])('%s gets the verdict the date-macro predicate pair gives', (value) => {
+    expect(accepts(value)).toBe(vocabularyVerdict(value));
   });
 });
