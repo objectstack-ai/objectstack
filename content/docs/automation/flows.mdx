@@ -2515,9 +2515,13 @@ unbound unless its declaration carries a
 [`defaultValue`](#defaultvalue--declaring-a-variable-is-not-the-same-as-binding-it);
 a param you send explicitly always wins, `false` and `null` included.
 
-**Identity.** The caller's identity (user, positions, permissions, tenant) is
-forwarded into the run, so a `runAs: 'user'` flow executes under that caller's
-row-level security. See [API Authentication](/docs/api#authentication) for
+**Identity.** The caller's identity (user, positions, permissions, tenant,
+posture rung) and language are forwarded into the run, as the caller's request
+resolved them, so a `runAs: 'user'` flow executes under that caller's
+row-level security and reads what the caller's own request reads. The rung is
+the caller's own, never the flow author's and never raised; a request without
+one starts a run without one. The run's setup adds the user's email and
+organization peers. See [API Authentication](/docs/api#authentication) for
 credentials.
 
 <Callout type="warn">
