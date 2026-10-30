@@ -23,6 +23,10 @@ export const NewProjectWizardPage = definePage({
       name: 'main',
       components: [
         {
+          // The id is the form's translation address: its `title`,
+          // `description` and thank-you panel are keyed under
+          // `pages.showcase_new_project_wizard.components.new_project_form`.
+          id: 'new_project_form',
           type: 'object-form',
           properties: {
             objectName: 'showcase_project',
