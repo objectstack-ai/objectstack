@@ -40,13 +40,15 @@
  * was a per-seat one; the board falsified that premise, and nothing here reads
  * a login as a seat any more.
  *
- * A seat is spelled `LANE#N` — `domain:ui#4`, `repo:cloud#1`, `triage` — with
- * an absent number read as seat 1 (`seatKey`). It is compared lower-cased and
- * written canonically with its number (`triage#1`). Its SLUG is that key as one
- * ref segment, because a ref cannot carry `:` or `#`: the default `domain:`
- * kind dropped, every other `:` and the `#` turned into `-` (`ui-4`,
- * `repo-cloud-1`, `triage-1`). No live lane is named both `domain:X` and `X`,
- * which is what keeps the slug one-to-one.
+ * A seat is spelled `LANE#N` — `domain:ui#4`, `repo:cloud#1`, `triage` — its
+ * lane one of the four a seat post's title names (`domain:<x>`, `repo:<x>`,
+ * `triage`, `director`), so a login never reads as a seat, and an absent
+ * number read as seat 1 (`seatKey`). It is compared lower-cased and written
+ * canonically with its number (`triage#1`). Its SLUG is that key as one ref
+ * segment, because a ref cannot carry `:` or `#`: the default `domain:` kind
+ * dropped, every other `:` and the `#` turned into `-` (`ui-4`,
+ * `repo-cloud-1`, `triage-1`). No `domain:` lane is named `triage`,
+ * `director` or `repo-…`, which is what keeps the slug one-to-one.
  *
  * ## What it does, in order (open)
  *
@@ -156,8 +158,9 @@ const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const BRANCH_SHAPE = /^(?!\/|.*\/\/|.*\.\.|.*[\s~^:?*[\\]|.*\.lock$|.*\/$)[A-Za-z0-9._/-]+$/;
 const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
-// A seat: its lane (`domain:ui`, `repo:cloud`, `triage`, `director`), then `#N`; absent = seat 1. Read lower-cased.
-const SEAT_SHAPE = /^([a-z]+(?::[a-z0-9._-]+)?)(?:#([1-9][0-9]*))?$/;
+// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, the four a seat post's title names — then `#N`;
+// absent = seat 1. Read lower-cased. The bare lanes are a closed pair, so a login is never read as a seat.
+const SEAT_SHAPE = /^((?:domain|repo):[a-z0-9._-]+|triage|director)(?:#([1-9][0-9]*))?$/;
 /** A per-seat mailbox body's first line, `Mailbox-of: <seat> · <login>`. */
 const MAILBOX_OF_LINE = /^Mailbox-of:[ \t]*(\S+)[ \t]*·[ \t]*(\S+)$/;
 /** The first lines a legacy per-login mailbox opened with: `To: <login>` (this file's), `Mailbox-of: <login>`. */
@@ -501,7 +504,7 @@ async function selfTest() {
   t('no --repo is refused', parseArgs(['--seat', 'triage', '--login', 'a']).errors.some((e) => e.includes('--repo')), true);
   t('a repo not shaped owner/name is refused', parseArgs(['--repo', 'nope', '--seat', 'triage', '--login', 'a']).errors.some((e) => e.includes('owner/name')), true);
   t('⭐ open without --seat is refused, naming why — the mailbox is the seat\'s, never the login\'s', parseArgs(['--repo', 'o/r', '--login', 'os-bill']).errors.some((e) => e.includes('--seat <seat> is required') && e.includes('never the login')), true);
-  t('a --seat that is not LANE#N is refused', ['ui 4', 'domain:ui#0', '#4', 'domain:', 'domain:ui#4#5'].every((s) => parseArgs(['--repo', 'o/r', '--seat', s, '--login', 'a']).errors.some((e) => e.includes('is not a seat'))), true);
+  t('a --seat that is not LANE#N is refused, a login among them', ['ui 4', 'domain:ui#0', '#4', 'domain:', 'domain:ui#4#5', 'os-bill', 'marchtian'].every((s) => parseArgs(['--repo', 'o/r', '--seat', s, '--login', 'a']).errors.some((e) => e.includes('is not a seat'))), true);
   t('open without --login is refused', parseArgs(['--repo', 'o/r', '--seat', 'triage']).errors.some((e) => e.includes('--login')), true);
   t('a login GitHub would refuse is refused', parseArgs(['--repo', 'o/r', '--seat', 'triage', '--login', '-bad--']).errors.some((e) => e.includes('not a GitHub login')), true);
   t('a seat whose branch is no legal ref is refused', parseArgs(['--repo', 'o/r', '--seat', 'repo:a..b#1', '--login', 'a']).errors.some((e) => e.includes('not a legal ref')), true);
@@ -515,7 +518,7 @@ async function selfTest() {
   t('an absent number is seat 1, spelled', [seatKey('triage'), seatKey('domain:skills')], [{ key: 'triage#1', slug: 'triage-1' }, { key: 'domain:skills#1', slug: 'skills-1' }]);
   t('another kind keeps its name, its colon turned into a hyphen', [seatKey('repo:cloud#1').slug, seatKey('repo:www.objectos.ai#2').slug], ['repo-cloud-1', 'repo-www.objectos.ai-2']);
   t('read lower-cased, so one seat has one key', [seatKey('Domain:UI#4').key, seatKey(' domain:ui#4 ').key], ['domain:ui#4', 'domain:ui#4']);
-  t('not a seat ⇒ null', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null].map(seatKey), [null, null, null, null, null, null]);
+  t('not a seat ⇒ null — ⛔ a login above all, the confusion a per-login mailbox made', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null, 'os-bill', 'marchtian', 'epic:#12'].map(seatKey), [null, null, null, null, null, null, null, null, null]);
   t('the branch is mailbox/<login>/<slug> — no `:` and no `#` in a ref', mailboxBranch('os-bill', seatKey('domain:ui#4')), 'mailbox/os-bill/ui-4');
   t('⭐ two seats under ONE login get two branches', [mailboxBranch('os-sales', seatKey('domain:server#1')), mailboxBranch('os-sales', seatKey('domain:ui#1'))], ['mailbox/os-sales/server-1', 'mailbox/os-sales/ui-1']);
 
