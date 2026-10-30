@@ -40,6 +40,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AutomationEngine, InMemorySuspendedRunStore, installBuiltinNodes } from '@objectstack/service-automation';
 import { APPROVAL_REVISE_NODE_TYPE, defineActionDescriptor } from '@objectstack/spec/automation';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { ApprovalService } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
 
@@ -53,7 +54,7 @@ function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
 }
 
-/** In-memory ObjectQL stand-in: equality/$in/$ne where, orderBy, limit. */
+/** In-memory ObjectQL stand-in: equality/$in/$ne where, orderBy, offset/limit; update/delete dispatch as the engine does. */
 function makeFakeEngine() {
   const tables = new Map<string, any[]>([['sys_user', ROUTED_USERS.map((id) => ({ id }))]]);
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
@@ -72,20 +73,37 @@ function makeFakeEngine() {
         const dir = ord.order === 'desc' ? -1 : 1;
         out = [...out].sort((a, b) => (a[ord.field] < b[ord.field] ? -dir : a[ord.field] > b[ord.field] ? dir : 0));
       }
-      if (opts.limit) out = out.slice(0, opts.limit);
-      return out.map(r => ({ ...r }));
+      const start = opts.offset ?? 0;
+      const page = typeof opts.limit === 'number' ? out.slice(start, start + opts.limit) : out.slice(start);
+      return page.map(r => ({ ...r }));
     },
     async insert(object: string, data: any) { rows(object).push({ ...data }); return { ...data }; },
-    async update(object: string, idOrData: any) {
-      const row = rows(object).find(r => r.id === idOrData.id);
-      if (row) Object.assign(row, idOrData);
-      return row ? { ...row } : null;
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const table = rows(object);
+      if (dispatch.kind === 'multi') {
+        let n = 0;
+        for (let i = 0; i < table.length; i++) {
+          if (matches(table[i], options?.where)) { table[i] = { ...table[i], ...data }; n++; }
+        }
+        return { updated: n };
+      }
+      const i = table.findIndex(r => r.id === dispatch.id);
+      if (i >= 0) table[i] = { ...table[i], ...data };
+      return i >= 0 ? { ...table[i] } : null;
     },
-    async delete(object: string, opts: any = {}) {
-      const where = opts.where ?? {};
-      const list = rows(object);
-      for (let i = list.length - 1; i >= 0; i--) if (matches(list[i], where)) list.splice(i, 1);
-      return { affected: 1 };
+    async delete(object: string, options?: any) {
+      const dispatch = assertEngineDeleteDispatch(options);
+      const table = rows(object);
+      if (dispatch.kind === 'multi') {
+        const survivors = table.filter(r => !matches(r, options?.where));
+        const deleted = table.length - survivors.length;
+        table.splice(0, table.length, ...survivors);
+        return { deleted };
+      }
+      const i = table.findIndex(r => r.id === dispatch.id);
+      if (i >= 0) table.splice(i, 1);
+      return { id: dispatch.id };
     },
   };
 }
