@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/metadata-core': minor
 ---
 
 feat(spec): a `percent` field declares its read-only face with `percentDisplay` (`bar` or `plain`)
@@ -18,3 +19,5 @@ probability: Field.percent({ label: 'Probability', percentDisplay: 'plain' }),
 ```
 
 Display only: the stored value, its validation and its decimal places are unchanged. The key is declared ahead of its renderer: the Studio UI does not read it yet, so every percent field still draws the bar until the console's percent face reads it. No existing metadata changes meaning.
+
+`@objectstack/metadata-core` classifies the new key for field-level security (ADR-0106 D1) as `keep`: it names no field, so a served object schema keeps an authored `percentDisplay` whatever the caller may read. Unclassified, a value that happened to spell a denied field's name (`bar`, `plain`) would have been scrubbed.
