@@ -29,6 +29,7 @@ import {
     type CredentialResolver,
 } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
+import { computeAliyunAcs3Signature } from './request-signing/aliyun-acs3-hmac-sha256.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -1088,6 +1089,106 @@ describe('ADR-0143 D4 — a grant-bearing instance is held degraded, never mater
             k_none: 'none', k_bearer: 'bearer', k_key: 'api-key', k_basic: 'basic',
         });
         expect(automationOf(kernel).getConnectorDescriptors().filter((d) => d.state === 'degraded')).toEqual([]);
+        await kernel.shutdown();
+    });
+});
+
+// ADR-0143 D2.3, D4 — a `signed` instance's key is bound to the signer its
+// scheme names by the host, and the provider receives only the signer. It is
+// served only by a provider that says it applies the signer to every request;
+// any other is a configuration fault, so the instance is never called unsigned.
+describe('ADR-0143 D2.3 — a `signed` instance is handed a request signer, never its key', () => {
+    const SIGNING_KEY = 'resolved-signing-key';
+    const signed: ConnectorInstanceAuth = {
+        type: 'signed',
+        scheme: 'aliyun-acs3-hmac-sha256',
+        keyId: 'LTAI-example',
+        credentialRef: 'ALIYUN_SECRET',
+    };
+
+    /** A provider that applies the signer it is handed (and says so), recording each ctx. */
+    function makeSigningProvider(applied: boolean | undefined) {
+        const calls: ConnectorProviderContext[] = [];
+        const closed: string[] = [];
+        const factory: ConnectorProviderFactory = (ctx) => {
+            calls.push(ctx);
+            return {
+                def: {
+                    name: ctx.name,
+                    label: ctx.label,
+                    type: 'api',
+                    authentication: { type: 'none' },
+                    actions: [{ key: 'ping', label: 'Ping' }],
+                } as unknown as Connector,
+                handlers: { ping: async () => ({ ok: true }) },
+                close: async () => { closed.push(ctx.name); },
+                ...(applied === undefined ? {} : { requestSignerApplied: applied }),
+            };
+        };
+        return { factory, calls, closed };
+    }
+
+    it('materializes it with `requestSigner` bound to the resolved key, `auth` unset, and no key in the context', async () => {
+        const { factory, calls } = makeSigningProvider(true);
+        const kernel = await boot([providerConnector('aliyun_ecs', { auth: signed })], {
+            providerFactory: factory,
+            credentialResolver: (ref) => (ref === 'ALIYUN_SECRET' ? SIGNING_KEY : undefined),
+        });
+        expect(calls).toHaveLength(1);
+        const ctx = calls[0]!;
+        expect(ctx.auth).toBeUndefined();
+        expect([ctx.requestSigner?.connector, ctx.requestSigner?.scheme]).toEqual(['aliyun_ecs', 'aliyun-acs3-hmac-sha256']);
+        expect(JSON.stringify(ctx)).not.toContain(SIGNING_KEY);
+
+        // The signer signs with the key the reference resolved to: recompute
+        // its signature from the instant and nonce it chose.
+        const request = { method: 'GET', url: 'https://ecs.cn-shanghai.aliyuncs.com/?RegionId=cn-shanghai', headers: {} };
+        const signature = await ctx.requestSigner!.sign(request);
+        const expected = computeAliyunAcs3Signature(request, 'LTAI-example', SIGNING_KEY, {
+            date: signature.headers['x-acs-date']!,
+            nonce: signature.headers['x-acs-signature-nonce']!,
+        });
+        expect(signature.headers.authorization).toBe(expected.headers.authorization);
+
+        const engine = automationOf(kernel);
+        expect(engine.getConnectorDescriptors().find((d) => d.name === 'aliyun_ecs')?.state).not.toBe('degraded');
+        expect(engine.resolveConnectorAction('aliyun_ecs', 'ping')).toBeDefined();
+        await kernel.shutdown();
+    });
+
+    it.each([
+        ['does not say it applies the signer', undefined],
+        ['says it does not apply the signer', false],
+    ] as const)('fails boot when the provider %s, and lets its connection go', async (_why, applied) => {
+        const { factory, closed } = makeSigningProvider(applied);
+        await expect(boot([providerConnector('aliyun_ecs', { auth: signed })], {
+            providerFactory: factory,
+            credentialResolver: () => SIGNING_KEY,
+        })).rejects.toThrow(/auth type 'signed'.*did not say it signs every request.*unsigned/s);
+        expect(closed).toEqual(['aliyun_ecs']);
+    });
+
+    it('degrades the instance naming the reference when the signing key does not resolve, without calling its factory', async () => {
+        const { factory, calls } = makeSigningProvider(true);
+        const kernel = await boot([providerConnector('aliyun_ecs', { auth: signed })], {
+            providerFactory: factory,
+            credentialResolver: () => undefined,
+        });
+        expect(calls).toHaveLength(0);
+        const engine = automationOf(kernel);
+        expect(engine.getConnectorDescriptors().find((d) => d.name === 'aliyun_ecs')?.state).toBe('degraded');
+        expect(engine.getConnectorDegradedReason('aliyun_ecs')).toContain('ALIYUN_SECRET');
+        await kernel.shutdown();
+    });
+
+    it('CONTROL: a static kind is handed its credential and no signer', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('k_bearer', { auth: { type: 'bearer', credentialRef: 'TOKEN' } })], {
+            providerFactory: factory,
+            credentialResolver: () => 'resolved-secret',
+        });
+        expect(calls[0]!.auth).toEqual({ type: 'bearer', token: 'resolved-secret' });
+        expect(calls[0]!.requestSigner).toBeUndefined();
         await kernel.shutdown();
     });
 });
