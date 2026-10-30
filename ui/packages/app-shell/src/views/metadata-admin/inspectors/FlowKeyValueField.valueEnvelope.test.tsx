@@ -16,6 +16,7 @@ import {
 } from '@objectstack/spec/automation';
 import { FlowNodeConfigField } from './FlowNodeConfigField';
 import type { FlowConfigField } from './flow-node-config';
+import { t } from '../i18n';
 
 afterEach(cleanup);
 
@@ -119,7 +120,11 @@ describe('assignment value cell — text or CEL expression (objectui#7588)', () 
     expect(screen.queryByRole('alert')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: TOGGLE }));
     expect(onCommit).toHaveBeenLastCalledWith({ empty: { dialect: 'cel', source: '' } });
-    expect(screen.getByRole('alert').textContent).toContain(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+    // objectstack#27799 — the spec's refusal of a blank expression, said in
+    // business words rather than the envelope's wire shape.
+    const alert = screen.getByRole('alert').textContent ?? '';
+    expect(alert).toBe(t('engine.inspector.flowNode.kv.expressionNeeded'));
+    expect(alert).not.toContain(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
   });
 
   it('names the legacy array form with the spec prescription, and an expression writes the map', () => {

@@ -49,6 +49,7 @@ import type { ScopeGroup } from './useFlowScope.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
 import {
   ASSIGNMENT_ARRAY_FORM_PRESCRIPTION,
+  isBlankExpressionRefusal,
   isEditableValueEnvelope,
   valueEnvelopeRefusal,
   writeValueEnvelope,
@@ -227,6 +228,12 @@ export interface FlowKeyValueFieldProps {
     toggleLabel: string;
     /** Placeholder of an expression row's source input. */
     expressionPlaceholder: string;
+    /**
+     * What the cell says where the spec refuses an expression left blank
+     * (`isBlankExpressionRefusal`), in place of the envelope's wire shape.
+     * The verdict stays the spec's; only its words change.
+     */
+    blankExpressionMessage?: string;
   };
   /** The spec requires this map (objectui#10948): the label carries {@link RequiredMarker}. */
   required?: boolean;
@@ -371,6 +378,10 @@ export function FlowKeyValueField({
           const hole = valueMode === 'hole' && !expression;
           const pickerGroups = expression || hole ? (scopeGroups ?? []) : [];
           const refusal = envelopeSlot && writesMap ? valueRefusal(rowValue(row)) : null;
+          const blankText = valueEnvelope?.blankExpressionMessage;
+          const shownRefusal = refusal
+            ? [...new Set(refusal.map((m) => (blankText && isBlankExpressionRefusal(m) ? blankText : m)))]
+            : null;
           return (
             <div key={row.id} className="space-y-1">
               {/*
@@ -436,9 +447,9 @@ export function FlowKeyValueField({
                   </Button>
                 )}
               </div>
-              {refusal ? (
+              {shownRefusal ? (
                 <div className="space-y-0.5" role="alert">
-                  {refusal.map((message, i) => (
+                  {shownRefusal.map((message, i) => (
                     <p key={i} className="text-[11px] leading-snug text-destructive">
                       {message}
                     </p>

@@ -607,6 +607,16 @@
       "pinned": 2
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.datasource-credentials-ref-own-reference.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.datasource-credentials-ref-own-reference.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
       "verb": "delete",
       "pinned": 1

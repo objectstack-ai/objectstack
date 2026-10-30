@@ -896,6 +896,7 @@
     "isComposedReadableIds": "src/data/readable-ids.ts#isComposedReadableIds (function)",
     "isContextToken": "src/data/context-tokens.zod.ts#isContextToken (function)",
     "isControlledByParentMasterField": "src/data/controlled-by-parent-master.ts#isControlledByParentMasterField (function)",
+    "isCredentialFieldType": "src/data/masked-field-types.ts#isCredentialFieldType (function)",
     "isCurrentUserDefaultToken": "src/data/default-value-tokens.ts#isCurrentUserDefaultToken (function)",
     "isDateMacroToken": "src/data/date-macros.zod.ts#isDateMacroToken (function)",
     "isDateRangePresetName": "src/data/date-range-presets.ts#isDateRangePresetName (function)",

@@ -436,6 +436,8 @@ import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstall
 import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
+// [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
+import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -21288,6 +21290,17 @@ export class ObjectStackProtocolImplementation implements
             if (datasourceRefusal) throw datasourceRefusal;
         }
 
+        // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
+        // holds: refused 400 before the authoring gate and every write. See {@link datasourceCredentialsRefSaveRefusal}.
+        {
+            const repo = this.getOverlayRepo();
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: request.item,
+                mode, packageId: request.packageId, source: request.source,
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
+        }
+
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
         // anonymous endpoint of `type: 'flow'` names it is refused, in publish
         // mode only (a draft does not execute; its publish is judged at the
@@ -23049,7 +23062,10 @@ export class ObjectStackProtocolImplementation implements
         // binding the active row is written under), before `repo.promoteDraft`
         // writes — so a batch publish aborts on it as it aborts on the owner
         // refusal above. See {@link permissionSetNameCollisionRefusal}.
-        {
+        // Asked only when a draft was read, like its siblings: with none at
+        // the address the caller is told `repo.promoteDraft`'s `NO_DRAFT`
+        // first, the fact about its own state, rather than another owner's.
+        if (draftForGate) {
             const nameCollision = await this.permissionSetNameCollisionRefusal(
                 singularType, request.name, promoteInto, 'publish',
             );

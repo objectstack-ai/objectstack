@@ -177,7 +177,7 @@ export function VariableTextInput({
           ref={setRef}
           {...shared}
           rows={rows}
-          className="w-full rounded border bg-background px-2 py-1.5 pr-8 font-mono text-xs"
+          className="w-full rounded border bg-background px-2 py-1.5 pr-8 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
         />
       ) : (
         <Input ref={setRef} {...shared} className={cn('h-8 pr-8 text-sm', mono && 'font-mono')} />

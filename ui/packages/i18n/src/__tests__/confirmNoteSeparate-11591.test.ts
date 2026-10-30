@@ -21,9 +21,9 @@
  *
  * ## How "claims atomicity" is read, per pack
  *
- * Each pack's package sentence spells the claim in its own words: an
- * "atomically" adverb where the language has one, "all at once" where it does
- * not (`ar` holds no atomic adverb at all). `CLAIM` names that spelling per
+ * Each pack's package sentence spells the claim in its own words: since
+ * objectstack#27521 that is the plain all-or-nothing clause ("all of them go
+ * live, or none do"), not an "atomically" adverb. `CLAIM` names that spelling per
  * pack, and every one is CONTROLLED: it must occur in every form of that
  * pack's `confirmNote` family before its absence from `confirmNoteSeparate`
  * means anything. A marker that stopped matching the package sentence would
@@ -43,15 +43,15 @@ const LANGS = Object.keys(builtInLocales) as LocaleCode[];
 
 /** The atomicity claim, as each pack's package sentence spells it. */
 const CLAIM: Record<LocaleCode, RegExp> = {
-  en: /atomically/u,
-  de: /atomar/u,
-  es: /atómicamente/u,
-  fr: /atomiquement/u,
-  pt: /atomicamente/u,
-  ru: /атомарно/u,
-  ar: /دفعة واحدة/u,
-  ja: /アトミック|まとめて/u,
-  ko: /원자적|한 번에/u,
+  en: /go live, or none do|goes live, or nothing changes/u,
+  de: /alle live oder keiner|geht live, oder nichts ändert sich/u,
+  es: /o se publican todos, o ninguno|se publica, o no cambia nada/u,
+  fr: /tous sont mis en ligne, ou aucun|il est mis en ligne, ou rien ne change/u,
+  pt: /ou todos entram no ar, ou nenhum|ele entra no ar, ou nada muda/u,
+  ru: /либо публикуются все, либо ни один|он публикуется, либо ничего не меняется/u,
+  ar: /إما أن تُنشر/u,
+  ja: /どちらかです/u,
+  ko: /하나도 게시되지 않습니다|아무것도 바뀌지 않습니다/u,
   zh: /原子|一次性/u,
 };
 

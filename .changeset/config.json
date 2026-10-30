@@ -36,6 +36,7 @@
       "@objectstack/driver-mongodb",
       "@objectstack/driver-sqlite-wasm",
       "@objectstack/driver-turso",
+      "@objectstack/driver-odata",
       "@objectstack/plugin-approvals",
       "@objectstack/plugin-audit",
       "@objectstack/plugin-auth",

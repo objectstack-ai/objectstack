@@ -524,6 +524,20 @@ describe('the draft promotion refuses a permission-set draft whose name another 
         ]);
     });
 
+    it('with no draft at the address, the caller is told about its own state first: the repository\'s NO_DRAFT (404), not the collision another owner\'s name would raise', async () => {
+        const h = makeProtocol();
+        // B holds the active name; A has no draft of it at all.
+        await h.protocol.saveMetaItem({ type: 'permission', name: SET, item: perm(SET), packageId: OWNER_B });
+        h.saveDoor.mockClear();
+
+        const { error } = await attempt(() => h.protocol.publishMetaItem({ type: 'permission', name: SET, packageId: OWNER_A }));
+
+        expect(error).toBeInstanceOf(Error);
+        expect(error.code).toBe('NO_DRAFT');
+        expect(error.status).toBe(404);
+        expect(storedSets(h)).toEqual([{ row: SET, state: 'active', binding: OWNER_B }]);
+    });
+
     it('CONTROL: the owning package publishes its own first set, and later re-publishes its own draft of it', async () => {
         const h = makeProtocol();
         await h.protocol.saveMetaItem({ type: 'permission', name: SET, item: perm(SET), packageId: OWNER_B, mode: 'draft' });
