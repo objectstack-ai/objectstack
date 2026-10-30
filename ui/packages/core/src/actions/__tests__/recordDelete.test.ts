@@ -194,3 +194,53 @@ describe('recordDelete.run — several records', () => {
   });
 });
 
+
+/**
+ * objectstack-ai/objectstack#27823 — the delete is permanent and the success
+ * toast names what went. The name comes from the same ADR-0079 resolver the
+ * confirm title reads; the resolver's `Record #id` floor is not a name, so a
+ * nameless record keeps the object-label toast. A batch keeps its count.
+ */
+describe('recordDelete.successText and the one-record toast (objectstack#27823)', () => {
+  const TASK = {
+    name: 'crm_task',
+    label: 'Task',
+    nameField: 'subject',
+    fields: { subject: { type: 'text' }, name: { type: 'text' } },
+  };
+
+  it('names the record by its declared name field and the object label', () => {
+    expect(
+      recordDelete.successText(
+        { t, label: 'Task', objectDef: TASK },
+        { id: 't1', subject: 'Website Relaunch', name: 'T-1' },
+      ),
+    ).toBe('objectActions.deletedNamed {"label":"Task","name":"Website Relaunch"}');
+  });
+
+  it('a record with nothing nameable keeps the object-label toast, never "Record #id"', () => {
+    expect(recordDelete.successText({ t, label: 'Task', objectDef: TASK }, { id: 't9' })).toBe(
+      'objectActions.deleteSuccess {"label":"Task"}',
+    );
+    expect(recordDelete.successText({ t, label: 'Task' }, null)).toBe('objectActions.deleteSuccess {"label":"Task"}');
+  });
+
+  it('run names the row it was handed in `params.record`', async () => {
+    const { deps, toast } = harness();
+    await recordDelete.run(
+      { ...deps, label: 'Task', objectDef: TASK },
+      { params: { recordId: 't1', record: { id: 't1', subject: 'Website Relaunch' } } },
+    );
+    expect(toast.success).toHaveBeenCalledWith('objectActions.deletedNamed {"label":"Task","name":"Website Relaunch"}');
+  });
+
+  it('control: a batch toast keeps its count and names no record', async () => {
+    const { deps, toast } = harness();
+    await recordDelete.run(
+      { ...deps, label: 'Task', objectDef: TASK },
+      { params: { records: [{ id: 'a', subject: 'One' }, { id: 'b', subject: 'Two' }] } },
+    );
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith('objectActions.bulkDeleteSuccess {"count":2,"label":"Task"}');
+  });
+});

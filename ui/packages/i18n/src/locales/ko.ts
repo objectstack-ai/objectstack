@@ -1144,7 +1144,7 @@ const ko = {
     loading: "로딩 중…",
     copyToClipboard: "클립보드에 복사",
     copied: "복사됨!",
-    deleteConfirmation: "이 레코드를 삭제하시겠습니까?",
+    deleteConfirmation: "이 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
     deleted: "레코드가 삭제됨",
     editRecord: "레코드 편집",
     viewAll: "모두 보기",
@@ -1722,7 +1722,7 @@ const ko = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다.",
+      accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 세트'에서 권한 세트로 부여할 수 있습니다.",
     },
     saveAdvisoryTitle: "저장되었습니다 — 작성 검사에서 {{count}}건의 권장 사항이 발견되었습니다",
     saveAdvisoryTitle_one: "저장되었습니다 — 작성 검사에서 {{count}}건의 권장 사항이 발견되었습니다",
@@ -2786,7 +2786,9 @@ const ko = {
         title: "비밀번호가 만료되었습니다",
         resetTitle: "비밀번호를 변경해야 합니다",
         fallbackMessage: "계속하려면 새 비밀번호를 설정하세요.",
+        resetBody: "관리자가 임시 비밀번호를 설정했습니다. 계속하려면 본인의 새 비밀번호를 설정하세요.",
         current: "현재 비밀번호",
+        temporary: "임시 비밀번호",
         next: "새 비밀번호",
         confirm: "새 비밀번호 확인",
         submit: "비밀번호 변경 후 계속",
@@ -3222,9 +3224,10 @@ const ko = {
   },
   objectActions: {
     deleteSuccess: "{{label}} 삭제 성공",
+    deletedNamed: "{{label}} \"{{name}}\" 삭제됨",
     deleteFailed: "{{label}} 삭제 실패",
     noRecordId: "레코드 ID가 없습니다",
-    deleteConfirm: "이 레코드를 삭제하시겠습니까?",
+    deleteConfirm: "이 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
     deleteConfirmTitle: "{{label}} \"{{name}}\"을(를) 삭제하시겠습니까?",
     bulkDeleteConfirmTitle: "{{count}}개의 {{label}} 레코드를 삭제하시겠습니까?",
     bulkDeleteConfirmTitle_one: "{{count}}개의 {{label}} 레코드를 삭제하시겠습니까?",
@@ -4377,9 +4380,9 @@ const ko = {
       detailChangedKeys: '기타 변경:',
       detailNewKeys: '포함:',
       generatedGroup: '플랫폼에서 생성됨 ({{n}})',
-      confirmNote: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
-      confirmNote_one: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
-      confirmNote_other: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 한 번에(원자적으로) 게시됩니다.',
+      confirmNote: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 함께 게시됩니다. 모두 게시되거나, 하나도 게시되지 않습니다.',
+      confirmNote_one: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 게시됩니다. 게시되거나, 아무것도 바뀌지 않습니다.',
+      confirmNote_other: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 함께 게시됩니다. 모두 게시되거나, 하나도 게시되지 않습니다.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: '게시하면 대기 중인 초안 {{count}}개가 하나씩 따로 게시됩니다. 게시에 실패한 초안은 대기 상태로 남고, 나머지는 그대로 게시됩니다.',
@@ -4684,6 +4687,11 @@ const ko = {
     actionsEmptyTitle: "패키지 액션 없음",
     actionsEmptyBody: "이 배포에는 액션을 선언하는 설치된 패키지가 없습니다. 직접 작성한 액션은 Studio에 있습니다.",
     actionsLoadFailed: "패키지 액션을 불러오지 못했습니다.",
+    switchedOn: "\"{{label}}\"을(를) 켰습니다.",
+    switchedOff: "\"{{label}}\"을(를) 이 배포에서 껐습니다.",
+    actionOffTitle: "\"{{label}}\"을(를) 끌까요?",
+    actionOffBody: "다시 켤 때까지 이 배포에서 제공되는 모든 곳에서 모든 사용자에게 실행되지 않습니다.",
+    actionOffConfirm: "끄기",
   },
   element: {
     number: {

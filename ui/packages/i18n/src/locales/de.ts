@@ -1144,7 +1144,7 @@ const de = {
     loading: "Wird geladen…",
     copyToClipboard: "In Zwischenablage kopieren",
     copied: "Kopiert!",
-    deleteConfirmation: "Sind Sie sicher, dass Sie diesen Datensatz löschen möchten?",
+    deleteConfirmation: "Sind Sie sicher, dass Sie diesen Datensatz löschen möchten? Dies kann nicht rückgängig gemacht werden.",
     deleted: "Datensatz gelöscht",
     editRecord: "Datensatz bearbeiten",
     viewAll: "Alle anzeigen",
@@ -1722,7 +1722,7 @@ const de = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen.",
+      accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssätze mit einem Berechtigungssatz erteilen.",
     },
     saveAdvisoryTitle: "Gespeichert — die Autorenprüfung ergab {{count}} Hinweis(e)",
     saveAdvisoryTitle_one: "Gespeichert — die Autorenprüfung ergab {{count}} Hinweis",
@@ -2786,7 +2786,9 @@ const de = {
         title: "Ihr Passwort ist abgelaufen",
         resetTitle: "Sie müssen Ihr Passwort ändern",
         fallbackMessage: "Bitte legen Sie ein neues Passwort fest, um fortzufahren.",
+        resetBody: "Ein Administrator hat ein temporäres Passwort für Sie festgelegt. Wählen Sie ein eigenes neues Passwort, um fortzufahren.",
         current: "Aktuelles Passwort",
+        temporary: "Temporäres Passwort",
         next: "Neues Passwort",
         confirm: "Neues Passwort bestätigen",
         submit: "Passwort ändern & fortfahren",
@@ -3223,9 +3225,10 @@ const de = {
   },
   objectActions: {
     deleteSuccess: "{{label}} erfolgreich gelöscht",
+    deletedNamed: "{{label}} „{{name}}“ gelöscht",
     deleteFailed: "{{label}} konnte nicht gelöscht werden",
     noRecordId: "Keine Datensatz-ID angegeben",
-    deleteConfirm: "Möchten Sie diesen Datensatz wirklich löschen?",
+    deleteConfirm: "Möchten Sie diesen Datensatz wirklich löschen? Dies kann nicht rückgängig gemacht werden.",
     deleteConfirmTitle: "{{label}} „{{name}}“ löschen?",
     bulkDeleteConfirmTitle: "{{count}} {{label}}-Datensätze löschen?",
     bulkDeleteConfirmTitle_one: "{{count}} {{label}}-Datensatz löschen?",
@@ -4378,9 +4381,9 @@ const de = {
       detailChangedKeys: 'Ebenfalls geändert:',
       detailNewKeys: 'Enthält:',
       generatedGroup: 'Von der Plattform erzeugt ({{n}})',
-      confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets atomar freigegeben.',
-      confirmNote_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf dieses Pakets atomar freigegeben.',
-      confirmNote_other: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets atomar freigegeben.',
+      confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets gemeinsam freigegeben: Entweder gehen alle live oder keiner.',
+      confirmNote_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf dieses Pakets freigegeben: Er geht live, oder nichts ändert sich.',
+      confirmNote_other: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets gemeinsam freigegeben: Entweder gehen alle live oder keiner.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'Beim Veröffentlichen werden die {{count}} ausstehenden Entwürfe einzeln freigegeben: Ein Entwurf, der dabei scheitert, bleibt ausstehend, die übrigen werden trotzdem freigegeben.',
@@ -4686,6 +4689,11 @@ const de = {
     actionsEmptyTitle: "Keine Paket-Aktionen",
     actionsEmptyBody: "In dieser Installation deklariert kein installiertes Paket eine Aktion. Selbst erstellte Aktionen finden Sie im Studio.",
     actionsLoadFailed: "Paket-Aktionen konnten nicht geladen werden.",
+    switchedOn: "{{label}} ist eingeschaltet.",
+    switchedOff: "{{label}} ist für diese Bereitstellung ausgeschaltet.",
+    actionOffTitle: "{{label}} ausschalten?",
+    actionOffBody: "Es wird überall, wo es in dieser Bereitstellung angeboten wird, für alle Benutzer nicht mehr ausgeführt, bis es wieder eingeschaltet wird.",
+    actionOffConfirm: "Ausschalten",
   },
   element: {
     number: {

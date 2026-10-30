@@ -1438,6 +1438,9 @@ const SEMANTIC_COLOR_MAP: Record<string, string> = {
   normal: 'blue',
   low: 'gray',
   none: 'gray',
+  // Severity values (en): info is the quiet level, not an alarm colour
+  info: 'blue',
+  warning: 'yellow',
   // Status values (en)
   paid: 'green',
   completed: 'green',

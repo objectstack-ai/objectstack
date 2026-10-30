@@ -37,7 +37,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 
+import { toast } from 'sonner';
 import { PackagedActionsSection } from './PackagedActionsSection';
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn() } }));
 
 /* -------------------------------------------------------------------------- */
 /* The server's own refusal strings                                            */
@@ -256,6 +259,15 @@ describe('activation state as the ledger reports it', () => {
 /* 2) Activation round-trip                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Switching a packaged action OFF asks a confirm first (objectstack#27521 row
+ * 20): click its switch, then the confirm. Switching one ON runs at once.
+ */
+async function switchOff(name: string): Promise<void> {
+  fireEvent.click(screen.getByRole('switch', { name }));
+  fireEvent.click(await screen.findByTestId('packaged-action-off-confirm'));
+}
+
 describe('activation round-trip', () => {
   it('disables and re-enables a packaged action, showing what the server reports', async () => {
     await renderSection();
@@ -263,7 +275,7 @@ describe('activation round-trip', () => {
     const invoice = screen.getByRole('switch', { name: 'Activation for Send invoice on account' });
     expect(invoice).toBeChecked();
 
-    fireEvent.click(invoice);
+    await switchOff('Activation for Send invoice on account');
     await waitFor(() => expect(flipCalls()).toHaveLength(1));
     expect(flipCalls()[0].method).toBe('POST');
     expect(flipCalls()[0].url).toContain('/actions/_activation/account/send_invoice');
@@ -290,7 +302,7 @@ describe('activation round-trip', () => {
   it('moves only the flipped row, even when a sibling shares the object', async () => {
     await renderSection();
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Send invoice on account' }));
+    await switchOff('Activation for Send invoice on account');
     await waitFor(() =>
       expect(
         screen.getByRole('switch', { name: 'Activation for Send invoice on account' }),
@@ -309,7 +321,7 @@ describe('activation round-trip', () => {
     render(<PackagedActionsSection />);
     await screen.findByText('Nightly sync');
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Nightly sync on global' }));
+    await switchOff('Activation for Nightly sync on global');
     await waitFor(() => expect(flipCalls()).toHaveLength(1));
     expect(flipCalls()[0].url).toContain('/actions/_activation/global/nightly_sync');
   });
@@ -324,7 +336,7 @@ describe('server refusals reach the operator verbatim', () => {
     fixture.flip = [{ status: 403, body: errorEnvelope('PERMISSION_DENIED', POSTURE_REFUSAL) }];
     await renderSection();
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Send invoice on account' }));
+    await switchOff('Activation for Send invoice on account');
 
     const shown = await screen.findByText(POSTURE_REFUSAL);
     expect(shown).toBeInTheDocument();
@@ -349,7 +361,7 @@ describe('server refusals reach the operator verbatim', () => {
     // conflict with a client-side guess about which one is "real".
     expect(screen.getByRole('switch', { name: 'Activation for Export on contact' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Export on account' }));
+    await switchOff('Activation for Export on account');
 
     const shown = await screen.findByText(AMBIGUITY_REFUSAL);
     expect(shown).toBeInTheDocument();
@@ -361,7 +373,7 @@ describe('server refusals reach the operator verbatim', () => {
     fixture.flip = [{ status: 503, body: errorEnvelope('SERVICE_UNAVAILABLE', NO_LEDGER_REFUSAL) }];
     await renderSection();
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Send invoice on account' }));
+    await switchOff('Activation for Send invoice on account');
 
     expect(await screen.findByText(NO_LEDGER_REFUSAL)).toBeInTheDocument();
     // An outage is not a verdict, and it is not a hiccup to paper over either:
@@ -374,7 +386,7 @@ describe('server refusals reach the operator verbatim', () => {
     fixture.flip = [{ status: 403, body: errorEnvelope('PERMISSION_DENIED', POSTURE_REFUSAL) }];
     await renderSection();
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Send invoice on account' }));
+    await switchOff('Activation for Send invoice on account');
     await screen.findByText(POSTURE_REFUSAL);
 
     const invoiceRow = screen.getByTestId('packaged-action-account-send_invoice');
@@ -455,7 +467,7 @@ describe('no ancestry or drift surface', () => {
     ];
     await renderSection();
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Send invoice on account' }));
+    await switchOff('Activation for Send invoice on account');
     await waitFor(() =>
       expect(
         screen.getByRole('switch', { name: 'Activation for Send invoice on account' }),
@@ -468,5 +480,60 @@ describe('no ancestry or drift surface', () => {
     const section = screen.getByTestId('packaged-actions-section');
     expect(section.textContent).not.toContain('base_send_invoice');
     expect(section.textContent).not.toContain('v3');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 6) The switch confirms off, says what happened, names the object           */
+/*    (objectstack#27521 row 20)                                              */
+/* -------------------------------------------------------------------------- */
+
+describe('the switch confirms off, says what happened, and names the object', () => {
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+  });
+
+  it('switching off asks first: Cancel sends nothing and leaves the switch on', async () => {
+    await renderSection();
+    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Send invoice on account' }));
+
+    const dialog = await screen.findByTestId('packaged-action-off-dialog');
+    expect(dialog).toHaveTextContent('Send invoice');
+    expect(flipCalls()).toHaveLength(0);
+
+    fireEvent.click(within(dialog).getByTestId('packaged-action-off-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('packaged-action-off-dialog')).toBeNull());
+    expect(flipCalls()).toHaveLength(0);
+    expect(screen.getByRole('switch', { name: 'Activation for Send invoice on account' })).toBeChecked();
+  });
+
+  it('an accepted switch says so in a toast, off and then on; switching on asks nothing', async () => {
+    await renderSection();
+    await switchOff('Activation for Send invoice on account');
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(toast.success).mock.calls[0][0]).toContain('Send invoice');
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Activation for Send invoice on account' }));
+    expect(screen.queryByTestId('packaged-action-off-dialog')).toBeNull();
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    expect(flipCalls().map((c) => (c.body as { enabled: boolean }).enabled)).toEqual([false, true]);
+  });
+
+  it('CONTROL: a refused switch shows the refusal and no toast', async () => {
+    fixture.flip = [{ status: 403, body: errorEnvelope('PERMISSION_DENIED', POSTURE_REFUSAL) }];
+    await renderSection();
+    await switchOff('Activation for Send invoice on account');
+    await screen.findByText(POSTURE_REFUSAL);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('draws the object by its label, with the machine name beside it', async () => {
+    fixture.objects = [
+      { ...packagedObject('account', [{ name: 'send_invoice', label: 'Send invoice' }]), label: 'Account' },
+    ];
+    render(<PackagedActionsSection />);
+    const row = await screen.findByTestId('packaged-action-account-send_invoice');
+    expect(within(row).getByTestId('packaged-action-object-label')).toHaveTextContent('Account');
+    expect(within(row).getByText('account')).toBeInTheDocument();
   });
 });

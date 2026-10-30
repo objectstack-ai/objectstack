@@ -110,6 +110,7 @@
 
 import * as React from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Info, Loader2, Workflow } from 'lucide-react';
 import {
   Badge,
@@ -424,6 +425,14 @@ export function PackagedAutomationPage() {
         return;
       }
       applyToggled(row.name, outcome.enabled);
+      toast.success(
+        outcome.enabled
+          ? t('packagedAutomation.switchedOn', { defaultValue: '"{{label}}" is switched on.', label: row.label })
+          : t('packagedAutomation.switchedOff', {
+              defaultValue: '"{{label}}" is switched off for this deployment.',
+              label: row.label,
+            }),
+      );
     } finally {
       setBusyFlow(null);
     }
@@ -632,14 +641,17 @@ export function PackagedAutomationPage() {
       )}
 
       {rows !== null && rows.length > 0 && (
-        <Table>
+        <Table className="max-sm:[&_td]:px-2 max-sm:[&_th]:px-2">
           <TableHeader>
             <TableRow>
               <TableHead>{t('packagedAutomation.colFlow', { defaultValue: 'Flow' })}</TableHead>
-              <TableHead className="w-[220px]">
+              {/* Fixed column widths from `sm` up only: on a phone the columns
+                  share the width and the activation cell wraps, so the switch
+                  and Clone stay on screen without a sideways scroll. */}
+              <TableHead className="sm:w-[220px]">
                 {t('packagedAutomation.colActivation', { defaultValue: 'Activation' })}
               </TableHead>
-              <TableHead className="w-[140px] text-right">
+              <TableHead className="sm:w-[140px] text-right">
                 {t('packagedAutomation.colActions', { defaultValue: 'Actions' })}
               </TableHead>
             </TableRow>
@@ -660,7 +672,7 @@ export function PackagedAutomationPage() {
                           sent; the chip reads the same whatever it says. */}
                       {row.reason && <ReasonDetails reason={row.reason} />}
                     </div>
-                    <code className="font-mono text-xs text-muted-foreground">{row.name}</code>
+                    <code className="font-mono text-xs text-muted-foreground break-all">{row.name}</code>
                     {refusal && (
                       // VERBATIM server refusal, next to the control that
                       // caused it. `role="alert"` so it is announced.
@@ -670,7 +682,7 @@ export function PackagedAutomationPage() {
                     )}
                   </TableCell>
                   <TableCell className="align-top">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Switch
                         checked={row.enabled}
                         disabled={busyFlow === row.name}
