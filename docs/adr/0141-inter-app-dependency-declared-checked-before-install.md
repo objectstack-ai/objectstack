@@ -65,8 +65,8 @@ HotCRM's module split.
 **Evidence**: every anchor into this repository was read at `origin/main` `47af3dde42`, the base of this record's branch
 (the tree outside `docs/adr/` is identical at the record's head). `objectstack-ai/hotcrm` and `objectstack-ai/cloud` are
 not readable from the drafting session; their facts are cited as the rulings and the HotCRM seat cite them and marked
-**not re-verified**. The build-time sentences of D1, the Consequences and Execution plan item 4 were re-read at
-`f5dd057587` and corrected on 2026-10-30 (#27616).
+**not re-verified**. The sentences on where a cross-app reference is judged — TL;DR item 2, D1, D7, the Consequences
+and Execution plan items 4 and 5 — were re-read at `f5dd057587` and corrected on 2026-10-30 (#27616).
 
 ---
 
@@ -78,7 +78,9 @@ added; one gate learns a second source of co-owners:
 1. **Declaration** is the `dependencies` key every manifest already has — `{ "PACKAGE_ID": "SEMVER_RANGE" }`.
 2. **Reference** is what the runtime save door already admits: a package's own objects, the objects of the packages its
    `dependencies` declare (transitively), platform objects, and tenant objects that belong to no package. An undeclared
-   cross-app reference is refused there today, `422`, with "declare a dependency" as the fix.
+   cross-app reference that door judges — a flow's trigger, a dataset's base, a list view's object — is refused there
+   today, `422`, with "declare a dependency" as the fix. A lookup is judged only at build, which refuses one into
+   another artifact whatever the manifest declares (D1).
 3. **The one new gate is a pre-install check.** Installing a package judges every declared dependency — installed in the
    target environment at a version inside the declared range, or delivered by the same artifact (presence only: the
    artifact is one tested unit) — and otherwise refuses the whole install, before anything registers, with a message
@@ -196,13 +198,13 @@ An app — any installable package — declares what it depends on in `ManifestS
 platform already admits for a declared package: the runtime save door judges a write against the transitive closure
 described in Context §1, and `defineStack` keeps admitting a lookup or master-detail to an object the stack does not
 carry while refusing a hook on it and a package's own navigation to it (ADR-0130 §1.5). Nothing else decides whether a
-cross-app reference is legal.
+cross-app reference is legal, though the build still refuses a declared lookup into another artifact (the gap below).
 
 ⛔ No owner-side "published object" flag, no export list, no second reference mechanism (the ruling's own words: the
-closure "already honours the declared packages' objects"). An undeclared cross-app reference is refused where it is
-refused today — at the save door, `422` — and the fix it prints is the declaration. `os validate`, `os build` and
-`os lint` cannot see the objects of a dependency the artifact does not carry: a stack there resolves against its own
-objects, its artifact's `packages[]` and the platform's names, so a lookup to such an object is refused
+closure "already honours the declared packages' objects"). An undeclared cross-app reference the save door judges is
+refused where it is refused today — at the save door, `422` — and the fix it prints is the declaration. `os validate`,
+`os build` and `os lint` cannot see the objects of a dependency the artifact does not carry: a stack there resolves
+against its own objects, its artifact's `packages[]` and the platform's names, so a lookup to such an object is refused
 (`object-reference-unknown`) and a flow triggered on one warns (`flow-trigger-unknown-object`). Only the save door
 honours the declaration, for a flow's trigger, a dataset's base and a list view's object; it does not judge a lookup.
 Closing that gap at build is deferred by the ruling on #25805.
@@ -491,6 +493,8 @@ Three HotCRM-side preconditions, each **not re-verified** and each the HotCRM la
 
 Until the runtime card ships, composite products keep shipping as one artifact under ADR-0130. That is the state
 hotcrm#2270 packages revenue and marketing in; hotcrm#2271 moves revenue to its own artifact once the check is released.
+Even then, until the build gap D1 names closes (#25805, deferred), a carved-out module's `Field.lookup` into its app's
+objects is refused at `os build` whatever the module declares.
 
 ### D8 — The dependency shapes, and the alignment the runtime card owes
 
@@ -536,9 +540,11 @@ one way to declare a dependency.
 - A customer installs CRM now and PSA — or a HotCRM module — later, without the module having been shipped to every CRM
   customer and without swapping to a combined app: 「每个包可以独立安装」.
 - One rule replaces several special cases. Inside an artifact (ADR-0130), at the save door (the closure), and across apps
-  (this record), a cross-package reference is legal exactly when it is declared.
-- An AI author's undeclared reference stays a loud `422` at the save door, and a missing dependency becomes a loud refusal
-  at install, instead of copied objects that drift silently.
+  (this record), a cross-package reference is legal exactly when it is declared — save the build's refusal of a lookup
+  into another artifact, the gap D1 names.
+- An AI author's undeclared reference stays a loud `422` at the save door for the bindings that door judges — a lookup
+  is refused at build instead (D1) — and a missing dependency becomes a loud refusal at install, instead of copied
+  objects that drift silently.
 - The work is small and stays small — one runtime card of size S and two smaller ones: no new authorable key, no schema
   change, one predicate at three doors, one more source for one co-owner set (read two ways: a declared parent, a shared
   declared parent), one author-side lint rule, and the one sorter applied inside two hydrate loops.
@@ -735,7 +741,8 @@ sizing decision; 10 is a reading of an earlier ruling.
    dependency the artifact does not carry, so it refuses a lookup to one and warns on a flow triggered on one (D1).
 5. **HotCRM** (its own lane): the D4 readings on the revenue module; D7's preconditions — service and marketing declare
    sales (Open items 7), hooks follow ownership, revenue's permission sets travel with it — and the carved-out module's
-   `type: 'app'`; hotcrm#2271 ships revenue as its own artifact once (1) is released.
+   `type: 'app'`; hotcrm#2271 ships revenue as its own artifact once (1) is released, and until D1's build gap closes
+   `os build` refuses that module's lookups into HotCRM's objects (D7).
 
 ## References
 
