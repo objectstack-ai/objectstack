@@ -344,7 +344,10 @@ export interface TranslateDocumentOptions extends ResolveOptions {
   /**
    * The PACKAGED (code-layer) base document this one was resolved from — the
    * owner's own declaration, BEFORE `objectExtensions` are folded on
-   * (ADR-0029 D9.2) and before any tenant `sys_metadata` overlay.
+   * (ADR-0029 D9.2) and before any tenant `sys_metadata` overlay. For an
+   * object, its `validations` also carry the rules each code extender ships
+   * (#27559), since a rule's packaged message is the message of whichever code
+   * layer shipped that rule name; its scalars stay the owner's.
    *
    * Supplied by the serving layer, which is the only one that knows it; when
    * it is absent the translators behave exactly as they did before #8284 (the
@@ -4008,13 +4011,14 @@ const MAX_VALIDATION_DEPTH = 10;
  * A rule the base does not declare has no packaged message to diverge from,
  * so nothing is inferred and the catalog applies, as it does with no base at
  * all (the predicate's own first edge). Unlike a list view, a rule is
- * translated under its OWN name: a rule an `objectExtensions` entry folds onto
- * the object, absent from the owner's declaration by construction, is
- * translated by its package's entry for that name, and counting it as
- * diverged would serve it untranslated.
+ * translated under its OWN name. A rule an `objectExtensions` entry folds onto
+ * the object is in the base too (#27559): the serving layer appends each code
+ * extender's rules to the owner's, so a tenant's rewrite of it is judged
+ * against the extension package's message, and the untouched rule is
+ * translated by that package's entry for its name.
  *
  * The evaluator applies the same rule to its refusal, through the exported
- * {@link scalarOverridesPackagedBase} and the packaged owner's declaration the
+ * {@link scalarOverridesPackagedBase} and the same packaged rule set the
  * engine hands it, so `/meta` and the refusal of the same write still show one
  * sentence for one rule and locale.
  */

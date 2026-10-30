@@ -226,15 +226,17 @@ for one) is served as written.
 An object's validation rule messages follow it too, on both places a reader
 sees them: the error a rejected write returns, and the rule served with the
 object (`/meta`, and the forms built from it). The rule's `message` is compared
-with the message of the rule of the same `name` in the owning package's
-declaration, a `conditional` rule's `then` / `otherwise` branch by its own name.
-An organization that overlays a packaged object and rewords a rule's message,
-keeping its name, gets that sentence as written in every locale; the rules it
-left alone are still translated, and both places always show the same sentence.
-Unlike a widget or a bulk action, a rule the owning package does not declare
-(one an object extension adds, or one the organization added) is **still
-translated** under its own name, `objects.<name>._validations.<rule>.message`:
-there is no shipped message for it to differ from.
+with the message of the rule of the same `name` that a package shipped, a
+`conditional` rule's `then` / `otherwise` branch by its own name. That is the
+owning package's declaration or, for a rule an
+[object extension](/docs/data-modeling/object-extensions) adds, the extending
+package's. An organization that overlays a packaged object and rewords a rule's
+message, keeping its name, gets that sentence as written in every locale. The
+rules it left alone are still translated, and both places always show the same
+sentence. Unlike a widget or a bulk action, a rule
+no package ships (one the organization added) is **still translated** under its
+own name, `objects.<name>._validations.<rule>.message`: there is no shipped
+message for it to differ from.
 
 ## Organizing the files
 

@@ -8948,6 +8948,15 @@ export class ObjectStackProtocolImplementation implements
      * "does a code package ship this?" test (`isCodeArtifactBody`) applied to
      * the OWNER contributor alone.
      *
+     * [#27559] Its `validations` are the one exception to "owner only": the
+     * registry's `getPackagedObjectBase` appends the rules each CODE extender
+     * ships, because a rule's packaged message is whichever code layer shipped
+     * that rule name, and the rule evaluator's `packagedRuleLookup` reads the
+     * same answer, so `/meta` and the refusal judge a tenant's rewrite against
+     * one packaged rule set. The scalars above stay the owner's. A registry
+     * double that predates that method is read through
+     * `getPackagedObjectOwner`, the owner alone.
+     *
      * Returns `undefined` — meaning "no packaged baseline, do not infer
      * anything" — for a runtime/tenant-authored object (no code owner), an
      * unknown name, and a partial registry double. The caller's contract is
@@ -8956,8 +8965,10 @@ export class ObjectStackProtocolImplementation implements
     getPackagedObjectBase(name: string): unknown {
         if (typeof name !== 'string' || name === '') return undefined;
         const registry = (this.engine as any)?.registry;
-        if (!registry || typeof registry.getPackagedObjectOwner !== 'function') return undefined;
+        if (!registry) return undefined;
         try {
+            if (typeof registry.getPackagedObjectBase === 'function') return registry.getPackagedObjectBase(name);
+            if (typeof registry.getPackagedObjectOwner !== 'function') return undefined;
             return registry.getPackagedObjectOwner(name)?.definition;
         } catch {
             // Same rule as the fold above: a read over in-memory contributors
@@ -27156,6 +27167,15 @@ export class ObjectStackProtocolImplementation implements
      * Roll a package back THROUGH every `apply` commit newer than `commitId`
      * (newest first), leaving the package as it was at that commit. Each step is
      * an individual `revertCommit`, so the whole rollback is itself audited.
+     *
+     * `failed[]` carries both kinds of failure a step can have: a step that
+     * THREW (one entry for the commit), and every item a step REFUSED and
+     * reported in its own returned `failed[]` (one entry per item, its `error`
+     * naming the item and quoting the step's client-facing text). Either makes
+     * `success` false — the declared answer's "true exactly when nothing
+     * failed". A refused item stops neither its commit nor the rollback: the
+     * step still reverts the item's neighbours and records its revert commit,
+     * so that commit is also listed in `revertedCommits`.
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
@@ -27192,11 +27212,19 @@ export class ObjectStackProtocolImplementation implements
         const failed: Array<{ commitId: string; error: string }> = [];
         for (const c of toRevert) {
             try {
-                await this.revertCommit({
+                const step = await this.revertCommit({
                     commitId: c.id,
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 revertedCommits.push(c.id);
+                // An item the step refused is returned, never thrown; its
+                // `error` is already client-facing (P11).
+                for (const item of step.failed) {
+                    failed.push({
+                        commitId: c.id,
+                        error: `Item '${item.type}/${item.name}' was not reverted: ${item.error}`,
+                    });
+                }
             } catch (e: any) {
                 // [#8333 · P12] The derivative of P11 — `failed[].error` on the
                 // rollback response. Measured on `origin/main` by failing the
