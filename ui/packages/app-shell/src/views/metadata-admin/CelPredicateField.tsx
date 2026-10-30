@@ -507,53 +507,53 @@ export function CelPredicateField({
   const listId = `${fieldId}-ac`;
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-2">
-        <Label className="text-[10px] uppercase text-muted-foreground" htmlFor={fieldId}>
-          {label}
-        </Label>
-        {fieldOptions && fieldOptions.length > 0 && !disabled && (
-          <Popover open={pickerOpen} onOpenChange={openPicker}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-expanded={pickerOpen}
-                data-testid="cel-insert-field"
-                className="h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground"
-              >
-                <ListPlus aria-hidden className="h-3.5 w-3.5" />
-                {t('perm.cel.insertField')}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 p-0">
-              <Command shouldFilter={false} label={t('perm.cel.insertField')}>
-                <CommandInput
-                  value={pickerSearch}
-                  onValueChange={setPickerSearch}
-                  placeholder={t('perm.cel.searchFields')}
-                />
-                <CommandList className="max-h-64">
-                  {pickerShown.length === 0 && <CommandEmpty>{t('perm.cel.noMatchingFields')}</CommandEmpty>}
-                  {pickerShown.map((f) => (
-                    <CommandItem
-                      key={f.name}
-                      value={f.name}
-                      onSelect={() => insertField(f.name)}
-                      data-field-name={f.name}
-                      className="flex items-center justify-between gap-2"
-                    >
-                      <span className="min-w-0 truncate text-xs">{f.label}</span>
-                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{f.name}</span>
-                    </CommandItem>
-                  ))}
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        )}
-      </div>
+    // The label stays a direct child of this box, beside the editor's own box,
+    // as every host reads it; the picker sits at the label row's end.
+    <div className={cn(fieldOptions && fieldOptions.length > 0 && !disabled && 'relative')}>
+      <Label className="text-[10px] uppercase text-muted-foreground" htmlFor={fieldId}>
+        {label}
+      </Label>
+      {fieldOptions && fieldOptions.length > 0 && !disabled && (
+        <Popover open={pickerOpen} onOpenChange={openPicker}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-expanded={pickerOpen}
+              data-testid="cel-insert-field"
+              className="absolute -top-1.5 right-0 h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground"
+            >
+              <ListPlus aria-hidden className="h-3.5 w-3.5" />
+              {t('perm.cel.insertField')}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-72 p-0">
+            <Command shouldFilter={false} label={t('perm.cel.insertField')}>
+              <CommandInput
+                value={pickerSearch}
+                onValueChange={setPickerSearch}
+                placeholder={t('perm.cel.searchFields')}
+              />
+              <CommandList className="max-h-64">
+                {pickerShown.length === 0 && <CommandEmpty>{t('perm.cel.noMatchingFields')}</CommandEmpty>}
+                {pickerShown.map((f) => (
+                  <CommandItem
+                    key={f.name}
+                    value={f.name}
+                    onSelect={() => insertField(f.name)}
+                    data-field-name={f.name}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="min-w-0 truncate text-xs">{f.label}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{f.name}</span>
+                  </CommandItem>
+                ))}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      )}
       <div className="relative">
         <Textarea
           ref={taRef}
