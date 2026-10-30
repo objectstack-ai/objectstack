@@ -2568,7 +2568,14 @@ export class AutomationServicePlugin implements Plugin {
         this.degradedInstances.set(info.name, { attempts: 1, signature: info.signature, reason: info.reason, held: true });
         if (!info.hasLive) {
             try {
-                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), info.reason, 'declarative', info.cause);
+                // [#28016] Held: the husk says so, and a dispatch names the edit.
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(info.name, info.entry),
+                    info.reason,
+                    'declarative',
+                    info.cause,
+                    { kind: 'declaration' },
+                );
             } catch (err) {
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
@@ -3096,7 +3103,16 @@ export class AutomationServicePlugin implements Plugin {
         }
         if (!hasLive) {
             try {
-                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), info.reason, 'declarative', info.cause);
+                // [#28016] A held husk names what re-attempts it: setting the
+                // stored value again, or (no `credentialRef`) an edit of the
+                // declaration that carries the credential.
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(info.name, info.entry),
+                    info.reason,
+                    'declarative',
+                    info.cause,
+                    held ? (stored ? { kind: 'credential', ref: stored.ref } : { kind: 'declaration' }) : undefined,
+                );
             } catch (err) {
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
