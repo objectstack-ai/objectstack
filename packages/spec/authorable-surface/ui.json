@@ -1260,6 +1260,7 @@
     "ui/ReportChart:height",
     "ui/ReportChart:interaction",
     "ui/ReportChart:series",
+    "ui/ReportChart:seriesBy",
     "ui/ReportChart:showDataLabels",
     "ui/ReportChart:showLegend",
     "ui/ReportChart:subtitle",
