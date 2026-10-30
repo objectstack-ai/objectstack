@@ -367,7 +367,7 @@ pressed: "has(record.viewer) && record.viewer.vote == 'helpful'"
 - A per-reader fact is usually not a column of the row (a vote is a child record per user). Declare it as a block under the object's `attachedOnRead`, have the serving side attach it to each row it returns for the caller (a service, or an `afterFind` hook that shapes the rows), and read it as `record.<block>.<leaf>`, guarded with `has()`. `os build` and `os validate` check the leaf against the declared block.
 
 <Callout type="info">
-The spec, the build check and this contract are in place; the console's record header and declared actions bar do not draw the pressed face yet, so today the button looks the same whatever the predicate answers.
+The spec, the build check and this contract are in place; the console's record header and declared actions bar do not draw the pressed face yet ([#28242](https://github.com/objectstack-ai/objectstack/issues/28242)), so today the button looks the same whatever the predicate answers.
 </Callout>
 
 #### Evaluation context
