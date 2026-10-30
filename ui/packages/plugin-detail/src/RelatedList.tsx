@@ -1906,7 +1906,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // returns a falsy renderer — measured over seven spellings, including
       // ones no producer can emit, all of which resolved to `TextCellRenderer`.
       if (!def?.type) return undefined;
-      const rendererType = resolveCellRendererType({ type: def.type, format: def.format }) || def.type;
+      const rendererType = resolveCellRendererType({ type: def.type, format: def.format, widget: def.widget }) || def.type;
       const CellRenderer = getCellRenderer(rendererType);
       if (!CellRenderer) return undefined;
       const isLookup = def.type === 'lookup' || def.type === 'master_detail';
