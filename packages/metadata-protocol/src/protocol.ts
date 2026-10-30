@@ -8948,6 +8948,15 @@ export class ObjectStackProtocolImplementation implements
      * "does a code package ship this?" test (`isCodeArtifactBody`) applied to
      * the OWNER contributor alone.
      *
+     * [#27559] Its `validations` are the one exception to "owner only": the
+     * registry's `getPackagedObjectBase` appends the rules each CODE extender
+     * ships, because a rule's packaged message is whichever code layer shipped
+     * that rule name, and the rule evaluator's `packagedRuleLookup` reads the
+     * same answer, so `/meta` and the refusal judge a tenant's rewrite against
+     * one packaged rule set. The scalars above stay the owner's. A registry
+     * double that predates that method is read through
+     * `getPackagedObjectOwner`, the owner alone.
+     *
      * Returns `undefined` — meaning "no packaged baseline, do not infer
      * anything" — for a runtime/tenant-authored object (no code owner), an
      * unknown name, and a partial registry double. The caller's contract is
@@ -8956,8 +8965,10 @@ export class ObjectStackProtocolImplementation implements
     getPackagedObjectBase(name: string): unknown {
         if (typeof name !== 'string' || name === '') return undefined;
         const registry = (this.engine as any)?.registry;
-        if (!registry || typeof registry.getPackagedObjectOwner !== 'function') return undefined;
+        if (!registry) return undefined;
         try {
+            if (typeof registry.getPackagedObjectBase === 'function') return registry.getPackagedObjectBase(name);
+            if (typeof registry.getPackagedObjectOwner !== 'function') return undefined;
             return registry.getPackagedObjectOwner(name)?.definition;
         } catch {
             // Same rule as the fold above: a read over in-memory contributors
