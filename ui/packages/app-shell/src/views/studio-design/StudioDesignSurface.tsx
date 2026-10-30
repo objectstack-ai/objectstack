@@ -1761,14 +1761,17 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         } else {
           // objectui#11807 — how many went live: every draft read above, as
           // none failed.
+          // The toast names what went live: one flow in its title, several
+          // by count with their names in the description.
           setPublishRefusals(NO_PUBLISH_REFUSALS);
-          toast.success(
-            tFormat(
-              pending.length === 1 ? 'engine.studio.publishedAllFlowsOne' : 'engine.studio.publishedAllFlows',
-              locale,
-              { count: pending.length },
-            ),
-          );
+          const names = pending.map((d) => resolveI18nLabel(d.label, locale)?.trim() || d.name);
+          if (names.length === 1) {
+            toast.success(tFormat('engine.studio.publishedAllFlowsOne', locale, { label: names[0] }));
+          } else {
+            toast.success(tFormat('engine.studio.publishedAllFlows', locale, { count: names.length }), {
+              description: names.join(', '),
+            });
+          }
           setChangesOpen(false);
         }
         setPublishNonce((n) => n + 1);

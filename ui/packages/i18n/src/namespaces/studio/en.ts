@@ -3126,8 +3126,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
   // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
   'engine.studio.org.openSetup': 'Open in Setup',
-  'engine.studio.publishedAllFlows': 'Published {count} package-less flow drafts',
-  'engine.studio.publishedAllFlowsOne': 'Published {count} package-less flow draft',
+  'engine.studio.publishedAllFlows': 'Published {count} flows',
+  'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
   'engine.studio.designer.select': 'Select…',
   'engine.studio.designer.pickDate': 'Pick a date…',

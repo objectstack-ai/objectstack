@@ -114,7 +114,7 @@ const published = (...names: string[]) =>
   names.map((name, i) => ({ type: 'object', name, version: `sha256:${i}` }));
 
 let batchBody: unknown;
-let orgDrafts: Array<{ type: string; name: string; packageId: null }> = [];
+let orgDrafts: Array<{ type: string; name: string; packageId: null; label?: string }> = [];
 /** Every publish request the surface sent: the batch door and the by-reference one. */
 const posts: string[] = [];
 
@@ -239,6 +239,26 @@ describe('the package-less publish names its count, and its zero is no success (
     await publishAt('/studio/~org/automations', 2);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllFlows', 'en', { count: 2 })]);
+  });
+
+  // #27356 row 18 (hotcrm#2320 Studio S7): the toast names what went live.
+  it('one package-less flow draft: the toast names it by its label', async () => {
+    orgDrafts = [{ type: 'flow', name: 'qa_alert_clone', packageId: null, label: 'QA alert (copy)' }];
+    await publishAt('/studio/~org/automations', 1);
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllFlowsOne', 'en', { label: 'QA alert (copy)' })]);
+    expect(toasts().success[0]).toContain('QA alert (copy)');
+  });
+
+  it('several: the count row, the flows named in the description (label, else name)', async () => {
+    orgDrafts = [
+      { type: 'flow', name: 'qa_alert_clone', packageId: null, label: 'QA alert (copy)' },
+      { type: 'flow', name: 'qa_digest_clone', packageId: null },
+    ];
+    await publishAt('/studio/~org/automations', 2);
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const description = (vi.mocked(toast.success).mock.calls[0][1] as { description?: string } | undefined)?.description;
+    expect(description).toBe('QA alert (copy), qa_digest_clone');
   });
 
   it('none pending by the time of the read: no success claimed', async () => {
