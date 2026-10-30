@@ -4988,8 +4988,24 @@ export class AutomationEngine implements IAutomationService {
      * The `FLOW_DISABLED` refusal MESSAGE, which is where the ledger-vs-status
      * distinction rides (ADR-0126 §7.2 reuses the CODE deliberately, so the
      * message is the only channel left).
+     *
+     * [#27966] The ledger sentence is written for the caller, in the shape
+     * the switched-off action refusal reads as (`describeTurnedOffPackagedItem`,
+     * `@objectstack/types`), so it names no table and no ADR. Those, with the
+     * code and the flow's name, go to the log line written here: both refusal
+     * exits ask for this message exactly when they refuse, so this is the one
+     * place every ledger refusal passes that holds the logger. It is `info`,
+     * not `warn`: the refusal is handed to the caller, and nothing is degraded
+     * (AGENTS.md "Degradation log levels").
      */
     private describeDisabledFlow(flowName: string): string {
+        if (this.flowLedgerDisabled.has(flowName)) {
+            this.logger.info(
+                `FLOW_DISABLED: packaged flow '${flowName}' refused — it is switched off in the activation ledger ` +
+                    '(sys_metadata_activation, ADR-0126 §7.2).',
+                { flow: flowName, refusal: 'FLOW_DISABLED' },
+            );
+        }
         // The body lives in ./subflow-guards.ts (#25222).
         const host: ThisParameterType<typeof describeDisabledFlow> = {
             flowLedgerDisabled: this.flowLedgerDisabled,
