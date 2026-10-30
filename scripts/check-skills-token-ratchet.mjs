@@ -1038,7 +1038,18 @@ export const CEILINGS = new Map([
   // `must_not_contain` assertions, 212 bytes = 53 units (1046 -> 993); the two
   // cases add 1438 bytes = 359 units (993 -> 1352); pinned AT the measurement,
   // zero headroom. The raising PR's body carries the same arithmetic.
-  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1352],
+  // 1352 -> 1506 (card #26940): case 8 asks for an `email_template` that mails
+  // one overdue notice per contract in that contract's own currency and
+  // expects `{{ amount | currency:@currency_code }}`; it refuses the bare path,
+  // a hard-coded `currency:USD` / `currency:CNY` and the no-argument form.
+  // Maintainer ruling 2026-10-30, decision batch #428 item 1, letter A (the
+  // ruling comment on the card is 6512920986), verbatim and untranslated, the
+  // binding first clause: 「26940同意」. PAID DOWN FIRST: six restatements in
+  // cases 1, 2, 4, 5 and 7 cut, 160 bytes = 40 units, every assertion and fact
+  // kept (1352 -> 1312); the case adds 774 bytes = 194 units (1312 -> 1506);
+  // pinned AT the measurement, zero headroom. The raising PR's body carries
+  // the same arithmetic.
+  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1506],
   // 1004 -> 1451 (2026-10-27, the objectstack-i18n fix card of the skills gap
   // audit): two eval prompts for the teaching that card adds — the `reports`,
   // `positions`, `permissions` and `picklists` groups; a form view `title`, a
