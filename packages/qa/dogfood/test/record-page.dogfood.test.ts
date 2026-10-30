@@ -93,29 +93,41 @@ describe('[#27627] the record page payload, as a non-admin member', () => {
     expect(data.record).toEqual(read.body.data?.record ?? read.body.record);
     expect(data.record).not.toHaveProperty('rating');
 
+    // A related answer is one of two arms: rows (`total`, `records`) or a refusal (`error`).
+    const rowsArm = (i: number) => {
+      const part = data.related[i];
+      if (!('total' in part)) throw new Error(`related[${i}] is a refusal: ${JSON.stringify(part)}`);
+      return part;
+    };
+    const refusalArm = (i: number) => {
+      const part = data.related[i];
+      if (!('error' in part)) throw new Error(`related[${i}] carries rows: ${JSON.stringify(part)}`);
+      return part;
+    };
+
     // Row-level security: the member's two notes, counted and listed; the
     // three they cannot read neither counted nor listed; `secret` stripped.
     const notes = await list('rp_note', { account: accountId }, 3);
     expect(notes.status).toBe(200);
     expect(data.related[0]).toEqual({ object: 'rp_note', field: 'account', total: totalOf(notes.body), records: rowsOf(notes.body) });
-    expect(data.related[0].total).toBe(2);
-    expect(data.related[0].records?.map((r: any) => r.title).sort()).toEqual(['mine 1', 'mine 2']);
-    for (const row of data.related[0].records ?? []) expect(row).not.toHaveProperty('secret');
+    expect(rowsArm(0).total).toBe(2);
+    expect(rowsArm(0).records.map((r: any) => r.title).sort()).toEqual(['mine 1', 'mine 2']);
+    for (const row of rowsArm(0).records) expect(row).not.toHaveProperty('secret');
 
     // A declared filter narrows the parent condition: four open tasks of
     // this account (the other account's task and the done one are out).
     const tasks = await list('rp_task', { account: accountId, status: 'open' }, 3);
     expect(tasks.status).toBe(200);
     expect(data.related[1]).toEqual({ object: 'rp_task', field: 'account', total: totalOf(tasks.body), records: rowsOf(tasks.body) });
-    expect(data.related[1].total).toBe(4);
-    expect(data.related[1].records).toHaveLength(3);
+    expect(rowsArm(1).total).toBe(4);
+    expect(rowsArm(1).records).toHaveLength(3);
 
     // A list the member may not read: the list read's refusal, no count, no rows.
     const ledger = await list('rp_ledger', { account: accountId }, 3);
     expect(ledger.status).toBe(403);
     expect(data.related[2]).not.toHaveProperty('total');
     expect(data.related[2]).not.toHaveProperty('records');
-    expect(data.related[2].error).toMatchObject({ status: 403, code: ledger.body?.error?.code ?? ledger.body?.code });
+    expect(refusalArm(2).error).toMatchObject({ status: 403, code: ledger.body?.error?.code ?? ledger.body?.code });
 
     // Field access: the record-scoped projection's answer.
     const access = await send(`/data/rp_account/${accountId}/field-access`);
