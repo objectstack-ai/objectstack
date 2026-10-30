@@ -350,6 +350,9 @@ describe('[#28040] connector pull — the input is checked against the action\'s
         const err = await refusal(h);
         expectRefused(err, { code: 'VALIDATION_ERROR', status: 400, reason: 'input_schema_mismatch' });
         expect(err.message).toContain("'query.limit' must be integer, got string");
+        // The pull door runs no CEL, so its hint says what JSON to write, not which cast to use.
+        expect(err.message).toContain('as a JSON number or boolean');
+        expect(err.message).not.toMatch(/CEL|int\(\)|double\(\)|bool\(\)/);
         expect(h.handler).toHaveBeenCalledTimes(0);
         expect(h.writes).toEqual([]);
     });

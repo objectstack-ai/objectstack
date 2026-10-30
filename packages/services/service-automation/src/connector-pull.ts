@@ -58,7 +58,6 @@ import type { ConnectorActionHandler } from './engine.js';
 import {
     findConnectorActionInputSchema,
     judgeConnectorInput,
-    TEXT_FOR_SCALAR_HINT,
     type ConnectorInputSchemaSource,
 } from './connector-input-schema.js';
 
@@ -389,7 +388,10 @@ export async function pullConnectorSource(
     // [#28040] The input about to be sent — the watermark included — is judged
     // against the action's declared `inputSchema` by the check the
     // `connector_action` node runs (#27995), so a pull missing a required
-    // parameter is refused here instead of reaching the remote API.
+    // parameter is refused here instead of reaching the remote API. The cast
+    // hint is the pull door's own: `connectorSource.input` is JSON spread as
+    // written and the watermark is the stored value, so no CEL envelope runs
+    // here and the node's `int()` / `double()` / `bool()` advice cannot apply.
     const verdict = judgeConnectorInput(findConnectorActionInputSchema(registry, connector, action), input);
     if (verdict) {
         return refuse(
@@ -397,7 +399,11 @@ export async function pullConnectorSource(
             `Mapping "${mappingName}": input for '${connector}.${action}' does not match the action's inputSchema — `
             + `${verdict.violations}. Nothing was pulled. Fix connectorSource.input so it satisfies the inputSchema `
             + 'GET /api/v1/automation/connectors lists for this action.'
-            + (verdict.textForScalar ? TEXT_FOR_SCALAR_HINT : ''),
+            + (verdict.textForScalar
+                ? ' A text value for an integer, number or boolean parameter is not converted: write it in '
+                    + "connectorSource.input as a JSON number or boolean (50, not '50'); a watermark parameter "
+                    + "carries the stored target field's value, so its declared type must be that field's."
+                : ''),
         );
     }
     logger.info(
