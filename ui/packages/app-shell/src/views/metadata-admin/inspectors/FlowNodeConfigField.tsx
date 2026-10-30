@@ -31,6 +31,7 @@ import {
 } from '@objectstack/spec/automation';
 import { FlowKeyValueField, type FlowKeyValueFieldProps } from './FlowKeyValueField.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
+import { FlowFieldHelp } from './FlowFieldHelp.js';
 import {
   isEditableValueEnvelope,
   isValueEnvelopeSlot,
@@ -983,9 +984,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           {describeUnknownRefs(unknownRefs, locale)}
         </p>
       )}
-      {field.help && !exprIssue && unknownRefs.length === 0 && (
-        <p className="text-[11px] leading-snug text-muted-foreground">{field.help}</p>
-      )}
+      {field.help && !exprIssue && unknownRefs.length === 0 && <FlowFieldHelp text={field.help} />}
     </div>
   );
 }

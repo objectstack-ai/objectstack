@@ -565,6 +565,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.branch.fromEdges': '此决策按其连线上的条件路由。每张卡片是一条连线，请在连线上编辑它的条件。',
   'engine.inspector.flowNode.branch.openEdge': '编辑连线',
   'engine.inspector.flowNode.branch.noCondition': '无条件',
+  'engine.inspector.flowNode.help.learnMore': '了解更多',
+  'engine.inspector.flowNode.help.showLess': '收起',
   'engine.inspector.flowNode.remove': '删除节点',
   // App nav inspector
   'engine.inspector.appNav.kind': '导航项',

@@ -659,6 +659,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.branch.fromEdges': 'This decision routes on its connections’ conditions. Each card is one connection; edit its condition on the connection.',
   'engine.inspector.flowNode.branch.openEdge': 'Edit connection',
   'engine.inspector.flowNode.branch.noCondition': 'No condition',
+  'engine.inspector.flowNode.help.learnMore': 'Learn more',
+  'engine.inspector.flowNode.help.showLess': 'Show less',
   'engine.inspector.flowNode.remove': 'Remove node',
   // App nav inspector
   'engine.inspector.appNav.kind': 'Nav Item',
