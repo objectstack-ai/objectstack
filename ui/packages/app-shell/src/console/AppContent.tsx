@@ -22,6 +22,7 @@ import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectst
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
+import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '../providers/writeWarningToast.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
 import {
@@ -764,7 +765,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     runner.registerHandler('crud_success', async (action: any) => {
       closeRecordForm();
       setRefreshKey(k => k + 1);
-      toast.success(action.params?.message ?? 'Record saved successfully');
+      // `warnings`: the save's own advisory warning lines, which this one
+      // toast carries (objectstack-ai/objectstack#27999).
+      toastRecordSave(toast, action.params?.message ?? 'Record saved successfully', action.params?.warnings);
       return { success: true, reload: true };
     });
 
@@ -901,10 +904,30 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       : t('form.createSuccess', { object: label, defaultValue: `${label} created successfully` });
   }, [editingRecord, formObjectDef, objectLabel, t]);
 
-  const handleCrudSuccess = useCallback((saved?: any) => {
+  // objectstack-ai/objectstack#27999 — the open record form reports its own
+  // write's advisory warnings: while the overlay is open, the write-warning
+  // channel parks the answer warnings of the write it names (this record's
+  // update, or a create of this object) on the claim instead of toasting them,
+  // and the save toast carries them. Keyed on the URL's primitives, not on the
+  // memoised `editingRecord` / `formObjectDef` (ui/AGENTS.md #10).
+  const answerWarningClaim = useRef<AnswerWarningClaim | null>(null);
+  const formObjectName: string | undefined = formObjectDef?.name;
+  useEffect(() => {
+    if (!dataSource || !recordFormParam || !formObjectName) return;
+    const claim = claimAnswerWarnings(dataSource, recordFormParam === 'new'
+      ? { operation: 'create', resource: formObjectName }
+      : { operation: 'update', resource: formObjectName, id: recordFormParam });
+    answerWarningClaim.current = claim;
+    return () => {
+      if (answerWarningClaim.current === claim) answerWarningClaim.current = null;
+      claim.release();
+    };
+  }, [dataSource, recordFormParam, formObjectName]);
+
+  const handleCrudSuccess = useCallback((saved?: any, warnings?: string[]) => {
     executeAction({
       type: 'crud_success',
-      params: { message: recordSaveMessage(saved) },
+      params: { message: recordSaveMessage(saved), warnings },
     });
   }, [executeAction, recordSaveMessage]);
 
@@ -925,12 +948,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     // the child's open related lists refetch on their own via the
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
+    const warnings = answerWarningClaim.current?.take(saved) ?? [];
     if (isChildFormTask) {
-      toast.success(recordSaveMessage(saved));
+      toastRecordSave(toast, recordSaveMessage(saved), warnings);
       closeRecordForm();
       return;
     }
-    handleCrudSuccess(saved);
+    handleCrudSuccess(saved, warnings);
     if (editingRecord || !currentObjectDef) return;
     const target = resolvePostCreateTarget({
       objectName: currentObjectDef.name,

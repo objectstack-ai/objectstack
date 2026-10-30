@@ -99,6 +99,7 @@ import {
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
+import { measureCurrencyResolver, type DeclaredCurrency } from './measure-currency-coherence.js';
 import { bindDatasetFiltersToObjectFields } from './dataset-filter-field-binding.js';
 import { drillWindowBounds } from './drill-window.js';
 import {
@@ -2563,13 +2564,20 @@ export class AnalyticsService implements IAnalyticsService {
       },
       // [ADR-0144, M0-3] …and the declared currency off the same hook, so the
       // compile-time currency guards judge exactly what the column would print.
-      declaredCurrency: (object: string, field: string) => {
-        const meta = this.sourceFieldMeta?.(object, field);
-        if (!meta) return undefined;
-        return { type: meta.type, defaultCurrency: meta.defaultCurrency, currencyField: meta.currencyField };
-      },
+      declaredCurrency: this.declaredCurrency,
     });
   }
+
+  /**
+   * [ADR-0144, M0-3] A field's declared currency off `sourceFieldMeta`: what
+   * the compile-time currency guards judge, and what a derived measure's
+   * column reads its resolved currency through (`enrichResultColumns`).
+   */
+  private readonly declaredCurrency = (object: string, field: string): DeclaredCurrency | undefined => {
+    const meta = this.sourceFieldMeta?.(object, field);
+    if (!meta) return undefined;
+    return { type: meta.type, defaultCurrency: meta.defaultCurrency, currencyField: meta.currencyField };
+  };
 
   /**
    * Compile a `dataset` (ADR-0021) and register its Cube + join allowlist in the
@@ -3131,6 +3139,7 @@ export class AnalyticsService implements IAnalyticsService {
     // this resolves TO a string rather than widening the contract.
     if (result.fields?.length && dataset.measures?.length) {
       const measureByName = new Map(dataset.measures.map((m) => [m.name, m]));
+      const currencies = measureCurrencyResolver(dataset, this.declaredCurrency);
       for (const f of result.fields) {
         const m = measureByName.get(f.name) ?? measureByName.get(f.name.replace(/__compare$/, ''));
         if (!m) continue;
@@ -3192,18 +3201,27 @@ export class AnalyticsService implements IAnalyticsService {
         // column left without the dimension gets neither key, rather than a
         // label that is wrong for every other row. A `count` over the amount
         // reads no amount, so it gets neither key either, grouped or not.
+        //
+        // [#28049] A derived measure has no field to lend a code. Its column
+        // takes the one `fixed` code its operands resolve to (a `sum` /
+        // `difference` over amounts in one `fixed` code), read off the compile
+        // guard's own resolution, so the column says what compile judged. Any
+        // other derived measure (a `ratio`, a `product`, operands in the
+        // tenant's or a record's currency) is monetary only by its own
+        // `currency`, as before.
         const fc = f as { currency?: string; currencyField?: string };
         const mc = m as { currency?: string };
         const meta = m.field ? this.sourceFieldMeta?.(dataset.object, m.field) : undefined;
+        const derivedCode = m.derived ? currencies.fixedCodeOf(m) : undefined;
         if (meta?.currencyField !== undefined) {
           const codeColumn = AMOUNT_AGGREGATES.has(m.aggregate ?? '')
             ? this.selectedDimensions(dataset, selection).find((d) => d.field === meta.currencyField)?.name
             : undefined;
           if (fc.currencyField == null && codeColumn !== undefined) fc.currencyField = codeColumn;
         } else if (fc.currency == null) {
-          const monetary = !!mc.currency || meta?.type === 'currency';
+          const monetary = !!mc.currency || meta?.type === 'currency' || derivedCode !== undefined;
           if (monetary) {
-            const resolved = mc.currency ?? meta?.defaultCurrency ?? context?.currency;
+            const resolved = mc.currency ?? meta?.defaultCurrency ?? derivedCode ?? context?.currency;
             if (resolved) fc.currency = resolved;
           }
         }

@@ -9,7 +9,7 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
-import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
@@ -20,9 +20,6 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
-import {
-  NavigationOverlay,
-} from '@object-ui/components';
 import { Plus } from 'lucide-react';
 import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
@@ -38,7 +35,6 @@ import {
   usePreviewDrafts,
 } from '../preview/PreviewModeContext.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
-import { RecordDetailView } from './RecordDetailView.js';
 import { IDENTITY_IMPORT_WRITE_MODES } from './identityImport.js';
 import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields } from './IdentityImportPanels.js';
 import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
@@ -75,7 +71,7 @@ import { useObjectViewTitleSwitcher } from './objectViewTitleSwitcher.js';
 import { useObjectViewPluginSchema } from './objectViewPluginSchema.js';
 import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import { ObjectViewPageHeader } from './objectViewPageHeader.js';
-import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
+import { ObjectViewRecordOverlay, RecordPaneListCount } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
 
@@ -181,7 +177,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // numbers (see the `ListView` below). Read off
     // the route's own `:appName`, the one signal the page header reads too.
     const inSetup = isSetupAppSegment(appName);
-    const [searchParams, setSearchParams] = useSearchParams();
+    const [searchParams, setSearchParamsNow] = useSearchParams();
+    // The router's setter is a new function whenever the search changes, and
+    // every list handler built on it (the URL state write-backs, the row
+    // click, the pane's step) would change with it: a `?recordId=` change —
+    // a row click, a step — would re-render the whole list (objectstack#27545).
+    // One setter for the page's life, calling the latest one.
+    const setSearchParamsRef = useRef(setSearchParamsNow);
+    setSearchParamsRef.current = setSearchParamsNow;
+    const setSearchParams = useCallback<typeof setSearchParamsNow>(
+        (next, options) => setSearchParamsRef.current(next, options),
+        [],
+    );
     const location = useLocation();
     const { showDebug } = useMetadataInspector();
     const { t, language } = useObjectTranslation();
@@ -730,15 +737,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     useObjectViewLiveData({ dataSource, objectDef, refreshData, refreshKey, setRecordCount });
 
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
-    // URL, row click, expand to page, record links) moved to `./objectViewRecordNavigation.ts`.
+    // URL, row click, open as page, record links) moved to `./objectViewRecordNavigation.ts`.
     // objectstack#26677 — the side-by-side pane is a READER's preference, not a
     // `navigation.mode` (`split` left the spec). Live state: the Display menu's
     // Open records section writes it (objectstack#26681) and the next row click
     // opens the new way. It applies only to a record that opens in the drawer:
     // an object that declares `page` (or `new_window` / `none`) keeps its
-    // declaration.
+    // declaration. objectstack#27545 — the pane beside the list is the default.
     const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -753,14 +760,25 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewLabel,
         unlabelledViewText,
         language,
+        recordOpenPreference,
     });
-    // The split face draws the drawer's own record beside the list: same URL
-    // state (`?recordId=`), same close, a different shell.
-    const opensBesideList = recordOpenPreference === 'split' && navOverlay.mode === 'drawer';
+    // A record that opens in the pane draws beside the list (`split`) unless
+    // the reader prefers the drawer over it: same URL state (`?recordId=`),
+    // same close, a different shell. A reader who prefers the page still gets
+    // the pane for a `?recordId=` link. Any other mode is the object's own.
+    const recordPaneMode = navOverlay.mode === 'drawer'
+        ? (recordOpenPreference === 'drawer' ? 'drawer' : 'split')
+        : navOverlay.mode;
     // objectstack#26681 — the Display menu's Open records section: the mode this
     // object and view resolved to, and the reader's preference with its setter.
+    // The console offers the full page as the third choice (objectstack#27545).
     const recordOpen = useMemo<NonNullable<ListViewProps['recordOpen']>>(
-        () => ({ resolvedMode: navOverlay.mode, preference: recordOpenPreference, setPreference: setRecordOpenPreference }),
+        () => ({
+            resolvedMode: navOverlay.mode,
+            preference: recordOpenPreference,
+            setPreference: setRecordOpenPreference,
+            selectPage: () => setRecordOpenPreference('page'),
+        }),
         [navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
     );
     // objectstack#26681 — the name cell's ↗, "open as full page", for a row that
@@ -768,8 +786,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // already opens the page; a `new_window` / `none` one keeps its declaration.
     const openAsPageLabel = t('console.objectView.openAsPage', { defaultValue: 'Open as full page' });
     const openAsPage = useMemo(
-        () => (navOverlay.mode === 'drawer' ? { objectName: objectDef.name, label: openAsPageLabel } : null),
-        [navOverlay.mode, objectDef.name, openAsPageLabel],
+        () => (navOverlay.mode === 'drawer'
+            ? { objectName: objectDef.name, label: openAsPageLabel, open: handleOpenRowAsPage }
+            : null),
+        [navOverlay.mode, objectDef.name, openAsPageLabel, handleOpenRowAsPage],
     );
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
@@ -836,7 +856,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         actions,
         handleRowClick,
         handleListRowsChange,
-        navOverlay,
         recordOpen,
         openAsPage,
         urlFilters,
@@ -894,9 +913,40 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewAccess,
     });
 
-    return (
-        <ActionProvider {...actionRuntime.actionProviderProps}>
-        <RelatedRecordActionsProvider value={listRecordActions}>
+    // The list itself: one element whether or not a record is open
+    // (objectstack#27545), so a `?recordId=` change — a row click, a step —
+    // hands React the same element and re-renders none of the list. Memoised
+    // for that cost only: a discarded cache re-renders it once, nothing more.
+    // The view handlers are rebuilt on every render of this page, so the list
+    // is handed ones that call the latest.
+    const listHandlers = useRef({ handleViewChange, handleCreateView, handleViewAction, onEdit });
+    listHandlers.current = { handleViewChange, handleCreateView, handleViewAction, onEdit };
+    const onListViewChange = useCallback<typeof handleViewChange>((...args) => listHandlers.current.handleViewChange(...args), []);
+    const onListCreateView = useCallback<typeof handleCreateView>((...args) => listHandlers.current.handleCreateView(...args), []);
+    const onListViewAction = useCallback<typeof handleViewAction>((...args) => listHandlers.current.handleViewAction(...args), []);
+    const onListEdit = useCallback((record: any) => listHandlers.current.onEdit?.(record), []);
+    const listView = useMemo(
+        () => refusedViewFace ?? (viewAccess.checking ? null : (
+            <PluginObjectView
+                schema={objectViewSchema}
+                dataSource={dataSource}
+                views={mergedViews}
+                activeViewId={activeViewId}
+                onViewChange={onListViewChange}
+                onEdit={onListEdit}
+                onRowClick={handleRowClick}
+                renderListView={renderListView}
+                onCreateView={onListCreateView}
+                hideNamedViewTabs
+                onViewAction={onListViewAction}
+            />
+        )),
+        [refusedViewFace, viewAccess.checking, objectViewSchema, dataSource, mergedViews, activeViewId, onListViewChange, onListEdit, handleRowClick, renderListView, onListCreateView, onListViewAction],
+    );
+
+    // The page column — header, list, panels — that the record pane draws
+    // beside, at its full height, or over (objectstack#27545).
+    const pageColumn = (
         <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden">
              {/* 1. Header with breadcrumb + description.
                  The managed-by badge sits inline with the title so the
@@ -1051,91 +1101,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
              {/* 2. Content — Plugin ObjectView with ViewSwitcher + Filter + Sort */}
              <div className="flex-1 overflow-hidden relative flex flex-row">
-                {opensBesideList && navOverlay.isOpen ? (
-                    <NavigationOverlay
-                        {...navOverlay}
-                        mode="split"
-                        close={handleDrawerClose}
-                        setIsOpen={(open: boolean) => { if (!open) handleDrawerClose(); }}
-                        title={objectLabel(objectDef)}
-                        onExpand={handleExpandDrawer}
-                        expandLabel={t('console.objectView.expandToPage', { defaultValue: 'Open as full page' })}
-                        storageKey={`drawer-width:${objectDef.name}`}
-                        mainContent={
-                            <div className="flex-1 min-w-0 relative h-full flex flex-col">
-                                <div className="flex-1 relative overflow-hidden">
-                                    <div className={['h-full overflow-auto', listFabClearance].filter(Boolean).join(' ')}>
-                                        {refusedViewFace ?? (viewAccess.checking ? null : (
-                                        <PluginObjectView
-                                            schema={objectViewSchema}
-                                            dataSource={dataSource}
-                                            views={mergedViews}
-                                            activeViewId={activeViewId}
-                                            onViewChange={handleViewChange}
-                                            onEdit={(record: any) => onEdit?.(record)}
-                                            onRowClick={(record: any, event?: any) => {
-                                                handleRowClick(record, event);
-                                            }}
-                                            renderListView={renderListView}
-                                            onCreateView={handleCreateView}
-                                            hideNamedViewTabs
-                                            onViewAction={handleViewAction}
-                                        />
-                                        ))}
-                                    </div>
-                                </div>
-                                {typeof recordCount === 'number' && (
-                                    <div data-testid="record-count-footer" className="border-t px-3 sm:px-4 py-1.5 text-xs text-muted-foreground bg-muted/5 shrink-0">
-                                        {/* One count family, like `ListView`'s record-count bar
-                                            (objectui#11445): i18next picks the CLDR slot. */}
-                                        {t('console.objectView.recordCount', { count: recordCount })}
-                                    </div>
-                                )}
-                            </div>
-                        }
-                    >
-                        {(record: Record<string, unknown>) => {
-                            const recordId = (record.id || record._id) as string;
-                            return (
-                                <RecordDetailView
-                                    dataSource={dataSource}
-                                    objects={objects}
-                                    onEdit={onEdit}
-                                    objectNameOverride={objectDef.name}
-                                    recordIdOverride={recordId}
-                                    embedded
-                                />
-                            );
-                        }}
-                    </NavigationOverlay>
-                ) : (
                 <div className="flex-1 min-w-0 relative h-full flex flex-col">
                     <div className="flex-1 relative overflow-hidden">
                         {/* objectui#13134 — `listFabClearance`: room at the
                             end of the card list's scroller for the phone FAB. */}
                         <div className={['h-full overflow-auto', listFabClearance].filter(Boolean).join(' ')}>
-                            {refusedViewFace ?? (viewAccess.checking ? null : (
-                            <PluginObjectView
-                                schema={objectViewSchema}
-                                dataSource={dataSource}
-                                views={mergedViews}
-                                activeViewId={activeViewId}
-                                onViewChange={handleViewChange}
-                                onEdit={(record: any) => onEdit?.(record)}
-                                onRowClick={(record: any, event?: any) => {
-                                    handleRowClick(record, event);
-                                }}
-                                renderListView={renderListView}
-                                onCreateView={handleCreateView}
-                                hideNamedViewTabs
-                                onViewAction={handleViewAction}
-                            />
-                            ))}
+                            {listView}
                         </div>
                     </div>
-                    {/* Record count footer removed — ListView already renders record-count-bar */}
+                    <RecordPaneListCount count={recordCount} t={t} />
                 </div>
-                )}
                 {/* Metadata panel only shows for admin users */}
                 <MetadataPanel
                     open={showDebug && isAdmin}
@@ -1174,25 +1149,27 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                     onCreate={(cfg) => handleViewCreate(cfg)}
                 />
              </div>
-
-             {/* Record Detail Overlay — the drawer, unless the reader prefers the pane beside the list */}
-             {!opensBesideList && (
-             /* objectstack#25992 slice 10: the overlay moved to `./objectViewRecordOverlay.tsx`. */
-             <ObjectViewRecordOverlay
-                 navOverlay={navOverlay}
-                 handleDrawerClose={handleDrawerClose}
-                 objectDef={objectDef}
-                 handleExpandDrawer={handleExpandDrawer}
-                 drawerRoot={drawerRoot}
-                 drawerRestore={drawerRestore}
-                 handleRootStep={handleRootStep}
-                 t={t}
-                 dataSource={dataSource}
-                 objects={objects}
-                 onEdit={onEdit}
-             />
-             )}
         </div>
+    );
+
+    return (
+        <ActionProvider {...actionRuntime.actionProviderProps}>
+        <RelatedRecordActionsProvider value={listRecordActions}>
+        {/* objectstack#25992 slice 10: the record pane moved to `./objectViewRecordOverlay.tsx`. */}
+        <ObjectViewRecordOverlay
+            navOverlay={navOverlay}
+            mode={recordPaneMode}
+            list={pageColumn}
+            handleDrawerClose={handleDrawerClose}
+            objectDef={objectDef}
+            handleOpenAsPage={handleOpenAsPage}
+            drawerRoot={drawerRoot}
+            drawerRestore={drawerRestore}
+            handleRootStep={handleRootStep}
+            dataSource={dataSource}
+            objects={objects}
+            onEdit={onEdit}
+        />
         {actionRuntime.dialogs}
         </RelatedRecordActionsProvider>
         </ActionProvider>

@@ -78,6 +78,7 @@ import {
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
 import { packagedAutomationPath } from './BuilderLanding.js';
+import { FlowItemMoreMenu } from './FlowItemMoreMenu.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
@@ -8822,6 +8823,10 @@ export function AutomationsPillar({
     };
   }, [publishNonce]);
 
+  // #27356 row 19 — a delete re-reads the rail (`flowListNonce`) and leaves
+  // the pillar on its empty state: that one re-read opens no other flow.
+  const [flowListNonce, setFlowListNonce] = React.useState(0);
+  const keepEmptyAfterDeleteRef = React.useRef(false);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -8864,7 +8869,9 @@ export function AutomationsPillar({
             return;
           }
         }
-        setCurrent((c) => c ?? deepLinked ?? (named ? null : items[0]) ?? null);
+        const keepEmpty = keepEmptyAfterDeleteRef.current;
+        keepEmptyAfterDeleteRef.current = false;
+        setCurrent((c) => (keepEmpty ? c : (c ?? deepLinked ?? (named ? null : items[0]) ?? null)));
       } catch (e) {
         if (!cancelled) setError(plainRefusal(e));
       } finally {
@@ -8874,7 +8881,7 @@ export function AutomationsPillar({
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, publishNonce, metadataRefreshNonce, locale]);
+  }, [client, packageId, publishNonce, metadataRefreshNonce, locale, flowListNonce]);
 
   const doCreateFlow = React.useCallback(
     async (label: string, name: string, trigger: NewFlowTrigger | null) => {
@@ -9119,6 +9126,32 @@ export function AutomationsPillar({
           setCreating(true);
         }
       : undefined;
+  // #27356 row 19 — Delete flow (`FlowItemMoreMenu`): the autosave disarmed,
+  // the draft (so none is left to publish the flow back) and then the flow
+  // deleted at the drafts' package, then the empty state over a re-read rail.
+  // A refusal shows the door's sentence and keeps the flow open.
+  const deleteOpenFlow = React.useCallback(async () => {
+    if (!current || packageId === null) return;
+    const flow = current;
+    setAutoDirty(false);
+    setError(null);
+    try {
+      if (hasDraft) {
+        await client.reset('flow', flow.name, { state: 'draft', packageId });
+        setHasDraft(false);
+      }
+      await client.reset('flow', flow.name, { packageId });
+    } catch (e) {
+      setError(plainRefusal(e));
+      return;
+    }
+    keepEmptyAfterDeleteRef.current = true;
+    setCurrent(null);
+    setFlows((fs) => fs.filter((f) => f.name !== flow.name));
+    setFlowListNonce((n) => n + 1);
+    onDraftSaved?.({ type: 'flow', name: flow.name });
+    toast.success(tFormat('engine.studio.auto.flowDeleted', locale, { item: flow.label || flow.name }));
+  }, [client, current, packageId, hasDraft, onDraftSaved, locale]);
   // objectstack#26917 — the refusal's way out: the flow holding the identifier
   // is on this rail, so it opens instead of a second one being made. The New
   // button already asked about a held step (objectstack#26845).
@@ -9562,6 +9595,15 @@ export function AutomationsPillar({
                 )}
                 {flowSwitchEl}
                 {!flowTabsEl && autoReadOnlyLinkEl}
+                {current && flowLoaded && !readOnly && packageId !== null && (
+                  <FlowItemMoreMenu
+                    name={current.name}
+                    label={current.label}
+                    locale={locale}
+                    disabled={!!saving}
+                    onDelete={() => void deleteOpenFlow()}
+                  />
+                )}
               </>
             }
             tabs={flowTabsEl}

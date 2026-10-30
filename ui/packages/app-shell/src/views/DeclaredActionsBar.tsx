@@ -56,7 +56,7 @@ import {
   usePredicateRecordContext,
   useActionTextLocalizer,
 } from '@object-ui/react';
-import type { ActionDef } from '@object-ui/core';
+import { isActionSwitchedOff, type ActionDef } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Loader2, MoreHorizontal, ShieldAlert } from 'lucide-react';
@@ -832,7 +832,7 @@ const DeclaredActionsToolbar: React.FC<
   const { t } = useObjectTranslation();
   const mayInvoke = useCapabilityGate();
   const permitted = useMemo(
-    () => actions.filter((action) => mayInvoke(action.requiredPermissions)),
+    () => actions.filter((action) => mayInvoke(action.requiredPermissions) && !isActionSwitchedOff(action)),
     [actions, mayInvoke],
   );
   // objectstack#25877 — which of the permitted levers fold into the override

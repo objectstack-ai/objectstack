@@ -93,7 +93,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Locale",
-        help: "Preferred language for this user's notifications, as a language tag such as zh-CN or ja-JP. When unset, the deployment's default language applies."
+        help: "The language this user sees the interface in and receives notifications in, as a language tag such as zh-CN or ja-JP. When unset, the deployment's default language applies."
       },
       manager_id: {
         label: "Manager",
@@ -195,13 +195,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "User Created",
-          description: "If a temporary password was generated, copy it now — it is shown only once and never stored.",
           acknowledge: "Done",
           fields: {
             "user.email": "Email",
             "user.phoneNumber": "Phone Number",
             permissionSet: "Permission Set",
-            temporaryPassword: "Temporary Password"
+            temporaryPassword: "Temporary password: copy it now, it is shown only once and never stored"
           }
         }
       },
@@ -222,10 +221,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Password Updated",
-          description: "If a temporary password was generated, copy it now — it is shown only once and never stored.",
           acknowledge: "Done",
           fields: {
-            temporaryPassword: "Temporary Password"
+            temporaryPassword: "Temporary password: copy it now, it is shown only once and never stored"
           }
         }
       },
