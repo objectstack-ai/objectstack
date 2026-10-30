@@ -85,6 +85,29 @@ export const SSL_DETAIL_BELONGS_ON_DATASOURCE =
   + '`ssl` is the on/off shorthand only.';
 
 /**
+ * The code author's route, one sentence shared by every credential refusal and
+ * the two `password` guidance entries on `DatasourceSchema` /
+ * `ExternalDatasourceSettingsSchema` (maintainer ruling: a code-defined
+ * datasource reads its credential at connect time from a runtime environment
+ * variable whose name the platform derives from the datasource name).
+ *
+ * The two ruled routes the refusals already name are the UI author's: the
+ * Setup → Datasources form cannot edit a datasource defined in code, and
+ * nothing mints a `sys_secret:` handle for one. This sentence is the route a
+ * `defineDatasource` author can follow. It names the derived variable by
+ * example, never by a placeholder an author could paste, and the host switch
+ * that gates it (off outside the CLI host — the multi-tenant guard).
+ * `@objectstack/service-datasource` (`datasource-env-credential.ts`) owns the
+ * derivation and the switch; this is their prescription.
+ */
+export const CODE_DEFINED_CREDENTIAL_ROUTE =
+  'A datasource defined in code (`defineDatasource`) leaves the credential out of the '
+  + 'declaration: it is read at connect time from the runtime environment variable derived '
+  + 'from the datasource name (`OS_DATASOURCE_WAREHOUSE_PASSWORD` for a datasource named '
+  + '`warehouse`), which `os serve` / `os start` honour by default '
+  + '(`OS_DATASOURCE_ENV_CREDENTIALS=on`).';
+
+/**
  * Refusal prescription for an inline credential written into driver config
  * (#7990, maintainer-ruled Option A 2026-08-12: per-artefact contract closure).
  *
@@ -110,7 +133,8 @@ export const INLINE_CREDENTIAL_REFUSED = (key: string): string =>
   + 'binder, which encrypts it into `sys_secret` and stores only an opaque handle at '
   + '`external.credentialsRef` — or reference the secrets store directly with '
   + '`external.credentialsRef`. The resolved secret is injected at connect time and always '
-  + 'wins over anything embedded in `config`.';
+  + 'wins over anything embedded in `config`. '
+  + CODE_DEFINED_CREDENTIAL_ROUTE;
 
 /**
  * Refusal prescription for a credential embedded in an authored URL's userinfo
@@ -158,7 +182,8 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
   + 'placeholders in authored metadata are resolved by nothing and reach the database client '
   + 'verbatim (measured), and are themselves refused at publish. '
   + 'Runtime-environment DSNs (`OS_DATABASE_URL` and friends) do '
-  + 'not pass through this publish door and are unaffected.';
+  + 'not pass through this publish door and are unaffected. '
+  + CODE_DEFINED_CREDENTIAL_ROUTE;
 
 /**
  * The userinfo component of a URL-ish string, or `undefined` when the string
@@ -337,7 +362,8 @@ export const URL_CREDENTIAL_QUERY_PARAM_REFUSED = (key: string, param: string): 
   + 'substitute a `${…}` placeholder into the URL: placeholders in authored metadata are '
   + 'resolved by nothing and reach the database client verbatim (measured), and are '
   + 'themselves refused at publish. Runtime-environment DSNs (`OS_DATABASE_URL` and '
-  + 'friends) do not pass through this publish door and are unaffected.';
+  + 'friends) do not pass through this publish door and are unaffected. '
+  + CODE_DEFINED_CREDENTIAL_ROUTE;
 
 /**
  * Refusal prescription for a credential written into the MongoClient
@@ -366,7 +392,8 @@ export const PASSTHROUGH_INLINE_CREDENTIAL_REFUSED = (path: string): string =>
   + '`external.credentialsRef` — or reference the secrets store directly with '
   + '`external.credentialsRef`. The resolved secret is injected at connect time and wins over '
   + 'an `auth` block embedded in the passthrough (measured). Placeholders are no '
-  + 'escape either: a `${…}` span anywhere in `options` is itself refused at publish.';
+  + 'escape either: a `${…}` span anywhere in `options` is itself refused at publish. '
+  + CODE_DEFINED_CREDENTIAL_ROUTE;
 
 /**
  * The paths inside mongo's `options` passthrough that resolve into a login
@@ -503,7 +530,7 @@ export const PASSTHROUGH_NESTED_CREDENTIAL_REFUSED = (path: string): string =>
   + "connection form's secret field hands it to the datasource secret binder, which encrypts "
   + 'it into `sys_secret` and stores only an opaque handle at `external.credentialsRef`. '
   + 'Placeholders are no escape either: a `${…}` span anywhere in `options` is itself refused '
-  + 'at publish.';
+  + 'at publish. ' + CODE_DEFINED_CREDENTIAL_ROUTE;
 
 /**
  * Attach commit 24206416a's passthrough-credential refusal to mongo's `options` slot.
@@ -821,7 +848,8 @@ export function refusedInlineCredentialKey(key: string, formTitle: string) {
   return z.never({ error: () => INLINE_CREDENTIAL_REFUSED(key) }).optional()
     .describe(
       "Set through the connection form's secret field or `external.credentialsRef` — "
-      + 'encrypted into `sys_secret`, never stored in `config`',
+      + 'encrypted into `sys_secret`, never stored in `config`. '
+      + CODE_DEFINED_CREDENTIAL_ROUTE,
     )
     .meta({ title: formTitle, format: 'password' });
 }

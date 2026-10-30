@@ -118,6 +118,10 @@ describe('planCredentialMigration — stated outcomes for what it will not touch
   it('refuses a code-defined datasource — its definition is owned by the artifact', () => {
     const plan = refusal(row({ origin: 'code', config: { host: 'h', password: 'p' } }));
     expect(plan.reason).toContain('code-defined');
+    // #27687 — the remedy names the variable this datasource reads at connect,
+    // derived from its name, and the switch that gates it.
+    expect(plan.remedy).toContain('OS_DATASOURCE_WAREHOUSE_PASSWORD');
+    expect(plan.remedy).toContain('OS_DATASOURCE_ENV_CREDENTIALS');
   });
 
   it('refuses an artefact row with no `origin` at all (treated as code)', () => {
