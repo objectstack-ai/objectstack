@@ -745,6 +745,7 @@ function RuleTypeFields({
         fields={fields}
         disabled={disabled}
         scope="record"
+        labelSubjects
         /* objectui#9855 — the SUBJECT dropdown's half of the narrowing the
            `scope` above buys for the autocomplete. objectql's rule validator
            evaluates this guard against `{ record, previous }` and nothing else

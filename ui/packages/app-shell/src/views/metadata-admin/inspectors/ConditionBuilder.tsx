@@ -820,7 +820,7 @@ function initFrom(value: string, valueOf: SubjectValueOf): { rows: Row[]; join: 
   return { rows: [], join: '&&', raw: !!value };
 }
 
-export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue }: {
+export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue, labelSubjects = false }: {
   label?: string;
   value: string;
   onCommit: (cel: string) => void;
@@ -906,6 +906,11 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
    * builder renders no verdict of its own, so it does not read this.
    */
   scopeIssue?: boolean;
+  /**
+   * The subject dropdown names a field by its label, with the CEL spelling
+   * beside it. Off by default, so a mount that lists spellings keeps them.
+   */
+  labelSubjects?: boolean;
 }) {
   const { fields: hookFields } = useObjectFields(objectName);
   const fields = fieldsProp ?? hookFields;
@@ -924,28 +929,27 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
   const locale = useMetadataLocale();
   const subjectOptions = React.useMemo(() => {
     const visible = fields.filter((f) => !f.hidden);
-    // A field reads by its label, with the subject spelling beside it.
-    const fieldOpts = visible.map((f) => ({
-      value: `${fieldPrefix}${f.name}`,
-      label: f.label || `${fieldPrefix}${f.name}`,
-      hint: f.label ? `${fieldPrefix}${f.name}` : undefined,
-    }));
+    // With `labelSubjects`, a field reads by its label, its spelling beside it.
+    const named = (spelling: string, label: string | undefined) =>
+      labelSubjects && label ? { value: spelling, label, hint: spelling } : { value: spelling, label: spelling, hint: undefined };
+    const fieldOpts = visible.map((f) => named(`${fieldPrefix}${f.name}`, f.label));
     // The whole-record `previous` comes first: `previous == null` is how an
     // author branches on the create leg of a create-or-update trigger, and it
     // reads as the head of the group rather than as one more field.
     const previousOpts = includePrevious
       ? [
           { value: 'previous', label: 'previous', hint: undefined },
-          ...visible.map((f) => ({
-            value: `previous.${f.name}`,
-            label: f.label ? tFormat('engine.inspector.condition.previousField', locale, { field: f.label }) : `previous.${f.name}`,
-            hint: f.label ? `previous.${f.name}` : undefined,
-          })),
+          ...visible.map((f) =>
+            named(
+              `previous.${f.name}`,
+              f.label ? tFormat('engine.inspector.condition.previousField', locale, { field: f.label }) : undefined,
+            ),
+          ),
         ]
       : [];
     const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value, hint: undefined }));
     return [...fieldOpts, ...previousOpts, ...contextOpts];
-  }, [fields, fieldPrefix, includePrevious, contextSubjects, locale]);
+  }, [fields, fieldPrefix, includePrevious, contextSubjects, locale, labelSubjects]);
   // The raw-expression editor's CEL assists (#1582): field-existence lint +
   // autocomplete need the bare field-name catalog and a locale-bound `t`.
   const tLocal = React.useCallback((k: string) => t(k, locale), [locale]);
