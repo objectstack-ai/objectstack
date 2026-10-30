@@ -17,7 +17,7 @@ export const entry: SemanticMigration = {
   id: 'connector-auth-config-oauth2-retired',
   surface: "connector.authentication (`type: 'oauth2'`, with its inline `clientSecret`, `refreshToken`, "
     + '`tokenExpiry` and `redirectUri`) — the runtime auth of a connector definition, as `defineConnector` '
-    + 'and registerConnector parse it; the exported ConnectorOAuth2Schema leaves with it',
+    + 'and registerConnector parse it; the module-level ConnectorOAuth2Schema, never on a published entry point, leaves with it',
   replacement: "A provider-bound connector instance (`provider: 'openapi' | 'rest' | 'mcp'`) declaring "
     + "`auth: { type: 'oauth2', grant: 'authorization_code' | 'client_credentials', tokenUrl, clientId, "
     + 'credentialRef, ... }`, where `credentialRef` names the client secret in the secrets layer and the '
