@@ -35,8 +35,9 @@
  *    `read` rows (`read-audit.ts`), plugin-auth's administrative `create` /
  *    `update` on a `sys_user`, the auth-event sink's `login` / `logout`,
  *    which name the session, and its `login_failed` / `account_locked`, which
- *    name the account's `sys_user` row (`auth-event-audit.ts`). Judged by the
- *    record gate;
+ *    name the account's `sys_user` row (`auth-event-audit.ts`), and an
+ *    `action_invocation` row whose action named a subject record
+ *    (`action-invocation-audit.ts`). Judged by the record gate;
  *    the session is in the audit writer's `AUDIT_EXCLUDED_OBJECTS`, so the gate
  *    names it ({@link LEDGER_NAMED_PARENTS}) to keep judging it.
  *    A record that no longer exists is read by no caller, so its rows are
@@ -47,7 +48,8 @@
  *  - **Rows about no record** — they name no `record_id` and their action is
  *    not a record action: the run-level `import` (plugin-auth's user import),
  *    `config_change` (service-settings) and `platform_admin_standing_change`
- *    (plugin-security) rows, and an auth event that carried no session id.
+ *    (plugin-security) rows, an auth event that carried no session id, and an
+ *    `action_invocation` row of an action invoked with no subject record.
  *    There is no record to judge, and none carries a record's field values
  *    (the per-writer measurement in `audit-log-field-redaction.ts`), so they
  *    are OUTSIDE this gate's class and are served under the ledger's own grant
