@@ -27,40 +27,35 @@
  * that provider's.
  */
 
-import { useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { SchemaRenderer, useAction } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import type { ActionBarSchema, UIActionSchema } from '@object-ui/types';
 
 /** `actions`, each drawn the way a launch of it would end now. */
-export function useListHeaderLaunchGate(actions: readonly UIActionSchema[] | undefined): UIActionSchema[] {
+function useListHeaderLaunchGate(actions: readonly UIActionSchema[] | undefined): UIActionSchema[] {
     const { runner } = useAction();
-    const subscribe = useMemo(() => (listener: () => void) => runner.subscribeContext(listener), [runner]);
-    // The two context facts the verdict reads, each a stable snapshot (the
-    // grid's own array, a boolean), so an unrelated context write redraws
-    // nothing.
-    const selectedRecords = useSyncExternalStore(subscribe, () => runner.getContext().selectedRecords);
+    const subscribe = useCallback((listener: () => void) => runner.subscribeContext(listener), [runner]);
+    // Redraw when the context facts the verdict reads change: the selection
+    // the grid publishes (its own array, a stable snapshot) and whether its
+    // rows can be selected at all. An unrelated context write redraws nothing.
+    useSyncExternalStore(subscribe, () => runner.getContext().selectedRecords);
     const selectionAvailable = useSyncExternalStore(subscribe, () => runner.getContext().selectionAvailable);
-    // The refusal is translated by the runner, so a language switch re-asks.
-    const { language } = useObjectTranslation();
+    // The runner translates the refusal, so a language switch redraws too.
+    useObjectTranslation();
 
-    return useMemo(() => {
-        const gated: UIActionSchema[] = [];
-        for (const action of actions ?? []) {
-            const refusal = typeof action.onClick === 'function'
-                ? undefined
-                : runner.launchRefusal(action as Parameters<typeof runner.launchRefusal>[0]);
-            if (refusal === undefined) {
-                gated.push(action);
-            } else if (selectionAvailable !== false) {
-                gated.push({ ...action, disabled: true, disabledReason: refusal });
-            }
+    const gated: UIActionSchema[] = [];
+    for (const action of actions ?? []) {
+        const refusal = typeof action.onClick === 'function'
+            ? undefined
+            : runner.launchRefusal(action as Parameters<typeof runner.launchRefusal>[0]);
+        if (refusal === undefined) {
+            gated.push(action);
+        } else if (selectionAvailable !== false) {
+            gated.push({ ...action, disabled: true, disabledReason: refusal });
         }
-        return gated;
-        // `selectedRecords` and `language` are what `launchRefusal` reads off
-        // the runner; they are the keys, not values used here.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [actions, runner, selectedRecords, selectionAvailable, language]);
+    }
+    return gated;
 }
 
 /** An `action:bar` of list header actions, drawn through {@link useListHeaderLaunchGate}. */
