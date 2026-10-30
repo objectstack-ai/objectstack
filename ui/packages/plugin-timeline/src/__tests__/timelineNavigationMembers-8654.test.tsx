@@ -137,8 +137,11 @@ function panelWidth(): string {
   return panel!.style.getPropertyValue('--ov-w').trim();
 }
 
-/** What the shell makes of an authored width: the authored value as a FLOOR. */
-const withFloor = (css: string) => `max(${css}, min(60vw, 880px))`;
+/**
+ * What the shell makes of an authored width: the authored value itself. It was
+ * a FLOOR (`max(WIDTH, min(60vw, 880px))`) until objectstack#27545 retired it.
+ */
+const asDrawn = (css: string) => css;
 
 beforeEach(() => {
   // A drag-resized width persisted in localStorage would mask every width row.
@@ -205,13 +208,13 @@ describe('object-timeline `navigation` members decide the entry click (objectui#
   it('`size` reaches the overlay through the bucket table', async () => {
     await clickEntry({ mode: 'drawer', size: 'lg' });
     await waitFor(() => expect(dialog()).not.toBeNull());
-    expect(panelWidth()).toBe(withFloor('min(92vw, 960px)'));
+    expect(panelWidth()).toBe(asDrawn('min(92vw, 960px)'));
   });
 
   it('a deprecated `width` WINS over `size` authored beside it', async () => {
     await clickEntry({ mode: 'drawer', size: 'sm', width: '720px' });
     await waitFor(() => expect(dialog()).not.toBeNull());
-    expect(panelWidth()).toBe(withFloor('720px'));
+    expect(panelWidth()).toBe(asDrawn('720px'));
   });
 
   it('`size: "auto"` resolves to NEITHER member and lands where a drawer with no size does', async () => {
@@ -223,7 +226,7 @@ describe('object-timeline `navigation` members decide the entry click (objectui#
     await waitFor(() => expect(dialog()).not.toBeNull());
     expect(panelWidth()).toBe(unsized);
     // Non-vacuity: the unsized width is not the `lg` bucket's.
-    expect(unsized).not.toBe(withFloor('min(92vw, 960px)'));
+    expect(unsized).not.toBe(asDrawn('min(92vw, 960px)'));
   });
 
   it('a parent view\'s click handler OUTRANKS the whole key, overlay mode included', async () => {

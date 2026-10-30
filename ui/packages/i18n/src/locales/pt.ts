@@ -1172,6 +1172,8 @@ const pt = {
     removeFromFavorites: "Remover dos favoritos",
     previousRecord: "Registro anterior",
     nextRecord: "Próximo registro",
+    maximize: "Maximizar",
+    restoreSize: "Restaurar tamanho",
     recordOf: "{{current}} de {{total}}",
     recordNotFound: "Registro não encontrado",
     recordNotFoundDescription: "O registro que você está procurando não existe ou pode ter sido excluído.",

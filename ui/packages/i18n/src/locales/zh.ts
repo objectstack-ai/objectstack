@@ -1221,6 +1221,8 @@ const zh = {
     removeFromFavorites: '从收藏中移除',
     previousRecord: '上一条记录',
     nextRecord: '下一条记录',
+    maximize: '最大化',
+    restoreSize: '还原',
     recordOf: '第 {{current}} 条，共 {{total}} 条',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在或已被删除。',

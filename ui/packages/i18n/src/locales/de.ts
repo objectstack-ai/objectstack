@@ -1142,6 +1142,8 @@ const de = {
     removeFromFavorites: "Aus Favoriten entfernen",
     previousRecord: "Vorheriger Datensatz",
     nextRecord: "Nächster Datensatz",
+    maximize: "Maximieren",
+    restoreSize: "Größe wiederherstellen",
     recordOf: "{{current}} von {{total}}",
     recordNotFound: "Datensatz nicht gefunden",
     recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht oder wurde möglicherweise gelöscht.",

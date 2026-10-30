@@ -10,11 +10,20 @@
  * NavigationOverlay
  *
  * A reusable component that renders record detail overlays based on
- * ViewNavigationConfig mode: the drawer (Sheet), and the split pane
- * (ResizablePanelGroup) a host draws from a reader's own preference.
- * `modal` and `popover` were retired from the spec's `NavigationModeSchema`
- * (objectstack#26677), and with them the Dialog and Popover faces: no caller
- * could reach either once the values left metadata.
+ * ViewNavigationConfig mode: the drawer (Sheet), and the split pane a host
+ * draws from a reader's own preference. `modal` and `popover` were retired
+ * from the spec's `NavigationModeSchema` (objectstack#26677), and with them
+ * the Dialog and Popover faces: no caller could reach either once the values
+ * left metadata.
+ *
+ * Both faces leave a list the host hands over (`mainContent`) usable
+ * (objectstack#27545): the drawer over it draws no dimming overlay and is
+ * non-modal, so a click on another row swaps the record instead of closing
+ * it; the split pane sits beside it, and it narrows to the remaining width.
+ * A drawer with no list is the modal sheet over the page, as before. A split pane falls back to the drawer when
+ * the content area is narrower than {@link RECORD_SPLIT_MIN_CONTENT_PX}, and a
+ * `maximizable` host gets `⤢`, which widens the pane in place over the whole
+ * content area — the sidebar stays — without leaving the URL it is on.
  *
  * Works in conjunction with useNavigationOverlay hook from @object-ui/react —
  * the hook manages state while this component handles the visual presentation.
@@ -56,7 +65,7 @@
  */
 
 import React from 'react';
-import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   Sheet,
@@ -64,15 +73,16 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
-  SheetClose,
 } from '../ui/sheet';
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from './resizable';
+import { useOptionalSidebar } from '../ui/sidebar';
 import { usePopperAwareInteractOutside } from './mobile-dialog-content';
 import { createSafeTranslation } from '@object-ui/i18n';
+import {
+  ActiveListRecordProvider,
+  RecordListFaceProvider,
+  recordListFaceFor,
+  type RecordListFace,
+} from './record-list-face';
 
 /**
  * English defaults for every string this overlay renders as chrome
@@ -91,13 +101,15 @@ const OVERLAY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // The drag handle is a bare `role="separator"` with no visible label, so
   // this literal IS the control to a screen reader.
   'common.resizeDrawer': 'Resize drawer',
-  // Default accessible name + tooltip of the icon-only expand button. Hosts
-  // may override it via the `expandLabel` prop; this is what ships otherwise.
+  // Default accessible name + tooltip of the icon-only ↗ a host's own page
+  // hop draws (`onExpand`). Hosts may override it via the `expandLabel` prop.
   'detail.openAsFullPage': 'Open as full page',
-  // The drawer's accessible title when the host passes no `title`. Since
-  // objectstack#26679 the drawer bar draws no title text at all (the record
-  // body names the record), so this is an accessible name only; the split
-  // face still draws it as its heading.
+  // The bar's ⤢ / ⤡ pair (`maximizable`, objectstack#27545).
+  'detail.maximize': 'Maximize',
+  'detail.restoreSize': 'Restore size',
+  // The pane's accessible name when the host passes no `title`. The bar draws
+  // no title text on either face (objectstack#26679: the record body names
+  // the record), so this is an accessible name only.
   'detail.recordDetail': 'Record Detail',
   // The bar's back control (`onBack`, objectstack#26679).
   'detail.goBack': 'Go back',
@@ -143,22 +155,21 @@ export interface NavigationOverlayProps {
   close: () => void;
   /** Set open state (for the controlled Sheet's onOpenChange) */
   setIsOpen: (open: boolean) => void;
-  /** Width for the overlay (drawer / split) */
+  /**
+   * Width of the pane (drawer / split) until the reader drags it. Drawn as
+   * given: no floor widens it (objectstack#27545).
+   */
   width?: string | number;
   /** Whether navigation is an overlay mode */
   isOverlay: boolean;
   /** Target view/form name from NavigationConfig */
   view?: string;
   /**
-   * The overlay's title. The split face draws it as its heading; the drawer
-   * keeps it as the accessible name only — its bar draws no title text
-   * (objectstack#26679, maintainer ruling 2).
+   * The pane's accessible name. Neither face draws title text — the bar holds
+   * controls only (objectstack#26679, maintainer ruling 2).
    */
   title?: string;
-  /**
-   * The overlay's description: drawn under the split face's heading, an
-   * accessible description only on the drawer (objectstack#26679).
-   */
+  /** The drawer's accessible description (objectstack#26679). */
   description?: string;
   /** CSS class for the overlay container */
   className?: string;
@@ -174,21 +185,41 @@ export interface NavigationOverlayProps {
    */
   renderView?: (record: Record<string, unknown>, viewName: string) => React.ReactNode;
   /**
-   * The main content to wrap (for split mode only).
-   * In split mode, the main content is rendered in the left panel.
+   * The list the pane opens records from (drawer and split, objectstack#27545).
+   *
+   * Drawn whether or not a record is open, always in the same place, so
+   * opening, stepping and closing never remount it. The split face narrows it
+   * beside the pane and publishes its narrowed face (`useRecordListFace`);
+   * both faces publish which row is open (`useIsActiveListRecord`, from
+   * {@link activeListRecordId}). Pass the same element across renders: an
+   * unchanged element is not re-rendered when the open record changes.
+   *
+   * Without it the split face draws nothing and the drawer floats alone.
    */
   mainContent?: React.ReactNode;
   /**
-   * Optional handler invoked when the user clicks the "Expand to full page"
-   * affordance in the drawer header. Mirrors Linear / Notion / Airtable
-   * peek-to-full-page behavior — the consumer is responsible for closing the
-   * overlay and router-pushing to the full record route.
+   * The id of the row in {@link mainContent} the open record came from — the
+   * root of a host's in-place stack, not the level it shows (objectstack#27545).
+   */
+  activeListRecordId?: string | null;
+  /**
+   * A host's own page hop, drawn as `↗` on the bar. The console's record
+   * pane passes none: its full page is reached from the list row's `↗` and the
+   * record header's `⋯` menu (objectstack#27545).
    *
-   * When omitted, the expand button is not rendered.
+   * When omitted, the button is not rendered.
    */
   onExpand?: () => void;
   /**
-   * Optional label for the expand button (accessible name & tooltip).
+   * `⤢` maximize in place (objectstack#27545): the pane widens over the whole
+   * content area — the viewport less the sidebar's live width — and the list
+   * behind it is hidden; `⤡` or `Esc` restores the width it had. Nothing else
+   * changes: the URL, the history, the list's scroll and the host's stack.
+   * Not remembered: every open starts at the pane's width.
+   */
+  maximizable?: boolean;
+  /**
+   * Optional label for the `↗` host page hop (accessible name & tooltip).
    *
    * When omitted the overlay resolves `detail.openAsFullPage` from the session
    * locale (English when no `I18nProvider` is mounted) — it is no longer a
@@ -197,7 +228,7 @@ export interface NavigationOverlayProps {
   expandLabel?: string;
   /**
    * Optional storage key for persisting the user's manually-resized drawer
-   * width (drawer mode only). When provided, the drawer renders a drag
+   * width (drawer and split). When provided, the pane renders a drag
    * handle on its left edge and remembers the resized width in
    * `localStorage` across sessions. Use a stable, scoped key such as
    * `'drawer-width:lead'` so different objects get independent widths.
@@ -208,7 +239,7 @@ export interface NavigationOverlayProps {
   storageKey?: string;
   /**
    * Retired storage key whose value is migrated into `storageKey` once
-   * (drawer mode only).
+   * (drawer and split).
    *
    * ⭐ objectui#9299 item 4: there used to be TWO drag-resize implementations
    * with two different persisted keys and two different floors —
@@ -226,7 +257,7 @@ export interface NavigationOverlayProps {
    */
   legacyStorageKey?: string;
   /**
-   * One level back (drawer mode only, objectstack#26679). When provided the
+   * One level back (drawer and split, objectstack#26679). When provided the
    * bar draws a `←` control at its left edge and `Esc` calls this instead of
    * closing the drawer: a host that opened a record IN PLACE (a related row,
    * a lookup value) hands it the pop of its stack, so each `←` / `Esc` undoes
@@ -234,7 +265,7 @@ export interface NavigationOverlayProps {
    */
   onBack?: () => void;
   /**
-   * The path drawn after the `←` control (drawer mode only,
+   * The path drawn after the `←` control (drawer and split,
    * objectstack#26679) — the host's ancestors of the record shown, each one a
    * control that returns to it. Nothing is drawn at the left of the bar when
    * neither this nor {@link onBack} is passed: the bar names no object and no
@@ -242,7 +273,7 @@ export interface NavigationOverlayProps {
    */
   trail?: React.ReactNode;
   /**
-   * Previous / next record (drawer mode only, objectstack#26679). When passed
+   * Previous / next record (drawer and split, objectstack#26679). When passed
    * the bar draws the `↑` `↓` pair, and `↑` / `↓` / `k` / `j` step through the
    * host's sibling set while no text input, menu or grid has the keyboard.
    * A missing handler draws its control disabled — the ends of the set.
@@ -338,11 +369,103 @@ function resolveWidth(width: string | number | undefined): string | undefined {
 
 /** Hard floor for drag-resize — narrower than this and the body becomes unusable. */
 const DRAWER_MIN_PX = 360;
-/** Soft ceiling — keep at least a thin sliver of underlying page visible. */
-const DRAWER_MAX_VW_FACTOR = 0.95;
+/**
+ * The widest a reader can drag the pane, as a share of the viewport
+ * (objectstack#27545: wider than that is what `⤢` is for). A remembered
+ * width beyond it draws at this bound.
+ */
+const DRAWER_MAX_VW = 60;
 
 /**
- * Drawer resize state — drag handle on the left edge, value persisted to
+ * Below this content-area width a split pane draws as the drawer instead
+ * (objectstack#27545): beside a 720 px pane the list would have no room left.
+ */
+export const RECORD_SPLIT_MIN_CONTENT_PX = 1000;
+
+/**
+ * The sidebar provider's own widths (`--sidebar-width`, `--sidebar-width-icon`
+ * in `ui/sidebar.tsx`). Inside the provider the variables resolve to their
+ * live values; these stand in only where they do not resolve — the drawer
+ * renders in a portal outside the provider's element.
+ */
+export const SIDEBAR_WIDTH_FALLBACK = '16rem';
+export const SIDEBAR_WIDTH_ICON_FALLBACK = '3rem';
+
+/**
+ * The CSS length the sidebar takes right now: its full width when expanded,
+ * its icon rail when collapsed, none on a phone or with no sidebar at all.
+ * Read on every render from the sidebar's own state, so a collapse — the
+ * reader's or the shell's own — widens a maximized pane at once.
+ */
+function useLiveSidebarWidth(): string {
+  const sidebar = useOptionalSidebar();
+  if (!sidebar || sidebar.isMobile) return '0px';
+  return sidebar.state === 'collapsed'
+    ? `var(--sidebar-width-icon, ${SIDEBAR_WIDTH_ICON_FALLBACK})`
+    : `var(--sidebar-width, ${SIDEBAR_WIDTH_FALLBACK})`;
+}
+
+/** The width a maximized pane takes: the viewport less the live sidebar. */
+function maximizedWidthCss(sidebarWidth: string): string {
+  return `calc(100vw - ${sidebarWidth})`;
+}
+
+/** An element's rendered width, kept current while it resizes; `null` until measured. */
+function useElementWidth(el: HTMLElement | null): number | null {
+  const [width, setWidth] = React.useState<number | null>(null);
+  React.useLayoutEffect(() => {
+    if (!el) {
+      setWidth(null);
+      return;
+    }
+    const read = () => {
+      const next = el.getBoundingClientRect().width;
+      setWidth(next > 0 ? next : null);
+    };
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el]);
+  return width;
+}
+
+/**
+ * Whether an `Esc` belongs to the element it was pressed in rather than to the
+ * split pane: a text field, or an open menu, list box or dialog (which closes
+ * itself first and marks the event handled).
+ */
+function escapeOwnedByTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof Element)) return false;
+  if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) {
+    return true;
+  }
+  return !!target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
+}
+
+/**
+ * The split pane's `Esc`, on the document while it is open: the drawer gets
+ * the same key from its dialog layer, the pane beside the list has none.
+ */
+function useSplitEscape(active: boolean, onEscape: () => void) {
+  const handler = React.useRef(onEscape);
+  handler.current = onEscape;
+  React.useEffect(() => {
+    if (!active || typeof document === 'undefined') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (escapeOwnedByTarget(e.target)) return;
+      e.preventDefault();
+      handler.current();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [active]);
+}
+
+/**
+ * Pane resize state — drag handle on the left edge, value persisted to
  * localStorage so the same user gets a consistent width across sessions /
  * objects. Returns `null` when storageKey is absent (resize disabled).
  */
@@ -388,19 +511,21 @@ function useDrawerResize(
     }
   }, [storageKey, legacyStorageKey]);
 
-  const handleMouseDown = React.useCallback((e: React.MouseEvent) => {
+  const handleMouseDown = React.useCallback((e: React.MouseEvent<HTMLElement>) => {
     if (!storageKey || typeof window === 'undefined') return;
     e.preventDefault();
     draggingRef.current = true;
 
-    const maxPx = Math.floor(window.innerWidth * DRAWER_MAX_VW_FACTOR);
+    const maxPx = Math.floor((window.innerWidth * DRAWER_MAX_VW) / 100);
+    // The pane is right-anchored: the drawer at the viewport's edge, the
+    // split pane at the content area's (the handle's own pane).
+    const paneRight = e.currentTarget.parentElement?.getBoundingClientRect().right || window.innerWidth;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
     const onMove = (ev: MouseEvent) => {
       if (!draggingRef.current) return;
-      // Drawer is right-anchored: rightX = window.innerWidth, leftX = mouseX.
-      const next = Math.min(maxPx, Math.max(DRAWER_MIN_PX, window.innerWidth - ev.clientX));
+      const next = Math.min(maxPx, Math.max(DRAWER_MIN_PX, paneRight - ev.clientX));
       setWidth(next);
     };
     const onUp = () => {
@@ -444,9 +569,12 @@ function useDrawerResize(
  * NavigationOverlay — renders record detail in the configured overlay mode.
  *
  * Supports:
- * - **drawer**: Right-side Sheet panel
- * - **split**: Side-by-side ResizablePanelGroup (a host's preference face)
- * - **page / new_window / none**: No overlay rendered (handled by hook)
+ * - **drawer**: Right-side Sheet panel — non-modal over a `mainContent` list,
+ *   modal over the page without one
+ * - **split**: a pane beside the list (a host's preference face); the drawer
+ *   when the content area is too narrow for both
+ * - **page / new_window / none**: no record is drawn (the hook navigates); a
+ *   `mainContent` is still drawn, in the same place
  */
 export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   isOpen,
@@ -462,7 +590,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   children,
   renderView,
   mainContent,
+  activeListRecordId,
   onExpand,
+  maximizable,
   expandLabel,
   storageKey,
   legacyStorageKey,
@@ -477,47 +607,65 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   const resolvedTitle = title || t('detail.recordDetail');
   // `??` rather than a destructuring default so the semantics are unchanged
   // for hosts that pass the prop: a default parameter also only fires on
-  // `undefined`, and `ObjectView` already supplies its own translated label.
+  // `undefined`.
   const resolvedExpandLabel = expandLabel ?? t('detail.openAsFullPage');
   // sr-only Sheet description for the drawer below.
   const overlayDescription = t('detail.recordDetailOverlay', { title: resolvedTitle });
+  const paneMode = mode === 'drawer' || mode === 'split';
   // Keep hooks above all conditional returns. Opening a record changes
   // selectedRecord from null to an object, but hook order must stay stable.
   const resize = useDrawerResize(
-    mode === 'drawer' ? storageKey : undefined,
-    mode === 'drawer' ? legacyStorageKey : undefined,
+    paneMode ? storageKey : undefined,
+    paneMode ? legacyStorageKey : undefined,
   );
-  // Inline-edit dropdowns render in body-level poppers; without this guard the
-  // click that closes an open dropdown also dismisses the drawer (#2156).
+  // The list is drawn in every mode, in one place, so a host that hands it
+  // over never remounts it when the mode or the face changes.
+  const hasList = mainContent != null;
+  const [hostEl, setHostEl] = React.useState<HTMLDivElement | null>(null);
+  const [listEl, setListEl] = React.useState<HTMLDivElement | null>(null);
+  const hostWidth = useElementWidth(hasList ? hostEl : null);
+  const listWidth = useElementWidth(hasList ? listEl : null);
+  const shown = paneMode && isOpen && !!selectedRecord;
+  // An unmeasured host (no layout yet) is taken as wide enough.
+  const face: 'drawer' | 'split' =
+    mode === 'split' && !(hostWidth !== null && hostWidth < RECORD_SPLIT_MIN_CONTENT_PX) ? 'split' : 'drawer';
+  const [maximizedState, setMaximized] = React.useState(false);
+  // Not remembered: a closed pane opens at its own width again.
+  React.useEffect(() => {
+    if (!shown) setMaximized(false);
+  }, [shown]);
+  const maximized = !!maximizable && shown && maximizedState;
+  const sidebarWidth = useLiveSidebarWidth();
   const handleInteractOutside = usePopperAwareInteractOutside();
-  useStepperKeys(
-    mode === 'drawer' && isOpen && !!selectedRecord && !!stepper,
-    stepper?.onPrevious,
-    stepper?.onNext,
-  );
+  useStepperKeys(paneMode && shown && !!stepper, stepper?.onPrevious, stepper?.onNext);
+  // `Esc`: from maximized it restores, below the stack's root it goes back one
+  // level, at the root it closes. The drawer's dialog layer asks the same
+  // through `onEscapeKeyDown` below.
+  const handleEscape = () => {
+    if (maximized) setMaximized(false);
+    else if (onBack) onBack();
+    else close();
+  };
+  useSplitEscape(hasList && face === 'split' && shown, handleEscape);
 
-  // Non-overlay modes don't render anything
-  if (mode === 'page' || mode === 'new_window' || mode === 'none') {
+  // Non-overlay modes draw no record (the hook navigates); only the list.
+  if (!paneMode && !hasList) {
+    return null;
+  }
+  // A split pane needs the list it sits beside.
+  if (mode === 'split' && !hasList) {
     return null;
   }
 
-  if (!selectedRecord) {
-    return null;
-  }
-
-  // Drawer width policy:
-  // - If the user explicitly drag-resized, honor that exact pixel value
-  //   (their choice always wins).
-  // - Otherwise, treat the authored width as a *floor*. On wide monitors,
-  //   weakly-authored values like 600px get bumped up to a healthier
-  //   `min(60vw, 880px)` so the drawer doesn't feel cramped on 1920px
-  //   displays. Strongly-authored larger values still win via `max()`.
-  // - The mobile gate (`sm:` on the className) prevents this from
-  //   affecting phones.
-  const authoredWidthCss = resolveWidth(width) ?? '42rem';
-  const drawerStyle: React.CSSProperties = resize.width != null
-    ? { ['--ov-w' as any]: `${resize.width}px` }
-    : { ['--ov-w' as any]: `max(${authoredWidthCss}, min(60vw, 880px))` };
+  // Pane width policy: the reader's dragged width, bounded by the drag range
+  // even when it was remembered at a wider viewport; otherwise the host's
+  // width as given. A maximized pane takes the content area instead.
+  const paneWidthCss = resize.width != null
+    ? `min(${resize.width}px, ${DRAWER_MAX_VW}vw)`
+    : resolveWidth(width) ?? '42rem';
+  const widthStyle: React.CSSProperties = {
+    ['--ov-w' as any]: maximized ? maximizedWidthCss(sidebarWidth) : paneWidthCss,
+  };
 
   // Use renderView when both renderView and view are provided; otherwise fallback to children
   const renderContent = (record: Record<string, unknown>) => {
@@ -527,194 +675,220 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     return children(record);
   };
 
-  // --- Drawer Mode (Sheet) ---
-  if (mode === 'drawer') {
-    return (
-      <Sheet open={isOpen} onOpenChange={setIsOpen}>
-        <SheetContent
-          side="right"
-          onInteractOutside={handleInteractOutside}
-          // Suppress Radix's default auto-focus on open. The overlay is for
-          // browsing/inspecting a record, not for immediate keyboard entry, so
-          // auto-focusing the Close button (or the first focusable child)
-          // flashes a focus ring on mount which feels jarring. Keyboard users
-          // still Tab in normally.
-          //
-          // This came in with objectui#9299's chrome de-duplication: it was
-          // `RecordDetailDrawer`'s behaviour, reasoned and deliberate, and the
-          // ruling makes this component the ONE drawer. Converging on the
-          // documented choice rather than dropping it is what "one shared
-          // overlay shell" has to mean when the two shells disagreed.
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          // objectstack#26679 — below the root of an in-place stack, `Esc`
-          // goes back one level; only the root's `Esc` closes.
-          onEscapeKeyDown={onBack ? (e) => { e.preventDefault(); onBack(); } : undefined}
-          className={cn(
-            // Mobile: full width (no inline cap, no max-w from base sheet).
-            // sm+: honor the host-supplied width via `--ov-w` CSS var with a
-            // sensible 2xl ceiling so very wide configs don't dwarf the
-            // page. The host's className still wins on more specific tokens.
-            'w-screen max-w-none sm:w-full sm:max-w-[var(--ov-w,42rem)] p-0 flex flex-col gap-0 overflow-hidden',
-            // Hide shadcn Sheet's auto-rendered close (X) — it's the LAST
-            // direct <button> child of SheetContent. We render our own close
-            // inside the header so it sits in a single button cluster
-            // visually aligned with the expand action.
-            '[&>button:last-of-type]:hidden',
-            className,
-          )}
-          style={drawerStyle}
+  /* Drag-resize handle — only rendered on sm+ (mobile uses full viewport so
+     there's nothing meaningful to resize) and never while maximized. The
+     4px-wide invisible hit-area sits flush with the pane's left edge; the
+     visible 1px tint reacts on hover so users discover the affordance.
+     Double-click resets to the configured default. */
+  const resizeHandle = resize.enabled && !maximized ? (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('common.resizeDrawer')}
+      onMouseDown={resize.handleMouseDown}
+      onDoubleClick={resize.handleDoubleClick}
+      className="hidden sm:block absolute left-0 top-0 bottom-0 z-30 w-1 cursor-col-resize touch-none bg-transparent hover:bg-primary/40 active:bg-primary/60 transition-colors"
+    />
+  ) : null;
+
+  // ✕ closes the whole path on either face; beside the list it is named the
+  // panel's close, as it always was.
+  const closeLabel = hasList && face === 'split' ? t('common.closePanel') : t('common.close');
+
+  /* The bar (objectstack#26679, maintainer rulings 2-5): the left side holds
+     only the in-place path — `←` and the ancestors — and is empty at the root;
+     the right side holds ↑ ↓, ⤢ / ⤡ and ✕. No object name and no position. */
+  const barControls = (
+    <>
+      <div className="flex min-w-0 flex-1 items-center gap-1" data-testid="record-drawer-leading">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label={t('detail.goBack')}
+            title={t('detail.goBack')}
+            className={BAR_BUTTON_CLASS}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {trail}
+      </div>
+      <div className="flex shrink-0 items-center gap-0.5">
+        {stepper && (
+          <>
+            <button
+              type="button"
+              onClick={stepper.onPrevious}
+              disabled={!stepper.onPrevious}
+              aria-label={t('detail.previousRecord')}
+              title={t('detail.previousRecord')}
+              className={BAR_BUTTON_CLASS}
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={stepper.onNext}
+              disabled={!stepper.onNext}
+              aria-label={t('detail.nextRecord')}
+              title={t('detail.nextRecord')}
+              className={BAR_BUTTON_CLASS}
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
+        {onExpand && (
+          <button
+            type="button"
+            onClick={() => onExpand()}
+            aria-label={resolvedExpandLabel}
+            title={resolvedExpandLabel}
+            className={BAR_BUTTON_CLASS}
+          >
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {maximizable && (
+          <button
+            type="button"
+            onClick={() => setMaximized((was) => !was)}
+            aria-label={maximized ? t('detail.restoreSize') : t('detail.maximize')}
+            title={maximized ? t('detail.restoreSize') : t('detail.maximize')}
+            className={BAR_BUTTON_CLASS}
+            data-testid="record-pane-maximize"
+          >
+            {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={close}
+          aria-label={closeLabel}
+          title={closeLabel}
+          className={BAR_BUTTON_CLASS}
         >
-          {/* Drag-resize handle — only rendered on sm+ (mobile uses full
-              viewport so there's nothing meaningful to resize). The
-              4px-wide invisible hit-area sits flush with the left edge;
-              the visible 1px tint reacts on hover so users discover the
-              affordance. Double-click resets to the configured default. */}
-          {resize.enabled && (
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </>
+  );
+  const barClass = 'shrink-0 flex-row items-center justify-between gap-2 space-y-0 px-4 py-2 border-b bg-muted/30';
+
+  // --- Drawer (Sheet) ---
+  // Over a list the host handed over, non-modal and undimmed
+  // (objectstack#27545): the list stays readable and clickable, so an outside
+  // click — another row, the toolbar — never dismisses it; ✕ and `Esc` do.
+  // With no list it is the modal sheet over the page it always was.
+  const drawer = paneMode && face === 'drawer' && selectedRecord ? (
+    <Sheet open={isOpen} onOpenChange={setIsOpen} modal={!hasList}>
+      <SheetContent
+        side="right"
+        hideOverlay={hasList}
+        onInteractOutside={hasList ? (e) => e.preventDefault() : handleInteractOutside}
+        // Suppress Radix's default auto-focus on open. The overlay is for
+        // browsing/inspecting a record, not for immediate keyboard entry, so
+        // auto-focusing the Close button (or the first focusable child)
+        // flashes a focus ring on mount which feels jarring. Keyboard users
+        // still Tab in normally.
+        //
+        // This came in with objectui#9299's chrome de-duplication: it was
+        // `RecordDetailDrawer`'s behaviour, reasoned and deliberate, and the
+        // ruling makes this component the ONE drawer. Converging on the
+        // documented choice rather than dropping it is what "one shared
+        // overlay shell" has to mean when the two shells disagreed.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        // objectstack#27545 — from maximized, `Esc` restores; objectstack#26679
+        // — below the root of an in-place stack, `Esc` goes back one level.
+        // Only the root's `Esc` closes.
+        onEscapeKeyDown={maximized || onBack ? (e) => { e.preventDefault(); handleEscape(); } : undefined}
+        className={cn(
+          // Mobile: full width (no inline cap, no max-w from base sheet).
+          // sm+: honor the pane width via the `--ov-w` CSS var. The host's
+          // className still wins on more specific tokens.
+          'w-screen max-w-none sm:w-full sm:max-w-[var(--ov-w,42rem)] p-0 flex flex-col gap-0 overflow-hidden',
+          // Hide shadcn Sheet's auto-rendered close (X) — it's the LAST
+          // direct <button> child of SheetContent. We render our own close
+          // inside the header so it sits in a single button cluster.
+          '[&>button:last-of-type]:hidden',
+          mode === 'drawer' && className,
+        )}
+        style={widthStyle}
+        data-maximized={maximized ? '' : undefined}
+      >
+        {resizeHandle}
+        <SheetHeader className={barClass}>
+          {/* The title and description stay for assistive technology only
+              (Radix requires the title). */}
+          <SheetTitle className="sr-only">{resolvedTitle}</SheetTitle>
+          <SheetDescription className="sr-only">
+            {description || overlayDescription}
+          </SheetDescription>
+          {barControls}
+        </SheetHeader>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {renderContent(selectedRecord)}
+        </div>
+      </SheetContent>
+    </Sheet>
+  ) : null;
+
+  if (!hasList) return drawer;
+
+  // --- The list, and the split pane beside it ---
+  // One element across every state — closed, split, drawer, maximized — so
+  // the list never remounts and its scroll survives (objectstack#27545). The
+  // pane is one element too: maximizing restyles it, it does not remount it.
+  const paneBeside = face === 'split' && shown;
+  const listFace: RecordListFace = paneBeside && !maximized
+    ? listWidth !== null ? recordListFaceFor(listWidth) : 'columns'
+    : 'full';
+  return (
+    <>
+      <ActiveListRecordProvider recordId={shown ? activeListRecordId ?? null : null}>
+        <RecordListFaceProvider value={listFace}>
+          <div
+            ref={setHostEl}
+            className={cn('relative flex h-full min-h-0 min-w-0 flex-1 flex-row', mode === 'split' && className)}
+            data-testid="record-split-host"
+          >
             <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t('common.resizeDrawer')}
-              onMouseDown={resize.handleMouseDown}
-              onDoubleClick={resize.handleDoubleClick}
-              className="hidden sm:block absolute left-0 top-0 bottom-0 z-30 w-1 cursor-col-resize touch-none bg-transparent hover:bg-primary/40 active:bg-primary/60 transition-colors"
-            />
-          )}
-          {/* The bar (objectstack#26679, maintainer rulings 2-5): the left
-              side holds only the in-place path — `←` and the ancestors —
-              and is empty at the root; the right side holds ↑ ↓, ⤢ and ✕.
-              No object name and no position: the title and description stay
-              for assistive technology only (Radix requires the title). */}
-          <SheetHeader className="shrink-0 flex-row items-center justify-between gap-2 space-y-0 px-4 py-2 border-b bg-muted/30">
-            <SheetTitle className="sr-only">{resolvedTitle}</SheetTitle>
-            <SheetDescription className="sr-only">
-              {description || overlayDescription}
-            </SheetDescription>
-            <div className="flex min-w-0 flex-1 items-center gap-1" data-testid="record-drawer-leading">
-              {onBack && (
-                <button
-                  type="button"
-                  onClick={onBack}
-                  aria-label={t('detail.goBack')}
-                  title={t('detail.goBack')}
-                  className={BAR_BUTTON_CLASS}
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {trail}
+              ref={setListEl}
+              className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+              // Maximized, the pane covers the list; the list keeps its place
+              // and its scroll, out of reach until the pane is restored.
+              inert={maximized}
+              data-testid="record-split-list"
+            >
+              {mainContent}
             </div>
-            <div className="flex shrink-0 items-center gap-0.5">
-              {stepper && (
-                <>
-                  <button
-                    type="button"
-                    onClick={stepper.onPrevious}
-                    disabled={!stepper.onPrevious}
-                    aria-label={t('detail.previousRecord')}
-                    title={t('detail.previousRecord')}
-                    className={BAR_BUTTON_CLASS}
-                  >
-                    <ChevronUp className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={stepper.onNext}
-                    disabled={!stepper.onNext}
-                    aria-label={t('detail.nextRecord')}
-                    title={t('detail.nextRecord')}
-                    className={BAR_BUTTON_CLASS}
-                  >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              )}
-              {onExpand && (
-                <button
-                  type="button"
-                  onClick={() => onExpand()}
-                  aria-label={resolvedExpandLabel}
-                  title={resolvedExpandLabel}
-                  className={BAR_BUTTON_CLASS}
-                >
-                  <Maximize2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-              <SheetClose asChild>
-                <button
-                  type="button"
-                  aria-label={t('common.close')}
-                  title={t('common.close')}
-                  className={BAR_BUTTON_CLASS}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </SheetClose>
-            </div>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {renderContent(selectedRecord)}
-          </div>
-        </SheetContent>
-      </Sheet>
-    );
-  }
-
-  // --- Split Mode (Resizable Panels) ---
-  if (mode === 'split') {
-    if (!isOpen || !mainContent) {
-      return null;
-    }
-
-    // Calculate panel sizes based on width config
-    const detailPercent = width
-      ? typeof width === 'number'
-        ? Math.min(70, Math.max(20, (width / 1200) * 100))
-        : 40
-      : 40;
-    const mainPercent = 100 - detailPercent;
-
-    return (
-      <ResizablePanelGroup orientation="horizontal" className={cn('h-full', className)}>
-        <ResizablePanel defaultSize={mainPercent} minSize={30}>
-          {mainContent}
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={detailPercent} minSize={20}>
-          <div className="h-full overflow-y-auto p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">{resolvedTitle}</h3>
-              <button type="button"
-                onClick={close}
-                className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                aria-label={t('common.closePanel')}
+            {paneBeside && selectedRecord && (
+              <aside
+                aria-label={resolvedTitle}
+                className={cn(
+                  'flex h-full min-h-0 flex-col overflow-hidden bg-background',
+                  maximized
+                    ? 'absolute inset-y-0 right-0 z-20 w-[var(--ov-w)] max-w-full'
+                    : 'relative w-[var(--ov-w)] max-w-full shrink-0 border-l',
+                )}
+                style={widthStyle}
+                data-testid="record-split-pane"
+                data-maximized={maximized ? '' : undefined}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            {description && (
-              <p className="text-sm text-muted-foreground mb-4">{description}</p>
+                {resizeHandle}
+                <div className={cn('flex', barClass)}>{barControls}</div>
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  {renderContent(selectedRecord)}
+                </div>
+              </aside>
             )}
-            {renderContent(selectedRecord)}
           </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    );
-  }
-
-  return null;
+        </RecordListFaceProvider>
+      </ActiveListRecordProvider>
+      {drawer}
+    </>
+  );
 };
 
 NavigationOverlay.displayName = 'NavigationOverlay';

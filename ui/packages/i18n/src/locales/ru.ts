@@ -1209,6 +1209,8 @@ const ru = {
     removeFromFavorites: "Удалить из избранного",
     previousRecord: "Предыдущая запись",
     nextRecord: "Следующая запись",
+    maximize: "Развернуть",
+    restoreSize: "Восстановить размер",
     recordOf: "{{current}} из {{total}}",
     recordNotFound: "Запись не найдена",
     recordNotFoundDescription: "Запись, которую вы ищете, не существует или была удалена.",

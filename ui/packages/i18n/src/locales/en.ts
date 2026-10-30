@@ -1487,6 +1487,8 @@ const en = {
     removeFromFavorites: 'Remove from favorites',
     previousRecord: 'Previous record',
     nextRecord: 'Next record',
+    maximize: 'Maximize',
+    restoreSize: 'Restore size',
     recordOf: '{{current}} of {{total}}',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist or may have been deleted.',

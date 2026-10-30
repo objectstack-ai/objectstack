@@ -1172,6 +1172,8 @@ const fr = {
     removeFromFavorites: "Retirer des favoris",
     previousRecord: "Enregistrement précédent",
     nextRecord: "Enregistrement suivant",
+    maximize: "Agrandir",
+    restoreSize: "Restaurer la taille",
     recordOf: "{{current}} sur {{total}}",
     recordNotFound: "Enregistrement introuvable",
     recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas ou a peut-être été supprimé.",

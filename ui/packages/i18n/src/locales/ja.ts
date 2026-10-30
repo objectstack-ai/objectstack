@@ -1142,6 +1142,8 @@ const ja = {
     removeFromFavorites: "お気に入りから削除",
     previousRecord: "前のレコード",
     nextRecord: "次のレコード",
+    maximize: "最大化",
+    restoreSize: "元のサイズに戻す",
     recordOf: "{{current}} / {{total}}",
     recordNotFound: "レコードが見つかりません",
     recordNotFoundDescription: "お探しのレコードは存在しないか、削除された可能性があります。",

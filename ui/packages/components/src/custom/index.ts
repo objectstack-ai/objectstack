@@ -16,6 +16,19 @@ export * from './item';
 export * from './kbd';
 export * from './native-select';
 export * from './navigation-overlay';
+export {
+  RecordListFaceProvider,
+  ActiveListRecordProvider,
+  recordListFaceFor,
+  useRecordListFace,
+  useIsActiveListRecord,
+  useScrollActiveListRecordIntoView,
+  ActiveListRow,
+  listRecordIdOf,
+  RECORD_LIST_CARD_FACE_BELOW_PX,
+  RECORD_LIST_NARROW_COLUMN_COUNT,
+  type RecordListFace,
+} from './record-list-face';
 export * from './panel-toggles';
 export * from './resizable';
 export * from './section-header';
