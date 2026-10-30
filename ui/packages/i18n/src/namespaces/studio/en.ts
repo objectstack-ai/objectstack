@@ -658,6 +658,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
   'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  // objectstack#27834 — the Update Records filter's "Triggering record" target.
+  'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -1411,6 +1415,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.timeline': 'Timeline',
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
+  'engine.inspector.view.type.tree': 'Tree',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -3046,6 +3051,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27785 — a report's chart held until its axes are picked; `input`
   // is the chart panel's own label for the axis it still needs.
   'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
+  // objectstack#27895 — a list view held until a required setting of its type's own block is picked again;
+  // `input` is the setting's label in the panel's type settings section.
+  'engine.studio.held.listViewTypeNeedsInput': '{input} in the view’s {type} settings needs a value',
   // objectstack#27461 — a roll-up held until it is set up; `input` is the field
   // inspector's own label for the roll-up input it still needs.
   'engine.studio.held.fieldNeedsInput': '{input} on the field “{field}” needs a value',
@@ -4097,6 +4105,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kanbanCard.mode.none': "Don't open",
   'engine.studio.inspector.listView.kanbanCard.groupBy': 'Group by field',
   'engine.studio.inspector.listView.kanbanCard.pickField': 'Pick a field',
+  // objectstack#27895 — the section of a view type's own settings (calendar, gallery, timeline, …).
+  'engine.studio.inspector.listView.typeSettings': '{type} settings',
+  'engine.studio.inspector.listView.typeSettings.intro': 'The settings this type of view has. A setting that names a field is picked from the object’s fields.',
   'engine.studio.inspector.designersMissing':
     'No metadata designers are registered in this session, so there is nothing to edit here.',
   'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',

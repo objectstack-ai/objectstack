@@ -57,12 +57,22 @@ interface HarnessOptions {
     datasourceAdmin?: 'none' | 'bare' | 'real';
     /** When true, the datasource-admin seam throws on attach. */
     datasourceAttachThrows?: boolean;
+    /**
+     * [#27428] The `automation` slot: `'none'` (getService throws — the
+     * default, so every earlier case reads exactly as it did), `'bare'`
+     * (present, no attachConnectorCredentialPubSub — an older implementation),
+     * or `'real'` (exposes attachConnectorCredentialPubSub).
+     */
+    automation?: 'none' | 'bare' | 'real';
+    /** When true, the automation seam throws on attach. */
+    automationAttachThrows?: boolean;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
     const {
         driver = 'redis', metadata = 'fallback', protocol = 'real',
         datasourceAdmin = 'none', datasourceAttachThrows = false,
+        automation = 'none', automationAttachThrows = false,
     } = opts;
 
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -75,6 +85,11 @@ function makeHarness(opts: HarnessOptions = {}) {
     const attachDatasource = vi.fn((_pubsub: unknown, _nodeId: string) => {
         if (datasourceAttachThrows) throw new Error('datasource attach exploded');
         return detachDatasource;
+    });
+    const detachCredential = vi.fn();
+    const attachCredential = vi.fn((_pubsub: unknown, _nodeId: string) => {
+        if (automationAttachThrows) throw new Error('automation attach exploded');
+        return detachCredential;
     });
 
     const pubsub = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() };
@@ -95,6 +110,10 @@ function makeHarness(opts: HarnessOptions = {}) {
         datasourceAdmin === 'none' ? undefined
         : datasourceAdmin === 'bare' ? { listDatasources: vi.fn() }
         : { attachDatasourceMutationPubSub: attachDatasource };
+    const automationService =
+        automation === 'none' ? undefined
+        : automation === 'bare' ? { execute: vi.fn() }
+        : { attachConnectorCredentialPubSub: attachCredential };
 
     const hooks = new Map<string, Array<() => Promise<void> | void>>();
     const ctx = {
@@ -121,6 +140,10 @@ function makeHarness(opts: HarnessOptions = {}) {
                 if (!datasourceAdminService) throw new Error('service not found: datasource-admin');
                 return datasourceAdminService;
             }
+            if (name === 'automation') {
+                if (!automationService) throw new Error('service not found: automation');
+                return automationService;
+            }
             throw new Error(`service not found: ${name}`);
         },
     } as unknown as PluginContext;
@@ -133,6 +156,7 @@ function makeHarness(opts: HarnessOptions = {}) {
         ctx, logger, fire, pubsub,
         attachMetadata, detachMetadata, attachMutation, detachMutation,
         attachDatasource, detachDatasource,
+        attachCredential, detachCredential,
     };
 }
 
@@ -410,5 +434,87 @@ describe('[#13805] lane 3 — the datasource admin service’s datasource.mutate
         // Idempotent: a second shutdown does not detach twice.
         await h.fire('kernel:shutdown');
         expect(h.detachDatasource).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('[#27428] lane 4 — the automation service’s connector-credential.mutated fan-out', () => {
+    it('⭐ attaches on a cross-process driver with the cluster’s pubsub and node id, and reports it — independently of lanes 1 to 3', async () => {
+        const h = makeHarness({ driver: 'redis', metadata: 'none', protocol: 'none', automation: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachCredential).toHaveBeenCalledTimes(1);
+        expect(h.attachCredential).toHaveBeenCalledWith(h.pubsub, 'node-a');
+        expect(infoLines(h)).toContain(
+            'MetadataClusterBridgePlugin: bridged connector-credential.mutated → cluster.pubsub (node=node-a)',
+        );
+    });
+
+    it('all four lanes attach together when every owner exposes its seam', async () => {
+        const h = makeHarness({
+            driver: 'redis', metadata: 'manager', protocol: 'real', datasourceAdmin: 'real', automation: 'real',
+        });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachMetadata).toHaveBeenCalledTimes(1);
+        expect(h.attachMutation).toHaveBeenCalledTimes(1);
+        expect(h.attachDatasource).toHaveBeenCalledTimes(1);
+        expect(h.attachCredential).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips attach on the in-process memory driver — no peers to reach, nothing said above debug', async () => {
+        const h = makeHarness({ driver: 'memory', automation: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachCredential).not.toHaveBeenCalled();
+        expect(infoLines(h).some((l) => l.includes('connector-credential.mutated'))).toBe(false);
+        expect(
+            debugLines(h).some((l) => l.includes('is in-process') && l.includes('connector-credential fan-out')),
+        ).toBe(true);
+    });
+
+    it('skips quietly when no automation service is registered, or it does not expose the seam', async () => {
+        for (const automation of ['none', 'bare'] as const) {
+            const h = makeHarness({ driver: 'redis', automation });
+            await new MetadataClusterBridgePlugin().init(h.ctx);
+            await h.fire('kernel:ready');
+
+            expect(h.attachCredential).not.toHaveBeenCalled();
+            expect(h.logger.error).not.toHaveBeenCalled();
+            expect(warnLines(h).some((l) => l.includes('connector-credential'))).toBe(false);
+        }
+    });
+
+    it('a throwing attach is reported and does not take the other lanes down', async () => {
+        const h = makeHarness({
+            driver: 'redis', metadata: 'manager', protocol: 'real', datasourceAdmin: 'real',
+            automation: 'real', automationAttachThrows: true,
+        });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachDatasource).toHaveBeenCalledTimes(1);
+        expect(h.logger.error).toHaveBeenCalledWith(
+            'MetadataClusterBridgePlugin: connector-credential-lane attach failed',
+            expect.any(Error),
+        );
+        expect(infoLines(h).some((l) => l.includes('connector-credential.mutated'))).toBe(false);
+    });
+
+    it('kernel:shutdown detaches lane 4, and a throwing lane-3 detach does not strand it', async () => {
+        const h = makeHarness({ driver: 'redis', datasourceAdmin: 'real', automation: 'real' });
+        h.detachDatasource.mockImplementation(() => { throw new Error('detach exploded'); });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:shutdown');
+
+        expect(h.detachCredential).toHaveBeenCalledTimes(1);
+        expect(h.logger.error).toHaveBeenCalled();
+
+        // Idempotent: a second shutdown does not detach twice.
+        await h.fire('kernel:shutdown');
+        expect(h.detachCredential).toHaveBeenCalledTimes(1);
     });
 });
