@@ -117,9 +117,14 @@ export function ConnectorCredentialsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [clearDraft, setClearDraft] = useState<ClearDraft | null>(null);
 
+  /** Read the door again: back to the loading state until the answer lands. */
+  const reload = () => {
+    setListing(null);
+    setNonce((n) => n + 1);
+  };
+
   useEffect(() => {
     const controller = new AbortController();
-    setListing(null);
     fetchCredentialListing(controller.signal).then(
       (next) => setListing(next),
       () => { /* aborted: a newer read owns the page */ },
@@ -195,7 +200,7 @@ export function ConnectorCredentialsPage() {
             {t('connectorCredentials.loadFailed', { defaultValue: 'Could not load connector credentials.' })}
           </p>
           <p className="text-muted-foreground">{listing.message}</p>
-          <Button size="sm" variant="outline" onClick={() => setNonce((n) => n + 1)}>
+          <Button size="sm" variant="outline" onClick={reload}>
             {t('connectorCredentials.retry', { defaultValue: 'Try again' })}
           </Button>
         </div>
@@ -327,7 +332,7 @@ export function ConnectorCredentialsPage() {
         })}
         icon={<KeyRound className="h-4 w-4" />}
         refresh={{
-          onRefresh: () => setNonce((n) => n + 1),
+          onRefresh: reload,
           label: t('connectorCredentials.refresh', { defaultValue: 'Refresh' }),
           busy: listing === null,
         }}

@@ -45,7 +45,6 @@ export interface ConnectorCredentialsStepProps {
 }
 
 type StepRead =
-  | { kind: 'reading' }
   | { kind: 'unreadable' }
   | { kind: 'read'; refs: ConnectorCredentialRef[] };
 
@@ -54,25 +53,37 @@ type Outcome = 'set' | 'skipped';
 
 export function ConnectorCredentialsStep({ packageId, fallbackNote, className }: ConnectorCredentialsStepProps) {
   const { t } = useObjectTranslation();
-  const [read, setRead] = useState<StepRead>({ kind: 'reading' });
-  const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
+  // Both are kept with the package they belong to, so a step handed another
+  // package reads as still reading, with nothing done, until its own listing lands.
+  const [stored, setStored] = useState<{ packageId: string; read: StepRead } | null>(null);
+  const [done, setDone] = useState<{ packageId: string; outcomes: Record<string, Outcome> } | null>(null);
+  const read = stored && stored.packageId === packageId ? stored.read : null;
+  const outcomes = done && done.packageId === packageId ? done.outcomes : {};
 
   useEffect(() => {
     const controller = new AbortController();
-    setRead({ kind: 'reading' });
-    setOutcomes({});
     fetchCredentialListing(controller.signal).then(
       (listing) => {
-        setRead(listing.kind === 'listed'
-          ? { kind: 'read', refs: refsAwaitingPackage(listing.refs, packageId) }
-          : { kind: 'unreadable' });
+        setStored({
+          packageId,
+          read: listing.kind === 'listed'
+            ? { kind: 'read', refs: refsAwaitingPackage(listing.refs, packageId) }
+            : { kind: 'unreadable' },
+        });
       },
       () => { /* aborted: the package changed */ },
     );
     return () => controller.abort();
   }, [packageId]);
 
-  if (read.kind === 'reading') return null;
+  const settle = (ref: string, outcome: Outcome) => {
+    setDone((cur) => ({
+      packageId,
+      outcomes: { ...(cur && cur.packageId === packageId ? cur.outcomes : {}), [ref]: outcome },
+    }));
+  };
+
+  if (read === null) return null;
   if (read.kind === 'unreadable') {
     return fallbackNote ? (
       <p className={`whitespace-normal text-sm text-muted-foreground ${className ?? ''}`} data-testid="install-credentials-note">
@@ -84,11 +95,9 @@ export function ConnectorCredentialsStep({ packageId, fallbackNote, className }:
 
   /** The door's answer after a set: `set` closes the row, anything else keeps it open with its new status. */
   const onWritten = (entry: ConnectorCredentialRef) => {
-    if (entry.status === 'set') {
-      setOutcomes((o) => ({ ...o, [entry.ref]: 'set' }));
-    }
-    setRead((cur) => (cur.kind === 'read'
-      ? { kind: 'read', refs: cur.refs.map((r) => (r.ref === entry.ref ? entry : r)) }
+    if (entry.status === 'set') settle(entry.ref, 'set');
+    setStored((cur) => (cur && cur.packageId === packageId && cur.read.kind === 'read'
+      ? { packageId, read: { kind: 'read', refs: cur.read.refs.map((r) => (r.ref === entry.ref ? entry : r)) } }
       : cur));
   };
 
@@ -137,7 +146,7 @@ export function ConnectorCredentialsStep({ packageId, fallbackNote, className }:
                     type="button"
                     size="sm"
                     variant="ghost"
-                    onClick={() => setOutcomes((o) => ({ ...o, [entry.ref]: 'skipped' }))}
+                    onClick={() => settle(entry.ref, 'skipped')}
                   >
                     {t('connectorCredentials.skip', { defaultValue: 'Skip for now' })}
                   </Button>
