@@ -24,7 +24,8 @@
  *  • B's live instance follows the new definition with no reload on B
  *                                                                    -> RED
  *    (the automation plugin's mutation listener takes `flow` only, and
- *    `metadata:reloaded` is a kernel-local hook)
+ *    `metadata:reloaded` is a kernel-local hook; pinned as `it.fails`, the
+ *    fix is #28002)
  *  • control: a `metadata:reloaded` on B converges B from its OWN read of the
  *    shared store, so the gap is the trigger and not the store or the read
  *                                                                    -> GREEN
@@ -184,7 +185,8 @@ describe('[#27977] a connector definition published on one replica', () => {
         await vi.waitFor(() => expect(b.heard).toContain(`connector/${NAME}`));
     });
 
-    it.fails('[#27977] converges the peer with no reload on the peer — today it does not', async () => {
+    // Measured by #27977; the fix is #28002. Promote to a plain `it` when #28002 lands.
+    it.fails('[#27977] converges the peer with no reload on the peer — known gap, filed as #28002', async () => {
         const file = sharedDatabaseFile();
         const bus = sharedBus();
         const a = await replica(file, 'node-a', bus);
