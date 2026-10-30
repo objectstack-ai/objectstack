@@ -3306,7 +3306,9 @@ const CHART_AXIS_NOT_SELECTED_EXPLANATION: RuleExplanation = {
       'exactly one dimension × one measure and derives ONE series, while `report.values` is the ' +
       'selection of the table beneath it. So a report\'s `chart.yAxis` is never reported — a chart ' +
       'cannot fail to select what it queries — and a `chart.series[].name` override lands only when ' +
-      'it names `chart.yAxis`. The verdict quotes at most three names of the selection.',
+      'it names `chart.yAxis`. With `chart.seriesBy` set the chart derives one series per value of ' +
+      'that dimension, so an override names a value, which no static check can see, and is not ' +
+      'judged. The verdict quotes at most three names of the selection.',
     CHART_BINDING_SURFACES,
   ],
 };
