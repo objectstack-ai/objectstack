@@ -5,8 +5,8 @@
  * pillar: a lock and "Read-only" in the app chip, muted, its title the
  * package's read-only sentence; and one read-only mark at the right of the
  * item header. With no item open (these pillars list nothing here) the mark
- * reads "Read-only" and links nowhere: it offers an overlay only for an open
- * item whose type accepts one (#27356 row 13, `StudioReadOnlyLink.overlay-27356`).
+ * reads "Read-only" and links nowhere, as it does for every item since
+ * ADR-0146 D2 retired the Setup link (`StudioReadOnlyLink.noSetupLink-28147`).
  *
  * The count reads the text a sighted author sees: text inside an `sr-only`
  * element is left out, because those are the disabled controls' reasons,
