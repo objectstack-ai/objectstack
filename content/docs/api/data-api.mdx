@@ -239,6 +239,13 @@ the requester's own answer only. The comment is saved
 with every mention, and nothing about the withheld users is stored on it. With
 nobody withheld, the key is absent.
 
+When a hook on the write tells the person who saved what the save set in motion
+("Sent to your manager for approval"), the answer also carries `notice`: that one
+author-written message, info severity, separate from `warnings`. Show it with, or
+in place of, your own success message. If more than one hook sets it, the last one
+wins. A hook on a nested write never reaches it, nothing about it is stored, and
+with no notice set the key is absent.
+
 ### `PATCH /data/:object/:id`
 
 Update an existing record (partial update).
@@ -248,6 +255,8 @@ Update an existing record (partial update).
 
 A `sys_comment` update answers `withheldMentions` the same way, for the mentions
 the update added. A mention the comment already carried is not judged again.
+
+It answers `notice` the same way as a create, when a hook on the update set one.
 
 ### `DELETE /data/:object/:id`
 

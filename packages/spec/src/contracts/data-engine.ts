@@ -146,9 +146,9 @@ export interface WriteObservabilityOptions {
    *
    * Absent is normal: a write no person is waiting on (a seed, a flow node, a
    * batch, an import) passes no listener, so a hook always calls it
-   * optionally. The sandboxed `body` face does not carry it: its
-   * `ctx.input.options` is the frozen `{ multi, where }` projection, never the
-   * caller's bag.
+   * optionally. The sandboxed `body` face (including a `handler` the build
+   * lowers into a body) does not carry it: its `ctx.input.options` is the
+   * frozen `{ multi, where }` projection, never the caller's bag.
    *
    * One message per write: a later call REPLACES an earlier one, so the last
    * call before the write answers wins, and a message that is not a non-empty
