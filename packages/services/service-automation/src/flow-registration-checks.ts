@@ -591,10 +591,14 @@ export function validateFlowExpressions(
             // `FlowValueSlotSchema` on the CRUD nodes, the same call on the
             // `assignment` node — so a flow that registers is never refused
             // there, and vice versa.
-            for (const refusal of flowNodeValueTemplateRefusals(node.type, node.config)) {
+            //
+            // [#27968] The node is handed for its sibling blocks: a
+            // `connector_action` node's `connectorConfig.input` is a value slot
+            // the ledger roots in that block, located as `connectorConfig.…`.
+            for (const refusal of flowNodeValueTemplateRefusals(node.type, node.config, node)) {
                 refuse(
-                    `${nodePath}.config.${refusal.path}`,
-                    `${at}node '${node.id}' (${node.type}) ${refusal.label} at config.${refusal.path}`,
+                    `${nodePath}.${refusal.block}.${refusal.path}`,
+                    `${at}node '${node.id}' (${node.type}) ${refusal.label} at ${refusal.block}.${refusal.path}`,
                     refusal.message,
                     refusal.source,
                 );
@@ -630,10 +634,14 @@ export function validateFlowExpressions(
             // envelope as a CEL value (#15137) — the two roles the ledger has
             // since #19939 retired the single-brace one with the `loop` / `map`
             // `collection` it recorded.
-            for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
-                const slotPath = `${nodePath}.config.${found.path}`;
+            //
+            // [#27968] Handed the node, the ledger reaches a slot rooted in a
+            // sibling block too — a `connector_action` node's
+            // `connectorConfig.input` — and names the block it is in.
+            for (const found of resolveFlowNodeExpressions(node.type, node.config, node)) {
+                const slotPath = `${nodePath}.${found.block}.${found.path}`;
                 const slotWhere =
-                    `${at}node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`;
+                    `${at}node '${node.id}' (${node.type}) ${found.entry.label} at ${found.block}.${found.path}`;
                 // [#15137] `value` slots — the ruled `assignment.assignments.*`
                 // and, since #19938, `create_record` / `update_record`
                 // `fields.*`. The resolver emits ONLY envelope-shaped objects

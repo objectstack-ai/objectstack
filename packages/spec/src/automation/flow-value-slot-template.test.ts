@@ -52,12 +52,13 @@ import {
   celExpression,
   celPath,
 } from './flow-template-token';
-import { FLOW_NODE_EXPRESSION_PATHS } from './flow-node-expression-paths';
+import { FLOW_NODE_EXPRESSION_PATHS, type FlowNodeExpressionPath } from './flow-node-expression-paths';
 import {
   VALUE_SLOT_TEMPLATE_REFUSAL,
   classifyFlowFilterOperandString,
   flowNodeValueTemplateRefusals,
   valueSlotTemplateRefusals,
+  type FlowNodeValueTemplateRefusal,
 } from './flow-value-slot-template';
 
 /**
@@ -85,6 +86,18 @@ function configForEntry(
 ): Record<string, unknown> {
   const config = entry.filterOperands ? configAtEntry(`${entry.path}.*`, value) : configAtEntry(entry.path, value);
   return entry.onlyWithKey === undefined ? config : { ...config, [entry.onlyWithKey]: { nodes: [], edges: [] } };
+}
+
+/**
+ * [#27968] The template refusals of a node carrying `value` at `entry`'s
+ * position — in `config`, or in the sibling block the entry is rooted in,
+ * handed over as the node's sibling blocks.
+ */
+function refusalsForEntry(entry: FlowNodeExpressionPath, value: unknown): FlowNodeValueTemplateRefusal[] {
+  const at = configForEntry(entry, value);
+  return entry.block === undefined
+    ? flowNodeValueTemplateRefusals(entry.nodeType, at)
+    : flowNodeValueTemplateRefusals(entry.nodeType, undefined, { [entry.block]: at });
 }
 
 /** The one refusal a string draws, or a failure naming what came back. */
@@ -588,6 +601,31 @@ describe('`flowNodeValueTemplateRefusals` — every value position of a node, lo
     const [refusal] = flowNodeValueTemplateRefusals('subflow', { flowName: 'child', input: { list: '{rows}' } });
     expect(refusal!.message).toContain("{ dialect: 'cel', source: 'rows' }");
   });
+
+  // [#27968] The one value slot rooted outside `config`: reached through the
+  // node's sibling blocks, located in `connectorConfig`, with the generic
+  // remedy — the action was handed the token's text, not nothing.
+  it('a connector_action node\'s `connectorConfig.input` — the node handed for its sibling block', () => {
+    const node = {
+      type: 'connector_action',
+      connectorConfig: {
+        connectorId: 'helpdesk',
+        actionId: 'open_ticket',
+        input: { recordId: '{rec.id}', queue: 'support', tags: ['{rec.tag}'] },
+      },
+    };
+    const refusals = flowNodeValueTemplateRefusals('connector_action', undefined, node);
+    expect(refusals.map((r) => [r.block, r.path, r.label, r.source])).toEqual([
+      ['connectorConfig', 'input.recordId', 'connector_action input value', '{rec.id}'],
+      ['connectorConfig', 'input.tags[0]', 'connector_action input value', '{rec.tag}'],
+    ]);
+    expect(refusals[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(refusals[0]!.message).toContain("{ dialect: 'cel', source: 'rec.id' }");
+    expect(refusals[0]!.message).not.toMatch(/child flow|the function/);
+    // Handed only `config`, the block is not read; every config refusal names `config`.
+    expect(flowNodeValueTemplateRefusals('connector_action', undefined)).toEqual([]);
+    expect(flowNodeValueTemplateRefusals('assignment', { assignments: { t: '{a}' } }, node).map((r) => r.block)).toEqual(['config']);
+  });
 });
 
 /**
@@ -731,7 +769,7 @@ describe('a callee\'s input map: the refusal says what the guarded form hands th
     const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
     expect(valueEntries.filter((e) => CALLEE.has(`${e.nodeType} ${e.path}`))).toHaveLength(3);
     for (const entry of valueEntries) {
-      const refusals = flowNodeValueTemplateRefusals(entry.nodeType, configForEntry(entry, '{x}'));
+      const refusals = refusalsForEntry(entry, '{x}');
       expect(refusals, `${entry.nodeType} ${entry.path}`).toHaveLength(1);
       const carries = /is (the child flow|each item's child flow|the function)'s/.test(refusals[0]!.message);
       expect(carries, `${entry.nodeType} ${entry.path}`).toBe(CALLEE.has(`${entry.nodeType} ${entry.path}`));
@@ -836,7 +874,7 @@ describe('a screen\'s value slots: the refusal says what the client is served in
     const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
     expect(valueEntries.filter((e) => SCREEN.has(`${e.nodeType} ${e.path}`))).toHaveLength(3);
     for (const entry of valueEntries) {
-      const [refusal] = flowNodeValueTemplateRefusals(entry.nodeType, configForEntry(entry, '{x}'));
+      const [refusal] = refusalsForEntry(entry, '{x}');
       const carries = /prefills (the object form|this screen field)|names the record an `edit` form opens/.test(refusal!.message);
       expect(carries, `${entry.nodeType} ${entry.path}`).toBe(SCREEN.has(`${entry.nodeType} ${entry.path}`));
     }
@@ -891,7 +929,7 @@ describe('a notify node\'s value slots: located per position, a recipient\'s ref
   it('only `recipients` carries it — one list: the ledger', () => {
     const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
     for (const entry of valueEntries) {
-      const [refusal] = flowNodeValueTemplateRefusals(entry.nodeType, configForEntry(entry, '{x}'));
+      const [refusal] = refusalsForEntry(entry, '{x}');
       const carries = /names who the notification goes to/.test(refusal!.message);
       expect(carries, `${entry.nodeType} ${entry.path}`).toBe(`${entry.nodeType} ${entry.path}` === 'notify recipients');
     }

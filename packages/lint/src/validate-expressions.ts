@@ -2769,8 +2769,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
             severity: 'error',
           });
         }
-        for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
-          const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
+        // [#27968] Handed the node, the ledger reaches a slot rooted in a
+        // sibling block too — a `connector_action` node's
+        // `connectorConfig.input` — and names the block it is in.
+        for (const found of resolveFlowNodeExpressions(nodeType, cfg, node)) {
+          const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at ${found.block}.${found.path}`;
           // [#15137] `value` slots are checkable too, by their own rule — see
           // `checkDeclaredValue`. Not shadowing-checked: the shadow diagnostic is
           // about a bare identifier resolving to a variable instead of a field,
@@ -2828,9 +2831,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // (`flowNodeValueTemplateRefusals`), walking the ledger's `value` slots
         // and the two legacy `assignment` shapes, so build and registration
         // give one verdict, and each refusal names the token's CEL spelling.
-        for (const templateRefusal of flowNodeValueTemplateRefusals(nodeType, cfg)) {
+        for (const templateRefusal of flowNodeValueTemplateRefusals(nodeType, cfg, node)) {
           issues.push({
-            where: `${at} · node '${node.id}' (${nodeType}) ${templateRefusal.label} at config.${templateRefusal.path}`,
+            where: `${at} · node '${node.id}' (${nodeType}) ${templateRefusal.label} at ${templateRefusal.block}.${templateRefusal.path}`,
             message: templateRefusal.message,
             source: templateRefusal.source,
             severity: 'error',

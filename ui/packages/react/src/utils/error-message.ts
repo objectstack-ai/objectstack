@@ -220,12 +220,8 @@ export function extractFieldErrors(err: unknown): WriteFieldError[] | null {
   const e = err as Record<string, any> | null | undefined;
   if (!e || typeof e !== 'object') return null;
 
-  const raw: unknown =
-    (Array.isArray(e.validationErrors) && e.validationErrors) ||
-    (Array.isArray(e.details?.fields) && e.details.fields) ||
-    (Array.isArray(e.fields) && e.fields) ||
-    null;
-  if (!raw || !Array.isArray(raw)) {
+  const raw = fieldEntries(e);
+  if (!raw) {
     if (!errorCodeIs(e, UNIQUE_VIOLATION) && !errorCodeIs(e.details, UNIQUE_VIOLATION)) return null;
     const field = firstString(e.details?.field, e.field);
     return field ? [{ field, message: extractWriteErrorMessage(err) ?? '' }] : null;
@@ -244,6 +240,62 @@ export function extractFieldErrors(err: unknown): WriteFieldError[] | null {
     out.push({ field, message });
   }
   return out.length > 0 ? out : null;
+}
+
+/**
+ * The `fields[]` list of a rejected write, from whichever side of the adapter
+ * boundary it arrives on — the three shapes {@link extractFieldErrors} reads.
+ */
+function fieldEntries(e: Record<string, any>): unknown[] | null {
+  return (
+    (Array.isArray(e.validationErrors) && e.validationErrors) ||
+    (Array.isArray(e.details?.fields) && e.details.fields) ||
+    (Array.isArray(e.fields) && e.fields) ||
+    null
+  );
+}
+
+/**
+ * The form-level lines of a rejected write: one per `fields[]` entry the
+ * caller could NOT show under an input, in the order the server sent them.
+ *
+ * The server keeps one entry per failed rule — located on the field the rule
+ * names, else on `_record` — and only its top-level `message` joins them with
+ * `; `. A banner that shows that joined text reads two broken rules as one
+ * run-on sentence, and repeats whatever is already written under an input. So
+ * a caller marks what it can (`extractFieldErrors` → its inputs) and says the
+ * rest here, one line per entry.
+ *
+ * `isShownInline` answers, per entry's field, whether the caller drew that
+ * entry's message under a visible input. An entry with no usable field is
+ * never shown inline.
+ *
+ * Answers `null` — the caller keeps the envelope's top-level message — when
+ * the refusal carries no entry list, or when an entry it would have to say
+ * carries no human-readable `message`: the server builds the top-level text
+ * for such an entry, and an untranslated enum on its own line reads as a bug.
+ * Answers `[]` when every entry is shown inline.
+ */
+export function unmarkedRefusalLines(
+  err: unknown,
+  isShownInline: (field: string) => boolean,
+): string[] | null {
+  const e = err as Record<string, any> | null | undefined;
+  if (!e || typeof e !== 'object') return null;
+  const raw = fieldEntries(e);
+  if (!raw) return null;
+
+  const lines: string[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rec = entry as Record<string, unknown>;
+    const field = firstString(rec.field, rec.name, rec.path);
+    if (field && isShownInline(field)) continue;
+    const message = firstString(rec.message, rec.error);
+    if (!message) return null;
+    lines.push(message);
+  }
+  return lines;
 }
 
 /**

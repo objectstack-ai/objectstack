@@ -349,7 +349,10 @@ export const TaskCompletedSlackFlow = defineFlow({
         actionId: 'chat.postMessage',
         input: {
           channel: 'C0WINS000',
-          text: '✅ Task done: {record.title}',
+          // Each input value is a literal or a CEL value envelope evaluated
+          // before dispatch (#27968); a `{…}` token in a string is refused.
+          // `title` is a required field, so it is read unguarded.
+          text: { dialect: 'cel', source: "'✅ Task done: ' + record.title" },
         },
       },
     },
