@@ -472,14 +472,14 @@ const MEASURE_AXIS_CHART_FAMILIES: ReadonlySet<string> = new Set(DASHBOARD_WIDGE
 /**
  * The chart families that draw ONE series, whatever the widget declares
  * (objectui#11417). The shared chart renderer (`AdvancedChartImpl` in
- * `@object-ui/plugin-charts`) binds `series[0]` on its `pie` / `donut`,
- * `funnel` and `treemap` arms and reads no other series there, so a chart of
- * one of these families WITH a dimension draws its first measure and drops
- * every other one, although this widget hands each measure on as a series.
- * Its `sankey` arm reads the series past the first as the groups of a pivoted
- * second dimension (objectstack#27460), so a sankey is handed only the measure
- * it renders (see `chartSeries`). (Without a dimension these families take the
- * tile, `isMetric`.)
+ * `@object-ui/plugin-charts`) draws one measure on its `pie` / `donut`,
+ * `funnel`, `treemap` and `sankey` arms, and reads the series past the first
+ * as the groups of a pivoted second dimension (objectstack#27460,
+ * objectstack#27563): the sankey and the treemap draw every group, the pie,
+ * donut and funnel refuse on the tile. So a chart of one of these families
+ * WITH a dimension is handed only the measure it renders (see `chartSeries`),
+ * and draws its first measure while every other one is dropped. (Without a
+ * dimension these families take the tile, `isMetric`.)
  *
  * Read off the family a widget renders AS (`CHART_TYPE_MAP`), so a `pyramid`
  * widget, which renders as a `funnel`, is in it too.
@@ -716,8 +716,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   const chartType = CHART_TYPE_MAP[widgetType] ?? 'bar';
   // A chart of a single-series family draws its first measure only, with a
   // dimension too (`SINGLE_SERIES_CHART_FAMILIES`, objectui#11417). The chart
-  // branch still hands every measure on as a series: what is drawn does not
-  // change here, only what this widget says it renders.
+  // branch hands such a chart that first measure alone (`chartSeries`), because
+  // the renderer reads a second series there as a group of a pivoted second
+  // dimension (objectstack#27563).
   const drawsFirstMeasureOnly = !isMetric && !isTable && SINGLE_SERIES_CHART_FAMILIES.has(chartType);
   // ── What this widget RENDERS of what it declares (objectui#8894) ─────────
   // Settled here, by the branch decision just above, and read by both the tile
@@ -730,7 +731,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   //
   // "Renders" is what reaches the screen. For a chart that is decided in the
   // shared chart renderer, which this widget hands every measure to as a
-  // series; the one family of arms there that draws a single series is
+  // series but on the single-series families; that one family of arms is
   // stated here as `SINGLE_SERIES_CHART_FAMILIES`, with the pin that ties the
   // two named in its docblock.
   const renderedMeasures = isMetric || drawsFirstMeasureOnly ? values.slice(0, 1) : values;
@@ -2097,13 +2098,15 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   const comparedChartSeries = comparisonSeries.length > 0
     ? [...series.map((s) => ({ ...s, variant: 'current' as const })), ...comparisonSeries]
     : series;
-  // objectstack#27460 — a sankey draws every series past its first as a group
-  // of a pivoted second dimension, one flow per cell. A sankey that declares
+  // objectstack#27460, objectstack#27563 — a single-series family reads every
+  // series past its first as a group of a pivoted second dimension: a sankey
+  // draws one flow per cell, a treemap one leaf per cell, and a pie, donut or
+  // funnel refuses on the tile. A widget of these families that declares
   // several measures (refused by the spec's single-series arm, so only a stored
   // document reaches here) is handed the one measure it renders, so its other
-  // measures are not drawn as groups and the dropped-measure warning above
+  // measures are not read as groups and the dropped-measure warning above
   // stays true. A pivot carries one measure, so nothing is dropped from it.
-  const chartSeries = chartType === 'sankey'
+  const chartSeries = SINGLE_SERIES_CHART_FAMILIES.has(chartType)
     ? comparedChartSeries.filter((s) => !droppedMeasures.includes(s.dataKey))
     : comparedChartSeries;
 

@@ -17,12 +17,18 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
  * canvas, not in a "Layout" form section: the page form prunes `regions`
  * (`PAGE_FIELDS_OWNED_ELSEWHERE` in app-shell's `page-schema.ts`), so the
  * canvas's region controls are where the layout config renders.
+ *
+ * In the required `Live E2E UI` job's `test:e2e:live:ci` allowlist since
+ * objectstack#27554, under the promotion rule (3/3 consecutive green, plus a
+ * 5/5 run of the enlarged allowlist); the readings are on that card's PR.
  */
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 const SHIPPED_PAGE = 'showcase_project_workspace';
 
-/** Author an editable copy of the shipped page; returns its name and how many regions it lays out. */
-async function authorEditablePage(request: APIRequestContext): Promise<{ name: string; regions: number }> {
+/** Author an editable copy of the shipped page; returns its name, how many regions it lays out and how many blocks its first region holds. */
+async function authorEditablePage(
+  request: APIRequestContext,
+): Promise<{ name: string; regions: number; firstRegionBlocks: number }> {
   const res = await request.get(`${API}/api/v1/meta/page/${SHIPPED_PAGE}`);
   expect(res.ok(), await res.text()).toBeTruthy();
   const shipped = (await res.json()).item as Record<string, unknown>;
@@ -30,13 +36,14 @@ async function authorEditablePage(request: APIRequestContext): Promise<{ name: s
   const body = Object.fromEntries(Object.entries(shipped).filter(([k]) => !k.startsWith('_')));
   const regions = Array.isArray(body.regions) ? body.regions.length : 0;
   expect(regions, 'the shipped page lays out regions to copy').toBeGreaterThan(0);
+  const firstRegionBlocks = ((body.regions as { components?: unknown[] }[])[0].components ?? []).length;
 
   const name = `e2e_studio_editor_${Date.now()}`;
   const put = await request.put(`${API}/api/v1/meta/page/${name}`, {
     data: { ...body, name, label: `E2E Studio Editor ${name.slice(-6)}` },
   });
   expect(put.ok(), await put.text()).toBeTruthy();
-  return { name, regions };
+  return { name, regions, firstRegionBlocks };
 }
 
 async function removePage(request: APIRequestContext, name: string) {
@@ -62,8 +69,8 @@ test('the page editor loads with its config sections', async ({ page, request })
   }
 });
 
-test('Add block opens a block-type picker with configurable block kinds', async ({ page, request }) => {
-  const { name } = await authorEditablePage(request);
+test('Add block opens a block-type picker with configurable block kinds, and the added block is stored', async ({ page, request }) => {
+  const { name, firstRegionBlocks } = await authorEditablePage(request);
   try {
     await page.goto(`/apps/showcase_app/metadata/page/${name}`);
     await expect(page.getByTestId('metadata-edit-page')).toBeVisible();
@@ -76,6 +83,21 @@ test('Add block opens a block-type picker with configurable block kinds', async 
     await expect(dialog.getByRole('button', { name: /Card/i })).toBeVisible();
     await expect(dialog.getByRole('button', { name: /Section/i })).toBeVisible();
     await expect(dialog.getByRole('button', { name: /Record details/i })).toBeVisible();
+
+    // The save round trip, not only the canvas: picking a kind autosaves a
+    // draft, and the draft read back through /meta holds the new block at the
+    // end of the first region.
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === 'PUT' && r.url().includes(`/api/v1/meta/page/${name}?mode=draft`),
+    );
+    await dialog.getByRole('button', { name: /Card/i }).first().click();
+    const save = await saved;
+    expect(save.ok(), await save.text()).toBeTruthy();
+    const stored = await request.get(`${API}/api/v1/meta/page/${name}?state=draft`);
+    expect(stored.ok(), await stored.text()).toBeTruthy();
+    const blocks = (await stored.json()).item.regions[0].components as { type?: string }[];
+    expect(blocks).toHaveLength(firstRegionBlocks + 1);
+    expect(blocks[firstRegionBlocks].type).toBe('page:card');
   } finally {
     await removePage(request, name);
   }

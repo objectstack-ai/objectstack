@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type {
   AnalyticsQuery as SpecAnalyticsQuery,
   AnalyticsResult as SpecAnalyticsResult,
@@ -163,6 +163,58 @@ describe('ObjectStackAdapter.queryDataset', () => {
 /* The first two and the third SHARE HTTP 404. That collision is the defect,    */
 /* so the pins below are written to fail if anyone reintroduces a status test.  */
 /* -------------------------------------------------------------------------- */
+/**
+ * objectstack#27585 — which world a dataset query reads. The page URL's
+ * `?preview=draft` decides when the caller says nothing (the draft preview of
+ * an app); `previewDrafts` is the caller saying it, for a surface that is a
+ * draft window without the URL flag (the Studio canvas). Either way the draft
+ * world is one flag on the one request, the server resolves the dataset.
+ */
+describe('ObjectStackAdapter.queryDataset — the draft world (objectstack#27585)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function postedBody(
+    search: string,
+    options?: { previewDrafts?: boolean },
+  ): Promise<Record<string, unknown>> {
+    vi.stubGlobal('window', { location: { search } });
+    const { fetchImpl, calls } = makeFetch({ ok: true, body: { rows: [], fields: [] } });
+    const adapter = new ObjectStackAdapter({ baseUrl: 'http://localhost:3000', autoReconnect: false, fetch: fetchImpl as any });
+    await adapter.queryDataset('draft_sales', selection, options);
+    const posts = calls.filter((c) => c.url.includes('/analytics/dataset/query'));
+    expect(posts).toHaveLength(1);
+    return JSON.parse(posts[0].init.body);
+  }
+
+  it('asks for the draft world when the caller passes previewDrafts, with no URL flag', async () => {
+    expect(await postedBody('', { previewDrafts: true })).toEqual({
+      datasetName: 'draft_sales',
+      selection,
+      previewDrafts: true,
+    });
+  });
+
+  it('reads the published world when neither the caller nor the URL asks', async () => {
+    expect(await postedBody('')).toEqual({ datasetName: 'draft_sales', selection });
+  });
+
+  it('still follows the page URL when the caller says nothing', async () => {
+    expect(await postedBody('?preview=draft')).toEqual({
+      datasetName: 'draft_sales',
+      selection,
+      previewDrafts: true,
+    });
+  });
+
+  it("takes the caller's previewDrafts: false over the URL flag", async () => {
+    expect(await postedBody('?preview=draft', { previewDrafts: false })).toEqual({
+      datasetName: 'draft_sales',
+      selection,
+    });
+  });
+});
+
 describe('ObjectStackAdapter.queryDataset — error branch mapping (objectui#5663)', () => {
   beforeEach(() => clearSharedDiscoveryCache());
 

@@ -37,7 +37,7 @@ import {
   SysMetadata,
   SysMetadataHistoryObject,
 } from './metadata/index.js';
-import { SysSecret, SysSetting } from './system/index.js';
+import { SysExchangeRate, SysSecret, SysSetting } from './system/index.js';
 import { ACCOUNT_APP, SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from './apps/index.js';
 import { AppSchema } from '@objectstack/spec/ui';
 import { resolveEffectiveApiMethods, isApiOperationAllowed, canServeApiOperation } from '@objectstack/spec/data';
@@ -555,6 +555,7 @@ describe('@objectstack/platform-objects', () => {
         sys_account: SysAccount,
         sys_api_key: SysApiKey,
         sys_business_unit: SysBusinessUnit,
+        sys_exchange_rate: SysExchangeRate,
         sys_invitation: SysInvitation,
         sys_jwks: SysJwks,
         sys_oauth_application: SysOauthApplication,

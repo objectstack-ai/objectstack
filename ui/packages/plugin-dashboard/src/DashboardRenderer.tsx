@@ -20,10 +20,10 @@ import {
   chartMeasureKey,
   chartConfigPresentation,
 } from '@object-ui/core';
-import { cn, Card, CardHeader, CardTitle, CardContent, Button, getLazyIcon } from '@object-ui/components';
+import { cn, Card, CardHeader, CardTitle, CardContent, Button, getLazyIcon, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { forwardRef, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import type { HTMLAttributes } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { Lock, RefreshCw } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -1440,11 +1440,33 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       [schema.widgets]
     );
 
+    // objectstack#27491 — a viewer whose every tile was left out (each one a
+    // read refusal, above) would see the header over nothing. The canvas then
+    // says so once, in the face the console draws for a refused dashboard
+    // (`dashboard-access-denied`). Only when nothing is left: a partial
+    // refusal reflows silently, design mode keeps every tile, and a dashboard
+    // with no widgets at all draws no refusal.
+    const nothingLeftForViewer = (tiles: ReadonlyArray<unknown>) =>
+      !designMode && refusedTiles.size > 0 && tiles.length > 0 && tiles.every((tile) => tile == null);
+    const allTilesRefusedPanel = (
+      <Empty data-testid="dashboard-all-widgets-forbidden" className="col-span-full">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+          <Lock className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        </div>
+        <EmptyTitle>{tt('dashboard.widgetForbiddenTitle', 'You don’t have access')}</EmptyTitle>
+        <EmptyDescription>
+          {tt('dashboard.allWidgetsForbiddenMessage', 'You don’t have permission to view the data behind this dashboard.')}
+        </EmptyDescription>
+      </Empty>
+    );
+
     if (isMobile) {
       // Separate metric widgets from other widgets for better mobile layout
       // A typeless widget is a `metric` (the spec's default, objectui#11514).
       const metricWidgets = schema.widgets?.filter((w: DashboardWidgetSlotEntry) => resolveWidgetType(w) === 'metric') || [];
       const otherWidgets = schema.widgets?.filter((w: DashboardWidgetSlotEntry) => resolveWidgetType(w) !== 'metric') || [];
+      const metricTiles = metricWidgets.map((widget: DashboardWidgetSlotEntry, index: number) => renderWidget(widget, index));
+      const otherTiles = otherWidgets.map((widget: DashboardWidgetSlotEntry, index: number) => renderWidget(widget, index, true));
 
       const mobileBody = (
         <div ref={ref} {...hostDomProps} className={cn("flex flex-col gap-4 px-4", className)} data-user-actions={userActionsAttr} onClick={handleHostClick}>
@@ -1455,7 +1477,7 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
           {metricWidgets.length > 0 && (
             <div className="grid grid-cols-2 gap-3" onClick={handleBackgroundClick}>
               <SortableContext items={metricIds} strategy={rectSortingStrategy} disabled={!dragEnabled}>
-                {metricWidgets.map((widget: DashboardWidgetSlotEntry, index: number) => renderWidget(widget, index))}
+                {metricTiles}
               </SortableContext>
             </div>
           )}
@@ -1464,10 +1486,12 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
           {otherWidgets.length > 0 && (
             <div className="flex flex-col gap-4" onClick={handleBackgroundClick}>
               <SortableContext items={otherIds} strategy={verticalListSortingStrategy} disabled={!dragEnabled}>
-                {otherWidgets.map((widget: DashboardWidgetSlotEntry, index: number) => renderWidget(widget, index, true))}
+                {otherTiles}
               </SortableContext>
             </div>
           )}
+
+          {nothingLeftForViewer([...metricTiles, ...otherTiles]) && allTilesRefusedPanel}
         </div>
       );
 
@@ -1478,6 +1502,7 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       ) : mobileBody;
     }
 
+    const desktopTiles = (schema.widgets ?? []).map((widget: DashboardWidgetSlotEntry, index: number) => renderWidget(widget, index));
     const desktopBody = (
       <div
         ref={ref}
@@ -1513,8 +1538,9 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         {headerSection}
         {toolbarRow}
         <SortableContext items={widgetIds} strategy={rectSortingStrategy} disabled={!dragEnabled}>
-          {schema.widgets?.map((widget: DashboardWidgetSlotEntry, index: number) => renderWidget(widget, index))}
+          {desktopTiles}
         </SortableContext>
+        {nothingLeftForViewer(desktopTiles) && allTilesRefusedPanel}
       </div>
     );
 

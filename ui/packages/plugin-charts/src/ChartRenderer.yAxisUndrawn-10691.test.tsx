@@ -66,7 +66,9 @@ async function draw(schema: Record<string, unknown>) {
       schema={{ type: 'chart', data: ROWS, xAxis: { field: 'month' }, isAnimationActive: false, ...schema } as never}
     />,
   );
-  await waitFor(() => expect(container.querySelector('svg')).toBeTruthy());
+  // Settled on the drawn plot, or on the renderer's own refusal (a pie handed
+  // several series refuses, objectstack#27563).
+  await waitFor(() => expect(container.querySelector('svg, [data-chart-error]')).toBeTruthy());
   return container;
 }
 
@@ -167,6 +169,9 @@ describe('objectui#10691 — a `yAxis` entry after the second is drawn on no axi
   it('(control) pie, three entries: no note', async () => {
     const c = await draw({ chartType: 'pie', yAxis: THREE });
     expect(noteKinds(c)).toEqual([]);
+    // A pie draws one series, so three derived series are named in its
+    // one-series refusal rather than the first drawn alone (objectstack#27563).
+    expect(c.querySelector('[data-chart-error]')?.getAttribute('data-chart-error')).toBe('one-series-family');
   });
 
   // ── One answer: the normalizer binds from the placement the note reads ──
