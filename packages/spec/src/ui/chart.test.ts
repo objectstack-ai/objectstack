@@ -370,10 +370,12 @@ describe('批 15 — the five closed chart sites', () => {
 
   it('strictness RIDES `.extend()` onto ReportChartSchema — the webhook/view trap, here on purpose', () => {
     // `.extend()` inherits `.strict()` AND the error map. `ReportChartSchema`
-    // narrows xAxis/yAxis to dataset names and adds no key of its own, so the
-    // inherited key set is exactly right — but that has to be asserted, not
-    // assumed, because the same mechanic is what made finding 16 a finding.
+    // narrows xAxis/yAxis to dataset names and adds one key of its own
+    // (`seriesBy`), so the key set is the inherited one plus that — but that
+    // has to be asserted, not assumed, because the same mechanic is what made
+    // finding 16 a finding.
     expect(ReportChartSchema.safeParse({ type: 'bar', xAxis: 'dim', yAxis: 'measure' }).success, 'control').toBe(true);
+    expect(ReportChartSchema.safeParse({ type: 'bar', xAxis: 'dim', yAxis: 'measure', seriesBy: 'dim2' }).success, 'own key').toBe(true);
     const msg = reject(ReportChartSchema as never, { type: 'bar', xAxis: 'd', yAxis: 'm', chartType: 'bar' });
     expect(msg).toContain('chartType');
     expect(msg, 'the base error map rides too, so the report surface gets the rename').toContain('`chartType` → `type`');

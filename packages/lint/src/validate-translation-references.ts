@@ -396,6 +396,14 @@ const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
   '_id', 'name', 'space',
 ]);
 
+/**
+ * The `_views` tails only a FORM view resolves — `title` (the form's heading,
+ * `config.title`) and `submitBehavior` (its thank-you panel,
+ * `config.submitBehavior`), both overlaid by `translateView`. The default
+ * form's key is legal for these alone.
+ */
+const FORM_ONLY_VIEW_TAILS: ReadonlySet<string> = new Set(['title', 'submitBehavior']);
+
 /** Everything a bundle may legally name under one object. */
 interface ObjectFacts {
   fields: Map<string, AnyRec>;
@@ -403,11 +411,12 @@ interface ObjectFacts {
   /**
    * The `_views` keys of the FORM views this object's containers serve — each
    * `formViews.<key>` entry, the default `form`, and a `viewKind: 'form'`
-   * item — the views a `_views.<view>.title` key addresses (`translateView`
-   * overlays it onto the form's `config.title`). A list view carries no
-   * title, so a `title` key over one resolves nothing. The default form's key
-   * is legal for `title` alone: its other `_views` tails stay non-keys (see
-   * {@link collectViewRecord}).
+   * item — the views a `_views.<view>.title` or `.submitBehavior` key
+   * addresses (`translateView` overlays them onto the form's `config.title`
+   * and `config.submitBehavior`). A list view carries neither, so either key
+   * over one resolves nothing. The default form's key is legal for those two
+   * alone ({@link FORM_ONLY_VIEW_TAILS}): its other `_views` tails stay
+   * non-keys (see {@link collectViewRecord}).
    */
   forms: Set<string>;
   actions: Map<string, AnyRec>;
@@ -702,10 +711,11 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   // legal that no consumer ever reads. Its SECTIONS are a different matter —
   // `ObjectForm` resolves those, which is exactly what #5415 established.
   //
-  // One `_views` tail of the default form IS read: its `title`, which
-  // `translateView` overlays onto the served `<object>.form` item's
-  // `config.title`. So its runtime key is registered as a FORM key only
-  // (`forms`), legal for `title` and nothing else.
+  // Two `_views` tails of the default form ARE read: its `title` and its
+  // `submitBehavior`, which `translateView` overlays onto the served
+  // `<object>.form` item's `config.title` and `config.submitBehavior`. So its
+  // runtime key is registered as a FORM key only (`forms`), legal for those
+  // two and nothing else.
   if (isRec(view.form)) {
     const formBinding = bindingOf(view.form) ?? listBinding;
     addSections(view.form, formBinding);
@@ -1905,12 +1915,11 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
 
         // _views.<name>
         for (const [viewName, rawView] of Object.entries(asRecord(rawNode._views))) {
-          const hasTitle = isRec(rawView) && 'title' in rawView;
           const isForm = facts.forms.has(viewName);
           // A `title` key translates a FORM view's heading only: over a list
           // view it resolves nothing (a list view has no title), where the
           // author most likely meant the tab's `label`.
-          if (hasTitle && !isForm && facts.views.has(viewName)) {
+          if (isRec(rawView) && 'title' in rawView && !isForm && facts.views.has(viewName)) {
             orphan(
               `${inLocale} · object "${objectName}" · view "${viewName}"`,
               `${objPath}._views.${viewName}.title`,
@@ -1919,9 +1928,20 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             );
             continue;
           }
+          // A `submitBehavior` key translates a FORM view's thank-you panel
+          // only: a list view submits nothing, so the key resolves nothing.
+          if (isRec(rawView) && 'submitBehavior' in rawView && !isForm && facts.views.has(viewName)) {
+            orphan(
+              `${inLocale} · object "${objectName}" · view "${viewName}"`,
+              `${objPath}._views.${viewName}.submitBehavior`,
+              `View "${viewName}" of object "${objectName}" is not a form view, so no thank-you panel resolves this key.`,
+              `Only a form view has a \`submitBehavior\`; key its panel under that form's own \`_views\` entry, or drop it.`,
+            );
+            continue;
+          }
           if (facts.views.has(viewName)) continue;
-          // The default form's key is legal for its `title` alone.
-          if (isForm && isRec(rawView) && Object.keys(rawView).every((k) => k === 'title')) continue;
+          // The default form's key is legal for its form-only tails alone.
+          if (isForm && isRec(rawView) && Object.keys(rawView).every((k) => FORM_ONLY_VIEW_TAILS.has(k))) continue;
           orphan(
             `${inLocale} · object "${objectName}" · view "${viewName}"`,
             `${objPath}._views.${viewName}`,
