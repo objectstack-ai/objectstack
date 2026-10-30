@@ -448,7 +448,7 @@ export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveSuspen
     // The owning service's stamp IS the recorded decision's tail, not a way
     // around it.
     if (!nodeType || this.resolveResumeAuthority(nodeType) !== 'service' || signal?.[RESUME_AUTHORITY_SERVICE]) {
-        return refuseMapItemSkip.call(this, runId, chain) ?? (await continuePastCancelledMapItem.call(this, runId, chain, signal));
+        return refuseMapItemSkip.call(this, runId, chain) ?? (await continuePastCancelledMapItem.call(this, runId, chain, nodeType, signal));
     }
 
     // Refusing. Which of the two reasons? A second registry walk, on the
@@ -540,18 +540,22 @@ function refuseMapItemSkip(this: Pick<RunResumeHost, 'logger'>, runId: string, c
  *    cannot record what happened to the item, so the resume is refused with
  *    #27877's code before any state is touched.
  *
- * `null` when the chain ends anywhere but on such a link, and when the caller's
- * signal writes the engine's `$` namespace: that bag is refused `INVALID_SIGNAL`
- * by `resumeInternal` with the run left parked, and folding it into an
+ * `null` when the chain ends anywhere but on such a link parked at the built-in
+ * `map` node (the one executor that reads the handoff; another type that mints
+ * a `map:` correlation records nothing from it), and when the caller's signal
+ * writes the engine's `$` namespace: that bag is refused `INVALID_SIGNAL` by
+ * `resumeInternal` with the run left parked, and folding it into an
  * engine-built signal would exempt it from that guard.
  */
 async function continuePastCancelledMapItem(
     this: Pick<RunResumeHost, 'getRun' | 'logger'>,
     runId: string,
     chain: readonly SuspendedRun[],
+    nodeType: string | undefined,
     signal?: ResumeSignal,
 ): Promise<AutomationResult | GatedResumeContinuation | null> {
     const link = chain[chain.length - 1]!;
+    if (nodeType !== 'map') return null;
     if (typeof link.correlation !== 'string' || !link.correlation.startsWith('map:')) return null;
     const itemRunId = link.correlation.slice('map:'.length);
     if (!itemRunId) return null;
