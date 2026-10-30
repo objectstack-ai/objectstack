@@ -540,6 +540,23 @@ describe('@mention notifications reach only mentioned users who can read the com
       expect(audiences(untouched.events)).toEqual([]);
     });
 
+    it('an edit by someone other than the author makes the EDITOR the actor: named in the notification, and the one skipped', async () => {
+      const { row } = await postTold(openTask, []);
+      emits.length = 0;
+      const told: string[][] = [];
+      const carol = { userId: CAROL.id, tenantId: ORG_A, positions: ['org_member', COMMENT_READER_POSITION], permissions: [], accessible_org_ids: [ORG_A] };
+      await engine.update('sys_comment', { mentions: JSON.stringify([ALICE.id, CAROL.id, BOB.id]) }, {
+        where: { id: row.id },
+        context: carol,
+        onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
+      } as any);
+      const events = emits.filter((e) => e.topic === 'collab.mention');
+      // ALICE, the author, is now a recipient like anyone else; CAROL, who added the mentions, is not.
+      expect(audiences(events)).toEqual([[ALICE.id]]);
+      expect(events[0]).toMatchObject({ actorId: CAROL.id, payload: { actorName: CAROL.id } });
+      expect(told).toEqual([[BOB.id]]);
+    });
+
     it('a throwing listener never fails the write and never stops the reader\'s notification', async () => {
       seq += 1;
       emits.length = 0;

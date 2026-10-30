@@ -2647,13 +2647,13 @@ const WRITE_ANSWER_WARNINGS_DESCRIPTION =
  * no field of any object, it is never stored, and a request never sends it.
  */
 const WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION =
-  'The ids of the users this write @mentioned whose mention notification was WITHHELD because they cannot read the ' +
-  'comment or its record: the mention recipient gate\'s own verdict on THIS write, ids only, never the reason. ' +
-  'Only a `sys_comment` write fills it, and only on the answer to the request that wrote the comment; on an update, ' +
-  'only a mention the update added is judged. The comment was saved with every mention; the author is told here ' +
-  'that the named users will not be notified. Response-only: never stored on the comment (a stored member would ' +
-  'tell every reader who cannot read the thread). Present ONLY when at least one mention was withheld; otherwise ' +
-  'the key is omitted.';
+  'The ids of the users this write @mentioned whose mention notification was WITHHELD by the mention recipient ' +
+  'gate, so they will not be notified: the gate\'s own verdict on THIS write, ids only, never the reason. ' +
+  'Only a `sys_comment` write fills it, and only on the requester\'s own answer to the request that made the write; ' +
+  'on an update, only a mention the update added is judged. The comment was saved with every mention; the ' +
+  'requester is told here that the named users will not be notified. Response-only: never stored on the comment ' +
+  '(a stored member would tell every reader who cannot read the thread). Present ONLY when at least one mention ' +
+  'was withheld; otherwise the key is omitted.';
 
 /**
  * Create Data Response

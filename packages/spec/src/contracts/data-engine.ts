@@ -97,10 +97,11 @@ export interface WriteObservabilityOptions {
   /**
    * Called with the ids of the mentioned users whose `@mention` notification
    * the mention recipient gate WITHHELD on this write (#27703): the users the
-   * comment's author named who will not be notified because they cannot read
-   * the comment or its record. Ids only, never the reason.
-   * `metadata-protocol`'s `createData` and `updateData` pass one and answer the
-   * ids as `withheldMentions`, on that request's answer and nowhere else.
+   * writer named who will not be notified, whatever the gate's reason (most
+   * often that they cannot read the comment or its record). Ids only, never
+   * the reason. `metadata-protocol`'s `createData` and `updateData` pass one and
+   * answer the ids as `withheldMentions`, on the requester's own answer to that
+   * request and nowhere else.
    *
    * The ENGINE never calls it. It reaches the mention writer (plugin-audit,
    * on `sys_comment` `afterInsert` / `afterUpdate`) the way every member of

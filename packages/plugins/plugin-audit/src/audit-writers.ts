@@ -2568,10 +2568,21 @@ export function installAuditWriters(
     if (mentioned.length === 0) return;
 
     const [source_object, source_id] = String(row.thread_id ?? '').split(':');
-    const actorId = row.author_id ?? null;
-    const actorName = row.author_name ?? null;
-    const bodyPreview = String(row.body ?? '').slice(0, 240);
     const sess: any = (ctx as any).session ?? {};
+    // The actor is whoever wrote these mentions. On insert that is the
+    // comment's author. [#27703] On an edit it is the EDITOR, who need not be
+    // the author (a holder of edit on the parent record may edit a comment,
+    // `comment-access-hooks.ts`), so the session's user is the actor: the
+    // notification says who added the mention, and the actor-skip drops the
+    // editor, not the author.
+    const editorId = ctx.event === 'afterUpdate' && typeof sess.userId === 'string' && sess.userId ? sess.userId : null;
+    const actorId: string | null = editorId ?? row.author_id ?? null;
+    let actorName: string | null = row.author_name ?? null;
+    if (editorId && editorId !== row.author_id) {
+      const api: any = (ctx as any).api;
+      actorName = api?.sudo ? (await resolveActorSnapshot(api, editorId)).name : null;
+    }
+    const bodyPreview = String(row.body ?? '').slice(0, 240);
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
 

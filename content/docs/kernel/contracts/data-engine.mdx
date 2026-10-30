@@ -462,7 +462,7 @@ and `severity`), present only when there is at least one hit.
 A `sys_comment` write notifies each user it @mentions, but only a user who can
 read the comment and its record: the mention recipient gate withholds the rest.
 This listener is told the ids of the users the gate withheld on the write the
-options were passed to: ids only, never the reason. The engine never calls it.
+options were passed to, whatever its reason: ids only, never the reason. The engine never calls it.
 It reaches the mention writer the way every member of this bag reaches an
 `after*` hook, on `ctx.input.options`, and the writer calls it once per written
 comment that withheld anyone. On an `update`, only a mention the update added is
@@ -471,7 +471,7 @@ nested write that a hook or a flow makes inside this one carries its own options
 so its verdicts never reach this listener.
 
 The DataProtocol's `createData` and `updateData` pass this listener and answer the
-ids as `withheldMentions`, on that request's answer only and present only when at
+ids as `withheldMentions`, on the requester's own answer to that request only and present only when at
 least one user was withheld. Nothing is stored on the comment: a stored member
 would tell every reader of the comment who cannot read its thread.
 
