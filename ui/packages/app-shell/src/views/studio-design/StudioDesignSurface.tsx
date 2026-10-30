@@ -170,7 +170,6 @@ import {
   Clock,
   MousePointerClick,
   CornerDownRight,
-  Layers,
   ArrowUpRight,
   FileQuestion,
   PackageX,
@@ -272,6 +271,16 @@ import {
 } from './metadataError.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { loadPackageLessSurfaces, loadPackageSurfaces, type PackageSurface } from './packageSurfaces.js';
+import {
+  IN_PLACE_OVERLAY_TYPES,
+  StudioCustomizedItemsContext,
+  editsOverlayInPlace,
+  isCustomizedHere,
+  overlayItemKey,
+  overlayRemovalVerb,
+  useOverlayEnvelopes,
+} from './overlayInPlace.js';
+import { StudioCustomizedChip, StudioOverlayRemoval } from './StudioOverlayControls.js';
 import {
   STUDIO_ORG_SCOPE_PILLAR,
   isOrgScopeDraft,
@@ -813,68 +822,32 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
  * chip, and this mark at the right of the open item's header, in every
  * pillar. The pillar's read-only sentence (objectui#11781) is its title.
  *
- * It offers an environment overlay only where one exists: when the open
- * item's metadata type declares `allowEnvironmentOverlay` in the served
- * registry (ADR-0005), it is a link to that item's Setup page, where the
- * overlay is edited. Any other item, no open item, or a registry not yet
- * read draws a plain "Read-only" mark that links nowhere.
+ * ADR-0146 D2 — it links nowhere: an item a read-only package lets this
+ * environment customize is edited in place in its pillar, which draws no
+ * read-only mark for it, so there is no second editor to send the reader to.
  *
  * objectui#12707 — at a tab row's end, the mark folds to its glyph when the
  * row cannot hold it whole (`useStudioTabRowFold`), rather than being cut
  * mid-word at the row's edge. Folded, its text stays as its accessible name
  * and its title stays its tooltip.
  */
-export function StudioReadOnlyLink({
-  item,
-  title,
-  locale,
-}: {
-  /** The open item, or `null` when the header has none open. */
-  item: { type: string; name: string } | null;
-  title: string;
-  locale: string;
-}): React.ReactElement {
-  const client = useMetadataClient();
-  const { entries } = useMetadataTypes(client);
-  const overlayable = item !== null && entries.some((e) => e.type === item.type && e.allowEnvironmentOverlay === true);
-  const ref = React.useRef<HTMLElement | null>(null);
-  const label = t(overlayable ? 'engine.studio.pkg.readonlyLink' : 'engine.studio.pkg.readonly', locale);
+export function StudioReadOnlyLink({ title, locale }: { title: string; locale: string }): React.ReactElement {
+  const ref = React.useRef<HTMLSpanElement | null>(null);
+  const label = t('engine.studio.pkg.readonly', locale);
   const folded = useStudioTabRowFold(ref, label);
-  const className = cn(
-    'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 dark:text-amber-300',
-    overlayable && 'hover:bg-amber-400/25',
-    folded ? 'w-7 justify-center' : 'px-2.5',
-  );
-  const body = (
-    <>
-      {overlayable ? (
-        <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      ) : (
-        <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      )}
-      <span className={folded ? 'sr-only' : undefined}>{label}</span>
-    </>
-  );
-  return overlayable && item ? (
-    <Link
-      ref={ref as React.Ref<HTMLAnchorElement>}
-      to={`/apps/setup/metadata/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
-      title={title}
-      data-testid="studio-readonly-link"
-      data-folded={folded || undefined}
-      className={className}
-    >
-      {body}
-    </Link>
-  ) : (
+  return (
     <span
-      ref={ref as React.Ref<HTMLSpanElement>}
+      ref={ref}
       title={title}
       data-testid="studio-readonly-link"
       data-folded={folded || undefined}
-      className={className}
+      className={cn(
+        'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 dark:text-amber-300',
+        folded ? 'w-7 justify-center' : 'px-2.5',
+      )}
     >
-      {body}
+      <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span className={folded ? 'sr-only' : undefined}>{label}</span>
     </span>
   );
 }
@@ -1972,6 +1945,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   );
   const shownPendingCount = behindSave ? Math.max(pendingCount ?? 0, 1) : pendingCount;
   const hasPending = (shownPendingCount ?? 0) > 0;
+  // ADR-0146 D2 — a read-only package's pending drafts are the overlays its
+  // items were customized with, and `POST /packages/:id/publish-drafts`
+  // publishes them; Publish is read-only there only while nothing is pending.
+  const publishReadOnly = readOnly && !hasPending;
   // objectui#12725 — the same ledger and number, for the pillars' item headers
   // (「草稿 · N 项未发布」): the rows the count above counts, so the package-less
   // scope offers its org-scope flow drafts only.
@@ -2282,9 +2259,9 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         setChangesPosture('confirm');
         setChangesOpen(true);
       }}
-      disabled={publishing || !hasPending || readOnly}
+      disabled={publishing || !hasPending || publishReadOnly}
       aria-describedby={
-        readOnly
+        publishReadOnly
           ? publishReadOnlyReasonId
           : !hasPending && !publishing
             ? publishNoneReasonId
@@ -2293,7 +2270,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
       // A read-only package's reason is the wrapper's (objectui#12303), not a
       // `title` the disabled button can never show.
       title={
-        readOnly
+        publishReadOnly
           ? undefined
           : hasPending
             ? t('engine.studio.publishTitle', locale)
@@ -2306,11 +2283,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
       className={cn(
         // The border is on both states so the swap never shifts the bar.
         'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium',
-        publishing || (hasPending && !readOnly)
+        publishing || (hasPending && !publishReadOnly)
           ? 'border-transparent bg-primary text-primary-foreground disabled:opacity-50'
           : 'text-muted-foreground',
         // The wrapper takes the hover: the disabled button lets it through.
-        readOnly && 'disabled:pointer-events-none',
+        publishReadOnly && 'disabled:pointer-events-none',
       )}
     >
       {publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
@@ -2441,7 +2418,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
                   objectui#12459 moves the sentence off the strip into the
                   Publish button's description, where readers and the tooltip
                   still find it. */}
-              {!hasPending && !readOnly && !publishing && (
+              {!hasPending && !publishReadOnly && !publishing && (
                 <span
                   id={publishNoneReasonId}
                   className="sr-only"
@@ -2458,7 +2435,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
                   skipped Publish entirely. The wrapping span is the tooltip
                   trigger and a tab stop, and the button and the span both
                   point `aria-describedby` at an `sr-only` copy of the reason. */}
-              {readOnly ? (
+              {publishReadOnly ? (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -2656,7 +2633,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
           onOpenChange={setChangesOpen}
           packageId={packageId}
           include={packageId === null ? isOrgScopeDraft : undefined}
-          onPublish={readOnly ? undefined : doPublish}
+          onPublish={publishReadOnly ? undefined : doPublish}
           publishing={publishing}
           posture={changesPosture}
           renderEntryNote={renderPublishRefusal}
@@ -2866,6 +2843,7 @@ function NavTree({
   // What a label-less row inherits is asked of the console's own resolver, so
   // the rail names it as the console's sidebar does (objectui#11196).
   const targetLabel = useNavTargetLabel();
+  const customized = React.useContext(StudioCustomizedItemsContext);
   // objectstack#26979 — a level is listed in the order the running menu draws
   // it, through the canvas's `inMenuOrder` (the menu's `byNavOrder` rule). `i`
   // stays the entry's position in the authored array, which the canvas numbers
@@ -2926,6 +2904,16 @@ function NavTree({
         // compared by nav id when both carry one (see `isSameSurface`).
         const isActive = !!surface && !!active && isSameSurface(active, surface);
         const kind = navKindName(node, locale);
+        // ADR-0146 D2 — the item the entry opens is customized here: a
+        // dashboard or report it names, or the view an `object` entry opens.
+        const opensItem = !surface
+          ? null
+          : surface.type === 'object'
+            ? typeof node.viewName === 'string' && node.viewName
+              ? { type: 'view', name: listViewTargetOf(surface.name, node.viewName, {}).viewId }
+              : null
+            : surface;
+        const isCustomized = !!opensItem && customized.has(overlayItemKey(opensItem));
         return (
           <StudioRailRow
             key={node.id ?? i}
@@ -2952,6 +2940,7 @@ function NavTree({
                     {node.badge}
                   </Badge>
                 )}
+                {isCustomized && <StudioCustomizedChip locale={locale} compact />}
                 {kind && (
                   <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
                     {kind}
@@ -3052,6 +3041,7 @@ function OffNavSection({
   onPick: (s: Surface) => void;
 }): React.ReactElement {
   const locale = useMetadataLocale();
+  const customized = React.useContext(StudioCustomizedItemsContext);
   const [open, setOpen] = React.useState(true);
   const Icon = navIcon(type);
   return (
@@ -3074,6 +3064,8 @@ function OffNavSection({
             // tooltip with the type, as on a tree row (objectui#11862).
             title={`${item.type} · ${item.name}`}
             icon={<Icon className="h-4 w-4 shrink-0" />}
+            // ADR-0146 D2 — customized in this environment.
+            trailing={customized.has(overlayItemKey(item)) ? <StudioCustomizedChip locale={locale} compact /> : undefined}
           >
             {item.label || item.name}
           </StudioRailRow>
@@ -4701,6 +4693,32 @@ export function InterfacesPillar({
   // running app, not an editable draft — schema editing is the Data pillar's
   // job — so those leaves are not draft-editable in this canvas.
   const isEditable = !!Preview && !StudioCanvas;
+  // ADR-0146 D2 — on a read-only package, an item of an overlay type that the
+  // served registry and the item's own layered envelope admit is edited in
+  // place: its draft is this environment's overlay of the package's item, and
+  // the package publish applies it. The rail's items and the open leaf are
+  // read for it (`overlayInPlace.ts`); a writable package reads nothing here.
+  // `overlayResetNonce` moves when this pillar resets an overlay: the baseline
+  // every buffer and envelope was read against changed, as a publish changes it.
+  const { entries: metaTypes } = useMetadataTypes(client);
+  const [overlayResetNonce, setOverlayResetNonce] = React.useState(0);
+  const baselineNonce = publishNonce + overlayResetNonce;
+  const overlayRefs = React.useMemo(
+    () => [
+      ...(currentType && currentName ? [{ type: currentType, name: currentName }] : []),
+      ...(packageItems?.packageId === packageId ? IN_PLACE_OVERLAY_TYPES.flatMap((type) => packageItems.byType[type as OffNavType] ?? []) : []),
+    ],
+    [currentType, currentName, packageItems, packageId],
+  );
+  const overlayEnvelopes = useOverlayEnvelopes(client, overlayRefs, readOnly, baselineNonce);
+  const leafEnvelope = current ? (overlayEnvelopes.get(overlayItemKey(current)) ?? null) : null;
+  const leafOverlayEditable = readOnly && editsOverlayInPlace(currentType, metaTypes, leafEnvelope);
+  // What every editor of the open leaf reads in place of the package's flag.
+  const leafReadOnly = readOnly && !leafOverlayEditable;
+  const customizedItems = React.useMemo(
+    () => new Set([...overlayEnvelopes].filter(([, envelope]) => isCustomizedHere(envelope)).map(([key]) => key)),
+    [overlayEnvelopes],
+  );
   // objectui#5800 — Design ⇄ Run: one canvas, two modes (ADR-0080's pivot made
   // visible). Run mode is pure subtraction: `editing=false` drops the design
   // overlays (dashboard widget overlays, page block canvas) and the SAME
@@ -4912,7 +4930,7 @@ export function InterfacesPillar({
     target: leafKey,
     loadedFor: draftFor,
     dirty: ifDirty,
-    blocked: !current || !isEditable || !!saving || readOnly || inspectorBlocking > 0 || leafIncomplete !== null,
+    blocked: !current || !isEditable || !!saving || leafReadOnly || inspectorBlocking > 0 || leafIncomplete !== null,
     snapshot: draft,
     save: doSave,
   });
@@ -4934,7 +4952,25 @@ export function InterfacesPillar({
   // objectui#11823 — an `object` leaf's list view: the third buffer, edited in
   // the Properties panel and shown on the canvas, autosaved to the package
   // draft like the other two. Blocked on `readOnly` like them.
-  const listView = useObjectListViewDraft({ client, packageId, leaf: current, publishNonce, draftOnlyObjects, onDraftSaved });
+  // ADR-0146 D2 — on a read-only package the view is a `view` item, edited in
+  // place as the leaf is (`listViewReadOnly`), and re-read after a reset.
+  const listView = useObjectListViewDraft({
+    client,
+    packageId,
+    leaf: current,
+    publishNonce: baselineNonce,
+    draftOnlyObjects,
+    onDraftSaved,
+  });
+  const listViewRefs = React.useMemo(
+    () => (listView.target ? [{ type: 'view', name: listView.target.viewId }] : []),
+    [listView.target],
+  );
+  const listViewEnvelope =
+    useOverlayEnvelopes(client, listViewRefs, readOnly, baselineNonce).get(
+      listView.target ? overlayItemKey({ type: 'view', name: listView.target.viewId }) : '',
+    ) ?? null;
+  const listViewReadOnly = readOnly && !editsOverlayInPlace('view', metaTypes, listViewEnvelope);
   // objectstack#27895 — an edit that clears a required setting of the view
   // type's own block (a calendar's start date) is held, not sent, as a
   // leaf's is: asked of the spec's list-view schema (`listViewHeldEdit`).
@@ -4943,12 +4979,65 @@ export function InterfacesPillar({
     target: listView.targetKey,
     loadedFor: listView.loadedFor,
     dirty: listView.dirty,
-    blocked: !listView.target || listView.saving || readOnly || listViewHeld !== null,
+    blocked: !listView.target || listView.saving || listViewReadOnly || listViewHeld !== null,
     snapshot: listView.row,
     save: listView.save,
   });
   useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? listViewHeld?.clause ?? navRenameClause);
   const heldUnsent = leafHeld !== null || listViewHeld !== null;
+  // ADR-0146 D2 — the overlay the open item's header speaks for: an `object`
+  // leaf's list view, else the leaf itself. Read-only packages only.
+  const overlayTarget = !readOnly || !current
+    ? null
+    : current.type === 'object'
+      ? listView.target
+        ? {
+            type: 'view',
+            name: listView.target.viewId,
+            label: navItemLabelText(listView.row?.label as I18nLabel | undefined, locale) || listView.target.viewId,
+            envelope: listViewEnvelope,
+            editable: !listViewReadOnly,
+            hasDraft: listView.hasDraft,
+          }
+        : null
+      : {
+          type: current.type,
+          name: current.name,
+          label: current.label || current.name,
+          envelope: leafEnvelope,
+          editable: leafOverlayEditable,
+          hasDraft: hasDraft && draftLoaded,
+        };
+  const overlayRemoval = overlayTarget?.editable ? overlayRemovalVerb(overlayTarget.envelope) : null;
+  const [overlayRemoving, setOverlayRemoving] = React.useState(false);
+  // Reset to package default — Setup's door, at the binding this pillar's save
+  // writes: the pending draft first (its `?state=draft` row), then the overlay
+  // row. The baseline moved, so every buffer and envelope is read again, and
+  // the live registry is told (the pending count and the running app follow).
+  const removeOverlay = async () => {
+    if (!overlayTarget || !overlayRemoval) return;
+    const { type, name, label, hasDraft: draftPending } = overlayTarget;
+    setOverlayRemoving(true);
+    setError(null);
+    try {
+      if (draftPending) await client.reset(type, name, { state: 'draft', packageId });
+      await client.reset(type, name, { packageId });
+      if (current && current.type !== 'object') forgetLeafVersion();
+      setOverlayResetNonce((n) => n + 1);
+      reloadLeafDraft();
+      emitMetadataRefresh();
+      if (overlayRemoval === 'delete') setCurrent(null);
+      toast.success(
+        tFormat(overlayRemoval === 'reset' ? 'engine.studio.overlay.resetDone' : 'engine.studio.overlay.deleteDone', locale, {
+          item: label,
+        }),
+      );
+    } catch (e) {
+      setError(plainRefusal(e));
+    } finally {
+      setOverlayRemoving(false);
+    }
+  };
   // objectstack#27896 — the panel's view picker (and its "Back to …") opens
   // another view of the object in the one list-view buffer, whose load
   // replaces the open view's edits, and the autosave sends nothing once the
@@ -5515,6 +5604,18 @@ export function InterfacesPillar({
             <Copy className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             {t('engine.studio.if.copyJson', locale)}
           </DropdownMenuItem>
+          {overlayTarget && overlayRemoval && (
+            <StudioOverlayRemoval
+              verb={overlayRemoval}
+              type={overlayTarget.type}
+              name={overlayTarget.name}
+              label={overlayTarget.label}
+              hasDraft={overlayTarget.hasDraft}
+              disabled={overlayRemoving || !!saving || listView.saving}
+              locale={locale}
+              onConfirm={() => void removeOverlay()}
+            />
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     ) : null;
@@ -5589,10 +5690,14 @@ export function InterfacesPillar({
       }
       chips={
         current ? (
-          <span className={STUDIO_KIND_CHIP} data-testid="if-canvas-caption" title={ifInternalId}>
-            <span className="sr-only">{ifTitleText} · </span>
-            {ifKindName}
-          </span>
+          <>
+            <span className={STUDIO_KIND_CHIP} data-testid="if-canvas-caption" title={ifInternalId}>
+              <span className="sr-only">{ifTitleText} · </span>
+              {ifKindName}
+            </span>
+            {/* ADR-0146 D2 — overlay presence, as the item's layered read serves it. */}
+            {overlayTarget && isCustomizedHere(overlayTarget.envelope) && <StudioCustomizedChip locale={locale} />}
+          </>
         ) : undefined
       }
       // objectui#12524 — the draft status sits after the kind chip, as in
@@ -5607,8 +5712,9 @@ export function InterfacesPillar({
               {t('engine.studio.autoSaving', locale)}
             </span>
           )}
-          {readOnly && (
-            <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+          {/* ADR-0146 D2 — an item edited in place is not read-only, whatever its package is. */}
+          {readOnly && !overlayTarget?.editable && (
+            <StudioReadOnlyLink title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
           )}
           {isObjectLeaf && openSurface && current && (
             <button
@@ -5796,8 +5902,9 @@ export function InterfacesPillar({
             // preview contract the canvas is then read-only (no add, drag,
             // rename or delete — each a write the blocked autosave would
             // discard), while selecting a block or widget still opens the
-            // inspector, read-only.
-            onPatch={readOnly ? undefined : onPatch}
+            // inspector, read-only. ADR-0146 D2 — an item edited in place
+            // (`leafReadOnly`) takes edits on a read-only package too.
+            onPatch={leafReadOnly ? undefined : onPatch}
             locale={locale}
           />
         ) : (
@@ -5870,7 +5977,9 @@ export function InterfacesPillar({
         <div className="min-h-0 flex-1 overflow-hidden">
           <ObjectListViewInspector
             listView={listView}
-            readOnly={readOnly}
+            readOnly={listViewReadOnly}
+            // ADR-0146 D2 — a read-only package's view takes an overlay; a new view is not one.
+            canCreate={!readOnly}
             locale={locale}
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
@@ -5907,8 +6016,8 @@ export function InterfacesPillar({
             setBlockingReport({ key: inspectorKey, count })
           }
           // objectui#11136 — the pillar's real flag, threaded exactly as the
-          // Data pillar threads it (objectui#2259).
-          readOnly={readOnly}
+          // Data pillar threads it (objectui#2259); in place, the leaf's.
+          readOnly={leafReadOnly}
           locale={locale}
         />
       </div>
@@ -5945,7 +6054,7 @@ export function InterfacesPillar({
               setBlockingReport({ key: inspectorKey, count })
             }
             // objectui#11136 — same flag, same threading as the block inspector.
-            readOnly={readOnly}
+            readOnly={leafReadOnly}
             locale={locale}
           />
         </ServedWidgetTextContext.Provider>
@@ -5985,8 +6094,15 @@ export function InterfacesPillar({
       // opens and closes the aside, so it carries no second one.
       onClose={navInspectorHead ? () => setNavSel(null) : selection && !StudioCanvas ? () => setSelection(null) : undefined}
       closeLabel={t('engine.studio.deselect', locale)}
-      // objectui#12453 — a read-only package saves no draft: no footer.
-      footer={readOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
+      // objectui#12453 — a read-only package saves no draft: no footer, but
+      // for an item it edits in place, whose draft is the overlay (ADR-0146 D2).
+      footer={
+        !readOnly
+          ? t('engine.studio.inspector.draftFooter', locale)
+          : overlayTarget?.editable
+            ? t('engine.studio.overlay.draftFooter', locale)
+            : null
+      }
       bodyClassName="flex min-h-0 flex-1 flex-col"
     >
       <div ref={inspectorBodyRef} className="contents">
@@ -6277,12 +6393,18 @@ export function InterfacesPillar({
                     : t('engine.studio.if.noNavItems', locale)}
               </p>
             ) : (
-              <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
+              <StudioCustomizedItemsContext.Provider value={customizedItems}>
+                <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
+              </StudioCustomizedItemsContext.Provider>
             )}
             {/* objectstack#26889 — under the tree (or the no-app notice), the
                 items no entry opens. Not while nav editing: the rail is the
                 nav editor then. */}
-            {!editNav && <OffNavSections sections={offNavSections} active={current} onPick={pickSurface} />}
+            {!editNav && (
+              <StudioCustomizedItemsContext.Provider value={customizedItems}>
+                <OffNavSections sections={offNavSections} active={current} onPick={pickSurface} />
+              </StudioCustomizedItemsContext.Provider>
+            )}
         </StudioRail>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" data-testid="if-content-column">
@@ -7769,7 +7891,6 @@ export function DataPillar({
                     read-only sentence the Layout control no longer does. */}
                 {readOnly && (
                   <StudioReadOnlyLink
-                    item={current}
                     title={
                       viewMode === 'form'
                         ? t('engine.studio.data.form.layoutBadgeReadOnly', locale)
@@ -9405,7 +9526,7 @@ export function AutomationsPillar({
   // end, the slot objectui#12456 gave the Access note for the same reason.
   const autoReadOnlyLinkEl =
     readOnly && packageId !== null ? (
-      <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+      <StudioReadOnlyLink title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
   const flowTabsEl =
     flowOpen ? (
@@ -10278,7 +10399,6 @@ export function AccessPillar({
     <StudioStatusChip {...accessStatus} />
   ) : (
     <StudioReadOnlyLink
-      item={current !== null && !owdOpen ? { type: 'permission', name: current } : null}
       title={t('engine.studio.access.bannerTitleReadOnly', locale)}
       locale={locale}
     />

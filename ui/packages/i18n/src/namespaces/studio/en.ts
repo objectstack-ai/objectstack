@@ -3134,8 +3134,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pkg.switchTitle': 'Switch / create package',
   'engine.studio.pkg.readonly': 'Read-only',
   'engine.studio.pkg.readonlyHint': 'Read-only package — switch to or create a writable package to edit.',
-  // objectui#12453 — the item header's read-only link, every pillar.
-  'engine.studio.pkg.readonlyLink': 'Read-only · Customize with an overlay',
+  // ADR-0146 D2 — a read-only package's view, dashboard or report, customized in place.
+  'engine.studio.overlay.customized': 'Customized in this environment',
+  'engine.studio.overlay.customizedTitle': 'This environment overlays the package’s version of this item. Reset to package default removes the overlay.',
+  'engine.studio.overlay.draftFooter': 'Edits save as this environment’s customization of the package’s item; Publish applies them.',
+  'engine.studio.overlay.reset': 'Reset to package default',
+  'engine.studio.overlay.draftDiscarded': 'Its unpublished draft is discarded first.',
+  'engine.studio.overlay.resetDone': '“{item}” is back to the package default',
+  'engine.studio.overlay.deleteDone': '“{item}” deleted',
   'engine.studio.app.scaffoldNav': "Add this package's objects as menu items",
   'engine.studio.landing.title': 'App Builder',
   'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and customize them with an environment overlay.',

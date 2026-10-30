@@ -1050,6 +1050,7 @@ function KanbanCardSection({
 export function ObjectListViewInspector({
   listView,
   readOnly,
+  canCreate = !readOnly,
   locale,
   selection,
   onSelectionChange,
@@ -1058,6 +1059,12 @@ export function ObjectListViewInspector({
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
+  /**
+   * ADR-0146 D2 — whether "Add view" is offered; defaults to `!readOnly`. A
+   * read-only package's view is edited in place as an overlay, while a new
+   * view would be a new item in that package, which it does not take.
+   */
+  canCreate?: boolean;
   locale: string;
   /**
    * objectstack#27836 — called as "Add view" opens its dialog: the host sends
@@ -1313,7 +1320,7 @@ export function ObjectListViewInspector({
             variant="outline"
             size="sm"
             className="h-7 gap-1 text-xs"
-            disabled={readOnly || fieldState.loading || !!fieldState.error}
+            disabled={!canCreate || fieldState.loading || !!fieldState.error}
             onClick={() => {
               onAddViewOpen?.();
               setAddOpen(true);
