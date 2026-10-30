@@ -37,7 +37,9 @@ const comment = (n: number) =>
     createdAt: `2026-01-0${n}T00:00:00.000Z`,
   }) satisfies FeedItem;
 
-function mountChatter(ctx: { items: FeedItem[]; commentsDenied?: boolean; activityDenied?: boolean }) {
+type HostItems = React.ComponentProps<typeof DiscussionContextProvider>['items'];
+
+function mountChatter(ctx: { items: HostItems; commentsDenied?: boolean; activityDenied?: boolean }) {
   return render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
       <RecordContextProvider objectName="crm_account" recordId="rec-1" data={{ id: 'rec-1' }}>
