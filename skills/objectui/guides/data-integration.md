@@ -130,7 +130,7 @@ import { SchemaRendererProvider, SchemaRenderer } from '@object-ui/react';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 
 const dataSource = new ObjectStackAdapter({
-  baseUrl: '/api/v1',
+  baseUrl: '',  // the server ORIGIN: '' behind a same-origin proxy, or 'https://api.example.com'
 });
 
 function App() {
@@ -152,7 +152,7 @@ const authClient = createAuthClient({ baseURL: '/api/v1/auth' });
 const authenticatedFetch = createAuthenticatedFetch(authClient);
 
 const dataSource = new ObjectStackAdapter({
-  baseUrl: '/api/v1',
+  baseUrl: '',
   fetch: authenticatedFetch,  // Injects Bearer token automatically
 });
 ```
@@ -204,7 +204,7 @@ The built-in adapter for ObjectStack backends (`packages/data-objectstack`).
 
 ```typescript
 new ObjectStackAdapter({
-  baseUrl: string;               // API base URL
+  baseUrl: string;               // Server origin ('' = same origin); the adapter adds /api/v1
   token?: string;                // Static API token
   autoReconnect?: boolean;       // Auto-reconnect on disconnect (default: true)
   maxReconnectAttempts?: number;  // Max retry count (default: 5)
@@ -215,7 +215,7 @@ new ObjectStackAdapter({
 ### Connection management
 
 ```typescript
-const adapter = new ObjectStackAdapter({ baseUrl: '/api/v1' });
+const adapter = new ObjectStackAdapter({ baseUrl: '' });
 
 // Listen for connection state changes
 adapter.onConnectionStateChange((event) => {
@@ -459,7 +459,7 @@ export class RestApiAdapter implements DataSource {
 For real-time UI updates when data changes:
 
 ```typescript
-const adapter = new ObjectStackAdapter({ baseUrl: '/api/v1' });
+const adapter = new ObjectStackAdapter({ baseUrl: '' });
 
 // Subscribe to mutations
 const unsubscribe = adapter.onMutation?.((event) => {

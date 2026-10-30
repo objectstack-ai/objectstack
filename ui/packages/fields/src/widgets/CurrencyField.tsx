@@ -185,7 +185,10 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
             onChange(val as any);
           }}
           onBlur={handleBlur}
-          placeholder={currencyField?.placeholder || '0.00'}
+          // The field's own placeholder, or none: an empty box must read as
+          // empty. A numeric stand-in such as `0.00` reads as a filled-in zero
+          // (and carries the wrong width for a JPY or KWD field).
+          placeholder={currencyField?.placeholder}
           disabled={readonly || props.disabled}
           className={cn(symbol ? 'pl-8' : '', refusal ? BAD_INPUT_BORDER : '', className)}
           // Surface the field's declared range (e.g. `min: 0` on a budget) so the
