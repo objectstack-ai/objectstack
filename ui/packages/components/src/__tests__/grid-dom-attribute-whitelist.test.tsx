@@ -157,11 +157,11 @@ describe('ui:grid — schema keys never reach the DOM (objectui#4787)', () => {
 
     // Computed layout classes — the renderer's real output, merged with the
     // authored className. A filter that dropped `className` would fail here.
-    // The bare `columns: 4` draws its mobile-first ramp: the canary's flat
-    // `mdColumns: 2` is read by nothing (objectui#11505), so `md` is the bare
-    // count, not the flat one.
+    // The bare `columns: 4` draws its mobile-first ramp (two across on a
+    // phone, objectstack#27355): the canary's flat `mdColumns: 2` is read by
+    // nothing (objectui#11505), so `md` is the bare count, not the flat one.
     expect(el.className).toContain('grid');
-    expect(el.className).toContain('sm:grid-cols-2');
+    expect(el.className).toContain('grid-cols-2');
     expect(el.className).toContain('md:grid-cols-4');
     expect(el.className).not.toContain('md:grid-cols-2');
     expect(el.className).toContain('gap-4');

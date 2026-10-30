@@ -18,7 +18,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhooks",
-    description: "Suscripción saliente de Webhook HTTP creada por una organización con el editor de Studio o mediante la API. Un webhook declarado en código mediante defineStack({ webhooks }) / defineWebhook() se lee del registro de metadatos y no escribe ninguna fila aquí. Ambos los despacha el encolador automático de webhooks al outbox HTTP compartido.",
+    description: "Webhook HTTP saliente que su organización crea aquí o mediante la API. Los webhooks incluidos en una aplicación no aparecen aquí. Ambos tipos se envían por la misma cola de entrega.",
     fields: {
       id: {
         label: "ID de webhook"

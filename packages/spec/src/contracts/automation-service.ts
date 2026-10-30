@@ -522,6 +522,15 @@ export interface AutomationResult {
      *    running; this duplicate was refused so side effects cannot run twice.
      *    A transport maps it to **409**. The other resume is doing the work,
      *    so callers should treat it as benign.
+     *  - `'RESUME_CHILD_PENDING'` — the run is parked on a `map` node (directly,
+     *    or through the run a `subflow` node waits on) whose in-flight item's
+     *    child run is still suspended, and the resume addressed the PARENT.
+     *    Continuing it would advance the map past an item that never ran, so
+     *    nothing moves and `error` names the child run id to resume instead; the
+     *    map continues when that child completes (#27877). A transport maps it
+     *    to **409**. Distinct from `'RESUME_IN_PROGRESS'` on purpose: that one is
+     *    benign and needs nothing from the caller, this one is answered only by
+     *    resuming a different run id.
      *  - `'INVALID_SCREEN_INPUT'` — the run is parked on a `screen` node and
      *    the submitted bag violates that screen's declared field contract: a
      *    `required` field the caller WAS asked for is missing, or a key the
@@ -579,7 +588,7 @@ export interface AutomationResult {
      * measured need — and by the spec seat — rather than minted at a call
      * site.
      */
-    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'INVALID_SCREEN_INPUT' | 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'RESUME_CHILD_PENDING' | 'INVALID_SCREEN_INPUT' | 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be

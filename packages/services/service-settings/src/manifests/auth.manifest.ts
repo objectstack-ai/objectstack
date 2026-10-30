@@ -45,7 +45,7 @@ const manifest = {
       required: false,
       default: true,
       description:
-        'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under invite_only, only an address holding a pending invitation; under email_domain, the allowlisted domains and invited addresses; under open, anyone. Off closes the form under every audience, invitations included.',
+        'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under Invitation only, only an address holding a pending invitation; under Allowlisted email domains, the allowlisted domains and invited addresses; under Open, anyone. Off closes the form under every audience, invitations included.',
       visible: "${data.email_password_enabled !== false}",
     },
     {
@@ -113,7 +113,7 @@ const manifest = {
         { value: 'open', label: 'Open — anyone may self-register' },
       ],
       description:
-        'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Both email_domain and open require the self-registration permission set below. email_domain always forces email verification on. open forces it on unless the deployment turns it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false saved in this console is refused under open.',
+        'Invitation only closes self-registration: people become users only when an administrator invites, creates or imports them, or through directory provisioning (SCIM) or enterprise single sign-on. Allowlisted email domains opens it to the domains listed below. Open admits anyone. Both Allowlisted email domains and Open need the self-registration permission set below. Allowlisted email domains always requires email verification. Open requires it unless the server configuration turns it off; turning it off in this console is refused under Open.',
     },
     {
       type: 'textarea',
@@ -130,7 +130,7 @@ const manifest = {
       label: 'Self-registration permission set',
       required: false,
       description:
-        'Name of the permission set granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
+        'Name of the permission set each self-registered user receives. The standard member set is fine; the full administrator set is refused. Required whenever the audience allows self-registration.',
       visible: "${data.audience_posture === 'email_domain' || data.audience_posture === 'open'}",
     },
 
@@ -369,7 +369,7 @@ const manifest = {
       label: 'Allowed IP ranges',
       required: false,
       description:
-        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected, and so is any request whose client address the server cannot establish. Empty = no restriction. The address judged is the connection\'s peer; behind a reverse proxy, declare server.trustProxy in the stack so the forwarded client address is judged instead.',
+        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected, and so is any request whose client address the server cannot establish. Empty = no restriction. The address judged is the one the connection comes from; behind a reverse proxy, the server must be configured to trust that proxy so the original client address is judged instead.',
     },
     // [#23367, ruling A] The API-key lifecycle policy. Two readers, one
     // source: `bindAuthSettings` binds these into the auth service
@@ -405,7 +405,7 @@ const manifest = {
       min: 1,
       max: 3650,
       description:
-        'The furthest expiry date a new key may ask for, counted from its creation. A longer one is refused (API_KEY_EXPIRY_TOO_LONG); exactly this many days is accepted.',
+        'The furthest expiry date a new key may ask for, counted from its creation. A longer one is refused; exactly this many days is accepted.',
     },
     {
       type: 'number',
@@ -416,7 +416,7 @@ const manifest = {
       min: 0,
       max: 3650,
       description:
-        'A key with no recorded use for this many days is refused (API_KEY_INACTIVE). It is not revoked; create a new key. A key never used counts from its creation, or from the policy start below when it is older. 0 turns inactivity expiry off.',
+        'A key with no recorded use for this many days is refused. It is not revoked; create a new key. A key never used counts from its creation, or from the policy start below when it is older. 0 turns inactivity expiry off.',
     },
     {
       type: 'text',
@@ -434,7 +434,7 @@ const manifest = {
       label: 'Social sign-in',
       required: false,
       description:
-        'Configure the built-in Google sign-in provider. Deployment env vars still win.',
+        'Configure the built-in Google sign-in provider. Credentials set in the server configuration still win.',
     },
     // Google is offered only when this is on AND a client ID and secret both
     // resolve (saved here, or GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, which
@@ -458,7 +458,7 @@ const manifest = {
       required: false,
       default: true,
       description:
-        'Offers Google sign-in once a client ID and a client secret both resolve: saved below, or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server, which win over saved values. Until both resolve, the login page shows no Google button, even while this is on. Off withdraws Google sign-in even when the server sets both. Create the OAuth client in Google Cloud Console.',
+        'Offers Google sign-in once a client ID and a client secret are both available: saved below, or set in the server configuration, which wins over saved values. Until both are available, the login page shows no Google button, even while this is on. Off withdraws Google sign-in even when the server sets both. Create the OAuth client in Google Cloud Console.',
     },
     {
       type: 'text',
@@ -466,7 +466,7 @@ const manifest = {
       label: 'Google client ID',
       required: false,
       description:
-        'OAuth client ID from Google Cloud Console. GOOGLE_CLIENT_ID can also be set on the server.',
+        'OAuth client ID from Google Cloud Console. It can also be set in the server configuration.',
       visible: "${data.google_enabled !== false}",
     },
     {
@@ -476,7 +476,7 @@ const manifest = {
       required: false,
       encrypted: true,
       description:
-        'Stored encrypted at rest. GOOGLE_CLIENT_SECRET can also be set on the server.',
+        'Stored encrypted at rest. It can also be set in the server configuration.',
       visible: "${data.google_enabled !== false}",
     },
 

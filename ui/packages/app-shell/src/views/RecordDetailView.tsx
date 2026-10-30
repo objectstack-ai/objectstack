@@ -3643,7 +3643,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           <EmptyDescription>
             {t('empty.recordNotFoundDescription', {
               defaultValue:
-                'The record you are looking for does not exist or may have been deleted.',
+                'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
             })}
           </EmptyDescription>
         </Empty>

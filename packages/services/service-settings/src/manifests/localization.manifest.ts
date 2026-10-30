@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { SettingsManifest } from '@objectstack/spec/system';
+import { COUNTRY_OPTIONS } from './company.manifest.js';
 
 /**
  * Localization — workspace-wide regional defaults (ADR-0053 Phase 2 follow-up).
@@ -90,8 +91,11 @@ export const localizationSettingsManifest: SettingsManifest = {
       ],
     },
     {
-      type: 'text', key: 'default_country', label: 'Default country', required: false, default: 'US',
-      description: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN). Used for address and phone defaults.',
+      // The same country picker as Company's `country` (#27867): names shown,
+      // the code stored, the value domain still the enforcement boundary.
+      type: 'select', key: 'default_country', label: 'Default country', required: false, default: 'US',
+      description: 'Used for address and phone defaults. Type a country name and pick it from the list.',
+      options: [...COUNTRY_OPTIONS],
       // Third case of the same hole #5712 closed on timezone/currency: the
       // pattern constrains SHAPE only, and `ZZ` is a shape-valid code assigned
       // to nobody. The domain constrains membership; both still apply.
