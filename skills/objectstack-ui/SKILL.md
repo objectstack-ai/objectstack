@@ -106,25 +106,24 @@ and the form's `taxRateField` overrides which parent field drives the totals.
 related list on the parent's record DETAIL page. You don't author it: every
 child relationship is shown as a related list by default (owned `master_detail`
 children first). Refine on the relationship:
-- `relatedList: 'primary'` — main content: a body table, its **own tab** on the
-  tabbed page (see layout below); it places, the parent's `relatedLists` orders
-  (ADR-0085).
+- `relatedList: 'primary'` — main content: a full-width body table (see layout
+  below); it places, the parent's `relatedLists` orders (ADR-0085).
 - `relatedList: false` — suppress a noisy child from the detail page.
 - `relatedListTitle` / `relatedListColumns` — override the derived title /
   columns (both optional; columns otherwise auto-derive from the child object's
   `highlightFields`). See objectstack-data → Relationships → Detail-page related lists.
 
 **Related-list layout.** On the synthesized record page, each
-`relatedList: 'primary'` child (default: inline-edited `master_detail`) gets its
-**own tab**; every other list stacks under one shared **Related** tab, both in
-the object's `relatedLists` order. Promoting a child table to a tab is a
-one-word change on the relationship. The object still declares no per-surface
-*layout* hints: the old
-`detail.relatedLayout` toggle and object-level `detail: {...}` block stay
-**removed** (ADR-0085); `relatedLayout: 'tabs' | 'stack'` survives only as an
-app-level default override, not an object key. For arrangements the
-relationship layer can't express — filtered splits (e.g. Open vs Closed tabs), a
-chart/report tab — assign the object a **custom record Page** and lay it out
+`relatedList: 'primary'` child (default: inline-edited `master_detail`) is a
+body table in the details column after the first field section (in the
+Details tab, no tab of its own); every other list is a side card in one shared
+**Related** tab, both in the object's `relatedLists` order. Field changes
+(`trackHistory`) join the Timeline tab under its Changes filter; there is no
+History tab. The object declares no per-surface *layout* hints: the
+`detail.relatedLayout` toggle, object-level `detail: {...}` block and app-level
+`relatedLayout` are **removed** (ADR-0085). For arrangements the relationship
+layer can't express — filtered splits (e.g. Open vs Closed tabs), a chart/report
+tab — assign the object a **custom record Page** and lay it out
 explicitly with `record:related_list` (or inline-editable `line_items`) blocks.
 
 ### Field Conditional Rules in Forms
