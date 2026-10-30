@@ -2907,6 +2907,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                   recordId={row?.id}
                   objectSchema={objectSchema}
                   label={name}
+                  dataSource={dataSource}
                   onOpen={handleRowClick ? (e) => handleRowClick(row, e) : undefined}
                 >
                   {handleRowClick ? (

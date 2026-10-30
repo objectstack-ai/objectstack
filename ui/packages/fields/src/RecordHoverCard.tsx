@@ -51,7 +51,7 @@ import {
   withoutDeniedFields,
 } from '@object-ui/core';
 import { pickLocalized } from '@object-ui/i18n';
-import type { FieldMetadata } from '@object-ui/types';
+import type { DataSource, FieldMetadata } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
 import {
   SchemaRendererContext,
@@ -97,6 +97,11 @@ export interface RecordHoverCardProps {
   /** The name the reference shows, used until the record is read. */
   label?: string;
   /**
+   * Where the record is read from: the source the host reads its own rows
+   * with. Absent: the renderer context's data source.
+   */
+  dataSource?: Pick<DataSource, 'findOne'> | null;
+  /**
    * Open the record the way a click on the reference does. Absent: the host's
    * `openRecord` (`RelatedRecordActionsContext`), the lookup link's own path.
    */
@@ -105,10 +110,8 @@ export interface RecordHoverCardProps {
   children: React.ReactElement;
 }
 
-/** The one read the card makes; the console's adapter satisfies it as it is. */
-interface HoverCardSource {
-  findOne(objectName: string, id: string, params?: { $expand?: string[] }): Promise<unknown>;
-}
+/** The one read the card makes. */
+type HoverCardSource = Pick<DataSource, 'findOne'>;
 
 /** `true` inside a card: references drawn there get no card of their own. */
 const InsideRecordHoverCard = React.createContext(false);
@@ -407,11 +410,13 @@ export function RecordHoverCard({
   recordId,
   objectSchema,
   label,
+  dataSource,
   onOpen,
   children,
 }: RecordHoverCardProps): React.ReactElement {
   const nested = React.useContext(InsideRecordHoverCard);
-  const source = React.useContext(SchemaRendererContext)?.dataSource as unknown as HoverCardSource | null | undefined;
+  const fromContext = React.useContext(SchemaRendererContext)?.dataSource;
+  const source: HoverCardSource | null | undefined = dataSource === undefined ? fromContext : dataSource;
   const [open, setOpen] = React.useState(false);
   // Radix opens a hover card on focus as well as on hover; only a pointer
   // resting on the reference (or Space) may open this one.

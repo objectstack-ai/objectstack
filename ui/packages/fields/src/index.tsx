@@ -2537,6 +2537,7 @@ function ReferencedRecordLink({
   objectName,
   recordId,
   objectSchema,
+  label,
   className,
   children,
 }: {
@@ -2544,6 +2545,8 @@ function ReferencedRecordLink({
   recordId?: string | number;
   /** The referenced object's definition, for the link's hover card. */
   objectSchema?: RecordHoverCardObjectDef | null;
+  /** The name the link shows, which its card shows until the record is read. */
+  label?: string;
   className?: string;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -2559,7 +2562,7 @@ function ReferencedRecordLink({
   // Hovering the link (or Space on it) shows the referenced record's card
   // (objectstack#27604): the same reference, a glance instead of a visit.
   return (
-    <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema}>
+    <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema} label={label}>
       <a
         href={href}
         className={cn('text-primary underline-offset-4 hover:underline', className)}
@@ -2697,7 +2700,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       } catch { /* not JSON — fall through to normal resolution */ }
       if (parsedDisplay) {
         return (
-          <ReferencedRecordLink objectName={referenceTo} recordId={parsedId} objectSchema={refSchema}>
+          <ReferencedRecordLink objectName={referenceTo} recordId={parsedId} objectSchema={refSchema} label={parsedDisplay}>
             <TruncatedText text={parsedDisplay} />
           </ReferencedRecordLink>
         );
@@ -2713,7 +2716,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       resolveLookupRecordName(obj, refSchema, displayField, perms, referenceTo) || String(obj.id || obj._id || '');
     if (display) {
       return (
-        <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(obj)} objectSchema={refSchema}>
+        <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(obj)} objectSchema={refSchema} label={display}>
           <TruncatedText text={display} />
         </ReferencedRecordLink>
       );
@@ -2812,6 +2815,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
               objectName={referenceTo}
               recordId={referencedRecordId(item)}
               objectSchema={refSchema}
+              label={unresolved ? undefined : label}
               className="text-inherit"
             >
               <span
@@ -2850,7 +2854,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       resolveLookupRecordName(value as Record<string, unknown>, refSchema, displayField, perms, referenceTo) ||
       String((value as any).id || (value as any)._id || '[Object]');
     return (
-      <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)} objectSchema={refSchema}>
+      <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)} objectSchema={refSchema} label={label}>
         <TruncatedText text={label} />
       </ReferencedRecordLink>
     );
@@ -2866,7 +2870,12 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   // (objectui#13335): the label, no id, and no link to a page that would 404.
   if (restricted) return <RestrictedLookupReference label={restrictedLabel} />;
   return (
-    <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)} objectSchema={refSchema}>
+    <ReferencedRecordLink
+      objectName={referenceTo}
+      recordId={referencedRecordId(value)}
+      objectSchema={refSchema}
+      label={unresolved ? undefined : text}
+    >
       {unresolved ? (
         <UnresolvedLookupReference value={text} />
       ) : (
