@@ -13,20 +13,24 @@
  * The secret is the datasource's `external.credentialsRef` — never a key of
  * the config, never inline. The plugin finds the datasource definition in the
  * engine (`listDatasourceDefs()`) and dereferences the handle through the
- * host's datasource secret store: the same `SecretBinder` the host gives
- * `DatasourceAdminServicePlugin` (its `resolve`). It does so at the FIRST
- * request, not at boot, so it never reads the definition registry while it is
- * still filling; a 401 makes it resolve again, which picks up a rotated
- * secret.
+ * host's datasource secret store: `options.secrets` when the host passes one,
+ * otherwise the kernel service `datasource-secret-resolver`
+ * (`DATASOURCE_SECRET_RESOLVER_SERVICE`, `@objectstack/types`) — the read half
+ * of the `SecretBinder` the host gives `DatasourceAdminServicePlugin`, which
+ * `os serve` publishes. It does so at the FIRST request, not at boot, so it
+ * never reads the definition or service registry while it is still filling; a
+ * 401 makes it resolve again, which picks up a rotated secret.
  *
  * Fail-closed, every way: an auth scheme with no `credentialsRef` on the
- * datasource, a `credentialsRef` with no secret store, a handle that does not
- * resolve, and a `credentialsRef` declared on a datasource whose scheme is
- * `none` all refuse the request (the engine answers 503 and logs the cause)
- * instead of sending it unauthenticated.
+ * datasource, a `credentialsRef` with neither `options.secrets` nor the
+ * service registered, a handle that does not resolve, and a `credentialsRef`
+ * declared on a datasource whose scheme is `none` all refuse the request (the
+ * engine answers 503 and logs the cause) instead of sending it
+ * unauthenticated.
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { DATASOURCE_SECRET_RESOLVER_SERVICE, type IDatasourceSecretResolver } from '@objectstack/types';
 import { parseODataDriverConfig, type ODataDriverConfigInput } from './config.js';
 import { ODataDriver } from './odata-driver.js';
 import type { FetchLike } from './transport.js';
@@ -42,7 +46,10 @@ export interface DatasourceDefinitionSource {
 }
 
 export interface ODataDriverPluginOptions extends ODataDriverConfigInput {
-  /** The secret store `external.credentialsRef` resolves through. Required for `bearer` and `basic`. */
+  /**
+   * The secret store `external.credentialsRef` resolves through, for `bearer` and `basic`. When absent, the kernel
+   * service `datasource-secret-resolver` is read at the first request; this option wins over it.
+   */
   secrets?: ODataSecretStore;
   /** The `fetch` the driver calls; the global one when absent. */
   fetch?: FetchLike;
@@ -50,6 +57,17 @@ export interface ODataDriverPluginOptions extends ODataDriverConfigInput {
 
 /** The engine's service name. */
 const ENGINE_SERVICE = 'objectql';
+
+/** The host's published secret resolver, or `undefined` when none is registered (the kernel throws on a miss). */
+function hostSecretResolver(ctx: PluginContext): ODataSecretStore | undefined {
+  let service: IDatasourceSecretResolver | undefined;
+  try {
+    service = ctx.getService<IDatasourceSecretResolver | undefined>(DATASOURCE_SECRET_RESOLVER_SERVICE);
+  } catch {
+    return undefined;
+  }
+  return typeof service?.resolve === 'function' ? service : undefined;
+}
 
 export function createODataDriverPlugin(options: ODataDriverPluginOptions): Plugin & { readonly driver: ODataDriver } {
   const { secrets, fetch, ...input } = options;
@@ -81,12 +99,15 @@ export function createODataDriverPlugin(options: ODataDriverPluginOptions): Plug
         `driver-odata: datasource '${config.name}' uses auth scheme '${config.auth.scheme}' and declares no external.credentialsRef`,
       );
     }
-    if (!secrets) {
+    const store = secrets ?? hostSecretResolver(ctxRef);
+    if (!store) {
       throw new Error(
-        `driver-odata: datasource '${config.name}' declares a credentialsRef, but no secret store was passed to the plugin (options.secrets)`,
+        `driver-odata: datasource '${config.name}' declares a credentialsRef, but no secret store was passed to the plugin `
+        + `(options.secrets) and none is registered as the '${DATASOURCE_SECRET_RESOLVER_SERVICE}' service; `
+        + 'run under os serve, or pass options.secrets',
       );
     }
-    const secret = await secrets.resolve(ref);
+    const secret = await store.resolve(ref);
     if (!secret) {
       throw new Error(`driver-odata: datasource '${config.name}': its credentialsRef could not be resolved or decrypted`);
     }

@@ -29,7 +29,7 @@ import {
 // posture is the authoritative knob and `resolveTenancyPosture()` already folds
 // the legacy boolean in as its unset-fallback. serve's last direct reader of the
 // boolean was the banner, and that was exactly the drift #4801 fixed.
-import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError, DATASOURCE_SECRET_RESOLVER_SERVICE, type IDatasourceSecretResolver } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // [#22301] The `requires` token → provider table and its exact identity match,
 // shared with `@objectstack/verify`'s `bootStack` — see `Serve.CAPABILITY_PROVIDERS`
@@ -5333,6 +5333,16 @@ export default class Serve extends Command {
           );
           trackPlugin('DatasourceAdminServicePlugin');
 
+          // The binder's read half, published as a kernel service so a plugin
+          // driver the stack composes (`@objectstack/driver-odata`) resolves
+          // its datasource's `external.credentialsRef` through this same
+          // store. Only when a binder was built: without one the service is
+          // absent, and such a driver refuses the request, naming it.
+          if (secrets) {
+            await kernel.use(createDatasourceSecretResolverPlugin(secrets));
+            trackPlugin('DatasourceSecretResolver');
+          }
+
           // REST routes under /api/v1/datasources, mounted by a tiny plugin
           // during its init (same pattern as the hostname guard above). What
           // it reads, and which warning a boot without a server gets, lives
@@ -6053,6 +6063,37 @@ export function createDatasourceAdminRoutesPlugin(
       } catch (routeErr: any) {
         ctx.logger?.warn?.(`[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`);
       }
+    },
+  };
+}
+
+/**
+ * The plugin `os serve` publishes its datasource secret binder's read half
+ * with: the kernel service {@link DATASOURCE_SECRET_RESOLVER_SERVICE}, whose
+ * one method is the binder's `resolve`. A plugin driver the stack composes
+ * reads it to dereference a datasource's `external.credentialsRef`, so a
+ * `sys_secret:` handle stored through the datasource admin resolves for that
+ * driver with no code from the stack author.
+ *
+ * Only `resolve` is published — `bind` and `unbind` stay with
+ * `DatasourceAdminServicePlugin`, which holds the whole binder. The binder
+ * decrypts under the `datasource_credential` scope alone, so the service
+ * cannot open a settings secret or a secret field's row. Registered in
+ * `init`, so it is in place before any request; a driver reads it at its
+ * first request, never at its own `init`.
+ */
+export function createDatasourceSecretResolverPlugin(
+  secrets: IDatasourceSecretResolver,
+) {
+  const resolver: IDatasourceSecretResolver = {
+    resolve: (credentialsRef: string) => secrets.resolve(credentialsRef),
+  };
+  return {
+    name: 'com.objectstack.cli.datasource-secret-resolver',
+    version: '1.0.0',
+    providesServices: [DATASOURCE_SECRET_RESOLVER_SERVICE],
+    init: async (ctx: { registerService(name: string, service: unknown): void }): Promise<void> => {
+      ctx.registerService(DATASOURCE_SECRET_RESOLVER_SERVICE, resolver);
     },
   };
 }
