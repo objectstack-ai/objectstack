@@ -1722,7 +1722,7 @@ const de = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen.",
+      accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssätze mit einem Berechtigungssatz erteilen.",
     },
     saveAdvisoryTitle: "Gespeichert — die Autorenprüfung ergab {{count}} Hinweis(e)",
     saveAdvisoryTitle_one: "Gespeichert — die Autorenprüfung ergab {{count}} Hinweis",
@@ -4378,9 +4378,9 @@ const de = {
       detailChangedKeys: 'Ebenfalls geändert:',
       detailNewKeys: 'Enthält:',
       generatedGroup: 'Von der Plattform erzeugt ({{n}})',
-      confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets atomar freigegeben.',
-      confirmNote_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf dieses Pakets atomar freigegeben.',
-      confirmNote_other: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets atomar freigegeben.',
+      confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets gemeinsam freigegeben: Entweder gehen alle live oder keiner.',
+      confirmNote_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf dieses Pakets freigegeben: Er geht live, oder nichts ändert sich.',
+      confirmNote_other: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets gemeinsam freigegeben: Entweder gehen alle live oder keiner.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'Beim Veröffentlichen werden die {{count}} ausstehenden Entwürfe einzeln freigegeben: Ein Entwurf, der dabei scheitert, bleibt ausstehend, die übrigen werden trotzdem freigegeben.',
