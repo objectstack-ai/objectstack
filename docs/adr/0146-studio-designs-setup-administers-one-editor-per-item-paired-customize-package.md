@@ -6,11 +6,13 @@ hand-merge, which is the acceptance act for a governed surface (Prime Directive 
 force until it merges; **this record declares and implements nothing** — the implementation is cut as cards after the
 merge ([Rollout](#rollout)).
 **Decided by**: the maintainer's rulings in that thread, 2026-10-30T10:04Z–10:28Z, verbatim and untranslated, each
-quoted at the decision it fixes. The thread's analysis is kept at
-`/mnt/project-files/decisions/27356-Studio与Setup边界-维度分析.md` (project files) and its three-row brief at
-`/mnt/project-files/decisions/27356-Studio三行-入口字段表一个设计器-呈批.md`; the rows are
-[#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 14 and 19 (HotCRM's 18.2.0 browser pass,
-hotcrm#2320 Studio report S1 / S3 / S8).
+quoted at the decision it fixes. **Provenance a repository reader can reach**: the three row rulings (12 B, 14 C,
+19 A1) and the D4–D6 quotes are on the card as ruling record
+[`6520616687`](https://github.com/objectstack-ai/objectstack/issues/27356#issuecomment-6520616687); the D1–D3
+boundary quotes were spoken in the project thread and have **no GitHub record** — the maintainer's hand-review and
+hand-merge of this record is their verification. The thread's full analysis lives in the project's own files, outside
+this repository. The rows are [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 14 and 19
+(HotCRM's 18.2.0 browser pass, hotcrm#2320 Studio report S1 / S3 / S8).
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (the overlay tier and its five types),
 [ADR-0070](./0070-package-first-authoring.md) (every authored item lives in a writable package; D3 "pick or create a
 base first"; D5/D6 retire the package-less scope and forbid an org dumping ground),
@@ -18,8 +20,12 @@ base first"; D5/D6 retire the package-less scope and forbid an org dumping groun
 `sys_metadata_activation`; §7 flows; §9 what is deliberately not tracked),
 [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 (managed install = sealed definitions +
 the regimes), [ADR-0010](./0010-metadata-protection-model.md) (the protection envelope a packaged item carries),
-[ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D7 (navigation contributions, the
-precedent for "another package's item shown greyed with its source").
+[ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D7 (navigation contributions — the
+*contributed item* this record presents; the greyed-with-source presentation is this record's own, see [D3](#d3)),
+[ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) (`manifest.dependencies`, checked before
+install, the namespace it shares co-owned — the dependency [D3](#d3)'s paired package declares),
+[ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) D2 (queue membership through the existing
+recipient kinds — the queue page [D7](#d7) waits for).
 **Governs**: the console's two authoring surfaces in `ui/packages/app-shell` — Studio (`views/studio-design/**`,
 `hooks/useStudioDesignGate.ts`, the app → Studio bridge in `layout/`) and Setup (`views/metadata-admin/**`,
 `views/setup/**`); the package create door and the flow clone door (`packages/runtime`, `packages/metadata-protocol`);
@@ -36,10 +42,12 @@ names).
 
 Measured on `origin/main` `f8633c7c` (2026-10-30), code read, not run.
 
-1. **Two editors per item.** Studio is four pillars (Data, Interfaces, Automations, Access) over **7** metadata types
-   (object, view, page, dashboard, report, flow, permission set), working per package with drafts and a publish review
-   (ADR-0070). Setup → Metadata ("All Metadata Types", `views/metadata-admin`) lists **all 30** registered types and
-   opens every item in one generic page (`ResourceEditPage`: schema form, Source JSON, layered code / overlay /
+1. **Two editors per item.** Studio is four pillars (Data, Interfaces, Automations, Access) that design **7** metadata
+   types (object, view, page, dashboard, report, flow, permission set) — plus a create dialog, with no designer, for
+   `dataset` (`datasetCreate.tsx`, from the report and widget pickers) — working per package with drafts and a publish
+   review (ADR-0070). Setup → Metadata ("All Metadata Types", `views/metadata-admin`) is the registry's catalog: its
+   directory shows the types the active package contributes, hiding `field` and `package` (`HIDDEN_TYPES`), and opens
+   every item in one generic page (`ResourceEditPage`: schema form, Source JSON, layered code / overlay /
    effective diff, history, diagnostics, reset or delete) that saves at once. For the 7 pillar types the same item has
    two designers with two save models. HotCRM's browser pass named it (#27356 row 19: "Studio and Setup → Metadata each
    open a designer for the same flow or view; only Setup can delete a flow or reset an overlay").
@@ -53,19 +61,23 @@ Measured on `origin/main` `f8633c7c` (2026-10-30), code read, not run.
 4. **The app → Studio bridge skips code packages.** `useStudioDesignGate` draws "Edit {app} in Studio" (app switcher,
    app bar pencil) only for a package Studio lists as `writable` (objectui#12615: "Studio opened a read-only package in
    its browse-only posture with nothing to edit, so an entry drawn there promised an edit Studio cannot deliver"). On a
-   deployment whose apps are all code packages the bridge never draws (#27356 row 12).
+   deployment whose apps are all code packages the bridge never draws (#27356 row 12). *Overtaken while this record was
+   in review*: PR [#28076](https://github.com/objectstack-ai/objectstack/pull/28076) implements [D5](#d5) and was
+   seat-accepted on 2026-10-30; the reading above is true at `f8633c7c` and false once it merges.
 5. **Operational switches live only in Setup.** ADR-0126 §7.4 placed the packaged-flow toggle (the
    `sys_metadata_activation` bit, `POST /api/v1/automation/<name>/toggle`) and the clone
-   (`POST /api/v1/automation/<name>/clone`) on Setup › Packaged automation, whose header says "Automation AUTHORING
-   lives in Studio and stays there. This page is the OPERATIONAL surface". Studio's own Enabled switch is a definition
+   (`POST /api/v1/automation/<name>/clone`) on Setup › Packaged automation, whose file's doc comment states the charter: "Automation
+   AUTHORING lives in Studio and stays there. This page is the OPERATIONAL surface". Studio's own Enabled switch is a definition
    write (`status`), refused on a read-only package and since #27376 drawn muted with a lock. So an administrator looking
    at HotCRM's flow in Studio cannot switch it off or clone it there.
 6. **A clone lands package-less.** `packages/runtime/src/flow-clone.ts` drops the package envelope; the copy is "a flow
    authored in this deployment" and shows in Studio's package-less "Organization flows" scope (objectui#11553) — the
    scope ADR-0070 D5 retires.
-7. **Setup's metadata pages carry administration.** Position holders ("Position → Add holder"), permission-set
-   assignment and queue membership are reached through Setup's metadata list and item pages today (#27356 rows 1, 2, 5,
-   9 are about those pages).
+7. **Setup's metadata pages carry administration.** Two live sections sit inside Setup's metadata item pages today:
+   position holders (`PositionHoldersSection`, "Position → Add holder") and permission-set assignment
+   (`AssignedUsersSection`); #27356 rows 1, 2, 5 and 9 are about those pages. Queue membership has **no** Setup page or
+   section at this head — ADR-0142 D2 (Proposed) defines it through the existing recipient kinds, and its page arrives
+   with that record's landing.
 
 The question the maintainer put was not "which rows to take" but where the line between the two surfaces runs:
 「Setup → Metadata 你说的是一个菜单入口吧，这些应该都属于元数据，是否建议都归 studio，是给开发人员用的， setup 时给管理员用的。」
@@ -109,6 +121,17 @@ membership are administration and get Setup pages of their own.
   ([D1](#d1)); the "Read-only · Customize with an overlay" link that today sends Studio to Setup (#27927, row 13) is
   the transitional form and retires with Phase 2.
 
+**What this lifts from ADR-0126 §9, stated so the two records cannot be read as disagreeing.** §9's first bullet
+deferred "the ServiceNow-style overlay layer (badge / customization list / diff-vs-base / revert / upgrade skip-report)
+… **if** customer pull for in-place customization appears". That pull is now on record (HotCRM's pass, #27356 rows 12,
+13, 19; the maintainer's 「或者直接在只读包上做叠加的覆盖管理」), and this record charters **three of the five** on facts the
+platform already serves, with nothing computed: the **badge** (the "customized" chip = overlay presence in the layered
+read; the "customization" chip in [D3](#d3) = the item's package), the **customization list** ([D3](#d3)'s "only
+customizations" filter and the landing's per-package count of overlaid and switched-off items — a filter over served
+rows and a count of ledger rows) and **revert** (Reset = the existing `DELETE /meta/:type/:name` on the overlay row).
+**Diff-vs-base and the upgrade skip-report stay deferred**, and §9's second bullet — no clone provenance, no base-moved
+notice — stands untouched. At acceptance, ADR-0126 §9's first bullet takes the pointer to this record.
+
 Maintainer, verbatim: 「或者直接在只读包上做叠加的覆盖管理」.
 
 Not taken: a separately selectable **virtual package** standing for "this environment's customization layer" as a
@@ -120,27 +143,33 @@ org-level dumping ground ADR-0070 D6 forbids. The word "virtual" survives only a
 
 **Underneath, a real package.** ADR-0070 D1 holds: a new flow, view, page or permission set the customer adds "to
 HotCRM" lives in a writable package. That package is **`hotcrm.customize`** — an ordinary writable package that
-declares a dependency on `hotcrm`, created on the customer's first addition to the base **without a package prompt**
-(ADR-0070 D3's "pick or create a base first" is answered by the pairing convention), one per base, never one per
-environment. It receives: new items authored from the base's Studio surface, **clones** of the base's flows
-([D4](#d4)), and environment-level permission sets for the base. It is published, reviewed, exported, duplicated and
-deleted as any writable package is (ADR-0070 D4); upgrading the base never touches it; ADR-0070 D6 is satisfied (one
-per base, not a bucket).
+declares a dependency on `hotcrm` in `manifest.dependencies` (ADR-0141: checked once before install; the paired package
+shares the base's namespace by construction and co-owns it under that record's rule), created on the customer's first
+addition to the base **without a package prompt**, one per base, never one per environment. **This amends ADR-0070 D3
+for the paired case**: D3 forbade the *silent catch-all* (`com.workspace`, the package-less scope) and left a prompted
+one-click auto-provision open (ADR-0070 open question 1); a deterministic, per-base, dependency-declaring target is
+neither a catch-all nor silent about where the item went — the item header's chip and the folded switcher say it — so
+the prompt is dropped for this one case and stays everywhere else D3 names. It receives: new items authored from the base's Studio surface, **clones** of the base's flows
+([D4](#d4)), and environment-level permission sets for the base. It is published, reviewed, duplicated and deleted as any
+writable package is today, and exported as ADR-0070 D4 lands (the export door is not on the REST ledger at this head);
+upgrading the base never touches it; ADR-0070 D6 is satisfied (one per base, not a bucket).
 
 **On top, one surface.** Studio opens HotCRM and the designer sees **one** HotCRM: the pillar rails list the base's
 items (read-only; the overlay types editable in place per [D2](#d2)) and the customize package's items (writable)
 **in the same list**, the latter marked with a small "customization" chip and filterable with "only customizations";
 New and Clone land in the customize package without asking; the pending-changes and publish surfaces act on the
 customize package; the package switcher folds `hotcrm.customize` under HotCRM instead of giving it a row. Items another
-package contributes to the base (flows watching its objects, fields extending its objects, navigation contributions)
-are listed greyed with their source package, the ADR-0029 D7 presentation.
+package contributes to the base (flows watching its objects, fields extending its objects, ADR-0029 D7 navigation
+contributions) are listed **greyed, with their source package named** — a presentation this record decides (ADR-0029
+D7 defines the contribution, not how a contributed item is drawn; #26889 and #27928 are the row-20 precedent).
 
 **Upgrade and audit.** "What did we change on HotCRM" is one place: `hotcrm.customize` plus the base's overlays and
 switched-off items. Studio's landing carries one line per package ("n customized, m switched off"); Setup carries
 nothing per package.
 
 Maintainer, verbatim: 「假设未来客户安装了很多软件包，对具体软件包的定制岂不是在 软件包中直接看更方便，如果在setup，都
-混在一起了。」; 「流必须住在可写包里（ADR-0070），能否虚拟一个 hotcrm.customize 包，但是设计者看的时候应该在一个[界面]。」
+混在一起了。」; 「流必须住在可写包里（ADR-0070），能否虚拟一个 hotcrm.customize 包，但是设计者看的时候应该在一个及诶慢。」 (verbatim; the last
+word is a typing slip for 界面, "one interface" — editorial note, not part of the quote)
 
 Doors this needs (server cards, Phase 2): the package create door accepts the pairing convention (name
 `<base>.customize`, dependency on the base, idempotent "create if absent"); the flow clone door takes a target
@@ -156,14 +185,19 @@ ADR-0126 §7.4 chose Setup as the first surface for the packaged-flow toggle and
   (`GET /api/v1/automation/_status`, `POST /api/v1/automation/<name>/toggle`) and reads "off for this deployment"; on a
   **writable package's flow** it stays the definition switch ("disabled; publish to apply"). Two switches, two words —
   never one control that means different things by package.
+- **Authority is the ledger door's, not Studio's.** The toggle's gate (`packages/runtime/src/domains/activation-gate.ts`)
+  admits `manage_metadata` in the `single` posture and, under the walled `group` / `isolated` postures, only the
+  PLATFORM_ADMIN posture rung (ADR-0126 §5); a tenant administrator there is refused with the operator's name. Studio
+  draws the ledger switch **disabled, with that refusal as its title**, for a principal the gate would refuse — never a
+  live control that always answers 403 (the shape `useCanReadTrail` already avoids).
 - The item's ⋯ menu offers **Clone** (`POST /api/v1/automation/<name>/clone`, a new machine name required, the server's
   notice shown verbatim with the "switch the original off" offer, objectui#13270's shape); the clone lands in the
   paired package ([D3](#d3)).
 - Setup › Packaged automation becomes a deployment-wide **operations overview** (which packaged flows are off, which are
   "not running here" and why); it stops being the only door. Whether it stays or retires is decided on usage after
   Phase 2, not here.
-- ADR-0126 §9 stands in full: no lineage from a clone to its source, no diff against the base, no "based on vN" notice,
-  on either surface.
+- ADR-0126 §9's second bullet stands: no lineage from a clone to its source, no diff against the base, no "based on
+  vN" notice, on either surface. Its first bullet is lifted in part by [D2](#d2), as stated there.
 
 Maintainer, verbatim: 「打包自动化开关，这个就很奇怪，正常的操作我应该是在studio中进入 hotcrm app，选中一个流程，点禁用或者
 复制更符合逻辑吧？」
@@ -193,9 +227,11 @@ Maintainer, verbatim: 「「Edit {app} in Studio」代码包/已安装包一律�
 ### D7 — Setup pages the move owes {#d7}
 
 Administration reached through Setup's metadata pages today gets a page of its own under Setup before those routes
-retire: **position holders**, **permission-set assignment**, **queue membership**. Each is a people-and-organization
-page (the scope of `setup.access` and the delegated-administrator gate), not a metadata page. ⛔ Phase 3 does not
-retire a Setup → Metadata route whose administrative action has no Setup home yet.
+retire: **position holders** (`PositionHoldersSection`) and **permission-set assignment** (`AssignedUsersSection`) are
+the two live sections the move re-homes; **queue membership** has no section at this head and arrives as a Setup page
+with ADR-0142 D2's landing, never inside a metadata page. Each is a people-and-organization page (the scope of
+`setup.access` and the delegated-administrator gate), not a metadata page. ⛔ Phase 3 does not retire a
+Setup → Metadata route whose administrative action has no Setup home yet.
 
 ## Consequences
 
@@ -210,7 +246,9 @@ retire a Setup → Metadata route whose administrative action has no Setup home 
   Setup designer as "a sibling door onto the same save" (`studio-authoring.json`, `ux-conventions.json`, the live
   `studio-object-designer.spec.ts`) are rewritten to the Studio door or marked transitional; users used to editing a
   view in Setup change habit. Translations and email templates lose the Setup form; their simplified form editor is
-  offered inside Studio's All-metadata area ([Open questions](#open-questions) 3).
+  offered inside Studio's All-metadata area ([Open questions](#open-questions) 3) — which is the **second** recorded
+  crossing: an administrator changing one line of mail copy enters Studio, behind `manage_metadata`, as the
+  permission-set definer does.
 
 ## Rollout
 
@@ -223,13 +261,20 @@ Cut as cards after this record merges; nothing below binds a seat before that. E
    "customized" chip and Reset on read-only packages ([D2](#d2); views, dashboards, reports first); (b) the ledger
    switch and Clone on the item ([D4](#d4)); (c) the clone door's `packageId`; (d) the paired-package create
    convention and dependency ([D3](#d3)); (e) the mixed rails, the chip and filter, the folded switcher ([D3](#d3));
-   (f) the browse entry ([D5](#d5)) — this one is #27356 row 12 and may land before the record merges, since it reverses
-   no wall.
+   (f) the browse entry ([D5](#d5)) — #27356 row 12, PR #28076, seat-accepted 2026-10-30; it reverses no wall and lands
+   ahead of this record.
 3. **Phase 3 — the catalog moves** ([D1](#d1), [D7](#d7)): `views/metadata-admin` directory, lists, item page,
    history and diagnostics re-homed under Studio's All-metadata area (per package and across packages); the three Setup
    administration pages; Setup → Metadata routes redirect; QA checklist and e2e door rewrites.
-4. **Phase 4 — as pulled**: app, action, dataset, translation, email template, documentation and the AI types gain
-   pillar-grade designers in Studio one card at a time; until then the All-metadata area's generic page is their editor.
+4. **Phase 4 — as pulled**: app, action, dataset (today a create dialog, no designer), translation, email template,
+   documentation and the AI types gain pillar-grade designers in Studio one card at a time; until then the All-metadata
+   area's generic page is their editor.
+
+## At acceptance
+
+When this record is accepted, the pointers go on the records it amends, in the repository's status-line form
+(ADR-0005's is the model): ADR-0126 §7.4 and §9 (first bullet), ADR-0070 D3 (the paired case) and D5 (the clone's
+landing), ADR-0029 D7 (the greyed-with-source presentation is this record's). Not owed while Proposed.
 
 ## Open questions (for the maintainer's review of this draft)
 
@@ -244,7 +289,7 @@ Cut as cards after this record merges; nothing below binds a seat before that. E
 
 - [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 13, 14, 19, 20, 21 and their landed
   PRs #27376 (read-only flow switch), #27927 (overlay link only where an overlay exists).
-- ADR-0126 §7.4 (the Setup surface this record moves from) and §9 (the walls it keeps); ADR-0070 D1, D3, D5, D6;
-  ADR-0005; ADR-0131 D6.
+- ADR-0126 §7.4 (the Setup surface this record moves from) and §9 (first bullet lifted in part by D2; second bullet
+  kept); ADR-0070 D1, D3 (amended for the paired case by D3), D4, D5, D6; ADR-0005; ADR-0131 D6; ADR-0141; ADR-0142 D2.
 - objectui#12615 (bridge follows package posture), objectui#5813 and objectui#12450 (the Data pillar's tabs),
   objectui#11553 (the package-less scope), objectui#13270 (the clone result's offers).
