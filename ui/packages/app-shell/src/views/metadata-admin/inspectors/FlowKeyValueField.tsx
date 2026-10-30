@@ -38,6 +38,10 @@
  *    action's `params`) a text value is a literal as well: objectstack#19939
  *    S7 deleted the single-brace resolver, so no flow string outside the text
  *    slots reads a `{…}` token. Its cell has no picker and no reference check.
+ *  - objectstack#27834: with `keysByLabel` the key cell is a searchable picker
+ *    over `keyOptions` that shows a field by its label and stores its API name;
+ *    a key the list does not hold is still typeable through the picker's own
+ *    "Use «text»" row.
  */
 
 import * as React from 'react';
@@ -45,6 +49,7 @@ import { Code2, Plus, X } from 'lucide-react';
 import { Button, Input, Label, cn } from '@object-ui/components';
 import { RequiredMarker, uniqueId } from './_shared.js';
 import { VariableTextInput } from './VariableTextInput.js';
+import { InspectorComboField } from './InspectorComboField.js';
 import type { ScopeGroup } from './useFlowScope.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
 import {
@@ -247,6 +252,12 @@ export interface FlowKeyValueFieldProps {
   /** One line under the rows about where {@link keyOptions} come from. */
   keyHint?: string;
   /**
+   * objectstack#27834: render the key cell as a picker that shows each of
+   * {@link keyOptions} by its label and stores its value. Omitted, the key is
+   * the text box with the options as suggestions.
+   */
+  keysByLabel?: boolean;
+  /**
    * objectui#12101: `'hole'` when every value of the map is a flow text slot
    * that renders `{{ }}` holes. Omitted, a text value is a literal, with no
    * picker: no other flow string reads a `{…}` token (objectui#12329).
@@ -294,6 +305,7 @@ export function FlowKeyValueField({
   required,
   keyOptions,
   keyHint,
+  keysByLabel,
   valueMode,
   valueRefusal = valueEnvelopeRefusal,
 }: FlowKeyValueFieldProps) {
@@ -347,6 +359,16 @@ export function FlowKeyValueField({
     setRows((rs) => flush(rs.filter((r) => r.id !== id)));
   };
 
+  const setRowKey = (id: string, key: string) => {
+    setRows((rs) => flush(rs.map((r) => (r.id === id ? { ...r, key } : r))));
+  };
+
+  const pickKeys = !!keysByLabel && !!keyOptions;
+  const keyPickerOptions = React.useMemo(
+    () => (keyOptions ?? []).map((o) => ({ value: o.value, label: o.label })),
+    [keyOptions],
+  );
+
   const setRowMode = (id: string, mode: 'text' | 'expression') => {
     setRows((rs) => flush(rs.map((r) => (r.id === id ? switchRowMode(r, mode) : r))));
   };
@@ -391,18 +413,32 @@ export function FlowKeyValueField({
                * on its own line it keeps the full width beside one button.
                */}
               <div className="flex items-center gap-1.5" data-testid="flow-kv-key-line">
-                <Input
-                  list={suggestsKeys ? keyListId : undefined}
-                  value={row.key}
-                  onChange={(e) => setRowField(row.id, { key: e.target.value })}
-                  onBlur={flushShown}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                  }}
-                  placeholder={keyLabel}
-                  disabled={disabled}
-                  className="h-8 min-w-0 flex-1 font-mono text-xs"
-                />
+                {pickKeys ? (
+                  <div className="min-w-0 flex-1">
+                    <InspectorComboField
+                      ariaLabel={keyLabel}
+                      value={row.key}
+                      onCommit={(v) => setRowKey(row.id, v)}
+                      options={keyPickerOptions}
+                      placeholder={keyLabel}
+                      disabled={disabled}
+                      mono
+                    />
+                  </div>
+                ) : (
+                  <Input
+                    list={suggestsKeys ? keyListId : undefined}
+                    value={row.key}
+                    onChange={(e) => setRowField(row.id, { key: e.target.value })}
+                    onBlur={flushShown}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    }}
+                    placeholder={keyLabel}
+                    disabled={disabled}
+                    className="h-8 min-w-0 flex-1 font-mono text-xs"
+                  />
+                )}
                 <Button
                   type="button"
                   variant="ghost"
@@ -475,7 +511,7 @@ export function FlowKeyValueField({
         <Plus className="mr-1 h-3.5 w-3.5" />
         {addLabel}
       </Button>
-      {suggestsKeys && keyOptions && (
+      {suggestsKeys && keyOptions && !pickKeys && (
         <datalist id={keyListId}>
           {keyOptions.map((o) => (
             <option key={o.value} value={o.value}>

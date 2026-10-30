@@ -166,6 +166,20 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * The object a record-triggered flow fires on — its start node's
+ * `config.objectName` when `config.triggerType` is a record trigger — or `''`
+ * on any other flow (objectstack#27834: a new Update Records node's seed).
+ */
+export function recordTriggerObjectName(nodes: unknown): string {
+  const start = asArray(nodes).map(asRecord).find((n) => str(n.type) === 'start');
+  if (!start) return '';
+  const cfg = asRecord(start.config);
+  const triggerType = str(cfg.triggerType);
+  if (!triggerType || !RECORD_TRIGGER_TYPES.has(triggerType)) return '';
+  return str(cfg.objectName) ?? '';
+}
+
+/**
  * The connector + action a `connector_action` node has COMMITTED, read off its
  * spec-structured `connectorConfig` block (where the connector and action
  * pickers write them). Either half missing → undefined.

@@ -654,6 +654,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
   'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  // objectstack#27834 — the Update Records filter's "Triggering record" target.
+  'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
