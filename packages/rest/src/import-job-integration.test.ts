@@ -618,11 +618,16 @@ describe('async import job — a job whose every row failed ends failed', () => 
     await waitForTerminal(slowCtx.progress, jobId);
     // The cancel route writes `cancelled` first; wait until the worker's own
     // final patch has landed (it is the only write of `results`), then read the row.
+    let reported = 0;
     for (let i = 0; i < 400; i++) {
       const r = await callJob(slowCtx.results, jobId);
-      if ((r._json?.results ?? []).length === 3) break;
+      reported = (r._json?.results ?? []).length;
+      if (reported === 3) break;
       await new Promise((rr) => setTimeout(rr, 5));
     }
+    // An exhausted wait must fail here: without the worker's final patch, the
+    // cancel route's write and the progress flush alone could pass the checks below.
+    expect(reported).toBe(3);
     const after = await callJob(slowCtx.progress, jobId);
     expect(after._json.status).toBe('cancelled');
     expect(after._json).toMatchObject({ processed: 3, created: 0, updated: 0, skipped: 0, errors: 3 });

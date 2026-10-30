@@ -8,6 +8,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import {
+  RELATED_ARRANGEMENT_RECORD_VERSION,
   relatedArrangementFromRecord,
   relatedArrangementToRecord,
   type RelatedArrangement,
@@ -157,18 +158,20 @@ export const RECORD_RELATED_COLUMN_PREFERENCE = defineWorkspacePreference<Prefer
 });
 
 /**
- * How the reader arranged the record page's related cards, per object
- * (scope `object:OBJECT_NAME`, objectstack#27055): `{ v, order, collapsed,
- * hidden, basedOn }` — plus `seen`, the first-seen stamps of relationships new
- * since the last drag (the 48 h 「新」 badge needs a clock). The value is a
- * DIFF against the default order; `resolveRelatedArrangement` in
- * `@object-ui/plugin-detail` lays it over the default. With no choice the
- * host passes `EMPTY_RELATED_ARRANGEMENT`: the default order, every card open.
+ * How the reader arranged the record page's related panels, per object
+ * (scope `object:OBJECT_NAME`, objectstack#27055, objectstack#27524):
+ * `{ v, order, hidden, basedOn }` — plus `seen`, the first-seen stamps of
+ * relationships new since the last drag (the 48 h 「新」 badge needs a clock).
+ * The value is a DIFF against the default order; `resolveRelatedArrangement`
+ * in `@object-ui/plugin-detail` lays it over the default. With no choice the
+ * host passes `EMPTY_RELATED_ARRANGEMENT`: the default order, every panel
+ * shown. A record of an earlier version (version 1 carried `collapsed`) is
+ * "no choice": no compatibility read.
  */
 export const RECORD_RELATED_ARRANGEMENT_PREFERENCE = defineWorkspacePreference<RelatedArrangement>({
   name: 'record.related.arrangement',
   codec: versionedPreferenceCodec<RelatedArrangement>({
-    version: 1,
+    version: RELATED_ARRANGEMENT_RECORD_VERSION,
     toRecord: relatedArrangementToRecord,
     fromRecord: relatedArrangementFromRecord,
   }),

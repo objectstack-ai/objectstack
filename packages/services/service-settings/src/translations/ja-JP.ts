@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PlatformTranslationData } from '@objectstack/spec/system';
+import { countryOptionLabels } from '../manifests/company.manifest.js';
 
 /**
  * 日本語 (ja-JP) — built-in settings manifest translations.
@@ -10,7 +11,7 @@ export const jaJP: PlatformTranslationData = {
     sourceLabels: {
       env: '環境変数',
       global: 'グローバル',
-      tenant: 'テナント',
+      tenant: '組織',
       user: 'ユーザー',
       default: 'デフォルト',
     },
@@ -130,7 +131,7 @@ export const jaJP: PlatformTranslationData = {
         social: {
           title: 'ソーシャルサインイン',
           description:
-            '組み込みの Google サインインプロバイダーを設定します。デプロイの環境変数が優先されます。',
+            '組み込みの Google サインインプロバイダーを設定します。サーバー設定で指定した認証情報が優先されます。',
         },
       },
       keys: {
@@ -150,7 +151,7 @@ export const jaJP: PlatformTranslationData = {
         },
         audience_posture: {
           label: 'セルフ登録の対象',
-          help: '「招待のみ」はセルフ登録を閉じます。ユーザーは運用側の行為(招待、管理者による作成/インポート、SCIM、エンタープライズ SSO)によってのみ作成されます。「メールドメイン」は下の許可リストのドメインにのみ開放し、「オープン」は誰でも登録できます。「メールドメイン」と「オープン」では下のセルフ登録権限セットの指定が必要です。「メールドメイン」ではメール確認が常に強制されます。「オープン」でも強制されますが、デプロイ側で無効にできます(OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false、またはスタック設定の emailAndPassword.requireEmailVerification: false)。このコンソールで保存した false は「オープン」では拒否されます。',
+          help: '「招待のみ」はセルフ登録を閉じます。ユーザーは運用側の行為(招待、管理者による作成/インポート、SCIM、エンタープライズ SSO)によってのみ作成されます。「メールドメイン」は下の許可リストのドメインにのみ開放し、「オープン」は誰でも登録できます。「メールドメイン」と「オープン」では下のセルフ登録権限セットの指定が必要です。「メールドメイン」ではメール確認が常に強制されます。「オープン」でも強制されますが、サーバー設定で無効にできます。このコンソールで無効にすることは「オープン」では拒否されます。',
           options: {
             invite_only: '招待のみ — セルフ登録なし(既定)',
             email_domain: '許可リストのメールドメインのみ',
@@ -163,7 +164,7 @@ export const jaJP: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'セルフ登録の権限セット',
-          help: '各セルフ登録ユーザーに付与される権限セット名(member_default の明示宣言は可。admin_full_access は拒否されます)。',
+          help: '各セルフ登録ユーザーに付与される権限セット名。標準のメンバー権限セットは使用できます。完全な管理者権限セットは拒否されます。セルフ登録を許可する対象では必須です。',
         },
         password_min_length: { label: 'パスワードの最小文字数' },
         password_max_length: { label: 'パスワードの最大文字数', help: '非常に長いパスワードのハッシュ化によるサービス拒否を防ぎます。' },
@@ -227,7 +228,7 @@ export const jaJP: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: '許可 IP レンジ',
-          help: 'CIDR レンジまたは正確な IP(1行に1つ、またはカンマ区切り)。例:203.0.113.0/24。設定すると、この範囲外からのサインインを拒否し、サーバーがクライアントアドレスを特定できないリクエストも拒否します。空欄で制限なし。判定には接続元(ピア)のアドレスを使います。リバースプロキシの背後に配置する場合は、スタックで server.trustProxy を宣言すると、転送されたクライアントアドレスが判定に使われます。',
+          help: 'CIDR レンジまたは正確な IP(1行に1つ、またはカンマ区切り)。例:203.0.113.0/24。設定すると、この範囲外からのサインインを拒否し、サーバーがクライアントアドレスを特定できないリクエストも拒否します。空欄で制限なし。判定には接続元のアドレスを使います。リバースプロキシの背後に配置する場合は、サーバー設定でそのプロキシを信頼すると、元のクライアントアドレスが判定に使われます。',
         },
         api_key_default_expiry_days: {
           label: 'キーの既定の有効期間(日)',
@@ -235,11 +236,11 @@ export const jaJP: PlatformTranslationData = {
         },
         api_key_max_expiry_days: {
           label: 'キーの最大有効期間(日)',
-          help: '新しいキーが指定できる最も遠い有効期限(作成時から数えます)。これより長いものは拒否されます(API_KEY_EXPIRY_TOO_LONG)。ちょうどこの日数は受け付けます。',
+          help: '新しいキーが指定できる最も遠い有効期限(作成時から数えます)。これより長いものは拒否されます。ちょうどこの日数は受け付けます。',
         },
         api_key_inactivity_days: {
           label: '非アクティブによる失効(日)',
-          help: 'この日数のあいだ使用記録のないキーは拒否されます(API_KEY_INACTIVE)。失効(revoke)はされません。新しいキーを作成してください。一度も使われていないキーは作成時から、それが下のポリシー開始時刻より古い場合はポリシー開始時刻から数えます。0 で非アクティブ失効をオフにします。',
+          help: 'この日数のあいだ使用記録のないキーは拒否されます。失効(revoke)はされません。新しいキーを作成してください。一度も使われていないキーは作成時から、それが下のポリシー開始時刻より古い場合はポリシー開始時刻から数えます。0 で非アクティブ失効をオフにします。',
         },
         api_key_policy_started_at: {
           label: 'キーポリシーの開始時刻',
@@ -247,15 +248,15 @@ export const jaJP: PlatformTranslationData = {
         },
         google_enabled: {
           label: 'Google ログインを有効化',
-          help: 'クライアント ID とクライアントシークレットの両方が解決されると Google サインインを提供します。値は下に保存したもの、またはサーバーの GOOGLE_CLIENT_ID と GOOGLE_CLIENT_SECRET(保存した値より優先)から解決されます。両方が解決されるまでは、オンでもログインページに Google ボタンは表示されません。オフにすると、サーバーが両方を設定していても Google サインインを取り下げます。OAuth クライアントは Google Cloud Console で作成してください。',
+          help: 'クライアント ID とクライアントシークレットの両方が利用できると Google サインインを提供します。値は下に保存したもの、またはサーバー設定(保存した値より優先)から取得されます。両方が利用できるまでは、オンでもログインページに Google ボタンは表示されません。オフにすると、サーバーが両方を設定していても Google サインインを取り下げます。OAuth クライアントは Google Cloud Console で作成してください。',
         },
         google_client_id: {
           label: 'Google クライアント ID',
-          help: 'Google Cloud Console の OAuth クライアント ID。サーバー側で GOOGLE_CLIENT_ID を設定することもできます。',
+          help: 'Google Cloud Console の OAuth クライアント ID。サーバー設定で指定することもできます。',
         },
         google_client_secret: {
           label: 'Google クライアントシークレット',
-          help: '保存時に暗号化されます。サーバー側で GOOGLE_CLIENT_SECRET を設定することもできます。',
+          help: '保存時に暗号化されます。サーバー設定で指定することもできます。',
         },
       },
     },
@@ -313,7 +314,11 @@ export const jaJP: PlatformTranslationData = {
         city: { label: '市区町村' },
         state: { label: '都道府県 / 州' },
         postal_code: { label: '郵便番号' },
-        country: { label: '国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。' },
+        country: {
+          label: '国',
+          help: '登記住所の国。国名を入力してリストから選択します。',
+          options: countryOptionLabels('ja-JP'),
+        },
         phone: { label: '電話', help: '主要な業務用電話（E.164 推奨。例:+1 415 555 0100）。' },
         website: { label: 'ウェブサイト', help: '例:https://example.com' },
         primary_contact_name: { label: '主担当者名' },
@@ -331,7 +336,11 @@ export const jaJP: PlatformTranslationData = {
       keys: {
         timezone: { label: '既定のタイムゾーン', help: '数式での「今日」がどの日か、レポートでの日付のまとめ方、日付と時刻の表示方法を決めます。任意の IANA タイムゾーン名（例:Asia/Tokyo）を指定できます。これが組織で実際に使われるタイムゾーンです。組織レコードの「タイムゾーン」フィールドではこれは変わりません。' },
         locale: { label: '既定の言語', help: 'メッセージカタログと数値/日付フォーマットに使う BCP-47 ロケール。' },
-        default_country: { label: '既定の国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。住所と電話の既定に使用します。' },
+        default_country: {
+          label: '既定の国',
+          help: '住所と電話の既定に使用します。国名を入力してリストから選択します。',
+          options: countryOptionLabels('ja-JP'),
+        },
         currency: { label: '既定の通貨', help: '通貨フィールドが独自の通貨を指定しない場合に適用される ISO 4217 コード。' },
         fiscal_year_start: { label: '会計年度の開始月', help: '会計年度の最初の月 — レポートの「今四半期 / 会計年度」を決定します。' },
       },
@@ -355,7 +364,7 @@ export const jaJP: PlatformTranslationData = {
       },
       banners: {
         beta_notice: { title: 'ご注意ください',
-          text: 'ベータ機能は予告なく変更される場合があります。デプロイ全体で固定するには環境変数 (例: `OS_FEATURE_FLAGS_AI_ENABLED=true`) を使用してください。' },
+          text: 'ベータ機能は予告なく変更される場合があります。サーバー設定で指定した機能はデプロイ全体でオンまたはオフに固定され、ここでは変更できません。' },
       },
     },
 
