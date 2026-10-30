@@ -793,6 +793,11 @@ const ja = {
     recordCount: "{{count}} 件のレコード",
     recordCount_one: "{{count}} 件のレコード",
     recordCount_other: "{{count}} 件のレコード",
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: "この期間に読み込んだレコード {{count}} 件",
+    calendarRecordCount_one: "この期間に読み込んだレコード {{count}} 件",
+    calendarRecordCount_other: "この期間に読み込んだレコード {{count}} 件",
     addRecord: "レコードを追加",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "すべて表示",
@@ -1134,7 +1139,7 @@ const ja = {
     nextRecord: "次のレコード",
     recordOf: "{{current}} / {{total}}",
     recordNotFound: "レコードが見つかりません",
-    recordNotFoundDescription: "お探しのレコードは存在しないか、削除された可能性があります。",
+    recordNotFoundDescription: "お探しのレコードは存在しないか、削除されたか、アクセス権がない可能性があります。",
     goBack: "戻る",
     details: "詳細",
     related: "関連",
@@ -3187,7 +3192,7 @@ const ja = {
     systemSettings: "システム設定",
     back: "戻る",
     recordNotFound: "レコードが見つかりません",
-    recordNotFoundDescription: "お探しのレコードは存在しないか、削除された可能性があります。",
+    recordNotFoundDescription: "お探しのレコードは存在しないか、削除されたか、アクセス権がない可能性があります。",
     recordAccessDenied: "{{object}}レコードへのアクセス権がありません",
     recordAccessDeniedDescription: "この種類のレコードを表示する権限がありません。必要な場合は管理者にお問い合わせください。",
     recordLoadFailed: "このレコードを読み込めませんでした",

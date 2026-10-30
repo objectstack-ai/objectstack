@@ -890,6 +890,15 @@ const ar = {
     recordCount_few: "{{count}} سجلات",
     recordCount_many: "{{count}} سجلًا",
     recordCount_other: "{{count}} سجل",
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: "عدد السجلات المحمّلة لهذه التواريخ: {{count}}",
+    calendarRecordCount_zero: "{{count}} سجل محمّل لهذه التواريخ",
+    calendarRecordCount_one: "{{count}} سجل محمّل لهذه التواريخ",
+    calendarRecordCount_two: "سجلان محمّلان لهذه التواريخ ({{count}})",
+    calendarRecordCount_few: "{{count}} سجلات محمّلة لهذه التواريخ",
+    calendarRecordCount_many: "{{count}} سجلًا محمّلًا لهذه التواريخ",
+    calendarRecordCount_other: "{{count}} سجل محمّل لهذه التواريخ",
     addRecord: "إضافة سجل",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "عرض الكل",
@@ -1260,7 +1269,7 @@ const ar = {
     nextRecord: "السجل التالي",
     recordOf: "{{current}} من {{total}}",
     recordNotFound: "لم يتم العثور على السجل",
-    recordNotFoundDescription: "السجل الذي تبحث عنه غير موجود أو ربما تم حذفه.",
+    recordNotFoundDescription: "السجل الذي تبحث عنه غير موجود، أو ربما تم حذفه، أو ربما لا تملك صلاحية الوصول إليه.",
     goBack: "رجوع",
     details: "التفاصيل",
     related: "ذات صلة",
@@ -3434,7 +3443,7 @@ const ar = {
     systemSettings: "إعدادات النظام",
     back: "رجوع",
     recordNotFound: "السجل غير موجود",
-    recordNotFoundDescription: "السجل الذي تبحث عنه غير موجود أو ربما تم حذفه.",
+    recordNotFoundDescription: "السجل الذي تبحث عنه غير موجود، أو ربما تم حذفه، أو ربما لا تملك صلاحية الوصول إليه.",
     recordAccessDenied: "ليس لديك صلاحية الوصول إلى سجلات {{object}}",
     recordAccessDeniedDescription: "ليس لديك إذن لعرض السجلات من هذا النوع. تواصل مع المسؤول إذا كنت تعتقد أنه يجب أن يكون لديك وصول.",
     recordLoadFailed: "تعذّر تحميل هذا السجل",

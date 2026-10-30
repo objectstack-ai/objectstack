@@ -793,6 +793,11 @@ const de = {
     recordCount: "{{count}} Datensätze",
     recordCount_one: "{{count}} Datensatz",
     recordCount_other: "{{count}} Datensätze",
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: "{{count}} Datensätze für diesen Zeitraum geladen",
+    calendarRecordCount_one: "{{count}} Datensatz für diesen Zeitraum geladen",
+    calendarRecordCount_other: "{{count}} Datensätze für diesen Zeitraum geladen",
     addRecord: "Datensatz hinzufügen",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Alle anzeigen",
@@ -1134,7 +1139,7 @@ const de = {
     nextRecord: "Nächster Datensatz",
     recordOf: "{{current}} von {{total}}",
     recordNotFound: "Datensatz nicht gefunden",
-    recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht oder wurde möglicherweise gelöscht.",
+    recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht, wurde möglicherweise gelöscht, oder Sie haben keinen Zugriff darauf.",
     goBack: "Zurück",
     details: "Details",
     related: "Verknüpft",
@@ -3185,7 +3190,7 @@ const de = {
     systemSettings: "Systemeinstellungen",
     back: "Zurück",
     recordNotFound: "Datensatz nicht gefunden",
-    recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht oder wurde möglicherweise gelöscht.",
+    recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht, wurde möglicherweise gelöscht, oder Sie haben keinen Zugriff darauf.",
     recordAccessDenied: "Kein Zugriff auf {{object}}-Datensätze",
     recordAccessDeniedDescription: "Sie haben keine Berechtigung, Datensätze dieses Typs anzuzeigen. Wenden Sie sich an Ihren Administrator, wenn Sie Zugriff benötigen.",
     recordLoadFailed: "Dieser Datensatz konnte nicht geladen werden",

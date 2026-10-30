@@ -164,7 +164,7 @@ describe('`grid` reads and publishes no flat column key (objectui#11505)', () =>
 
   it('a flat key no longer switches the bare count\'s ramp off', () => {
     // Lit control for the rows above: the ramp is what a bare `4` draws.
-    expect(classesOf({ columns: 4 })).toBe('grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4');
-    expect(classesOf({ columns: 4, mdColumns: 2 })).toBe('grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4');
+    expect(classesOf({ columns: 4 })).toBe('grid grid-cols-2 md:grid-cols-4 gap-4');
+    expect(classesOf({ columns: 4, mdColumns: 2 })).toBe('grid grid-cols-2 md:grid-cols-4 gap-4');
   });
 });

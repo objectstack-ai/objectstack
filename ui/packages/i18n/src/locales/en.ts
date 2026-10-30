@@ -1004,6 +1004,11 @@ const en = {
     recordCount: '{{count}} records',
     recordCount_one: '{{count}} record',
     recordCount_other: '{{count}} records',
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: '{{count}} records loaded for these dates',
+    calendarRecordCount_one: '{{count}} record loaded for these dates',
+    calendarRecordCount_other: '{{count}} records loaded for these dates',
     addRecord: 'Add record',
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: 'View all',
@@ -1479,7 +1484,7 @@ const en = {
     nextRecord: 'Next record',
     recordOf: '{{current}} of {{total}}',
     recordNotFound: 'Record not found',
-    recordNotFoundDescription: 'The record you are looking for does not exist or may have been deleted.',
+    recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
     goBack: 'Go back',
     details: 'Details',
     related: 'Related',
@@ -3749,7 +3754,7 @@ const en = {
     objectNotFoundDescription: 'Object "{{name}}" definition missing. Check your configuration or navigate back to select a valid object.',
     interfacePageSourceMissing: 'This interface page references "{{name}}", which is not available.',
     recordNotFound: 'Record not found',
-    recordNotFoundDescription: 'The record you are looking for does not exist or may have been deleted.',
+    recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
     recordAccessDenied: 'You don’t have access to {{object}} records',
     recordAccessDeniedDescription: 'You don’t have permission to view records of this type. Contact your administrator if you think you should have access.',
     recordLoadFailed: 'Couldn’t load this record',

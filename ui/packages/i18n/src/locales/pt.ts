@@ -815,6 +815,12 @@ const pt = {
     recordCount_one: "{{count}} registro",
     recordCount_many: "{{count}} de registros",
     recordCount_other: "{{count}} registros",
+    // objectstack#27355 — a windowed calendar's footer: the count is the records
+    // loaded for the dates it draws, not the records the view matches.
+    calendarRecordCount: "{{count}} registros carregados para estas datas",
+    calendarRecordCount_one: "{{count}} registro carregado para estas datas",
+    calendarRecordCount_many: "{{count}} de registros carregados para estas datas",
+    calendarRecordCount_other: "{{count}} registros carregados para estas datas",
     addRecord: "Adicionar registro",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Ver tudo",
@@ -1164,7 +1170,7 @@ const pt = {
     nextRecord: "Próximo registro",
     recordOf: "{{current}} de {{total}}",
     recordNotFound: "Registro não encontrado",
-    recordNotFoundDescription: "O registro que você está procurando não existe ou pode ter sido excluído.",
+    recordNotFoundDescription: "O registro que você está procurando não existe, pode ter sido excluído ou você pode não ter acesso a ele.",
     goBack: "Voltar",
     details: "Detalhes",
     related: "Relacionados",
@@ -3243,7 +3249,7 @@ const pt = {
     systemSettings: "Configurações do sistema",
     back: "Voltar",
     recordNotFound: "Registro não encontrado",
-    recordNotFoundDescription: "O registro que você está procurando não existe ou pode ter sido excluído.",
+    recordNotFoundDescription: "O registro que você está procurando não existe, pode ter sido excluído ou você pode não ter acesso a ele.",
     recordAccessDenied: "Você não tem acesso aos registros de {{object}}",
     recordAccessDeniedDescription: "Você não tem permissão para ver registros deste tipo. Contate seu administrador se acha que deveria ter acesso.",
     recordLoadFailed: "Não foi possível carregar este registro",
