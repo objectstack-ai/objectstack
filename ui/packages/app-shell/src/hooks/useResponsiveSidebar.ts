@@ -7,46 +7,53 @@
  * (objectstack#27593). A reader who keeps the sidebar open is left alone.
  * Must be called inside a SidebarProvider context.
  *
- * The fold is not the reader's choice, so it does not keep one: the open
- * state the sidebar had on the wide window is stashed when the rail takes
- * over and handed back when the window widens, or on the next load that
- * opens wide, because the primitive's cookie records every open and close,
- * the fold's included.
+ * The fold is not the reader's choice, so it does not keep one: every open
+ * and close on a wide window is kept as the wide-window choice, and only
+ * those (objectstack#28079). A window that turns wide, or a load that opens
+ * wide, gets that choice back, whatever the fold, the overlay or a sidebar
+ * kept open on a narrow window did to the primitive's cookie meanwhile.
  * @module
  */
 
 import { useLayoutEffect, useRef } from 'react';
 import { useSidebar } from '@object-ui/components';
 import {
-  readStashedWideOpen,
+  readWideWindowOpen,
+  seedWideWindowOpen,
   useConsoleSidebarRail,
-  writeStashedWideOpen,
+  writeWideWindowOpen,
 } from '../layout/consoleSidebarRail.js';
 
 export function useResponsiveSidebar() {
   const { open, setOpen } = useSidebar();
-  const { narrow, keepOpen, railMode } = useConsoleSidebarRail();
-  const openRef = useRef(open);
+  const { wide, railMode } = useConsoleSidebarRail();
   const setOpenRef = useRef(setOpen);
+  const last = useRef<{ wide: boolean; railMode: boolean } | null>(null);
 
   useLayoutEffect(() => {
-    openRef.current = open;
     setOpenRef.current = setOpen;
   });
 
   // A layout effect, so a window that opens narrow paints the rail first.
   useLayoutEffect(() => {
-    if (railMode) {
-      // A stash left by an earlier narrow load is the wide state; keep it.
-      if (readStashedWideOpen() === undefined) writeStashedWideOpen(openRef.current);
-      setOpenRef.current(false);
+    const previous = last.current;
+    last.current = { wide, railMode };
+    if (wide) {
+      // A load that opens wide, or a window that turns wide: the reader's wide-window choice.
+      if (!previous?.wide) {
+        const wideOpen = readWideWindowOpen();
+        if (wideOpen !== undefined && wideOpen !== open) {
+          setOpenRef.current(wideOpen);
+          return;
+        }
+      }
+      writeWideWindowOpen(open);
       return;
     }
-    const wideOpen = readStashedWideOpen();
-    if (wideOpen === undefined) return;
-    writeStashedWideOpen(undefined);
-    // "Keep open" on a narrow window: the reader just chose the open sidebar.
-    if (narrow && keepOpen) return;
-    setOpenRef.current(wideOpen);
-  }, [railMode, narrow, keepOpen]);
+    // The fold takes over: a narrow load, a window that narrows, "keep open" turned off.
+    if (railMode && !previous?.railMode) {
+      seedWideWindowOpen(open);
+      setOpenRef.current(false);
+    }
+  }, [wide, railMode, open]);
 }
