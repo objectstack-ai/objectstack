@@ -47,6 +47,9 @@ import {
 const NOT_A_CREDENTIAL: Readonly<Record<string, string>> = {
   'datasource:external.credentialsRef':
     'a reference into the secrets store, never the credential itself (the schema says: never inline credentials)',
+  'datasource:external.connector':
+    'the NAME of a declared connector instance (snake_case, pattern-checked); the credential it lends stays on '
+    + 'that instance, referenced by its own `auth.credentialRef` (ADR-0015 amendment D7)',
 };
 
 const CREDENTIAL_WORDS = new Set([
