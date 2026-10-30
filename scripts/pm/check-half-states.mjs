@@ -12710,8 +12710,16 @@ export const CONTRACT_REVIEW_HEAD_SHA_LINE = new RegExp(
  * Measured in the delta review of the fence-tracking reader (2026-10-30): a
  * ``` followed by prose closed the fence here while the renderer kept it open,
  * so a `Head-sha:` line after it was read; 0 of 713 live records carry one.
+ *
+ * A BACKTICK fence's info string may not contain a backtick (CommonMark §4.5):
+ * a line opening on three backticks whose rest carries one more is a paragraph
+ * holding code spans, not a fence, so it opens nothing and the lines below it
+ * are read. A tilde fence's info string may hold anything, backticks included.
+ * Measured in the #28103 review (F16, 2026-10-30): the opener read such a line
+ * as a fence and skipped the record's own line below it, in the fail-closed
+ * direction; 0 of 713 live records carry one.
  */
-const FENCE_LINE = /^[ ]{0,3}(`{3,}|~{3,})/;
+const FENCE_LINE = /^[ ]{0,3}(`{3,}(?!.*`)|~{3,})/;
 const FENCE_CLOSE_LINE = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/;
 
 /**
@@ -33618,6 +33626,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('⛔ record reader: a `Head-sha:` line before the heading, blockquoted, bulleted or fenced — naming another head ABOVE the record\'s own — is NO review of that head', Object.values(CITED51).map((body) => latestContractReviewOnHead([cm51(1, body, T51)], HEAD51)).join('|'), '|||');
   t('⭐ record reader: …and each IS the review of the head its own line names — the cited line is prose to the reader', Object.values(CITED51).map((body) => latestContractReviewOnHead([cm51(1, body, T51)], OLDHEAD51)?.sha).join(), [OLDHEAD51, OLDHEAD51, OLDHEAD51, OLDHEAD51].join());
   t('⛔ record reader: a quoted, bulleted or fenced line ALONE names no head, nor does a line with NO heading above it, nor one inside an unclosed fence', [contractReviewHeadSha(UNDER51(`> Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51(`- **Head-sha:** \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``, '```')), contractReviewHeadSha(`Head-sha: \`${HEAD51}\``), contractReviewHeadSha(UNDER51('```', `Head-sha: \`${HEAD51}\``))].join('|'), '||||');
+  t('⛔ #28111 · record reader: a backtick run whose info string carries a BACKTICK opens no fence (CommonMark) — the line below it reads; a backtick-free info string opens one, and so does a tilde run with a backtick in its info string', [contractReviewHeadSha(UNDER51('``` a`b', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```md `x`', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('~~~ a`b', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('````', '``` a`b', `Head-sha: \`${HEAD51}\``, '````', `Head-sha: \`${OLDHEAD51}\``))].join('|'), [HEAD51, HEAD51, '', '', OLDHEAD51].join('|'));
   t('record reader: a tilde fence is a fence too, and CRLF line endings read', [contractReviewHeadSha(UNDER51('~~~', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(`## Contract review\r\nHead-sha: \`${HEAD51}\`\r\n`)].join(), [OLDHEAD51, HEAD51].join());
   t('⛔ record reader: the RETIRED dialects — head in the heading (two spellings), on the first body line, in an adoption sentence — name no head', [DIALECT_A, DIALECT_B, DIALECT_C, DIALECT_D].map((d) => latestContractReviewOnHead([cm51(1, d(HEAD51), T51)], HEAD51)).join('|'), '|||');
 
